@@ -11,7 +11,10 @@ from .domain import (
     TheoremStatus,
     TrustLevel,
 )
+from .bugs import ProofBugReport, ProofBugReviewState, ProofBugScan, ProofBugSeverity, ProofBugStatus, ProofBugType, scan_proof_bugs
+from .debug_tasks import ProofDebugTaskBatch, debug_task_batch_from_reports
 from .export import build_export
+from .evidence import EvidenceChain, build_evidence_chains
 from .memory import MemoryArtifact, MemoryLayer, list_memory_artifacts, record_memory
 from .proof_state import (
     add_blocker,
@@ -42,6 +45,7 @@ from .storage import (
     append_event,
     import_reference,
 )
+from .reasoning import ContractAdequacyCheck, DownstreamUse, LocalObligation, ReasoningProject, TheoremReasoningGoal
 from .retrieval import retrieve_candidates
 from .theorems import (
     add_theorem,
@@ -95,6 +99,189 @@ def _format_memory_line(artifact: MemoryArtifact) -> str:
     scope_text = " ".join(scope_bits) if scope_bits else "project-scope"
     tag_text = f" tags={','.join(artifact.tags)}" if artifact.tags else ""
     return f"{artifact.id}: [{artifact.layer.value}/{artifact.status.value}/{artifact.importance.value}] {scope_text} {artifact.content}{tag_text}"
+
+
+_BUG_SCAN_HISTORY_PREFIX = "proof_bug_scan:"
+_BUG_REVIEW_HISTORY_PREFIX = "proof_bug_review:"
+_BUG_REPAIR_HISTORY_PREFIX = "proof_bug_repair:"
+_REASONING_HISTORY_PREFIX = "proof_reasoning:"
+_DEBUG_BATCH_HISTORY_PREFIX = "proof_debug_batch:"
+
+
+def _state_marker(prefix: str, payload: dict[str, object]) -> str:
+    return f"{prefix}{json.dumps(payload, sort_keys=True)}"
+
+
+def _append_state_marker(store: ProjectStore, prefix: str, payload: dict[str, object], *, event_kind: str, message: str, entity_id: str | None = None) -> None:
+    state = load_state(store)
+    state.session_history.append(_state_marker(prefix, payload))
+    save_state(store, state, message=message)
+    append_event(store, event_kind, message, entity_id=entity_id, payload=payload)
+
+
+def _stable_bug_id(theorem_id: str, report: ProofBugReport) -> str:
+    seed = (
+        theorem_id,
+        report.detector,
+        report.bug_type.value,
+        report.description,
+        tuple(report.missing_conditions),
+        tuple(report.linked_contract_ids),
+        tuple(report.linked_obligation_ids),
+        tuple(report.linked_blocker_ids),
+    )
+    return f"bug_{abs(hash(seed)) % 100000}"
+
+
+def _normalize_bug_reports(theorem_id: str, reports: list[ProofBugReport]) -> list[ProofBugReport]:
+    normalized: list[ProofBugReport] = []
+    for report in reports:
+        report_update = {
+            "id": _stable_bug_id(theorem_id, report),
+            "linked_contract_ids": [*report.linked_contract_ids] if theorem_id in report.linked_contract_ids or theorem_id else list(report.linked_contract_ids),
+        }
+        normalized.append(report.model_copy(update=report_update))
+    return normalized
+
+
+def _latest_marked_bug_scan(store: ProjectStore, theorem_id: str | None = None) -> ProofBugScan | None:
+    state = load_state(store)
+    latest: ProofBugScan | None = None
+    for entry in state.session_history:
+        if not entry.startswith(_BUG_SCAN_HISTORY_PREFIX):
+            continue
+        payload = json.loads(entry.removeprefix(_BUG_SCAN_HISTORY_PREFIX))
+        if theorem_id is not None and payload.get("theorem_id") != theorem_id:
+            continue
+        latest = ProofBugScan.model_validate(payload)
+    return latest
+
+
+def _bug_overrides(store: ProjectStore) -> tuple[dict[str, dict[str, object]], dict[str, dict[str, object]]]:
+    state = load_state(store)
+    reviews: dict[str, dict[str, object]] = {}
+    repairs: dict[str, dict[str, object]] = {}
+    for entry in state.session_history:
+        if entry.startswith(_BUG_REVIEW_HISTORY_PREFIX):
+            payload = json.loads(entry.removeprefix(_BUG_REVIEW_HISTORY_PREFIX))
+            reviews[str(payload["bug_id"])] = payload
+        elif entry.startswith(_BUG_REPAIR_HISTORY_PREFIX):
+            payload = json.loads(entry.removeprefix(_BUG_REPAIR_HISTORY_PREFIX))
+            repairs[str(payload["bug_id"])] = payload
+    return reviews, repairs
+
+
+def _apply_bug_overrides(report: ProofBugReport, reviews: dict[str, dict[str, object]], repairs: dict[str, dict[str, object]]) -> ProofBugReport:
+    update: dict[str, object] = {}
+    review_payload = reviews.get(report.id)
+    if review_payload is not None:
+        update["status"] = ProofBugStatus(str(review_payload["bug_status"]))
+        update["review_state"] = ProofBugReviewState(str(review_payload.get("review_state", "reviewed")))
+    repair_payload = repairs.get(report.id)
+    if repair_payload is not None:
+        update["status"] = ProofBugStatus(str(repair_payload["bug_status"]))
+        update["review_state"] = ProofBugReviewState(str(repair_payload.get("review_state", "reviewed")))
+    if not update:
+        return report
+    return report.model_copy(update=update)
+
+
+def _scan_and_store_bugs(store: ProjectStore, theorem_id: str) -> ProofBugScan:
+    scan = scan_proof_bugs(store, theorem_id)
+    normalized_reports = _normalize_bug_reports(theorem_id, scan.reports)
+    scan = scan.model_copy(update={"reports": normalized_reports})
+    _append_state_marker(
+        store,
+        _BUG_SCAN_HISTORY_PREFIX,
+        scan.model_dump(mode="json"),
+        event_kind="proof_bug_scan",
+        message=f"scanned proof bugs for {theorem_id}",
+        entity_id=theorem_id,
+    )
+    return scan
+
+
+def _record_debug_batch(store: ProjectStore, batch: ProofDebugTaskBatch, *, theorem_id: str) -> ProofDebugTaskBatch:
+    _append_state_marker(
+        store,
+        _DEBUG_BATCH_HISTORY_PREFIX,
+        batch.model_dump(mode="json"),
+        event_kind="proof_debug_batch",
+        message=f"generated debug tasks for {theorem_id}",
+        entity_id=theorem_id,
+    )
+    return batch
+
+
+def _find_bug_report(store: ProjectStore, bug_id: str) -> tuple[ProofBugScan | None, ProofBugReport | None]:
+    latest_scan: ProofBugScan | None = None
+    found_report: ProofBugReport | None = None
+    state = load_state(store)
+    reviews, repairs = _bug_overrides(store)
+    for entry in state.session_history:
+        if not entry.startswith(_BUG_SCAN_HISTORY_PREFIX):
+            continue
+        payload = json.loads(entry.removeprefix(_BUG_SCAN_HISTORY_PREFIX))
+        scan = ProofBugScan.model_validate(payload)
+        scan = scan.model_copy(update={"reports": [_apply_bug_overrides(report, reviews, repairs) for report in scan.reports]})
+        latest_scan = scan
+        for report in scan.reports:
+            if report.id == bug_id:
+                found_report = report
+    return latest_scan, found_report
+
+
+def _format_bug_line(report: ProofBugReport) -> str:
+    return f"{report.id}: {report.bug_type.value} [{report.status.value}/{report.severity.value}] {report.description}"
+
+
+def _derive_reasoning_project(store: ProjectStore, theorem_id: str, *, notes: str = "") -> tuple[ReasoningProject, ContractAdequacyCheck, list[LocalObligation]]:
+    contract = get_contract(store, theorem_id)
+    if contract is None:
+        raise KeyError(theorem_id)
+    state = load_state(store)
+    downstream_use = DownstreamUse(
+        id=f"use_{theorem_id}_apply",
+        label=f"apply {theorem_id}",
+        required_assumptions=list(contract.assumptions),
+        required_exports=list(contract.exports),
+        reasoning_path=[theorem_id, "reason", "apply"],
+        notes=notes or contract.notes,
+    )
+    goal = TheoremReasoningGoal(
+        id=f"reason_{theorem_id}",
+        theorem_id=theorem_id,
+        statement=contract.statement,
+        assumptions=list(state.current_context),
+        exports=list(contract.exports),
+        downstream_use=[downstream_use],
+        dependencies=list(contract.dependencies),
+    )
+    project = ReasoningProject(project_id=state.project_id, theorem_goals=[goal])
+    check = ContractAdequacyCheck.evaluate(
+        contract_id=theorem_id,
+        contract_assumptions=list(state.current_context),
+        contract_exports=list(contract.exports),
+        downstream_use=[downstream_use],
+    )
+    obligations = project.synthesize_obligations()
+    return project, check, obligations
+
+
+def _store_reasoning_obligations(store: ProjectStore, theorem_id: str, obligations: list[LocalObligation], check: ContractAdequacyCheck) -> list[ProofObligation]:
+    derived: list[ProofObligation] = []
+    for local_obligation in obligations:
+        proof_obligation = ProofObligation(
+            id=local_obligation.id,
+            goal_statement=local_obligation.statement,
+            source_step_id=local_obligation.source_unit_id,
+            required_for=local_obligation.required_for,
+            blocking_reason="; ".join(check.missing_conditions) if check.missing_conditions else "derived from reasoning",
+            dependencies=list(local_obligation.dependencies),
+        )
+        add_obligation(store, proof_obligation)
+        derived.append(proof_obligation)
+    return derived
 
 
 def _find_memory_artifact(store: ProjectStore, artifact_id: str) -> MemoryArtifact | None:
@@ -410,6 +597,239 @@ def cmd_proof_review(
     )
     _append_history(store, f"review:{target_id}:{normalized}", message=f"reviewed {target_id}")
     return f"review:{target_id}:{updated.review_state.value}"
+
+
+def cmd_proof_reason(theorem_id: str, root: str | Path = ".", *, notes: str = "") -> str:
+    store = get_store(root)
+    contract = get_contract(store, theorem_id)
+    if contract is None:
+        return f"reason:blocked:theorem {theorem_id} not found"
+    project, check, obligations = _derive_reasoning_project(store, theorem_id, notes=notes)
+    derived = _store_reasoning_obligations(store, theorem_id, obligations, check)
+    payload = {
+        "theorem_id": theorem_id,
+        "project": project.model_dump(mode="json"),
+        "adequacy_check": check.model_dump(mode="json"),
+        "derived_obligations": [obligation.model_dump(mode="json") for obligation in derived],
+    }
+    _append_state_marker(
+        store,
+        _REASONING_HISTORY_PREFIX,
+        payload,
+        event_kind="proof_reasoning",
+        message=f"reasoned about {theorem_id}",
+        entity_id=theorem_id,
+    )
+    return json.dumps(payload, indent=2)
+
+
+def cmd_proof_obligation_derive(theorem_id: str, root: str | Path = ".", *, notes: str = "") -> str:
+    store = get_store(root)
+    contract = get_contract(store, theorem_id)
+    if contract is None:
+        return f"obligation:derive:blocked:theorem {theorem_id} not found"
+    project, check, obligations = _derive_reasoning_project(store, theorem_id, notes=notes)
+    derived = _store_reasoning_obligations(store, theorem_id, obligations, check)
+    payload = {
+        "theorem_id": theorem_id,
+        "adequacy_check": check.model_dump(mode="json"),
+        "obligations": [obligation.model_dump(mode="json") for obligation in derived],
+        "reasoning_path": project.theorem_goals[0].downstream_use[0].reasoning_path if project.theorem_goals else [],
+    }
+    _append_state_marker(
+        store,
+        _REASONING_HISTORY_PREFIX,
+        payload,
+        event_kind="proof_obligation_derive",
+        message=f"derived obligations for {theorem_id}",
+        entity_id=theorem_id,
+    )
+    return json.dumps(payload, indent=2)
+
+
+def cmd_proof_bug_scan(theorem_id: str, root: str | Path = ".") -> str:
+    store = get_store(root)
+    scan = _scan_and_store_bugs(store, theorem_id)
+    return scan.model_dump_json(indent=2)
+
+
+def cmd_proof_bug_list(root: str | Path = ".", *, theorem_id: str = "") -> str:
+    store = get_store(root)
+    scan = _latest_marked_bug_scan(store, theorem_id or None)
+    if scan is None:
+        return "No proof bug scans"
+    reviews, repairs = _bug_overrides(store)
+    reports = [_apply_bug_overrides(report, reviews, repairs) for report in scan.reports]
+    if not reports:
+        return "No proof bugs"
+    return "\n".join(_format_bug_line(report) for report in reports)
+
+
+def cmd_proof_bug_show(bug_id: str, root: str | Path = ".") -> str:
+    store = get_store(root)
+    _, report = _find_bug_report(store, bug_id)
+    return report.model_dump_json(indent=2) if report is not None else f"Bug not found: {bug_id}"
+
+
+def cmd_proof_evidence_show(bug_id: str, root: str | Path = ".") -> str:
+    store = get_store(root)
+    _, report = _find_bug_report(store, bug_id)
+    if report is None:
+        return f"Bug not found: {bug_id}"
+    chain = EvidenceChain.from_bug_report(report)
+    return chain.model_dump_json(indent=2)
+
+
+def cmd_proof_debug_generate(theorem_id: str, root: str | Path = ".") -> str:
+    store = get_store(root)
+    scan = _latest_marked_bug_scan(store, theorem_id)
+    if scan is None or scan.theorem_id != theorem_id:
+        scan = _scan_and_store_bugs(store, theorem_id)
+    reviews, repairs = _bug_overrides(store)
+    reports = [_apply_bug_overrides(report, reviews, repairs) for report in scan.reports]
+    evidence_chains = build_evidence_chains(reports)
+    batch = debug_task_batch_from_reports(reports, evidence_chains=evidence_chains, theorem_id=theorem_id)
+    batch = _record_debug_batch(store, batch, theorem_id=theorem_id)
+    return batch.model_dump_json(indent=2)
+
+
+def cmd_proof_debug_list(root: str | Path = ".", *, theorem_id: str = "") -> str:
+    store = get_store(root)
+    state = load_state(store)
+    latest_batch: ProofDebugTaskBatch | None = None
+    for entry in state.session_history:
+        if not entry.startswith(_DEBUG_BATCH_HISTORY_PREFIX):
+            continue
+        payload = json.loads(entry.removeprefix(_DEBUG_BATCH_HISTORY_PREFIX))
+        if theorem_id and payload.get("theorem_id") != theorem_id:
+            continue
+        latest_batch = ProofDebugTaskBatch.model_validate(payload)
+    if latest_batch is None:
+        return "No debug tasks"
+    if not latest_batch.tasks:
+        return "No debug tasks"
+    lines = [
+        f"{task.id}: {task.task_type.value} [{task.priority.value}/{task.status.value}] bug={task.bug_report_id} {task.description}"
+        for task in latest_batch.tasks
+    ]
+    return "\n".join(lines)
+
+
+def cmd_proof_repair_mark(bug_id: str, status: str, root: str | Path = ".", *, note: str = "") -> str:
+    store = get_store(root)
+    _, existing_report = _find_bug_report(store, bug_id)
+    if existing_report is None:
+        return f"repair:blocked:bug {bug_id} not found"
+    normalized = status.strip().lower()
+    status_map = {
+        "repaired": ProofBugStatus.repaired,
+        "superseded": ProofBugStatus.superseded,
+        "confirmed": ProofBugStatus.confirmed,
+        "dismissed": ProofBugStatus.dismissed,
+    }
+    bug_status = status_map.get(normalized)
+    if bug_status is None:
+        return f"repair:unsupported:{status}"
+    payload = {
+        "bug_id": bug_id,
+        "bug_status": bug_status.value,
+        "review_state": "reviewed",
+        "note": note,
+    }
+    _append_state_marker(
+        store,
+        _BUG_REPAIR_HISTORY_PREFIX,
+        payload,
+        event_kind="proof_bug_repair",
+        message=f"marked bug {bug_id} as {bug_status.value}",
+        entity_id=bug_id,
+    )
+    return json.dumps(payload, indent=2)
+
+
+def cmd_proof_review_suspicion(bug_id: str, status: str, root: str | Path = ".", *, rationale: str = "") -> str:
+    store = get_store(root)
+    _, existing_report = _find_bug_report(store, bug_id)
+    if existing_report is None:
+        return f"review:suspicion:blocked:bug {bug_id} not found"
+    normalized = status.strip().lower() or "under_review"
+    status_map = {
+        "suspected": ProofBugStatus.suspected,
+        "under_review": ProofBugStatus.under_review,
+        "confirmed": ProofBugStatus.confirmed,
+        "dismissed": ProofBugStatus.dismissed,
+        "repaired": ProofBugStatus.repaired,
+        "superseded": ProofBugStatus.superseded,
+    }
+    bug_status = status_map.get(normalized)
+    if bug_status is None:
+        return f"review:suspicion:unsupported:{status}"
+    payload = {
+        "bug_id": bug_id,
+        "bug_status": bug_status.value,
+        "review_state": "reviewed" if bug_status in {ProofBugStatus.confirmed, ProofBugStatus.dismissed, ProofBugStatus.repaired, ProofBugStatus.superseded} else "triaged",
+        "rationale": rationale,
+    }
+    _append_state_marker(
+        store,
+        _BUG_REVIEW_HISTORY_PREFIX,
+        payload,
+        event_kind="proof_bug_review",
+        message=f"reviewed suspicion for {bug_id}",
+        entity_id=bug_id,
+    )
+    return json.dumps(payload, indent=2)
+
+
+def cmd_proof_trace_dependency(target_id: str, root: str | Path = ".") -> str:
+    store = get_store(root)
+    contract = get_contract(store, target_id)
+    obligations = [obligation.model_dump(mode="json") for obligation in list_obligations(store) if obligation.required_for == target_id or target_id in obligation.dependencies]
+    blockers = [blocker.model_dump(mode="json") for blocker in list_blockers(store) if blocker.scope == target_id or target_id in blocker.related_contracts or target_id in blocker.related_steps]
+    payload = {
+        "target_id": target_id,
+        "contract": contract.model_dump(mode="json") if contract is not None else None,
+        "dependency_ids": list(contract.dependencies) if contract is not None else [],
+        "open_obligations": obligations,
+        "blockers": blockers,
+        "recent_theorem_usage": list(load_state(store).recent_theorem_usage),
+        "session_history": list(load_state(store).session_history[-10:]),
+    }
+    return json.dumps(payload, indent=2)
+
+
+def cmd_proof_explain_apply(theorem_id: str, root: str | Path = ".") -> str:
+    store = get_store(root)
+    contract = get_contract(store, theorem_id)
+    if contract is None:
+        return f"explain:apply:blocked:theorem {theorem_id} not found"
+    ok, reason = theorem_callability(store, theorem_id)
+    state = load_state(store)
+    open_obligations = [
+        obligation.model_dump(mode="json")
+        for obligation in list_obligations(store)
+        if obligation.required_for == theorem_id
+        or obligation.source_step_id == theorem_id
+        or theorem_id in obligation.dependencies
+        or (obligation.required_for or "").startswith(f"use_{theorem_id}")
+    ]
+    payload = {
+        "theorem_id": theorem_id,
+        "callable": ok,
+        "callability_reason": reason,
+        "statement": contract.statement,
+        "assumptions": list(contract.assumptions),
+        "exports": list(contract.exports),
+        "current_context": list(state.current_context),
+        "missing_assumptions": [assumption for assumption in contract.assumptions if assumption not in state.current_context],
+        "dependencies": list(contract.dependencies),
+        "grounded_reference_ids": list(contract.grounded_reference_ids),
+        "grounded_theorem_ids": list(contract.grounded_theorem_ids),
+        "open_obligations": open_obligations,
+        "local_usage_notes": list(contract.local_usage_notes),
+        "imported_usage_notes": list(contract.imported_usage_notes),
+    }
+    return json.dumps(payload, indent=2)
 
 
 def cmd_proof_provenance_show(target_id: str, root: str | Path = ".") -> str:

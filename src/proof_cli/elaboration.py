@@ -7,7 +7,24 @@ from .storage import ProjectStore
 from .theorems import apply_theorem, theorem_callability
 from .domain import ProofObligation
 from .dsl import DSLCommand
-from .commands import cmd_proof_ground, cmd_proof_import, cmd_proof_review, cmd_proof_search
+from .commands import (
+    cmd_proof_bug_list,
+    cmd_proof_bug_scan,
+    cmd_proof_bug_show,
+    cmd_proof_debug_generate,
+    cmd_proof_debug_list,
+    cmd_proof_evidence_show,
+    cmd_proof_explain_apply,
+    cmd_proof_ground,
+    cmd_proof_import,
+    cmd_proof_obligation_derive,
+    cmd_proof_reason,
+    cmd_proof_repair_mark,
+    cmd_proof_review,
+    cmd_proof_review_suspicion,
+    cmd_proof_search,
+    cmd_proof_trace_dependency,
+)
 
 
 def _is_vague(argument: str) -> bool:
@@ -73,6 +90,70 @@ def elaborate_command(store: ProjectStore, command: DSLCommand) -> str:
             review_action = "approve"
             review_rationale = ""
         return cmd_proof_review(command.target, review_action, root=store.root, rationale=review_rationale)
+    if name == "reason":
+        theorem_id = command.target or state.current_theorem or argument
+        if not theorem_id:
+            return "reason:missing-target"
+        return cmd_proof_reason(theorem_id, root=store.root, notes=argument)
+    if name == "obligation_derive":
+        theorem_id = command.target or state.current_theorem or argument
+        if not theorem_id:
+            return "obligation:derive:missing-target"
+        return cmd_proof_obligation_derive(theorem_id, root=store.root, notes=argument)
+    if name == "bug_scan":
+        theorem_id = command.target or state.current_theorem or argument
+        if not theorem_id:
+            return "bug:scan:missing-target"
+        return cmd_proof_bug_scan(theorem_id, root=store.root)
+    if name == "bug_list":
+        theorem_id = command.target or state.current_theorem or ""
+        return cmd_proof_bug_list(root=store.root, theorem_id=theorem_id)
+    if name == "bug_show":
+        bug_id = command.target or argument
+        if not bug_id:
+            return "bug:show:missing-target"
+        return cmd_proof_bug_show(bug_id, root=store.root)
+    if name == "evidence_show":
+        bug_id = command.target or argument
+        if not bug_id:
+            return "evidence:show:missing-target"
+        return cmd_proof_evidence_show(bug_id, root=store.root)
+    if name == "debug_generate":
+        theorem_id = command.target or state.current_theorem or argument
+        if not theorem_id:
+            return "debug:generate:missing-target"
+        return cmd_proof_debug_generate(theorem_id, root=store.root)
+    if name == "debug_list":
+        theorem_id = command.target or state.current_theorem or ""
+        return cmd_proof_debug_list(root=store.root, theorem_id=theorem_id)
+    if name == "repair_mark":
+        bug_id = command.target or argument
+        if not bug_id:
+            return "repair:mark:missing-target"
+        repair_argument = argument.strip()
+        repair_parts = repair_argument.split(maxsplit=1) if repair_argument else []
+        repair_status = repair_parts[0] if repair_parts else "repaired"
+        repair_note = repair_parts[1] if len(repair_parts) > 1 else ""
+        return cmd_proof_repair_mark(bug_id, repair_status, root=store.root, note=repair_note)
+    if name == "review_suspicion":
+        bug_id = command.target or argument
+        if not bug_id:
+            return "review:suspicion:missing-target"
+        review_argument = argument.strip()
+        review_parts = review_argument.split(maxsplit=1) if review_argument else []
+        review_status = review_parts[0] if review_parts else "under_review"
+        review_note = review_parts[1] if len(review_parts) > 1 else ""
+        return cmd_proof_review_suspicion(bug_id, review_status, root=store.root, rationale=review_note)
+    if name == "trace_dependency":
+        target_id = command.target or state.current_theorem or argument
+        if not target_id:
+            return "trace:dependency:missing-target"
+        return cmd_proof_trace_dependency(target_id, root=store.root)
+    if name == "explain_apply":
+        theorem_id = command.target or state.current_theorem or argument
+        if not theorem_id:
+            return "explain:apply:missing-target"
+        return cmd_proof_explain_apply(theorem_id, root=store.root)
     if name in {"assert", "defer", "suffices"}:
         statement = argument
         if not statement:
