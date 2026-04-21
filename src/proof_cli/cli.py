@@ -8,6 +8,18 @@ from .commands import (
     cmd_blocker_add,
     cmd_blocker_list,
     cmd_export,
+    cmd_proof_bug_list,
+    cmd_proof_bug_scan,
+    cmd_proof_bug_show,
+    cmd_proof_debug_generate,
+    cmd_proof_debug_list,
+    cmd_proof_evidence_show,
+    cmd_proof_explain_apply,
+    cmd_proof_obligation_derive,
+    cmd_proof_reason,
+    cmd_proof_repair_mark,
+    cmd_proof_review_suspicion,
+    cmd_proof_trace_dependency,
     cmd_goal_list,
     cmd_goal_open,
     cmd_goal_set,
@@ -42,6 +54,13 @@ blocker_app = typer.Typer(help="Blocker tracking")
 reference_app = typer.Typer(help="Reference workflows")
 memory_app = typer.Typer(help="Memory workflows")
 provenance_app = typer.Typer(help="Provenance workflows")
+bug_app = typer.Typer(help="Proof bug workflows")
+debug_app = typer.Typer(help="Proof debug workflows")
+review_app = typer.Typer(help="Proof review workflows")
+repair_app = typer.Typer(help="Proof repair workflows")
+trace_app = typer.Typer(help="Dependency tracing workflows")
+evidence_app = typer.Typer(help="Evidence inspection workflows")
+explain_app = typer.Typer(help="Theorem explanation workflows")
 
 
 def _root(path: str | None) -> Path:
@@ -78,6 +97,11 @@ def search(query: str, root: str = ".", limit: int = 10) -> None:
     typer.echo(cmd_search(query, _root(root), limit=limit))
 
 
+@app.command()
+def reason(theorem_id: str, root: str = ".", notes: str = "") -> None:
+    typer.echo(cmd_proof_reason(theorem_id, _root(root), notes=notes))
+
+
 app.add_typer(goal_app, name="goal")
 app.add_typer(theorem_app, name="theorem")
 app.add_typer(obligation_app, name="obligation")
@@ -85,6 +109,13 @@ app.add_typer(blocker_app, name="blocker")
 app.add_typer(reference_app, name="reference")
 app.add_typer(memory_app, name="memory")
 app.add_typer(provenance_app, name="provenance")
+app.add_typer(bug_app, name="bug")
+app.add_typer(debug_app, name="debug")
+app.add_typer(review_app, name="review")
+app.add_typer(repair_app, name="repair")
+app.add_typer(trace_app, name="trace")
+app.add_typer(evidence_app, name="evidence")
+app.add_typer(explain_app, name="explain")
 
 
 @goal_app.command("set")
@@ -164,6 +195,11 @@ def obligation_add(goal_statement: str, root: str = ".", source_step_id: str = "
 @obligation_app.command("list")
 def obligation_list(root: str = ".") -> None:
     typer.echo(cmd_obligation_list(_root(root)))
+
+
+@obligation_app.command("derive")
+def obligation_derive(theorem_id: str, root: str = ".", notes: str = "") -> None:
+    typer.echo(cmd_proof_obligation_derive(theorem_id, _root(root), notes=notes))
 
 
 @blocker_app.command("add")
@@ -270,3 +306,65 @@ def memory_add(
 @provenance_app.command("show")
 def provenance_show(target_id: str, root: str = ".") -> None:
     typer.echo(cmd_proof_provenance_show(target_id, root=_root(root)))
+
+
+@bug_app.command("scan")
+def bug_scan(theorem_id: str, root: str = ".") -> None:
+    typer.echo(cmd_proof_bug_scan(theorem_id, _root(root)))
+
+
+@bug_app.command("list")
+def bug_list(root: str = ".", theorem_id: str = typer.Option("", "--theorem-id")) -> None:
+    typer.echo(cmd_proof_bug_list(_root(root), theorem_id=theorem_id))
+
+
+@bug_app.command("show")
+def bug_show(bug_id: str, root: str = ".") -> None:
+    typer.echo(cmd_proof_bug_show(bug_id, _root(root)))
+
+
+@evidence_app.command("show")
+def evidence_show(bug_id: str, root: str = ".") -> None:
+    typer.echo(cmd_proof_evidence_show(bug_id, _root(root)))
+
+
+@debug_app.command("generate")
+def debug_generate(theorem_id: str, root: str = ".") -> None:
+    typer.echo(cmd_proof_debug_generate(theorem_id, _root(root)))
+
+
+@debug_app.command("list")
+def debug_list(root: str = ".", theorem_id: str = typer.Option("", "--theorem-id")) -> None:
+    typer.echo(cmd_proof_debug_list(_root(root), theorem_id=theorem_id))
+
+
+@repair_app.command("mark")
+def repair_mark(
+    bug_id: str,
+    status: str = typer.Argument("repaired"),
+    status_override: str | None = typer.Option(None, "--status"),
+    root: str = ".",
+    note: str = "",
+) -> None:
+    typer.echo(cmd_proof_repair_mark(bug_id, status_override or status, _root(root), note=note))
+
+
+@review_app.command("suspicion")
+def review_suspicion(
+    bug_id: str,
+    status: str = typer.Argument("under_review"),
+    status_override: str | None = typer.Option(None, "--status"),
+    root: str = ".",
+    rationale: str = "",
+) -> None:
+    typer.echo(cmd_proof_review_suspicion(bug_id, status_override or status, _root(root), rationale=rationale))
+
+
+@trace_app.command("dependency")
+def trace_dependency(target_id: str, root: str = ".") -> None:
+    typer.echo(cmd_proof_trace_dependency(target_id, _root(root)))
+
+
+@explain_app.command("apply")
+def explain_apply(theorem_id: str, root: str = ".") -> None:
+    typer.echo(cmd_proof_explain_apply(theorem_id, _root(root)))
