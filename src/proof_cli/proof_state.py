@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Callable
+from datetime import datetime
+from typing import Literal
 
-from .domain import BlockerRecord, ProofObligation, ProjectSnapshot, ProjectState
+from pydantic import BaseModel, Field
+
+from .domain import BlockerRecord, ProofObligation, ProofObligationStatus, ProjectSnapshot, ProjectState, utc_now
 from .storage import (
     ProjectStore,
     append_event,
-    list_blockers,
-    list_contracts,
-    list_obligations,
     read_latest_snapshot,
     read_state,
     store_blocker,
@@ -17,7 +16,57 @@ from .storage import (
     store_snapshot,
     store_state,
 )
-from .domain import ProofObligationStatus
+
+
+LITERATURE_ROUTE_EVENT_PREFIX = "literature_route:"
+
+
+class LiteratureRouteRecord(BaseModel):
+    target_kind: Literal["goal", "obligation", "blocker"]
+    target_id: str
+    reference_id: str
+    reference_title: str = ""
+    outcome: Literal["candidate", "supporting", "failed", "rejected"] = "candidate"
+    source_kind: str = "retrieval"
+    notes: str = ""
+    created_at: datetime = Field(default_factory=utc_now)
+
+    def summary(self) -> str:
+        title = self.reference_title or self.reference_id
+        note = f" - {self.notes}" if self.notes else ""
+        return f"{self.target_kind}:{self.target_id} <- {title} [{self.outcome}]{note}"
+
+
+def _encode_route_entry(route: LiteratureRouteRecord) -> str:
+    return f"{LITERATURE_ROUTE_EVENT_PREFIX}{route.model_dump_json()}"
+
+
+def _append_route_to_state(state: ProjectState, route: LiteratureRouteRecord) -> None:
+    state.session_history.append(_encode_route_entry(route))
+    if route.outcome in {"failed", "rejected"}:
+        failed_summary = route.summary()
+        if failed_summary not in state.failed_routes:
+            state.failed_routes.append(failed_summary)
+
+
+def _collect_routes(state: ProjectState) -> list[LiteratureRouteRecord]:
+    routes: list[LiteratureRouteRecord] = []
+    for entry in state.session_history:
+        if not entry.startswith(LITERATURE_ROUTE_EVENT_PREFIX):
+            continue
+        payload = entry[len(LITERATURE_ROUTE_EVENT_PREFIX) :]
+        routes.append(LiteratureRouteRecord.model_validate_json(payload))
+    return routes
+
+
+def _reference_token(reference_id: str, kind: str) -> str:
+    return f"{kind}_ref:{reference_id}"
+
+
+def _extend_unique(target: list[str], values: list[str]) -> None:
+    for value in values:
+        if value not in target:
+            target.append(value)
 
 
 def load_state(store: ProjectStore) -> ProjectState:
@@ -54,7 +103,121 @@ def add_goal(store: ProjectStore, goal: str) -> ProjectState:
     return save_state(store, state, message=f"added goal {goal}")
 
 
-def add_obligation(store: ProjectStore, obligation: ProofObligation) -> ProofObligation:
+def record_literature_route(
+    store: ProjectStore,
+    *,
+    target_kind: Literal["goal", "obligation", "blocker"],
+    target_id: str,
+    reference_id: str,
+    reference_title: str = "",
+    outcome: Literal["candidate", "supporting", "failed", "rejected"] = "candidate",
+    source_kind: str = "retrieval",
+    notes: str = "",
+) -> LiteratureRouteRecord:
+    state = load_state(store)
+    route = LiteratureRouteRecord(
+        target_kind=target_kind,
+        target_id=target_id,
+        reference_id=reference_id,
+        reference_title=reference_title,
+        outcome=outcome,
+        source_kind=source_kind,
+        notes=notes,
+    )
+    _append_route_to_state(state, route)
+    save_state(store, state, message=f"recorded literature route for {target_kind} {target_id}")
+    append_event(
+        store,
+        "literature_route_recorded",
+        f"recorded literature route for {target_kind} {target_id}",
+        entity_id=target_id,
+        payload=route.model_dump(mode="json"),
+    )
+    return route
+
+
+def record_candidate_reference(
+    store: ProjectStore,
+    *,
+    target_kind: Literal["goal", "obligation", "blocker"],
+    target_id: str,
+    reference_id: str,
+    reference_title: str = "",
+    source_kind: str = "retrieval",
+    notes: str = "",
+) -> LiteratureRouteRecord:
+    return record_literature_route(
+        store,
+        target_kind=target_kind,
+        target_id=target_id,
+        reference_id=reference_id,
+        reference_title=reference_title,
+        outcome="candidate",
+        source_kind=source_kind,
+        notes=notes,
+    )
+
+
+def record_supporting_reference(
+    store: ProjectStore,
+    *,
+    target_kind: Literal["goal", "obligation", "blocker"],
+    target_id: str,
+    reference_id: str,
+    reference_title: str = "",
+    source_kind: str = "retrieval",
+    notes: str = "",
+) -> LiteratureRouteRecord:
+    return record_literature_route(
+        store,
+        target_kind=target_kind,
+        target_id=target_id,
+        reference_id=reference_id,
+        reference_title=reference_title,
+        outcome="supporting",
+        source_kind=source_kind,
+        notes=notes,
+    )
+
+
+def list_literature_routes(
+    store: ProjectStore,
+    *,
+    target_id: str | None = None,
+    target_kind: str | None = None,
+    outcome: str | None = None,
+) -> list[LiteratureRouteRecord]:
+    state = load_state(store)
+    routes = _collect_routes(state)
+    filtered: list[LiteratureRouteRecord] = []
+    for route in routes:
+        if target_id is not None and route.target_id != target_id:
+            continue
+        if target_kind is not None and route.target_kind != target_kind:
+            continue
+        if outcome is not None and route.outcome != outcome:
+            continue
+        filtered.append(route)
+    return filtered
+
+
+def add_obligation(
+    store: ProjectStore,
+    obligation: ProofObligation,
+    *,
+    candidate_reference_ids: list[str] | None = None,
+    supporting_reference_ids: list[str] | None = None,
+    failed_reference_ids: list[str] | None = None,
+    route_notes: str = "",
+) -> ProofObligation:
+    route_tokens = [
+        *(_reference_token(reference_id, "candidate") for reference_id in candidate_reference_ids or []),
+        *(_reference_token(reference_id, "supporting") for reference_id in supporting_reference_ids or []),
+        *(_reference_token(reference_id, "failed") for reference_id in failed_reference_ids or []),
+    ]
+    if route_notes:
+        route_tokens.append(f"route_note:{route_notes}")
+    _extend_unique(obligation.dependencies, route_tokens)
     store_obligation(store, obligation)
     state = load_state(store)
     if obligation.id not in state.open_obligations and obligation.status == ProofObligationStatus.open:
@@ -66,7 +229,23 @@ def add_obligation(store: ProjectStore, obligation: ProofObligation) -> ProofObl
     return obligation
 
 
-def add_blocker(store: ProjectStore, blocker: BlockerRecord) -> BlockerRecord:
+def add_blocker(
+    store: ProjectStore,
+    blocker: BlockerRecord,
+    *,
+    candidate_reference_ids: list[str] | None = None,
+    supporting_reference_ids: list[str] | None = None,
+    failed_reference_ids: list[str] | None = None,
+    route_notes: str = "",
+) -> BlockerRecord:
+    route_tokens = [
+        *(_reference_token(reference_id, "candidate") for reference_id in candidate_reference_ids or []),
+        *(_reference_token(reference_id, "supporting") for reference_id in supporting_reference_ids or []),
+        *(_reference_token(reference_id, "failed") for reference_id in failed_reference_ids or []),
+    ]
+    if route_notes:
+        route_tokens.append(f"route_note:{route_notes}")
+    _extend_unique(blocker.related_contracts, route_tokens)
     store_blocker(store, blocker)
     state = load_state(store)
     if blocker.id not in state.blockers and blocker.status == "active":
@@ -76,10 +255,33 @@ def add_blocker(store: ProjectStore, blocker: BlockerRecord) -> BlockerRecord:
     return blocker
 
 
-def record_failed_route(store: ProjectStore, route: str) -> ProjectState:
+def record_failed_route(
+    store: ProjectStore,
+    route: str,
+    *,
+    target_kind: Literal["goal", "obligation", "blocker"] = "goal",
+    target_id: str = "",
+    reference_id: str = "",
+    reference_title: str = "",
+    source_kind: str = "retrieval",
+    notes: str = "",
+) -> ProjectState:
     state = load_state(store)
     state.failed_routes.append(route)
     state.session_history.append(f"failed_route:{route}")
+    if target_id or reference_id or notes:
+        _append_route_to_state(
+            state,
+            LiteratureRouteRecord(
+                target_kind=target_kind,
+                target_id=target_id or route,
+                reference_id=reference_id or route,
+                reference_title=reference_title,
+                outcome="failed",
+                source_kind=source_kind,
+                notes=notes or route,
+            ),
+        )
     return save_state(store, state, message=f"recorded failed route {route}")
 
 
@@ -100,6 +302,12 @@ def note_unresolved_trust_call(store: ProjectStore, theorem_id: str) -> ProjectS
 
 def build_snapshot(store: ProjectStore, handoff_note: str = "") -> ProjectSnapshot:
     state = load_state(store)
+    literature_routes = list_literature_routes(store)
+    promising_routes = [
+        route.summary()
+        for route in literature_routes
+        if route.outcome in {"candidate", "supporting"}
+    ]
     snapshot = ProjectSnapshot(
         project_id=state.project_id,
         active_theorem=state.current_theorem,
@@ -109,7 +317,7 @@ def build_snapshot(store: ProjectStore, handoff_note: str = "") -> ProjectSnapsh
         active_blockers=list(state.blockers),
         recently_used_results=list(state.recent_theorem_usage),
         unresolved_trust_sensitive_calls=list(state.unresolved_trust_sensitive_calls),
-        next_promising_routes=list(state.failed_routes[-3:]),
+        next_promising_routes=(promising_routes + list(state.failed_routes))[-3:],
         handoff_note=handoff_note or "resume from the latest proof state",
     )
     store_snapshot(store, snapshot)
@@ -126,6 +334,7 @@ def project_history(store: ProjectStore) -> list[str]:
 def summarize_state(store: ProjectStore) -> dict[str, object]:
     state = load_state(store)
     snapshot = read_latest_snapshot(store)
+    literature_routes = list_literature_routes(store)
     return {
         "project_id": state.project_id,
         "current_theorem": state.current_theorem,
@@ -135,5 +344,6 @@ def summarize_state(store: ProjectStore) -> dict[str, object]:
         "failed_routes": state.failed_routes,
         "recent_theorem_usage": state.recent_theorem_usage,
         "unresolved_trust_sensitive_calls": state.unresolved_trust_sensitive_calls,
+        "literature_routes": [route.model_dump(mode="json") for route in literature_routes],
         "latest_snapshot": snapshot,
     }
