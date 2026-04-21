@@ -14,9 +14,9 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Theorem Registry
 
-- [ ] **THM-01**: User can register a theorem, lemma, proposition, or corollary as a reusable contract
-- [ ] **THM-02**: User can record assumptions, exports, and dependencies for each contract
-- [ ] **THM-03**: User can tell whether a contract is callable in the current proof context
+- [x] **THM-01**: User can register a theorem, lemma, proposition, or corollary as a reusable contract
+- [x] **THM-02**: User can record assumptions, exports, and dependencies for each contract
+- [x] **THM-03**: User can tell whether a contract is callable in the current proof context
 
 ### Proof Scripts and Elaboration
 
@@ -75,9 +75,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 |-------------|-------|--------|
 | WS-01 | Phase 1 | Complete |
 | WS-02 | Phase 1 | Complete |
-| THM-01 | Phase 2 | Pending |
-| THM-02 | Phase 2 | Pending |
-| THM-03 | Phase 2 | Pending |
+| THM-01 | Phase 2 | Complete |
+| THM-02 | Phase 2 | Complete |
+| THM-03 | Phase 2 | Complete |
 | DSL-01 | Phase 3 | Pending |
 | DSL-02 | Phase 3 | Pending |
 | DSL-03 | Phase 3 | Pending |
