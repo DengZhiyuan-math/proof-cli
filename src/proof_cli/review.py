@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .checks import run_standard_checks
 from .blockers import resolve_blocker
 from .domain import BlockerRecord, ProofObligation, TheoremContract, TheoremStatus, TrustLevel
 from .obligations import close_obligation
@@ -15,8 +16,28 @@ class ReviewResult:
     message: str
 
 
-def _blocked(store: ProjectStore, action: str, target: str, reason: str) -> ReviewResult:
-    append_event(store, "review_blocked", f"{action} blocked for {target}: {reason}", entity_id=target, payload={"action": action, "reason": reason})
+def _checker_context(store: ProjectStore, theorem_id: str) -> list[dict[str, str]]:
+    contract = get_contract(store, theorem_id)
+    if contract is None:
+        return []
+    return [
+        {"name": check.name, "severity": check.severity, "message": check.message}
+        for check in run_standard_checks(store, theorem_id)
+    ]
+
+
+def _blocked(
+    store: ProjectStore,
+    action: str,
+    target: str,
+    reason: str,
+    *,
+    checker_context: list[dict[str, str]] | None = None,
+) -> ReviewResult:
+    payload = {"action": action, "reason": reason}
+    if checker_context is not None:
+        payload["checker_context"] = checker_context
+    append_event(store, "review_blocked", f"{action} blocked for {target}: {reason}", entity_id=target, payload=payload)
     return ReviewResult(False, reason)
 
 
@@ -29,12 +50,19 @@ def change_trust_level(
     rationale: str = "",
 ) -> ReviewResult:
     if not confirmed:
-        return _blocked(store, "trust_change", theorem_id, "confirmation required")
+        return _blocked(store, "trust_change", theorem_id, "confirmation required", checker_context=_checker_context(store, theorem_id))
     contract = get_contract(store, theorem_id)
     if contract is None:
         return ReviewResult(False, "theorem not found")
+    checker_context = _checker_context(store, theorem_id)
     updated = update_theorem(store, theorem_id, trust_level=trust_level)
-    append_event(store, "review_approved", f"trust level changed for {theorem_id}", entity_id=theorem_id, payload={"trust_level": trust_level.value, "rationale": rationale})
+    append_event(
+        store,
+        "review_approved",
+        f"trust level changed for {theorem_id}",
+        entity_id=theorem_id,
+        payload={"trust_level": trust_level.value, "rationale": rationale, "checker_context": checker_context},
+    )
     return ReviewResult(True, updated.trust_level.value)
 
 
@@ -46,12 +74,19 @@ def mark_verified(
     rationale: str = "",
 ) -> ReviewResult:
     if not confirmed:
-        return _blocked(store, "mark_verified", theorem_id, "confirmation required")
+        return _blocked(store, "mark_verified", theorem_id, "confirmation required", checker_context=_checker_context(store, theorem_id))
     contract = get_contract(store, theorem_id)
     if contract is None:
         return ReviewResult(False, "theorem not found")
+    checker_context = _checker_context(store, theorem_id)
     update_theorem(store, theorem_id, status=TheoremStatus.verified, trust_level=TrustLevel.project_verified)
-    append_event(store, "review_approved", f"marked verified {theorem_id}", entity_id=theorem_id, payload={"rationale": rationale})
+    append_event(
+        store,
+        "review_approved",
+        f"marked verified {theorem_id}",
+        entity_id=theorem_id,
+        payload={"rationale": rationale, "checker_context": checker_context},
+    )
     return ReviewResult(True, "verified")
 
 
@@ -64,12 +99,19 @@ def supersede_theorem_contract(
     rationale: str = "",
 ) -> ReviewResult:
     if not confirmed:
-        return _blocked(store, "supersede_theorem", theorem_id, "confirmation required")
+        return _blocked(store, "supersede_theorem", theorem_id, "confirmation required", checker_context=_checker_context(store, theorem_id))
     contract = get_contract(store, theorem_id)
     if contract is None:
         return ReviewResult(False, "theorem not found")
+    checker_context = _checker_context(store, theorem_id)
     update_theorem(store, theorem_id, statement=replacement_statement, notes=(contract.notes + "\n" + rationale).strip())
-    append_event(store, "review_approved", f"superseded theorem {theorem_id}", entity_id=theorem_id, payload={"replacement_statement": replacement_statement, "rationale": rationale})
+    append_event(
+        store,
+        "review_approved",
+        f"superseded theorem {theorem_id}",
+        entity_id=theorem_id,
+        payload={"replacement_statement": replacement_statement, "rationale": rationale, "checker_context": checker_context},
+    )
     return ReviewResult(True, "superseded")
 
 
@@ -81,12 +123,19 @@ def approve_imported_result(
     rationale: str = "",
 ) -> ReviewResult:
     if not confirmed:
-        return _blocked(store, "approve_import", theorem_id, "confirmation required")
+        return _blocked(store, "approve_import", theorem_id, "confirmation required", checker_context=_checker_context(store, theorem_id))
     contract = get_contract(store, theorem_id)
     if contract is None:
         return ReviewResult(False, "theorem not found")
+    checker_context = _checker_context(store, theorem_id)
     update_theorem(store, theorem_id, status=TheoremStatus.imported, trust_level=TrustLevel.external_reference)
-    append_event(store, "review_approved", f"approved imported result {theorem_id}", entity_id=theorem_id, payload={"rationale": rationale})
+    append_event(
+        store,
+        "review_approved",
+        f"approved imported result {theorem_id}",
+        entity_id=theorem_id,
+        payload={"rationale": rationale, "checker_context": checker_context},
+    )
     return ReviewResult(True, "import approved")
 
 
