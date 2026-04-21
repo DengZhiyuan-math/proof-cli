@@ -27,6 +27,19 @@ class TrustLevel(str, Enum):
     temporary_admit = "temporary_admit"
 
 
+class TheoremProvenanceKind(str, Enum):
+    local = "local"
+    imported = "imported"
+
+
+class TheoremReviewState(str, Enum):
+    draft = "draft"
+    candidate = "candidate"
+    approved = "approved"
+    rejected = "rejected"
+    superseded = "superseded"
+
+
 class ProofObligationStatus(str, Enum):
     open = "open"
     closed = "closed"
@@ -56,8 +69,15 @@ class TheoremContract(BaseModel):
     exports: list[str] = Field(default_factory=list)
     status: TheoremStatus = TheoremStatus.draft
     trust_level: TrustLevel = TrustLevel.temporary_admit
+    provenance_kind: TheoremProvenanceKind = TheoremProvenanceKind.local
+    review_state: TheoremReviewState = TheoremReviewState.draft
     dependencies: list[str] = Field(default_factory=list)
     source_ref: str = "internal/project"
+    grounded_reference_ids: list[str] = Field(default_factory=list)
+    grounded_theorem_ids: list[str] = Field(default_factory=list)
+    local_usage_notes: list[str] = Field(default_factory=list)
+    imported_usage_notes: list[str] = Field(default_factory=list)
+    supersedes_version: int | None = None
     notes: str = ""
     version: int = 1
     created_at: datetime = Field(default_factory=utc_now)
@@ -115,4 +135,3 @@ class ProjectState(BaseModel):
     latest_snapshot_id: str | None = None
     recent_theorem_usage: list[str] = Field(default_factory=list)
     unresolved_trust_sensitive_calls: list[str] = Field(default_factory=list)
-
