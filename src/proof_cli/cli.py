@@ -15,10 +15,21 @@ from .commands import (
     cmd_init,
     cmd_obligation_add,
     cmd_obligation_list,
+    cmd_memory_add,
+    cmd_memory_list,
+    cmd_memory_show,
+    cmd_proof_provenance_show,
+    cmd_reference_import,
+    cmd_reference_list,
+    cmd_reference_review,
+    cmd_reference_show,
+    cmd_search,
     cmd_snapshot,
     cmd_status,
     cmd_theorem_add,
     cmd_theorem_apply,
+    cmd_theorem_extract,
+    cmd_theorem_ground,
     cmd_theorem_list,
     cmd_theorem_show,
 )
@@ -28,6 +39,9 @@ goal_app = typer.Typer(help="Goal operations")
 theorem_app = typer.Typer(help="Theorem registry")
 obligation_app = typer.Typer(help="Obligation queue")
 blocker_app = typer.Typer(help="Blocker tracking")
+reference_app = typer.Typer(help="Reference workflows")
+memory_app = typer.Typer(help="Memory workflows")
+provenance_app = typer.Typer(help="Provenance workflows")
 
 
 def _root(path: str | None) -> Path:
@@ -59,10 +73,18 @@ def export(root: str = ".") -> None:
     typer.echo(cmd_export(_root(root)))
 
 
+@app.command()
+def search(query: str, root: str = ".", limit: int = 10) -> None:
+    typer.echo(cmd_search(query, _root(root), limit=limit))
+
+
 app.add_typer(goal_app, name="goal")
 app.add_typer(theorem_app, name="theorem")
 app.add_typer(obligation_app, name="obligation")
 app.add_typer(blocker_app, name="blocker")
+app.add_typer(reference_app, name="reference")
+app.add_typer(memory_app, name="memory")
+app.add_typer(provenance_app, name="provenance")
 
 
 @goal_app.command("set")
@@ -107,6 +129,11 @@ def theorem_show(theorem_id: str, root: str = ".") -> None:
     typer.echo(cmd_theorem_show(theorem_id, root=_root(root)))
 
 
+@theorem_app.command("extract")
+def theorem_extract(theorem_id: str, root: str = ".") -> None:
+    typer.echo(cmd_theorem_extract(theorem_id, root=_root(root)))
+
+
 @theorem_app.command("list")
 def theorem_list(root: str = ".") -> None:
     typer.echo(cmd_theorem_list(_root(root)))
@@ -115,6 +142,11 @@ def theorem_list(root: str = ".") -> None:
 @theorem_app.command("apply")
 def theorem_apply(theorem_id: str, root: str = ".") -> None:
     typer.echo(cmd_theorem_apply(theorem_id, root=_root(root)))
+
+
+@theorem_app.command("ground")
+def theorem_ground(theorem_id: str, reference_id: list[str] = typer.Option(..., "--reference-id"), root: str = ".", notes: str = "") -> None:
+    typer.echo(cmd_theorem_ground(theorem_id, reference_id, root=_root(root), notes=notes))
 
 
 @obligation_app.command("add")
@@ -143,3 +175,98 @@ def blocker_add(description: str, root: str = ".", scope: str = "global", failur
 def blocker_list(root: str = ".") -> None:
     typer.echo(cmd_blocker_list(_root(root)))
 
+
+@reference_app.command("list")
+def reference_list(root: str = ".") -> None:
+    typer.echo(cmd_reference_list(_root(root)))
+
+
+@reference_app.command("show")
+def reference_show(reference_id: str, root: str = ".") -> None:
+    typer.echo(cmd_reference_show(reference_id, root=_root(root)))
+
+
+@reference_app.command("import")
+def reference_import(
+    reference_id: str,
+    title: str,
+    year: int,
+    root: str = ".",
+    author: list[str] = typer.Option(None, "--author"),
+    source_type: str = "other",
+    origin: str = "",
+    bibliographic_source: str = "",
+    identifier: str = "",
+    url: str = "",
+    notes: str = "",
+) -> None:
+    typer.echo(
+        cmd_reference_import(
+            reference_id,
+            title,
+            year,
+            _root(root),
+            author=author,
+            source_type=source_type,  # type: ignore[arg-type]
+            origin=origin,
+            bibliographic_source=bibliographic_source,
+            identifier=identifier,
+            url=url,
+            notes=notes,
+        )
+    )
+
+
+@reference_app.command("review")
+def reference_review(reference_id: str, action: str, root: str = ".", rationale: str = "") -> None:
+    typer.echo(cmd_reference_review(reference_id, action, root=_root(root), rationale=rationale))
+
+
+@memory_app.command("list")
+def memory_list(root: str = ".", layer: str = "", theorem_id: str = "", goal_id: str = "") -> None:
+    typer.echo(cmd_memory_list(_root(root), layer=layer, theorem_id=theorem_id, goal_id=goal_id))
+
+
+@memory_app.command("show")
+def memory_show(artifact_id: str, root: str = ".") -> None:
+    typer.echo(cmd_memory_show(artifact_id, root=_root(root)))
+
+
+@memory_app.command("add")
+def memory_add(
+    content: str,
+    root: str = ".",
+    layer: str = "working",
+    theorem_id: str = "",
+    goal_id: str = "",
+    obligation_id: str = "",
+    blocker_id: str = "",
+    route_id: str = "",
+    importance: str = "medium",
+    status: str = "",
+    source: str = "manual",
+    tag: list[str] = typer.Option(None, "--tag"),
+    notes: str = "",
+) -> None:
+    typer.echo(
+        cmd_memory_add(
+            content,
+            _root(root),
+            layer=layer,
+            theorem_id=theorem_id,
+            goal_id=goal_id,
+            obligation_id=obligation_id,
+            blocker_id=blocker_id,
+            route_id=route_id,
+            importance=importance,
+            status=status,
+            source=source,
+            tag=tag,
+            notes=notes,
+        )
+    )
+
+
+@provenance_app.command("show")
+def provenance_show(target_id: str, root: str = ".") -> None:
+    typer.echo(cmd_proof_provenance_show(target_id, root=_root(root)))

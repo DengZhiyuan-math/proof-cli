@@ -12,6 +12,7 @@ from .domain import (
     TrustLevel,
 )
 from .export import build_export
+from .memory import MemoryArtifact, MemoryLayer, list_memory_artifacts, record_memory
 from .proof_state import (
     add_blocker,
     add_goal,
@@ -25,7 +26,8 @@ from .proof_state import (
     note_unresolved_trust_call,
     record_theorem_usage,
 )
-from .rendering import render_export, render_status
+from .references import ReferenceRecord, ReferenceReviewStatus, ReferenceSourceType
+from .rendering import render_status
 from .storage import (
     ProjectStore,
     approve_reference,
@@ -35,8 +37,10 @@ from .storage import (
     list_blockers,
     list_events,
     list_obligations,
+    list_references,
     reject_reference,
     append_event,
+    import_reference,
 )
 from .retrieval import retrieve_candidates
 from .theorems import (
@@ -66,6 +70,52 @@ def _next_obligation_id(*parts: str) -> str:
 
 def _format_candidate_line(rank: int, title: str, source_kind: str, score: float, candidate_id: str) -> str:
     return f"{rank}. {candidate_id}: {title} [{source_kind}] score={score:g}"
+
+
+def _format_reference_line(reference: ReferenceRecord) -> str:
+    callability = "callable" if reference.is_callable else "not callable"
+    return (
+        f"{reference.id}: {reference.title} "
+        f"[{reference.source_type.value}, {reference.review_status.value}, {callability}]"
+    )
+
+
+def _format_memory_line(artifact: MemoryArtifact) -> str:
+    scope_bits = []
+    if artifact.scope.theorem_id:
+        scope_bits.append(f"theorem={artifact.scope.theorem_id}")
+    if artifact.scope.goal_id:
+        scope_bits.append(f"goal={artifact.scope.goal_id}")
+    if artifact.scope.obligation_id:
+        scope_bits.append(f"obligation={artifact.scope.obligation_id}")
+    if artifact.scope.blocker_id:
+        scope_bits.append(f"blocker={artifact.scope.blocker_id}")
+    if artifact.scope.route_id:
+        scope_bits.append(f"route={artifact.scope.route_id}")
+    scope_text = " ".join(scope_bits) if scope_bits else "project-scope"
+    tag_text = f" tags={','.join(artifact.tags)}" if artifact.tags else ""
+    return f"{artifact.id}: [{artifact.layer.value}/{artifact.status.value}/{artifact.importance.value}] {scope_text} {artifact.content}{tag_text}"
+
+
+def _find_memory_artifact(store: ProjectStore, artifact_id: str) -> MemoryArtifact | None:
+    for artifact in list_memory_artifacts(store):
+        if artifact.id == artifact_id:
+            return artifact
+    return None
+
+
+def _reference_review_action(action: str) -> ReferenceReviewStatus | None:
+    normalized = action.strip().lower()
+    mapping = {
+        "approve": ReferenceReviewStatus.approved,
+        "approved": ReferenceReviewStatus.approved,
+        "reject": ReferenceReviewStatus.rejected,
+        "rejected": ReferenceReviewStatus.rejected,
+        "defer": ReferenceReviewStatus.deferred,
+        "deferred": ReferenceReviewStatus.deferred,
+        "candidate": ReferenceReviewStatus.candidate,
+    }
+    return mapping.get(normalized)
 
 
 def cmd_proof_search(
@@ -98,6 +148,72 @@ def cmd_proof_search(
             )
         )
     return "\n".join(lines)
+
+
+def cmd_reference_list(root: str | Path = ".") -> str:
+    references = list_references(get_store(root))
+    if not references:
+        return "No references"
+    lines = ["References:"]
+    for reference in references:
+        lines.append(f"- {_format_reference_line(reference)}")
+    return "\n".join(lines)
+
+
+def cmd_reference_show(reference_id: str, root: str | Path = ".") -> str:
+    reference = get_reference(get_store(root), reference_id)
+    return reference.model_dump_json(indent=2) if reference else f"Reference not found: {reference_id}"
+
+
+def cmd_reference_import(
+    reference_id: str,
+    title: str,
+    year: int,
+    root: str | Path = ".",
+    *,
+    author: list[str] | None = None,
+    source_type: ReferenceSourceType = ReferenceSourceType.other,
+    origin: str = "",
+    bibliographic_source: str = "",
+    identifier: str = "",
+    url: str = "",
+    notes: str = "",
+) -> str:
+    store = get_store(root)
+    source_type_enum = source_type if isinstance(source_type, ReferenceSourceType) else ReferenceSourceType(source_type)
+    reference = ReferenceRecord(
+        id=reference_id,
+        title=title,
+        authors=list(author or []),
+        year=year,
+        source_type=source_type_enum,
+        origin=origin,
+        bibliographic_source=bibliographic_source,
+        identifier=identifier,
+        url=url,
+        notes=notes,
+    )
+    stored = import_reference(store, reference)
+    _append_history(store, f"reference_import:{reference_id}", message=f"imported reference {reference_id}")
+    return stored.model_dump_json(indent=2)
+
+
+def cmd_reference_review(reference_id: str, action: str, root: str | Path = ".", *, rationale: str = "") -> str:
+    store = get_store(root)
+    review_status = _reference_review_action(action)
+    if review_status is None:
+        return f"review:unsupported:{action}"
+    reviewer = {
+        ReferenceReviewStatus.approved: approve_reference,
+        ReferenceReviewStatus.rejected: reject_reference,
+        ReferenceReviewStatus.deferred: defer_reference,
+        ReferenceReviewStatus.candidate: defer_reference,
+    }[review_status]
+    result = reviewer(store, reference_id, confirmed=True, rationale=rationale)
+    if not result.allowed:
+        return f"review:blocked:{result.message}"
+    _append_history(store, f"reference_review:{reference_id}:{review_status.value}", message=f"reviewed reference {reference_id}")
+    return f"review:{reference_id}:{review_status.value}"
 
 
 def cmd_proof_import(theorem_id: str, root: str | Path = ".") -> str:
@@ -388,6 +504,18 @@ def cmd_theorem_show(theorem_id: str, root: str | Path = ".") -> str:
     return contract.model_dump_json(indent=2) if contract else "Theorem not found"
 
 
+def cmd_theorem_extract(theorem_id: str, root: str | Path = ".") -> str:
+    store = get_store(root)
+    contract = show_theorem(store, theorem_id)
+    if contract is None:
+        return f"Theorem not found: {theorem_id}"
+    ok, reason = theorem_callability(store, theorem_id)
+    payload = contract.model_dump(mode="json")
+    payload["callable"] = ok
+    payload["callability_reason"] = reason
+    return json.dumps(payload, indent=2)
+
+
 def cmd_theorem_list(root: str | Path = ".") -> str:
     items = list_theorems(get_store(root))
     return "\n".join([f"{item.id}: {item.name} [{item.status.value}]" for item in items]) or "No theorems"
@@ -396,6 +524,10 @@ def cmd_theorem_list(root: str | Path = ".") -> str:
 def cmd_theorem_apply(theorem_id: str, root: str | Path = ".") -> str:
     ok, reason = apply_theorem(get_store(root), theorem_id)
     return f"{theorem_id}: {reason}"
+
+
+def cmd_theorem_ground(theorem_id: str, reference_ids: list[str], root: str | Path = ".", *, notes: str = "") -> str:
+    return cmd_proof_ground(theorem_id, reference_ids, root=root, notes=notes)
 
 
 def cmd_obligation_add(goal_statement: str, root: str | Path = ".", source_step_id: str | None = None, required_for: str | None = None) -> str:
@@ -425,6 +557,67 @@ def cmd_blocker_list(root: str | Path = ".") -> str:
     return "\n".join([f"{item.id}: {item.description} [{item.status.value}]" for item in items]) or "No blockers"
 
 
+def cmd_memory_add(
+    content: str,
+    root: str | Path = ".",
+    *,
+    layer: str = "working",
+    theorem_id: str = "",
+    goal_id: str = "",
+    obligation_id: str = "",
+    blocker_id: str = "",
+    route_id: str = "",
+    importance: str = "medium",
+    status: str = "",
+    source: str = "manual",
+    tag: list[str] | None = None,
+    notes: str = "",
+) -> str:
+    store = get_store(root)
+    artifact = record_memory(
+        store,
+        layer,
+        content,
+        theorem_id=theorem_id or None,
+        goal_id=goal_id or None,
+        obligation_id=obligation_id or None,
+        blocker_id=blocker_id or None,
+        route_id=route_id or None,
+        importance=importance,
+        status=status or None,
+        source=source,  # type: ignore[arg-type]
+        tags=tag,
+        notes=notes,
+    )
+    return artifact.model_dump_json(indent=2)
+
+
+def cmd_memory_list(
+    root: str | Path = ".",
+    *,
+    layer: str = "",
+    theorem_id: str = "",
+    goal_id: str = "",
+) -> str:
+    artifacts = list_memory_artifacts(
+        get_store(root),
+        layer=layer or None,
+        theorem_id=theorem_id or None,
+        goal_id=goal_id or None,
+    )
+    if not artifacts:
+        return "No memory artifacts"
+    lines = ["Memory:"]
+    for artifact in artifacts:
+        lines.append(f"- {_format_memory_line(artifact)}")
+    return "\n".join(lines)
+
+
+def cmd_memory_show(artifact_id: str, root: str | Path = ".") -> str:
+    artifact = _find_memory_artifact(get_store(root), artifact_id)
+    return artifact.model_dump_json(indent=2) if artifact else f"Memory artifact not found: {artifact_id}"
+
+
 def cmd_snapshot(root: str | Path = ".", handoff_note: str = "") -> str:
     snapshot = build_snapshot(get_store(root), handoff_note=handoff_note)
     return snapshot.model_dump_json(indent=2)
@@ -441,3 +634,11 @@ def cmd_export(root: str | Path = ".") -> str:
 
 def cmd_goal_open(theorem_id: str, root: str | Path = ".") -> str:
     return cmd_goal_set(theorem_id, root=root)
+
+
+def cmd_search(query: str, root: str | Path = ".", *, external_candidates: list[dict[str, object]] | None = None, limit: int = 10) -> str:
+    return cmd_proof_search(query, root=root, external_candidates=external_candidates, limit=limit)
+
+
+def cmd_provenance_show(target_id: str, root: str | Path = ".") -> str:
+    return cmd_proof_provenance_show(target_id, root=root)
