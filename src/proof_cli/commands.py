@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .domain import BlockerRecord, ProofObligation, ProjectState, TheoremStatus, TrustLevel
+from .export import build_export
 from .proof_state import (
     add_blocker,
     add_goal,
@@ -120,10 +121,8 @@ def cmd_history(root: str | Path = ".") -> str:
 
 
 def cmd_export(root: str | Path = ".") -> str:
-    data = summarize_state(get_store(root))
-    return render_export(data)
+    return build_export(get_store(root))
 
 
 def cmd_goal_open(theorem_id: str, root: str | Path = ".") -> str:
     return cmd_goal_set(theorem_id, root=root)
-
