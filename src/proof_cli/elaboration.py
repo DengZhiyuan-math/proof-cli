@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from .blockers import record_failed_route
 from .goals import add_goal, set_current_context, set_current_theorem
 from .obligations import add_obligation, close_obligation
 from .proof_state import load_state, note_unresolved_trust_call, record_theorem_usage
@@ -8,6 +7,7 @@ from .storage import ProjectStore
 from .theorems import apply_theorem, theorem_callability
 from .domain import ProofObligation
 from .dsl import DSLCommand
+from .commands import cmd_proof_ground, cmd_proof_import, cmd_proof_review, cmd_proof_search
 
 
 def _is_vague(argument: str) -> bool:
@@ -30,7 +30,7 @@ def elaborate_command(store: ProjectStore, command: DSLCommand) -> str:
             assumptions.append(argument)
         set_current_context(store, assumptions)
         return f"assume:{argument}"
-    if name in {"import", "use", "apply"}:
+    if name in {"use", "apply"}:
         ok, reason = theorem_callability(store, argument)
         if ok:
             if name == "apply":
@@ -51,8 +51,28 @@ def elaborate_command(store: ProjectStore, command: DSLCommand) -> str:
                         blocking_reason=reason,
                     ),
                 )
-        record_failed_route(store, f"{name}:{argument}")
         return f"{name}:blocked:{reason}"
+    if name == "import":
+        return cmd_proof_import(command.target or argument, root=store.root)
+    if name == "search":
+        return cmd_proof_search(argument, root=store.root)
+    if name == "ground":
+        return cmd_proof_ground(command.target or argument, list(command.references), root=store.root)
+    if name == "review":
+        if not command.target:
+            return "review:missing-target"
+        review_argument = argument.strip()
+        if review_argument:
+            review_parts = review_argument.split(maxsplit=1)
+            review_action = review_parts[0]
+            review_rationale = review_parts[1] if len(review_parts) > 1 else ""
+            if review_action.lower() not in {"approve", "approved", "reject", "rejected", "defer", "deferred", "candidate", "downgrade"}:
+                review_rationale = review_argument
+                review_action = "approve"
+        else:
+            review_action = "approve"
+            review_rationale = ""
+        return cmd_proof_review(command.target, review_action, root=store.root, rationale=review_rationale)
     if name in {"assert", "defer", "suffices"}:
         statement = argument
         if not statement:
