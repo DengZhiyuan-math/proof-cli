@@ -1,3 +1,17 @@
+---
+gsd_state_version: 1.0
+milestone: v1.0
+milestone_name: milestone
+status: unknown
+last_updated: "2026-04-21T19:14:49.960Z"
+progress:
+  total_phases: 5
+  completed_phases: 0
+  total_plans: 7
+  completed_plans: 0
+  percent: 0
+---
+
 # Project State
 
 ## Project Reference
@@ -5,7 +19,7 @@
 See: .planning/PROJECT.md (updated 2026-04-21)
 
 **Core value:** Manage the trust boundary around mathematical proof work: know what can be called, under what assumptions, and what proof obligations remain.
-**Current focus:** Phase 1 planning
+**Current focus:** Phase 1 — foundation
 
 ## Current Snapshot
 
@@ -24,4 +38,3 @@ See: .planning/PROJECT.md (updated 2026-04-21)
 
 - No existing codebase was detected.
 - The planning documents are the source of truth until implementation begins.
-

@@ -15,47 +15,47 @@
 
 ## Phase Details
 
-**Phase 1: Foundation**
-Goal: Create the persistent project backbone and CLI status surface.
-Requirements: WS-01, WS-02
-Success criteria:
+## Phase 1: Foundation
+**Goal:** Create the persistent project backbone and CLI status surface.
+**Requirements:** WS-01, WS-02
+**Success Criteria:**
 1. A new workspace can be initialized and reopened without losing project state.
 2. The CLI can display current open goals and blockers.
 3. Project snapshots survive a fresh session.
 4. The state model is explicit enough for later phases to build on.
 
-**Phase 2: Registry**
-Goal: Make theorem contracts first-class and callable.
-Requirements: THM-01, THM-02, THM-03
-Success criteria:
+## Phase 2: Registry
+**Goal:** Make theorem contracts first-class and callable.
+**Requirements:** THM-01, THM-02, THM-03
+**Success Criteria:**
 1. The user can register reusable theorem contracts.
 2. Each contract stores assumptions, exports, and dependencies.
 3. The system can explain whether a contract is callable in context.
 4. Dependency metadata is available for later checks.
 
-**Phase 3: DSL and Checks**
-Goal: Parse proof scripts and validate omissions, assumptions, and dependency safety.
-Requirements: DSL-01, DSL-02, DSL-03, CHK-01, CHK-02, CHK-03, CHK-04
-Success criteria:
+## Phase 3: DSL and Checks
+**Goal:** Parse proof scripts and validate omissions, assumptions, and dependency safety.
+**Requirements:** DSL-01, DSL-02, DSL-03, CHK-01, CHK-02, CHK-03, CHK-04
+**Success Criteria:**
 1. A proof script can be parsed into explicit steps.
 2. Compressed reasoning expands into visible obligations.
 3. The system can catch assumption mismatches before reuse.
 4. Circular dependency and export-strength errors are reported clearly.
 5. Notation and omission issues are surfaced as actionable checker output.
 
-**Phase 4: Memory and Retrieval**
-Goal: Add layered memory and project-first retrieval.
-Requirements: MEM-01, RET-01, RET-02
-Success criteria:
+## Phase 4: Memory and Retrieval
+**Goal:** Add layered memory and project-first retrieval.
+**Requirements:** MEM-01, RET-01, RET-02
+**Success Criteria:**
 1. The system can persist multiple memory layers, not just plain notes.
 2. Current-project results are searched before external sources.
 3. External imports store source metadata and trust levels.
 4. Session recovery preserves enough context to resume work accurately.
 
-**Phase 5: Review and Trust**
-Goal: Gate imported results and make blockers explicit.
-Requirements: REV-01, REV-02
-Success criteria:
+## Phase 5: Review and Trust
+**Goal:** Gate imported results and make blockers explicit.
+**Requirements:** REV-01, REV-02
+**Success Criteria:**
 1. Imported results require approval, downgrade, or rejection before reuse.
 2. Blockers are visible and tied to concrete proof failures.
 3. Trust changes are auditable.
