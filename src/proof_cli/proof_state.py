@@ -120,7 +120,7 @@ def build_snapshot(store: ProjectStore, handoff_note: str = "") -> ProjectSnapsh
 
 
 def project_history(store: ProjectStore) -> list[str]:
-    return [event.message for event in []]
+    return [event.message for event in list_events(store)]
 
 
 def summarize_state(store: ProjectStore) -> dict[str, object]:
