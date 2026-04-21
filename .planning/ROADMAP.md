@@ -7,7 +7,7 @@
 
 | # | Phase | Goal | Requirements | Success Criteria |
 |---|-------|------|--------------|------------------|
-| 1 | Foundation | Create the persistent project backbone and CLI status surface | WS-01, WS-02 | 4 |
+| 1 | Foundation | 7/7 | Complete    | 2026-04-21 |
 | 2 | Registry | Make theorem contracts first-class and callable | THM-01, THM-02, THM-03 | 4 |
 | 3 | DSL and Checks | Parse proof scripts and validate omissions, assumptions, and dependency safety | DSL-01, DSL-02, DSL-03, CHK-01, CHK-02, CHK-03, CHK-04 | 5 |
 | 4 | Memory and Retrieval | Add layered memory and project-first retrieval | MEM-01, RET-01, RET-02 | 4 |

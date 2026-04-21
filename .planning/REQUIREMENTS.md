@@ -9,8 +9,8 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Workspace and State
 
-- [ ] **WS-01**: User can initialize a proof project workspace and resume it across sessions
-- [ ] **WS-02**: User can view the current project state, including open goals and blockers, from the CLI
+- [x] **WS-01**: User can initialize a proof project workspace and resume it across sessions
+- [x] **WS-02**: User can view the current project state, including open goals and blockers, from the CLI
 
 ### Theorem Registry
 
@@ -73,8 +73,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| WS-01 | Phase 1 | Pending |
-| WS-02 | Phase 1 | Pending |
+| WS-01 | Phase 1 | Complete |
+| WS-02 | Phase 1 | Complete |
 | THM-01 | Phase 2 | Pending |
 | THM-02 | Phase 2 | Pending |
 | THM-03 | Phase 2 | Pending |
