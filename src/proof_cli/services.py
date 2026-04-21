@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, Mapping, Sequence
 
 from .commands import (
     cmd_export,
@@ -8,6 +9,7 @@ from .commands import (
     cmd_snapshot,
     cmd_status,
 )
+from .retrieval import RetrievalReport, retrieve_candidates
 from .storage import ProjectStore, ensure_project
 
 
@@ -30,3 +32,17 @@ def workspace_history(root: str | Path = ".") -> str:
 def workspace_export(root: str | Path = ".") -> str:
     return cmd_export(root)
 
+
+def workspace_retrieval(
+    root: str | Path = ".",
+    *,
+    query: str | None = None,
+    external_candidates: Sequence[Mapping[str, Any]] | None = None,
+    limit: int = 10,
+) -> RetrievalReport:
+    return retrieve_candidates(
+        open_store(root),
+        query=query,
+        external_candidates=external_candidates,
+        limit=limit,
+    )
