@@ -110,7 +110,10 @@ def append_event(store: ProjectStore, kind: str, message: str, *, entity_id: str
                 event.kind,
                 event.entity_id,
                 event.message,
-                json.dumps(event.payload),
+                json.dumps(
+                    event.payload,
+                    default=lambda o: o.isoformat() if hasattr(o, "isoformat") else (o.value if hasattr(o, "value") else str(o)),
+                ),
                 event.created_at.isoformat(),
             ),
         )
@@ -121,18 +124,21 @@ def append_event(store: ProjectStore, kind: str, message: str, *, entity_id: str
 def store_contract(store: ProjectStore, contract: TheoremContract) -> TheoremContract:
     with store.connect() as conn:
         current = conn.execute(
-            "SELECT current_version FROM theorem_contracts WHERE id = ? ORDER BY version DESC LIMIT 1",
+            "SELECT MAX(version) AS version FROM theorem_contracts WHERE id = ?",
             (contract.id,),
         ).fetchone()
-        if current:
-            next_version = int(current["current_version"]) + 1
-            contract.version = next_version
+        current_version = int(current["version"]) if current and current["version"] is not None else 0
+        contract.version = current_version + 1
         conn.execute(
-            "INSERT INTO theorem_contracts(id, version, current_version, data, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+            "UPDATE theorem_contracts SET is_current = 0 WHERE id = ?",
+            (contract.id,),
+        )
+        conn.execute(
+            "INSERT INTO theorem_contracts(id, version, is_current, data, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
             (
                 contract.id,
                 contract.version,
-                contract.version,
+                1,
                 contract.model_dump_json(),
                 contract.created_at.isoformat(),
                 contract.updated_at.isoformat(),
@@ -143,8 +149,6 @@ def store_contract(store: ProjectStore, contract: TheoremContract) -> TheoremCon
 
 
 def update_contract(store: ProjectStore, contract: TheoremContract) -> TheoremContract:
-    contract.version += 1
-    contract.updated_at = contract.updated_at
     return store_contract(store, contract)
 
 
@@ -153,7 +157,7 @@ def list_contracts(store: ProjectStore) -> list[TheoremContract]:
         rows = conn.execute(
             """
             SELECT data FROM theorem_contracts
-            WHERE version = current_version
+            WHERE is_current = 1
             ORDER BY id
             """
         ).fetchall()
@@ -165,13 +169,31 @@ def get_contract(store: ProjectStore, contract_id: str) -> TheoremContract | Non
         row = conn.execute(
             """
             SELECT data FROM theorem_contracts
-            WHERE id = ? AND version = current_version
+            WHERE id = ? AND is_current = 1
             ORDER BY version DESC
             LIMIT 1
             """,
             (contract_id,),
         ).fetchone()
     return THEOREM_ADAPTER.validate_json(row["data"]) if row else None
+
+
+def list_events(store: ProjectStore) -> list[EventRecord]:
+    with store.connect() as conn:
+        rows = conn.execute("SELECT id, kind, entity_id, message, payload, created_at FROM events ORDER BY created_at").fetchall()
+    events: list[EventRecord] = []
+    for row in rows:
+        events.append(
+            EventRecord(
+                id=row["id"],
+                kind=row["kind"],
+                entity_id=row["entity_id"],
+                message=row["message"],
+                payload=json.loads(row["payload"]),
+                created_at=row["created_at"],
+            )
+        )
+    return events
 
 
 def store_obligation(store: ProjectStore, obligation: ProofObligation) -> ProofObligation:

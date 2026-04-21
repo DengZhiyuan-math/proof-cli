@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE TABLE IF NOT EXISTS theorem_contracts (
   id TEXT NOT NULL,
   version INTEGER NOT NULL,
-  current_version INTEGER NOT NULL DEFAULT 1,
+  is_current INTEGER NOT NULL DEFAULT 0,
   data TEXT NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
@@ -65,4 +65,3 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
 def initialize(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
     conn.commit()
-
