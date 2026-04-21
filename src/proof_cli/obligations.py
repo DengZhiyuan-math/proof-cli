@@ -9,6 +9,7 @@ from .proof_state import (
     record_supporting_reference as _record_supporting_reference,
     save_state,
 )
+from .reasoning import LocalObligation, TheoremReasoningGoal
 from .storage import ProjectStore, append_event, list_obligations as _list_obligations, store_obligation
 
 
@@ -20,6 +21,31 @@ def _extend_unique(target: list[str], values: list[str]) -> None:
     for value in values:
         if value not in target:
             target.append(value)
+
+
+def _to_proof_obligation(
+    local_obligation: LocalObligation,
+    *,
+    note: str = "",
+) -> ProofObligation:
+    dependencies = list(local_obligation.dependencies)
+    if local_obligation.source_unit_id:
+        _extend_unique(dependencies, [f"source_unit:{local_obligation.source_unit_id}"])
+    if local_obligation.required_for:
+        _extend_unique(dependencies, [f"required_for:{local_obligation.required_for}"])
+    if note:
+        _extend_unique(dependencies, [f"synthesis_note:{note}"])
+    return ProofObligation(
+        id=local_obligation.id,
+        goal_statement=local_obligation.statement,
+        source_step_id=local_obligation.source_unit_id,
+        required_for=local_obligation.required_for,
+        status=ProofObligationStatus(local_obligation.status),
+        blocking_reason=f"derived from {local_obligation.required_for or local_obligation.source_unit_id}",
+        dependencies=dependencies,
+        created_at=local_obligation.created_at,
+        updated_at=local_obligation.created_at,
+    )
 
 
 def add_obligation(
@@ -69,6 +95,56 @@ def add_obligation(
 
 def list_obligations(store: ProjectStore) -> list[ProofObligation]:
     return _list_obligations(store)
+
+
+def synthesize_obligations(
+    theorem_goal: TheoremReasoningGoal,
+    *,
+    contract_assumptions: list[str] | None = None,
+    contract_exports: list[str] | None = None,
+) -> list[ProofObligation]:
+    return [
+        _to_proof_obligation(local_obligation)
+        for local_obligation in theorem_goal.synthesize_obligations(
+            contract_assumptions=contract_assumptions,
+            contract_exports=contract_exports,
+        )
+    ]
+
+
+def derive_obligations(
+    store: ProjectStore,
+    theorem_goal: TheoremReasoningGoal,
+    *,
+    contract_assumptions: list[str] | None = None,
+    contract_exports: list[str] | None = None,
+    route_notes: str = "",
+) -> list[ProofObligation]:
+    synthesized = synthesize_obligations(
+        theorem_goal,
+        contract_assumptions=contract_assumptions,
+        contract_exports=contract_exports,
+    )
+    persisted: list[ProofObligation] = []
+    for obligation in synthesized:
+        stored = _add_obligation(
+            store,
+            obligation,
+            route_notes=route_notes or f"derived from theorem intent {theorem_goal.id}",
+        )
+        append_event(
+            store,
+            "obligation_synthesized",
+            f"synthesized obligation {obligation.id} from downstream use",
+            entity_id=obligation.id,
+            payload={
+                "obligation": stored.model_dump(mode="json"),
+                "theorem_goal_id": theorem_goal.id,
+                "downstream_use_ids": [use.id for use in theorem_goal.downstream_use],
+            },
+        )
+        persisted.append(stored)
+    return persisted
 
 
 def close_obligation(
