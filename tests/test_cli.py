@@ -220,6 +220,67 @@ def _seed_phase_three_project(tmp_path: Path) -> str:
     return standard_reference.id
 
 
+def _seed_phase_four_project(tmp_path: Path) -> tuple[str, str]:
+    store = ensure_project(tmp_path)
+
+    add_theorem(
+        store,
+        theorem_id="thm_aux",
+        kind="lemma",
+        name="Auxiliary Lemma",
+        statement="A implies B",
+        assumptions=["A"],
+        exports=["B"],
+        status=TheoremStatus.verified,
+        trust_level=TrustLevel.project_verified,
+    )
+    add_theorem(
+        store,
+        theorem_id="thm_main",
+        kind="theorem",
+        name="Main Result",
+        statement="A and B imply C",
+        assumptions=["A", "B"],
+        exports=["C"],
+        status=TheoremStatus.verified,
+        trust_level=TrustLevel.project_verified,
+        dependencies=["thm_aux"],
+        notes="fragile theorem application with explicit side condition",
+    )
+    add_theorem(
+        store,
+        theorem_id="thm_reject",
+        kind="theorem",
+        name="Rejected Result",
+        statement="B implies D",
+        assumptions=["B"],
+        exports=["D"],
+        status=TheoremStatus.verified,
+        trust_level=TrustLevel.project_verified,
+    )
+    add_obligation(
+        store,
+        ProofObligation(
+            id="obl_main",
+            goal_statement="standard bridge step requires an explicit side condition",
+            required_for="thm_main",
+            blocking_reason="standard bridge step",
+        ),
+    )
+    add_blocker(
+        store,
+        BlockerRecord(
+            id="blk_main",
+            scope="thm_main",
+            description="bridge step is fragile until machine-checked",
+            failure_type="missing_verification",
+        ),
+    )
+    set_current_theorem(store, "thm_main")
+    set_current_context(store, ["A", "B"])
+    return "thm_main", "thm_reject"
+
+
 def test_help_lists_phase_two_commands(tmp_path: Path):
     _seed_phase_two_project(tmp_path)
 
@@ -368,3 +429,162 @@ def test_phase_three_cli_paths_cover_reasoning_bug_review_and_repair(tmp_path: P
     assert result.exit_code == 0
     assert '"callable": false' in result.stdout
     assert '"missing_assumptions": [' in result.stdout
+
+
+def test_phase_four_cli_paths_cover_formal_bridge_workflows(tmp_path: Path):
+    theorem_id, reject_id = _seed_phase_four_project(tmp_path)
+
+    result = runner.invoke(app, ["--help"])
+    assert result.exit_code == 0
+    assert "formalize" in result.stdout
+    assert "verify" in result.stdout
+    assert "revalidate" in result.stdout
+
+    result = runner.invoke(
+        app,
+        [
+            "formalize",
+            "recommend",
+            theorem_id,
+            "--root",
+            str(tmp_path),
+            "--backend-target",
+            "lean4",
+            "--notes",
+            "fragile bridge",
+        ],
+    )
+    assert result.exit_code == 0
+    assert f"formalize recommend {theorem_id}" in result.stdout
+    assert "Fragment:" in result.stdout
+    assert "Recommendation:" in result.stdout
+    assert '"source_id": "thm_main"' in result.stdout
+
+    result = runner.invoke(
+        app,
+        [
+            "verify",
+            "queue",
+            theorem_id,
+            "--root",
+            str(tmp_path),
+            "--backend-target",
+            "lean4",
+            "--route-id",
+            "route_bridge",
+            "--notes",
+            "queued for machine checking",
+        ],
+    )
+    assert result.exit_code == 0
+    assert f"verify queue {theorem_id}" in result.stdout
+    assert "Fragment:" in result.stdout
+    assert "queued_for_verification" in result.stdout
+
+    result = runner.invoke(
+        app,
+        [
+            "verify",
+            "run",
+            theorem_id,
+            "--root",
+            str(tmp_path),
+            "--backend-target",
+            "lean4",
+            "--notes",
+            "run after queue",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "Result:" in result.stdout
+    assert "machine_checked" in result.stdout
+
+    result = runner.invoke(app, ["verify", "accept", theorem_id, "--root", str(tmp_path), "--notes", "accepted after review"])
+    assert result.exit_code == 0
+    assert "accepted_after_review" in result.stdout
+    assert "Verification record:" in result.stdout
+
+    result = runner.invoke(app, ["verify", "status", theorem_id, "--root", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "Additional results:" in result.stdout
+    assert "accepted_after_review" in result.stdout
+
+    result = runner.invoke(app, ["verify", "result", theorem_id, "--root", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "accepted_after_review" in result.stdout
+
+    result = runner.invoke(app, ["trace", "machine-check", theorem_id, "--root", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "Trace: machine-check-trace" in result.stdout
+    assert "verification://" in result.stdout
+
+    result = runner.invoke(
+        app,
+        [
+            "verify",
+            "stale",
+            theorem_id,
+            "--root",
+            str(tmp_path),
+            "--reason",
+            "dependency changed",
+            "--dependency",
+            "thm_aux",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "Stale fragment:" in result.stdout
+    assert "stale_after_change" in result.stdout
+
+    result = runner.invoke(
+        app,
+        [
+            "revalidate",
+            theorem_id,
+            "--root",
+            str(tmp_path),
+            "--backend-target",
+            "lean4",
+            "--notes",
+            "recheck after dependency change",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "Revalidated fragment:" in result.stdout
+    assert "queued_for_verification" in result.stdout
+
+    result = runner.invoke(
+        app,
+        [
+            "verify",
+            "queue",
+            reject_id,
+            "--root",
+            str(tmp_path),
+            "--backend-target",
+            "lean4",
+            "--notes",
+            "queued for review",
+        ],
+    )
+    assert result.exit_code == 0
+
+    result = runner.invoke(
+        app,
+        [
+            "verify",
+            "run",
+            reject_id,
+            "--root",
+            str(tmp_path),
+            "--backend-target",
+            "lean4",
+            "--notes",
+            "run for reject path",
+        ],
+    )
+    assert result.exit_code == 0
+
+    result = runner.invoke(app, ["verify", "reject", reject_id, "--root", str(tmp_path), "--notes", "needs more work"])
+    assert result.exit_code == 0
+    assert "rejected_by_human" in result.stdout

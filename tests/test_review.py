@@ -4,11 +4,31 @@ from proof_cli.domain import ProofObligation, TheoremProvenanceKind, TheoremRevi
 from proof_cli.obligations import add_obligation
 from proof_cli.proof_state import set_current_context
 from proof_cli.memory import track_symbol
-from proof_cli.review import approve_imported_result, close_obligation_review, mark_verified, resolve_blocker_review, change_trust_level
+from proof_cli.review import (
+    approve_imported_result,
+    change_trust_level,
+    close_obligation_review,
+    describe_verification_fragment,
+    describe_verification_result_record,
+    mark_verified,
+    render_verification_output,
+    resolve_blocker_review,
+)
 from proof_cli.storage import ensure_project, list_events
 from proof_cli.theorems import add_theorem
 from proof_cli.blockers import add_blocker
 from proof_cli.domain import BlockerRecord
+from proof_cli.verification_ir import (
+    VerificationFragment,
+    VerificationFragmentStatus,
+    VerificationProvenance,
+    VerificationResult,
+    VerificationReviewStatus,
+    VerificationScope,
+    VerificationSourceKind,
+    VerificationTranslationStatus,
+)
+from proof_cli.verification_results import VerificationResultRecord
 
 
 def test_review_gate_requires_confirmation_and_logs(tmp_path: Path):
@@ -99,3 +119,53 @@ def test_review_records_checker_context_for_imported_approval(tmp_path: Path):
     checker_context = review_event.payload["checker_context"]
     assert any(check["name"] == "assumption_presence" and check["severity"] == "warn" for check in checker_context)
     assert any(check["name"] == "export_strength" and check["severity"] == "warn" for check in checker_context)
+
+
+def test_verification_review_formatters_are_readable_and_session_ready() -> None:
+    scope = VerificationScope(project_id="proj_1", theorem_id="thm_1", proof_step_id="step_1", route_id="route_1")
+    fragment = VerificationFragment(
+        source_type=VerificationSourceKind.proof_step,
+        source_id="step_1",
+        scope=scope,
+        status=VerificationFragmentStatus.machine_checked,
+        translation_status=VerificationTranslationStatus.translated,
+        backend_target="lean4",
+        provenance=VerificationProvenance(
+            source_kind=VerificationSourceKind.proof_step,
+            source_id="step_1",
+            source_label="apply bridge",
+            source_scope=scope,
+            derived_from_ids=["step_1", "thm_1"],
+            machine_path=["inspect state", "translate to ir"],
+        ),
+    )
+    result = VerificationResult(
+        fragment_id=fragment.id,
+        backend="lean4",
+        summary="machine check completed",
+        review_status=VerificationReviewStatus.accepted_after_review,
+        notes="accepted by reviewer",
+    )
+    record = VerificationResultRecord(
+        result=result,
+        result_status=fragment.status,
+        review_status=result.review_status,
+        source_kind=fragment.source_type,
+        source_id=fragment.source_id,
+        scope=scope,
+        theorem_id=scope.theorem_id,
+        proof_step_id=scope.proof_step_id,
+        route_id=scope.route_id,
+        effect="strengthening",
+        notes="accepted by reviewer",
+    )
+
+    fragment_summary = describe_verification_fragment(fragment)
+    record_summary = describe_verification_result_record(record)
+    rendered = render_verification_output("verify run step_1", result.model_dump_json(indent=2))
+
+    assert "step_1" in fragment_summary
+    assert "machine_checked" in fragment_summary
+    assert "accepted_after_review" in record_summary
+    assert "Result:" in rendered
+    assert "Details:" in rendered

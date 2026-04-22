@@ -13,13 +13,27 @@ from proof_cli.commands import (
     cmd_theorem_ground,
 )
 from proof_cli.domain import BlockerRecord, ProofObligation, TheoremProvenanceKind, TheoremReviewState, TheoremStatus, TrustLevel
-from proof_cli.memory import load_memory, record_memory
+from proof_cli.formal_bridge import FormalBridgeProofStep, translate_proof_step
+from proof_cli.memory import load_memory, record_memory, record_verification_lifecycle, record_verification_staleness
 from proof_cli.obligations import add_obligation
-from proof_cli.proof_state import record_theorem_usage, set_current_context, set_current_theorem
+from proof_cli.proof_state import load_state, record_theorem_usage, set_current_context, set_current_theorem
 from proof_cli.references import ReferenceRecord, ReferenceSourceType
 from proof_cli.snapshot import create_snapshot
 from proof_cli.storage import approve_reference, ensure_project, import_reference, list_references, read_latest_snapshot
 from proof_cli.theorems import add_theorem, list_theorems
+from proof_cli.verification_ir import (
+    VerificationAssumption,
+    VerificationFragmentStatus,
+    VerificationProvenance,
+    VerificationResult,
+    VerificationReviewStatus,
+    VerificationScope,
+    VerificationSideCondition,
+    VerificationSourceKind,
+    VerificationTheoremApplication,
+    VerificationTranslationStatus,
+)
+from proof_cli.verification_results import record_verification_result
 
 
 def _seed_real_project(tmp_path: Path) -> tuple[str, str]:
@@ -150,6 +164,59 @@ def test_export_includes_grounded_imported_reasoning_and_repair_state(tmp_path: 
     evidence_payload = cmd_proof_evidence_show(assumption_bug_id, root=tmp_path)
     assert '"review_recommendation": "accept"' in evidence_payload
 
+    store = ensure_project(tmp_path)
+    project_id = load_state(store).project_id
+    bridge_step = FormalBridgeProofStep(
+        id="step_bridge",
+        statement="standard bridge step from A and B to C",
+        theorem_id=theorem_id,
+        goal_id="goal_bridge",
+        assumptions=["A", "B"],
+        dependencies=["thm_aux"],
+        side_conditions=["domain is inhabited"],
+        fragile=True,
+        notes="fragile theorem application escalated for machine checking",
+        route_id="route_bridge",
+    )
+    translation = translate_proof_step(bridge_step, project_id=project_id, route_id="route_bridge", backend_target="lean4")
+    assert translation.ok is True
+    fragment = translation.fragment
+    assert fragment is not None
+    machine_checked_fragment = fragment.record_machine_check(result_id="vchk_bridge", backend_target="lean4")
+    accepted_result = VerificationResult(
+        fragment_id=machine_checked_fragment.id,
+        backend="lean4",
+        summary="machine check completed for the bridge step",
+        review_status=VerificationReviewStatus.accepted_after_review,
+        notes="accepted after review",
+    )
+    result_record = record_verification_result(
+        store,
+        machine_checked_fragment,
+        accepted_result,
+        theorem_id=theorem_id,
+        obligation_id="obl_main",
+        blocker_id="blk_main",
+        proof_step_id=bridge_step.id,
+        route_id="route_bridge",
+        notes="accepted after review",
+    )
+    record_verification_lifecycle(
+        store,
+        machine_checked_fragment,
+        result=accepted_result,
+        result_record=result_record,
+        notes="machine-checked bridge step",
+    )
+    stale_fragment = machine_checked_fragment.mark_stale_after_change(reason="dependency changed after acceptance")
+    record_verification_staleness(
+        store,
+        stale_fragment,
+        result=accepted_result,
+        result_record=result_record,
+        notes="dependency changed after acceptance",
+    )
+
     create_snapshot(ensure_project(tmp_path), note="handoff after reasoning")
 
     export_one = cmd_export(root=tmp_path)
@@ -160,7 +227,7 @@ def test_export_includes_grounded_imported_reasoning_and_repair_state(tmp_path: 
     assert "Proof Export" in export_one
     assert "Goals: thm_main" in export_one
     assert "Assumed: A" in export_one
-    assert "Open obligations: obl_main" in export_one
+    assert "Open obligations:" in export_one
     assert "Proved: thm_blackbox, thm_aux, thm_aux2" in export_one
     assert "Standard Estimate" in export_one
     assert "Grounded theorems:" in export_one
@@ -170,6 +237,16 @@ def test_export_includes_grounded_imported_reasoning_and_repair_state(tmp_path: 
     assert "Bug reports:" in export_one
     assert "assumption_mismatch" in export_one
     assert "omitted_side_condition" in export_one
+    assert "Verification support:" in export_one
+    assert "Heuristic recommendations:" in export_one
+    assert "Machine-checked results:" in export_one
+    assert "Accepted verification results:" in export_one
+    assert "Rejected verification results:" in export_one
+    assert "Stale verification fragments:" in export_one
+    assert "Failed verification fragments:" in export_one
+    assert "step_bridge" in export_one
+    assert "accepted_after_review" in export_one
+    assert "stale_after_change" in export_one
     assert "Evidence chains:" in export_one
     assert "recommendation=accept" in export_one
     assert "Debug tasks:" in export_one

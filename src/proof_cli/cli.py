@@ -17,9 +17,21 @@ from .commands import (
     cmd_proof_explain_apply,
     cmd_proof_obligation_derive,
     cmd_proof_reason,
+    cmd_proof_revalidate,
     cmd_proof_repair_mark,
     cmd_proof_review_suspicion,
+    cmd_proof_formalize_edit,
+    cmd_proof_formalize_recommend,
+    cmd_proof_formalize_show,
     cmd_proof_trace_dependency,
+    cmd_proof_trace_machine_check,
+    cmd_proof_verify_accept,
+    cmd_proof_verify_queue,
+    cmd_proof_verify_reject,
+    cmd_proof_verify_result,
+    cmd_proof_verify_run,
+    cmd_proof_verify_stale,
+    cmd_proof_verify_status,
     cmd_goal_list,
     cmd_goal_open,
     cmd_goal_set,
@@ -45,6 +57,7 @@ from .commands import (
     cmd_theorem_list,
     cmd_theorem_show,
 )
+from .review import render_verification_output
 
 app = typer.Typer(add_completion=False, help="Mathematical Proof CLI")
 goal_app = typer.Typer(help="Goal operations")
@@ -61,6 +74,8 @@ repair_app = typer.Typer(help="Proof repair workflows")
 trace_app = typer.Typer(help="Dependency tracing workflows")
 evidence_app = typer.Typer(help="Evidence inspection workflows")
 explain_app = typer.Typer(help="Theorem explanation workflows")
+formalize_app = typer.Typer(help="Formal bridge workflows")
+verify_app = typer.Typer(help="Verification workflows")
 
 
 def _root(path: str | None) -> Path:
@@ -102,6 +117,16 @@ def reason(theorem_id: str, root: str = ".", notes: str = "") -> None:
     typer.echo(cmd_proof_reason(theorem_id, _root(root), notes=notes))
 
 
+@app.command()
+def revalidate(source_id: str, root: str = ".", backend_target: str = "", notes: str = "") -> None:
+    typer.echo(
+        render_verification_output(
+            f"revalidate {source_id}",
+            cmd_proof_revalidate(source_id, _root(root), backend_target=backend_target, notes=notes),
+        )
+    )
+
+
 app.add_typer(goal_app, name="goal")
 app.add_typer(theorem_app, name="theorem")
 app.add_typer(obligation_app, name="obligation")
@@ -116,6 +141,8 @@ app.add_typer(repair_app, name="repair")
 app.add_typer(trace_app, name="trace")
 app.add_typer(evidence_app, name="evidence")
 app.add_typer(explain_app, name="explain")
+app.add_typer(formalize_app, name="formalize")
+app.add_typer(verify_app, name="verify")
 
 
 @goal_app.command("set")
@@ -365,6 +392,92 @@ def trace_dependency(target_id: str, root: str = ".") -> None:
     typer.echo(cmd_proof_trace_dependency(target_id, _root(root)))
 
 
+@trace_app.command("machine-check")
+def trace_machine_check(source_id: str, root: str = ".") -> None:
+    typer.echo(render_verification_output(f"trace machine-check {source_id}", cmd_proof_trace_machine_check(source_id, _root(root))))
+
+
 @explain_app.command("apply")
 def explain_apply(theorem_id: str, root: str = ".") -> None:
     typer.echo(cmd_proof_explain_apply(theorem_id, _root(root)))
+
+
+@formalize_app.command("recommend")
+def formalize_recommend(source_id: str, root: str = ".", backend_target: str = "", notes: str = "") -> None:
+    typer.echo(
+        render_verification_output(
+            f"formalize recommend {source_id}",
+            cmd_proof_formalize_recommend(source_id, _root(root), backend_target=backend_target, notes=notes),
+        )
+    )
+
+
+@formalize_app.command("show")
+def formalize_show(source_id: str, root: str = ".") -> None:
+    typer.echo(render_verification_output(f"formalize show {source_id}", cmd_proof_formalize_show(source_id, _root(root))))
+
+
+@formalize_app.command("edit")
+def formalize_edit(source_id: str, root: str = ".", backend_target: str = "", notes: str = "") -> None:
+    typer.echo(
+        render_verification_output(
+            f"formalize edit {source_id}",
+            cmd_proof_formalize_edit(source_id, _root(root), backend_target=backend_target, notes=notes),
+        )
+    )
+
+
+@verify_app.command("queue")
+def verify_queue(source_id: str, root: str = ".", backend_target: str = "", route_id: str = "", notes: str = "") -> None:
+    typer.echo(
+        render_verification_output(
+            f"verify queue {source_id}",
+            cmd_proof_verify_queue(source_id, _root(root), backend_target=backend_target, route_id=route_id, notes=notes),
+        )
+    )
+
+
+@verify_app.command("run")
+def verify_run(source_id: str, root: str = ".", backend_target: str = "", notes: str = "") -> None:
+    typer.echo(
+        render_verification_output(
+            f"verify run {source_id}",
+            cmd_proof_verify_run(source_id, _root(root), backend_target=backend_target, notes=notes),
+        )
+    )
+
+
+@verify_app.command("status")
+def verify_status(source_id: str, root: str = ".") -> None:
+    typer.echo(render_verification_output(f"verify status {source_id}", cmd_proof_verify_status(source_id, _root(root))))
+
+
+@verify_app.command("result")
+def verify_result(source_id: str, root: str = ".") -> None:
+    typer.echo(render_verification_output(f"verify result {source_id}", cmd_proof_verify_result(source_id, _root(root))))
+
+
+@verify_app.command("accept")
+def verify_accept(source_id: str, root: str = ".", notes: str = "") -> None:
+    typer.echo(render_verification_output(f"verify accept {source_id}", cmd_proof_verify_accept(source_id, _root(root), notes=notes)))
+
+
+@verify_app.command("reject")
+def verify_reject(source_id: str, root: str = ".", notes: str = "") -> None:
+    typer.echo(render_verification_output(f"verify reject {source_id}", cmd_proof_verify_reject(source_id, _root(root), notes=notes)))
+
+
+@verify_app.command("stale")
+def verify_stale(
+    source_id: str,
+    root: str = ".",
+    reason: str = "",
+    dependency: list[str] = typer.Option(None, "--dependency"),
+) -> None:
+    typer.echo(
+        render_verification_output(
+            f"verify stale {source_id}",
+            cmd_proof_verify_stale(source_id, _root(root), reason=reason, changed_dependency_ids=dependency),
+        )
+    )
+

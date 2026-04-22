@@ -6,9 +6,13 @@ from pathlib import Path
 from .bugs import ProofBugReport, ProofBugScan, ProofBugSeverity, ProofBugStatus
 from .bugs import ProofBugReviewState
 from .debug_tasks import ProofDebugTaskBatch
-from .memory import load_memory
+from .formalization_recommendations import rank_formalization_candidates
+from .memory import accepted_verification_results, load_memory, stale_verification_fragments, verification_records
 from .proof_state import load_state, summarize_state
 from .storage import ProjectStore, list_references
+from .review import describe_verification_fragment, describe_verification_result_record
+from .verification_broker import build_default_verification_broker
+from .verification_ir import VerificationFragmentStatus, VerificationReviewStatus
 from .theorems import list_theorems
 
 
@@ -106,6 +110,18 @@ def _format_repair_state_line(bug_id: str, payload: dict[str, object]) -> str:
     return f"{bug_id}: status={bug_status} review_state={review_state}{note_text}"
 
 
+def _format_verification_recommendation_line(recommendation) -> str:
+    backend_text = recommendation.suggested_backend or "auto"
+    return (
+        f"{recommendation.fragment_id}: rank={recommendation.rank} score={recommendation.total_score:.2f} "
+        f"backend={backend_text} [{recommendation.review_status}]"
+    )
+
+
+def _format_verification_result_line(record) -> str:
+    return describe_verification_result_record(record)
+
+
 def build_export(store: ProjectStore) -> str:
     state = summarize_state(store)
     live_state = load_state(store)
@@ -149,6 +165,89 @@ def build_export(store: ProjectStore) -> str:
         lines.extend(f"- {_format_theorem_grounding_line(theorem)}" for theorem in grounded_theorems)
     else:
         lines.append("- none")
+
+    verification_lifecycle_records = verification_records(store)
+    verification_fragments = [record.fragment for record in verification_lifecycle_records]
+    verification_recommendations = (
+        rank_formalization_candidates(verification_fragments, broker=build_default_verification_broker())
+        if verification_fragments
+        else []
+    )
+    accepted_results = accepted_verification_results(store)
+    stale_fragments = stale_verification_fragments(store)
+    machine_checked_results = [
+        record.result_record
+        for record in verification_lifecycle_records
+        if record.result_record is not None and record.result_record.result_status == VerificationFragmentStatus.machine_checked
+    ]
+    rejected_results = [
+        record.result_record
+        for record in verification_lifecycle_records
+        if record.result_record is not None and record.result_record.review_status == VerificationReviewStatus.rejected_by_human
+    ]
+    failed_fragments = [
+        record.fragment
+        for record in verification_lifecycle_records
+        if record.fragment.status
+        in {
+            VerificationFragmentStatus.backend_failed,
+            VerificationFragmentStatus.translation_failed,
+            VerificationFragmentStatus.rejected_by_human,
+        }
+    ]
+
+    lines.append("Verification support:")
+    if verification_recommendations:
+        lines.append("Heuristic recommendations:")
+        lines.extend(f"- {_format_verification_recommendation_line(recommendation)}" for recommendation in verification_recommendations[:5])
+    else:
+        lines.append("- none")
+
+    lines.append("Machine-checked results:")
+    if machine_checked_results:
+        lines.extend(f"- {_format_verification_result_line(record)}" for record in machine_checked_results if record is not None)
+    else:
+        lines.append("- none")
+
+    lines.append("Accepted verification results:")
+    if accepted_results:
+        lines.extend(f"- {_format_verification_result_line(record)}" for record in accepted_results)
+    else:
+        lines.append("- none")
+
+    lines.append("Rejected verification results:")
+    if rejected_results:
+        lines.extend(f"- {_format_verification_result_line(record)}" for record in rejected_results)
+    else:
+        lines.append("- none")
+
+    lines.append("Stale verification fragments:")
+    if stale_fragments:
+        lines.extend(f"- {describe_verification_fragment(fragment)}" for fragment in stale_fragments)
+    else:
+        lines.append("- none")
+
+    lines.append("Failed verification fragments:")
+    if failed_fragments:
+        lines.extend(f"- {describe_verification_fragment(fragment)}" for fragment in failed_fragments)
+    else:
+        lines.append("- none")
+
+    lines.append("Verification detail:")
+    lines.append(
+        json.dumps(
+            {
+                "recommendations": [recommendation.model_dump(mode="json") for recommendation in verification_recommendations],
+                "machine_checked_results": [record.model_dump(mode="json") for record in machine_checked_results if record is not None],
+                "accepted_verification_results": [record.model_dump(mode="json") for record in accepted_results],
+                "rejected_verification_results": [record.model_dump(mode="json") for record in rejected_results],
+                "stale_verification_fragments": [fragment.model_dump(mode="json") for fragment in stale_fragments],
+                "failed_verification_fragments": [fragment.model_dump(mode="json") for fragment in failed_fragments],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
 
     lines.append("Bug reports:")
     if latest_bug_scan_payload is not None:
