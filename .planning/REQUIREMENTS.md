@@ -20,16 +20,16 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Proof Scripts and Elaboration
 
-- [ ] **DSL-01**: User can write a proof script in a CLI-friendly DSL and have it parsed into explicit steps
-- [ ] **DSL-02**: User can expand omitted or compressed proof steps into checkable obligations
-- [ ] **DSL-03**: User can attach DSL steps to either a local proof action or an existing contract
+- [x] **DSL-01**: User can write a proof script in a CLI-friendly DSL and have it parsed into explicit steps
+- [x] **DSL-02**: User can expand omitted or compressed proof steps into checkable obligations
+- [x] **DSL-03**: User can attach DSL steps to either a local proof action or an existing contract
 
 ### Checks and Validation
 
-- [ ] **CHK-01**: User can verify that current assumptions satisfy a contract before reuse
-- [ ] **CHK-02**: User can detect when an imported conclusion is stronger than the contract actually exports
-- [ ] **CHK-03**: User can detect circular dependencies in proof paths
-- [ ] **CHK-04**: User can flag notation mismatches and unresolved omissions that require elaboration
+- [x] **CHK-01**: User can verify that current assumptions satisfy a contract before reuse
+- [x] **CHK-02**: User can detect when an imported conclusion is stronger than the contract actually exports
+- [x] **CHK-03**: User can detect circular dependencies in proof paths
+- [x] **CHK-04**: User can flag notation mismatches and unresolved omissions that require elaboration
 
 ### Retrieval and Memory
 
@@ -78,13 +78,13 @@ Which phases cover which requirements. Updated during roadmap creation.
 | THM-01 | Phase 2 | Complete |
 | THM-02 | Phase 2 | Complete |
 | THM-03 | Phase 2 | Complete |
-| DSL-01 | Phase 3 | Pending |
-| DSL-02 | Phase 3 | Pending |
-| DSL-03 | Phase 3 | Pending |
-| CHK-01 | Phase 3 | Pending |
-| CHK-02 | Phase 3 | Pending |
-| CHK-03 | Phase 3 | Pending |
-| CHK-04 | Phase 3 | Pending |
+| DSL-01 | Phase 3 | Complete |
+| DSL-02 | Phase 3 | Complete |
+| DSL-03 | Phase 3 | Complete |
+| CHK-01 | Phase 3 | Complete |
+| CHK-02 | Phase 3 | Complete |
+| CHK-03 | Phase 3 | Complete |
+| CHK-04 | Phase 3 | Complete |
 | MEM-01 | Phase 4 | Pending |
 | RET-01 | Phase 4 | Pending |
 | RET-02 | Phase 4 | Pending |
