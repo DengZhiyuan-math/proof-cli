@@ -7,6 +7,12 @@ from typing import Any, Mapping, Sequence
 from pydantic import BaseModel, Field
 
 from .domain import ProjectState, TheoremContract
+from .domain_packs import DomainPack, DomainPackReviewStatus, DomainPackTrustLevel
+from .reusable_assets import (
+    ReusableAsset,
+    ReusableAssetReuseStatus,
+    ReusableAssetTrustLevel,
+)
 from .storage import ProjectStore, list_contracts, read_state
 
 
@@ -58,11 +64,56 @@ class RetrievalReport(BaseModel):
     trace: list[RetrievalSourceTrace] = Field(default_factory=list)
 
 
+class CrossProjectSourceKind(str, Enum):
+    project_local = "project_local"
+    shared_domain = "shared_domain"
+    prior_project = "prior_project"
+    domain_pack = "domain_pack"
+
+
+class CrossProjectRetrievalCandidate(BaseModel):
+    id: str
+    title: str
+    source_kind: CrossProjectSourceKind
+    source_ref: str
+    origin_project_id: str = ""
+    trust_level: str = ""
+    reuse_status: str = ""
+    trust_score: float = 0.0
+    prior_usefulness_score: float = 0.0
+    similarity_score: float = 0.0
+    provenance_score: float = 0.0
+    score: float = 0.0
+    source_priority: int = 0
+    rank: int = 0
+    match_reasons: list[str] = Field(default_factory=list)
+    provenance_reasons: list[str] = Field(default_factory=list)
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class CrossProjectRetrievalSourceTrace(BaseModel):
+    source_kind: CrossProjectSourceKind
+    evaluated_count: int
+    candidate_ids: list[str] = Field(default_factory=list)
+
+
+class CrossProjectRetrievalReport(BaseModel):
+    query: str
+    current_project_id: str
+    source_order: list[CrossProjectSourceKind] = Field(default_factory=list)
+    candidates: list[CrossProjectRetrievalCandidate] = Field(default_factory=list)
+    trace: list[CrossProjectRetrievalSourceTrace] = Field(default_factory=list)
+
+
 def _tokens(*parts: str) -> set[str]:
     tokens: set[str] = set()
     for part in parts:
         tokens.update(token.lower() for token in TOKEN_RE.findall(part or ""))
     return tokens
+
+
+def _clamp(value: float, *, lower: float = 0.0, upper: float = 1.0) -> float:
+    return max(lower, min(upper, value))
 
 
 def _score_text(query_terms: set[str], *parts: str) -> tuple[float, list[str]]:
@@ -167,6 +218,451 @@ def _rank_candidates(candidates: list[RetrievalCandidate]) -> list[RetrievalCand
     for index, candidate in enumerate(ranked, start=1):
         candidate.rank = index
     return ranked
+
+
+def _asset_text(asset: ReusableAsset) -> str:
+    payload = asset.payload
+    provenance = asset.provenance
+    return " ".join(
+        part
+        for part in [
+            asset.id,
+            asset.name,
+            asset.summary,
+            payload.statement,
+            " ".join(payload.assumptions),
+            " ".join(payload.exports),
+            " ".join(payload.pattern_steps),
+            " ".join(payload.repair_steps),
+            " ".join(payload.bug_signals),
+            " ".join(payload.verification_targets),
+            " ".join(payload.method_steps),
+            " ".join(payload.checklist_items),
+            payload.notes,
+            provenance.origin_project_id,
+            provenance.origin_asset_id,
+            " ".join(provenance.source_contract_ids),
+            " ".join(provenance.source_reference_ids),
+            " ".join(provenance.derived_from_asset_ids),
+            " ".join(provenance.linked_blocker_ids),
+            " ".join(provenance.linked_repair_ids),
+            " ".join(provenance.linked_verification_fragment_ids),
+            provenance.notes,
+        ]
+        if part
+    ).lower()
+
+
+def _pack_text(pack: DomainPack) -> str:
+    content = pack.content
+    compatibility = pack.compatibility
+    return " ".join(
+        part
+        for part in [
+            pack.id,
+            pack.name,
+            pack.summary,
+            " ".join(content.theorem_templates),
+            " ".join(content.method_templates),
+            " ".join(content.omission_rules),
+            " ".join(content.bug_patterns),
+            " ".join(content.formalization_preferences),
+            " ".join(content.debug_task_templates),
+            " ".join(content.notation_conventions),
+            content.notes,
+            " ".join(compatibility.required_project_tags),
+            " ".join(compatibility.required_asset_ids),
+            " ".join(compatibility.required_asset_kinds),
+            compatibility.required_notation_profile,
+            " ".join(compatibility.allowed_pack_versions),
+            compatibility.notes,
+            pack.reviewed_by,
+            pack.review_notes,
+            pack.origin_project_id,
+            " ".join(pack.source_asset_ids),
+            pack.notes,
+        ]
+        if part
+    ).lower()
+
+
+def _normalized_score(score: float, *, query_terms: set[str]) -> float:
+    if not query_terms:
+        return 0.0
+    return _clamp(score / max(1.0, float(len(query_terms))))
+
+
+def _prior_usefulness_score(item_id: str, prior_usefulness: Mapping[str, float] | None) -> float:
+    if not prior_usefulness:
+        return 0.0
+    value = float(prior_usefulness.get(item_id, 0.0))
+    return _clamp(value)
+
+
+def _asset_trust_score(asset: ReusableAsset) -> tuple[float, list[str]]:
+    reasons: list[str] = []
+    if asset.reuse_status in {
+        ReusableAssetReuseStatus.approved_reusable,
+        ReusableAssetReuseStatus.domain_shared,
+    }:
+        score = 0.92
+        reasons.append(f"reuse status {asset.reuse_status.value} supports cross-project reuse")
+    elif asset.reuse_status == ReusableAssetReuseStatus.private_experimental:
+        score = 0.52
+        reasons.append("private experimental asset keeps some provenance but still needs review")
+    elif asset.reuse_status == ReusableAssetReuseStatus.project_local:
+        score = 0.44
+        reasons.append("project-local asset is useful but not yet cross-project reviewed")
+    elif asset.reuse_status == ReusableAssetReuseStatus.deprecated:
+        score = 0.18
+        reasons.append("deprecated asset should be used cautiously")
+    else:
+        score = 0.3
+        reasons.append(f"reuse status {asset.reuse_status.value} has limited trust")
+
+    if asset.trust_level in {
+        ReusableAssetTrustLevel.domain_trusted,
+        ReusableAssetTrustLevel.reviewed_reusable,
+        ReusableAssetTrustLevel.foundational,
+    }:
+        score += 0.06
+        reasons.append(f"trust level {asset.trust_level.value} increases confidence")
+    elif asset.trust_level == ReusableAssetTrustLevel.project_verified:
+        score += 0.03
+        reasons.append("project verification provides a modest trust bump")
+    elif asset.trust_level == ReusableAssetTrustLevel.temporary_admit:
+        reasons.append("temporary admit leaves the asset review-sensitive")
+
+    return _clamp(score), reasons
+
+
+def _pack_trust_score(pack: DomainPack) -> tuple[float, list[str]]:
+    reasons: list[str] = []
+    if pack.review_status == DomainPackReviewStatus.approved:
+        score = 0.94
+        reasons.append("approved domain pack is reusable across projects")
+    elif pack.review_status == DomainPackReviewStatus.pending_review:
+        score = 0.48
+        reasons.append("pending review pack is not yet broadly trusted")
+    elif pack.review_status == DomainPackReviewStatus.rejected:
+        score = 0.18
+        reasons.append("rejected pack should not be promoted without review")
+    else:
+        score = 0.3
+        reasons.append(f"pack review status {pack.review_status.value} is limited")
+
+    if pack.trust_level in {
+        DomainPackTrustLevel.reviewed_reusable,
+        DomainPackTrustLevel.domain_trusted,
+    }:
+        score += 0.05
+        reasons.append(f"trust level {pack.trust_level.value} strengthens the pack")
+    elif pack.trust_level == DomainPackTrustLevel.temporary_admit:
+        reasons.append("temporary admit leaves the pack review-sensitive")
+
+    return _clamp(score), reasons
+
+
+def _asset_provenance_score(asset: ReusableAsset) -> tuple[float, list[str]]:
+    provenance = asset.provenance
+    signal_count = sum(
+        1
+        for value in [
+            provenance.origin_project_id,
+            provenance.origin_asset_id,
+            *provenance.source_contract_ids,
+            *provenance.source_reference_ids,
+            *provenance.derived_from_asset_ids,
+            *provenance.linked_blocker_ids,
+            *provenance.linked_repair_ids,
+            *provenance.linked_verification_fragment_ids,
+            provenance.notes,
+        ]
+        if value
+    )
+    score = _clamp(0.18 + (0.07 * min(signal_count, 6)))
+    reasons = [f"asset provenance exposes {signal_count} supporting signal(s)"]
+    if provenance.origin_project_id:
+        reasons.append(f"originated in project {provenance.origin_project_id}")
+    if provenance.source_contract_ids:
+        reasons.append(f"linked contracts: {', '.join(provenance.source_contract_ids)}")
+    if provenance.source_reference_ids:
+        reasons.append(f"linked references: {', '.join(provenance.source_reference_ids)}")
+    if provenance.derived_from_asset_ids:
+        reasons.append(f"derived from asset(s): {', '.join(provenance.derived_from_asset_ids)}")
+    if provenance.linked_blocker_ids:
+        reasons.append(f"linked blocker(s): {', '.join(provenance.linked_blocker_ids)}")
+    if provenance.linked_repair_ids:
+        reasons.append(f"linked repair(s): {', '.join(provenance.linked_repair_ids)}")
+    if provenance.linked_verification_fragment_ids:
+        reasons.append(f"linked verification fragment(s): {', '.join(provenance.linked_verification_fragment_ids)}")
+    if provenance.notes:
+        reasons.append(provenance.notes)
+    return score, reasons
+
+
+def _pack_provenance_score(pack: DomainPack) -> tuple[float, list[str]]:
+    signals = [
+        pack.origin_project_id,
+        *pack.source_asset_ids,
+        pack.review_notes,
+        pack.notes,
+    ]
+    signal_count = sum(1 for value in signals if value)
+    score = _clamp(0.2 + (0.08 * min(signal_count, 5)))
+    reasons = [f"domain pack provenance exposes {signal_count} supporting signal(s)"]
+    if pack.origin_project_id:
+        reasons.append(f"originated in project {pack.origin_project_id}")
+    if pack.source_asset_ids:
+        reasons.append(f"includes source asset(s): {', '.join(pack.source_asset_ids)}")
+    if pack.review_notes:
+        reasons.append(pack.review_notes)
+    if pack.notes:
+        reasons.append(pack.notes)
+    return score, reasons
+
+
+def _candidate_score(
+    *,
+    similarity_score: float,
+    trust_score: float,
+    prior_usefulness_score: float,
+    provenance_score: float,
+) -> float:
+    return _clamp(
+        (similarity_score * 0.42)
+        + (trust_score * 0.24)
+        + (prior_usefulness_score * 0.18)
+        + (provenance_score * 0.16)
+    )
+
+
+def _asset_candidate(
+    asset: ReusableAsset,
+    *,
+    source_kind: CrossProjectSourceKind,
+    source_priority: int,
+    query_terms: set[str],
+    prior_usefulness: Mapping[str, float] | None,
+) -> CrossProjectRetrievalCandidate:
+    score, match_reasons = _score_text(
+        query_terms,
+        asset.name,
+        asset.summary,
+        asset.payload.statement,
+        " ".join(asset.payload.assumptions),
+        " ".join(asset.payload.exports),
+        " ".join(asset.payload.pattern_steps),
+        " ".join(asset.payload.repair_steps),
+        " ".join(asset.payload.bug_signals),
+        " ".join(asset.payload.verification_targets),
+        " ".join(asset.payload.method_steps),
+        " ".join(asset.payload.checklist_items),
+        asset.payload.notes,
+        asset.provenance.notes,
+    )
+    similarity_score = _normalized_score(score, query_terms=query_terms)
+    trust_score, trust_reasons = _asset_trust_score(asset)
+    provenance_score, provenance_reasons = _asset_provenance_score(asset)
+    prior_score = _prior_usefulness_score(asset.id, prior_usefulness)
+    total_score = _candidate_score(
+        similarity_score=similarity_score,
+        trust_score=trust_score,
+        prior_usefulness_score=prior_score,
+        provenance_score=provenance_score,
+    )
+    if not query_terms:
+        match_reasons.append("no query terms supplied; scored from trust and provenance only")
+    return CrossProjectRetrievalCandidate(
+        id=asset.id,
+        title=asset.name,
+        source_kind=source_kind,
+        source_ref=asset.provenance.origin_asset_id or asset.id,
+        origin_project_id=asset.provenance.origin_project_id,
+        trust_level=asset.trust_level.value,
+        reuse_status=asset.reuse_status.value,
+        trust_score=trust_score,
+        prior_usefulness_score=prior_score,
+        similarity_score=similarity_score,
+        provenance_score=provenance_score,
+        score=total_score,
+        source_priority=source_priority,
+        match_reasons=[*match_reasons, *trust_reasons],
+        provenance_reasons=provenance_reasons,
+        payload=asset.model_dump(mode="json"),
+    )
+
+
+def _pack_candidate(
+    pack: DomainPack,
+    *,
+    source_priority: int,
+    query_terms: set[str],
+    prior_usefulness: Mapping[str, float] | None,
+) -> CrossProjectRetrievalCandidate:
+    score, match_reasons = _score_text(
+        query_terms,
+        pack.name,
+        pack.summary,
+        " ".join(pack.content.theorem_templates),
+        " ".join(pack.content.method_templates),
+        " ".join(pack.content.omission_rules),
+        " ".join(pack.content.bug_patterns),
+        " ".join(pack.content.formalization_preferences),
+        " ".join(pack.content.debug_task_templates),
+        " ".join(pack.content.notation_conventions),
+        pack.content.notes,
+        " ".join(pack.compatibility.required_project_tags),
+        " ".join(pack.compatibility.required_asset_ids),
+        " ".join(pack.compatibility.required_asset_kinds),
+        pack.compatibility.required_notation_profile,
+        pack.compatibility.notes,
+        pack.review_notes,
+        pack.notes,
+    )
+    similarity_score = _normalized_score(score, query_terms=query_terms)
+    trust_score, trust_reasons = _pack_trust_score(pack)
+    provenance_score, provenance_reasons = _pack_provenance_score(pack)
+    prior_score = _prior_usefulness_score(pack.id, prior_usefulness)
+    total_score = _candidate_score(
+        similarity_score=similarity_score,
+        trust_score=trust_score,
+        prior_usefulness_score=prior_score,
+        provenance_score=provenance_score,
+    )
+    if not query_terms:
+        match_reasons.append("no query terms supplied; scored from trust and provenance only")
+    return CrossProjectRetrievalCandidate(
+        id=pack.id,
+        title=pack.name,
+        source_kind=CrossProjectSourceKind.domain_pack,
+        source_ref=pack.id,
+        origin_project_id=pack.origin_project_id,
+        trust_level=pack.trust_level.value,
+        reuse_status=pack.review_status.value,
+        trust_score=trust_score,
+        prior_usefulness_score=prior_score,
+        similarity_score=similarity_score,
+        provenance_score=provenance_score,
+        score=total_score,
+        source_priority=source_priority,
+        match_reasons=[*match_reasons, *trust_reasons],
+        provenance_reasons=provenance_reasons,
+        payload=pack.model_dump(mode="json"),
+    )
+
+
+def _rank_cross_project_candidates(
+    candidates: list[CrossProjectRetrievalCandidate],
+) -> list[CrossProjectRetrievalCandidate]:
+    ranked = sorted(
+        candidates,
+        key=lambda candidate: (
+            -candidate.score,
+            -candidate.trust_score,
+            -candidate.prior_usefulness_score,
+            -candidate.provenance_score,
+            -candidate.similarity_score,
+            candidate.source_priority,
+            candidate.title.lower(),
+            candidate.id,
+        ),
+    )
+    for index, candidate in enumerate(ranked, start=1):
+        candidate.rank = index
+    return ranked
+
+
+def retrieve_cross_project_assets(
+    *,
+    current_project_id: str,
+    query: str | None = None,
+    current_project_assets: Sequence[ReusableAsset] | None = None,
+    shared_assets: Sequence[ReusableAsset] | None = None,
+    prior_project_assets: Sequence[ReusableAsset] | None = None,
+    domain_packs: Sequence[DomainPack] | None = None,
+    prior_usefulness: Mapping[str, float] | None = None,
+    limit: int = 10,
+) -> CrossProjectRetrievalReport:
+    query_terms = _tokens(query or "")
+    source_order = [
+        CrossProjectSourceKind.project_local,
+        CrossProjectSourceKind.shared_domain,
+        CrossProjectSourceKind.prior_project,
+        CrossProjectSourceKind.domain_pack,
+    ]
+    trace: list[CrossProjectRetrievalSourceTrace] = []
+    candidates: list[CrossProjectRetrievalCandidate] = []
+
+    grouped_sources: list[tuple[CrossProjectSourceKind, Sequence[Any]]] = [
+        (CrossProjectSourceKind.project_local, list(current_project_assets or [])),
+        (CrossProjectSourceKind.shared_domain, list(shared_assets or [])),
+        (CrossProjectSourceKind.prior_project, list(prior_project_assets or [])),
+    ]
+    for source_kind, assets in grouped_sources:
+        source_candidates: list[CrossProjectRetrievalCandidate] = []
+        for asset in assets:
+            source_candidates.append(
+                _asset_candidate(
+                    asset,
+                    source_kind=source_kind,
+                    source_priority=source_order.index(source_kind),
+                    query_terms=query_terms,
+                    prior_usefulness=prior_usefulness,
+                )
+            )
+        trace.append(
+            CrossProjectRetrievalSourceTrace(
+                source_kind=source_kind,
+                evaluated_count=len(assets),
+                candidate_ids=[candidate.id for candidate in source_candidates],
+            )
+        )
+        candidates.extend(source_candidates)
+
+    pack_candidates: list[CrossProjectRetrievalCandidate] = []
+    pack_list = list(domain_packs or [])
+    for pack in pack_list:
+        pack_candidates.append(
+            _pack_candidate(
+                pack,
+                source_priority=source_order.index(CrossProjectSourceKind.domain_pack),
+                query_terms=query_terms,
+                prior_usefulness=prior_usefulness,
+            )
+        )
+    trace.append(
+        CrossProjectRetrievalSourceTrace(
+            source_kind=CrossProjectSourceKind.domain_pack,
+            evaluated_count=len(pack_list),
+            candidate_ids=[candidate.id for candidate in pack_candidates],
+        )
+    )
+    candidates.extend(pack_candidates)
+
+    ranked = _rank_cross_project_candidates(candidates)[:limit]
+    return CrossProjectRetrievalReport(
+        query=query or " ".join(sorted(query_terms)),
+        current_project_id=current_project_id,
+        source_order=source_order,
+        candidates=ranked,
+        trace=trace,
+    )
+
+
+__all__ = [
+    "CrossProjectRetrievalCandidate",
+    "CrossProjectRetrievalReport",
+    "CrossProjectRetrievalSourceTrace",
+    "CrossProjectSourceKind",
+    "RetrievalCandidate",
+    "RetrievalContext",
+    "RetrievalReport",
+    "RetrievalSourceKind",
+    "RetrievalSourceTrace",
+    "retrieve_candidates",
+    "retrieve_cross_project_assets",
+]
 
 
 def retrieve_candidates(
