@@ -588,3 +588,31 @@ def test_phase_four_cli_paths_cover_formal_bridge_workflows(tmp_path: Path):
     result = runner.invoke(app, ["verify", "reject", reject_id, "--root", str(tmp_path), "--notes", "needs more work"])
     assert result.exit_code == 0
     assert "rejected_by_human" in result.stdout
+
+
+def test_phase_five_cli_surface_routes_to_governance_workflows(tmp_path: Path) -> None:
+    help_result = runner.invoke(app, ["--help"])
+    assert help_result.exit_code == 0
+    assert "asset" in help_result.stdout
+    assert "pack" in help_result.stdout
+    assert "policy" in help_result.stdout
+    assert "recommend" in help_result.stdout
+    assert "reuse" in help_result.stdout
+    assert "automate" in help_result.stdout
+    assert "benchmark" in help_result.stdout
+
+    asset_result = runner.invoke(app, ["asset", "list", "--root", str(tmp_path)])
+    assert asset_result.exit_code == 0
+    assert "No reusable assets" in asset_result.stdout
+
+    policy_result = runner.invoke(app, ["policy", "list", "--root", str(tmp_path)])
+    assert policy_result.exit_code == 0
+    assert "bounded_local_reasoning" in policy_result.stdout or "project_id" in policy_result.stdout
+
+    recommend_result = runner.invoke(app, ["recommend", "--root", str(tmp_path)])
+    assert recommend_result.exit_code == 0
+    assert "query" in recommend_result.stdout
+
+    benchmark_result = runner.invoke(app, ["benchmark", "run", "--root", str(tmp_path), "--scenario-id", "smoke"])
+    assert benchmark_result.exit_code == 0
+    assert "smoke" in benchmark_result.stdout

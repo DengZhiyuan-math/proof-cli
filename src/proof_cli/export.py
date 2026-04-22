@@ -7,6 +7,22 @@ from .bugs import ProofBugReport, ProofBugScan, ProofBugSeverity, ProofBugStatus
 from .bugs import ProofBugReviewState
 from .debug_tasks import ProofDebugTaskBatch
 from .formalization_recommendations import rank_formalization_candidates
+from .governance import (
+    list_automation_records,
+    list_benchmark_records,
+    list_domain_pack_records,
+    list_policy_records,
+    list_recommendation_records,
+    list_reusable_asset_records,
+    list_reuse_records,
+    summarize_automation_record,
+    summarize_benchmark_record,
+    summarize_domain_pack,
+    summarize_policy_record,
+    summarize_recommendation_record,
+    summarize_reusable_asset,
+    summarize_reuse_record,
+)
 from .memory import accepted_verification_results, load_memory, stale_verification_fragments, verification_records
 from .proof_state import load_state, summarize_state
 from .storage import ProjectStore, list_references
@@ -304,6 +320,71 @@ def build_export(store: ProjectStore) -> str:
         "handoffs": len(memory.handoff_snapshots),
     }
     lines.append("Memory layers: " + ", ".join(f"{name}={count}" for name, count in memory_counts.items()))
+
+    reusable_assets = list_reusable_asset_records(store)
+    domain_packs = list_domain_pack_records(store)
+    policy_records = list_policy_records(store)
+    automation_runs = list_automation_records(store)
+    recommendations = list_recommendation_records(store)
+    reuse_records = list_reuse_records(store)
+    benchmarks = list_benchmark_records(store)
+
+    lines.append("Reusable assets:")
+    if reusable_assets:
+        lines.extend(f"- {summarize_reusable_asset(record)}" for record in reusable_assets)
+    else:
+        lines.append("- none")
+
+    lines.append("Domain packs:")
+    if domain_packs:
+        lines.extend(f"- {summarize_domain_pack(record)}" for record in domain_packs)
+    else:
+        lines.append("- none")
+
+    lines.append("Policy profiles:")
+    if policy_records:
+        lines.extend(f"- {summarize_policy_record(record)}" for record in policy_records)
+    else:
+        lines.append("- none")
+
+    lines.append("Automation runs:")
+    if automation_runs:
+        lines.extend(f"- {summarize_automation_record(record)}" for record in automation_runs)
+    else:
+        lines.append("- none")
+
+    lines.append("Automation traces:")
+    if automation_runs:
+        lines.append(
+            json.dumps(
+                {
+                    record.run.id: [entry.model_dump(mode="json") for entry in record.run.trace]
+                    for record in automation_runs
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+    else:
+        lines.append("- none")
+
+    lines.append("Recommendations:")
+    if recommendations:
+        lines.extend(f"- {summarize_recommendation_record(record)}" for record in recommendations)
+    else:
+        lines.append("- none")
+
+    lines.append("Reuse outcomes:")
+    if reuse_records:
+        lines.extend(f"- {summarize_reuse_record(record)}" for record in reuse_records)
+    else:
+        lines.append("- none")
+
+    lines.append("Benchmarks:")
+    if benchmarks:
+        lines.extend(f"- {summarize_benchmark_record(record)}" for record in benchmarks)
+    else:
+        lines.append("- none")
 
     snapshot = state["latest_snapshot"]
     if snapshot is not None:

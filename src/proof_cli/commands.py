@@ -12,12 +12,63 @@ from .domain import (
     TrustLevel,
 )
 from .bugs import ProofBugReport, ProofBugReviewState, ProofBugScan, ProofBugSeverity, ProofBugStatus, ProofBugType, scan_proof_bugs
+from .automation import (
+    AutomationActionStatus,
+    AutomationExecutionMode,
+    AutomationPolicyDecision,
+    AutomationPolicyProfile,
+    AutomationRunStatus,
+    AutomationTaskType,
+    AutomationTraceEntry,
+    AutomationTraceKind,
+    default_policy_profile,
+)
+from .automation_eval import AutomationEvaluationRecord, replay_automation_benchmark
 from .debug_tasks import ProofDebugTaskBatch, debug_task_batch_from_reports
 from .export import build_export
 from .evidence import EvidenceChain, build_evidence_chains
 from .formal_bridge import FormalBridgeProofStep, machine_check_trace, translate_selection
 from .formalization_recommendations import FormalizationRecommendation, rank_formalization_candidates
+from .governance import (
+    GovernanceAssetRecord,
+    GovernanceAutomationRecord,
+    GovernanceBenchmarkRecord,
+    GovernancePackRecord,
+    GovernancePolicyRecord,
+    GovernanceRecommendationRecord,
+    GovernanceReuseRecord,
+    build_automation_run as build_governance_automation_run,
+    get_automation_record,
+    get_domain_pack_record,
+    get_latest_policy_profile,
+    get_reusable_asset_record,
+    install_domain_pack,
+    list_automation_records,
+    list_benchmark_records,
+    list_domain_pack_records,
+    list_policy_records,
+    list_recommendation_records,
+    list_reusable_asset_records,
+    list_reuse_records,
+    publish_reusable_asset,
+    record_automation_run,
+    record_benchmark_replay,
+    record_cross_project_recommendation,
+    record_reuse_outcome,
+    render_json,
+    set_policy_profile,
+    summarize_automation_record,
+    summarize_benchmark_record,
+    summarize_domain_pack,
+    summarize_policy_record,
+    summarize_recommendation_record,
+    summarize_reusable_asset,
+    summarize_reuse_record,
+    update_domain_pack,
+)
+from .domain_packs import DomainPack
 from .memory import MemoryArtifact, MemoryLayer, list_memory_artifacts, record_memory
+from .recommendations import recommend_cross_project_assets
 from .proof_state import (
     add_blocker,
     add_goal,
@@ -33,6 +84,7 @@ from .proof_state import (
 )
 from .references import ReferenceRecord, ReferenceReviewStatus, ReferenceSourceType
 from .rendering import render_status
+from .reusable_assets import ReusableAsset
 from .storage import (
     ProjectStore,
     approve_reference,
@@ -81,6 +133,14 @@ def _append_history(store: ProjectStore, entry: str, *, message: str) -> None:
     state = load_state(store)
     state.session_history.append(entry)
     save_state(store, state, message=message)
+
+
+def _load_model_json(value: str, model: type[object]):
+    return model.model_validate_json(value)  # type: ignore[attr-defined]
+
+
+def _load_model_json_list(values: list[str] | None, model: type[object]) -> list[object]:
+    return [model.model_validate_json(value) for value in values or []]  # type: ignore[attr-defined]
 
 
 def _next_obligation_id(*parts: str) -> str:
@@ -1782,3 +1842,294 @@ def cmd_search(query: str, root: str | Path = ".", *, external_candidates: list[
 
 def cmd_provenance_show(target_id: str, root: str | Path = ".") -> str:
     return cmd_proof_provenance_show(target_id, root=root)
+
+
+def cmd_proof_asset_list(root: str | Path = ".", *, project_id: str = "", kind: str = "", status: str = "") -> str:
+    records = list_reusable_asset_records(get_store(root), project_id=project_id, kind=kind, status=status)
+    if not records:
+        return "No reusable assets"
+    return "\n".join(summarize_reusable_asset(record) for record in records)
+
+
+def cmd_proof_asset_show(asset_id: str, root: str | Path = ".") -> str:
+    record = get_reusable_asset_record(get_store(root), asset_id)
+    return render_json(record) if record is not None else f"Reusable asset not found: {asset_id}"
+
+
+def cmd_proof_asset_publish(
+    asset_json: str,
+    root: str | Path = ".",
+    *,
+    review_action: str = "publish",
+    reviewer: str = "human",
+    notes: str = "",
+) -> str:
+    store = get_store(root)
+    asset = _load_model_json(asset_json, ReusableAsset)
+    record = publish_reusable_asset(store, asset, review_action=review_action, reviewer=reviewer, notes=notes)
+    return render_json(record)
+
+
+def cmd_proof_asset_review(
+    asset_id: str,
+    action: str,
+    root: str | Path = ".",
+    *,
+    reviewer: str = "human",
+    notes: str = "",
+) -> str:
+    store = get_store(root)
+    existing = get_reusable_asset_record(store, asset_id)
+    if existing is None:
+        return f"asset:review:blocked:asset {asset_id} not found"
+    record = publish_reusable_asset(store, existing.asset, review_action=action, reviewer=reviewer, notes=notes)
+    return render_json(record)
+
+
+def cmd_proof_pack_list(root: str | Path = ".", *, project_id: str = "") -> str:
+    records = list_domain_pack_records(get_store(root), project_id=project_id)
+    if not records:
+        return "No domain packs"
+    return "\n".join(summarize_domain_pack(record) for record in records)
+
+
+def cmd_proof_pack_show(pack_id: str, root: str | Path = ".") -> str:
+    record = get_domain_pack_record(get_store(root), pack_id)
+    return render_json(record) if record is not None else f"Domain pack not found: {pack_id}"
+
+
+def cmd_proof_pack_install(
+    pack_json: str,
+    root: str | Path = ".",
+    *,
+    installed_by: str = "human",
+    project_tags: list[str] | None = None,
+    available_asset_ids: list[str] | None = None,
+    available_asset_kinds: list[str] | None = None,
+    notation_profile: str = "",
+    notes: str = "",
+) -> str:
+    store = get_store(root)
+    pack = _load_model_json(pack_json, DomainPack)
+    record = install_domain_pack(
+        store,
+        pack,
+        installed_by=installed_by,
+        project_tags=project_tags or [],
+        available_asset_ids=available_asset_ids or [],
+        available_asset_kinds=available_asset_kinds or [],
+        notation_profile=notation_profile,
+        notes=notes,
+    )
+    return render_json(record)
+
+
+def cmd_proof_pack_update(
+    pack_json: str,
+    root: str | Path = ".",
+    *,
+    reviewer: str = "human",
+    notes: str = "",
+) -> str:
+    store = get_store(root)
+    pack = _load_model_json(pack_json, DomainPack)
+    record = update_domain_pack(store, pack, reviewer=reviewer, notes=notes)
+    return render_json(record)
+
+
+def cmd_proof_policy_list(root: str | Path = ".", *, project_id: str = "") -> str:
+    records = list_policy_records(get_store(root), project_id=project_id)
+    if not records:
+        profile = get_latest_policy_profile(get_store(root), project_id=project_id) or default_policy_profile()
+        return render_json(profile)
+    return "\n".join(summarize_policy_record(record) for record in records)
+
+
+def cmd_proof_policy_set(
+    profile_json: str,
+    root: str | Path = ".",
+    *,
+    reviewer: str = "human",
+    notes: str = "",
+) -> str:
+    store = get_store(root)
+    profile = _load_model_json(profile_json, AutomationPolicyProfile)
+    record = set_policy_profile(store, profile, reviewer=reviewer, notes=notes)  # type: ignore[arg-type]
+    return render_json(record)
+
+
+def cmd_proof_recommend(
+    root: str | Path = ".",
+    *,
+    query: str = "",
+    current_project_id: str = "",
+    current_project_assets_json: list[str] | None = None,
+    shared_assets_json: list[str] | None = None,
+    prior_project_assets_json: list[str] | None = None,
+    domain_packs_json: list[str] | None = None,
+    prior_usefulness_json: str = "",
+    limit: int = 10,
+) -> str:
+    store = get_store(root)
+    state = load_state(store)
+    current_assets = [_load_model_json(value, ReusableAsset) for value in current_project_assets_json or []]
+    shared_assets = [_load_model_json(value, ReusableAsset) for value in shared_assets_json or []]
+    prior_assets = [_load_model_json(value, ReusableAsset) for value in prior_project_assets_json or []]
+    packs = [_load_model_json(value, DomainPack) for value in domain_packs_json or []]
+    prior_usefulness = json.loads(prior_usefulness_json) if prior_usefulness_json else None
+    report = recommend_cross_project_assets(
+        current_project_id=current_project_id or state.project_id,
+        query=query or None,
+        current_project_assets=current_assets,
+        shared_assets=shared_assets,
+        prior_project_assets=prior_assets,
+        domain_packs=packs,
+        prior_usefulness=prior_usefulness,
+        limit=limit,
+    )
+    record = record_cross_project_recommendation(store, report, notes=f"query={query}" if query else "")
+    return render_json(record)
+
+
+def cmd_proof_reuse_show(root: str | Path = ".", *, asset_id: str = "", project_id: str = "") -> str:
+    store = get_store(root)
+    assets = list_reusable_asset_records(store, project_id=project_id)
+    reuse_records = list_reuse_records(store, project_id=project_id, asset_id=asset_id)
+    payload = {
+        "assets": [record.model_dump(mode="json") for record in assets if not asset_id or record.asset.id == asset_id],
+        "reuse_records": [record.model_dump(mode="json") for record in reuse_records],
+    }
+    return json.dumps(payload, indent=2)
+
+
+def cmd_proof_automate_plan(
+    root: str | Path = ".",
+    *,
+    scope: str,
+    task_type: str,
+    action_json: list[str] | None = None,
+    policy_json: str = "",
+    execution_mode: str = "supervised",
+    notes: str = "",
+    dry_run: bool | None = None,
+    approval_required: bool | None = None,
+) -> str:
+    store = get_store(root)
+    state = load_state(store)
+    policy_profile = None
+    if policy_json:
+        policy_profile = _load_model_json(policy_json, AutomationPolicyProfile)
+    action_specs = [json.loads(value) for value in action_json or []]
+    run = build_governance_automation_run(
+        project_id=state.project_id,
+        scope=scope,
+        task_type=AutomationTaskType(task_type),
+        action_specs=action_specs,
+        policy_profile=policy_profile,
+        execution_mode=AutomationExecutionMode(execution_mode),
+        notes=notes,
+        dry_run=dry_run,
+        approval_required=approval_required,
+    )
+    record = record_automation_run(store, run, review_status="planned", notes=notes)
+    return render_json(record)
+
+
+def cmd_proof_automate_run(
+    run_id: str,
+    root: str | Path = ".",
+    *,
+    approvals_json: str = "",
+    interrupt_after: int | None = None,
+    notes: str = "",
+) -> str:
+    store = get_store(root)
+    record = get_automation_record(store, run_id)
+    if record is None:
+        return f"automation:run:blocked:run {run_id} not found"
+    approvals = json.loads(approvals_json) if approvals_json else {}
+    run = record.run.execute(approvals=approvals, interrupt_after=interrupt_after)
+    updated = record_automation_run(store, run, review_status="completed" if run.status.value == "completed" else run.status.value, notes=notes)
+    return render_json(updated)
+
+
+def cmd_proof_automate_trace(run_id: str, root: str | Path = ".") -> str:
+    store = get_store(root)
+    record = get_automation_record(store, run_id)
+    if record is None:
+        return f"automation:trace:blocked:run {run_id} not found"
+    payload = {
+        "run": record.run.model_dump(mode="json"),
+        "trace": [entry.model_dump(mode="json") for entry in record.run.trace],
+    }
+    return json.dumps(payload, indent=2)
+
+
+def cmd_proof_automate_review(
+    run_id: str,
+    action_id: str,
+    root: str | Path = ".",
+    *,
+    decision: str = "approve",
+    reviewer: str = "human",
+    rationale: str = "",
+) -> str:
+    store = get_store(root)
+    record = get_automation_record(store, run_id)
+    if record is None:
+        return f"automation:review:blocked:run {run_id} not found"
+    action = next((item for item in record.run.planned_actions if item.id == action_id), None)
+    if action is None:
+        return f"automation:review:blocked:action {action_id} not found"
+    normalized = decision.strip().lower()
+    if normalized in {"approve", "approved"}:
+        reviewed_run = record.run.approve_action(action_id, reviewer=reviewer, rationale=rationale)
+        review_status = "accepted_after_review"
+    else:
+        updated_action = action.mark(
+            status=AutomationActionStatus.rejected,
+            policy_decision=AutomationPolicyDecision.deny,
+            requires_review=True,
+            reviewer=reviewer,
+            review_notes=rationale,
+            result_summary=rationale or "rejected by human reviewer",
+        )
+        reviewed_actions = [updated_action if item.id == action_id else item for item in record.run.planned_actions]
+        reviewed_run = record.run.model_copy(
+            update={
+                "planned_actions": reviewed_actions,
+                "status": AutomationRunStatus.rejected,
+                "trace": [
+                    *record.run.trace,
+                    AutomationTraceEntry(
+                        kind=AutomationTraceKind.action_rejected,
+                        message=f"rejected {action_id} by {reviewer}",
+                        action_id=action_id,
+                        payload={"rationale": rationale},
+                    ),
+                ],
+            }
+        )
+        review_status = "rejected_by_human"
+    updated = record_automation_run(store, reviewed_run, review_status=review_status, notes=rationale)
+    return render_json(updated)
+
+
+def cmd_proof_benchmark_run(
+    root: str | Path = ".",
+    *,
+    record_json: list[str] | None = None,
+    benchmark_name: str = "",
+    scenario_id: str = "",
+    notes: str = "",
+) -> str:
+    store = get_store(root)
+    records = [_load_model_json(value, AutomationEvaluationRecord) for value in record_json or []]
+    replay = replay_automation_benchmark(
+        records,
+        benchmark_name=benchmark_name or None,
+        scenario_id=scenario_id or None,
+        notes=notes,
+    )
+    record = record_benchmark_replay(store, replay, notes=notes)
+    return render_json(record)

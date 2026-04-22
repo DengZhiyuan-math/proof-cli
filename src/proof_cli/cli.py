@@ -8,6 +8,15 @@ from .commands import (
     cmd_blocker_add,
     cmd_blocker_list,
     cmd_export,
+    cmd_proof_asset_list,
+    cmd_proof_asset_publish,
+    cmd_proof_asset_review,
+    cmd_proof_asset_show,
+    cmd_proof_automate_plan,
+    cmd_proof_automate_review,
+    cmd_proof_automate_run,
+    cmd_proof_automate_trace,
+    cmd_proof_benchmark_run,
     cmd_proof_bug_list,
     cmd_proof_bug_scan,
     cmd_proof_bug_show,
@@ -32,6 +41,10 @@ from .commands import (
     cmd_proof_verify_run,
     cmd_proof_verify_stale,
     cmd_proof_verify_status,
+    cmd_proof_policy_list,
+    cmd_proof_policy_set,
+    cmd_proof_recommend,
+    cmd_proof_reuse_show,
     cmd_goal_list,
     cmd_goal_open,
     cmd_goal_set,
@@ -60,6 +73,13 @@ from .commands import (
 from .review import render_verification_output
 
 app = typer.Typer(add_completion=False, help="Mathematical Proof CLI")
+asset_app = typer.Typer(help="Reusable asset workflows")
+pack_app = typer.Typer(help="Domain pack workflows")
+policy_app = typer.Typer(help="Automation policy workflows")
+recommend_app = typer.Typer(help="Cross-project recommendation workflows")
+reuse_app = typer.Typer(help="Reuse outcome workflows")
+automate_app = typer.Typer(help="Supervised automation workflows")
+benchmark_app = typer.Typer(help="Automation evaluation workflows")
 goal_app = typer.Typer(help="Goal operations")
 theorem_app = typer.Typer(help="Theorem registry")
 obligation_app = typer.Typer(help="Obligation queue")
@@ -128,6 +148,13 @@ def revalidate(source_id: str, root: str = ".", backend_target: str = "", notes:
 
 
 app.add_typer(goal_app, name="goal")
+app.add_typer(asset_app, name="asset")
+app.add_typer(pack_app, name="pack")
+app.add_typer(policy_app, name="policy")
+app.add_typer(recommend_app, name="recommend")
+app.add_typer(reuse_app, name="reuse")
+app.add_typer(automate_app, name="automate")
+app.add_typer(benchmark_app, name="benchmark")
 app.add_typer(theorem_app, name="theorem")
 app.add_typer(obligation_app, name="obligation")
 app.add_typer(blocker_app, name="blocker")
@@ -143,6 +170,183 @@ app.add_typer(evidence_app, name="evidence")
 app.add_typer(explain_app, name="explain")
 app.add_typer(formalize_app, name="formalize")
 app.add_typer(verify_app, name="verify")
+
+
+@asset_app.command("list")
+def asset_list(root: str = ".", project_id: str = "", kind: str = "", status: str = "") -> None:
+    typer.echo(cmd_proof_asset_list(_root(root), project_id=project_id, kind=kind, status=status))
+
+
+@asset_app.command("show")
+def asset_show(asset_id: str, root: str = ".") -> None:
+    typer.echo(cmd_proof_asset_show(asset_id, _root(root)))
+
+
+@asset_app.command("publish")
+def asset_publish(
+    asset_json: str,
+    root: str = ".",
+    review_action: str = "publish",
+    reviewer: str = "human",
+    notes: str = "",
+) -> None:
+    typer.echo(cmd_proof_asset_publish(asset_json, _root(root), review_action=review_action, reviewer=reviewer, notes=notes))
+
+
+@asset_app.command("review")
+def asset_review(
+    asset_id: str,
+    action: str,
+    root: str = ".",
+    reviewer: str = "human",
+    notes: str = "",
+) -> None:
+    typer.echo(cmd_proof_asset_review(asset_id, action, _root(root), reviewer=reviewer, notes=notes))
+
+
+@pack_app.command("list")
+def pack_list(root: str = ".", project_id: str = "") -> None:
+    typer.echo(cmd_proof_pack_list(_root(root), project_id=project_id))
+
+
+@pack_app.command("show")
+def pack_show(pack_id: str, root: str = ".") -> None:
+    typer.echo(cmd_proof_pack_show(pack_id, _root(root)))
+
+
+@pack_app.command("install")
+def pack_install(
+    pack_json: str,
+    root: str = ".",
+    installed_by: str = "human",
+    notation_profile: str = "",
+    notes: str = "",
+    project_tag: list[str] = typer.Option(None, "--project-tag"),
+    available_asset_id: list[str] = typer.Option(None, "--available-asset-id"),
+    available_asset_kind: list[str] = typer.Option(None, "--available-asset-kind"),
+) -> None:
+    typer.echo(
+        cmd_proof_pack_install(
+            pack_json,
+            _root(root),
+            installed_by=installed_by,
+            project_tags=project_tag,
+            available_asset_ids=available_asset_id,
+            available_asset_kinds=available_asset_kind,
+            notation_profile=notation_profile,
+            notes=notes,
+        )
+    )
+
+
+@pack_app.command("update")
+def pack_update(pack_json: str, root: str = ".", reviewer: str = "human", notes: str = "") -> None:
+    typer.echo(cmd_proof_pack_update(pack_json, _root(root), reviewer=reviewer, notes=notes))
+
+
+@policy_app.command("list")
+def policy_list(root: str = ".", project_id: str = "") -> None:
+    typer.echo(cmd_proof_policy_list(_root(root), project_id=project_id))
+
+
+@policy_app.command("set")
+def policy_set(profile_json: str, root: str = ".", reviewer: str = "human", notes: str = "") -> None:
+    typer.echo(cmd_proof_policy_set(profile_json, _root(root), reviewer=reviewer, notes=notes))
+
+
+@recommend_app.callback(invoke_without_command=True)
+def recommend(
+    ctx: typer.Context,
+    root: str = ".",
+    query: str = "",
+    current_project_id: str = "",
+    prior_usefulness_json: str = "",
+    limit: int = 10,
+    current_asset_json: list[str] = typer.Option(None, "--current-asset-json"),
+    shared_asset_json: list[str] = typer.Option(None, "--shared-asset-json"),
+    prior_asset_json: list[str] = typer.Option(None, "--prior-asset-json"),
+    domain_pack_json: list[str] = typer.Option(None, "--domain-pack-json"),
+) -> None:
+    if ctx.invoked_subcommand is not None:
+        return
+    typer.echo(
+        cmd_proof_recommend(
+            _root(root),
+            query=query,
+            current_project_id=current_project_id,
+            current_project_assets_json=current_asset_json,
+            shared_assets_json=shared_asset_json,
+            prior_project_assets_json=prior_asset_json,
+            domain_packs_json=domain_pack_json,
+            prior_usefulness_json=prior_usefulness_json,
+            limit=limit,
+        )
+    )
+
+
+@reuse_app.command("show")
+def reuse_show(root: str = ".", asset_id: str = "", project_id: str = "") -> None:
+    typer.echo(cmd_proof_reuse_show(_root(root), asset_id=asset_id, project_id=project_id))
+
+
+@automate_app.command("plan")
+def automate_plan(
+    scope: str,
+    task_type: str,
+    root: str = ".",
+    execution_mode: str = "supervised",
+    notes: str = "",
+    dry_run: bool = False,
+    approval_required: bool = False,
+    policy_json: str = "",
+    action_json: list[str] = typer.Option(None, "--action-json"),
+) -> None:
+    typer.echo(
+        cmd_proof_automate_plan(
+            _root(root),
+            scope=scope,
+            task_type=task_type,
+            action_json=action_json,
+            policy_json=policy_json,
+            execution_mode=execution_mode,
+            notes=notes,
+            dry_run=dry_run,
+            approval_required=approval_required,
+        )
+    )
+
+
+@automate_app.command("run")
+def automate_run(run_id: str, root: str = ".", approvals_json: str = "", interrupt_after: int | None = None, notes: str = "") -> None:
+    typer.echo(cmd_proof_automate_run(run_id, _root(root), approvals_json=approvals_json, interrupt_after=interrupt_after, notes=notes))
+
+
+@automate_app.command("trace")
+def automate_trace(run_id: str, root: str = ".") -> None:
+    typer.echo(cmd_proof_automate_trace(run_id, _root(root)))
+
+
+@automate_app.command("review")
+def automate_review(
+    run_id: str,
+    action_id: str,
+    root: str = ".",
+    decision: str = "approve",
+    reviewer: str = "human",
+    rationale: str = "",
+) -> None:
+    typer.echo(cmd_proof_automate_review(run_id, action_id, _root(root), decision=decision, reviewer=reviewer, rationale=rationale))
+
+
+@benchmark_app.command("run")
+def benchmark_run(
+    root: str = ".",
+    benchmark_name: str = "",
+    scenario_id: str = "",
+    notes: str = "",
+    record_json: list[str] = typer.Option(None, "--record-json"),
+) -> None:
+    typer.echo(cmd_proof_benchmark_run(_root(root), record_json=record_json, benchmark_name=benchmark_name, scenario_id=scenario_id, notes=notes))
 
 
 @goal_app.command("set")
@@ -480,4 +684,3 @@ def verify_stale(
             cmd_proof_verify_stale(source_id, _root(root), reason=reason, changed_dependency_ids=dependency),
         )
     )
-

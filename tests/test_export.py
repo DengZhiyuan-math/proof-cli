@@ -1,25 +1,40 @@
 import json
 from pathlib import Path
 
+from proof_cli.automation import AutomationActionType, AutomationExecutionMode, AutomationTaskType
+from proof_cli.automation_eval import AutomationEvaluationMode, build_automation_evaluation_record
 from proof_cli.blockers import add_blocker
 from proof_cli.commands import (
+    cmd_proof_asset_publish,
     cmd_export,
+    cmd_proof_automate_plan,
+    cmd_proof_automate_run,
+    cmd_proof_automate_trace,
+    cmd_proof_benchmark_run,
     cmd_proof_bug_scan,
     cmd_proof_debug_generate,
     cmd_proof_evidence_show,
     cmd_proof_reason,
     cmd_proof_repair_mark,
     cmd_proof_review_suspicion,
+    cmd_proof_pack_install,
+    cmd_proof_policy_set,
+    cmd_proof_recommend,
+    cmd_proof_reuse_show,
     cmd_theorem_ground,
 )
+from proof_cli.automation_policy import build_policy_profile
 from proof_cli.domain import BlockerRecord, ProofObligation, TheoremProvenanceKind, TheoremReviewState, TheoremStatus, TrustLevel
+from proof_cli.domain_packs import DomainPack, DomainPackCompatibility, DomainPackContent, DomainPackReviewStatus, DomainPackTrustLevel
 from proof_cli.formal_bridge import FormalBridgeProofStep, translate_proof_step
+from proof_cli.governance import record_reuse_outcome
 from proof_cli.memory import load_memory, record_memory, record_verification_lifecycle, record_verification_staleness
 from proof_cli.obligations import add_obligation
 from proof_cli.proof_state import load_state, record_theorem_usage, set_current_context, set_current_theorem
 from proof_cli.references import ReferenceRecord, ReferenceSourceType
 from proof_cli.snapshot import create_snapshot
 from proof_cli.storage import approve_reference, ensure_project, import_reference, list_references, read_latest_snapshot
+from proof_cli.reusable_assets import ReusableAsset, ReusableAssetKind, ReusableAssetPayload, ReusableAssetProvenance, ReusableAssetReuseStatus, ReusableAssetTrustLevel
 from proof_cli.theorems import add_theorem, list_theorems
 from proof_cli.verification_ir import (
     VerificationAssumption,
@@ -265,3 +280,221 @@ def test_export_includes_grounded_imported_reasoning_and_repair_state(tmp_path: 
     assert memory.working[0].content == "checking the black-box handoff"
 
     assert read_latest_snapshot(reopened_store) is not None
+
+
+def test_export_summarizes_phase_five_governance_across_related_projects(tmp_path: Path):
+    alpha = tmp_path / "alpha"
+    beta = tmp_path / "beta"
+    gamma = tmp_path / "gamma"
+    ensure_project(alpha)
+    ensure_project(beta)
+    ensure_project(gamma)
+
+    shared_asset = ReusableAsset(
+        id="asset_shared_uniformity",
+        kind=ReusableAssetKind.proof_pattern,
+        name="Uniformity-before-summation pattern",
+        summary="Reusable proof-development pattern",
+        payload=ReusableAssetPayload(pattern_steps=["inspect uniformity", "separate the sum", "close the route"]),
+        provenance=ReusableAssetProvenance(
+            origin_project_id="proj_alpha",
+            source_contract_ids=["thm_uniformity"],
+            source_reference_ids=["ref_uniformity"],
+            notes="approved for cross-project reuse",
+        ),
+        reuse_status=ReusableAssetReuseStatus.approved_reusable,
+        trust_level=ReusableAssetTrustLevel.reviewed_reusable,
+        reviewed_by="lead",
+        review_notes="approved for cross-project reuse",
+    )
+    local_asset = ReusableAsset(
+        id="asset_local_uniformity",
+        kind=ReusableAssetKind.proof_pattern,
+        name="Local uniformity route",
+        summary="Project-local proof-development pattern",
+        payload=ReusableAssetPayload(pattern_steps=["inspect local context", "reuse known lemma"]),
+        provenance=ReusableAssetProvenance(origin_project_id="proj_alpha", notes="local route"),
+        reuse_status=ReusableAssetReuseStatus.project_local,
+        trust_level=ReusableAssetTrustLevel.project_verified,
+        reviewed_by="researcher",
+        review_notes="local route",
+    )
+    prior_asset = ReusableAsset(
+        id="asset_prior_boundary",
+        kind=ReusableAssetKind.proof_pattern,
+        name="Boundary repair route",
+        summary="Prior project repair pattern",
+        payload=ReusableAssetPayload(pattern_steps=["check the boundary case", "close the interior case"]),
+        provenance=ReusableAssetProvenance(origin_project_id="proj_gamma", notes="prior route"),
+        reuse_status=ReusableAssetReuseStatus.private_experimental,
+        trust_level=ReusableAssetTrustLevel.temporary_admit,
+        reviewed_by="researcher",
+        review_notes="prior route",
+    )
+    pack = DomainPack(
+        id="pack_spectral_analysis",
+        name="Spectral-Analysis-Pack",
+        version="0.1.0",
+        summary="Reusable spectral workflow pack",
+        content=DomainPackContent(
+            theorem_templates=["spectral decomposition theorem template"],
+            method_templates=["retrieve known result first", "check side conditions explicitly"],
+            omission_rules=["expand all standard estimates into explicit side conditions"],
+            bug_patterns=["hidden uniformity gap"],
+            formalization_preferences=["escalate fragile theorem applications"],
+            debug_task_templates=["test the boundary parameter regime"],
+            notation_conventions=["use lambda for eigenvalue parameters"],
+        ),
+        compatibility=DomainPackCompatibility(
+            required_project_tags=["spectral", "analysis"],
+            required_asset_ids=["asset_shared_uniformity"],
+            required_asset_kinds=["proof_pattern"],
+            required_notation_profile="spectral_default",
+            allowed_pack_versions=["0.1.0"],
+        ),
+        review_status=DomainPackReviewStatus.approved,
+        trust_level=DomainPackTrustLevel.reviewed_reusable,
+        reviewed_by="reviewer",
+        review_notes="approved for cross-project installation",
+        origin_project_id="proj_alpha",
+        source_asset_ids=["asset_shared_uniformity"],
+    )
+
+    cmd_proof_asset_publish(shared_asset.model_dump_json(), root=alpha, review_action="approve", reviewer="lead", notes="publish shared asset")
+    cmd_proof_asset_publish(local_asset.model_dump_json(), root=alpha, review_action="publish", reviewer="researcher", notes="publish local asset")
+    cmd_proof_asset_publish(prior_asset.model_dump_json(), root=gamma, review_action="private", reviewer="researcher", notes="private experimental asset")
+    cmd_proof_pack_install(
+        pack.model_dump_json(),
+        root=alpha,
+        installed_by="reviewer",
+        project_tags=["spectral", "analysis"],
+        available_asset_ids=["asset_shared_uniformity", "asset_local_uniformity"],
+        available_asset_kinds=["proof_pattern"],
+        notation_profile="spectral_default",
+        notes="alpha install",
+    )
+    cmd_proof_pack_install(
+        pack.model_dump_json(),
+        root=beta,
+        installed_by="reviewer",
+        project_tags=["spectral", "analysis", "functional"],
+        available_asset_ids=["asset_shared_uniformity"],
+        available_asset_kinds=["proof_pattern"],
+        notation_profile="spectral_default",
+        notes="beta install",
+    )
+
+    policy_profile = build_policy_profile(
+        project_id="proj_alpha",
+        allowed_actions=[
+            AutomationActionType.inspect_state,
+            AutomationActionType.retrieve_assets,
+            AutomationActionType.check_policy,
+            AutomationActionType.generate_plan,
+            AutomationActionType.request_review,
+            AutomationActionType.execute_task,
+            AutomationActionType.record_trace,
+            AutomationActionType.publish_reusable_outcome,
+            AutomationActionType.rollback,
+            AutomationActionType.interrupt,
+        ],
+        approval_required_for=[],
+        forbidden_actions=[AutomationActionType.publish_reusable_outcome, AutomationActionType.rollback],
+        notes="bounded local reasoning",
+    )
+    cmd_proof_policy_set(policy_profile.model_dump_json(), root=alpha, reviewer="lead", notes="alpha policy")
+    recommendation_payload = cmd_proof_recommend(
+        root=alpha,
+        query="uniformity before summation",
+        current_project_id="proj_alpha",
+        current_project_assets_json=[local_asset.model_dump_json()],
+        shared_assets_json=[shared_asset.model_dump_json()],
+        prior_project_assets_json=[prior_asset.model_dump_json()],
+        domain_packs_json=[pack.model_dump_json()],
+        prior_usefulness_json=json.dumps(
+            {
+                shared_asset.id: 0.95,
+                prior_asset.id: 0.35,
+                pack.id: 0.82,
+            }
+        ),
+        limit=5,
+    )
+    assert "asset_shared_uniformity" in recommendation_payload
+
+    record_reuse_outcome(ensure_project(alpha), asset_id=shared_asset.id, used_in_project="proj_beta", outcome="helpful", notes="reduced duplicate search", reviewed_by_human=True)
+    reuse_payload = cmd_proof_reuse_show(root=alpha, asset_id=shared_asset.id)
+    assert "helpful" in reuse_payload
+
+    plan_payload = cmd_proof_automate_plan(
+        root=alpha,
+        scope="theorem_7",
+        task_type=AutomationTaskType.theorem_application_checks.value,
+        action_json=[
+            json.dumps({"action_type": "inspect_state", "description": "inspect local theorem state", "risk_level": "low", "reversible": True}),
+            json.dumps({"action_type": "publish_reusable_outcome", "description": "publish reusable proof outcome", "risk_level": "trust_sensitive", "reversible": False}),
+        ],
+        policy_json=policy_profile.model_dump_json(),
+        execution_mode=AutomationExecutionMode.supervised.value,
+        notes="bounded automation for the alpha project",
+    )
+    plan_record = json.loads(plan_payload)
+    run_id = plan_record["run"]["id"]
+    run_payload = cmd_proof_automate_run(run_id, root=alpha, notes="run the planned sequence")
+    run_record = json.loads(run_payload)
+    assert run_record["run"]["planned_actions"][0]["status"] == "completed"
+    assert run_record["run"]["planned_actions"][1]["status"] == "rejected"
+    assert "action_completed" in cmd_proof_automate_trace(run_id, root=alpha)
+
+    assisted_record = build_automation_evaluation_record(
+        benchmark_name="phase5-compounding",
+        scenario_id="scenario_uniformity",
+        project_id="proj_alpha",
+        task_type="theorem_application_checks",
+        mode=AutomationEvaluationMode.assisted,
+        time_spent_minutes=10.0,
+        obligations_resolved=4,
+        false_positives=1,
+        review_burden_minutes=2.0,
+        stale_automation_count=0,
+        repeated_error_reduction_count=2,
+        reuse_hits=3,
+        accepted_actions=4,
+        rejected_actions=0,
+    )
+    baseline_record = build_automation_evaluation_record(
+        benchmark_name="phase5-compounding",
+        scenario_id="scenario_uniformity",
+        project_id="proj_beta",
+        task_type="theorem_application_checks",
+        mode=AutomationEvaluationMode.non_assisted,
+        time_spent_minutes=18.0,
+        obligations_resolved=2,
+        false_positives=3,
+        review_burden_minutes=4.0,
+        stale_automation_count=2,
+        repeated_error_reduction_count=0,
+        reuse_hits=1,
+        accepted_actions=2,
+        rejected_actions=2,
+    )
+    benchmark_payload = cmd_proof_benchmark_run(
+        root=alpha,
+        benchmark_name="phase5-compounding",
+        scenario_id="scenario_uniformity",
+        record_json=[assisted_record.model_dump_json(), baseline_record.model_dump_json()],
+        notes="multi-project benchmark replay",
+    )
+    assert "assisted_better" in benchmark_payload
+
+    export = cmd_export(root=alpha)
+    assert "Reusable assets:" in export
+    assert "asset_shared_uniformity" in export
+    assert "Domain packs:" in export
+    assert "Policy profiles:" in export
+    assert "Automation runs:" in export
+    assert "Automation traces:" in export
+    assert "Recommendations:" in export
+    assert "Reuse outcomes:" in export
+    assert "Benchmarks:" in export
+    assert "phase5-compounding" in export
