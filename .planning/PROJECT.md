@@ -2,9 +2,9 @@
 
 ## What This Is
 
-This is a human-machine collaborative proof operating system for research mathematics. It is not trying to replace mathematicians or fully formalize every proof step; it is trying to make proof work stateful, debuggable, and trustworthy.
+This is a CLI-first human-machine collaborative proof operating system for research mathematics.
 
-The CLI should help a researcher manage theorem contracts, proof state, dependencies, blockers, and imported results so long-running proof work can survive context loss and stay auditable.
+It helps a researcher manage theorem contracts, proof state, dependencies, blockers, imported results, reusable proof knowledge, and bounded automation so long-running proof work can survive context loss and stay auditable.
 
 ## Core Value
 
@@ -14,18 +14,18 @@ Manage the trust boundary around mathematical proof work: know what can be calle
 
 ### Validated
 
-(None yet — ship to validate)
+- [x] A CLI-first workspace that persists proof project state across sessions
+- [x] A theorem registry that stores contracts with assumptions, exports, and dependencies
+- [x] A proof state engine that tracks open goals, pending obligations, and blocker history
+- [x] A DSL/elaboration layer that turns proof scripts into explicit, checkable actions
+- [x] A checker stack that detects assumption mismatches, export-strength issues, circular dependencies, notation drift, and omission gaps
+- [x] A retrieval-first workflow that prefers current project results before external sources
+- [x] A memory system that stores working, semantic, episodic, and procedural proof context
+- [x] A human review gate for imported references and trust-level changes
 
 ### Active
 
-- [ ] A CLI-first workspace that persists proof project state across sessions
-- [ ] A theorem registry that stores contracts with assumptions, exports, and dependencies
-- [ ] A proof state engine that tracks open goals, pending obligations, and blocker history
-- [ ] A DSL/elaboration layer that turns proof scripts into explicit, checkable actions
-- [ ] A checker stack that detects assumption mismatches, export-strength issues, circular dependencies, notation drift, and omission gaps
-- [ ] A retrieval-first workflow that prefers current project results before external sources
-- [ ] A memory system that stores working, semantic, episodic, and procedural proof context
-- [ ] A human review gate for imported references and trust-level changes
+(None for v1.0)
 
 ### Out of Scope
 
@@ -36,9 +36,9 @@ Manage the trust boundary around mathematical proof work: know what can be calle
 
 ## Context
 
-This is a greenfield project with no existing codebase yet. The source material already defines the product philosophy: theorem contracts instead of raw text, proof obligations instead of vague prose, and retrieval before local proof search.
+The project shipped v1.0 as a local-first CLI proof workspace with persistent proof state, theorem contracts, retrieval, layered memory, proof-debugging, selective formal bridge workflows, and supervised automation.
 
-The project is being initialized from a proposal that frames the product as a research workflow tool, not an automated theorem prover. That framing should stay stable unless the core product vision changes.
+The source material defined the product philosophy: theorem contracts instead of raw text, proof obligations instead of vague prose, retrieval before local proof search, and human review at trust boundaries. That framing stayed stable through v1.0.
 
 ## Constraints
 
@@ -52,10 +52,13 @@ The project is being initialized from a proposal that frames the product as a re
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Human-in-the-loop review remains mandatory | Research math needs trust, not just automation | — Pending |
-| Theorem contracts are the core data model | They encode assumptions, exports, and callability | — Pending |
-| CLI is the primary interface | It matches the workflow and keeps the first release focused | — Pending |
-| Retrieval happens before proof search | Prevents re-proving known results and reduces wasted effort | — Pending |
+| Human-in-the-loop review remains mandatory | Research math needs trust, not just automation | ✓ Good |
+| Theorem contracts are the core data model | They encode assumptions, exports, and callability | ✓ Good |
+| CLI is the primary interface | It matches the workflow and keeps the first release focused | ✓ Good |
+| Retrieval happens before proof search | Prevents re-proving known results and reduces wasted effort | ✓ Good |
+| Selective formalization is preferable to blanket formalization | It keeps stronger checking practical | ✓ Good |
+| Bounded automation is preferable to open-ended autonomous proof search | It preserves auditability and trust boundaries | ✓ Good |
+| Shared reusable assets require review before broad reuse | Cross-project reuse needs provenance and governance | ✓ Good |
 
 ## Evolution
 
@@ -75,4 +78,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-21 after initialization*
+*Last updated: 2026-04-22 after v1.0 milestone*
