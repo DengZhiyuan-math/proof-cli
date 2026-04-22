@@ -7,6 +7,8 @@ from proof_cli.domain import BlockerRecord
 from proof_cli.evidence import EvidenceChain
 from proof_cli.memory import (
     ProofRepairDecision,
+    VerificationLifecycleKind,
+    accepted_verification_results,
     failed_routes,
     load_memory,
     proof_debug_history,
@@ -18,14 +20,33 @@ from proof_cli.memory import (
     record_failure_motif_memory,
     record_repair_decision_memory,
     record_repair_pattern_memory,
+    record_verification_lifecycle,
+    record_verification_revalidation,
+    record_verification_staleness,
+    revalidation_history,
+    stale_verification_fragments,
     procedural_tactics,
     record_memory,
     stable_memory,
+    queued_verification_fragments,
+    verification_dependency_versions,
+    verification_records,
 )
 from proof_cli.goals import add_goal, set_current_theorem
 from proof_cli.proof_state import note_unresolved_trust_call
 from proof_cli.snapshot import create_snapshot, restore_snapshot
 from proof_cli.storage import ensure_project
+from proof_cli.verification_ir import (
+    VerificationDependencyVersion,
+    VerificationFragment,
+    VerificationFragmentStatus,
+    VerificationProvenance,
+    VerificationResult,
+    VerificationReviewStatus,
+    VerificationScope,
+    VerificationSourceKind,
+)
+from proof_cli.verification_results import VerificationResultRecord
 
 
 def test_proof_debug_memory_is_typed_and_retrievable_by_scope(tmp_path: Path):
@@ -280,3 +301,174 @@ def test_snapshot_restore_preserves_memory_context_blockers_and_debts(tmp_path: 
     assert restored.unresolved_debts == ["thm_1"]
     assert memory.handoff_snapshots[-1].handoff_note == "handoff for later"
     assert memory.handoff_snapshots[-1].working_context == ["open theorem 1"]
+
+
+def test_verification_lifecycle_snapshots_preserve_stale_and_revalidation_state(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    scope = VerificationScope(
+        project_id="proj_alpha",
+        theorem_id="thm_1",
+        obligation_id="obl_1",
+        proof_step_id="step_1",
+        route_id="route_1",
+        tags=["phase4", "memory"],
+    )
+    dependency_v1 = VerificationDependencyVersion(
+        dependency_id="thm_bridge",
+        version=1,
+        kind="theorem_contract",
+        digest="sha256:aaa111",
+    )
+    dependency_v2 = VerificationDependencyVersion(
+        dependency_id="thm_bridge",
+        version=2,
+        kind="theorem_contract",
+        digest="sha256:bbb222",
+    )
+    fragment = VerificationFragment(
+        source_type=VerificationSourceKind.theorem_application,
+        source_id="step_1",
+        scope=scope,
+        ir_version=1,
+        status=VerificationFragmentStatus.queued_for_verification,
+        backend_target="lean4",
+        dependency_versions=[dependency_v1],
+        provenance=VerificationProvenance(
+            source_kind=VerificationSourceKind.theorem_application,
+            source_id="step_1",
+            source_label="initial machine-check candidate",
+            source_scope=scope,
+            derived_from_ids=["goal_1", "lemma_bridge"],
+            machine_path=["inspect state", "queue for backend"],
+        ),
+        notes="queued for verification",
+    )
+    queued_fragment = fragment.queue_for_verification(backend_target="lean4")
+    queued_record = record_verification_lifecycle(
+        store,
+        queued_fragment,
+        kind=VerificationLifecycleKind.queued_for_verification,
+        notes="queued for backend execution",
+    )
+
+    checked_fragment = queued_fragment.record_machine_check(result_id="vchk_1", backend_target="lean4")
+    machine_result = VerificationResult(
+        fragment_id=checked_fragment.id,
+        backend="lean4",
+        summary="machine check succeeded for the bridge fragment",
+        review_status=VerificationReviewStatus.accepted_after_review,
+        notes="reviewed and accepted",
+    )
+    machine_result_record = VerificationResultRecord(
+        result=machine_result,
+        result_status=checked_fragment.status,
+        review_status=machine_result.review_status,
+        source_kind=checked_fragment.source_type,
+        source_id=checked_fragment.source_id,
+        scope=checked_fragment.scope,
+        theorem_id=checked_fragment.scope.theorem_id,
+        obligation_id=checked_fragment.scope.obligation_id,
+        proof_step_id=checked_fragment.scope.proof_step_id,
+        route_id=checked_fragment.scope.route_id,
+        effect="strengthening",
+        notes="accepted after machine check",
+    )
+    machine_checked_record = record_verification_lifecycle(
+        store,
+        checked_fragment,
+        result=machine_result,
+        result_record=machine_result_record,
+        kind=VerificationLifecycleKind.machine_checked,
+        notes="machine check accepted",
+    )
+
+    stale_fragment = checked_fragment.mark_stale_after_change(
+        changed_dependency_versions=[dependency_v2],
+        reason="dependency version changed after a proof update",
+    )
+    stale_record = record_verification_staleness(
+        store,
+        stale_fragment,
+        notes="dependency version changed after a proof update",
+    )
+
+    revalidated_fragment = stale_fragment.queue_for_verification(backend_target="lean4").model_copy(
+        update={
+            "id": "vfrag_revalidated_1",
+            "dependency_versions": [dependency_v2],
+            "provenance": stale_fragment.provenance.model_copy(
+                update={
+                    "derived_from_ids": [*stale_fragment.provenance.derived_from_ids, stale_fragment.id],
+                    "machine_path": [*stale_fragment.provenance.machine_path, "revalidate fragment"],
+                }
+            ),
+        }
+    )
+    revalidated_result = VerificationResult(
+        fragment_id=revalidated_fragment.id,
+        backend="lean4",
+        summary="revalidated machine check succeeded",
+        review_status=VerificationReviewStatus.accepted_after_review,
+        notes="revalidated and accepted",
+    )
+    revalidated_record = VerificationResultRecord(
+        result=revalidated_result,
+        result_status=revalidated_fragment.status,
+        review_status=revalidated_result.review_status,
+        source_kind=revalidated_fragment.source_type,
+        source_id=revalidated_fragment.source_id,
+        scope=revalidated_fragment.scope,
+        theorem_id=revalidated_fragment.scope.theorem_id,
+        obligation_id=revalidated_fragment.scope.obligation_id,
+        proof_step_id=revalidated_fragment.scope.proof_step_id,
+        route_id=revalidated_fragment.scope.route_id,
+        effect="strengthening",
+        notes="accepted after revalidation",
+    )
+    revalidation_record = record_verification_revalidation(
+        store,
+        revalidated_fragment,
+        result=revalidated_result,
+        result_record=revalidated_record,
+        notes="revalidated after dependency change",
+    )
+
+    memory = load_memory(store)
+    snapshot = create_snapshot(store, note="handoff after verification lifecycle update")
+    restored = restore_snapshot(store)
+
+    assert memory.verification_history[0].kind == VerificationLifecycleKind.queued_for_verification
+    assert {record.fragment.status for record in verification_records(store, theorem_id="thm_1")} >= {
+        VerificationFragmentStatus.queued_for_verification,
+        VerificationFragmentStatus.machine_checked,
+        VerificationFragmentStatus.stale_after_change,
+    }
+    assert [dep.version for dep in verification_dependency_versions(store, theorem_id="thm_1")] == [1, 2]
+    assert [fragment.id for fragment in queued_verification_fragments(store, theorem_id="thm_1")] == [
+        queued_record.fragment.id,
+        revalidation_record.fragment.id,
+    ]
+    assert [fragment.id for fragment in stale_verification_fragments(store, theorem_id="thm_1")] == [stale_record.fragment.id]
+    assert [record.result.id for record in accepted_verification_results(store, theorem_id="thm_1")] == [
+        machine_result.id,
+        revalidated_result.id,
+    ]
+    assert [record.fragment.id for record in revalidation_history(store, theorem_id="thm_1")] == [
+        stale_record.fragment.id,
+        revalidation_record.fragment.id,
+    ]
+    assert snapshot.handoff_note == "handoff after verification lifecycle update"
+    assert restored is not None
+    assert [fragment.id for fragment in restored.queued_verification_fragments] == [
+        queued_record.fragment.id,
+        revalidation_record.fragment.id,
+    ]
+    assert [fragment.id for fragment in restored.stale_verification_fragments] == [stale_record.fragment.id]
+    assert [record.result.id for record in restored.accepted_verification_results] == [
+        machine_result_record.result.id,
+        revalidated_record.result.id,
+    ]
+    assert [record.fragment.id for record in restored.revalidation_requirements] == [
+        stale_record.fragment.id,
+        revalidation_record.fragment.id,
+    ]

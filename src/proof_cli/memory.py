@@ -12,6 +12,15 @@ from pydantic import BaseModel, Field
 
 from .domain import ProjectSnapshot, utc_now
 from .storage import ProjectStore, read_state
+from .verification_ir import (
+    VerificationDependencyVersion,
+    VerificationFragment,
+    VerificationFragmentStatus,
+    VerificationResult,
+    VerificationReviewStatus,
+    VerificationScope,
+)
+from .verification_results import VerificationResultRecord
 
 
 class MemoryLayer(str, Enum):
@@ -55,6 +64,31 @@ class LinkedProofState(BaseModel):
     method_id: str | None = None
     snapshot_id: str | None = None
     notes: str = ""
+
+
+class VerificationLifecycleKind(str, Enum):
+    queued_for_verification = "queued_for_verification"
+    machine_checked = "machine_checked"
+    backend_failed = "backend_failed"
+    translation_failed = "translation_failed"
+    stale_after_change = "stale_after_change"
+    rejected_by_human = "rejected_by_human"
+    accepted_after_review = "accepted_after_review"
+    revalidation_requested = "revalidation_requested"
+    revalidation_completed = "revalidation_completed"
+
+
+class VerificationLifecycleRecord(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    kind: VerificationLifecycleKind
+    scope: VerificationScope
+    fragment: VerificationFragment
+    result: VerificationResult | None = None
+    result_record: VerificationResultRecord | None = None
+    source: Literal["manual", "snapshot", "recovery", "migration", "state_sync"] = "manual"
+    notes: str = ""
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
 
 
 class MemoryArtifact(BaseModel):
@@ -120,6 +154,11 @@ class ProofDebugMemoryRecord(BaseModel):
 class HandoffSnapshot(BaseModel):
     project_id: str
     project_snapshot: ProjectSnapshot
+    verification_history: list[VerificationLifecycleRecord] = Field(default_factory=list)
+    queued_verification_fragments: list[VerificationFragment] = Field(default_factory=list)
+    accepted_verification_results: list[VerificationResultRecord] = Field(default_factory=list)
+    stale_verification_fragments: list[VerificationFragment] = Field(default_factory=list)
+    revalidation_requirements: list[VerificationLifecycleRecord] = Field(default_factory=list)
     proof_debug_history: list[ProofDebugMemoryRecord] = Field(default_factory=list)
     suspicion_reports: list[Any] = Field(default_factory=list)
     resolved_bug_history: list[Any] = Field(default_factory=list)
@@ -141,11 +180,12 @@ class HandoffSnapshot(BaseModel):
 
 class LayeredMemory(BaseModel):
     project_id: str
-    version: int = 3
+    version: int = 4
     working: list[MemoryArtifact] = Field(default_factory=list)
     semantic: list[MemoryArtifact] = Field(default_factory=list)
     episodic: list[MemoryArtifact] = Field(default_factory=list)
     procedural: list[MemoryArtifact] = Field(default_factory=list)
+    verification_history: list[VerificationLifecycleRecord] = Field(default_factory=list)
     proof_debug_history: list[ProofDebugMemoryRecord] = Field(default_factory=list)
     handoff_snapshots: list[HandoffSnapshot] = Field(default_factory=list)
     tracked_symbols: list[str] = Field(default_factory=list)
@@ -163,6 +203,8 @@ _BUG_REVIEW_HISTORY_PREFIX = "proof_bug_review:"
 _BUG_REPAIR_HISTORY_PREFIX = "proof_bug_repair:"
 _DEBUG_BATCH_HISTORY_PREFIX = "proof_debug_batch:"
 _REASONING_HISTORY_PREFIX = "proof_reasoning:"
+_VERIFICATION_FRAGMENT_HISTORY_PREFIX = "verification_fragment:"
+_VERIFICATION_RESULT_HISTORY_PREFIX = "verification_result:"
 
 
 def _project_id(store: ProjectStore) -> str:
@@ -194,6 +236,11 @@ def _coerce_importance(value: str | MemoryImportance) -> MemoryImportance:
 def _stable_debug_id(*parts: str) -> str:
     digest = hashlib.sha1("::".join(parts).encode("utf-8")).hexdigest()[:16]
     return f"dbgmem_{digest}"
+
+
+def _stable_verification_id(*parts: str) -> str:
+    digest = hashlib.sha1("::".join(parts).encode("utf-8")).hexdigest()[:16]
+    return f"vmem_{digest}"
 
 
 def _coerce_debug_scope(item: Any, project_id: str) -> ProofDebugScope:
@@ -262,6 +309,40 @@ def _artifact_payload(item: Any, layer: MemoryLayer, project_id: str) -> MemoryA
     raise TypeError(f"unsupported memory artifact payload: {type(item)!r}")
 
 
+def _verification_result_record_payload(item: Any) -> VerificationResultRecord:
+    if isinstance(item, VerificationResultRecord):
+        return item
+    if isinstance(item, dict):
+        return VerificationResultRecord.model_validate(item)
+    raise TypeError(f"unsupported verification result record payload: {type(item)!r}")
+
+
+def _verification_lifecycle_payload(item: Any, project_id: str) -> VerificationLifecycleRecord:
+    if isinstance(item, VerificationLifecycleRecord):
+        if item.scope.project_id != project_id:
+            item.scope.project_id = project_id
+        if item.fragment.scope.project_id != project_id:
+            item.fragment.scope.project_id = project_id
+        return item
+    if isinstance(item, dict):
+        payload = dict(item)
+        payload.setdefault("scope", {"project_id": project_id})
+        if isinstance(payload["scope"], dict):
+            payload["scope"].setdefault("project_id", project_id)
+        fragment = payload.get("fragment")
+        if isinstance(fragment, dict):
+            fragment.setdefault("scope", {"project_id": project_id})
+            if isinstance(fragment["scope"], dict):
+                fragment["scope"].setdefault("project_id", project_id)
+        record = VerificationLifecycleRecord.model_validate(payload)
+        if record.scope.project_id != project_id:
+            record.scope.project_id = project_id
+        if record.fragment.scope.project_id != project_id:
+            record.fragment.scope.project_id = project_id
+        return record
+    raise TypeError(f"unsupported verification lifecycle payload: {type(item)!r}")
+
+
 def _coerce_handoff_snapshot(item: Any, project_id: str) -> HandoffSnapshot:
     from .bugs import ProofBugReport, ProofBugReviewState, ProofBugStatus
     from .debug_tasks import ProofDebugTask
@@ -308,11 +389,14 @@ def load_memory(store: ProjectStore) -> LayeredMemory:
     if not path.exists():
         return LayeredMemory(project_id=project_id)
     data = json.loads(path.read_text())
-    layer_memory = LayeredMemory(project_id=data.get("project_id", project_id), version=int(data.get("version", 3)))
+    layer_memory = LayeredMemory(project_id=data.get("project_id", project_id), version=int(data.get("version", 4)))
     for layer in (MemoryLayer.working, MemoryLayer.semantic, MemoryLayer.episodic, MemoryLayer.procedural):
         raw_entries = data.get(layer.value, [])
         entries = [_artifact_payload(item, layer, layer_memory.project_id) for item in raw_entries]
         setattr(layer_memory, layer.value, entries)
+    layer_memory.verification_history = [
+        _verification_lifecycle_payload(item, layer_memory.project_id) for item in data.get("verification_history", [])
+    ]
     raw_debug_entries = data.get("proof_debug_history", data.get("debug_history", []))
     layer_memory.proof_debug_history = [
         _debug_record_payload(item, layer_memory.project_id) for item in raw_debug_entries
@@ -328,8 +412,81 @@ def save_memory(store: ProjectStore, memory: LayeredMemory) -> LayeredMemory:
     path = _memory_path(store)
     path.parent.mkdir(parents=True, exist_ok=True)
     memory.project_id = _project_id(store)
-    memory.version = 3
+    memory.version = 4
     path.write_text(memory.model_dump_json(indent=2))
+    return memory
+
+
+def _verification_record_kind(fragment: VerificationFragment) -> VerificationLifecycleKind:
+    if fragment.status == VerificationFragmentStatus.queued_for_verification and any(
+        step == "revalidate fragment" for step in fragment.provenance.machine_path
+    ):
+        return VerificationLifecycleKind.revalidation_completed
+    return VerificationLifecycleKind(fragment.status.value)
+
+
+def _verification_records_from_state(store: ProjectStore) -> list[VerificationLifecycleRecord]:
+    from .proof_state import list_verification_result_records, load_state
+
+    state = load_state(store)
+    fragments: list[VerificationFragment] = []
+    for entry in state.session_history:
+        if not entry.startswith(_VERIFICATION_FRAGMENT_HISTORY_PREFIX):
+            continue
+        payload = entry.removeprefix(_VERIFICATION_FRAGMENT_HISTORY_PREFIX)
+        fragments.append(VerificationFragment.model_validate_json(payload))
+
+    result_records = {
+        record.result.id: _verification_result_record_payload(record)
+        for record in list_verification_result_records(state)
+    }
+
+    records: list[VerificationLifecycleRecord] = []
+    for fragment in fragments:
+        result_record = None
+        if fragment.result_id is not None:
+            result_record = result_records.get(fragment.result_id)
+        if result_record is None:
+            result_record = next((record for record in result_records.values() if record.result.fragment_id == fragment.id), None)
+        record = VerificationLifecycleRecord(
+            id=_stable_verification_id(
+                state.project_id,
+                fragment.id,
+                fragment.status.value,
+                fragment.updated_at.isoformat(),
+                fragment.result_id or "",
+                result_record.result.review_status.value if result_record is not None else "",
+                _verification_record_kind(fragment).value,
+            ),
+            kind=_verification_record_kind(fragment),
+            scope=fragment.scope,
+            fragment=fragment,
+            result=result_record.result if result_record is not None else None,
+            result_record=result_record,
+            source="state_sync",
+            notes=fragment.notes,
+            created_at=fragment.created_at,
+            updated_at=fragment.updated_at,
+        )
+        records.append(record)
+    return records
+
+
+def synchronize_verification_history(store: ProjectStore) -> LayeredMemory:
+    memory = load_memory(store)
+    records = _verification_records_from_state(store)
+    if not records:
+        return memory
+    changed = False
+    existing_ids = {record.id for record in memory.verification_history}
+    for record in records:
+        if record.id in existing_ids:
+            continue
+        memory.verification_history.append(record)
+        existing_ids.add(record.id)
+        changed = True
+    if changed:
+        save_memory(store, memory)
     return memory
 
 
@@ -787,6 +944,85 @@ def synchronize_proof_debug_history(store: ProjectStore) -> LayeredMemory:
     return memory
 
 
+def record_verification_lifecycle(
+    store: ProjectStore,
+    fragment: VerificationFragment,
+    *,
+    result: VerificationResult | None = None,
+    result_record: VerificationResultRecord | None = None,
+    kind: VerificationLifecycleKind | str | None = None,
+    source: Literal["manual", "snapshot", "recovery", "migration", "state_sync"] = "manual",
+    notes: str = "",
+) -> VerificationLifecycleRecord:
+    memory = load_memory(store)
+    record_kind = kind if isinstance(kind, VerificationLifecycleKind) else VerificationLifecycleKind(kind or fragment.status.value)
+    record = VerificationLifecycleRecord(
+        id=_stable_verification_id(
+            memory.project_id,
+            fragment.id,
+            fragment.status.value,
+            fragment.updated_at.isoformat(),
+            fragment.result_id or "",
+            result.review_status.value if result is not None else (result_record.review_status.value if result_record is not None else ""),
+            record_kind.value,
+        ),
+        kind=record_kind,
+        scope=fragment.scope,
+        fragment=fragment,
+        result=result,
+        result_record=result_record,
+        source=source,
+        notes=notes or fragment.notes,
+        created_at=fragment.created_at,
+        updated_at=fragment.updated_at,
+    )
+    if all(existing.id != record.id for existing in memory.verification_history):
+        memory.verification_history.append(record)
+        save_memory(store, memory)
+    return record
+
+
+def record_verification_staleness(
+    store: ProjectStore,
+    fragment: VerificationFragment,
+    *,
+    result: VerificationResult | None = None,
+    result_record: VerificationResultRecord | None = None,
+    source: Literal["manual", "snapshot", "recovery", "migration", "state_sync"] = "manual",
+    notes: str = "",
+) -> VerificationLifecycleRecord:
+    return record_verification_lifecycle(
+        store,
+        fragment,
+        result=result,
+        result_record=result_record,
+        kind=VerificationLifecycleKind.stale_after_change,
+        source=source,
+        notes=notes,
+    )
+
+
+def record_verification_revalidation(
+    store: ProjectStore,
+    fragment: VerificationFragment,
+    *,
+    result: VerificationResult | None = None,
+    result_record: VerificationResultRecord | None = None,
+    source: Literal["manual", "snapshot", "recovery", "migration", "state_sync"] = "manual",
+    notes: str = "",
+) -> VerificationLifecycleRecord:
+    kind = VerificationLifecycleKind.revalidation_completed
+    return record_verification_lifecycle(
+        store,
+        fragment,
+        result=result,
+        result_record=result_record,
+        kind=kind,
+        source=source,
+        notes=notes,
+    )
+
+
 def append_memory_artifact(
     store: ProjectStore,
     layer: str | MemoryLayer,
@@ -937,6 +1173,182 @@ def procedural_tactics(store: ProjectStore, *, theorem_id: str | None = None) ->
     return _matching_artifacts(store, layer=MemoryLayer.procedural, status=MemoryStatus.tactic, theorem_id=theorem_id)
 
 
+def _matches_verification_scope(
+    record: VerificationLifecycleRecord,
+    *,
+    theorem_id: str | None = None,
+    obligation_id: str | None = None,
+    proof_step_id: str | None = None,
+    source_id: str | None = None,
+    route_id: str | None = None,
+) -> bool:
+    if theorem_id is not None and record.scope.theorem_id != theorem_id:
+        return False
+    if obligation_id is not None and record.scope.obligation_id != obligation_id:
+        return False
+    if proof_step_id is not None and record.scope.proof_step_id != proof_step_id:
+        return False
+    if source_id is not None and record.fragment.source_id != source_id and record.fragment.id != source_id:
+        return False
+    if route_id is not None and record.scope.route_id != route_id:
+        return False
+    return True
+
+
+def verification_records(
+    store: ProjectStore,
+    *,
+    theorem_id: str | None = None,
+    obligation_id: str | None = None,
+    proof_step_id: str | None = None,
+    source_id: str | None = None,
+    route_id: str | None = None,
+    kind: VerificationLifecycleKind | str | None = None,
+) -> list[VerificationLifecycleRecord]:
+    memory = synchronize_verification_history(store)
+    candidates = list(memory.verification_history)
+    if kind is not None:
+        kind_enum = kind if isinstance(kind, VerificationLifecycleKind) else VerificationLifecycleKind(kind)
+        candidates = [record for record in candidates if record.kind == kind_enum]
+    candidates = [
+        record
+        for record in candidates
+        if _matches_verification_scope(
+            record,
+            theorem_id=theorem_id,
+            obligation_id=obligation_id,
+            proof_step_id=proof_step_id,
+            source_id=source_id,
+            route_id=route_id,
+        )
+    ]
+    return sorted(candidates, key=lambda record: (record.updated_at, record.created_at, record.id))
+
+
+def verification_dependency_versions(
+    store: ProjectStore,
+    *,
+    theorem_id: str | None = None,
+    obligation_id: str | None = None,
+    proof_step_id: str | None = None,
+    source_id: str | None = None,
+    route_id: str | None = None,
+) -> list[VerificationDependencyVersion]:
+    versions: list[VerificationDependencyVersion] = []
+    seen: set[tuple[str, int, str, str]] = set()
+    for record in verification_records(
+        store,
+        theorem_id=theorem_id,
+        obligation_id=obligation_id,
+        proof_step_id=proof_step_id,
+        source_id=source_id,
+        route_id=route_id,
+    ):
+        for dependency in record.fragment.dependency_versions:
+            key = (dependency.dependency_id, dependency.version, dependency.kind, dependency.digest)
+            if key in seen:
+                continue
+            seen.add(key)
+            versions.append(dependency)
+    return versions
+
+
+def queued_verification_fragments(
+    store: ProjectStore,
+    *,
+    theorem_id: str | None = None,
+    obligation_id: str | None = None,
+    proof_step_id: str | None = None,
+    source_id: str | None = None,
+    route_id: str | None = None,
+) -> list[VerificationFragment]:
+    return [
+        record.fragment
+        for record in verification_records(
+            store,
+            theorem_id=theorem_id,
+            obligation_id=obligation_id,
+            proof_step_id=proof_step_id,
+            source_id=source_id,
+            route_id=route_id,
+        )
+        if record.fragment.status == VerificationFragmentStatus.queued_for_verification
+    ]
+
+
+def stale_verification_fragments(
+    store: ProjectStore,
+    *,
+    theorem_id: str | None = None,
+    obligation_id: str | None = None,
+    proof_step_id: str | None = None,
+    source_id: str | None = None,
+    route_id: str | None = None,
+) -> list[VerificationFragment]:
+    return [
+        record.fragment
+        for record in verification_records(
+            store,
+            theorem_id=theorem_id,
+            obligation_id=obligation_id,
+            proof_step_id=proof_step_id,
+            source_id=source_id,
+            route_id=route_id,
+        )
+        if record.fragment.status == VerificationFragmentStatus.stale_after_change
+    ]
+
+
+def accepted_verification_results(
+    store: ProjectStore,
+    *,
+    theorem_id: str | None = None,
+    obligation_id: str | None = None,
+    proof_step_id: str | None = None,
+    source_id: str | None = None,
+    route_id: str | None = None,
+) -> list[VerificationResultRecord]:
+    records = []
+    for record in verification_records(
+        store,
+        theorem_id=theorem_id,
+        obligation_id=obligation_id,
+        proof_step_id=proof_step_id,
+        source_id=source_id,
+        route_id=route_id,
+    ):
+        if record.result_record is None:
+            continue
+        if record.result_record.review_status != VerificationReviewStatus.accepted_after_review:
+            continue
+        records.append(record.result_record)
+    return records
+
+
+def revalidation_history(
+    store: ProjectStore,
+    *,
+    theorem_id: str | None = None,
+    obligation_id: str | None = None,
+    proof_step_id: str | None = None,
+    source_id: str | None = None,
+    route_id: str | None = None,
+) -> list[VerificationLifecycleRecord]:
+    return [
+        record
+        for record in verification_records(
+            store,
+            theorem_id=theorem_id,
+            obligation_id=obligation_id,
+            proof_step_id=proof_step_id,
+            source_id=source_id,
+            route_id=route_id,
+        )
+        if record.kind in {VerificationLifecycleKind.stale_after_change, VerificationLifecycleKind.revalidation_completed}
+        or "revalidate fragment" in record.fragment.provenance.machine_path
+    ]
+
+
 def _matches_debug_scope(
     record: ProofDebugMemoryRecord,
     *,
@@ -1068,9 +1480,10 @@ def build_handoff_snapshot(
     *,
     handoff_note: str = "",
 ) -> HandoffSnapshot:
-    memory = load_memory(store)
+    memory = synchronize_verification_history(store)
     theorem_id = project_snapshot.active_theorem
     debug_records = proof_debug_history(store, theorem_id=theorem_id) if theorem_id is not None else proof_debug_history(store)
+    verification_history = verification_records(store, theorem_id=theorem_id) if theorem_id is not None else verification_records(store)
     suspicion_reports = [
         record.bug_report
         for record in debug_records
@@ -1093,11 +1506,39 @@ def build_handoff_snapshot(
     recent_attempts = [artifact.content for artifact in (memory.episodic[-2:] + memory.procedural[-2:])]
     unresolved_debts = list(project_snapshot.unresolved_trust_sensitive_calls)
     blocker_ids = list(project_snapshot.active_blockers)
+    queued_fragments = [
+        record.fragment
+        for record in verification_history
+        if record.fragment.status == VerificationFragmentStatus.queued_for_verification
+    ]
+    stale_fragments = [
+        record.fragment
+        for record in verification_history
+        if record.fragment.status == VerificationFragmentStatus.stale_after_change
+    ]
+    accepted_results = [
+        record.result_record
+        for record in verification_history
+        if record.result_record is not None and record.result_record.review_status == VerificationReviewStatus.accepted_after_review
+    ]
+    revalidation_requirements = [
+        record
+        for record in verification_history
+        if record.fragment.status == VerificationFragmentStatus.stale_after_change
+        or record.kind == VerificationLifecycleKind.revalidation_requested
+        or record.kind == VerificationLifecycleKind.revalidation_completed
+        or "revalidate fragment" in record.fragment.provenance.machine_path
+    ]
     if not handoff_note:
         handoff_note = project_snapshot.handoff_note or "resume from the latest proof state"
     return HandoffSnapshot(
         project_id=memory.project_id,
         project_snapshot=project_snapshot,
+        verification_history=verification_history,
+        queued_verification_fragments=queued_fragments,
+        accepted_verification_results=[record for record in accepted_results if record is not None],
+        stale_verification_fragments=stale_fragments,
+        revalidation_requirements=revalidation_requirements,
         proof_debug_history=debug_records,
         suspicion_reports=[report for report in suspicion_reports if report is not None],
         resolved_bug_history=[report for report in resolved_bug_history if report is not None],
