@@ -19,6 +19,7 @@ from .storage import (
 
 
 LITERATURE_ROUTE_EVENT_PREFIX = "literature_route:"
+VERIFICATION_RESULT_EVENT_PREFIX = "verification_result:"
 
 
 class LiteratureRouteRecord(BaseModel):
@@ -57,6 +58,22 @@ def _collect_routes(state: ProjectState) -> list[LiteratureRouteRecord]:
         payload = entry[len(LITERATURE_ROUTE_EVENT_PREFIX) :]
         routes.append(LiteratureRouteRecord.model_validate_json(payload))
     return routes
+
+
+def record_verification_result_entry(state: ProjectState, record: object) -> None:
+    state.session_history.append(f"{VERIFICATION_RESULT_EVENT_PREFIX}{record.model_dump_json()}")
+
+
+def list_verification_result_records(state: ProjectState) -> list[object]:
+    from .verification_results import VerificationResultRecord
+
+    records: list[VerificationResultRecord] = []
+    for entry in state.session_history:
+        if not entry.startswith(VERIFICATION_RESULT_EVENT_PREFIX):
+            continue
+        payload = entry[len(VERIFICATION_RESULT_EVENT_PREFIX) :]
+        records.append(VerificationResultRecord.model_validate_json(payload))
+    return records
 
 
 def _reference_token(reference_id: str, kind: str) -> str:
@@ -300,9 +317,17 @@ def note_unresolved_trust_call(store: ProjectStore, theorem_id: str) -> ProjectS
     return save_state(store, state, message=f"noted unresolved trust-sensitive call {theorem_id}")
 
 
+def clear_unresolved_trust_call(store: ProjectStore, theorem_id: str) -> ProjectState:
+    state = load_state(store)
+    if theorem_id in state.unresolved_trust_sensitive_calls:
+        state.unresolved_trust_sensitive_calls.remove(theorem_id)
+    return save_state(store, state, message=f"cleared unresolved trust-sensitive call {theorem_id}")
+
+
 def build_snapshot(store: ProjectStore, handoff_note: str = "") -> ProjectSnapshot:
     state = load_state(store)
     literature_routes = list_literature_routes(store)
+    verification_results = list_verification_result_records(state)
     promising_routes = [
         route.summary()
         for route in literature_routes
@@ -312,7 +337,10 @@ def build_snapshot(store: ProjectStore, handoff_note: str = "") -> ProjectSnapsh
         project_id=state.project_id,
         active_theorem=state.current_theorem,
         current_goals=list(state.open_goals),
-        validated_results=list(state.recent_theorem_usage),
+        validated_results=[
+            *state.recent_theorem_usage,
+            *[result.summary() for result in verification_results],
+        ],
         open_obligations=list(state.open_obligations),
         active_blockers=list(state.blockers),
         recently_used_results=list(state.recent_theorem_usage),
@@ -335,6 +363,7 @@ def summarize_state(store: ProjectStore) -> dict[str, object]:
     state = load_state(store)
     snapshot = read_latest_snapshot(store)
     literature_routes = list_literature_routes(store)
+    verification_results = list_verification_result_records(state)
     return {
         "project_id": state.project_id,
         "current_theorem": state.current_theorem,
@@ -345,5 +374,11 @@ def summarize_state(store: ProjectStore) -> dict[str, object]:
         "recent_theorem_usage": state.recent_theorem_usage,
         "unresolved_trust_sensitive_calls": state.unresolved_trust_sensitive_calls,
         "literature_routes": [route.model_dump(mode="json") for route in literature_routes],
+        "verification_results": [result.model_dump(mode="json") for result in verification_results],
+        "verification_result_summaries": [result.summary() for result in verification_results],
+        "validated_results": [
+            *state.recent_theorem_usage,
+            *[result.summary() for result in verification_results],
+        ],
         "latest_snapshot": snapshot,
     }

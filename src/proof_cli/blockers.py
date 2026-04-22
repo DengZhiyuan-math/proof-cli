@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Any
 from typing import Literal
 
 from .domain import BlockerRecord, BlockerStatus
@@ -132,4 +133,47 @@ def resolve_blocker(
                 state.blockers.remove(blocker_id)
                 save_state(store, state, message=f"resolved blocker {blocker_id}")
             return blocker
+    raise KeyError(blocker_id)
+
+
+def integrate_verification_result(store: ProjectStore, blocker_id: str, verification_result: Any) -> BlockerRecord:
+    blockers = list_blockers(store)
+    for blocker in blockers:
+        if blocker.id != blocker_id:
+            continue
+
+        verification_note = verification_result.summary() if hasattr(verification_result, "summary") else str(verification_result)
+        if getattr(verification_result, "effect", "neutral") == "strengthening":
+            return resolve_blocker(
+                store,
+                blocker_id,
+                rationale=verification_note,
+                supporting_reference_ids=[verification_result.result.id if hasattr(verification_result, "result") else verification_result],
+                route_notes=f"machine-check result {getattr(verification_result.result, 'id', blocker_id)}",
+            )
+
+        if verification_note:
+            blocker.description = f"{blocker.description} (verification: {verification_note})"
+        if hasattr(verification_result, "proof_step_id") and verification_result.proof_step_id:
+            _extend_unique(blocker.related_steps, [f"proof_step:{verification_result.proof_step_id}"])
+        if hasattr(verification_result, "result") and hasattr(verification_result.result, "id"):
+            _extend_unique(blocker.related_contracts, [f"verification_result:{verification_result.result.id}"])
+        blocker.status = BlockerStatus.active
+        store_blocker(store, blocker)
+        append_event(
+            store,
+            "blocker_verification_result_recorded",
+            f"recorded verification result for blocker {blocker_id}",
+            entity_id=blocker_id,
+            payload={"blocker": blocker.model_dump(mode="json"), "verification_result": getattr(verification_result, "model_dump", lambda *args, **kwargs: {})(mode="json")},
+        )
+        _record_failed_route(
+            store,
+            f"verification:{blocker.id}:{getattr(verification_result.result, 'id', blocker.id)}",
+            target_kind="blocker",
+            target_id=blocker.id,
+            reference_id=getattr(verification_result.result, "id", blocker.id),
+            notes=verification_note,
+        )
+        return blocker
     raise KeyError(blocker_id)
