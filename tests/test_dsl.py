@@ -10,9 +10,11 @@ from proof_cli.commands import (
     cmd_proof_debug_list,
     cmd_proof_evidence_show,
     cmd_proof_explain_apply,
+    cmd_proof_formalize_recommend,
     cmd_proof_provenance_show,
     cmd_proof_repair_mark,
     cmd_proof_review_suspicion,
+    cmd_proof_trace_machine_check,
 )
 from proof_cli.domain import (
     TheoremProvenanceKind,
@@ -307,6 +309,149 @@ def test_reasoning_bug_and_debug_workflow_exposes_explicit_state(tmp_path: Path)
 
     explanation = json.loads(cmd_proof_explain_apply("thm_reason", root=tmp_path))
     assert explanation["callability_reason"].startswith("missing assumptions:")
+
+
+def test_parse_program_understands_formalization_verification_and_trace_commands() -> None:
+    program = parse_program(
+        """
+        formalize recommend thm_verify backend=smt notes=fragile
+        formalize show thm_verify
+        formalize edit thm_verify backend=proof_assistant notes=tuned
+        verify queue thm_verify backend=smt route=route_1 notes=queued
+        verify run thm_verify backend=smt notes=run
+        verify status thm_verify
+        verify result thm_verify
+        verify accept thm_verify notes=accepted
+        verify reject thm_verify notes=rejected
+        verify stale thm_verify dependency=thm_dep reason=changed
+        trace machine-check thm_verify
+        revalidate thm_verify backend=smt notes=recheck
+        """
+    )
+
+    assert program[0].name == "formalize_recommend"
+    assert program[0].category == "formalization"
+    assert program[0].target == "thm_verify"
+    assert dict(program[0].options) == {"backend": "smt", "notes": "fragile"}
+    assert program[3].name == "verify_queue"
+    assert program[3].category == "verification"
+    assert program[3].target == "thm_verify"
+    assert dict(program[3].options) == {"backend": "smt", "route": "route_1", "notes": "queued"}
+    assert program[10].name == "trace_machine_check"
+    assert program[10].category == "trace"
+    assert program[11].name == "revalidate"
+    assert program[11].category == "verification"
+
+
+def test_formalize_and_verify_commands_preserve_provenance_and_audit_reviews(tmp_path: Path) -> None:
+    store = ensure_project(tmp_path)
+
+    add_theorem(
+        store,
+        theorem_id="thm_verify",
+        kind="theorem",
+        name="Verification Target",
+        statement="A -> C",
+        assumptions=["A"],
+        exports=["C"],
+        status=TheoremStatus.verified,
+        trust_level=TrustLevel.project_verified,
+        provenance_kind=TheoremProvenanceKind.local,
+        review_state=TheoremReviewState.approved,
+    )
+    add_theorem(
+        store,
+        theorem_id="thm_reject",
+        kind="theorem",
+        name="Rejected Verification Target",
+        statement="B -> D",
+        assumptions=["B"],
+        exports=["D"],
+        status=TheoremStatus.verified,
+        trust_level=TrustLevel.project_verified,
+        provenance_kind=TheoremProvenanceKind.local,
+        review_state=TheoremReviewState.approved,
+    )
+    set_current_context(store, ["A", "B"])
+
+    formalize_payload = json.loads(
+        cmd_proof_formalize_recommend("thm_verify", root=tmp_path, backend_target="smt", notes="fragile")
+    )
+    assert formalize_payload["recommendation"]["source_id"] == "thm_verify"
+    assert formalize_payload["fragment"]["provenance"]["source_id"] == "thm_verify"
+
+    accepted_outputs = elaborate_program(
+        store,
+        parse_program(
+            """
+            verify queue thm_verify backend=smt
+            verify run thm_verify backend=smt
+            verify accept thm_verify accepted after review
+            verify status thm_verify
+            verify result thm_verify
+            trace machine-check thm_verify
+            verify stale thm_verify dependency=thm_dep reason=dependency changed
+            revalidate thm_verify backend=smt
+            """
+        ),
+    )
+
+    queue_payload = json.loads(accepted_outputs[0])
+    assert queue_payload["machine_check_status"] == "queued_for_verification"
+    assert queue_payload["fragment"]["provenance"]["source_id"] == "thm_verify"
+
+    run_payload = json.loads(accepted_outputs[1])
+    assert run_payload["machine_check_status"] == "machine_checked"
+    assert run_payload["result"]["fragment_id"] == run_payload["fragment"]["id"]
+
+    accept_payload = json.loads(accepted_outputs[2])
+    assert accept_payload["result"]["review_status"] == "accepted_after_review"
+    assert accept_payload["machine_check_status"] == "accepted_after_review"
+
+    status_payload = json.loads(accepted_outputs[3])
+    assert status_payload["machine_check_status"] == "accepted_after_review"
+    assert status_payload["provenance"]["source_id"] == "thm_verify"
+
+    result_payload = json.loads(accepted_outputs[4])
+    assert result_payload["review_status"] == "accepted_after_review"
+    assert result_payload["result"]["fragment_id"] == run_payload["fragment"]["id"]
+
+    trace_payload = json.loads(accepted_outputs[5])
+    assert trace_payload["machine_check_status"] == "accepted_after_review"
+    assert trace_payload["provenance"]["source_id"] == "thm_verify"
+    assert trace_payload["trace"]["kind"] == "machine-check-trace"
+
+    direct_trace_payload = json.loads(cmd_proof_trace_machine_check("thm_verify", root=tmp_path))
+    assert direct_trace_payload["provenance"]["source_id"] == "thm_verify"
+    assert direct_trace_payload["trace"]["kind"] == "machine-check-trace"
+
+    stale_payload = json.loads(accepted_outputs[6])
+    assert stale_payload["machine_check_status"] == "stale_after_change"
+
+    revalidate_payload = json.loads(accepted_outputs[7])
+    assert revalidate_payload["machine_check_status"] == "queued_for_verification"
+    assert revalidate_payload["stale_fragment"]["status"] == "stale_after_change"
+
+    rejected_outputs = elaborate_program(
+        store,
+        parse_program(
+            """
+            verify run thm_reject backend=smt
+            verify reject thm_reject needs more work
+            verify result thm_reject
+            """
+        ),
+    )
+
+    reject_run_payload = json.loads(rejected_outputs[0])
+    assert reject_run_payload["machine_check_status"] == "machine_checked"
+
+    reject_payload = json.loads(rejected_outputs[1])
+    assert reject_payload["result"]["review_status"] == "rejected_by_human"
+    assert reject_payload["machine_check_status"] == "rejected_by_human"
+
+    reject_result_payload = json.loads(rejected_outputs[2])
+    assert reject_result_payload["review_status"] == "rejected_by_human"
 
 
 def test_vague_statement_creates_obligation(tmp_path: Path) -> None:

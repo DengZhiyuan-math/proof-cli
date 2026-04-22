@@ -10,10 +10,12 @@ DSLCommandCategory = Literal[
     "grounding",
     "review",
     "reasoning",
+    "formalization",
     "bug",
     "evidence",
     "debug",
     "repair",
+    "verification",
     "trace",
     "explain",
 ]
@@ -27,9 +29,19 @@ _COMPOUND_COMMANDS: dict[str, dict[str, str]] = {
     "bug": {"scan": "bug_scan", "list": "bug_list", "show": "bug_show"},
     "evidence": {"show": "evidence_show"},
     "debug": {"generate": "debug_generate", "list": "debug_list"},
+    "formalize": {"recommend": "formalize_recommend", "show": "formalize_show", "edit": "formalize_edit"},
+    "verify": {
+        "queue": "verify_queue",
+        "run": "verify_run",
+        "status": "verify_status",
+        "result": "verify_result",
+        "accept": "verify_accept",
+        "reject": "verify_reject",
+        "stale": "verify_stale",
+    },
     "repair": {"mark": "repair_mark"},
     "review": {"suspicion": "review_suspicion"},
-    "trace": {"dependency": "trace_dependency"},
+    "trace": {"dependency": "trace_dependency", "machine-check": "trace_machine_check", "machine_check": "trace_machine_check"},
     "explain": {"apply": "explain_apply"},
 }
 _COMPOUND_CATEGORIES: dict[str, DSLCommandCategory] = {
@@ -41,10 +53,22 @@ _COMPOUND_CATEGORIES: dict[str, DSLCommandCategory] = {
     "evidence_show": "evidence",
     "debug_generate": "debug",
     "debug_list": "debug",
+    "formalize_recommend": "formalization",
+    "formalize_show": "formalization",
+    "formalize_edit": "formalization",
+    "verify_queue": "verification",
+    "verify_run": "verification",
+    "verify_status": "verification",
+    "verify_result": "verification",
+    "verify_accept": "verification",
+    "verify_reject": "verification",
+    "verify_stale": "verification",
     "repair_mark": "repair",
     "review_suspicion": "review",
     "trace_dependency": "trace",
+    "trace_machine_check": "trace",
     "explain_apply": "explain",
+    "revalidate": "verification",
 }
 
 
@@ -91,6 +115,24 @@ def _parse_target_and_argument_from_parts(parts: list[str]) -> tuple[str, str]:
     return target, argument
 
 
+def _parse_target_argument_options(parts: list[str]) -> tuple[str, str, tuple[tuple[str, str], ...]]:
+    if not parts:
+        return "", "", ()
+    target = ""
+    remaining = list(parts)
+    if remaining and "=" not in remaining[0]:
+        target = remaining.pop(0)
+    options: list[tuple[str, str]] = []
+    argument_tokens: list[str] = []
+    for token in remaining:
+        if "=" in token:
+            key, value = token.split("=", 1)
+            options.append((key.lower(), value))
+        else:
+            argument_tokens.append(token)
+    return target, " ".join(argument_tokens).strip(), tuple(options)
+
+
 @dataclass(frozen=True)
 class DSLCommand:
     name: str
@@ -98,6 +140,7 @@ class DSLCommand:
     category: DSLCommandCategory = "proof"
     target: str = ""
     references: tuple[str, ...] = ()
+    options: tuple[tuple[str, str], ...] = ()
 
 
 def _classify_command(name: str) -> DSLCommandCategory:
@@ -124,6 +167,7 @@ def parse_program(text: str) -> list[DSLCommand]:
         category = _classify_command(name)
         target = ""
         references: tuple[str, ...] = ()
+        options: tuple[tuple[str, str], ...] = ()
 
         if name == "search":
             target = argument
@@ -149,6 +193,21 @@ def parse_program(text: str) -> list[DSLCommand]:
             "explain_apply",
         }:
             target, argument = _parse_target_and_argument_from_parts(payload)
+        elif name in {
+            "formalize_recommend",
+            "formalize_show",
+            "formalize_edit",
+            "verify_queue",
+            "verify_run",
+            "verify_status",
+            "verify_result",
+            "verify_accept",
+            "verify_reject",
+            "verify_stale",
+            "trace_machine_check",
+            "revalidate",
+        }:
+            target, argument, options = _parse_target_argument_options(payload)
 
         commands.append(
             DSLCommand(
@@ -157,6 +216,7 @@ def parse_program(text: str) -> list[DSLCommand]:
                 category=category,
                 target=target,
                 references=references,
+                options=options,
             )
         )
     return commands

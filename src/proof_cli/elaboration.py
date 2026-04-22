@@ -15,6 +15,9 @@ from .commands import (
     cmd_proof_debug_list,
     cmd_proof_evidence_show,
     cmd_proof_explain_apply,
+    cmd_proof_formalize_edit,
+    cmd_proof_formalize_recommend,
+    cmd_proof_formalize_show,
     cmd_proof_ground,
     cmd_proof_import,
     cmd_proof_obligation_derive,
@@ -22,7 +25,16 @@ from .commands import (
     cmd_proof_repair_mark,
     cmd_proof_review,
     cmd_proof_review_suspicion,
+    cmd_proof_revalidate,
+    cmd_proof_trace_machine_check,
     cmd_proof_search,
+    cmd_proof_verify_accept,
+    cmd_proof_verify_queue,
+    cmd_proof_verify_reject,
+    cmd_proof_verify_result,
+    cmd_proof_verify_run,
+    cmd_proof_verify_stale,
+    cmd_proof_verify_status,
     cmd_proof_trace_dependency,
 )
 
@@ -30,6 +42,10 @@ from .commands import (
 def _is_vague(argument: str) -> bool:
     lower = argument.lower()
     return any(token in lower for token in ["obvious", "standard", "similar", "clear", "routine"])
+
+
+def _options(command: DSLCommand) -> dict[str, str]:
+    return {key: value for key, value in command.options}
 
 
 def elaborate_command(store: ProjectStore, command: DSLCommand) -> str:
@@ -149,6 +165,103 @@ def elaborate_command(store: ProjectStore, command: DSLCommand) -> str:
         if not target_id:
             return "trace:dependency:missing-target"
         return cmd_proof_trace_dependency(target_id, root=store.root)
+    if name == "formalize_recommend":
+        source_id = command.target or argument
+        if not source_id:
+            return "formalize:recommend:missing-target"
+        return cmd_proof_formalize_recommend(
+            source_id,
+            root=store.root,
+            backend_target=_options(command).get("backend", ""),
+            notes=argument,
+        )
+    if name == "formalize_show":
+        source_id = command.target or argument
+        if not source_id:
+            return "formalize:show:missing-target"
+        return cmd_proof_formalize_show(source_id, root=store.root)
+    if name == "formalize_edit":
+        source_id = command.target or argument
+        if not source_id:
+            return "formalize:edit:missing-target"
+        options = _options(command)
+        return cmd_proof_formalize_edit(
+            source_id,
+            root=store.root,
+            backend_target=options.get("backend", ""),
+            notes=options.get("notes", argument),
+        )
+    if name == "verify_queue":
+        source_id = command.target or argument
+        if not source_id:
+            return "verify:queue:missing-target"
+        options = _options(command)
+        return cmd_proof_verify_queue(
+            source_id,
+            root=store.root,
+            backend_target=options.get("backend", ""),
+            route_id=options.get("route", ""),
+            notes=argument,
+        )
+    if name == "verify_run":
+        source_id = command.target or argument
+        if not source_id:
+            return "verify:run:missing-target"
+        options = _options(command)
+        return cmd_proof_verify_run(
+            source_id,
+            root=store.root,
+            backend_target=options.get("backend", ""),
+            notes=argument,
+        )
+    if name == "verify_status":
+        source_id = command.target or argument
+        if not source_id:
+            return "verify:status:missing-target"
+        return cmd_proof_verify_status(source_id, root=store.root)
+    if name == "verify_result":
+        source_id = command.target or argument
+        if not source_id:
+            return "verify:result:missing-target"
+        return cmd_proof_verify_result(source_id, root=store.root)
+    if name == "verify_accept":
+        source_id = command.target or argument
+        if not source_id:
+            return "verify:accept:missing-target"
+        return cmd_proof_verify_accept(source_id, root=store.root, notes=argument)
+    if name == "verify_reject":
+        source_id = command.target or argument
+        if not source_id:
+            return "verify:reject:missing-target"
+        return cmd_proof_verify_reject(source_id, root=store.root, notes=argument)
+    if name == "verify_stale":
+        source_id = command.target or argument
+        if not source_id:
+            return "verify:stale:missing-target"
+        options = _options(command)
+        dependency_ids = [item.strip() for item in options.get("dependency", "").split(",") if item.strip()]
+        return cmd_proof_verify_stale(
+            source_id,
+            root=store.root,
+            reason=argument,
+            changed_dependency_ids=dependency_ids or None,
+        )
+    if name == "trace_machine_check":
+        target_id = command.target or argument
+        if not target_id:
+            return "trace:machine-check:missing-target"
+        return cmd_proof_trace_machine_check(target_id, root=store.root)
+    if name == "revalidate":
+        source_id = command.target or argument
+        if not source_id:
+            return "revalidate:missing-target"
+        options = _options(command)
+        return cmd_proof_revalidate(
+            source_id,
+            root=store.root,
+            backend_target=options.get("backend", ""),
+            notes=argument,
+        )
     if name == "explain_apply":
         theorem_id = command.target or state.current_theorem or argument
         if not theorem_id:

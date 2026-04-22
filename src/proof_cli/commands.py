@@ -15,6 +15,8 @@ from .bugs import ProofBugReport, ProofBugReviewState, ProofBugScan, ProofBugSev
 from .debug_tasks import ProofDebugTaskBatch, debug_task_batch_from_reports
 from .export import build_export
 from .evidence import EvidenceChain, build_evidence_chains
+from .formal_bridge import FormalBridgeProofStep, machine_check_trace, translate_selection
+from .formalization_recommendations import FormalizationRecommendation, rank_formalization_candidates
 from .memory import MemoryArtifact, MemoryLayer, list_memory_artifacts, record_memory
 from .proof_state import (
     add_blocker,
@@ -47,6 +49,19 @@ from .storage import (
 )
 from .reasoning import ContractAdequacyCheck, DownstreamUse, LocalObligation, ReasoningProject, TheoremReasoningGoal
 from .retrieval import retrieve_candidates
+from .verification_broker import build_default_verification_broker, route_verification_fragment
+from .verification_ir import (
+    VerificationArtifact,
+    VerificationDependencyVersion,
+    VerificationFragment,
+    VerificationFragmentStatus,
+    VerificationProvenance,
+    VerificationResult,
+    VerificationReviewStatus,
+    VerificationScope,
+    VerificationSourceKind,
+)
+from .verification_results import list_verification_results, record_verification_result
 from .theorems import (
     add_theorem,
     apply_theorem,
@@ -106,6 +121,10 @@ _BUG_REVIEW_HISTORY_PREFIX = "proof_bug_review:"
 _BUG_REPAIR_HISTORY_PREFIX = "proof_bug_repair:"
 _REASONING_HISTORY_PREFIX = "proof_reasoning:"
 _DEBUG_BATCH_HISTORY_PREFIX = "proof_debug_batch:"
+_FORMALIZATION_RECOMMENDATION_PREFIX = "formalization_recommendation:"
+_VERIFICATION_FRAGMENT_PREFIX = "verification_fragment:"
+_VERIFICATION_REVIEW_PREFIX = "verification_review:"
+_VERIFICATION_TRACE_PREFIX = "verification_trace:"
 
 
 def _state_marker(prefix: str, payload: dict[str, object]) -> str:
@@ -117,6 +136,279 @@ def _append_state_marker(store: ProjectStore, prefix: str, payload: dict[str, ob
     state.session_history.append(_state_marker(prefix, payload))
     save_state(store, state, message=message)
     append_event(store, event_kind, message, entity_id=entity_id, payload=payload)
+
+
+def _verification_source_entry(store: ProjectStore, source_id: str) -> object | None:
+    contract = get_contract(store, source_id)
+    if contract is not None:
+        return contract
+    for obligation in list_obligations(store):
+        if obligation.id == source_id:
+            return obligation
+    for fragment in _verification_fragments(store):
+        if fragment.id == source_id:
+            return fragment
+    return None
+
+
+def _verification_fragments(store: ProjectStore) -> list[VerificationFragment]:
+    state = load_state(store)
+    fragments: list[VerificationFragment] = []
+    for entry in state.session_history:
+        if not entry.startswith(_VERIFICATION_FRAGMENT_PREFIX):
+            continue
+        payload = entry.removeprefix(_VERIFICATION_FRAGMENT_PREFIX)
+        fragments.append(VerificationFragment.model_validate_json(payload))
+    return fragments
+
+
+def _latest_verification_fragment(store: ProjectStore, source_id: str) -> VerificationFragment | None:
+    for fragment in reversed(_verification_fragments(store)):
+        if (
+            fragment.id == source_id
+            or fragment.source_id == source_id
+            or fragment.scope.theorem_id == source_id
+            or fragment.scope.obligation_id == source_id
+            or fragment.scope.goal_id == source_id
+            or fragment.scope.proof_step_id == source_id
+        ):
+            return fragment
+    return None
+
+
+def _verification_results(store: ProjectStore) -> list[object]:
+    return list_verification_results(store)
+
+
+def _latest_verification_result(store: ProjectStore, source_id: str) -> object | None:
+    for record in reversed(_verification_results(store)):
+        result = record.result
+        if (
+            result.id == source_id
+            or result.fragment_id == source_id
+            or record.source_id == source_id
+        ):
+            return record
+        fragment = _latest_verification_fragment(store, result.fragment_id)
+        if fragment is not None and (
+            fragment.source_id == source_id
+            or fragment.scope.theorem_id == source_id
+            or fragment.scope.obligation_id == source_id
+            or fragment.scope.goal_id == source_id
+            or fragment.scope.proof_step_id == source_id
+        ):
+            return record
+    return None
+
+
+def _dedupe_verification_result_records(records: list[object]) -> list[object]:
+    seen: set[str] = set()
+    unique: list[object] = []
+    for record in reversed(records):
+        result_id = getattr(getattr(record, "result", None), "id", None)
+        if result_id is None or result_id in seen:
+            continue
+        seen.add(result_id)
+        unique.append(record)
+    unique.reverse()
+    return unique
+
+
+def _verification_summary_payload(
+    store: ProjectStore,
+    *,
+    source_id: str,
+    fragment: VerificationFragment | None = None,
+    result_record: object | None = None,
+) -> dict[str, object]:
+    state = load_state(store)
+    fragment = fragment or _latest_verification_fragment(store, source_id)
+    if result_record is None and fragment is not None:
+        result_record = _latest_verification_result(store, fragment.id)
+    if result_record is None:
+        result_record = _latest_verification_result(store, source_id)
+    recommendation: FormalizationRecommendation | None = None
+    if fragment is not None:
+        ranked = rank_formalization_candidates([fragment], broker=build_default_verification_broker())
+        recommendation = ranked[0] if ranked else None
+    payload: dict[str, object] = {
+        "project_id": state.project_id,
+        "source_id": source_id,
+        "current_context": list(state.current_context),
+        "open_obligations": list(state.open_obligations),
+        "fragment": fragment.model_dump(mode="json") if fragment is not None else None,
+        "machine_check_status": fragment.status.value if fragment is not None else "missing",
+        "translation_status": fragment.translation_status.value if fragment is not None else "missing",
+        "result": result_record.model_dump(mode="json") if result_record is not None else None,
+        "recommendation": recommendation.model_dump(mode="json") if recommendation is not None else None,
+    }
+    if fragment is not None:
+        payload["provenance"] = fragment.provenance.model_dump(mode="json")
+    return payload
+
+
+def _persist_verification_fragment(
+    store: ProjectStore,
+    fragment: VerificationFragment,
+    *,
+    event_kind: str,
+    message: str,
+) -> VerificationFragment:
+    _append_state_marker(
+        store,
+        _VERIFICATION_FRAGMENT_PREFIX,
+        fragment.model_dump(mode="json"),
+        event_kind=event_kind,
+        message=message,
+        entity_id=fragment.id,
+    )
+    return fragment
+
+
+def _translate_source_fragment(
+    store: ProjectStore,
+    source_id: str,
+    *,
+    backend_target: str | None = None,
+    route_id: str | None = None,
+) -> VerificationFragment | str:
+    state = load_state(store)
+    source = _verification_source_entry(store, source_id)
+    if source is None:
+        return f"verify:blocked:source {source_id} not found"
+
+    if isinstance(source, VerificationFragment):
+        provenance = source.provenance.model_copy(
+            update={
+                "derived_from_ids": list(dict.fromkeys([*source.provenance.derived_from_ids, source.id])),
+                "machine_path": [*source.provenance.machine_path, "clone verification fragment"],
+            }
+        )
+        fragment = source.model_copy(
+            update={
+                "id": f"vfrag_{source.id.split('_', 1)[-1]}_{len(_verification_fragments(store)) + 1}",
+                "scope": source.scope.model_copy(update={"route_id": route_id or source.scope.route_id}),
+                "provenance": provenance,
+                "status": VerificationFragmentStatus.queued_for_verification,
+                "translation_status": source.translation_status,
+                "backend_target": backend_target or source.backend_target,
+                "result_id": None,
+                "updated_at": source.updated_at,
+            }
+        )
+        return fragment
+
+    translation = translate_selection(
+        [source],
+        project_id=state.project_id,
+        route_id=route_id,
+        backend_target=backend_target,
+    )
+    if translation.failures:
+        return f"verify:blocked:translation_failed:{translation.failures[0].reason}"
+    fragment = translation.fragments[0]
+    routed_fragment, _ = route_verification_fragment(fragment, broker=build_default_verification_broker())
+    if backend_target is not None:
+        routed_fragment = routed_fragment.model_copy(update={"backend_target": backend_target})
+    return routed_fragment
+
+
+def _run_machine_check(
+    store: ProjectStore,
+    fragment: VerificationFragment,
+    *,
+    backend_target: str | None = None,
+    summary: str = "",
+) -> tuple[VerificationFragment, VerificationResult, VerificationResult | None]:
+    backend = backend_target or fragment.backend_target or "proof_assistant"
+    checks: list[str] = []
+    if fragment.side_conditions:
+        checks.extend(condition.statement for condition in fragment.side_conditions)
+    if fragment.theorem_applications:
+        checks.extend(application.statement for application in fragment.theorem_applications)
+    if fragment.translation_status == VerificationFragmentStatus.translation_failed:
+        failed_fragment = fragment.record_translation_failure("translation failed before run")
+        result = VerificationResult(
+            fragment_id=fragment.id,
+            backend=backend,
+            summary="translation failed before machine-check",
+            review_status=VerificationReviewStatus.rejected_by_human,
+            notes=summary or "translation failure",
+            metadata={"checks": checks, "fragment_status": failed_fragment.status.value},
+        )
+        return failed_fragment, result, None
+
+    if fragment.status == VerificationFragmentStatus.stale_after_change:
+        result = VerificationResult(
+            fragment_id=fragment.id,
+            backend=backend,
+            summary="fragment is stale after dependency change",
+            review_status=VerificationReviewStatus.rejected_by_human,
+            notes=summary or "stale fragment",
+            metadata={"checks": checks},
+        )
+        return fragment, result, None
+
+    if fragment.theorem_applications and any(application.fragile for application in fragment.theorem_applications):
+        result = VerificationResult(
+            fragment_id=fragment.id,
+            backend=backend,
+            summary=summary or "machine-check completed for fragile theorem application",
+            artifacts=[machine_check_trace(fragment, backend=backend, summary=summary or "fragile application checked")],
+            notes="fragile theorem application checked with explicit status",
+            metadata={"checks": checks, "fragile": True},
+        )
+        return fragment.record_machine_check(result_id=result.id, backend_target=backend), result, None
+
+    result = VerificationResult(
+        fragment_id=fragment.id,
+        backend=backend,
+        summary=summary or "machine-check completed",
+        artifacts=[machine_check_trace(fragment, backend=backend, summary=summary or "machine-check completed")],
+        notes=summary or "machine-check completed",
+        metadata={"checks": checks},
+    )
+    return fragment.record_machine_check(result_id=result.id, backend_target=backend), result, None
+
+
+def _record_verification_result(
+    store: ProjectStore,
+    fragment: VerificationFragment,
+    result: VerificationResult,
+    *,
+    theorem_id: str | None = None,
+    obligation_id: str | None = None,
+    blocker_id: str | None = None,
+    proof_step_id: str | None = None,
+    route_id: str | None = None,
+    notes: str = "",
+):
+    record = record_verification_result(
+        store,
+        fragment,
+        result,
+        theorem_id=theorem_id,
+        obligation_id=obligation_id,
+        blocker_id=blocker_id,
+        proof_step_id=proof_step_id,
+        route_id=route_id,
+        notes=notes,
+    )
+    _append_state_marker(
+        store,
+        _VERIFICATION_REVIEW_PREFIX,
+        {
+            "fragment_id": fragment.id,
+            "result_id": result.id,
+            "review_status": result.review_status.value,
+            "fragment_status": fragment.status.value,
+            "backend": result.backend,
+        },
+        event_kind="verification_result_reviewed",
+        message=f"recorded review state for verification result {result.id}",
+        entity_id=result.id,
+    )
+    return record
 
 
 def _stable_bug_id(theorem_id: str, report: ProofBugReport) -> str:
@@ -795,6 +1087,434 @@ def cmd_proof_trace_dependency(target_id: str, root: str | Path = ".") -> str:
         "recent_theorem_usage": list(load_state(store).recent_theorem_usage),
         "session_history": list(load_state(store).session_history[-10:]),
     }
+    return json.dumps(payload, indent=2)
+
+
+def cmd_proof_formalize_recommend(source_id: str, root: str | Path = ".", *, backend_target: str = "", notes: str = "") -> str:
+    store = get_store(root)
+    fragment_or_error = _translate_source_fragment(store, source_id, backend_target=backend_target or None)
+    if isinstance(fragment_or_error, str):
+        return fragment_or_error
+    fragment = fragment_or_error
+    if notes:
+        fragment = fragment.model_copy(
+            update={
+                "notes": notes if not fragment.notes else f"{fragment.notes}; {notes}",
+                "provenance": fragment.provenance.model_copy(
+                    update={
+                        "machine_path": [*fragment.provenance.machine_path, "formalization recommendation"],
+                    }
+                ),
+            }
+        )
+    _persist_verification_fragment(
+        store,
+        fragment,
+        event_kind="verification_fragment_recommended",
+        message=f"recommended formalization for {source_id}",
+    )
+    recommendation = rank_formalization_candidates([fragment], broker=build_default_verification_broker())[0]
+    _append_state_marker(
+        store,
+        _FORMALIZATION_RECOMMENDATION_PREFIX,
+        recommendation.model_dump(mode="json"),
+        event_kind="formalization_recommendation_recorded",
+        message=f"recorded formalization recommendation for {source_id}",
+        entity_id=fragment.id,
+    )
+    return json.dumps(
+        {
+            "source_id": source_id,
+            "fragment": fragment.model_dump(mode="json"),
+            "recommendation": recommendation.model_dump(mode="json"),
+        },
+        indent=2,
+    )
+
+
+def cmd_proof_formalize_show(source_id: str, root: str | Path = ".") -> str:
+    store = get_store(root)
+    fragment = _latest_verification_fragment(store, source_id)
+    recommendation = None
+    if fragment is not None:
+        ranked = rank_formalization_candidates([fragment], broker=build_default_verification_broker())
+        recommendation = ranked[0] if ranked else None
+    if fragment is None:
+        return f"formalize:blocked:source {source_id} not found"
+    payload = {
+        "source_id": source_id,
+        "fragment": fragment.model_dump(mode="json"),
+        "recommendation": recommendation.model_dump(mode="json") if recommendation is not None else None,
+        "machine_check_status": fragment.status.value,
+        "translation_status": fragment.translation_status.value,
+        "provenance": fragment.provenance.model_dump(mode="json"),
+    }
+    return json.dumps(payload, indent=2)
+
+
+def cmd_proof_formalize_edit(
+    source_id: str,
+    root: str | Path = ".",
+    *,
+    backend_target: str = "",
+    notes: str = "",
+) -> str:
+    store = get_store(root)
+    fragment = _latest_verification_fragment(store, source_id)
+    if fragment is None:
+        translated = _translate_source_fragment(store, source_id, backend_target=backend_target or None)
+        if isinstance(translated, str):
+            return translated
+        fragment = translated
+    update_data: dict[str, object] = {}
+    if backend_target:
+        update_data["backend_target"] = backend_target
+    if notes:
+        update_data["notes"] = notes if not fragment.notes else f"{fragment.notes}; {notes}"
+    update_data["provenance"] = fragment.provenance.model_copy(
+        update={
+            "machine_path": [*fragment.provenance.machine_path, "formalization edit"],
+        }
+    )
+    edited = fragment.model_copy(update=update_data)
+    _persist_verification_fragment(
+        store,
+        edited,
+        event_kind="verification_fragment_edited",
+        message=f"edited formalization for {source_id}",
+    )
+    recommendation = rank_formalization_candidates([edited], broker=build_default_verification_broker())[0]
+    _append_state_marker(
+        store,
+        _FORMALIZATION_RECOMMENDATION_PREFIX,
+        recommendation.model_dump(mode="json"),
+        event_kind="formalization_recommendation_recorded",
+        message=f"updated formalization recommendation for {source_id}",
+        entity_id=edited.id,
+    )
+    return json.dumps(
+        {
+            "source_id": source_id,
+            "fragment": edited.model_dump(mode="json"),
+            "recommendation": recommendation.model_dump(mode="json"),
+        },
+        indent=2,
+    )
+
+
+def cmd_proof_verify_queue(
+    source_id: str,
+    root: str | Path = ".",
+    *,
+    backend_target: str = "",
+    route_id: str = "",
+    notes: str = "",
+) -> str:
+    store = get_store(root)
+    fragment_or_error = _translate_source_fragment(store, source_id, backend_target=backend_target or None, route_id=route_id or None)
+    if isinstance(fragment_or_error, str):
+        return fragment_or_error
+    fragment = fragment_or_error
+    if notes:
+        fragment = fragment.model_copy(
+            update={
+                "notes": notes if not fragment.notes else f"{fragment.notes}; {notes}",
+            }
+        )
+    queued = fragment.queue_for_verification(backend_target=backend_target or fragment.backend_target)
+    _persist_verification_fragment(
+        store,
+        queued,
+        event_kind="verification_fragment_queued",
+        message=f"queued verification for {source_id}",
+    )
+    recommendation = rank_formalization_candidates([queued], broker=build_default_verification_broker())[0]
+    return json.dumps(
+        {
+            "source_id": source_id,
+            "machine_check_status": queued.status.value,
+            "translation_status": queued.translation_status.value,
+            "fragment": queued.model_dump(mode="json"),
+            "recommendation": recommendation.model_dump(mode="json"),
+        },
+        indent=2,
+    )
+
+
+def cmd_proof_verify_run(
+    source_id: str,
+    root: str | Path = ".",
+    *,
+    backend_target: str = "",
+    notes: str = "",
+) -> str:
+    store = get_store(root)
+    fragment = _latest_verification_fragment(store, source_id)
+    if fragment is None:
+        queued = cmd_proof_verify_queue(source_id, root=root, backend_target=backend_target, notes=notes)
+        if queued.startswith("verify:blocked:"):
+            return queued
+        fragment_payload = json.loads(queued)["fragment"]
+        fragment = VerificationFragment.model_validate(fragment_payload)
+    run_fragment, result, _ = _run_machine_check(store, fragment, backend_target=backend_target or None, summary=notes)
+    scoped_result = _record_verification_result(
+        store,
+        run_fragment,
+        result,
+        theorem_id=run_fragment.scope.theorem_id,
+        obligation_id=run_fragment.scope.obligation_id,
+        blocker_id=run_fragment.scope.blocker_id,
+        proof_step_id=run_fragment.scope.proof_step_id,
+        route_id=run_fragment.scope.route_id,
+        notes=notes,
+    )
+    _persist_verification_fragment(
+        store,
+        run_fragment,
+        event_kind="verification_fragment_ran",
+        message=f"ran machine check for {source_id}",
+    )
+    payload = {
+        "source_id": source_id,
+        "machine_check_status": run_fragment.status.value,
+        "translation_status": run_fragment.translation_status.value,
+        "fragment": run_fragment.model_dump(mode="json"),
+        "result": result.model_dump(mode="json"),
+        "verification_record": scoped_result.model_dump(mode="json"),
+        "trace": machine_check_trace(run_fragment, backend=result.backend, summary=result.summary).model_dump(mode="json"),
+    }
+    return json.dumps(payload, indent=2)
+
+
+def cmd_proof_verify_status(source_id: str, root: str | Path = ".") -> str:
+    store = get_store(root)
+    fragment = _latest_verification_fragment(store, source_id)
+    result_record = _latest_verification_result(store, source_id)
+    payload = _verification_summary_payload(store, source_id=source_id, fragment=fragment, result_record=result_record)
+    payload["results"] = [
+        record.model_dump(mode="json")
+        for record in _dedupe_verification_result_records(
+            [record for record in _verification_results(store) if record.source_id == source_id or getattr(record.result, "fragment_id", "") == source_id]
+        )
+    ]
+    return json.dumps(payload, indent=2)
+
+
+def cmd_proof_verify_result(source_id: str, root: str | Path = ".") -> str:
+    store = get_store(root)
+    record = _latest_verification_result(store, source_id)
+    if record is None:
+        return f"verify:result:not-found:{source_id}"
+    return json.dumps(record.model_dump(mode="json"), indent=2)
+
+
+def cmd_proof_verify_accept(source_id: str, root: str | Path = ".", *, notes: str = "") -> str:
+    store = get_store(root)
+    record = _latest_verification_result(store, source_id)
+    if record is None:
+        return f"verify:accept:blocked:verification result {source_id} not found"
+    fragment = _latest_verification_fragment(store, record.result.fragment_id)
+    if fragment is None:
+        return f"verify:accept:blocked:fragment {record.result.fragment_id} not found"
+    result = record.result.accept(notes=notes or None)
+    updated_fragment = fragment.accept_after_review(result_id=result.id, notes=notes)
+    _persist_verification_fragment(
+        store,
+        updated_fragment,
+        event_kind="verification_fragment_accepted",
+        message=f"accepted verification result {result.id}",
+    )
+    scoped_record = _record_verification_result(
+        store,
+        updated_fragment,
+        result,
+        theorem_id=updated_fragment.scope.theorem_id,
+        obligation_id=updated_fragment.scope.obligation_id,
+        blocker_id=updated_fragment.scope.blocker_id,
+        proof_step_id=updated_fragment.scope.proof_step_id,
+        route_id=updated_fragment.scope.route_id,
+        notes=notes,
+    )
+    return json.dumps(
+        {
+            "source_id": source_id,
+            "machine_check_status": updated_fragment.status.value,
+            "translation_status": updated_fragment.translation_status.value,
+            "fragment": updated_fragment.model_dump(mode="json"),
+            "result": result.model_dump(mode="json"),
+            "verification_record": scoped_record.model_dump(mode="json"),
+        },
+        indent=2,
+    )
+
+
+def cmd_proof_verify_reject(source_id: str, root: str | Path = ".", *, notes: str = "") -> str:
+    store = get_store(root)
+    record = _latest_verification_result(store, source_id)
+    if record is None:
+        return f"verify:reject:blocked:verification result {source_id} not found"
+    fragment = _latest_verification_fragment(store, record.result.fragment_id)
+    if fragment is None:
+        return f"verify:reject:blocked:fragment {record.result.fragment_id} not found"
+    result = record.result.reject(notes=notes or None)
+    updated_fragment = fragment.reject_by_human(result_id=result.id, notes=notes)
+    _persist_verification_fragment(
+        store,
+        updated_fragment,
+        event_kind="verification_fragment_rejected",
+        message=f"rejected verification result {result.id}",
+    )
+    scoped_record = _record_verification_result(
+        store,
+        updated_fragment,
+        result,
+        theorem_id=updated_fragment.scope.theorem_id,
+        obligation_id=updated_fragment.scope.obligation_id,
+        blocker_id=updated_fragment.scope.blocker_id,
+        proof_step_id=updated_fragment.scope.proof_step_id,
+        route_id=updated_fragment.scope.route_id,
+        notes=notes,
+    )
+    return json.dumps(
+        {
+            "source_id": source_id,
+            "machine_check_status": updated_fragment.status.value,
+            "translation_status": updated_fragment.translation_status.value,
+            "fragment": updated_fragment.model_dump(mode="json"),
+            "result": result.model_dump(mode="json"),
+            "verification_record": scoped_record.model_dump(mode="json"),
+        },
+        indent=2,
+    )
+
+
+def cmd_proof_verify_stale(
+    source_id: str,
+    root: str | Path = ".",
+    *,
+    reason: str = "",
+    changed_dependency_ids: list[str] | None = None,
+) -> str:
+    store = get_store(root)
+    fragment = _latest_verification_fragment(store, source_id)
+    if fragment is None:
+        return f"verify:stale:blocked:source {source_id} not found"
+    changed_versions = [
+        VerificationDependencyVersion(
+            dependency_id=dependency_id,
+            version=fragment.ir_version + 1,
+            kind="external_reference",
+            digest=f"stale:{dependency_id}:{fragment.ir_version + 1}",
+        )
+        for dependency_id in (changed_dependency_ids or [])
+    ]
+    stale_fragment = fragment.mark_stale_after_change(changed_dependency_versions=changed_versions or None, reason=reason)
+    _persist_verification_fragment(
+        store,
+        stale_fragment,
+        event_kind="verification_fragment_stale",
+        message=f"marked verification fragment {stale_fragment.id} stale",
+    )
+    return json.dumps(
+        {
+            "source_id": source_id,
+            "machine_check_status": stale_fragment.status.value,
+            "translation_status": stale_fragment.translation_status.value,
+            "fragment": stale_fragment.model_dump(mode="json"),
+        },
+        indent=2,
+    )
+
+
+def cmd_proof_revalidate(
+    source_id: str,
+    root: str | Path = ".",
+    *,
+    backend_target: str = "",
+    notes: str = "",
+) -> str:
+    store = get_store(root)
+    fragment = _latest_verification_fragment(store, source_id)
+    if fragment is None:
+        return f"revalidate:blocked:source {source_id} not found"
+    stale_fragment = fragment.mark_stale_after_change(reason=notes or "revalidated after dependency change")
+    _persist_verification_fragment(
+        store,
+        stale_fragment,
+        event_kind="verification_fragment_stale",
+        message=f"marked verification fragment {stale_fragment.id} stale for revalidation",
+    )
+    if fragment.source_type == VerificationSourceKind.theorem_contract:
+        source = get_contract(store, fragment.source_id)
+        if source is None:
+            return f"revalidate:blocked:source {fragment.source_id} not found"
+        translation = translate_selection([source], project_id=load_state(store).project_id, route_id=fragment.scope.route_id, backend_target=backend_target or fragment.backend_target)
+        if translation.failures:
+            return f"revalidate:blocked:translation_failed:{translation.failures[0].reason}"
+        revalidated = translation.fragments[0]
+    elif fragment.source_type == VerificationSourceKind.proof_obligation:
+        obligation = next((item for item in list_obligations(store) if item.id == fragment.source_id), None)
+        if obligation is None:
+            return f"revalidate:blocked:source {fragment.source_id} not found"
+        translation = translate_selection([obligation], project_id=load_state(store).project_id, route_id=fragment.scope.route_id, backend_target=backend_target or fragment.backend_target)
+        if translation.failures:
+            return f"revalidate:blocked:translation_failed:{translation.failures[0].reason}"
+        revalidated = translation.fragments[0]
+    else:
+        revalidated = fragment.model_copy(
+            update={
+                "id": f"vfrag_{fragment.id.split('_', 1)[-1]}_{len(_verification_fragments(store)) + 1}",
+                "backend_target": backend_target or fragment.backend_target,
+            }
+        )
+    revalidated = revalidated.model_copy(
+        update={
+            "provenance": revalidated.provenance.model_copy(
+                update={
+                    "derived_from_ids": list(dict.fromkeys([*revalidated.provenance.derived_from_ids, fragment.id])),
+                    "machine_path": [*revalidated.provenance.machine_path, "revalidate fragment"],
+                }
+            )
+        }
+    )
+    revalidated = revalidated.queue_for_verification(backend_target=backend_target or revalidated.backend_target)
+    _persist_verification_fragment(
+        store,
+        revalidated,
+        event_kind="verification_fragment_revalidated",
+        message=f"revalidated verification fragment {source_id}",
+    )
+    return json.dumps(
+        {
+            "source_id": source_id,
+            "stale_fragment": stale_fragment.model_dump(mode="json"),
+            "revalidated_fragment": revalidated.model_dump(mode="json"),
+            "machine_check_status": revalidated.status.value,
+            "translation_status": revalidated.translation_status.value,
+        },
+        indent=2,
+    )
+
+
+def cmd_proof_trace_machine_check(source_id: str, root: str | Path = ".") -> str:
+    store = get_store(root)
+    fragment = _latest_verification_fragment(store, source_id)
+    if fragment is None:
+        return f"trace:machine-check:blocked:source {source_id} not found"
+    record = _latest_verification_result(store, source_id)
+    trace_artifact: VerificationArtifact | None = None
+    if record is not None:
+        trace_artifact = machine_check_trace(fragment, backend=record.result.backend, summary=record.result.summary)
+    payload = _verification_summary_payload(store, source_id=source_id, fragment=fragment, result_record=record)
+    payload["trace"] = trace_artifact.model_dump(mode="json") if trace_artifact is not None else None
+    _append_state_marker(
+        store,
+        _VERIFICATION_TRACE_PREFIX,
+        payload,
+        event_kind="verification_trace_recorded",
+        message=f"traced machine check for {source_id}",
+        entity_id=fragment.id,
+    )
     return json.dumps(payload, indent=2)
 
 
