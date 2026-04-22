@@ -39,8 +39,8 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Review and Trust
 
-- [ ] **REV-01**: User can approve, downgrade, or reject imported results before they are callable
-- [ ] **REV-02**: User can inspect a blocker log that records why a proof path stalled
+- [x] **REV-01**: User can approve, downgrade, or reject imported results before they are callable
+- [x] **REV-02**: User can inspect a blocker log that records why a proof path stalled
 
 ## v2 Requirements
 
@@ -88,8 +88,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | MEM-01 | Phase 4 | Complete |
 | RET-01 | Phase 4 | Complete |
 | RET-02 | Phase 4 | Complete |
-| REV-01 | Phase 5 | Pending |
-| REV-02 | Phase 5 | Pending |
+| REV-01 | Phase 5 | Complete |
+| REV-02 | Phase 5 | Complete |
 
 **Coverage:**
 - v1 requirements: 17 total
