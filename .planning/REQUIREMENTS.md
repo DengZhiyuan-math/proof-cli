@@ -33,9 +33,9 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Retrieval and Memory
 
-- [ ] **MEM-01**: User can store and retrieve structured proof memory across working, semantic, episodic, and procedural layers
-- [ ] **RET-01**: User can search current project results before looking outside the project
-- [ ] **RET-02**: User can import an external result with source metadata and a trust level
+- [x] **MEM-01**: User can store and retrieve structured proof memory across working, semantic, episodic, and procedural layers
+- [x] **RET-01**: User can search current project results before looking outside the project
+- [x] **RET-02**: User can import an external result with source metadata and a trust level
 
 ### Review and Trust
 
@@ -85,9 +85,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CHK-02 | Phase 3 | Complete |
 | CHK-03 | Phase 3 | Complete |
 | CHK-04 | Phase 3 | Complete |
-| MEM-01 | Phase 4 | Pending |
-| RET-01 | Phase 4 | Pending |
-| RET-02 | Phase 4 | Pending |
+| MEM-01 | Phase 4 | Complete |
+| RET-01 | Phase 4 | Complete |
+| RET-02 | Phase 4 | Complete |
 | REV-01 | Phase 5 | Pending |
 | REV-02 | Phase 5 | Pending |
 

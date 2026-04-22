@@ -10,7 +10,7 @@
 | 1 | Foundation | 7/7 | Complete    | 2026-04-21 |
 | 2 | Registry | 8/8 | Complete    | 2026-04-21 |
 | 3 | DSL and Checks | 8/8 | Complete    | 2026-04-22 |
-| 4 | Memory and Retrieval | Add layered memory and project-first retrieval | MEM-01, RET-01, RET-02 | 4 |
+| 4 | Memory and Retrieval | 8/8 | Complete    | 2026-04-22 |
 | 5 | Review and Trust | Gate imported results and make blockers explicit | REV-01, REV-02 | 4 |
 
 ## Phase Details
