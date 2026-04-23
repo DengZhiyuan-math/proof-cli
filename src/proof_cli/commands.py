@@ -25,10 +25,54 @@ from .automation import (
 )
 from .automation_eval import AutomationEvaluationRecord, replay_automation_benchmark
 from .debug_tasks import ProofDebugTaskBatch, debug_task_batch_from_reports
+from .exchange import (
+    bundle_from_json,
+    bundle_to_json,
+    export_exchange_bundle,
+    import_exchange_bundle,
+    inspect_exchange_bundle,
+    report_to_json,
+    summarize_import_report,
+    summarize_inspect_report,
+)
 from .export import build_export
 from .evidence import EvidenceChain, build_evidence_chains
 from .formal_bridge import FormalBridgeProofStep, machine_check_trace, translate_selection
 from .formalization_recommendations import FormalizationRecommendation, rank_formalization_candidates
+from .publication import (
+    PublicationCitationKind,
+    PublicationReleaseStatus,
+    PublicationReadiness,
+    PublicationVisibility,
+    build_publication_bundle,
+    build_publication_manifest,
+    build_publication_paper,
+    build_publication_supplement,
+    create_publication_view,
+    list_citation_provenance,
+    list_publication_bundle_snapshots,
+    list_publication_state_records,
+    list_publication_views,
+    list_release_records,
+    list_verification_summaries,
+    record_citation_provenance,
+    record_editorial_note,
+    record_publication_bundle_snapshot,
+    record_release_approval,
+    record_release_withdrawal,
+    record_verification_summary,
+    publication_paper_export,
+    publication_supplement_export,
+    render_publication_bundle,
+    save_publication_workspace,
+    set_publication_state,
+    summarize_publication_bundle_snapshot,
+    summarize_publication_citation,
+    summarize_publication_release,
+    summarize_publication_state,
+    summarize_publication_verification,
+    summarize_publication_view,
+)
 from .governance import (
     GovernanceAssetRecord,
     GovernanceAutomationRecord,
@@ -67,6 +111,43 @@ from .governance import (
     update_domain_pack,
 )
 from .domain_packs import DomainPack
+from .collaboration import (
+    BranchComparison,
+    BranchStatus,
+    CollaborationPolicy,
+    CollaborationRole,
+    CommentThreadStatus,
+    Contributor,
+    ReviewGovernanceState,
+    SharedAssetPublicationStatus,
+    add_comment,
+    compare_branches,
+    create_branch,
+    get_branch,
+    get_contributor,
+    get_policy as get_collaboration_policy,
+    list_branches,
+    list_comment_threads,
+    list_comments,
+    list_contributors,
+    list_publications,
+    list_review_records,
+    merge_branch,
+    publish_shared_asset,
+    record_review_decision,
+    record_review_request,
+    set_collaboration_policy,
+    set_contributor_role,
+    summarize_branch,
+    summarize_comment,
+    summarize_comment_thread,
+    summarize_contributor,
+    summarize_policy,
+    summarize_publication,
+    summarize_review_record,
+    summarize_state as summarize_collaboration_state,
+    upsert_contributor,
+)
 from .memory import MemoryArtifact, MemoryLayer, list_memory_artifacts, record_memory
 from .recommendations import recommend_cross_project_assets
 from .proof_state import (
@@ -82,6 +163,7 @@ from .proof_state import (
     note_unresolved_trust_call,
     record_theorem_usage,
 )
+from .snapshot import create_snapshot
 from .references import ReferenceRecord, ReferenceReviewStatus, ReferenceSourceType
 from .rendering import render_status
 from .reusable_assets import ReusableAsset
@@ -1654,6 +1736,156 @@ def cmd_proof_provenance_show(target_id: str, root: str | Path = ".") -> str:
     return f"provenance:not-found:{target_id}"
 
 
+def cmd_publication_list(root: str | Path = ".", *, object_type: str = "") -> str:
+    store = get_store(root)
+    records = list_publication_state_records(store, object_type=object_type)
+    if not records:
+        return "No publication claims"
+    lines = ["Publication claims:"]
+    lines.extend(f"- {summarize_publication_state(record)}" for record in records)
+    return "\n".join(lines)
+
+
+def cmd_publication_show(object_id: str, root: str | Path = ".") -> str:
+    store = get_store(root)
+    records = list_publication_state_records(store, object_id=object_id)
+    if not records:
+        return f"Publication claim not found: {object_id}"
+    return json.dumps([record.model_dump(mode="json") for record in records], indent=2)
+
+
+def cmd_publication_set(
+    object_id: str,
+    readiness: str,
+    root: str | Path = ".",
+    *,
+    object_type: str = "theorem_contract",
+    display_name: str = "",
+    title: str = "",
+    section_placement: str = "",
+    reason: str = "",
+    citation_kind: str = "",
+    internal_only: bool = False,
+    editorial_note: list[str] | None = None,
+    supporting_reference_id: list[str] | None = None,
+    supporting_theorem_id: list[str] | None = None,
+    release_status: str = "draft",
+    release_notes: str = "",
+) -> str:
+    store = get_store(root)
+    release_status_value = PublicationReleaseStatus.approved if release_status == "draft" else PublicationReleaseStatus(release_status)
+    state_record = set_publication_state(
+        store,
+        object_id,
+        PublicationReadiness(readiness),
+        object_type=object_type,
+        display_name=display_name,
+        title=title,
+        section_placement=section_placement,
+        reason=reason,
+        citation_kind=PublicationCitationKind(citation_kind) if citation_kind else None,
+        internal_only=internal_only,
+        editorial_notes=editorial_note,
+        supporting_reference_ids=supporting_reference_id,
+        supporting_theorem_ids=supporting_theorem_id,
+        release_status=release_status_value,
+        release_notes=release_notes,
+        updated_by=display_name or "human",
+    )
+    if readiness == "paper_ready":
+        view_audience = "paper"
+        view_visibility = PublicationVisibility.paper
+    elif readiness == "supplement_ready":
+        view_audience = "supplement"
+        view_visibility = PublicationVisibility.supplement
+    else:
+        view_audience = "internal"
+        view_visibility = PublicationVisibility.internal_only
+    if internal_only:
+        view_visibility = PublicationVisibility.internal_only
+    if title or section_placement or citation_kind or editorial_note or supporting_reference_id or supporting_theorem_id or release_notes:
+        view = create_publication_view(
+            store,
+            name=title or display_name or object_id,
+            scope=object_type,
+            audience=view_audience,
+            visibility=view_visibility,
+            included_object_ids=[object_id],
+            section_mapping={object_id: section_placement} if section_placement else None,
+            notes=release_notes or reason,
+        )
+        record_editorial_note(store, object_id, release_notes or reason, section_label=section_placement, updated_by=display_name or "human")
+        if supporting_reference_id:
+            for reference_id in supporting_reference_id:
+                record_citation_provenance(store, object_id, reference_id, usage_type=citation_kind or "project-original", citation_note=reason)
+        if supporting_theorem_id:
+            for theorem_id in supporting_theorem_id:
+                record_citation_provenance(store, theorem_id, object_id, usage_type=citation_kind or "project-original", citation_note=reason)
+        if release_status and release_status != "draft":
+            release_enum = PublicationReleaseStatus(release_status)
+            if release_enum == PublicationReleaseStatus.withdrawn:
+                record_release_withdrawal(store, view.id, withdrawn_by=[display_name] if display_name else [], reason=release_notes or reason)
+            else:
+                record_release_approval(store, view.id, approved_by=[display_name] if display_name else [], notes=release_notes or reason, status=release_enum)
+    return state_record.model_dump_json(indent=2)
+
+
+def cmd_publication_view(root: str | Path = ".", *, audience: str = "paper") -> str:
+    store = get_store(root)
+    state_records = list_publication_state_records(store)
+    views = [view for view in list_publication_views(store) if audience == "" or view.visibility.value == audience or audience == "paper" and view.visibility == PublicationVisibility.paper]
+    lines = ["Publication workspace:"]
+    lines.append("State records:")
+    if state_records:
+        lines.extend(f"- {summarize_publication_state(record)}" for record in state_records)
+    else:
+        lines.append("- none")
+    lines.append("Views:")
+    if views:
+        lines.extend(f"- {summarize_publication_view(view)}" for view in views)
+    else:
+        lines.append("- none")
+    return "\n".join(lines)
+
+
+def cmd_publication_export(root: str | Path = ".", *, audience: str = "paper", format: str = "paper") -> str:
+    store = get_store(root)
+    if format == "paper":
+        return publication_paper_export(store)
+    if format == "supplement":
+        return publication_supplement_export(store)
+    if format == "bundle":
+        return render_publication_bundle(build_publication_bundle(store))
+    if format == "manifest":
+        return json.dumps(build_publication_manifest(store), indent=2, sort_keys=True)
+    return f"publication:unsupported-format:{format}"
+
+
+def cmd_publication_release(
+    root: str | Path = ".",
+    *,
+    audience: str = "paper",
+    status: str = "approved",
+    approved_by: list[str] | None = None,
+    rationale: str = "",
+    note: str = "",
+) -> str:
+    store = get_store(root)
+    record = record_release_approval(store, bundle_id=audience, approved_by=approved_by, notes=note or rationale, status=PublicationReleaseStatus(status))
+    return record.model_dump_json(indent=2)
+
+
+def cmd_publication_withdraw(
+    release_id: str,
+    root: str | Path = ".",
+    *,
+    rationale: str = "",
+    approved_by: list[str] | None = None,
+) -> str:
+    release = record_release_withdrawal(get_store(root), release_id, withdrawn_by=approved_by, reason=rationale)
+    return release.model_dump_json(indent=2)
+
+
 def cmd_init(root: str | Path = ".") -> str:
     store = ensure_project(root)
     state = load_state(store)
@@ -1661,7 +1893,8 @@ def cmd_init(root: str | Path = ".") -> str:
 
 
 def cmd_status(root: str | Path = ".") -> str:
-    return render_status(summarize_state(get_store(root)))
+    store = get_store(root)
+    return render_status(summarize_state(store)) + "\n" + summarize_collaboration_state(store)
 
 
 def cmd_goal_set(goal: str, root: str | Path = ".") -> str:
@@ -1683,6 +1916,9 @@ def cmd_theorem_add(
     assumption: list[str] | None = None,
     export: list[str] | None = None,
     source_ref: str = "internal/project",
+    created_by: str = "human",
+    updated_by: str = "human",
+    contributor: list[str] | None = None,
     notes: str = "",
 ) -> str:
     contract = add_theorem(
@@ -1694,6 +1930,9 @@ def cmd_theorem_add(
         assumptions=assumption,
         exports=export,
         source_ref=source_ref,
+        created_by=created_by,
+        updated_by=updated_by,
+        contributors=contributor,
         notes=notes,
     )
     return contract.model_dump_json(indent=2)
@@ -1832,6 +2071,180 @@ def cmd_export(root: str | Path = ".") -> str:
     return build_export(get_store(root))
 
 
+def cmd_exchange_export(root: str | Path = ".", *, note: str = "") -> str:
+    return bundle_to_json(export_exchange_bundle(get_store(root), note=note))
+
+
+def cmd_exchange_import(bundle_json: str, root: str | Path = ".") -> str:
+    report = import_exchange_bundle(get_store(root), bundle_from_json(bundle_json))
+    return report_to_json(report)
+
+
+def cmd_handoff_create(root: str | Path = ".", *, note: str = "") -> str:
+    snapshot = create_snapshot(get_store(root), note=note)
+    bundle = export_exchange_bundle(get_store(root), note=note or snapshot.handoff_note)
+    return bundle_to_json(bundle)
+
+
+def cmd_handoff_inspect(bundle_json: str = "", root: str | Path = ".") -> str:
+    if bundle_json:
+        report = inspect_exchange_bundle(bundle_from_json(bundle_json))
+        return report_to_json(report)
+    store = get_store(root)
+    bundle = export_exchange_bundle(store)
+    report = inspect_exchange_bundle(bundle)
+    return report_to_json(report)
+
+
+def cmd_contributor_list(root: str | Path = ".", *, team_id: str = "", status: str = "") -> str:
+    records = list_contributors(get_store(root), team_id=team_id, status=status)
+    if not records:
+        return "No contributors"
+    return "\n".join(summarize_contributor(record) for record in records)
+
+
+def cmd_role_show(contributor_id: str, root: str | Path = ".") -> str:
+    store = get_store(root)
+    contributor = get_contributor(store, contributor_id)
+    if contributor is None:
+        return f"Contributor not found: {contributor_id}"
+    policy = get_collaboration_policy(store)
+    payload = {
+        "contributor": contributor.model_dump(mode="json"),
+        "policy": policy.model_dump(mode="json") if policy is not None else None,
+    }
+    return json.dumps(payload, indent=2)
+
+
+def cmd_review_request(
+    object_type: str,
+    object_id: str,
+    root: str | Path = ".",
+    *,
+    reviewer_id: str = "human",
+    rationale: str = "",
+) -> str:
+    record = record_review_request(get_store(root), object_type, object_id, reviewer_id=reviewer_id, rationale=rationale)
+    return json.dumps(record.model_dump(mode="json"), indent=2)
+
+
+def cmd_review_list(root: str | Path = ".", *, object_type: str = "", object_id: str = "") -> str:
+    records = list_review_records(get_store(root), object_type=object_type, object_id=object_id)
+    if not records:
+        return "No review records"
+    return "\n".join(summarize_review_record(record) for record in records)
+
+
+def cmd_review_decide(
+    review_id: str,
+    decision: str,
+    root: str | Path = ".",
+    *,
+    reviewer_id: str = "human",
+    rationale: str = "",
+) -> str:
+    record = record_review_decision(
+        get_store(root),
+        review_id,
+        ReviewGovernanceState(decision),
+        reviewer_id=reviewer_id,
+        rationale=rationale,
+    )
+    return json.dumps(record.model_dump(mode="json"), indent=2)
+
+
+def cmd_comment_add(
+    object_type: str,
+    object_id: str,
+    content: str,
+    root: str | Path = ".",
+    *,
+    author_id: str = "human",
+    thread_id: str = "",
+    status: str = "open",
+) -> str:
+    comment = add_comment(
+        get_store(root),
+        object_type,
+        object_id,
+        author_id=author_id,
+        content=content,
+        thread_id=thread_id,
+        status=CommentThreadStatus(status),
+    )
+    return json.dumps(comment.model_dump(mode="json"), indent=2)
+
+
+def cmd_comment_list(
+    root: str | Path = ".",
+    *,
+    thread_id: str = "",
+    object_type: str = "",
+    object_id: str = "",
+) -> str:
+    threads = list_comment_threads(get_store(root), object_type=object_type, object_id=object_id)
+    comments = list_comments(get_store(root), thread_id=thread_id, object_type=object_type, object_id=object_id)
+    if not threads and not comments:
+        return "No comments"
+    lines = ["Comment threads:"]
+    if threads:
+        lines.extend(f"- {summarize_comment_thread(thread)}" for thread in threads)
+    else:
+        lines.append("- none")
+    lines.append("Comments:")
+    if comments:
+        lines.extend(f"- {summarize_comment(comment)}" for comment in comments)
+    else:
+        lines.append("- none")
+    return "\n".join(lines)
+
+
+def cmd_branch_create(
+    scope: str,
+    name: str,
+    root: str | Path = ".",
+    *,
+    created_by: str = "human",
+    derived_from: str = "",
+    notes: str = "",
+    downstream_asset_id: list[str] | None = None,
+) -> str:
+    branch = create_branch(
+        get_store(root),
+        scope,
+        name,
+        created_by=created_by,
+        derived_from=derived_from or None,
+        notes=notes,
+        downstream_asset_ids=downstream_asset_id or [],
+    )
+    return json.dumps(branch.model_dump(mode="json"), indent=2)
+
+
+def cmd_branch_list(root: str | Path = ".", *, scope: str = "", status: str = "") -> str:
+    branches = list_branches(get_store(root), scope=scope, status=status)
+    if not branches:
+        return "No branches"
+    return "\n".join(summarize_branch(branch) for branch in branches)
+
+
+def cmd_branch_compare(left_branch_id: str, right_branch_id: str, root: str | Path = ".") -> str:
+    comparison = compare_branches(get_store(root), left_branch_id, right_branch_id)
+    return json.dumps(comparison.model_dump(mode="json"), indent=2)
+
+
+def cmd_branch_merge(
+    branch_id: str,
+    root: str | Path = ".",
+    *,
+    into_branch_id: str = "",
+    reviewer_id: str = "human",
+    rationale: str = "",
+) -> str:
+    branch = merge_branch(get_store(root), branch_id, into_branch_id=into_branch_id or None, reviewer_id=reviewer_id, rationale=rationale)
+    return json.dumps(branch.model_dump(mode="json"), indent=2)
+
+
 def cmd_goal_open(theorem_id: str, root: str | Path = ".") -> str:
     return cmd_goal_set(theorem_id, root=root)
 
@@ -1867,6 +2280,15 @@ def cmd_proof_asset_publish(
     store = get_store(root)
     asset = _load_model_json(asset_json, ReusableAsset)
     record = publish_reusable_asset(store, asset, review_action=review_action, reviewer=reviewer, notes=notes)
+    publish_shared_asset(
+        store,
+        record.asset.id,
+        published_to="team_library" if record.asset.is_reusable() else "project_library",
+        created_by=reviewer,
+        approved_by=[reviewer],
+        status=SharedAssetPublicationStatus.approved if record.asset.is_reusable() else SharedAssetPublicationStatus.proposed_for_review,
+        provenance_notes=notes or record.asset.provenance.notes,
+    )
     return render_json(record)
 
 
@@ -1883,6 +2305,15 @@ def cmd_proof_asset_review(
     if existing is None:
         return f"asset:review:blocked:asset {asset_id} not found"
     record = publish_reusable_asset(store, existing.asset, review_action=action, reviewer=reviewer, notes=notes)
+    publish_shared_asset(
+        store,
+        record.asset.id,
+        published_to="team_library" if record.asset.is_reusable() else "project_library",
+        created_by=reviewer,
+        approved_by=[reviewer],
+        status=SharedAssetPublicationStatus.approved if record.asset.is_reusable() else SharedAssetPublicationStatus.proposed_for_review,
+        provenance_notes=notes or record.asset.provenance.notes,
+    )
     return render_json(record)
 
 

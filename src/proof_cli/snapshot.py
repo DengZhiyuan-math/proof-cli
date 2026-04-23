@@ -8,6 +8,7 @@ from .memory import (
     synchronize_verification_history,
     synchronize_proof_debug_history,
 )
+from .publication import record_publication_bundle_snapshot
 from .proof_state import build_snapshot
 from .storage import ProjectStore, read_latest_snapshot
 
@@ -18,6 +19,7 @@ def create_snapshot(store: ProjectStore, note: str = "") -> ProjectSnapshot:
     snapshot = build_snapshot(store, handoff_note=note)
     handoff_snapshot = build_handoff_snapshot(store, snapshot, handoff_note=note)
     record_handoff_snapshot(store, handoff_snapshot)
+    record_publication_bundle_snapshot(store, snapshot.project_id, "handoff_snapshot", snapshot.model_dump(mode="json"))
     return snapshot
 
 

@@ -2,7 +2,7 @@ from pathlib import Path
 
 from proof_cli.domain import ProofObligation, TheoremProvenanceKind, TheoremReviewState, TheoremStatus, TrustLevel
 from proof_cli.obligations import add_obligation
-from proof_cli.proof_state import set_current_context
+from proof_cli.proof_state import load_state, set_current_context
 from proof_cli.memory import track_symbol
 from proof_cli.review import (
     approve_imported_result,
@@ -11,9 +11,12 @@ from proof_cli.review import (
     describe_verification_fragment,
     describe_verification_result_record,
     mark_verified,
+    publication_review_summary,
+    publication_verification_summary,
     render_verification_output,
     resolve_blocker_review,
 )
+from proof_cli.publication import list_release_records, record_release_approval, record_release_withdrawal, summarize_publication_release
 from proof_cli.storage import ensure_project, list_events
 from proof_cli.theorems import add_theorem
 from proof_cli.blockers import add_blocker
@@ -29,6 +32,7 @@ from proof_cli.verification_ir import (
     VerificationTranslationStatus,
 )
 from proof_cli.verification_results import VerificationResultRecord
+from proof_cli.verification_results import record_verification_result
 
 
 def test_review_gate_requires_confirmation_and_logs(tmp_path: Path):
@@ -90,6 +94,70 @@ def test_review_gate_controls_blockers_and_obligations(tmp_path: Path):
 
     resolved = resolve_blocker_review(store, "blk_1", confirmed=True, rationale="lemma added")
     assert resolved.allowed is True
+
+
+def test_publication_review_summaries_and_release_audit_are_selective(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    add_theorem(
+        store,
+        theorem_id="thm_pub",
+        kind="theorem",
+        name="Publication Theorem",
+        statement="A -> C",
+        assumptions=["A"],
+        exports=["C"],
+        status=TheoremStatus.verified,
+        trust_level=TrustLevel.project_verified,
+    )
+    add_obligation(
+        store,
+        ProofObligation(
+            id="obl_pub",
+            goal_statement="close publication gap",
+            required_for="thm_pub",
+        ),
+    )
+    mark_verified(store, "thm_pub", confirmed=True, rationale="publication ready")
+
+    scope = VerificationScope(project_id=load_state(store).project_id, theorem_id="thm_pub")
+    fragment = VerificationFragment(
+        source_type=VerificationSourceKind.theorem_contract,
+        source_id="thm_pub",
+        scope=scope,
+        status=VerificationFragmentStatus.machine_checked,
+        translation_status=VerificationTranslationStatus.translated,
+        backend_target="lean4",
+        provenance=VerificationProvenance(
+            source_kind=VerificationSourceKind.theorem_contract,
+            source_id="thm_pub",
+            source_label="publication theorem",
+            source_scope=scope,
+            derived_from_ids=["thm_pub"],
+            machine_path=["check publication theorem"],
+        ),
+    )
+    result = VerificationResult(
+        fragment_id=fragment.id,
+        backend="lean4",
+        summary="publication verification complete",
+        review_status=VerificationReviewStatus.accepted_after_review,
+        notes="accepted for publication",
+    )
+    record_verification_result(store, fragment, result, theorem_id="thm_pub", notes="accepted for publication")
+
+    review_lines = publication_review_summary(store, object_type="theorem_contract", object_id="thm_pub")
+    verification_lines = publication_verification_summary(store, theorem_id="thm_pub")
+    release = record_release_approval(store, "bundle_pub", approved_by=["editor"], notes="paper ready")
+    withdrawn = record_release_withdrawal(store, "bundle_pub", withdrawn_by=["editor"], reason="correction issued")
+
+    assert review_lines
+    assert verification_lines
+    assert "thm_pub" in review_lines[0]
+    assert "publication verification complete" in verification_lines[0]
+    assert release.status.value == "approved"
+    assert withdrawn.status.value == "withdrawn"
+    assert summarize_publication_release(withdrawn).startswith("bundle_pub")
+    assert list_release_records(store, bundle_id="bundle_pub")
 
 
 def test_review_records_checker_context_for_imported_approval(tmp_path: Path):

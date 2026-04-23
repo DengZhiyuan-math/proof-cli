@@ -4,6 +4,7 @@ import json
 import sqlite3
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from pydantic import TypeAdapter
@@ -82,6 +83,14 @@ class ProjectStore:
         conn.executescript(REFERENCE_SCHEMA)
         conn.commit()
         return conn
+
+
+def project_proof_dir(store: ProjectStore) -> Path:
+    return store.root / ".proof"
+
+
+def collaboration_state_path(store: ProjectStore) -> Path:
+    return project_proof_dir(store) / "collaboration.json"
 
 
 def create_project(root: str | Path, project_id: str) -> ProjectStore:
@@ -496,6 +505,51 @@ def read_latest_snapshot(store: ProjectStore) -> ProjectSnapshot | None:
     with store.connect() as conn:
         row = conn.execute("SELECT data FROM snapshots ORDER BY created_at DESC LIMIT 1").fetchone()
     return SNAPSHOT_ADAPTER.validate_json(row["data"]) if row else None
+
+
+def store_publication_state(store: ProjectStore, project_id: str, data: str, *, updated_at: datetime | None = None) -> None:
+    timestamp = (updated_at or utc_now()).isoformat()
+    with store.connect() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO publication_state(project_id, data, updated_at) VALUES (?, ?, ?)",
+            (project_id, data, timestamp),
+        )
+        conn.commit()
+
+
+def read_publication_state(store: ProjectStore) -> str | None:
+    with store.connect() as conn:
+        row = conn.execute("SELECT data FROM publication_state ORDER BY updated_at DESC LIMIT 1").fetchone()
+    return row["data"] if row else None
+
+
+def store_publication_bundle_snapshot(
+    store: ProjectStore,
+    snapshot_id: str,
+    project_id: str,
+    data: str,
+    *,
+    created_at: datetime | None = None,
+) -> None:
+    timestamp = (created_at or utc_now()).isoformat()
+    with store.connect() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO publication_bundle_snapshots(id, project_id, data, created_at) VALUES (?, ?, ?, ?)",
+            (snapshot_id, project_id, data, timestamp),
+        )
+        conn.commit()
+
+
+def list_publication_bundle_snapshots(store: ProjectStore) -> list[str]:
+    with store.connect() as conn:
+        rows = conn.execute("SELECT data FROM publication_bundle_snapshots ORDER BY created_at, id").fetchall()
+    return [row["data"] for row in rows]
+
+
+def read_latest_publication_bundle_snapshot(store: ProjectStore) -> str | None:
+    with store.connect() as conn:
+        row = conn.execute("SELECT data FROM publication_bundle_snapshots ORDER BY created_at DESC LIMIT 1").fetchone()
+    return row["data"] if row else None
 
 
 def store_state(store: ProjectStore, state: ProjectState) -> ProjectState:

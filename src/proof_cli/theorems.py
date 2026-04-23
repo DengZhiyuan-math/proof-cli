@@ -10,7 +10,9 @@ from .domain import (
     TrustLevel,
     utc_now,
 )
+from .references import normalize_citation_provenance
 from .proof_state import load_state, note_unresolved_trust_call, record_theorem_usage
+from .collaboration import Contributor, upsert_contributor
 from .storage import ProjectStore, append_event, get_contract, list_contracts, store_contract
 
 
@@ -33,6 +35,9 @@ def add_theorem(
     grounded_theorem_ids: list[str] | None = None,
     local_usage_notes: list[str] | None = None,
     imported_usage_notes: list[str] | None = None,
+    created_by: str = "human",
+    updated_by: str = "human",
+    contributors: list[str] | None = None,
     notes: str = "",
     supersedes_version: int | None = None,
 ) -> TheoremContract:
@@ -55,9 +60,14 @@ def add_theorem(
         grounded_theorem_ids=grounded_theorem_ids or [],
         local_usage_notes=local_usage_notes or [],
         imported_usage_notes=imported_usage_notes or [],
+        created_by=created_by,
+        updated_by=updated_by,
+        contributors=list(dict.fromkeys([*(contributors or []), created_by])),
         supersedes_version=supersedes_version,
         notes=notes,
     )
+    if created_by:
+        upsert_contributor(store, Contributor(id=created_by, display_name=created_by, role="contributor"))
     store_contract(store, contract)
     append_event(store, "theorem_added", f"added theorem {theorem_id}", entity_id=theorem_id, payload=contract.model_dump(mode="json"))
     return contract
@@ -73,11 +83,14 @@ def update_theorem(store: ProjectStore, theorem_id: str, **changes) -> TheoremCo
         "grounded_theorem_ids",
         "local_usage_notes",
         "imported_usage_notes",
+        "contributors",
     ):
         if field_name in update_data and update_data[field_name] is not None:
             existing_values = list(getattr(contract, field_name))
             incoming_values = list(update_data[field_name])
             update_data[field_name] = existing_values + [value for value in incoming_values if value not in existing_values]
+    if "updated_by" not in update_data:
+        update_data["updated_by"] = contract.updated_by
     update_data.setdefault("supersedes_version", contract.version)
     update_data.setdefault("updated_at", utc_now())
     updated = contract.model_copy(update=update_data)
@@ -163,3 +176,10 @@ def apply_theorem(store: ProjectStore, theorem_id: str) -> tuple[bool, str]:
     record_theorem_usage(store, theorem_id)
     append_event(store, "theorem_applied", f"applied theorem {theorem_id}", entity_id=theorem_id, payload={"theorem_id": theorem_id})
     return True, "applied"
+
+
+def theorem_publication_citation_kind(store: ProjectStore, theorem_id: str) -> str | None:
+    contract = get_contract(store, theorem_id)
+    if contract is None:
+        return None
+    return normalize_citation_provenance(theorem=contract).value

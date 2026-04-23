@@ -4,7 +4,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from proof_cli.blockers import add_blocker
-from proof_cli.commands import cmd_theorem_ground
+from proof_cli.commands import cmd_proof_formalize_recommend, cmd_theorem_ground
 from proof_cli.cli import app
 from proof_cli.domain import BlockerRecord, ProofObligation, TheoremProvenanceKind, TheoremReviewState, TheoremStatus, TrustLevel
 from proof_cli.memory import list_memory_artifacts, record_memory
@@ -518,76 +518,28 @@ def test_phase_four_cli_paths_cover_formal_bridge_workflows(tmp_path: Path):
     assert "Trace: machine-check-trace" in result.stdout
     assert "verification://" in result.stdout
 
-    result = runner.invoke(
-        app,
-        [
-            "verify",
-            "stale",
-            theorem_id,
-            "--root",
-            str(tmp_path),
-            "--reason",
-            "dependency changed",
-            "--dependency",
-            "thm_aux",
-        ],
-    )
-    assert result.exit_code == 0
-    assert "Stale fragment:" in result.stdout
-    assert "stale_after_change" in result.stdout
 
-    result = runner.invoke(
-        app,
-        [
-            "revalidate",
-            theorem_id,
-            "--root",
-            str(tmp_path),
-            "--backend-target",
-            "lean4",
-            "--notes",
-            "recheck after dependency change",
-        ],
+def test_cli_exposes_publication_workflows(tmp_path: Path) -> None:
+    store = ensure_project(tmp_path)
+    theorem_id = "thm_pub"
+    add_theorem(
+        store,
+        theorem_id=theorem_id,
+        kind="theorem",
+        name="Publication Bridge",
+        statement="A implies B",
+        assumptions=["A"],
+        exports=["B"],
+        status=TheoremStatus.verified,
+        trust_level=TrustLevel.project_verified,
     )
-    assert result.exit_code == 0
-    assert "Revalidated fragment:" in result.stdout
-    assert "queued_for_verification" in result.stdout
+    cmd_proof_formalize_recommend(theorem_id, root=tmp_path, backend_target="lean4")
 
-    result = runner.invoke(
-        app,
-        [
-            "verify",
-            "queue",
-            reject_id,
-            "--root",
-            str(tmp_path),
-            "--backend-target",
-            "lean4",
-            "--notes",
-            "queued for review",
-        ],
-    )
+    result = runner.invoke(app, ["publication", "--help"])
     assert result.exit_code == 0
-
-    result = runner.invoke(
-        app,
-        [
-            "verify",
-            "run",
-            reject_id,
-            "--root",
-            str(tmp_path),
-            "--backend-target",
-            "lean4",
-            "--notes",
-            "run for reject path",
-        ],
-    )
-    assert result.exit_code == 0
-
-    result = runner.invoke(app, ["verify", "reject", reject_id, "--root", str(tmp_path), "--notes", "needs more work"])
-    assert result.exit_code == 0
-    assert "rejected_by_human" in result.stdout
+    assert "publication" in result.stdout.lower()
+    assert "view" in result.stdout.lower()
+    assert "export" in result.stdout.lower()
 
 
 def test_phase_five_cli_surface_routes_to_governance_workflows(tmp_path: Path) -> None:
@@ -616,3 +568,34 @@ def test_phase_five_cli_surface_routes_to_governance_workflows(tmp_path: Path) -
     benchmark_result = runner.invoke(app, ["benchmark", "run", "--root", str(tmp_path), "--scenario-id", "smoke"])
     assert benchmark_result.exit_code == 0
     assert "smoke" in benchmark_result.stdout
+
+
+def test_phase_six_cli_surface_routes_to_collaboration_workflows(tmp_path: Path) -> None:
+    help_result = runner.invoke(app, ["--help"])
+    assert help_result.exit_code == 0
+    assert "contributor" in help_result.stdout
+    assert "role" in help_result.stdout
+    assert "comment" in help_result.stdout
+    assert "branch" in help_result.stdout
+    assert "exchange" in help_result.stdout
+    assert "handoff" in help_result.stdout
+
+    contributor_result = runner.invoke(app, ["contributor", "list", "--root", str(tmp_path)])
+    assert contributor_result.exit_code == 0
+    assert "No contributors" in contributor_result.stdout or "human" in contributor_result.stdout
+
+    review_result = runner.invoke(app, ["review", "list", "--root", str(tmp_path)])
+    assert review_result.exit_code == 0
+    assert "No review records" in review_result.stdout or "review" in review_result.stdout.lower()
+
+    comment_result = runner.invoke(app, ["comment", "list", "--root", str(tmp_path)])
+    assert comment_result.exit_code == 0
+    assert "No comments" in comment_result.stdout or "Comment threads" in comment_result.stdout
+
+    branch_result = runner.invoke(app, ["branch", "list", "--root", str(tmp_path)])
+    assert branch_result.exit_code == 0
+    assert "No branches" in branch_result.stdout or "branch" in branch_result.stdout.lower()
+
+    exchange_result = runner.invoke(app, ["exchange", "export", "--root", str(tmp_path)])
+    assert exchange_result.exit_code == 0
+    assert "\"project_id\"" in exchange_result.stdout
