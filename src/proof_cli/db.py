@@ -47,6 +47,19 @@ CREATE TABLE IF NOT EXISTS snapshots (
   created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS publication_state (
+  project_id TEXT PRIMARY KEY,
+  data TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS publication_bundle_snapshots (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  data TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS state (
   project_id TEXT PRIMARY KEY,
   data TEXT NOT NULL

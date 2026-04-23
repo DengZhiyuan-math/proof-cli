@@ -6,6 +6,8 @@ from proof_cli.automation_eval import AutomationEvaluationMode, build_automation
 from proof_cli.blockers import add_blocker
 from proof_cli.commands import (
     cmd_proof_asset_publish,
+    cmd_publication_export,
+    cmd_publication_set,
     cmd_export,
     cmd_proof_automate_plan,
     cmd_proof_automate_run,
@@ -163,6 +165,32 @@ def _seed_real_project(tmp_path: Path) -> tuple[str, str]:
 def test_export_includes_grounded_imported_reasoning_and_repair_state(tmp_path: Path):
     standard_reference_id, theorem_id = _seed_real_project(tmp_path)
 
+    cmd_publication_set(
+        theorem_id,
+        "paper_ready",
+        root=tmp_path,
+        title="Main Publication Claim",
+        section_placement="Section 3",
+        reason="paper-facing claim",
+        release_status="approved",
+    )
+    cmd_publication_set(
+        "thm_aux2",
+        "supplement_ready",
+        root=tmp_path,
+        title="Supplement Publication Claim",
+        section_placement="Supplement A",
+        reason="technical detail retained for supplement",
+    )
+    cmd_publication_set(
+        "thm_blackbox",
+        "internal_draft",
+        root=tmp_path,
+        title="Internal Publication Claim",
+        reason="keep internal only",
+        internal_only=True,
+    )
+
     scan_payload = json.loads(cmd_proof_bug_scan(theorem_id, root=tmp_path))
     bug_ids = {report["bug_type"]: report["id"] for report in scan_payload["reports"]}
     assumption_bug_id = bug_ids["assumption_mismatch"]
@@ -237,6 +265,9 @@ def test_export_includes_grounded_imported_reasoning_and_repair_state(tmp_path: 
     export_one = cmd_export(root=tmp_path)
     reopened_store = ensure_project(tmp_path)
     export_two = cmd_export(root=tmp_path)
+    publication_paper = cmd_publication_export(root=tmp_path, format="paper")
+    publication_supplement = cmd_publication_export(root=tmp_path, format="supplement")
+    publication_bundle = json.loads(cmd_publication_export(root=tmp_path, format="bundle"))
 
     assert export_one == export_two
     assert "Proof Export" in export_one
@@ -258,6 +289,9 @@ def test_export_includes_grounded_imported_reasoning_and_repair_state(tmp_path: 
     assert "Accepted verification results:" in export_one
     assert "Rejected verification results:" in export_one
     assert "Stale verification fragments:" in export_one
+    assert "Collaboration:" in export_one
+    assert "Contributors:" in export_one
+    assert "Review records:" in export_one
     assert "Failed verification fragments:" in export_one
     assert "step_bridge" in export_one
     assert "accepted_after_review" in export_one
@@ -269,6 +303,11 @@ def test_export_includes_grounded_imported_reasoning_and_repair_state(tmp_path: 
     assert "status=repaired" in export_one
     assert "Memory layers: working=1, semantic=1, episodic=1, procedural=1, handoffs=1" in export_one
     assert standard_reference_id in export_one
+    assert "Main Publication Claim" in publication_paper
+    assert "Internal Publication Claim" not in publication_paper
+    assert "Supplement Publication Claim" in publication_supplement
+    assert publication_bundle["publication_state"]["states"]
+    assert publication_bundle["bundle_snapshots"]
 
     stateful_references = {reference.id for reference in list_references(reopened_store)}
     assert standard_reference_id in stateful_references

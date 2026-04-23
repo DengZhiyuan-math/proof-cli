@@ -7,6 +7,32 @@ from .bugs import ProofBugReport, ProofBugScan, ProofBugSeverity, ProofBugStatus
 from .bugs import ProofBugReviewState
 from .debug_tasks import ProofDebugTaskBatch
 from .formalization_recommendations import rank_formalization_candidates
+from .publication import (
+    list_publication_bundle_snapshots,
+    list_publication_state_records,
+    list_publication_views,
+    list_release_records,
+    summarize_publication_bundle_snapshot,
+    summarize_publication_release,
+    summarize_publication_state,
+    summarize_publication_view,
+)
+from .collaboration import (
+    list_branches,
+    list_comment_threads,
+    list_comments,
+    list_contributors,
+    list_publications,
+    list_review_records,
+    get_policy,
+    summarize_branch,
+    summarize_comment,
+    summarize_comment_thread,
+    summarize_contributor,
+    summarize_policy,
+    summarize_publication,
+    summarize_review_record,
+)
 from .governance import (
     list_automation_records,
     list_benchmark_records,
@@ -179,6 +205,73 @@ def build_export(store: ProjectStore) -> str:
     lines.append("Grounded theorems:")
     if grounded_theorems:
         lines.extend(f"- {_format_theorem_grounding_line(theorem)}" for theorem in grounded_theorems)
+    else:
+        lines.append("- none")
+
+    contributors = list_contributors(store)
+    review_records = list_review_records(store)
+    comment_threads = list_comment_threads(store)
+    comments = list_comments(store)
+    branches = list_branches(store)
+    publications = list_publications(store)
+
+    lines.append("Collaboration:")
+    lines.append("Contributors:")
+    if contributors:
+        lines.extend(f"- {summarize_contributor(contributor)}" for contributor in contributors)
+    else:
+        lines.append("- none")
+    lines.append("Review records:")
+    if review_records:
+        lines.extend(f"- {summarize_review_record(record)}" for record in review_records)
+    else:
+        lines.append("- none")
+    lines.append("Comment threads:")
+    if comment_threads:
+        lines.extend(f"- {summarize_comment_thread(thread)}" for thread in comment_threads)
+    else:
+        lines.append("- none")
+    lines.append("Comments:")
+    if comments:
+        lines.extend(f"- {summarize_comment(comment)}" for comment in comments)
+    else:
+        lines.append("- none")
+    lines.append("Branches:")
+    if branches:
+        lines.extend(f"- {summarize_branch(branch)}" for branch in branches)
+    else:
+        lines.append("- none")
+    lines.append("Shared publications:")
+    if publications:
+        lines.extend(f"- {summarize_publication(publication)}" for publication in publications)
+    else:
+        lines.append("- none")
+    policy = get_policy(store)
+    lines.append("Collaboration policy:")
+    lines.append(f"- {summarize_policy(policy)}" if policy is not None else "- none")
+
+    publication_states = list_publication_state_records(store)
+    publication_views = list_publication_views(store)
+    publication_releases = list_release_records(store)
+    publication_bundle_snapshots = list_publication_bundle_snapshots(store)
+    lines.append("Publication:")
+    if publication_states:
+        lines.extend(f"- {summarize_publication_state(record)}" for record in publication_states)
+    else:
+        lines.append("- none")
+    lines.append("Publication views:")
+    if publication_views:
+        lines.extend(f"- {summarize_publication_view(view)}" for view in publication_views)
+    else:
+        lines.append("- none")
+    lines.append("Publication release history:")
+    if publication_releases:
+        lines.extend(f"- {summarize_publication_release(release)}" for release in publication_releases)
+    else:
+        lines.append("- none")
+    lines.append("Publication bundle snapshots:")
+    if publication_bundle_snapshots:
+        lines.extend(f"- {summarize_publication_bundle_snapshot(snapshot)}" for snapshot in publication_bundle_snapshots)
     else:
         lines.append("- none")
 

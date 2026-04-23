@@ -7,7 +7,16 @@ import typer
 from .commands import (
     cmd_blocker_add,
     cmd_blocker_list,
+    cmd_branch_compare,
+    cmd_branch_create,
+    cmd_branch_list,
+    cmd_branch_merge,
     cmd_export,
+    cmd_comment_add,
+    cmd_comment_list,
+    cmd_contributor_list,
+    cmd_exchange_export,
+    cmd_exchange_import,
     cmd_proof_asset_list,
     cmd_proof_asset_publish,
     cmd_proof_asset_review,
@@ -44,6 +53,12 @@ from .commands import (
     cmd_proof_policy_list,
     cmd_proof_policy_set,
     cmd_proof_recommend,
+    cmd_review_decide,
+    cmd_review_list,
+    cmd_review_request,
+    cmd_role_show,
+    cmd_handoff_create,
+    cmd_handoff_inspect,
     cmd_proof_reuse_show,
     cmd_goal_list,
     cmd_goal_open,
@@ -55,6 +70,13 @@ from .commands import (
     cmd_memory_add,
     cmd_memory_list,
     cmd_memory_show,
+    cmd_publication_export,
+    cmd_publication_list,
+    cmd_publication_release,
+    cmd_publication_set,
+    cmd_publication_show,
+    cmd_publication_view,
+    cmd_publication_withdraw,
     cmd_proof_provenance_show,
     cmd_reference_import,
     cmd_reference_list,
@@ -86,10 +108,17 @@ obligation_app = typer.Typer(help="Obligation queue")
 blocker_app = typer.Typer(help="Blocker tracking")
 reference_app = typer.Typer(help="Reference workflows")
 memory_app = typer.Typer(help="Memory workflows")
+publication_app = typer.Typer(help="Publication workflows")
 provenance_app = typer.Typer(help="Provenance workflows")
 bug_app = typer.Typer(help="Proof bug workflows")
 debug_app = typer.Typer(help="Proof debug workflows")
 review_app = typer.Typer(help="Proof review workflows")
+contributor_app = typer.Typer(help="Contributor workflows")
+role_app = typer.Typer(help="Role workflows")
+comment_app = typer.Typer(help="Comment workflows")
+branch_app = typer.Typer(help="Branch workflows")
+exchange_app = typer.Typer(help="Exchange workflows")
+handoff_app = typer.Typer(help="Handoff workflows")
 repair_app = typer.Typer(help="Proof repair workflows")
 trace_app = typer.Typer(help="Dependency tracing workflows")
 evidence_app = typer.Typer(help="Evidence inspection workflows")
@@ -160,10 +189,17 @@ app.add_typer(obligation_app, name="obligation")
 app.add_typer(blocker_app, name="blocker")
 app.add_typer(reference_app, name="reference")
 app.add_typer(memory_app, name="memory")
+app.add_typer(publication_app, name="publication")
 app.add_typer(provenance_app, name="provenance")
 app.add_typer(bug_app, name="bug")
 app.add_typer(debug_app, name="debug")
 app.add_typer(review_app, name="review")
+app.add_typer(contributor_app, name="contributor")
+app.add_typer(role_app, name="role")
+app.add_typer(comment_app, name="comment")
+app.add_typer(branch_app, name="branch")
+app.add_typer(exchange_app, name="exchange")
+app.add_typer(handoff_app, name="handoff")
 app.add_typer(repair_app, name="repair")
 app.add_typer(trace_app, name="trace")
 app.add_typer(evidence_app, name="evidence")
@@ -369,6 +405,9 @@ def theorem_add(
     assumption: list[str] = typer.Option(None, "--assumption"),
     export: list[str] = typer.Option(None, "--export"),
     source_ref: str = "internal/project",
+    created_by: str = "human",
+    updated_by: str = "human",
+    contributor: list[str] = typer.Option(None, "--contributor"),
     notes: str = "",
 ) -> None:
     typer.echo(
@@ -381,6 +420,9 @@ def theorem_add(
             assumption=assumption,
             export=export,
             source_ref=source_ref,
+            created_by=created_by,
+            updated_by=updated_by,
+            contributor=contributor,
             notes=notes,
         )
     )
@@ -534,6 +576,96 @@ def memory_add(
     )
 
 
+@publication_app.command("list")
+def publication_list(root: str = ".", object_type: str = "") -> None:
+    typer.echo(cmd_publication_list(_root(root), object_type=object_type))
+
+
+@publication_app.command("show")
+def publication_show(object_id: str, root: str = ".") -> None:
+    typer.echo(cmd_publication_show(object_id, _root(root)))
+
+
+@publication_app.command("set")
+def publication_set(
+    object_id: str,
+    readiness: str,
+    root: str = ".",
+    object_type: str = "theorem_contract",
+    display_name: str = "",
+    title: str = "",
+    section_placement: str = "",
+    reason: str = "",
+    citation_kind: str = "",
+    internal_only: bool = False,
+    editorial_note: list[str] = typer.Option(None, "--editorial-note"),
+    supporting_reference_id: list[str] = typer.Option(None, "--supporting-reference-id"),
+    supporting_theorem_id: list[str] = typer.Option(None, "--supporting-theorem-id"),
+    release_status: str = "draft",
+    release_notes: str = "",
+) -> None:
+    typer.echo(
+        cmd_publication_set(
+            object_id,
+            readiness,
+            _root(root),
+            object_type=object_type,
+            display_name=display_name,
+            title=title,
+            section_placement=section_placement,
+            reason=reason,
+            citation_kind=citation_kind,
+            internal_only=internal_only,
+            editorial_note=editorial_note,
+            supporting_reference_id=supporting_reference_id,
+            supporting_theorem_id=supporting_theorem_id,
+            release_status=release_status,
+            release_notes=release_notes,
+        )
+    )
+
+
+@publication_app.command("view")
+def publication_view(root: str = ".", audience: str = "paper") -> None:
+    typer.echo(cmd_publication_view(_root(root), audience=audience))
+
+
+@publication_app.command("export")
+def publication_export(root: str = ".", audience: str = "paper", format: str = "paper") -> None:
+    typer.echo(cmd_publication_export(_root(root), audience=audience, format=format))
+
+
+@publication_app.command("release")
+def publication_release(
+    root: str = ".",
+    audience: str = "paper",
+    status: str = "approved",
+    approved_by: list[str] = typer.Option(None, "--approved-by"),
+    rationale: str = "",
+    note: str = "",
+) -> None:
+    typer.echo(
+        cmd_publication_release(
+            _root(root),
+            audience=audience,
+            status=status,
+            approved_by=approved_by,
+            rationale=rationale,
+            note=note,
+        )
+    )
+
+
+@publication_app.command("withdraw")
+def publication_withdraw(
+    release_id: str,
+    root: str = ".",
+    approved_by: list[str] = typer.Option(None, "--approved-by"),
+    rationale: str = "",
+) -> None:
+    typer.echo(cmd_publication_withdraw(release_id, _root(root), rationale=rationale, approved_by=approved_by))
+
+
 @provenance_app.command("show")
 def provenance_show(target_id: str, root: str = ".") -> None:
     typer.echo(cmd_proof_provenance_show(target_id, root=_root(root)))
@@ -589,6 +721,125 @@ def review_suspicion(
     rationale: str = "",
 ) -> None:
     typer.echo(cmd_proof_review_suspicion(bug_id, status_override or status, _root(root), rationale=rationale))
+
+
+@review_app.command("request")
+def review_request(
+    object_type: str,
+    object_id: str,
+    root: str = ".",
+    reviewer_id: str = "human",
+    rationale: str = "",
+) -> None:
+    typer.echo(cmd_review_request(object_type, object_id, _root(root), reviewer_id=reviewer_id, rationale=rationale))
+
+
+@review_app.command("list")
+def review_list(root: str = ".", object_type: str = "", object_id: str = "") -> None:
+    typer.echo(cmd_review_list(_root(root), object_type=object_type, object_id=object_id))
+
+
+@review_app.command("decide")
+def review_decide(
+    review_id: str,
+    decision: str,
+    root: str = ".",
+    reviewer_id: str = "human",
+    rationale: str = "",
+) -> None:
+    typer.echo(cmd_review_decide(review_id, decision, _root(root), reviewer_id=reviewer_id, rationale=rationale))
+
+
+@contributor_app.command("list")
+def contributor_list(root: str = ".", team_id: str = "", status: str = "") -> None:
+    typer.echo(cmd_contributor_list(_root(root), team_id=team_id, status=status))
+
+
+@role_app.command("show")
+def role_show(contributor_id: str, root: str = ".") -> None:
+    typer.echo(cmd_role_show(contributor_id, _root(root)))
+
+
+@comment_app.command("add")
+def comment_add(
+    object_type: str,
+    object_id: str,
+    content: str,
+    root: str = ".",
+    author_id: str = "human",
+    thread_id: str = "",
+    status: str = "open",
+) -> None:
+    typer.echo(cmd_comment_add(object_type, object_id, content, _root(root), author_id=author_id, thread_id=thread_id, status=status))
+
+
+@comment_app.command("list")
+def comment_list(root: str = ".", thread_id: str = "", object_type: str = "", object_id: str = "") -> None:
+    typer.echo(cmd_comment_list(_root(root), thread_id=thread_id, object_type=object_type, object_id=object_id))
+
+
+@branch_app.command("create")
+def branch_create(
+    scope: str,
+    name: str,
+    root: str = ".",
+    created_by: str = "human",
+    derived_from: str = "",
+    notes: str = "",
+    downstream_asset_id: list[str] = typer.Option(None, "--downstream-asset-id"),
+) -> None:
+    typer.echo(
+        cmd_branch_create(
+            scope,
+            name,
+            _root(root),
+            created_by=created_by,
+            derived_from=derived_from,
+            notes=notes,
+            downstream_asset_id=downstream_asset_id,
+        )
+    )
+
+
+@branch_app.command("list")
+def branch_list(root: str = ".", scope: str = "", status: str = "") -> None:
+    typer.echo(cmd_branch_list(_root(root), scope=scope, status=status))
+
+
+@branch_app.command("compare")
+def branch_compare(left_branch_id: str, right_branch_id: str, root: str = ".") -> None:
+    typer.echo(cmd_branch_compare(left_branch_id, right_branch_id, _root(root)))
+
+
+@branch_app.command("merge")
+def branch_merge(
+    branch_id: str,
+    root: str = ".",
+    into_branch_id: str = "",
+    reviewer_id: str = "human",
+    rationale: str = "",
+) -> None:
+    typer.echo(cmd_branch_merge(branch_id, _root(root), into_branch_id=into_branch_id, reviewer_id=reviewer_id, rationale=rationale))
+
+
+@exchange_app.command("export")
+def exchange_export(root: str = ".", note: str = "") -> None:
+    typer.echo(cmd_exchange_export(_root(root), note=note))
+
+
+@exchange_app.command("import")
+def exchange_import(bundle_json: str, root: str = ".") -> None:
+    typer.echo(cmd_exchange_import(bundle_json, _root(root)))
+
+
+@handoff_app.command("create")
+def handoff_create(root: str = ".", note: str = "") -> None:
+    typer.echo(cmd_handoff_create(_root(root), note=note))
+
+
+@handoff_app.command("inspect")
+def handoff_inspect(bundle_json: str = "", root: str = ".") -> None:
+    typer.echo(cmd_handoff_inspect(bundle_json, _root(root)))
 
 
 @trace_app.command("dependency")

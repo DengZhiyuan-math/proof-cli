@@ -7,12 +7,13 @@ from typing import Any
 
 from .checks import run_standard_checks
 from .blockers import resolve_blocker
+from .collaboration import ReviewGovernanceState, list_review_records, record_review_decision, record_review_request, summarize_review_record
 from .domain import BlockerRecord, ProofObligation, TheoremContract, TheoremStatus, TrustLevel
 from .formalization_recommendations import FormalizationRecommendation
 from .obligations import close_obligation
 from .storage import ProjectStore, append_event
 from .verification_ir import VerificationFragment, VerificationFragmentStatus, VerificationResult
-from .verification_results import VerificationResultRecord
+from .verification_results import VerificationResultRecord, list_verification_results
 from .theorems import get_contract, update_theorem
 
 
@@ -47,6 +48,29 @@ def _blocked(
     return ReviewResult(False, reason)
 
 
+def _record_collaboration_review(
+    store: ProjectStore,
+    *,
+    object_type: str,
+    object_id: str,
+    reviewer_id: str,
+    decision: ReviewGovernanceState,
+    rationale: str = "",
+    authorship: list[str] | None = None,
+    provenance_notes: str = "",
+) -> None:
+    request = record_review_request(
+        store,
+        object_type,
+        object_id,
+        reviewer_id=reviewer_id,
+        rationale=rationale,
+        authorship=authorship,
+        provenance_notes=provenance_notes,
+    )
+    record_review_decision(store, request.id, decision, reviewer_id=reviewer_id, rationale=rationale)
+
+
 def change_trust_level(
     store: ProjectStore,
     theorem_id: str,
@@ -68,6 +92,16 @@ def change_trust_level(
         f"trust level changed for {theorem_id}",
         entity_id=theorem_id,
         payload={"trust_level": trust_level.value, "rationale": rationale, "checker_context": checker_context},
+    )
+    _record_collaboration_review(
+        store,
+        object_type="theorem_contract",
+        object_id=theorem_id,
+        reviewer_id="human",
+        decision=ReviewGovernanceState.approved,
+        rationale=rationale,
+        authorship=[contract.created_by, contract.updated_by, *contract.contributors],
+        provenance_notes=contract.source_ref,
     )
     return ReviewResult(True, updated.trust_level.value)
 
@@ -92,6 +126,16 @@ def mark_verified(
         f"marked verified {theorem_id}",
         entity_id=theorem_id,
         payload={"rationale": rationale, "checker_context": checker_context},
+    )
+    _record_collaboration_review(
+        store,
+        object_type="theorem_contract",
+        object_id=theorem_id,
+        reviewer_id="human",
+        decision=ReviewGovernanceState.approved,
+        rationale=rationale,
+        authorship=[contract.created_by, contract.updated_by, *contract.contributors],
+        provenance_notes=contract.source_ref,
     )
     return ReviewResult(True, "verified")
 
@@ -118,6 +162,16 @@ def supersede_theorem_contract(
         entity_id=theorem_id,
         payload={"replacement_statement": replacement_statement, "rationale": rationale, "checker_context": checker_context},
     )
+    _record_collaboration_review(
+        store,
+        object_type="theorem_contract",
+        object_id=theorem_id,
+        reviewer_id="human",
+        decision=ReviewGovernanceState.superseded,
+        rationale=rationale,
+        authorship=[contract.created_by, contract.updated_by, *contract.contributors],
+        provenance_notes=contract.source_ref,
+    )
     return ReviewResult(True, "superseded")
 
 
@@ -142,6 +196,16 @@ def approve_imported_result(
         entity_id=theorem_id,
         payload={"rationale": rationale, "checker_context": checker_context},
     )
+    _record_collaboration_review(
+        store,
+        object_type="theorem_contract",
+        object_id=theorem_id,
+        reviewer_id="human",
+        decision=ReviewGovernanceState.approved,
+        rationale=rationale,
+        authorship=[contract.created_by, contract.updated_by, *contract.contributors],
+        provenance_notes=contract.source_ref,
+    )
     return ReviewResult(True, "import approved")
 
 
@@ -156,6 +220,15 @@ def resolve_blocker_review(
         return _blocked(store, "resolve_blocker", blocker_id, "confirmation required")
     blocker = resolve_blocker(store, blocker_id, rationale=rationale)
     append_event(store, "review_approved", f"resolved blocker {blocker_id}", entity_id=blocker_id, payload={"rationale": rationale})
+    _record_collaboration_review(
+        store,
+        object_type="blocker",
+        object_id=blocker_id,
+        reviewer_id="human",
+        decision=ReviewGovernanceState.approved,
+        rationale=rationale,
+        provenance_notes=blocker.failure_type,
+    )
     return ReviewResult(True, blocker.status.value)
 
 
@@ -179,7 +252,27 @@ def close_obligation_review(
         entity_id=obligation_id,
         payload={"proof_text": proof_text, "rationale": rationale},
     )
+    _record_collaboration_review(
+        store,
+        object_type="obligation",
+        object_id=obligation_id,
+        reviewer_id="human",
+        decision=ReviewGovernanceState.approved,
+        rationale=rationale or proof_text,
+    )
     return ReviewResult(True, obligation.status.value)
+
+
+def publication_review_summary(store: ProjectStore, *, object_type: str = "", object_id: str = "") -> list[str]:
+    records = list_review_records(store, object_type=object_type, object_id=object_id)
+    return [summarize_review_record(record) for record in records]
+
+
+def publication_verification_summary(store: ProjectStore, *, theorem_id: str = "") -> list[str]:
+    records = list_verification_results(store)
+    if theorem_id:
+        records = [record for record in records if record.theorem_id == theorem_id]
+    return [describe_verification_result_record(record) for record in records]
 
 
 def describe_verification_fragment(fragment: VerificationFragment) -> str:
@@ -222,7 +315,7 @@ def describe_verification_result_record(record: VerificationResultRecord) -> str
     return (
         f"{record.result.id}: {record.source_kind.value}/{record.source_id} "
         f"[{record.result_status.value}/{record.review_status.value}] backend={record.result.backend} "
-        f"effect={record.effect} ({target_text}){note_text}"
+        f"effect={record.effect} summary={record.result.summary} ({target_text}){note_text}"
     )
 
 

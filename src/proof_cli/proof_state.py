@@ -6,6 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from .domain import BlockerRecord, ProofObligation, ProofObligationStatus, ProjectSnapshot, ProjectState, utc_now
+from .publication import load_publication_workspace
 from .storage import (
     ProjectStore,
     append_event,
@@ -328,6 +329,8 @@ def build_snapshot(store: ProjectStore, handoff_note: str = "") -> ProjectSnapsh
     state = load_state(store)
     literature_routes = list_literature_routes(store)
     verification_results = list_verification_result_records(state)
+    publication_workspace = load_publication_workspace(store)
+    publication_view = publication_workspace.views[-1] if publication_workspace.views else None
     promising_routes = [
         route.summary()
         for route in literature_routes
@@ -346,6 +349,11 @@ def build_snapshot(store: ProjectStore, handoff_note: str = "") -> ProjectSnapsh
         recently_used_results=list(state.recent_theorem_usage),
         unresolved_trust_sensitive_calls=list(state.unresolved_trust_sensitive_calls),
         next_promising_routes=(promising_routes + list(state.failed_routes))[-3:],
+        publication_view_id=publication_view.id if publication_view is not None else None,
+        publication_audience=publication_view.visibility.value if publication_view is not None else None,
+        publication_claim_ids=[state_record.object_id for state_record in publication_workspace.states],
+        publication_release_ids=[release.bundle_id for release in publication_workspace.release_records],
+        publication_bundle_snapshot_ids=[snapshot.id for snapshot in publication_workspace.bundle_snapshots],
         handoff_note=handoff_note or "resume from the latest proof state",
     )
     store_snapshot(store, snapshot)

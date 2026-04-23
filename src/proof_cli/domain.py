@@ -77,6 +77,9 @@ class TheoremContract(BaseModel):
     grounded_theorem_ids: list[str] = Field(default_factory=list)
     local_usage_notes: list[str] = Field(default_factory=list)
     imported_usage_notes: list[str] = Field(default_factory=list)
+    created_by: str = "human"
+    updated_by: str = "human"
+    contributors: list[str] = Field(default_factory=list)
     supersedes_version: int | None = None
     notes: str = ""
     version: int = 1
@@ -119,6 +122,11 @@ class ProjectSnapshot(BaseModel):
     recently_used_results: list[str] = Field(default_factory=list)
     unresolved_trust_sensitive_calls: list[str] = Field(default_factory=list)
     next_promising_routes: list[str] = Field(default_factory=list)
+    publication_view_id: str | None = None
+    publication_audience: str | None = None
+    publication_claim_ids: list[str] = Field(default_factory=list)
+    publication_release_ids: list[str] = Field(default_factory=list)
+    publication_bundle_snapshot_ids: list[str] = Field(default_factory=list)
     handoff_note: str = ""
     created_at: datetime = Field(default_factory=utc_now)
 
