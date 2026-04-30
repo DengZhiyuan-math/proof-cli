@@ -6,6 +6,7 @@ from typing import Any, Mapping, Sequence
 from .commands import (
     cmd_export,
     cmd_history,
+    cmd_project_analyze,
     cmd_snapshot,
     cmd_status,
 )
@@ -46,3 +47,7 @@ def workspace_retrieval(
         external_candidates=external_candidates,
         limit=limit,
     )
+
+
+def workspace_project_analysis(root: str | Path = ".", *, query: str = "", limit: int = 5) -> str:
+    return cmd_project_analyze(root, query=query, limit=limit)

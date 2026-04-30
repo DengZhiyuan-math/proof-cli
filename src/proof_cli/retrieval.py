@@ -8,12 +8,13 @@ from pydantic import BaseModel, Field
 
 from .domain import ProjectState, TheoremContract
 from .domain_packs import DomainPack, DomainPackReviewStatus, DomainPackTrustLevel
+from .memory import list_memory_artifacts, load_memory
 from .reusable_assets import (
     ReusableAsset,
     ReusableAssetReuseStatus,
     ReusableAssetTrustLevel,
 )
-from .storage import ProjectStore, list_contracts, read_state
+from .storage import ProjectStore, list_blockers, list_contracts, list_obligations, read_state
 
 
 TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
@@ -33,6 +34,8 @@ class RetrievalContext(BaseModel):
     open_obligations: list[str] = Field(default_factory=list)
     blockers: list[str] = Field(default_factory=list)
     recent_theorem_usage: list[str] = Field(default_factory=list)
+    recent_memory: list[str] = Field(default_factory=list)
+    explicit_neighborhood: list[str] = Field(default_factory=list)
 
 
 class RetrievalCandidate(BaseModel):
@@ -42,11 +45,15 @@ class RetrievalCandidate(BaseModel):
     source_ref: str
     source_priority: int
     score: float
+    structural_score: float = 0.0
+    lexical_score: float = 0.0
     rank: int = 0
     contract_id: str | None = None
     contract_status: str | None = None
     trust_level: str | None = None
     match_reasons: list[str] = Field(default_factory=list)
+    structural_reasons: list[str] = Field(default_factory=list)
+    lexical_reasons: list[str] = Field(default_factory=list)
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -147,6 +154,8 @@ def _build_context(state: ProjectState) -> RetrievalContext:
         open_obligations=list(state.open_obligations),
         blockers=list(state.blockers),
         recent_theorem_usage=list(state.recent_theorem_usage),
+        recent_memory=[],
+        explicit_neighborhood=[],
     )
 
 
@@ -160,7 +169,112 @@ def _query_terms(query: str | None, context: RetrievalContext) -> set[str]:
         " ".join(context.open_obligations),
         " ".join(context.blockers),
         " ".join(context.recent_theorem_usage),
+        " ".join(context.recent_memory),
+        " ".join(context.explicit_neighborhood),
     )
+
+
+def _candidate_text(contract: TheoremContract) -> str:
+    return " ".join(
+        part
+        for part in [
+            contract.id,
+            contract.kind,
+            contract.name,
+            contract.statement,
+            " ".join(contract.assumptions),
+            " ".join(contract.exports),
+            " ".join(contract.dependencies),
+            contract.notes,
+            contract.source_ref,
+        ]
+        if part
+    )
+
+
+def _structural_context(store: ProjectStore, state: ProjectState) -> tuple[list[str], list[str]]:
+    memory = load_memory(store)
+    contracts = list_contracts(store)
+    obligations = list_obligations(store)
+    blockers = list_blockers(store)
+    contract_by_id = {contract.id: contract for contract in contracts}
+
+    neighborhood: list[str] = []
+    if state.current_theorem:
+        neighborhood.append(f"theorem:{state.current_theorem}")
+        current_contract = contract_by_id.get(state.current_theorem)
+        if current_contract is not None:
+            neighborhood.extend(f"dependency:{dependency}" for dependency in current_contract.dependencies)
+            neighborhood.extend(
+                f"dependent:{contract.id}"
+                for contract in contracts
+                if state.current_theorem in contract.dependencies
+            )
+    neighborhood.extend(f"goal:{goal}" for goal in state.open_goals)
+    neighborhood.extend(f"obligation:{obligation.id}" for obligation in obligations if obligation.required_for in {None, state.current_theorem})
+    neighborhood.extend(f"blocker:{blocker.id}" for blocker in blockers if blocker.scope in {state.current_theorem, "global"} or state.current_theorem in blocker.related_contracts)
+    neighborhood.extend(
+        f"memory:{artifact.id}"
+        for artifact in list_memory_artifacts(store)
+        if state.current_theorem is None
+        or artifact.scope.theorem_id in {None, state.current_theorem}
+        or artifact.linked_proof_state.theorem_id in {None, state.current_theorem}
+    )
+    neighborhood = list(dict.fromkeys(neighborhood))[-12:]
+    recent_memory = [artifact.content for artifact in (memory.working[-3:] + memory.semantic[-3:] + memory.episodic[-2:] + memory.procedural[-2:])]
+    return recent_memory[-5:], neighborhood
+
+
+def _structural_score(candidate: TheoremContract, context: RetrievalContext) -> tuple[float, list[str]]:
+    candidate_terms = _tokens(_candidate_text(candidate))
+    score = 0.0
+    reasons: list[str] = []
+
+    if context.current_theorem and candidate.id == context.current_theorem:
+        score += 0.65
+        reasons.append(f"matches active theorem {context.current_theorem}")
+    if context.current_theorem and context.current_theorem in candidate.dependencies:
+        score += 0.35
+        reasons.append(f"depends on active theorem {context.current_theorem}")
+
+    for obligation in context.open_obligations:
+        tokens = _tokens(obligation)
+        overlap = sorted(tokens & candidate_terms)
+        if overlap:
+            score += 0.08 * len(overlap)
+            reasons.append(f"aligns with open obligation {obligation}")
+
+    for blocker in context.blockers:
+        tokens = _tokens(blocker)
+        overlap = sorted(tokens & candidate_terms)
+        if overlap:
+            score += 0.08 * len(overlap)
+            reasons.append(f"aligns with blocker {blocker}")
+
+    for memory_text in context.recent_memory:
+        tokens = _tokens(memory_text)
+        overlap = sorted(tokens & candidate_terms)
+        if overlap:
+            score += 0.04 * len(overlap)
+            reasons.append(f"matches recent memory: {memory_text}")
+
+    for neighborhood_item in context.explicit_neighborhood:
+        tokens = _tokens(neighborhood_item)
+        overlap = sorted(tokens & candidate_terms)
+        if overlap:
+            score += 0.06 * len(overlap)
+            reasons.append(f"adjacent to {neighborhood_item}")
+
+    if context.current_context:
+        overlap = sorted(_tokens(" ".join(context.current_context)) & candidate_terms)
+        if overlap:
+            score += 0.1 * len(overlap)
+            reasons.append(f"matches current context: {', '.join(overlap)}")
+
+    if not reasons:
+        reasons.append("no explicit structural link found")
+
+    return _clamp(score, upper=1.5), reasons
 
 
 def _candidate_payload(contract: TheoremContract) -> dict[str, Any]:
@@ -179,9 +293,13 @@ def _make_candidate(
     source_ref: str,
     source_priority: int,
     score: float,
+    structural_score: float = 0.0,
+    lexical_score: float = 0.0,
     contract: TheoremContract | None = None,
     reference: Mapping[str, Any] | None = None,
     match_reasons: list[str] | None = None,
+    structural_reasons: list[str] | None = None,
+    lexical_reasons: list[str] | None = None,
 ) -> RetrievalCandidate:
     payload: dict[str, Any]
     if contract is not None:
@@ -197,10 +315,14 @@ def _make_candidate(
         source_ref=source_ref,
         source_priority=source_priority,
         score=score,
+        structural_score=structural_score,
+        lexical_score=lexical_score,
         contract_id=contract.id if contract is not None else None,
         contract_status=contract.status.value if contract is not None else None,
         trust_level=contract.trust_level.value if contract is not None else None,
         match_reasons=match_reasons or [],
+        structural_reasons=structural_reasons or [],
+        lexical_reasons=lexical_reasons or [],
         payload=payload,
     )
 
@@ -210,6 +332,7 @@ def _rank_candidates(candidates: list[RetrievalCandidate]) -> list[RetrievalCand
         candidates,
         key=lambda candidate: (
             candidate.source_priority,
+            -candidate.structural_score,
             -candidate.score,
             candidate.title.lower(),
             candidate.id,
@@ -674,6 +797,9 @@ def retrieve_candidates(
 ) -> RetrievalReport:
     state = read_state(store)
     context = _build_context(state)
+    recent_memory, explicit_neighborhood = _structural_context(store, state)
+    context.recent_memory = recent_memory
+    context.explicit_neighborhood = explicit_neighborhood
     query_terms = _query_terms(query, context)
     source_order = [
         RetrievalSourceKind.project_local,
@@ -689,16 +815,12 @@ def retrieve_candidates(
         source_contracts = [contract for contract in local_contracts if _classify_contract(contract) == source_kind]
         source_candidates: list[RetrievalCandidate] = []
         for contract in source_contracts:
-            score, reasons = _score_text(
+            lexical_score, lexical_reasons = _score_text(
                 query_terms,
-                contract.name,
-                contract.statement,
-                " ".join(contract.assumptions),
-                " ".join(contract.exports),
-                " ".join(contract.dependencies),
-                contract.notes,
-                contract.source_ref,
+                _candidate_text(contract),
             )
+            structural_score, structural_reasons = _structural_score(contract, context)
+            score = _clamp((structural_score * 0.7) + (lexical_score * 0.3))
             source_candidates.append(
                 _make_candidate(
                     item_id=contract.id,
@@ -708,7 +830,11 @@ def retrieve_candidates(
                     source_priority=source_order.index(source_kind),
                     score=score,
                     contract=contract,
-                    match_reasons=reasons,
+                    structural_score=structural_score,
+                    lexical_score=lexical_score,
+                    match_reasons=[*structural_reasons, *lexical_reasons],
+                    structural_reasons=structural_reasons,
+                    lexical_reasons=lexical_reasons,
                 )
             )
         trace.append(
@@ -726,13 +852,15 @@ def retrieve_candidates(
         reference_id = str(reference.get("id") or reference.get("identifier") or f"external_{index}")
         title = str(reference.get("title") or reference.get("name") or reference_id)
         summary = str(reference.get("summary") or reference.get("abstract") or reference.get("notes") or "")
-        score, reasons = _score_text(
+        lexical_score, lexical_reasons = _score_text(
             query_terms,
             title,
             summary,
             str(reference.get("bibliographic_source") or ""),
             str(reference.get("url") or ""),
         )
+        structural_score = 0.0
+        structural_reasons = ["external candidate is evaluated after project-local context"]
         external_source_candidates.append(
             _make_candidate(
                 item_id=reference_id,
@@ -740,9 +868,13 @@ def retrieve_candidates(
                 source_kind=RetrievalSourceKind.external_bibliographic,
                 source_ref=str(reference.get("bibliographic_source") or reference.get("url") or "external/bibliography"),
                 source_priority=source_order.index(RetrievalSourceKind.external_bibliographic),
-                score=score,
+                score=_clamp((structural_score * 0.7) + (lexical_score * 0.3)),
                 reference=reference,
-                match_reasons=reasons,
+                structural_score=structural_score,
+                lexical_score=lexical_score,
+                match_reasons=[*structural_reasons, *lexical_reasons],
+                structural_reasons=structural_reasons,
+                lexical_reasons=lexical_reasons,
             )
         )
     trace.append(

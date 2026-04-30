@@ -24,6 +24,7 @@ from .automation import (
     default_policy_profile,
 )
 from .automation_eval import AutomationEvaluationRecord, replay_automation_benchmark
+from .analysis import build_project_diagnostic_report
 from .debug_tasks import ProofDebugTaskBatch, debug_task_batch_from_reports
 from .exchange import (
     bundle_from_json,
@@ -256,6 +257,37 @@ def _format_memory_line(artifact: MemoryArtifact) -> str:
     scope_text = " ".join(scope_bits) if scope_bits else "project-scope"
     tag_text = f" tags={','.join(artifact.tags)}" if artifact.tags else ""
     return f"{artifact.id}: [{artifact.layer.value}/{artifact.status.value}/{artifact.importance.value}] {scope_text} {artifact.content}{tag_text}"
+
+
+def _render_retrieval_report(report) -> str:
+    lines = [f"query: {report.query}"]
+    context = report.project_context
+    if context.current_theorem:
+        lines.append(f"current theorem: {context.current_theorem}")
+    if context.open_obligations:
+        lines.append("obligations: " + ", ".join(context.open_obligations))
+    if context.blockers:
+        lines.append("blockers: " + ", ".join(context.blockers))
+    if context.recent_memory:
+        lines.append("recent memory: " + "; ".join(context.recent_memory[:3]))
+    if context.explicit_neighborhood:
+        lines.append("neighborhood: " + ", ".join(context.explicit_neighborhood[:5]))
+    lines.append("sources: " + ", ".join(source.value for source in report.source_order))
+    if report.candidates:
+        lines.append("candidates:")
+        for candidate in report.candidates:
+            lines.append(
+                _format_candidate_line(
+                    candidate.rank,
+                    candidate.title,
+                    candidate.source_kind.value,
+                    candidate.score,
+                    candidate.id,
+                )
+            )
+    else:
+        lines.append("No candidates")
+    return "\n".join(lines)
 
 
 _BUG_SCAN_HISTORY_PREFIX = "proof_bug_scan:"
@@ -754,21 +786,32 @@ def cmd_proof_search(
         external_candidates=external_candidates,
         limit=limit,
     )
-    lines = [
-        f"query: {report.query}",
-        "sources: " + ", ".join(source.value for source in report.source_order),
-    ]
-    for candidate in report.candidates[:limit]:
-        lines.append(
-            _format_candidate_line(
-                candidate.rank,
-                candidate.title,
-                candidate.source_kind.value,
-                candidate.score,
-                candidate.id,
-            )
-        )
-    return "\n".join(lines)
+    return _render_retrieval_report(report)
+
+
+def cmd_proof_retrieve(
+    query: str,
+    root: str | Path = ".",
+    *,
+    external_candidates: list[dict[str, object]] | None = None,
+    limit: int = 10,
+) -> str:
+    store = get_store(root)
+    _append_history(store, f"retrieve:{query}", message=f"retrieved {query}")
+    report = retrieve_candidates(
+        store,
+        query=query,
+        external_candidates=external_candidates,
+        limit=limit,
+    )
+    return report.model_dump_json(indent=2)
+
+
+def cmd_project_analyze(root: str | Path = ".", *, query: str = "", limit: int = 5) -> str:
+    store = get_store(root)
+    _append_history(store, f"analyze:{query}", message=f"analyzed {query or 'current project'}")
+    report = build_project_diagnostic_report(store, query=query or None, limit=limit)
+    return render_json(report)
 
 
 def cmd_reference_list(root: str | Path = ".") -> str:

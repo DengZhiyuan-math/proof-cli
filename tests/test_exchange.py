@@ -124,5 +124,7 @@ def test_exchange_round_trips_collaboration_state_across_two_users(tmp_path: Pat
 
     exchange_bundle = json.loads(cmd_exchange_export(root=target_root))
     assert exchange_bundle["project_id"] == "proj_alpha"
+    assert exchange_bundle["latest_snapshot"]["latest_diagnostic_report"] is not None
+    assert exchange_bundle["handoff_snapshot"]["latest_diagnostic_report"] is not None
     assert exchange_bundle["collaboration"]["comment_threads"]
     assert exchange_bundle["publication_workspace"]["states"]

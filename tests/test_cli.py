@@ -290,7 +290,9 @@ def test_help_lists_phase_two_commands(tmp_path: Path):
     assert "memory" in result.stdout
     assert "provenance" in result.stdout
     assert "search" in result.stdout
+    assert "retrieve" in result.stdout
     assert "theorem" in result.stdout
+    assert "project" in result.stdout
 
 
 def test_phase_two_cli_paths_are_reachable_and_readable(tmp_path: Path):
@@ -301,6 +303,20 @@ def test_phase_two_cli_paths_are_reachable_and_readable(tmp_path: Path):
     assert "query: Auxiliary Lemma" in result.stdout
     assert "sources:" in result.stdout
     assert "thm_aux" in result.stdout
+
+    result = runner.invoke(app, ["retrieve", "Auxiliary Lemma", "--root", str(tmp_path)])
+    assert result.exit_code == 0
+    retrieve_payload = json.loads(result.stdout)
+    assert retrieve_payload["project_context"]["current_theorem"] == "thm_main"
+    assert "explicit_neighborhood" in retrieve_payload["project_context"]
+    assert retrieve_payload["candidates"][0]["structural_score"] >= retrieve_payload["candidates"][0]["lexical_score"]
+
+    result = runner.invoke(app, ["project", "analyze", "--root", str(tmp_path)])
+    assert result.exit_code == 0
+    project_payload = json.loads(result.stdout)
+    assert project_payload["current_theorem"] == "thm_main"
+    assert project_payload["bottleneck_kind"] in {"blocker", "obligation"}
+    assert project_payload["promising_next_steps"]
 
     result = runner.invoke(app, ["reference", "list", "--root", str(tmp_path)])
     assert result.exit_code == 0
@@ -599,3 +615,175 @@ def test_phase_six_cli_surface_routes_to_collaboration_workflows(tmp_path: Path)
     exchange_result = runner.invoke(app, ["exchange", "export", "--root", str(tmp_path)])
     assert exchange_result.exit_code == 0
     assert "\"project_id\"" in exchange_result.stdout
+
+
+def test_codex_surface_shows_guided_catalog_and_discovers_workspace_root(tmp_path: Path, monkeypatch) -> None:
+    ensure_project(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["codex"])
+
+    assert result.exit_code == 0
+    assert "Proof Codex Surface" in result.stdout
+    assert f"Selected root: {tmp_path}" in result.stdout
+    assert "Readiness:" in result.stdout
+    assert "proof codex status" in result.stdout
+    assert "proof codex snapshot" in result.stdout
+    assert "proof codex doctor" in result.stdout
+
+
+def test_codex_surface_routes_real_read_only_commands(tmp_path: Path) -> None:
+    _seed_phase_two_project(tmp_path)
+
+    status_result = runner.invoke(app, ["codex", "status", "--root", str(tmp_path)])
+    assert status_result.exit_code == 0
+    assert "Current theorem" in status_result.stdout
+    assert "thm_main" in status_result.stdout
+
+    theorem_result = runner.invoke(app, ["codex", "theorem", "list", "--root", str(tmp_path)])
+    assert theorem_result.exit_code == 0
+    assert "Main Result" in theorem_result.stdout
+    assert "Auxiliary Lemma" in theorem_result.stdout
+
+    obligation_result = runner.invoke(app, ["codex", "obligation", "list", "--root", str(tmp_path)])
+    assert obligation_result.exit_code == 0
+    assert "bridge A to C" in obligation_result.stdout
+
+    blocker_result = runner.invoke(app, ["codex", "blocker", "list", "--root", str(tmp_path)])
+    assert blocker_result.exit_code == 0
+    assert "paper route needs grounding" in blocker_result.stdout
+
+
+def test_codex_surface_preserves_json_outputs_for_retrieval_and_analysis(tmp_path: Path) -> None:
+    _seed_phase_two_project(tmp_path)
+
+    retrieve_result = runner.invoke(app, ["codex", "retrieve", "bridge lemma", "--root", str(tmp_path)])
+    assert retrieve_result.exit_code == 0
+    retrieve_payload = json.loads(retrieve_result.stdout)
+    assert retrieve_payload["query"] == "bridge lemma"
+    assert retrieve_payload["project_context"]["current_theorem"] == "thm_main"
+
+    analyze_result = runner.invoke(app, ["codex", "project", "analyze", "--root", str(tmp_path), "--query", "bridge"])
+    assert analyze_result.exit_code == 0
+    analyze_payload = json.loads(analyze_result.stdout)
+    assert analyze_payload["query"] == "bridge"
+    assert analyze_payload["current_theorem"] == "thm_main"
+
+
+def test_codex_surface_exposes_guided_mutation_entry_points(tmp_path: Path) -> None:
+    ensure_project(tmp_path)
+
+    theorem_add_result = runner.invoke(app, ["codex", "theorem", "add", "--root", str(tmp_path)])
+    assert theorem_add_result.exit_code == 0
+    assert "Mutation: theorem add" in theorem_add_result.stdout
+    assert "Missing details: theorem_id, name, statement" in theorem_add_result.stdout
+    assert "proof codex theorem add" in theorem_add_result.stdout
+
+    new_theorem_result = runner.invoke(app, ["codex", "new", "theorem", "--root", str(tmp_path)])
+    assert new_theorem_result.exit_code == 0
+    assert "Mutation: new theorem" in new_theorem_result.stdout
+    assert f"Selected root: {tmp_path}" in new_theorem_result.stdout
+
+
+def test_codex_surface_runs_mutations_through_wrapper(tmp_path: Path) -> None:
+    ensure_project(tmp_path)
+
+    theorem_result = runner.invoke(
+        app,
+        [
+            "codex",
+            "theorem",
+            "add",
+            "thm_tiny",
+            "Tiny theorem",
+            "A implies B",
+            "--root",
+            str(tmp_path),
+            "--assumption",
+            "A",
+            "--export",
+            "B",
+        ],
+    )
+    assert theorem_result.exit_code == 0
+    assert "Persisted proof state: changed" in theorem_result.stdout
+    theorem_payload = json.loads(theorem_result.stdout.split("Result:\n", 1)[1])
+    assert theorem_payload["id"] == "thm_tiny"
+    assert theorem_payload["assumptions"] == ["A"]
+
+    obligation_result = runner.invoke(
+        app,
+        ["codex", "obligation", "add", "bridge the theorem", "--root", str(tmp_path), "--required-for", "thm_tiny"],
+    )
+    assert obligation_result.exit_code == 0
+    obligation_payload = json.loads(obligation_result.stdout.split("Result:\n", 1)[1])
+    assert obligation_payload["required_for"] == "thm_tiny"
+
+    blocker_result = runner.invoke(
+        app,
+        ["codex", "blocker", "add", "stuck on normalization", "--root", str(tmp_path), "--scope", "thm_tiny", "--failure-type", "gap"],
+    )
+    assert blocker_result.exit_code == 0
+    blocker_payload = json.loads(blocker_result.stdout.split("Result:\n", 1)[1])
+    assert blocker_payload["scope"] == "thm_tiny"
+
+    snapshot_result = runner.invoke(app, ["codex", "snapshot", "--root", str(tmp_path), "--note", "checkpoint"])
+    assert snapshot_result.exit_code == 0
+    snapshot_payload = json.loads(snapshot_result.stdout.split("Result:\n", 1)[1])
+    assert snapshot_payload["handoff_note"] == "checkpoint"
+
+
+def test_codex_surface_honors_root_precedence_for_mutations(tmp_path: Path, monkeypatch) -> None:
+    explicit_root = tmp_path / "explicit"
+    env_root = tmp_path / "env"
+    ensure_project(explicit_root)
+    ensure_project(env_root)
+    monkeypatch.setenv("PROOF_ROOT", str(env_root))
+
+    result = runner.invoke(
+        app,
+        ["codex", "theorem", "add", "thm_explicit", "Explicit theorem", "A implies B", "--root", str(explicit_root)],
+    )
+    assert result.exit_code == 0
+    assert f"Selected root: {explicit_root.resolve()}" in result.stdout
+    assert "Root source: explicit --root" in result.stdout
+
+    env_result = runner.invoke(app, ["codex", "theorem", "add", "thm_env", "Env theorem", "B implies C"])
+    assert env_result.exit_code == 0
+    assert f"Selected root: {env_root.resolve()}" in env_result.stdout
+    assert "Root source: $PROOF_ROOT" in env_result.stdout
+
+
+def test_codex_surface_guides_when_mutation_target_is_unsafe(tmp_path: Path, monkeypatch) -> None:
+    unsafe = tmp_path / "unsafe"
+    unsafe.mkdir()
+    monkeypatch.chdir(unsafe)
+    monkeypatch.delenv("PROOF_ROOT", raising=False)
+
+    result = runner.invoke(app, ["codex", "snapshot"])
+
+    assert result.exit_code == 0
+    assert "does not look like a Proof workspace" in result.stdout
+    assert "Provide --root explicitly" in result.stdout
+
+
+def test_codex_surface_reports_degraded_command_readiness(monkeypatch) -> None:
+    monkeypatch.setattr("proof_cli.codex_router.shutil.which", lambda _: None)
+
+    result = runner.invoke(app, ["codex", "doctor"])
+
+    assert result.exit_code == 0
+    assert "Status: degraded" in result.stdout
+    assert "`proof` is not available on PATH." in result.stdout
+    assert "`proof-codex` is not available on PATH." in result.stdout
+    assert 'python -m pip install -e ".[dev]"' in result.stdout
+    assert "global ~/.codex/skills/proof/ skill" in result.stdout
+
+
+def test_codex_surface_reports_ready_command_readiness() -> None:
+    result = runner.invoke(app, ["codex", "doctor"])
+
+    assert result.exit_code == 0
+    assert "Proof Codex Diagnostics" in result.stdout
+    assert "Canonical skill: ~/.codex/skills/proof/SKILL.md" in result.stdout
+    assert "Project-local skills: debugging and development helpers only" in result.stdout

@@ -284,8 +284,12 @@ def test_snapshot_restore_preserves_memory_context_blockers_and_debts(tmp_path: 
     memory = load_memory(store)
 
     assert snapshot.handoff_note == "handoff for later"
+    assert snapshot.latest_diagnostic_report is not None
+    assert snapshot.latest_diagnostic_report["current_theorem"] == "thm_1"
     assert restored is not None
     assert restored.project_snapshot.active_theorem == "thm_1"
+    assert restored.project_snapshot.latest_diagnostic_report is not None
+    assert restored.latest_diagnostic_report is not None
     assert "prove theorem 1" in restored.project_snapshot.current_goals
     assert [report.id for report in restored.suspicion_reports] == [suspect_report.id]
     assert [report.id for report in restored.resolved_bug_history] == [dismissed_report.id]

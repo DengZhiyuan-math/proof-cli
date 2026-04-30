@@ -127,6 +127,7 @@ class ProjectSnapshot(BaseModel):
     publication_claim_ids: list[str] = Field(default_factory=list)
     publication_release_ids: list[str] = Field(default_factory=list)
     publication_bundle_snapshot_ids: list[str] = Field(default_factory=list)
+    latest_diagnostic_report: dict[str, Any] | None = None
     handoff_note: str = ""
     created_at: datetime = Field(default_factory=utc_now)
 

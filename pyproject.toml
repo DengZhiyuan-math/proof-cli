@@ -20,6 +20,7 @@ dev = [
 
 [project.scripts]
 proof = "proof_cli.cli:app"
+proof-codex = "proof_cli.codex_router:app"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

@@ -172,6 +172,7 @@ class DomainPack(BaseModel):
     name: str
     version: str
     summary: str = ""
+    team_scope: str = ""
     content: DomainPackContent = Field(default_factory=DomainPackContent)
     compatibility: DomainPackCompatibility = Field(default_factory=DomainPackCompatibility)
     review_status: DomainPackReviewStatus = DomainPackReviewStatus.pending_review
