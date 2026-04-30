@@ -11,6 +11,8 @@ Use this skill when working in the `Mathematical Proof CLI / Research Proof OS` 
 
 This project-local skill is primarily for repository debugging and development work. The canonical user-facing entry path is the global `~/.codex/skills/proof/` skill.
 
+If the Proof Routing plugin is installed, prefer the plugin-backed MCP tools first and use this skill only as a repository-local fallback.
+
 ## Command-style triggers
 
 If the user writes a short command such as:

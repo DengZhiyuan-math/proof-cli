@@ -37,7 +37,7 @@ metadata:
 
 # Proof Command Trigger
 
-This project-local copy exists mainly for repository debugging and development. The canonical everyday entry path is the global `~/.codex/skills/proof/` skill.
+This project-local copy exists mainly for repository debugging and development. The canonical everyday entry path is the global Proof Routing plugin tool surface once installed; the global `~/.codex/skills/proof/` skill is the fallback bridge when plugin tools are unavailable.
 
 Use this skill when the user writes a command beginning with `$proof`, such as:
 
@@ -79,6 +79,7 @@ as the default `--root` value unless the user provides a different root.
 ## Working Rules
 
 - Treat the local `proof` executable as the source of truth.
+- Prefer plugin-backed MCP tools over `$proof ...` when the Proof Routing plugin is installed.
 - Treat `proof codex` as the guided Codex-facing entry surface.
 - Treat the global `~/.codex/skills/proof/` skill as canonical; treat this project-local copy as a debug/development helper.
 - For mutating commands, expect the wrapper to show the selected root and whether persisted state will change.

@@ -1,0 +1,41 @@
+{
+  "name": "proof-routing",
+  "version": "0.1.0",
+  "description": "Codex-native routing for Mathematical Proof CLI via local MCP tools.",
+  "author": {
+    "name": "zhdeng",
+    "email": "local-user@example.com",
+    "url": "https://github.com/zhdeng"
+  },
+  "homepage": "https://github.com/zhdeng/proof-cli",
+  "repository": "https://github.com/zhdeng/proof-cli",
+  "license": "MIT",
+  "keywords": [
+    "proof",
+    "codex",
+    "mcp",
+    "cli"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Proof Routing",
+    "shortDescription": "Route proof work to local Proof CLI tools.",
+    "longDescription": "Adds Codex-native tools for Proof CLI so theorem, obligation, blocker, retrieval, diagnostics, and snapshot workflows can run through a local MCP server instead of only skill prose.",
+    "developerName": "Proof CLI",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/zhdeng/proof-cli",
+    "privacyPolicyURL": "https://openai.com/policies/privacy-policy/",
+    "termsOfServiceURL": "https://openai.com/policies/terms-of-use/",
+    "defaultPrompt": [
+      "Inspect my current proof workspace state.",
+      "Create a theorem and add its obligations.",
+      "Snapshot the current proof checkpoint."
+    ],
+    "brandColor": "#2563EB"
+  }
+}
