@@ -154,6 +154,7 @@ class ProofDebugMemoryRecord(BaseModel):
 class HandoffSnapshot(BaseModel):
     project_id: str
     project_snapshot: ProjectSnapshot
+    latest_diagnostic_report: dict[str, Any] | None = None
     verification_history: list[VerificationLifecycleRecord] = Field(default_factory=list)
     queued_verification_fragments: list[VerificationFragment] = Field(default_factory=list)
     accepted_verification_results: list[VerificationResultRecord] = Field(default_factory=list)
@@ -1534,6 +1535,7 @@ def build_handoff_snapshot(
     return HandoffSnapshot(
         project_id=memory.project_id,
         project_snapshot=project_snapshot,
+        latest_diagnostic_report=project_snapshot.latest_diagnostic_report,
         verification_history=verification_history,
         queued_verification_fragments=queued_fragments,
         accepted_verification_results=[record for record in accepted_results if record is not None],

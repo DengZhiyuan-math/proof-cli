@@ -326,11 +326,14 @@ def clear_unresolved_trust_call(store: ProjectStore, theorem_id: str) -> Project
 
 
 def build_snapshot(store: ProjectStore, handoff_note: str = "") -> ProjectSnapshot:
+    from .analysis import build_project_diagnostic_report
+
     state = load_state(store)
     literature_routes = list_literature_routes(store)
     verification_results = list_verification_result_records(state)
     publication_workspace = load_publication_workspace(store)
     publication_view = publication_workspace.views[-1] if publication_workspace.views else None
+    diagnostic_report = build_project_diagnostic_report(store, query=state.current_theorem or "", limit=3)
     promising_routes = [
         route.summary()
         for route in literature_routes
@@ -354,6 +357,7 @@ def build_snapshot(store: ProjectStore, handoff_note: str = "") -> ProjectSnapsh
         publication_claim_ids=[state_record.object_id for state_record in publication_workspace.states],
         publication_release_ids=[release.bundle_id for release in publication_workspace.release_records],
         publication_bundle_snapshot_ids=[snapshot.id for snapshot in publication_workspace.bundle_snapshots],
+        latest_diagnostic_report=diagnostic_report.model_dump(mode="json"),
         handoff_note=handoff_note or "resume from the latest proof state",
     )
     store_snapshot(store, snapshot)

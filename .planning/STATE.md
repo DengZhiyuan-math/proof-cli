@@ -1,39 +1,41 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: milestone
-status: 1.0 milestone complete
-last_updated: "2026-04-22T12:58:51.505Z"
+milestone: next
+milestone_name: Next Milestone Definition
+status: ready
+last_updated: "2026-04-30T10:30:00.000Z"
 progress:
-  total_phases: 5
-  completed_phases: 5
-  total_plans: 39
-  completed_plans: 39
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-04-21)
+See: .planning/PROJECT.md (updated 2026-04-30)
 
 **Core value:** Manage the trust boundary around mathematical proof work: know what can be called, under what assumptions, and what proof obligations remain.
-**Current focus:** Phase 5 complete
+**Current focus:** Define the next milestone
 
 ## Current Snapshot
 
-- Project type: greenfield CLI for research mathematics
-- Persistence model: local-first, structured state
-- Core concept: theorem contracts with explicit assumptions and exports
-- Immediate next step: review Phase 5 outcomes and decide the next phase
+- Project type: CLI-first research proof OS with a shipped Codex-facing wrapper
+- Latest shipped milestone: v1.2 Codex Command Routing
+- Active roadmap: none yet
+- Immediate next step: run `$gsd-new-milestone`
 
 ## Open Questions
 
-- How to gate trust changes without slowing routine edits too much
-- Which review actions should be mandatory versus optional
-- How to surface blocker state and stalled-path recovery in the CLI
+- Which usability or integration layer should become the next milestone
+- Which v1.2 carry-forward ideas deserve promotion into active scope
+- Whether the next step should stay command-centric or add a stronger visual layer
 
 ## Notes
 
-- Phase 5 is complete; the planning documents remain the source of truth for future phases.
+- v1.0 is complete and archived
+- v1.1 is complete and archived
+- v1.2 is complete and archived

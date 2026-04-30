@@ -531,18 +531,20 @@ def list_benchmark_records(store: ProjectStore, *, project_id: str = "") -> list
 
 def summarize_reusable_asset(record: GovernanceAssetRecord) -> str:
     asset = record.asset
+    scope_text = f" scope={asset.team_scope}" if getattr(asset, "team_scope", "") else ""
     return (
         f"{asset.id}: {asset.name} [{asset.kind.value}/{asset.reuse_status.value}/{asset.trust_level.value}] "
-        f"project={record.project_id} review={record.review_action}"
+        f"project={record.project_id} review={record.review_action}{scope_text}"
     )
 
 
 def summarize_domain_pack(record: GovernancePackRecord) -> str:
     installation = record.installation
     install_text = f" install={installation.status.value}" if installation is not None else ""
+    scope_text = f" scope={record.pack.team_scope}" if getattr(record.pack, "team_scope", "") else ""
     return (
         f"{record.pack.id}: {record.pack.name} v{record.pack.version} "
-        f"[{record.pack.review_status.value}/{record.pack.trust_level.value}]{install_text} project={record.project_id}"
+        f"[{record.pack.review_status.value}/{record.pack.trust_level.value}]{install_text} project={record.project_id}{scope_text}"
     )
 
 

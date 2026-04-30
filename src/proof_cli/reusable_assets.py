@@ -67,6 +67,7 @@ class ReusableAsset(BaseModel):
     kind: ReusableAssetKind
     name: str
     summary: str = ""
+    team_scope: str = ""
     payload: ReusableAssetPayload = Field(default_factory=ReusableAssetPayload)
     provenance: ReusableAssetProvenance = Field(default_factory=ReusableAssetProvenance)
     reuse_status: ReusableAssetReuseStatus = ReusableAssetReuseStatus.project_local
@@ -174,4 +175,3 @@ class ReusableAsset(BaseModel):
             review_notes=notes,
             reviewed_at=utc_now(),
         )
-

@@ -4,6 +4,7 @@ from pathlib import Path
 
 import typer
 
+from .codex_router import app as codex_app
 from .commands import (
     cmd_blocker_add,
     cmd_blocker_list,
@@ -37,6 +38,7 @@ from .commands import (
     cmd_proof_reason,
     cmd_proof_revalidate,
     cmd_proof_repair_mark,
+    cmd_proof_retrieve,
     cmd_proof_review_suspicion,
     cmd_proof_formalize_edit,
     cmd_proof_formalize_recommend,
@@ -53,6 +55,7 @@ from .commands import (
     cmd_proof_policy_list,
     cmd_proof_policy_set,
     cmd_proof_recommend,
+    cmd_project_analyze,
     cmd_review_decide,
     cmd_review_list,
     cmd_review_request,
@@ -102,6 +105,7 @@ recommend_app = typer.Typer(help="Cross-project recommendation workflows")
 reuse_app = typer.Typer(help="Reuse outcome workflows")
 automate_app = typer.Typer(help="Supervised automation workflows")
 benchmark_app = typer.Typer(help="Automation evaluation workflows")
+project_app = typer.Typer(help="Project diagnostics workflows")
 goal_app = typer.Typer(help="Goal operations")
 theorem_app = typer.Typer(help="Theorem registry")
 obligation_app = typer.Typer(help="Obligation queue")
@@ -162,6 +166,11 @@ def search(query: str, root: str = ".", limit: int = 10) -> None:
 
 
 @app.command()
+def retrieve(query: str, root: str = ".", limit: int = 10) -> None:
+    typer.echo(cmd_proof_retrieve(query, _root(root), limit=limit))
+
+
+@app.command()
 def reason(theorem_id: str, root: str = ".", notes: str = "") -> None:
     typer.echo(cmd_proof_reason(theorem_id, _root(root), notes=notes))
 
@@ -177,6 +186,7 @@ def revalidate(source_id: str, root: str = ".", backend_target: str = "", notes:
 
 
 app.add_typer(goal_app, name="goal")
+app.add_typer(codex_app, name="codex")
 app.add_typer(asset_app, name="asset")
 app.add_typer(pack_app, name="pack")
 app.add_typer(policy_app, name="policy")
@@ -184,6 +194,7 @@ app.add_typer(recommend_app, name="recommend")
 app.add_typer(reuse_app, name="reuse")
 app.add_typer(automate_app, name="automate")
 app.add_typer(benchmark_app, name="benchmark")
+app.add_typer(project_app, name="project")
 app.add_typer(theorem_app, name="theorem")
 app.add_typer(obligation_app, name="obligation")
 app.add_typer(blocker_app, name="blocker")
@@ -381,8 +392,13 @@ def benchmark_run(
     scenario_id: str = "",
     notes: str = "",
     record_json: list[str] = typer.Option(None, "--record-json"),
-) -> None:
+    ) -> None:
     typer.echo(cmd_proof_benchmark_run(_root(root), record_json=record_json, benchmark_name=benchmark_name, scenario_id=scenario_id, notes=notes))
+
+
+@project_app.command("analyze")
+def project_analyze(root: str = ".", query: str = "", limit: int = 5) -> None:
+    typer.echo(cmd_project_analyze(_root(root), query=query, limit=limit))
 
 
 @goal_app.command("set")

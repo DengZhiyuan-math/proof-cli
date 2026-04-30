@@ -80,6 +80,9 @@ def test_goals_blockers_obligations_and_snapshot(tmp_path: Path):
     assert snapshot.active_theorem == "thm_1"
     assert "obl_1" in snapshot.open_obligations
     assert any("Compactness Lemma" in route for route in snapshot.next_promising_routes)
+    assert snapshot.latest_diagnostic_report is not None
+    assert snapshot.latest_diagnostic_report["current_theorem"] == "thm_1"
+    assert snapshot.latest_diagnostic_report["promising_next_steps"]
     assert read_latest_snapshot(store).handoff_note == "continue from lemma 1"
 
     summary = summarize_state(store)
