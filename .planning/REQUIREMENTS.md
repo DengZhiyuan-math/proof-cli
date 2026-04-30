@@ -16,12 +16,12 @@ These are not active requirements yet. They are preserved here only as likely ca
 - **CMDX-01**: Richer interactive theorem-creation and proof-state edit forms
 - **CMDX-02**: Multi-workspace selection without manual root disambiguation
 - **CMDX-03**: Structured machine-readable execution logs for downstream tooling
-- **CMDX-04**: Deeper Codex plugin packaging beyond skill-based invocation
+- **CMDX-04**: Deeper Codex plugin packaging beyond the initial local/global plugin path
 
 ## Notes
 
-- The full shipped v1.2 requirement set is archived in [v1.2-REQUIREMENTS.md](/Users/zhdeng/Proof%20CLI%20/.planning/milestones/v1.2-REQUIREMENTS.md).
+- The full shipped v1.3 requirement set is archived in [v1.3-REQUIREMENTS.md](/Users/zhdeng/Proof%20CLI%20/.planning/milestones/v1.3-REQUIREMENTS.md).
 - Start the next milestone before treating any candidate above as active scope.
 
 ---
-*Requirements reset: 2026-04-30 after v1.2 milestone completion*
+*Requirements reset: 2026-04-30 after v1.3 milestone completion*

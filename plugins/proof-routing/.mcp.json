@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "proof-routing": {
+      "command": "python3",
+      "args": [
+        "./scripts/proof_mcp_server.py"
+      ]
+    }
+  }
+}

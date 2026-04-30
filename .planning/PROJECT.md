@@ -4,7 +4,7 @@
 
 This is a CLI-first human-machine collaborative proof operating system for research mathematics.
 
-It helps a researcher manage theorem contracts, proof state, dependencies, blockers, imported results, reusable proof knowledge, project memory, and explicit proof structure so long-running proof work can survive context loss and stay auditable.
+It helps a researcher manage theorem contracts, proof state, dependencies, blockers, imported results, reusable proof knowledge, project memory, explicit proof structure, and now a plugin-backed Codex tool surface so long-running proof work can survive context loss and stay auditable.
 
 ## Core Value
 
@@ -12,9 +12,9 @@ Manage the trust boundary around mathematical proof work: know what can be calle
 
 ## Current State
 
-v1.2 is shipped.
+v1.3 is shipped.
 
-The project now has a real Codex-facing command surface on top of the Proof CLI, including deterministic command routing, safe mutation routing, readiness diagnostics, and an end-to-end theorem-cluster workflow validated through the wrapper.
+The project now has a globally installable plugin-backed Codex integration on top of the Proof CLI, including home-local packaging, wrapper-backed MCP tools, explicit entry hierarchy, and installed-copy validation.
 
 ## Next Milestone Goals
 
@@ -22,10 +22,10 @@ The next milestone is not defined yet.
 
 Likely directions to evaluate:
 
-- richer guided command UX for theorem and proof-state editing
-- multi-workspace selection and disambiguation
-- deeper plugin-level integration for Codex
-- broader visual or structured inspection surfaces that still preserve the CLI-first trust model
+- richer interactive theorem and proof-state editing
+- deeper Codex plugin packaging and discovery behavior
+- broader structured execution logs and inspection surfaces
+- more user-friendly multi-workspace selection
 
 ## Requirements
 
@@ -44,6 +44,9 @@ Likely directions to evaluate:
 - [x] Mutating Proof CLI commands ask only for the minimum missing theorem or obligation details
 - [x] Proof CLI bootstrap and fallback behavior is explicit when the local executable is unavailable
 - [x] The command-routing layer is validated with a small end-to-end theorem workflow inside Codex
+- [x] Proof Routing can be installed as a home-local Codex plugin
+- [x] Plugin-backed tools can expose proof inspection and core mutation workflows without replacing Proof CLI as the source of truth
+- [x] The global plugin path, wrapper fallback, and `$proof ...` compatibility layer are documented and validated as one coherent user path
 
 ### Active
 
@@ -66,8 +69,9 @@ The project shipped:
 - v1.0 as the local-first CLI proof workspace foundation
 - v1.1 as the collaboration, publication, retrieval, snapshot, and real validation milestone
 - v1.2 as the Codex command-routing and wrapper-hardening milestone
+- v1.3 as the global plugin integration milestone
 
-The immediate question is no longer whether the Proof CLI can model proof work, but what the next usability and integration layer should be without weakening auditability or the human-in-the-loop trust boundary.
+The immediate question is no longer whether Proof CLI can reach Codex at all, but what the next layer of usability, interaction, and plugin maturity should be without weakening auditability or the human-in-the-loop trust boundary.
 
 ## Constraints
 
@@ -88,18 +92,19 @@ The immediate question is no longer whether the Proof CLI can model proof work, 
 | Retrieval happens before proof search | Prevents re-proving known results and reduces wasted effort | ✓ Good |
 | Bounded automation is preferable to open-ended autonomous proof search | It preserves auditability and trust boundaries | ✓ Good |
 | Codex should drive Proof CLI through a wrapper, not replace it | The system needs a hard command surface without duplicating proof-state logic | ✓ Shipped in v1.2 |
+| Plugin-backed tools should be the canonical Codex path once installed | Skills alone are not a reliable hard execution surface | ✓ Shipped in v1.3 |
 
 ## Recent Milestone History
 
 <details>
-<summary>v1.2 closeout snapshot</summary>
+<summary>v1.3 closeout snapshot</summary>
 
-- Shipped deterministic `proof codex` / `proof-codex` command routing
-- Shipped safe mutation routing for theorem, obligation, blocker, and snapshot flows
-- Shipped readiness diagnostics through `proof codex doctor`
-- Validated a realistic small theorem-cluster workflow through the hardened wrapper
+- Shipped home-local plugin packaging for `proof-routing`
+- Shipped broader wrapper-backed MCP proof tools
+- Shipped unified entry hierarchy across plugin, wrapper, and skill surfaces
+- Validated the installed plugin copy end to end
 
 </details>
 
 ---
-*Last updated: 2026-04-30 after v1.2 milestone completion*
+*Last updated: 2026-04-30 after v1.3 milestone completion*

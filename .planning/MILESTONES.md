@@ -34,4 +34,15 @@
 - Readiness diagnostics made degraded command-layer states visible without silently repairing the environment.
 - A realistic theorem-cluster workflow validated initialization, mutation, retrieval, diagnostics, and snapshotting through the wrapper.
 
+## v1.3 (Shipped: 2026-04-30)
+
+**Phases completed:** 4 phases, 4 plans, 10 tasks
+
+**Key accomplishments:**
+
+- Proof Routing became a home-local installable Codex plugin rather than a repo-local experiment.
+- The plugin MCP surface expanded to cover routine proof inspection and core theorem-state mutations.
+- Plugin tools, `proof codex ...`, and `$proof ...` were given a clear documented entry hierarchy.
+- The installed plugin copy was validated end to end through a short real workflow.
+
 ---

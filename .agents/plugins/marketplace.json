@@ -1,0 +1,20 @@
+{
+  "name": "proof-cli-local",
+  "interface": {
+    "displayName": "Proof CLI Local Plugins"
+  },
+  "plugins": [
+    {
+      "name": "proof-routing",
+      "source": {
+        "source": "local",
+        "path": "./plugins/proof-routing"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
