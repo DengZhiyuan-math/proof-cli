@@ -8,8 +8,8 @@ from proof_cli.commands import cmd_proof_formalize_recommend, cmd_theorem_ground
 from proof_cli.cli import app
 from proof_cli.domain import BlockerRecord, ProofObligation, TheoremProvenanceKind, TheoremReviewState, TheoremStatus, TrustLevel
 from proof_cli.memory import list_memory_artifacts, record_memory
-from proof_cli.obligations import add_obligation
-from proof_cli.proof_state import record_theorem_usage, set_current_context, set_current_theorem
+from proof_cli.obligations import add_obligation, list_obligations
+from proof_cli.proof_state import load_state, record_theorem_usage, set_current_context, set_current_theorem
 from proof_cli.references import ReferenceRecord, ReferenceSourceType
 from proof_cli.storage import approve_reference, defer_reference, ensure_project, import_reference
 from proof_cli.theorems import add_theorem
@@ -630,6 +630,7 @@ def test_codex_surface_shows_guided_catalog_and_discovers_workspace_root(tmp_pat
     assert "proof codex status" in result.stdout
     assert "proof codex snapshot" in result.stdout
     assert "proof codex doctor" in result.stdout
+    assert "proof codex obligation resolve" in result.stdout
 
 
 def test_codex_surface_routes_real_read_only_commands(tmp_path: Path) -> None:
@@ -686,7 +687,7 @@ def test_codex_surface_exposes_guided_mutation_entry_points(tmp_path: Path) -> N
 
 
 def test_codex_surface_runs_mutations_through_wrapper(tmp_path: Path) -> None:
-    ensure_project(tmp_path)
+    store = ensure_project(tmp_path)
 
     theorem_result = runner.invoke(
         app,
@@ -719,6 +720,26 @@ def test_codex_surface_runs_mutations_through_wrapper(tmp_path: Path) -> None:
     obligation_payload = json.loads(obligation_result.stdout.split("Result:\n", 1)[1])
     assert obligation_payload["required_for"] == "thm_tiny"
 
+    resolve_result = runner.invoke(
+        app,
+        [
+            "codex",
+            "obligation",
+            "resolve",
+            obligation_payload["id"],
+            "--root",
+            str(tmp_path),
+            "--rationale",
+            "proved explicitly",
+        ],
+    )
+    assert resolve_result.exit_code == 0
+    assert "Persisted proof state: changed" in resolve_result.stdout
+    resolved_payload = json.loads(resolve_result.stdout.split("Result:\n", 1)[1])
+    assert resolved_payload["status"] == "resolved"
+    assert list_obligations(store)[-1].status.value == "resolved"
+    assert obligation_payload["id"] not in load_state(store).open_obligations
+
     blocker_result = runner.invoke(
         app,
         ["codex", "blocker", "add", "stuck on normalization", "--root", str(tmp_path), "--scope", "thm_tiny", "--failure-type", "gap"],
@@ -731,6 +752,29 @@ def test_codex_surface_runs_mutations_through_wrapper(tmp_path: Path) -> None:
     assert snapshot_result.exit_code == 0
     snapshot_payload = json.loads(snapshot_result.stdout.split("Result:\n", 1)[1])
     assert snapshot_payload["handoff_note"] == "checkpoint"
+
+
+def test_obligation_resolve_is_available_on_the_base_cli(tmp_path: Path) -> None:
+    store = ensure_project(tmp_path)
+    add_obligation(
+        store,
+        ProofObligation(
+            id="obl_base_resolve",
+            goal_statement="bridge A to C",
+            required_for="thm_tiny",
+        ),
+    )
+
+    result = runner.invoke(
+        app,
+        ["obligation", "resolve", "obl_base_resolve", "--root", str(tmp_path), "--rationale", "proved explicitly"],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "resolved"
+    assert list_obligations(store)[0].status.value == "resolved"
+    assert load_state(store).open_obligations == []
 
 
 def test_codex_surface_honors_root_precedence_for_mutations(tmp_path: Path, monkeypatch) -> None:

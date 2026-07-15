@@ -1,43 +1,19 @@
 ---
-name: "proof-cli"
-description: "Work with the Mathematical Proof CLI / Research Proof OS repository, including command-style triggers"
+name: "proof-cli-repo-dev"
+description: "Repository-local Proof CLI debug and development helper"
 metadata:
-  short-description: "Proof CLI project skill"
+  short-description: "Proof CLI repo debug helper"
 ---
 
 # Proof CLI
 
-Use this skill when working in the `Mathematical Proof CLI / Research Proof OS` repository.
+Use this skill when debugging the `Mathematical Proof CLI / Research Proof OS` repository.
 
-This project-local skill is primarily for repository debugging and development work. The canonical user-facing entry path is the global `~/.codex/skills/proof/` skill.
+This project-local skill is primarily for repository debugging and development work. The canonical user-facing entry path is the global exact `$proof-*` skill family.
 
 If the Proof Routing plugin is installed, prefer the plugin-backed MCP tools first and use this skill only as a repository-local fallback.
 
-## Command-style triggers
-
-If the user writes a short command such as:
-
-- `$proof theorem add`
-- `$proof new theorem`
-- `$proof status`
-- `$proof search ...`
-
-treat it as an instruction to run the matching Proof Codex wrapper flow directly.
-
-Prefer these shortcuts as canonical entry points for Codex:
-
-- `$proof status` -> `proof codex status`
-- `$proof theorem list` -> `proof codex theorem list`
-- `$proof theorem add` / `$proof new theorem` -> `proof codex theorem add` or `proof codex new theorem`
-- `$proof obligation list` / `$proof obligation add` -> `proof codex obligation list` or `proof codex obligation add`
-- `$proof blocker list` / `$proof blocker add` -> `proof codex blocker list` or `proof codex blocker add`
-- `$proof search <query>` -> `proof codex search <query>`
-- `$proof retrieve <query>` -> `proof codex retrieve <query>`
-- `$proof project analyze` -> `proof codex project analyze`
-- `$proof snapshot` -> `proof codex snapshot`
-- `$proof doctor` -> `proof codex doctor`
-
-When a command is underspecified, choose the smallest safe default and ask for only the minimum missing detail.
+This debug helper should not claim the `$proof` trigger surface.
 
 ## Setup
 
@@ -95,12 +71,9 @@ When a command is underspecified, choose the smallest safe default and ask for o
 
 For interactive Codex work, prefer this pattern:
 
-1. User issues a short `$proof ...` command.
-2. Resolve the command to the corresponding `proof codex` action first.
-3. Let the wrapper call the underlying Proof CLI logic.
-4. Inspect current workspace state before mutating anything.
-5. Keep proof changes small, local, and auditable.
-6. Validate with the smallest relevant test or command set.
+1. Developer inspects the local repository skill surface.
+2. Developer validates the exact global `$proof-*` skills or plugin tools.
+3. Developer tests the underlying `proof codex` command directly.
 
 ## Working conventions
 

@@ -127,7 +127,7 @@ def _next_steps(
             steps.append(f"recheck related contract(s): {', '.join(blocker.related_contracts)}")
     elif bottleneck_kind == "obligation" and obligations:
         obligation = obligations[0]
-        steps.append(f"close obligation {obligation.id}")
+        steps.append(f"resolve obligation {obligation.id}")
         if obligation.source_step_id:
             steps.append(f"revisit source step {obligation.source_step_id}")
     elif bottleneck_kind == "route":
@@ -200,4 +200,3 @@ def build_project_diagnostic_report(
         ),
         top_candidates=_candidate_summaries(retrieval.candidates),
     )
-

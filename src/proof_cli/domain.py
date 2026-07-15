@@ -42,8 +42,15 @@ class TheoremReviewState(str, Enum):
 
 class ProofObligationStatus(str, Enum):
     open = "open"
-    closed = "closed"
+    resolved = "resolved"
+    closed = "resolved"
     blocked = "blocked"
+
+    @classmethod
+    def _missing_(cls, value: object) -> ProofObligationStatus | None:
+        if value == "closed":
+            return cls.resolved
+        return None
 
 
 class BlockerStatus(str, Enum):
