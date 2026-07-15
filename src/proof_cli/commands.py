@@ -151,6 +151,7 @@ from .collaboration import (
 )
 from .memory import MemoryArtifact, MemoryLayer, list_memory_artifacts, record_memory
 from .recommendations import recommend_cross_project_assets
+from .obligations import close_obligation
 from .proof_state import (
     add_blocker,
     add_goal,
@@ -2015,6 +2016,16 @@ def cmd_theorem_ground(theorem_id: str, reference_ids: list[str], root: str | Pa
 def cmd_obligation_add(goal_statement: str, root: str | Path = ".", source_step_id: str | None = None, required_for: str | None = None) -> str:
     obligation = ProofObligation(id=f"obl_{abs(hash(goal_statement)) % 100000}", goal_statement=goal_statement, source_step_id=source_step_id, required_for=required_for)
     add_obligation(get_store(root), obligation)
+    return obligation.model_dump_json(indent=2)
+
+
+def cmd_obligation_resolve(
+    obligation_id: str,
+    root: str | Path = ".",
+    *,
+    rationale: str = "",
+) -> str:
+    obligation = close_obligation(get_store(root), obligation_id, rationale=rationale or None)
     return obligation.model_dump_json(indent=2)
 
 

@@ -70,6 +70,7 @@ from .commands import (
     cmd_init,
     cmd_obligation_add,
     cmd_obligation_list,
+    cmd_obligation_resolve,
     cmd_memory_add,
     cmd_memory_list,
     cmd_memory_show,
@@ -484,6 +485,11 @@ def obligation_add(goal_statement: str, root: str = ".", source_step_id: str = "
 @obligation_app.command("list")
 def obligation_list(root: str = ".") -> None:
     typer.echo(cmd_obligation_list(_root(root)))
+
+
+@obligation_app.command("resolve")
+def obligation_resolve(obligation_id: str, root: str = ".", rationale: str = "") -> None:
+    typer.echo(cmd_obligation_resolve(obligation_id, _root(root), rationale=rationale))
 
 
 @obligation_app.command("derive")

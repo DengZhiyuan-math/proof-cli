@@ -188,7 +188,7 @@ def test_record_verification_result_strengthens_state_and_resolves_blocker(tmp_p
     assert state.unresolved_trust_sensitive_calls == []
     assert contract is not None
     assert record.summary() in contract.local_usage_notes
-    assert obligations[0].status == ProofObligationStatus.closed
+    assert obligations[0].status == ProofObligationStatus.resolved
     assert blockers[0].status == BlockerStatus.resolved
     assert any(reference == f"supporting_ref:{result.id}" for reference in blockers[0].related_contracts)
     assert summary["verification_result_summaries"] == [record.summary()]

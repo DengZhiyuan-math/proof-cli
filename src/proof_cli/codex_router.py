@@ -15,6 +15,7 @@ from .commands import (
     cmd_blocker_list,
     cmd_obligation_add,
     cmd_obligation_list,
+    cmd_obligation_resolve,
     cmd_project_analyze,
     cmd_proof_retrieve,
     cmd_search,
@@ -204,6 +205,7 @@ def _catalog(root: ResolvedRoot) -> str:
             "  proof codex theorem list",
             "  proof codex theorem show <theorem_id>",
             "  proof codex obligation list",
+            "  proof codex obligation resolve <obligation_id>",
             "  proof codex blocker list",
             '  proof codex search "<query>"',
             '  proof codex retrieve "<query>"',
@@ -214,6 +216,7 @@ def _catalog(root: ResolvedRoot) -> str:
             "  proof codex new theorem <theorem_id> <name> <statement>",
             "  proof codex theorem add <theorem_id> <name> <statement>",
             '  proof codex obligation add "<goal_statement>"',
+            "  proof codex obligation resolve <obligation_id>",
             '  proof codex blocker add "<description>"',
             "  proof codex snapshot",
             "",
@@ -398,6 +401,29 @@ def obligation_add(
         source_step_id=source_step_id or None,
         required_for=required_for or None,
     )
+    typer.echo(_render_mutation_result(context, payload))
+
+
+@obligation_app.command("resolve")
+def obligation_resolve(
+    obligation_id: str | None = typer.Argument(None),
+    root: str = "",
+    rationale: str = "",
+) -> None:
+    context = _mutation_context(root or None, "obligation resolve")
+    if isinstance(context, str):
+        typer.echo(context)
+        return
+    if not obligation_id:
+        typer.echo(
+            _render_missing_details(
+                context,
+                ["obligation_id"],
+                "proof codex obligation resolve <obligation_id> [--rationale \"...\"]",
+            )
+        )
+        return
+    payload = cmd_obligation_resolve(obligation_id, root=context.root.path, rationale=rationale)
     typer.echo(_render_mutation_result(context, payload))
 
 

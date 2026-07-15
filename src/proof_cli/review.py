@@ -248,7 +248,7 @@ def close_obligation_review(
     append_event(
         store,
         "review_approved",
-        f"closed obligation {obligation_id}",
+        f"resolved obligation {obligation_id}",
         entity_id=obligation_id,
         payload={"proof_text": proof_text, "rationale": rationale},
     )

@@ -169,20 +169,20 @@ def close_obligation(
                     reference_id=reference_id,
                     notes=route_notes or (rationale or ""),
                 )
-            obligation.status = ProofObligationStatus.closed
+            obligation.status = ProofObligationStatus.resolved
             obligation.blocking_reason = rationale
             store_obligation(store, obligation)
             append_event(
                 store,
-                "obligation_closed",
-                f"closed obligation {obligation_id}",
+                "obligation_resolved",
+                f"resolved obligation {obligation_id}",
                 entity_id=obligation_id,
                 payload=obligation.model_dump(mode="json"),
             )
             state = load_state(store)
             if obligation_id in state.open_obligations:
                 state.open_obligations.remove(obligation_id)
-                save_state(store, state, message=f"closed obligation {obligation_id}")
+                save_state(store, state, message=f"resolved obligation {obligation_id}")
             return obligation
     raise KeyError(obligation_id)
 

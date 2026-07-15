@@ -13,6 +13,8 @@ files_modified:
   - src/proof_cli/reusable_assets.py
   - src/proof_cli/domain_packs.py
   - src/proof_cli/storage.py
+  - src/proof_cli/theorems.py
+  - src/proof_cli/review.py
   - tests/test_collaboration.py
   - tests/test_cli.py
   - tests/test_export.py
@@ -29,7 +31,6 @@ requirements:
   - COL-07
   - COL-08
   - COL-09
-  - COL-10
 must_haves:
   truths:
     - collaborative proof work must preserve provenance, review history, and explicit trust boundaries
@@ -45,13 +46,14 @@ must_haves:
     - src/proof_cli/reusable_assets.py
     - src/proof_cli/domain_packs.py
     - src/proof_cli/storage.py
+    - src/proof_cli/theorems.py
+    - src/proof_cli/review.py
     - tests/test_collaboration.py
     - tests/test_cli.py
     - tests/test_export.py
     - tests/test_governance.py
     - tests/test_reusable_assets.py
   key_links:
-    - leverage existing layered memory, retrieval, and snapshots as the base for provenance and handoff
     - keep the collaboration model explicit enough to support later service-mode evolution without requiring it now
     - policy and review state must be auditable in exports and summaries
 ---
@@ -61,6 +63,7 @@ Build Phase 6 as a governed collaborative proof infrastructure for research math
 
 Purpose: validate that multiple researchers can collaborate on related proof projects without losing authorship, provenance, review discipline, or mathematical clarity.
 Output: contributor and role model, explicit governance for shared proof objects, review/comment workflows, branch/divergence handling, team-scoped reusable knowledge, reproducible exchange/handoff, collaboration-aware policy, and validation on a real multi-user proof workflow.
+Execution split: wave 1 establishes collaboration models, governance, and CLI reachability; wave 2 handles bundle import/reconstitution and the end-to-end collaboration validation harness.
 </objective>
 
 <execution_context>
@@ -88,9 +91,9 @@ Output: contributor and role model, explicit governance for shared proof objects
 
 <task type="auto">
   <name>Define collaboration domain models and persistence</name>
-  <files>src/proof_cli/collaboration.py, src/proof_cli/storage.py</files>
+  <files>src/proof_cli/collaboration.py, src/proof_cli/storage.py, src/proof_cli/theorems.py, src/proof_cli/review.py</files>
   <read_first>/Users/zhdeng/Proof CLI /.planning/milestones/1.0-phases/06-collaborative-proof-infrastructure/06-CONTEXT.md</read_first>
-  <action>Create explicit contributor, role, authorship, review record, comment thread, comment, branch, publication, exchange bundle, and collaboration policy models; add persistence and loading hooks that preserve provenance and review history across sessions.</action>
+  <action>Create explicit contributor, role, authorship, review record, comment thread, comment, branch, publication, and collaboration policy models; wire authorship and provenance into theorem contracts and review records; add persistence and loading hooks that preserve provenance and review history across sessions.</action>
   <verify>pytest tests/test_collaboration.py -q</verify>
   <acceptance_criteria>
     - proof objects can carry contributor identity and authorship
@@ -118,28 +121,13 @@ Output: contributor and role model, explicit governance for shared proof objects
   <name>Implement shared asset governance and reproducible exchange</name>
   <files>src/proof_cli/reusable_assets.py, src/proof_cli/domain_packs.py, src/proof_cli/governance.py, src/proof_cli/export.py</files>
   <read_first>/Users/zhdeng/Proof CLI /.planning/milestones/1.0-phases/06-collaborative-proof-infrastructure/06-CONTEXT.md</read_first>
-  <action>Extend reusable assets and domain packs with team-scoped publication, provenance propagation, review states, and policy checks; add export/import bundles that include state, review history, shared dependencies, and handoff metadata.</action>
+  <action>Extend reusable assets and domain packs with team-scoped publication, provenance propagation, review states, and policy checks; add export bundles that include state, review history, shared dependencies, and export metadata.</action>
   <verify>pytest tests/test_reusable_assets.py tests/test_export.py tests/test_governance.py -q</verify>
   <acceptance_criteria>
     - shared assets require explicit governance before publication
     - exports preserve provenance, review history, and dependencies
-    - imports validate and preserve trust boundaries
   </acceptance_criteria>
   <done>Shared governance and exchange are reproducible</done>
-</task>
-
-<task type="auto">
-  <name>Validate collaborative workflow on a real proof section</name>
-  <files>tests/test_collaboration.py, tests/test_export.py, tests/test_governance.py, tests/test_cli.py</files>
-  <read_first>/Users/zhdeng/Proof CLI /.planning/milestones/1.0-phases/06-collaborative-proof-infrastructure/06-CONTEXT.md</read_first>
-  <action>Build an evaluation harness that simulates at least two contributors on a nontrivial proof section with one disputed step, one shared imported theorem family, one reusable team asset, one branch comparison or resolution, and one successful handoff after interruption.</action>
-  <verify>pytest tests/test_collaboration.py tests/test_cli.py tests/test_export.py tests/test_governance.py tests/test_reusable_assets.py -q</verify>
-  <acceptance_criteria>
-    - collaboration improves proof workflow rather than collapsing into file sharing
-    - handoff preserves state, trust context, and review history
-    - governance overhead is visible and testable
-  </acceptance_criteria>
-  <done>Phase 6 is validated on a real collaborative proof workflow</done>
 </task>
 
 </tasks>
@@ -150,8 +138,6 @@ Before declaring this plan complete:
 - [ ] comments and approvals remain separate from theorem truth state
 - [ ] branch divergence and disputed interpretations are explicit
 - [ ] shared assets and team packs require governance before reuse
-- [ ] exchange bundles reproduce a proof project without context collapse
-- [ ] the validation harness demonstrates useful collaboration on a real proof section
 </verification>
 
 <success_criteria>

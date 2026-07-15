@@ -312,7 +312,7 @@ def elaborate_command(store: ProjectStore, command: DSLCommand) -> str:
     if name == "close":
         obligations = load_state(store).open_obligations
         if obligations:
-            close_obligation(store, obligations[-1], rationale="closed by DSL close")
+            close_obligation(store, obligations[-1], rationale="resolved by DSL close")
             return f"close:{obligations[-1]}"
         return "close:no-open-obligations"
     raise ValueError(f"Unknown DSL command: {name}")

@@ -103,7 +103,7 @@ def test_closing_obligation_updates_open_queue(tmp_path: Path):
         ),
     )
     closed = close_obligation(store, "obl_2", rationale="proved explicitly")
-    assert closed.status.value == "closed"
+    assert closed.status.value == "resolved"
     assert "obl_2" not in load_state(store).open_obligations
 
 
