@@ -23,6 +23,8 @@ See: .planning/PROJECT.md (updated 2026-04-30)
 
 ## Current Snapshot
 
+Last activity: 2026-07-15 - Completed quick task 260716-0ls: Prepare a safe public release and publish the repository to GitHub
+
 - Project type: CLI-first research proof OS with a shipped plugin-backed Codex integration layer
 - Latest shipped milestone: v1.3 Global Proof Plugin Integration
 - Active roadmap: none yet
@@ -40,3 +42,9 @@ See: .planning/PROJECT.md (updated 2026-04-30)
 - v1.1 is complete and archived
 - v1.2 is complete and archived
 - v1.3 is complete and archived
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260716-0ls | Prepare a safe public release and publish the repository to GitHub | 2026-07-15 | eabe7de | [260716-0ls-prepare-a-safe-public-release-and-publis](./quick/260716-0ls-prepare-a-safe-public-release-and-publis/) |
