@@ -21,7 +21,7 @@ An accepted, local result with independent standing that other nodes may depend 
 _Avoid_: proposition, corollary, result — these are display labels for how a Lemma is described in writing, not distinct kinds
 
 **Claim** (a proof map node kind):
-A local proof obligation serving a specific parent node, not yet judged reusable enough to stand as a Lemma.
+A local proof obligation serving a specific parent node, not yet judged reusable enough to stand as a Lemma. Note the deliberate homonym with the verb "to claim" (see Claimed, below) — the noun names a node kind, the verb names an agent's action; they are disambiguated by part of speech, not by spelling.
 _Avoid_: obligation, proof obligation, open goal
 
 **Imported result** (a proof map node kind):
@@ -43,3 +43,27 @@ _Avoid_: acceptance, verification
 **Promote**:
 The researcher's explicit decision to change an Accepted Claim's kind to Lemma, marking it as independently reusable. Only possible after the Claim has been Accepted; a node's kind is never automatically reassigned, and Promote does not currently support demotion.
 _Avoid_: upgrade, generalize
+
+### Node lifecycle
+
+A proof map node's lifecycle state is never stored directly — it is always computed from lower-level records (an active claim, the node's latest candidate proof and its review decision, and its dependencies' own state). See ADR-0002.
+
+**Claimed** (a node lifecycle state):
+A researcher or agent has taken ownership of a proof map node to work on it, and has not yet submitted a Candidate proof for it. A review decision on that Candidate proof — whatever the decision — ends the claim; the next attempt on the node needs a fresh claim.
+_Avoid_: assigned, in progress, proof-drafted
+
+**Review-needed** (a node lifecycle state):
+A proof map node has a submitted Candidate proof awaiting the researcher's Acceptance or Reference review decision.
+_Avoid_: pending review, submitted
+
+**Revision requested** (a node lifecycle state):
+The researcher's decision that a Candidate proof does not stand, but the node itself is still worth pursuing — the next attempt targets the same node, not a new one.
+_Avoid_: rejected, needs work
+
+**Rejected** (a node lifecycle state):
+The researcher's decision that a node's approach does not hold and should not be pursued further. The node and its full candidate-proof and review history stay in the proof map permanently, as the record of the abandoned route.
+_Avoid_: closed, abandoned, revision requested
+
+**Blocked** (a node lifecycle state):
+A proof map node has at least one dependency that has not yet reached Acceptance (for a Theorem, Lemma, or Claim dependency) or Reference review (for an Imported result dependency).
+_Avoid_: waiting
