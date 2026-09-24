@@ -69,5 +69,9 @@ The researcher's decision that a node's approach does not hold and should not be
 _Avoid_: closed, abandoned, revision requested
 
 **Blocked** (a node lifecycle state):
-A proof map node has at least one dependency that has not yet reached Acceptance (for a Theorem, Lemma, or Claim dependency) or Reference review (for an Imported result dependency).
+A proof map node has at least one dependency that has not yet reached Acceptance (for a Theorem, Lemma, or Claim dependency) or Reference review (for an Imported result dependency). Blocked overrides Claimed, Review-needed, and Revision requested in what's displayed, but never overrides Accepted or Rejected — those are terminal regardless of a node's dependencies.
 _Avoid_: waiting
+
+**Split**:
+Decomposing a Theorem, Lemma, or Claim into new Claim nodes that become its dependencies, so each can be worked and Accepted independently. Not gated by review — it proposes work structure, not a mathematical result — so any agent or collaborator may do it. Splitting doesn't resolve the parent: once its new dependencies are Accepted, the parent still needs its own Candidate proof (even a short one) and its own Acceptance, combining them. A parent's existing dependencies aren't automatically reassigned to the new children; only a person or agent explicitly moving one decides that. Split doesn't apply to an Imported result (nothing to decompose) or a Rejected node (pursue a new node instead of reviving that one). A node produced by a split records which node it was split from, in `derived_from`.
+_Avoid_: decompose (fine informally, but keep decisions and CLI/agent protocol on "split"), break down
