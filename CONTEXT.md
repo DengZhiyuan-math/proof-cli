@@ -29,8 +29,12 @@ An external, already-established result pulled in as a dependency. It carries a 
 _Avoid_: reference, external theorem
 
 **Candidate proof**:
-A proof an agent or collaborator submits for a proof map node; it is a reviewable artifact, never an established result.
+A proof an agent or collaborator submits for a proof map node; it is a reviewable artifact, never an established result. Its text lives as a Markdown file in the Proof vault, one immutable file per attempt; the proof map node itself (id, kind, dependencies) stays in SQLite. See ADR-0003.
 _Avoid_: resolution, solution
+
+**Proof vault**:
+The repo's top-level `proofs/` directory: one Markdown file per Candidate proof attempt (`proofs/<node-id>/v<N>.md`), openable directly as an Obsidian vault. Distinct from `.proof/`, which holds internal, non-human-authored project state.
+_Avoid_: .proof, proof store
 
 **Acceptance**:
 The researcher's explicit decision that a candidate proof for a Theorem, Lemma, or Claim node enters the established proof map and may be depended on. Does not apply to Imported result nodes — see Reference review.
