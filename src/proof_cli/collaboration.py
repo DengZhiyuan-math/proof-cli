@@ -39,6 +39,8 @@ class ReviewGovernanceState(str, Enum):
     disputed = "disputed"
     revision_requested = "revision_requested"
     reaffirmed = "reaffirmed"
+    trusted = "trusted"
+    unusable = "unusable"
 
 
 class ReviewRecordKind(str, Enum):

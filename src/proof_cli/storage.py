@@ -17,6 +17,7 @@ from .domain import (
     ClaimRecord,
     DependencyPin,
     EventRecord,
+    EvidenceCheck,
     ProofMapNode,
     ProofObligation,
     ProjectSnapshot,
@@ -146,6 +147,17 @@ CREATE TABLE IF NOT EXISTS challenges (
 );
 
 CREATE INDEX IF NOT EXISTS idx_challenges_target_node_id ON challenges(target_node_id, status);
+
+CREATE TABLE IF NOT EXISTS evidence_checks (
+  id TEXT PRIMARY KEY,
+  candidate_proof_id TEXT NOT NULL,
+  outcome TEXT NOT NULL,
+  notes TEXT NOT NULL,
+  run_by TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_evidence_checks_candidate_proof_id ON evidence_checks(candidate_proof_id);
 """
 
 
@@ -936,6 +948,42 @@ def mark_challenge_dismissed(
         )
         conn.commit()
         return cursor.rowcount > 0
+
+
+def _row_to_evidence_check(row: sqlite3.Row) -> EvidenceCheck:
+    return EvidenceCheck(
+        id=row["id"],
+        candidate_proof_id=row["candidate_proof_id"],
+        outcome=row["outcome"],
+        notes=row["notes"],
+        run_by=row["run_by"],
+        created_at=row["created_at"],
+    )
+
+
+def insert_evidence_check(store: ProjectStore, check: EvidenceCheck) -> EvidenceCheck:
+    with store.connect() as conn:
+        conn.execute(
+            "INSERT INTO evidence_checks(id, candidate_proof_id, outcome, notes, run_by, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (check.id, check.candidate_proof_id, check.outcome.value, check.notes, check.run_by, check.created_at.isoformat()),
+        )
+        conn.commit()
+    return check
+
+
+def get_evidence_check(store: ProjectStore, check_id: str) -> EvidenceCheck | None:
+    with store.connect() as conn:
+        row = conn.execute("SELECT * FROM evidence_checks WHERE id = ? LIMIT 1", (check_id,)).fetchone()
+    return _row_to_evidence_check(row) if row else None
+
+
+def list_evidence_checks_for_candidate_proof(store: ProjectStore, candidate_proof_id: str) -> list[EvidenceCheck]:
+    with store.connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM evidence_checks WHERE candidate_proof_id = ? ORDER BY created_at",
+            (candidate_proof_id,),
+        ).fetchall()
+    return [_row_to_evidence_check(row) for row in rows]
 
 
 def store_snapshot(store: ProjectStore, snapshot: ProjectSnapshot) -> ProjectSnapshot:

@@ -255,6 +255,31 @@ class Challenge(BaseModel):
     resolved_at: datetime | None = None
 
 
+class EvidenceOutcome(str, Enum):
+    passed = "passed"
+    failed = "failed"
+    inconclusive = "inconclusive"
+    error = "error"
+    stale = "stale"
+
+
+class EvidenceCheck(BaseModel):
+    """An automated or semi-automated check run against a specific Candidate proof.
+
+    Purely advisory: recording one, or a Human Review judgment of `trusted`
+    or `unusable` on it (a `kind=evidence_review` decision), can never
+    grant, revoke, or otherwise touch a node's acceptance_state — only
+    `decide_acceptance` can (ADR-0004 point 5).
+    """
+
+    id: str
+    candidate_proof_id: str
+    outcome: EvidenceOutcome
+    notes: str = ""
+    run_by: str = "system"
+    created_at: datetime = Field(default_factory=utc_now)
+
+
 class ProjectSnapshot(BaseModel):
     project_id: str
     active_theorem: str | None = None
