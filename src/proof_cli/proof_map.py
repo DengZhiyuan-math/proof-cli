@@ -19,6 +19,7 @@ from .storage import (
     append_event,
     get_active_claim,
     get_candidate_proof as _get_candidate_proof,
+    get_current_candidate_proof,
     get_proof_map_node,
     insert_claim,
     insert_candidate_proof,
@@ -582,3 +583,91 @@ def get_reference_review_state(store: ProjectStore, node_id: str) -> str:
     if records and records[-1].decision == ReviewGovernanceState.approved:
         return "reviewed"
     return "unreviewed"
+
+
+def _dependency_satisfied(store: ProjectStore, dependency_id: str) -> bool:
+    """Whether a dependency has reached the standing that unblocks its dependents.
+
+    For a local node that's Acceptance; for an imported_result that's
+    Reference review. A dangling dependency id can't happen through
+    `create_node` (it validates dependencies exist), so a missing node here
+    is treated as satisfied rather than as a block this axis can't explain.
+    """
+    dependency = get_proof_map_node(store, dependency_id)
+    if dependency is None:
+        return True
+    if dependency.kind == ProofMapNodeKind.imported_result:
+        return get_reference_review_state(store, dependency_id) == "reviewed"
+    return get_acceptance_state(store, dependency_id) == "accepted"
+
+
+def _has_unresolved_dependency(store: ProjectStore, node: ProofMapNode) -> bool:
+    return any(not _dependency_satisfied(store, dependency_id) for dependency_id in node.dependencies)
+
+
+def get_workflow_state(store: ProjectStore, node_id: str) -> str:
+    """One of `open`, `claimed`, `review-needed`, `revision-requested`, `blocked`.
+
+    Always recomputed from the claim, candidate-proof, review, and
+    dependency records — never read off a stored field, so it can never
+    drift out of sync with what actually happened. `blocked` overrides every
+    other workflow value but is a separate axis from acceptance/integrity,
+    not a priority ladder across all three.
+    """
+    node = require_node(store, node_id)
+
+    if _has_unresolved_dependency(store, node):
+        return "blocked"
+
+    if get_active_claim(store, node_id) is not None:
+        return "claimed"
+
+    if node.kind == ProofMapNodeKind.imported_result:
+        # no claim/submit/Candidate-proof cycle exists for this kind; Reference
+        # review governs it independently and doesn't move this axis.
+        return "open"
+
+    current_proof = get_current_candidate_proof(store, node_id)
+    acceptance_records = [
+        record
+        for record in list_review_records(store, object_type=_ACCEPTANCE_OBJECT_TYPE, object_id=node_id)
+        if record.kind == ReviewRecordKind.acceptance
+    ]
+    latest_review = acceptance_records[-1] if acceptance_records else None
+
+    # Whether the latest Human Review decision already covers the current
+    # submission (nothing has been submitted since it was made).
+    review_is_current = latest_review is not None and (
+        current_proof is None or latest_review.updated_at >= current_proof.created_at
+    )
+
+    if review_is_current and latest_review.decision == ReviewGovernanceState.revision_requested:
+        return "revision-requested"
+
+    if current_proof is not None and not review_is_current:
+        return "review-needed"
+
+    return "open"
+
+
+def get_integrity_state(store: ProjectStore, node_id: str) -> str:
+    """One of `current`, `potentially-stale`, `challenged`.
+
+    This ticket only derives `current`; the other two values are computed
+    once Challenge (#25) and dependency staleness (#24) exist.
+    """
+    require_node(store, node_id)
+    return "current"
+
+
+def get_frontier(store: ProjectStore) -> list[ProofMapNode]:
+    """Nodes with no unresolved dependency and no active claim.
+
+    What an agent could pick up right now without inspecting the whole graph
+    by hand.
+    """
+    return [
+        node
+        for node in list_nodes(store)
+        if get_active_claim(store, node.id) is None and not _has_unresolved_dependency(store, node)
+    ]

@@ -558,3 +558,75 @@ def test_node_review_reference_review_decision_invalid_on_local_node(tmp_path: P
     assert result.exit_code != 0
     payload = json.loads(result.stdout)
     assert payload["error"]["code"] == "INVALID_DECISION"
+
+
+def test_node_show_displays_all_three_axes_human_readable(tmp_path: Path):
+    runner.invoke(app, ["node", "create", "clm_1", "claim", "stmt", "--root", str(tmp_path)])
+
+    result = runner.invoke(app, ["node", "show", "clm_1", "--root", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "Workflow state" in result.stdout
+    assert "Acceptance state" in result.stdout
+    assert "Integrity state" in result.stdout
+    assert "open" in result.stdout
+    assert "unreviewed" in result.stdout
+    assert "current" in result.stdout
+
+
+def test_node_show_axes_json_envelope(tmp_path: Path):
+    runner.invoke(app, ["node", "create", "clm_1", "claim", "stmt", "--root", str(tmp_path)])
+    runner.invoke(app, ["node", "claim", "clm_1", "--root", str(tmp_path), "--claimant", "agent_a"])
+
+    result = runner.invoke(app, ["node", "show", "clm_1", "--root", str(tmp_path), "--json"])
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["data"]["workflow_state"] == "claimed"
+    assert payload["data"]["acceptance_state"] == "unreviewed"
+    assert payload["data"]["integrity_state"] == "current"
+
+
+def test_node_show_workflow_state_blocked_on_dependency(tmp_path: Path):
+    runner.invoke(app, ["node", "create", "lem_base", "lemma", "Base lemma", "--root", str(tmp_path)])
+    runner.invoke(
+        app,
+        [
+            "node", "create", "clm_1", "claim", "Depends on base", "--root", str(tmp_path),
+            "--dependency", "lem_base",
+        ],
+    )
+
+    result = runner.invoke(app, ["node", "show", "clm_1", "--root", str(tmp_path), "--json"])
+    assert json.loads(result.stdout)["data"]["workflow_state"] == "blocked"
+
+
+def test_frontier_lists_unclaimed_unblocked_nodes_json(tmp_path: Path):
+    runner.invoke(app, ["node", "create", "lem_base", "lemma", "Base lemma", "--root", str(tmp_path)])
+    runner.invoke(
+        app,
+        [
+            "node", "create", "clm_blocked", "claim", "Blocked claim", "--root", str(tmp_path),
+            "--dependency", "lem_base",
+        ],
+    )
+    runner.invoke(app, ["node", "create", "clm_open", "claim", "Open claim", "--root", str(tmp_path)])
+
+    result = runner.invoke(app, ["frontier", "--root", str(tmp_path), "--json"])
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    ids = {item["id"] for item in payload["data"]}
+    assert ids == {"lem_base", "clm_open"}
+
+
+def test_frontier_human_readable(tmp_path: Path):
+    runner.invoke(app, ["node", "create", "clm_open", "claim", "Open claim", "--root", str(tmp_path)])
+
+    result = runner.invoke(app, ["frontier", "--root", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "clm_open" in result.stdout
+
+
+def test_frontier_empty_project_human_readable(tmp_path: Path):
+    runner.invoke(app, ["init", "--root", str(tmp_path)])
+    result = runner.invoke(app, ["frontier", "--root", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "No frontier nodes" in result.stdout

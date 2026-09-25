@@ -11,8 +11,11 @@ from proof_cli.proof_map import (
     decide_acceptance,
     decide_reference_review,
     get_acceptance_state,
+    get_frontier,
+    get_integrity_state,
     get_node,
     get_reference_review_state,
+    get_workflow_state,
     list_candidate_proofs,
     list_nodes,
     release_node,
@@ -902,3 +905,138 @@ def test_decide_acceptance_still_rejects_imported_result_after_reference_review(
     with pytest.raises(ProofMapError) as exc_info:
         decide_acceptance(store, "ref_1", "accept", reviewer_id="researcher", confirmed=True)
     assert exc_info.value.code == "IMMUTABLE_NODE"
+
+
+def test_workflow_state_open_for_a_fresh_unclaimed_node(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_1", kind="claim", statement="stmt")
+    assert get_workflow_state(store, "clm_1") == "open"
+
+
+def test_workflow_state_is_recomputed_across_the_full_lifecycle_not_stored(tmp_path: Path):
+    """The ticket's own explicit test: mutate the underlying records and
+    re-read workflow_state each time, confirming it's never read off a
+    stored field."""
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_1", kind="claim", statement="stmt")
+    assert get_workflow_state(store, "clm_1") == "open"
+
+    claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
+    assert get_workflow_state(store, "clm_1") == "claimed"
+
+    submit_candidate_proof(
+        store,
+        "clm_1",
+        claimant_id="agent_a",
+        session_id="sess_1",
+        scoping_rationale="scoped correctly",
+        content="proof text",
+    )
+    assert get_workflow_state(store, "clm_1") == "review-needed"
+
+    decide_acceptance(store, "clm_1", "revision-requested", reviewer_id="researcher", confirmed=True)
+    assert get_workflow_state(store, "clm_1") == "revision-requested"
+
+    claim_node(store, "clm_1", claimant_id="agent_b", session_id="sess_2")
+    assert get_workflow_state(store, "clm_1") == "claimed"
+
+    submit_candidate_proof(
+        store,
+        "clm_1",
+        claimant_id="agent_b",
+        session_id="sess_2",
+        scoping_rationale="addressed feedback",
+        content="revised proof text",
+    )
+    assert get_workflow_state(store, "clm_1") == "review-needed"
+
+    decide_acceptance(store, "clm_1", "accept", reviewer_id="researcher", confirmed=True)
+    assert get_workflow_state(store, "clm_1") == "open"
+    assert get_acceptance_state(store, "clm_1") == "accepted"
+
+
+def test_workflow_state_blocked_on_unaccepted_local_dependency(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="lem_base", kind="lemma", statement="Base lemma")
+    create_node(store, node_id="clm_1", kind="claim", statement="Depends on base", dependencies=["lem_base"])
+
+    assert get_workflow_state(store, "clm_1") == "blocked"
+
+    claim_node(store, "lem_base", claimant_id="agent_a", session_id="sess_1")
+    submit_candidate_proof(
+        store,
+        "lem_base",
+        claimant_id="agent_a",
+        session_id="sess_1",
+        scoping_rationale="scoped correctly",
+        content="proof text",
+    )
+    decide_acceptance(store, "lem_base", "accept", reviewer_id="researcher", confirmed=True)
+
+    assert get_workflow_state(store, "clm_1") == "open"
+
+
+def test_workflow_state_blocked_on_unreviewed_imported_result_dependency(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(
+        store,
+        node_id="ref_1",
+        kind="imported_result",
+        statement="An external theorem",
+        source_locator="doi:10.1234/example",
+        source_version="v1",
+    )
+    create_node(store, node_id="clm_1", kind="claim", statement="Depends on ref_1", dependencies=["ref_1"])
+
+    assert get_workflow_state(store, "clm_1") == "blocked"
+
+    decide_reference_review(store, "ref_1", "reference-review", reviewer_id="researcher", confirmed=True)
+
+    assert get_workflow_state(store, "clm_1") == "open"
+
+
+def test_workflow_state_for_imported_result_is_always_open_never_claimable(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(
+        store,
+        node_id="ref_1",
+        kind="imported_result",
+        statement="An external theorem",
+        source_locator="doi:10.1234/example",
+        source_version="v1",
+    )
+    assert get_workflow_state(store, "ref_1") == "open"
+    decide_reference_review(store, "ref_1", "reference-review", reviewer_id="researcher", confirmed=True)
+    assert get_workflow_state(store, "ref_1") == "open"
+
+
+def test_integrity_state_is_current_by_default(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_1", kind="claim", statement="stmt")
+    assert get_integrity_state(store, "clm_1") == "current"
+
+
+def test_frontier_lists_only_unclaimed_unblocked_nodes(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="lem_base", kind="lemma", statement="Base lemma")
+    create_node(store, node_id="clm_blocked", kind="claim", statement="Blocked claim", dependencies=["lem_base"])
+    create_node(store, node_id="clm_open", kind="claim", statement="Open claim")
+    create_node(store, node_id="clm_claimed", kind="claim", statement="Claimed claim")
+    claim_node(store, "clm_claimed", claimant_id="agent_a", session_id="sess_1")
+
+    frontier_ids = {node.id for node in get_frontier(store)}
+    assert frontier_ids == {"lem_base", "clm_open"}
+
+    claim_node(store, "lem_base", claimant_id="agent_b", session_id="sess_2")
+    submit_candidate_proof(
+        store,
+        "lem_base",
+        claimant_id="agent_b",
+        session_id="sess_2",
+        scoping_rationale="scoped correctly",
+        content="proof text",
+    )
+    decide_acceptance(store, "lem_base", "accept", reviewer_id="researcher", confirmed=True)
+
+    frontier_ids = {node.id for node in get_frontier(store)}
+    assert frontier_ids == {"lem_base", "clm_open", "clm_blocked"}
