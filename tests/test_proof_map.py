@@ -13,17 +13,23 @@ from proof_cli.proof_map import (
     decide_acceptance,
     decide_reference_review,
     dependency_pin_is_current,
+    dismiss_challenge,
     get_acceptance_state,
     get_accepted_interface_fingerprint,
+    get_blocked_reason,
+    get_challenge,
     get_dependency_pin,
     get_frontier,
     get_integrity_state,
     get_node,
     get_reference_review_state,
     get_workflow_state,
+    has_open_challenge,
     list_candidate_proofs,
+    list_challenges,
     list_dependency_pins,
     list_nodes,
+    open_challenge,
     release_node,
     require_node,
     revalidate_dependency,
@@ -1549,3 +1555,177 @@ def test_revalidate_dependency_review_write_failure_rolls_back_the_pin(tmp_path:
 
 def list_review_records_for_test(store, node_id: str):
     return list_review_records(store, object_type="proof_map_node", object_id=node_id)
+
+
+def test_open_challenge_requires_no_permission_check(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="lem_1", kind="lemma", statement="Base lemma")
+    _accept_via_full_cycle(store, "lem_1")
+
+    challenge = open_challenge(store, "lem_1", opened_by="any_agent_or_collaborator", rationale="looks fishy")
+
+    assert challenge.target_node_id == "lem_1"
+    assert challenge.status.value == "open"
+    assert challenge.opened_by == "any_agent_or_collaborator"
+    assert has_open_challenge(store, "lem_1") is True
+
+
+def test_open_challenge_against_unaccepted_node_is_rejected(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="lem_1", kind="lemma", statement="Base lemma")
+
+    with pytest.raises(ProofMapError) as exc_info:
+        open_challenge(store, "lem_1", opened_by="agent_a")
+    assert exc_info.value.code == "TARGET_NOT_ACCEPTED"
+
+
+def test_open_challenge_against_imported_result_requires_reference_review(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(
+        store,
+        node_id="ref_1",
+        kind="imported_result",
+        statement="An external theorem",
+        source_locator="doi:10.1234/example",
+        source_version="v1",
+    )
+
+    with pytest.raises(ProofMapError) as exc_info:
+        open_challenge(store, "ref_1", opened_by="agent_a")
+    assert exc_info.value.code == "TARGET_NOT_REVIEWED"
+
+    decide_reference_review(store, "ref_1", "reference-review", reviewer_id="researcher", confirmed=True)
+    challenge = open_challenge(store, "ref_1", opened_by="agent_a")
+    assert challenge.target_node_id == "ref_1"
+
+
+def test_dismiss_challenge_requires_confirmation(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="lem_1", kind="lemma", statement="Base lemma")
+    _accept_via_full_cycle(store, "lem_1")
+    challenge = open_challenge(store, "lem_1", opened_by="agent_a")
+
+    with pytest.raises(ProofMapError) as exc_info:
+        dismiss_challenge(store, challenge.id, reviewer_id="researcher")
+    assert exc_info.value.code == "CONFIRMATION_REQUIRED"
+    assert get_challenge(store, challenge.id).status.value == "open"
+
+
+def test_dismiss_challenge_on_already_dismissed_is_rejected(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="lem_1", kind="lemma", statement="Base lemma")
+    _accept_via_full_cycle(store, "lem_1")
+    challenge = open_challenge(store, "lem_1", opened_by="agent_a")
+    dismiss_challenge(store, challenge.id, reviewer_id="researcher", confirmed=True)
+
+    with pytest.raises(ProofMapError) as exc_info:
+        dismiss_challenge(store, challenge.id, reviewer_id="researcher", confirmed=True)
+    assert exc_info.value.code == "CHALLENGE_NOT_OPEN"
+
+
+def test_challenge_list_filters_by_target_and_status(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="lem_1", kind="lemma", statement="Lemma one")
+    create_node(store, node_id="lem_2", kind="lemma", statement="Lemma two")
+    _accept_via_full_cycle(store, "lem_1")
+    _accept_via_full_cycle(store, "lem_2", claimant="agent_c", session="sess_3")
+
+    c1 = open_challenge(store, "lem_1", opened_by="agent_a")
+    open_challenge(store, "lem_2", opened_by="agent_b")
+    dismiss_challenge(store, c1.id, reviewer_id="researcher", confirmed=True)
+
+    assert {c.target_node_id for c in list_challenges(store, target_node_id="lem_2")} == {"lem_2"}
+    assert {c.target_node_id for c in list_challenges(store, status="open")} == {"lem_2"}
+    assert {c.target_node_id for c in list_challenges(store, status="dismissed")} == {"lem_1"}
+
+
+def test_challenge_never_changes_the_targets_own_acceptance_state(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="lem_1", kind="lemma", statement="Base lemma")
+    _accept_via_full_cycle(store, "lem_1")
+
+    open_challenge(store, "lem_1", opened_by="agent_a")
+
+    assert get_acceptance_state(store, "lem_1") == "accepted"
+    assert get_integrity_state(store, "lem_1") == "challenged"
+
+
+def test_architecture_proving_challenge_propagation_and_clearing(tmp_path: Path):
+    """The spec's own scenario: build L, M(->L), N(->M) from persisted
+    primitives only; open a Challenge on L; assert L reads `challenged` and
+    both M and N read `accepted` + `potentially-stale`, with nothing set
+    directly. Dismiss the Challenge and assert every overlay clears
+    automatically — nothing to clean up by hand."""
+    store = ensure_project(tmp_path)
+
+    create_node(store, node_id="L", kind="lemma", statement="L holds")
+    _accept_via_full_cycle(store, "L", claimant="agent_l", session="sess_l")
+
+    create_node(store, node_id="M", kind="lemma", statement="M holds, given L", dependencies=["L"])
+    _accept_via_full_cycle(store, "M", claimant="agent_m", session="sess_m")
+
+    create_node(store, node_id="N", kind="claim", statement="N holds, given M", dependencies=["M"])
+    _accept_via_full_cycle(store, "N", claimant="agent_n", session="sess_n")
+
+    # baseline: everything current, nothing stale
+    assert get_integrity_state(store, "L") == "current"
+    assert get_integrity_state(store, "M") == "current"
+    assert get_integrity_state(store, "N") == "current"
+
+    challenge = open_challenge(store, "L", opened_by="any_agent", rationale="counterexample found upstream")
+
+    assert get_integrity_state(store, "L") == "challenged"
+
+    assert get_acceptance_state(store, "M") == "accepted"
+    assert get_integrity_state(store, "M") == "potentially-stale"
+
+    assert get_acceptance_state(store, "N") == "accepted"
+    assert get_integrity_state(store, "N") == "potentially-stale"
+
+    # a fresh, not-yet-accepted node downstream of the Challenge reads
+    # blocked with a distinct reason, not conflated with ordinary
+    # not-yet-accepted blocking
+    create_node(store, node_id="P", kind="claim", statement="P holds, given M", dependencies=["M"])
+    assert get_workflow_state(store, "P") == "blocked"
+    assert get_blocked_reason(store, "P") == "dependency-challenged"
+
+    # accepted nodes' own workflow state is never dragged back to blocked
+    assert get_workflow_state(store, "M") != "blocked"
+    assert get_workflow_state(store, "N") != "blocked"
+
+    dismiss_challenge(store, challenge.id, reviewer_id="researcher", rationale="false alarm", confirmed=True)
+
+    # every overlay clears automatically — nothing cleaned up by hand
+    assert get_integrity_state(store, "L") == "current"
+    assert get_integrity_state(store, "M") == "current"
+    assert get_integrity_state(store, "N") == "current"
+    assert get_workflow_state(store, "P") != "blocked"
+    assert get_blocked_reason(store, "P") is None
+
+
+def test_ordinary_not_accepted_dependency_reads_blocked_with_a_different_reason(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="lem_base", kind="lemma", statement="Base lemma")
+    create_node(store, node_id="clm_1", kind="claim", statement="Depends on base", dependencies=["lem_base"])
+
+    assert get_workflow_state(store, "clm_1") == "blocked"
+    assert get_blocked_reason(store, "clm_1") == "not-accepted"
+
+
+def test_reclaiming_a_challenged_accepted_node_is_permitted(tmp_path: Path):
+    """The one sanctioned way to revise and re-Accept an Accepted node:
+    open a Challenge against it first, which is what unlocks claim_node's
+    otherwise-refused already-Accepted path."""
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="lem_1", kind="lemma", statement="Base lemma")
+    _accept_via_full_cycle(store, "lem_1")
+
+    with pytest.raises(ProofMapError) as exc_info:
+        claim_node(store, "lem_1", claimant_id="agent_b", session_id="sess_2")
+    assert exc_info.value.code == "NODE_ALREADY_ACCEPTED"
+
+    open_challenge(store, "lem_1", opened_by="agent_a", rationale="might be wrong")
+
+    claim = claim_node(store, "lem_1", claimant_id="agent_b", session_id="sess_2")
+    assert claim.claimant_id == "agent_b"
+    assert get_workflow_state(store, "lem_1") == "claimed"

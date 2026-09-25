@@ -13,6 +13,7 @@ from .db import connect, initialize
 from .domain import (
     BlockerRecord,
     CandidateProofRecord,
+    Challenge,
     ClaimRecord,
     DependencyPin,
     EventRecord,
@@ -132,6 +133,19 @@ CREATE TABLE IF NOT EXISTS dependency_pins (
 );
 
 CREATE INDEX IF NOT EXISTS idx_dependency_pins_node_id ON dependency_pins(node_id);
+
+CREATE TABLE IF NOT EXISTS challenges (
+  id TEXT PRIMARY KEY,
+  target_node_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  rationale TEXT NOT NULL,
+  opened_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  resolved_by TEXT,
+  resolved_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_challenges_target_node_id ON challenges(target_node_id, status);
 """
 
 
@@ -828,6 +842,83 @@ def list_dependency_pins_for_node(store: ProjectStore, node_id: str) -> list[Dep
             (node_id,),
         ).fetchall()
     return [_row_to_dependency_pin(row) for row in rows]
+
+
+def _row_to_challenge(row: sqlite3.Row) -> Challenge:
+    return Challenge(
+        id=row["id"],
+        target_node_id=row["target_node_id"],
+        status=row["status"],
+        rationale=row["rationale"],
+        opened_by=row["opened_by"],
+        created_at=row["created_at"],
+        resolved_by=row["resolved_by"],
+        resolved_at=row["resolved_at"],
+    )
+
+
+def insert_challenge(store: ProjectStore, challenge: Challenge) -> Challenge:
+    with store.connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO challenges(id, target_node_id, status, rationale, opened_by, created_at, resolved_by, resolved_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                challenge.id,
+                challenge.target_node_id,
+                challenge.status.value,
+                challenge.rationale,
+                challenge.opened_by,
+                challenge.created_at.isoformat(),
+                challenge.resolved_by,
+                challenge.resolved_at.isoformat() if challenge.resolved_at else None,
+            ),
+        )
+        conn.commit()
+    return challenge
+
+
+def get_challenge(store: ProjectStore, challenge_id: str) -> Challenge | None:
+    with store.connect() as conn:
+        row = conn.execute("SELECT * FROM challenges WHERE id = ? LIMIT 1", (challenge_id,)).fetchone()
+    return _row_to_challenge(row) if row else None
+
+
+def list_challenges(store: ProjectStore, *, target_node_id: str = "", status: str = "") -> list[Challenge]:
+    query = "SELECT * FROM challenges"
+    conditions = []
+    params: list[str] = []
+    if target_node_id:
+        conditions.append("target_node_id = ?")
+        params.append(target_node_id)
+    if status:
+        conditions.append("status = ?")
+        params.append(status)
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
+    query += " ORDER BY created_at"
+    with store.connect() as conn:
+        rows = conn.execute(query, params).fetchall()
+    return [_row_to_challenge(row) for row in rows]
+
+
+def mark_challenge_dismissed(
+    store: ProjectStore, challenge_id: str, *, resolved_by: str, resolved_at: datetime
+) -> bool:
+    """Dismiss a challenge, but only if it's still open.
+
+    Mirrors `mark_claim_released`'s guard: two concurrent dismiss attempts
+    can't both silently win — only the first UPDATE to reach SQLite's write
+    lock affects a row. Returns whether this call was the one that dismissed it.
+    """
+    with store.connect() as conn:
+        cursor = conn.execute(
+            "UPDATE challenges SET status = 'dismissed', resolved_by = ?, resolved_at = ? WHERE id = ? AND status = 'open'",
+            (resolved_by, resolved_at.isoformat(), challenge_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
 
 
 def store_snapshot(store: ProjectStore, snapshot: ProjectSnapshot) -> ProjectSnapshot:

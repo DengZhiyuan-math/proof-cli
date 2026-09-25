@@ -15,21 +15,35 @@ from .collaboration import (
     record_review_decision,
     record_review_request,
 )
-from .domain import CandidateProofRecord, ClaimRecord, DependencyPin, ProofMapNode, ProofMapNodeKind, TrustLevel, utc_now
+from .domain import (
+    CandidateProofRecord,
+    Challenge,
+    ChallengeStatus,
+    ClaimRecord,
+    DependencyPin,
+    ProofMapNode,
+    ProofMapNodeKind,
+    TrustLevel,
+    utc_now,
+)
 from .storage import (
     ProjectStore,
     append_event,
     get_active_claim,
     get_candidate_proof as _get_candidate_proof,
+    get_challenge as _get_challenge,
     get_current_candidate_proof,
     get_dependency_pin as _get_dependency_pin,
     get_proof_map_node,
+    insert_challenge,
     insert_claim,
     insert_candidate_proof,
     insert_proof_map_node,
     list_candidate_proofs_for_node,
+    list_challenges as _list_challenges,
     list_dependency_pins_for_node,
     list_proof_map_nodes,
+    mark_challenge_dismissed,
     mark_claim_released,
     next_candidate_proof_version,
     set_candidate_proof_interface_fingerprint,
@@ -181,10 +195,12 @@ def claim_node(
     `tests/test_proof_map.py::test_claim_concurrency_...`).
 
     Refuses a node that's Rejected (CONTEXT.md: "should not be pursued
-    further") or already Accepted (no supported revise-after-accept path
-    yet) — both are terminal for the Acceptance axis, so reopening the
-    claim/submit cycle on either would let a fresh submission silently
-    contradict a decision Human Review already made.
+    further") — terminal for the Acceptance axis, reopening the claim/submit
+    cycle on it would let a fresh submission silently contradict a decision
+    Human Review already made. Also refuses an already-Accepted node,
+    *unless* it's the target of an open Challenge: that's the one sanctioned
+    way to revise and re-Accept an Accepted node (ADR-0005 Rule 4) — without
+    an open Challenge there is no supported path to reclaim and revise one.
     """
     node = require_node(store, node_id)
     if node.kind == ProofMapNodeKind.imported_result:
@@ -199,10 +215,10 @@ def claim_node(
             "NODE_REJECTED",
             f"node {node_id} was Rejected and should not be pursued further; create a new node instead",
         )
-    if acceptance_state == "accepted":
+    if acceptance_state == "accepted" and not has_open_challenge(store, node_id):
         raise ProofMapError(
             "NODE_ALREADY_ACCEPTED",
-            f"node {node_id} is already Accepted; there is no supported path to reclaim and revise it",
+            f"node {node_id} is already Accepted; open a Challenge before reclaiming it to revise",
         )
 
     existing = get_active_claim(store, node_id)
@@ -828,6 +844,134 @@ def revalidate_dependency(
     return record
 
 
+def open_challenge(store: ProjectStore, target_node_id: str, *, opened_by: str = "human", rationale: str = "") -> Challenge:
+    """Raise a Challenge against an already-Accepted (or Reference-reviewed) node.
+
+    Ungated: any agent or collaborator may open one, no confirmation, no
+    permission check — raising a concern is not a mathematical judgment
+    ("this deserves a second look," not "this is wrong"), so it needs no
+    gate the way resolving one does (ADR-0005 Rule 4).
+    """
+    node = require_node(store, target_node_id)
+
+    if node.kind == ProofMapNodeKind.imported_result:
+        if get_reference_review_state(store, target_node_id) != "reviewed":
+            raise ProofMapError(
+                "TARGET_NOT_REVIEWED",
+                f"{target_node_id} has not been Reference-reviewed yet; nothing to Challenge",
+            )
+    elif get_acceptance_state(store, target_node_id) != "accepted":
+        raise ProofMapError(
+            "TARGET_NOT_ACCEPTED",
+            f"{target_node_id} is not Accepted; a Challenge only makes sense against a result someone might depend on",
+        )
+
+    challenge = Challenge(
+        id=str(uuid.uuid4()),
+        target_node_id=target_node_id,
+        rationale=rationale,
+        opened_by=opened_by,
+    )
+    insert_challenge(store, challenge)
+    append_event(
+        store,
+        "proof_map_challenge_opened",
+        f"challenge opened against {target_node_id} by {opened_by}",
+        entity_id=target_node_id,
+        payload={"challenge_id": challenge.id, "opened_by": opened_by, "rationale": rationale},
+    )
+    return challenge
+
+
+def get_challenge(store: ProjectStore, challenge_id: str) -> Challenge | None:
+    return _get_challenge(store, challenge_id)
+
+
+def require_challenge(store: ProjectStore, challenge_id: str) -> Challenge:
+    challenge = get_challenge(store, challenge_id)
+    if challenge is None:
+        raise ProofMapError("CHALLENGE_NOT_FOUND", f"challenge {challenge_id} not found")
+    return challenge
+
+
+def list_challenges(store: ProjectStore, *, target_node_id: str = "", status: str = "") -> list[Challenge]:
+    return _list_challenges(store, target_node_id=target_node_id, status=status)
+
+
+def has_open_challenge(store: ProjectStore, node_id: str) -> bool:
+    return len(_list_challenges(store, target_node_id=node_id, status="open")) > 0
+
+
+def dismiss_challenge(
+    store: ProjectStore,
+    challenge_id: str,
+    *,
+    reviewer_id: str = "human",
+    rationale: str = "",
+    confirmed: bool = False,
+) -> Challenge:
+    """Dismiss a Challenge — Human Review only.
+
+    Nothing un-sets `potentially-stale`/`challenged` by hand: both are
+    computed fresh from the set of *open* Challenges (and stale pins) on
+    every read, so dismissing one simply removes it from that set — every
+    overlay it alone was causing clears itself the next time anyone asks.
+    """
+    challenge = require_challenge(store, challenge_id)
+    if challenge.status != ChallengeStatus.open:
+        raise ProofMapError("CHALLENGE_NOT_OPEN", f"challenge {challenge_id} is already {challenge.status.value}")
+
+    if not confirmed:
+        raise ProofMapError(
+            "CONFIRMATION_REQUIRED",
+            "a Human Review decision requires explicit confirmation; only a researcher may confirm one",
+        )
+
+    resolved_at = utc_now()
+    won_race = mark_challenge_dismissed(store, challenge_id, resolved_by=reviewer_id, resolved_at=resolved_at)
+    if not won_race:
+        raise ProofMapError("CHALLENGE_NOT_OPEN", f"challenge {challenge_id} is already dismissed")
+
+    append_event(
+        store,
+        "proof_map_challenge_dismissed",
+        f"challenge {challenge_id} dismissed by {reviewer_id}",
+        entity_id=challenge.target_node_id,
+        payload={"challenge_id": challenge_id, "reviewer_id": reviewer_id, "rationale": rationale},
+    )
+    return challenge.model_copy(update={"status": ChallengeStatus.dismissed, "resolved_by": reviewer_id, "resolved_at": resolved_at})
+
+
+def _is_downstream_of_challenge_or_stale_pin(store: ProjectStore, node_id: str, _visited: set[str] | None = None) -> bool:
+    """Whether `node_id` is itself Challenged, or reachable (via dependency edges,
+    transitively) from a Challenged node or a dependency edge whose pin no
+    longer matches its target's current accepted interface.
+
+    Pure graph reachability over persisted Challenge and DependencyPin
+    records — nothing is stored per node. See ADR-0004 point 4.
+    """
+    if _visited is None:
+        _visited = set()
+    if node_id in _visited:
+        return False
+    _visited.add(node_id)
+
+    if has_open_challenge(store, node_id):
+        return True
+
+    node = get_proof_map_node(store, node_id)
+    if node is None:
+        return False
+
+    for dependency_id in node.dependencies:
+        pin = _get_dependency_pin(store, node_id, dependency_id)
+        if pin is not None and not dependency_pin_is_current(store, pin):
+            return True
+        if _is_downstream_of_challenge_or_stale_pin(store, dependency_id, _visited):
+            return True
+    return False
+
+
 def _dependency_satisfied(store: ProjectStore, dependency_id: str) -> bool:
     """Whether a dependency has reached the standing that unblocks its dependents.
 
@@ -835,10 +979,18 @@ def _dependency_satisfied(store: ProjectStore, dependency_id: str) -> bool:
     Reference review. A dangling dependency id can't happen through
     `create_node` (it validates dependencies exist), so a missing node here
     is treated as satisfied rather than as a block this axis can't explain.
+
+    Also false whenever the dependency is itself Challenged, or reachable
+    from a Challenge/stale pin further upstream — an Accepted-but-Challenged
+    dependency is not something a *new* dependent should treat as settled
+    (ADR-0004 point 4: a not-yet-accepted node downstream of a Challenge
+    reads `blocked`, same underlying cause, distinct reason).
     """
     dependency = get_proof_map_node(store, dependency_id)
     if dependency is None:
         return True
+    if _is_downstream_of_challenge_or_stale_pin(store, dependency_id):
+        return False
     if dependency.kind == ProofMapNodeKind.imported_result:
         return get_reference_review_state(store, dependency_id) == "reviewed"
     return get_acceptance_state(store, dependency_id) == "accepted"
@@ -855,11 +1007,19 @@ def get_workflow_state(store: ProjectStore, node_id: str) -> str:
     dependency records — never read off a stored field, so it can never
     drift out of sync with what actually happened. `blocked` overrides every
     other workflow value but is a separate axis from acceptance/integrity,
-    not a priority ladder across all three.
+    not a priority ladder across all three — and, per ADR-0004's note on
+    ADR-0002, never overrides an already-Accepted node either: a Challenge
+    or a stale dependency opened against an Accepted node's own dependency
+    shows up on the integrity axis (`potentially-stale`), not by reverting
+    this node's own already-settled workflow state to `blocked`.
     """
     node = require_node(store, node_id)
 
-    if _has_unresolved_dependency(store, node):
+    already_accepted = (
+        node.kind != ProofMapNodeKind.imported_result and get_acceptance_state(store, node_id) == "accepted"
+    )
+
+    if not already_accepted and _has_unresolved_dependency(store, node):
         return "blocked"
 
     if get_active_claim(store, node_id) is not None:
@@ -897,13 +1057,41 @@ def get_workflow_state(store: ProjectStore, node_id: str) -> str:
     return "open"
 
 
+def get_blocked_reason(store: ProjectStore, node_id: str) -> str | None:
+    """Why `get_workflow_state` reads `blocked`, or `None` if it doesn't.
+
+    `dependency-challenged` when an unresolved dependency is itself
+    Challenged or downstream of a Challenge/stale pin — distinct from the
+    ordinary `not-accepted` case of a dependency simply not having reached
+    Acceptance/Reference-review yet.
+    """
+    node = require_node(store, node_id)
+    if not _has_unresolved_dependency(store, node):
+        return None
+    for dependency_id in node.dependencies:
+        if not _dependency_satisfied(store, dependency_id) and _is_downstream_of_challenge_or_stale_pin(
+            store, dependency_id
+        ):
+            return "dependency-challenged"
+    return "not-accepted"
+
+
 def get_integrity_state(store: ProjectStore, node_id: str) -> str:
     """One of `current`, `potentially-stale`, `challenged`.
 
-    This ticket only derives `current`; the other two values are computed
-    once Challenge (#25) and dependency staleness (#24) exist.
+    `challenged` if the node is itself the target of an open Challenge.
+    `potentially-stale` if the node is Accepted and reachable (via
+    dependency edges) from an open Challenge's target or a stale dependency
+    pin — computed by graph reachability, nothing set directly (ADR-0004
+    point 4). `current` otherwise.
     """
     require_node(store, node_id)
+    if has_open_challenge(store, node_id):
+        return "challenged"
+    if get_acceptance_state(store, node_id) == "accepted" and _is_downstream_of_challenge_or_stale_pin(
+        store, node_id
+    ):
+        return "potentially-stale"
     return "current"
 
 

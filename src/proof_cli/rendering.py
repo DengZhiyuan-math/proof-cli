@@ -3,7 +3,7 @@ from __future__ import annotations
 from rich.console import Console
 from rich.table import Table
 
-from .domain import CandidateProofRecord, ClaimRecord, ProjectSnapshot, ProofMapNode
+from .domain import CandidateProofRecord, Challenge, ClaimRecord, ProjectSnapshot, ProofMapNode
 
 
 def render_status(data: dict[str, object]) -> str:
@@ -55,6 +55,7 @@ def render_proof_map_node(
     workflow_state: str | None = None,
     acceptance_state: str | None = None,
     integrity_state: str | None = None,
+    blocked_reason: str | None = None,
 ) -> str:
     console = Console(record=True, width=100)
     console.rule(f"Proof Map Node: {node.id}")
@@ -76,6 +77,8 @@ def render_proof_map_node(
     # Three independent, computed signals — never folded into one status word.
     if workflow_state is not None:
         table.add_row("Workflow state", workflow_state)
+    if blocked_reason is not None:
+        table.add_row("Blocked reason", blocked_reason)
     if acceptance_state is not None:
         table.add_row("Acceptance state", acceptance_state)
     if integrity_state is not None:
@@ -150,6 +153,42 @@ def render_proof_map_node_list(nodes: list[ProofMapNode]) -> str:
     table.add_column("statement")
     for node in nodes:
         table.add_row(node.id, node.kind.value, node.statement)
+    console.print(table)
+    return console.export_text()
+
+
+def render_challenge(challenge: Challenge) -> str:
+    console = Console(record=True, width=100)
+    console.rule(f"Challenge {challenge.id}")
+    table = Table(show_header=False, box=None, pad_edge=False)
+    table.add_column("key", style="bold")
+    table.add_column("value")
+    table.add_row("Target", challenge.target_node_id)
+    table.add_row("Status", challenge.status.value)
+    table.add_row("Opened by", challenge.opened_by)
+    table.add_row("Opened at", challenge.created_at.isoformat())
+    table.add_row("Rationale", challenge.rationale or "none")
+    if challenge.resolved_by:
+        table.add_row("Resolved by", challenge.resolved_by)
+    if challenge.resolved_at:
+        table.add_row("Resolved at", challenge.resolved_at.isoformat())
+    console.print(table)
+    return console.export_text()
+
+
+def render_challenge_list(challenges: list[Challenge]) -> str:
+    console = Console(record=True, width=100)
+    console.rule("Challenges")
+    if not challenges:
+        console.print("No challenges")
+        return console.export_text()
+    table = Table()
+    table.add_column("id")
+    table.add_column("target")
+    table.add_column("status")
+    table.add_column("opened_by")
+    for challenge in challenges:
+        table.add_row(challenge.id, challenge.target_node_id, challenge.status.value, challenge.opened_by)
     console.print(table)
     return console.export_text()
 

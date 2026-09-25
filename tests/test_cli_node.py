@@ -741,3 +741,117 @@ def test_node_revalidate_no_pin_json_error(tmp_path: Path):
     assert result.exit_code != 0
     payload = json.loads(result.stdout)
     assert payload["error"]["code"] == "NO_DEPENDENCY_PIN"
+
+
+def _create_and_accept_node(tmp_path: Path, node_id: str = "lem_1", claimant: str = "agent_a") -> None:
+    runner.invoke(app, ["node", "create", node_id, "lemma", "Base lemma", "--root", str(tmp_path)])
+    runner.invoke(app, ["node", "claim", node_id, "--root", str(tmp_path), "--claimant", claimant])
+    runner.invoke(
+        app,
+        [
+            "node", "submit", node_id, "--root", str(tmp_path),
+            "--claimant", claimant, "--content", "proof text", "--rationale", "scoped correctly",
+        ],
+    )
+    runner.invoke(
+        app,
+        ["node", "review", node_id, "accept", "--root", str(tmp_path), "--reviewer", "researcher", "--confirm"],
+    )
+
+
+def test_challenge_open_requires_no_confirmation(tmp_path: Path):
+    _create_and_accept_node(tmp_path)
+
+    result = runner.invoke(
+        app,
+        ["challenge", "open", "lem_1", "--root", str(tmp_path), "--opened-by", "any_agent", "--json"],
+    )
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is True
+    assert payload["command"] == "challenge.open"
+    assert payload["data"]["target_node_id"] == "lem_1"
+    assert payload["data"]["status"] == "open"
+
+
+def test_challenge_open_against_unaccepted_node_fails(tmp_path: Path):
+    runner.invoke(app, ["node", "create", "lem_1", "lemma", "Base lemma", "--root", str(tmp_path)])
+
+    result = runner.invoke(app, ["challenge", "open", "lem_1", "--root", str(tmp_path), "--json"])
+    assert result.exit_code != 0
+    payload = json.loads(result.stdout)
+    assert payload["error"]["code"] == "TARGET_NOT_ACCEPTED"
+
+
+def test_challenge_show_human_readable(tmp_path: Path):
+    _create_and_accept_node(tmp_path)
+    open_result = runner.invoke(app, ["challenge", "open", "lem_1", "--root", str(tmp_path), "--json"])
+    challenge_id = json.loads(open_result.stdout)["data"]["id"]
+
+    result = runner.invoke(app, ["challenge", "show", challenge_id, "--root", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "lem_1" in result.stdout
+    assert "open" in result.stdout
+
+
+def test_challenge_list_json(tmp_path: Path):
+    _create_and_accept_node(tmp_path)
+    runner.invoke(app, ["challenge", "open", "lem_1", "--root", str(tmp_path)])
+
+    result = runner.invoke(app, ["challenge", "list", "--root", str(tmp_path), "--json"])
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is True
+    assert any(item["target_node_id"] == "lem_1" for item in payload["data"])
+
+
+def test_challenge_dismiss_requires_confirmation(tmp_path: Path):
+    _create_and_accept_node(tmp_path)
+    open_result = runner.invoke(app, ["challenge", "open", "lem_1", "--root", str(tmp_path), "--json"])
+    challenge_id = json.loads(open_result.stdout)["data"]["id"]
+
+    result = runner.invoke(
+        app, ["challenge", "dismiss", challenge_id, "--root", str(tmp_path), "--reviewer", "researcher", "--json"]
+    )
+    assert result.exit_code != 0
+    payload = json.loads(result.stdout)
+    assert payload["error"]["code"] == "CONFIRMATION_REQUIRED"
+
+
+def test_challenge_dismiss_clears_integrity_overlay(tmp_path: Path):
+    _create_and_accept_node(tmp_path)
+    open_result = runner.invoke(app, ["challenge", "open", "lem_1", "--root", str(tmp_path), "--json"])
+    challenge_id = json.loads(open_result.stdout)["data"]["id"]
+
+    show_challenged = runner.invoke(app, ["node", "show", "lem_1", "--root", str(tmp_path), "--json"])
+    assert json.loads(show_challenged.stdout)["data"]["integrity_state"] == "challenged"
+
+    dismiss = runner.invoke(
+        app,
+        [
+            "challenge", "dismiss", challenge_id, "--root", str(tmp_path),
+            "--reviewer", "researcher", "--confirm", "--json",
+        ],
+    )
+    assert dismiss.exit_code == 0
+    assert json.loads(dismiss.stdout)["data"]["status"] == "dismissed"
+
+    show_cleared = runner.invoke(app, ["node", "show", "lem_1", "--root", str(tmp_path), "--json"])
+    assert json.loads(show_cleared.stdout)["data"]["integrity_state"] == "current"
+
+
+def test_challenge_unlocks_reclaim_of_accepted_node(tmp_path: Path):
+    _create_and_accept_node(tmp_path)
+
+    blocked = runner.invoke(
+        app, ["node", "claim", "lem_1", "--root", str(tmp_path), "--claimant", "agent_b", "--json"]
+    )
+    assert blocked.exit_code != 0
+    assert json.loads(blocked.stdout)["error"]["code"] == "NODE_ALREADY_ACCEPTED"
+
+    runner.invoke(app, ["challenge", "open", "lem_1", "--root", str(tmp_path)])
+
+    reclaim = runner.invoke(
+        app, ["node", "claim", "lem_1", "--root", str(tmp_path), "--claimant", "agent_b", "--json"]
+    )
+    assert reclaim.exit_code == 0

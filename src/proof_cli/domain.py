@@ -220,6 +220,32 @@ class DependencyPin(BaseModel):
     created_at: datetime = Field(default_factory=utc_now)
 
 
+class ChallengeStatus(str, Enum):
+    open = "open"
+    dismissed = "dismissed"
+
+
+class Challenge(BaseModel):
+    """A claim that an already-Accepted (or Reference-reviewed) node may no longer be safe to depend on.
+
+    Addressable on its own, never folded into its target as a boolean.
+    Opening one is ungated — any collaborator or agent may raise a concern
+    without needing anyone's permission first. Only Human Review resolves
+    one, by dismissing it (or by the revision/re-Acceptance/reference-review
+    decision that addresses the concern directly). See ADR-0004 point 3,
+    ADR-0005 Rule 4.
+    """
+
+    id: str
+    target_node_id: str
+    status: ChallengeStatus = ChallengeStatus.open
+    rationale: str = ""
+    opened_by: str = "human"
+    created_at: datetime = Field(default_factory=utc_now)
+    resolved_by: str | None = None
+    resolved_at: datetime | None = None
+
+
 class ProjectSnapshot(BaseModel):
     project_id: str
     active_theorem: str | None = None
