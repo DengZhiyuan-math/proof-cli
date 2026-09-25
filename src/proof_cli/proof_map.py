@@ -49,6 +49,7 @@ from .storage import (
     next_candidate_proof_version,
     set_candidate_proof_interface_fingerprint,
     set_candidate_proof_review_record_id,
+    update_proof_map_node,
     upsert_dependency_pin,
 )
 from .vault import candidate_proof_path, write_candidate_proof_file
@@ -657,6 +658,50 @@ def get_acceptance_state(store: ProjectStore, node_id: str) -> str:
     if latest.decision == ReviewGovernanceState.rejected:
         return "rejected"
     return "unreviewed"
+
+
+def promote_to_lemma(store: ProjectStore, node_id: str, *, promoted_by: str = "human", confirmed: bool = False) -> ProofMapNode:
+    """Promote an Accepted Claim to a Lemma, marking it independently reusable.
+
+    The researcher's explicit decision, never automatic. Only available for
+    `kind=claim` nodes that are already Accepted; there is no demote. Every
+    field but `kind` is unchanged — including the Candidate-proof history —
+    but since the interface fingerprint is a function of `(kind, statement,
+    assumptions)`, it's recomputed for the new kind on the currently
+    Accepted Candidate proof, so a dependent pinning this node afterward
+    isn't told its interface "changed" over a relabeling that changed
+    nothing it actually asserts.
+    """
+    node = require_node(store, node_id)
+
+    if node.kind != ProofMapNodeKind.claim:
+        raise ProofMapError("NOT_A_CLAIM", f"node {node_id} is kind={node.kind.value}, not claim; only a claim can be promoted")
+
+    if get_acceptance_state(store, node_id) != "accepted":
+        raise ProofMapError("NOT_ACCEPTED", f"node {node_id} must be Accepted before it can be promoted to Lemma")
+
+    if not confirmed:
+        raise ProofMapError(
+            "CONFIRMATION_REQUIRED",
+            "promoting a node requires explicit confirmation; only a researcher may confirm one",
+        )
+
+    promoted = node.model_copy(update={"kind": ProofMapNodeKind.lemma, "updated_by": promoted_by, "updated_at": utc_now()})
+    update_proof_map_node(store, promoted)
+
+    current_proof = get_current_candidate_proof(store, node_id)
+    if current_proof is not None and current_proof.interface_fingerprint is not None:
+        fingerprint = compute_interface_fingerprint(promoted.kind.value, promoted.statement, promoted.assumptions)
+        set_candidate_proof_interface_fingerprint(store, current_proof.id, fingerprint)
+
+    append_event(
+        store,
+        "proof_map_node_promoted",
+        f"promoted {node_id} from claim to lemma",
+        entity_id=node_id,
+        payload={"promoted_by": promoted_by},
+    )
+    return promoted
 
 
 REFERENCE_REVIEW_DECISION = "reference-review"

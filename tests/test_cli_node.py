@@ -855,3 +855,101 @@ def test_challenge_unlocks_reclaim_of_accepted_node(tmp_path: Path):
         app, ["node", "claim", "lem_1", "--root", str(tmp_path), "--claimant", "agent_b", "--json"]
     )
     assert reclaim.exit_code == 0
+
+
+def _create_and_accept_claim(tmp_path: Path, node_id: str = "clm_1", claimant: str = "agent_a") -> None:
+    runner.invoke(app, ["node", "create", node_id, "claim", "A promotable claim", "--root", str(tmp_path)])
+    runner.invoke(app, ["node", "claim", node_id, "--root", str(tmp_path), "--claimant", claimant])
+    runner.invoke(
+        app,
+        [
+            "node", "submit", node_id, "--root", str(tmp_path),
+            "--claimant", claimant, "--content", "proof text", "--rationale", "scoped correctly",
+        ],
+    )
+    runner.invoke(
+        app,
+        ["node", "review", node_id, "accept", "--root", str(tmp_path), "--reviewer", "researcher", "--confirm"],
+    )
+
+
+def test_node_promote_requires_confirmation(tmp_path: Path):
+    _create_and_accept_claim(tmp_path)
+
+    result = runner.invoke(
+        app, ["node", "promote", "clm_1", "--root", str(tmp_path), "--promoted-by", "researcher", "--json"]
+    )
+    assert result.exit_code != 0
+    payload = json.loads(result.stdout)
+    assert payload["error"]["code"] == "CONFIRMATION_REQUIRED"
+
+
+def test_node_promote_human_readable(tmp_path: Path):
+    _create_and_accept_claim(tmp_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "node", "promote", "clm_1", "--root", str(tmp_path),
+            "--promoted-by", "researcher", "--confirm",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "lemma" in result.stdout
+
+
+def test_node_promote_json_envelope(tmp_path: Path):
+    _create_and_accept_claim(tmp_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "node", "promote", "clm_1", "--root", str(tmp_path),
+            "--promoted-by", "researcher", "--confirm", "--json",
+        ],
+    )
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is True
+    assert payload["command"] == "node.promote"
+    assert payload["data"]["kind"] == "lemma"
+    assert payload["data"]["id"] == "clm_1"
+
+
+def test_node_promote_on_unaccepted_claim_fails(tmp_path: Path):
+    runner.invoke(app, ["node", "create", "clm_1", "claim", "Not yet accepted", "--root", str(tmp_path)])
+
+    result = runner.invoke(
+        app, ["node", "promote", "clm_1", "--root", str(tmp_path), "--confirm", "--json"]
+    )
+    assert result.exit_code != 0
+    payload = json.loads(result.stdout)
+    assert payload["error"]["code"] == "NOT_ACCEPTED"
+
+
+def test_node_promote_on_non_claim_fails(tmp_path: Path):
+    runner.invoke(app, ["node", "create", "lem_1", "lemma", "Already a lemma", "--root", str(tmp_path)])
+    runner.invoke(app, ["node", "claim", "lem_1", "--root", str(tmp_path), "--claimant", "agent_a"])
+    runner.invoke(
+        app,
+        [
+            "node", "submit", "lem_1", "--root", str(tmp_path),
+            "--claimant", "agent_a", "--content", "proof text", "--rationale", "scoped correctly",
+        ],
+    )
+    runner.invoke(
+        app,
+        ["node", "review", "lem_1", "accept", "--root", str(tmp_path), "--reviewer", "researcher", "--confirm"],
+    )
+
+    result = runner.invoke(
+        app, ["node", "promote", "lem_1", "--root", str(tmp_path), "--confirm", "--json"]
+    )
+    assert result.exit_code != 0
+    payload = json.loads(result.stdout)
+    assert payload["error"]["code"] == "NOT_A_CLAIM"
+
+
+def test_node_promote_has_no_demote_command(tmp_path: Path):
+    result = runner.invoke(app, ["node", "demote", "lem_1", "--root", str(tmp_path)])
+    assert result.exit_code != 0

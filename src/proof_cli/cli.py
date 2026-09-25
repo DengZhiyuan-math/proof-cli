@@ -115,6 +115,7 @@ from .proof_map import (
     list_challenges,
     list_nodes,
     open_challenge,
+    promote_to_lemma,
     release_node,
     require_challenge,
     require_node,
@@ -493,6 +494,26 @@ def node_revalidate(
         _emit_node_error(exc, json_output, command="node.revalidate")
         raise typer.Exit(code=1)
     _emit_review_record(record, json_output, command="node.revalidate")
+
+
+@node_app.command("promote")
+def node_promote(
+    node_id: str,
+    root: str = ".",
+    promoted_by: str = "human",
+    confirm: bool = typer.Option(
+        False, "--confirm", help="Explicit human confirmation; only a researcher may promote a node"
+    ),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Promote an Accepted Claim to a Lemma, marking it independently reusable. No demote."""
+    store = get_store(_root(root))
+    try:
+        node = promote_to_lemma(store, node_id, promoted_by=promoted_by, confirmed=confirm)
+    except ProofMapError as exc:
+        _emit_node_error(exc, json_output, command="node.promote")
+        raise typer.Exit(code=1)
+    _emit_node(node, json_output, command="node.promote")
 
 
 def _emit_challenge(challenge, json_output: bool, *, command: str) -> None:
