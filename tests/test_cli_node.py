@@ -465,3 +465,96 @@ def test_node_review_reject_json_envelope(tmp_path: Path):
     show = runner.invoke(app, ["node", "show", "clm_1", "--root", str(tmp_path), "--json"])
     assert show.exit_code == 0
     assert json.loads(show.stdout)["ok"] is True
+
+
+def test_node_create_imported_result_requires_source_fields(tmp_path: Path):
+    result = runner.invoke(
+        app,
+        ["node", "create", "ref_1", "imported_result", "An external theorem", "--root", str(tmp_path), "--json"],
+    )
+    assert result.exit_code != 0
+    payload = json.loads(result.stdout)
+    assert payload["error"]["code"] == "IMPORTED_RESULT_REQUIRES_SOURCE"
+
+
+def test_node_create_imported_result_json_envelope_includes_source_fields(tmp_path: Path):
+    result = runner.invoke(
+        app,
+        [
+            "node", "create", "ref_1", "imported_result", "An external theorem", "--root", str(tmp_path),
+            "--source-locator", "doi:10.1234/example",
+            "--source-version", "v1",
+            "--trust-level", "external_reference",
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["data"]["source_locator"] == "doi:10.1234/example"
+    assert payload["data"]["source_version"] == "v1"
+    assert payload["data"]["trust_level"] == "external_reference"
+
+
+def _create_imported_result(tmp_path: Path, node_id: str = "ref_1") -> None:
+    runner.invoke(
+        app,
+        [
+            "node", "create", node_id, "imported_result", "An external theorem", "--root", str(tmp_path),
+            "--source-locator", "doi:10.1234/example", "--source-version", "v1",
+        ],
+    )
+
+
+def test_node_claim_on_imported_result_rejected_with_json_error(tmp_path: Path):
+    _create_imported_result(tmp_path)
+
+    result = runner.invoke(
+        app, ["node", "claim", "ref_1", "--root", str(tmp_path), "--claimant", "agent_a", "--json"]
+    )
+    assert result.exit_code != 0
+    payload = json.loads(result.stdout)
+    assert payload["error"]["code"] == "IMMUTABLE_NODE"
+
+
+def test_node_review_reference_review_json_envelope(tmp_path: Path):
+    _create_imported_result(tmp_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "node", "review", "ref_1", "reference-review", "--root", str(tmp_path),
+            "--reviewer", "researcher", "--rationale", "trustworthy source", "--confirm", "--json",
+        ],
+    )
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is True
+    assert payload["data"]["kind"] == "reference_review"
+    assert payload["data"]["decision"] == "approved"
+
+
+def test_node_review_reference_review_requires_confirmation(tmp_path: Path):
+    _create_imported_result(tmp_path)
+
+    result = runner.invoke(
+        app,
+        ["node", "review", "ref_1", "reference-review", "--root", str(tmp_path), "--reviewer", "researcher", "--json"],
+    )
+    assert result.exit_code != 0
+    payload = json.loads(result.stdout)
+    assert payload["error"]["code"] == "CONFIRMATION_REQUIRED"
+
+
+def test_node_review_reference_review_decision_invalid_on_local_node(tmp_path: Path):
+    _create_claim_and_submit(tmp_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "node", "review", "clm_1", "reference-review", "--root", str(tmp_path),
+            "--confirm", "--json",
+        ],
+    )
+    assert result.exit_code != 0
+    payload = json.loads(result.stdout)
+    assert payload["error"]["code"] == "INVALID_DECISION"

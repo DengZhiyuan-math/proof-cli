@@ -99,11 +99,13 @@ from .commands import (
 )
 from .envelope import dump_envelope, error_envelope, success_envelope
 from .collaboration import summarize_review_record
+from .domain import ProofMapNodeKind
 from .proof_map import (
     ProofMapError,
     claim_node,
     create_node,
     decide_acceptance,
+    decide_reference_review,
     list_nodes,
     release_node,
     require_node,
@@ -235,6 +237,9 @@ def node_create(
     assumption: list[str] = typer.Option(None, "--assumption"),
     dependency: list[str] = typer.Option(None, "--dependency"),
     created_by: str = "human",
+    source_locator: str = typer.Option("", "--source-locator", help="Required for imported_result nodes"),
+    source_version: str = typer.Option("", "--source-version", help="Required for imported_result nodes"),
+    trust_level: str = typer.Option("", "--trust-level"),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     store = get_store(_root(root))
@@ -247,6 +252,9 @@ def node_create(
             display_label=display_label,
             assumptions=assumption,
             dependencies=dependency,
+            source_locator=source_locator or None,
+            source_version=source_version or None,
+            trust_level=trust_level or None,
             created_by=created_by,
         )
     except ProofMapError as exc:
@@ -382,15 +390,24 @@ def node_review(
     ),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
-    """Human Review's Accept / revision-requested / reject decision for a local node.
+    """Human Review decision for a node.
 
-    The only path that may set a node's acceptance_state.
+    For a local node (theorem/lemma/claim): accept / revision-requested /
+    reject — the only path that may set acceptance_state. For an
+    imported_result node: reference-review, which grants Reference review
+    independently of acceptance_state.
     """
     store = get_store(_root(root))
     try:
-        record = decide_acceptance(
-            store, node_id, decision, reviewer_id=reviewer, rationale=rationale, confirmed=confirm
-        )
+        node = require_node(store, node_id)
+        if node.kind == ProofMapNodeKind.imported_result:
+            record = decide_reference_review(
+                store, node_id, decision, reviewer_id=reviewer, rationale=rationale, confirmed=confirm
+            )
+        else:
+            record = decide_acceptance(
+                store, node_id, decision, reviewer_id=reviewer, rationale=rationale, confirmed=confirm
+            )
     except ProofMapError as exc:
         _emit_node_error(exc, json_output)
         raise typer.Exit(code=1)

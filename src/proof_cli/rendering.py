@@ -61,6 +61,12 @@ def render_proof_map_node(node: ProofMapNode) -> str:
     table.add_row("Statement", node.statement)
     table.add_row("Assumptions", ", ".join(node.assumptions) or "none")
     table.add_row("Dependencies", ", ".join(node.dependencies) or "none")
+    if node.source_locator:
+        table.add_row("Source locator", node.source_locator)
+    if node.source_version:
+        table.add_row("Source version", node.source_version)
+    if node.trust_level:
+        table.add_row("Trust level", node.trust_level.value)
     table.add_row("Created by", node.created_by)
     table.add_row("Created at", node.created_at.isoformat())
     console.print(table)
