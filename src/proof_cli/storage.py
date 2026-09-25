@@ -215,6 +215,18 @@ def create_project(root: str | Path, project_id: str) -> ProjectStore:
     return store
 
 
+def set_project_id(store: ProjectStore, project_id: str) -> None:
+    """Force the project's own id in `project_meta`, overwriting whatever was there.
+
+    Unlike `create_project`'s `INSERT`-if-absent, this always overwrites —
+    exchange import (issue #31) uses it to retarget a project onto an
+    imported bundle's project id even when the target already has one.
+    """
+    with store.connect() as conn:
+        conn.execute("INSERT OR REPLACE INTO project_meta(key, value) VALUES (?, ?)", ("project_id", project_id))
+        conn.commit()
+
+
 def load_project(root: str | Path) -> ProjectStore:
     store = ProjectStore(Path(root))
     with store.connect():
@@ -280,6 +292,40 @@ def store_contract(store: ProjectStore, contract: TheoremContract) -> TheoremCon
         )
         conn.execute(
             "INSERT INTO theorem_contracts(id, version, is_current, data, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                contract.id,
+                contract.version,
+                1,
+                contract.model_dump_json(),
+                contract.created_at.isoformat(),
+                contract.updated_at.isoformat(),
+            ),
+        )
+        conn.commit()
+    return contract
+
+
+def import_theorem_contract(store: ProjectStore, contract: TheoremContract) -> TheoremContract:
+    """Reinsert an already-versioned contract exactly as given, for exchange import fidelity (issue #31).
+
+    `store_contract` always bumps `version` and appends a new row — right
+    for normal writes, wrong for import, which must reproduce exactly what
+    was exported rather than mint yet another version on top of it. Keyed
+    on `(id, version)`, so re-importing the same bundle twice updates the
+    same row rather than erroring or duplicating.
+    """
+    with store.connect() as conn:
+        conn.execute("UPDATE theorem_contracts SET is_current = 0 WHERE id = ?", (contract.id,))
+        conn.execute(
+            """
+            INSERT INTO theorem_contracts(id, version, is_current, data, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id, version) DO UPDATE SET
+              is_current = excluded.is_current,
+              data = excluded.data,
+              created_at = excluded.created_at,
+              updated_at = excluded.updated_at
+            """,
             (
                 contract.id,
                 contract.version,
@@ -378,6 +424,29 @@ def _append_reference_review(store: ProjectStore, review: ReferenceReviewRecord)
                 review.model_dump_json(),
                 review.created_at.isoformat(),
             ),
+        )
+        conn.commit()
+    return review
+
+
+def import_reference_review(store: ProjectStore, review: ReferenceReviewRecord) -> ReferenceReviewRecord:
+    """Reinsert an already-constructed reference review record for exchange import fidelity (issue #31).
+
+    `_append_reference_review` always mints a fresh row for a brand-new
+    review decision; import needs to reproduce an existing one's exact id
+    and timestamp instead, so `id` upserts rather than erroring on a
+    re-import of the same bundle.
+    """
+    with store.connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO reference_reviews(id, reference_id, data, created_at) VALUES (?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              reference_id = excluded.reference_id,
+              data = excluded.data,
+              created_at = excluded.created_at
+            """,
+            (review.id, review.reference_id, review.model_dump_json(), review.created_at.isoformat()),
         )
         conn.commit()
     return review
@@ -691,6 +760,13 @@ def get_claim(store: ProjectStore, claim_id: str) -> ClaimRecord | None:
     return _row_to_claim(row) if row else None
 
 
+def list_all_claims(store: ProjectStore) -> list[ClaimRecord]:
+    """Every claim in the project — active and released — for a full-fidelity export (issue #31)."""
+    with store.connect() as conn:
+        rows = conn.execute("SELECT * FROM claims ORDER BY claimed_at").fetchall()
+    return [_row_to_claim(row) for row in rows]
+
+
 def mark_claim_released(
     store: ProjectStore,
     claim_id: str,
@@ -819,6 +895,19 @@ def get_current_candidate_proof(store: ProjectStore, node_id: str) -> CandidateP
     return _row_to_candidate_proof(row) if row else None
 
 
+def list_all_candidate_proofs(store: ProjectStore) -> list[CandidateProofRecord]:
+    """Every candidate proof's index row across the whole project (issue #31).
+
+    Only the index — id, version, file_path, fingerprint, etc. The proof
+    text itself lives in the git-tracked Proof vault, not here; exchange
+    carries this index for fidelity, and relies on git for the vault files
+    themselves, same as it always has for the rest of the working tree.
+    """
+    with store.connect() as conn:
+        rows = conn.execute("SELECT * FROM candidate_proofs ORDER BY node_id, version").fetchall()
+    return [_row_to_candidate_proof(row) for row in rows]
+
+
 def _row_to_dependency_pin(row: sqlite3.Row) -> DependencyPin:
     return DependencyPin(
         id=row["id"],
@@ -879,6 +968,13 @@ def list_dependency_pins_for_node(store: ProjectStore, node_id: str) -> list[Dep
             "SELECT * FROM dependency_pins WHERE node_id = ? ORDER BY target_node_id",
             (node_id,),
         ).fetchall()
+    return [_row_to_dependency_pin(row) for row in rows]
+
+
+def list_all_dependency_pins(store: ProjectStore) -> list[DependencyPin]:
+    """Every dependency pin across the whole project, for a full-fidelity export (issue #31)."""
+    with store.connect() as conn:
+        rows = conn.execute("SELECT * FROM dependency_pins ORDER BY node_id, target_node_id").fetchall()
     return [_row_to_dependency_pin(row) for row in rows]
 
 
@@ -992,6 +1088,13 @@ def list_evidence_checks_for_candidate_proof(store: ProjectStore, candidate_proo
             "SELECT * FROM evidence_checks WHERE candidate_proof_id = ? ORDER BY created_at",
             (candidate_proof_id,),
         ).fetchall()
+    return [_row_to_evidence_check(row) for row in rows]
+
+
+def list_all_evidence_checks(store: ProjectStore) -> list[EvidenceCheck]:
+    """Every evidence check across the whole project, for a full-fidelity export (issue #31)."""
+    with store.connect() as conn:
+        rows = conn.execute("SELECT * FROM evidence_checks ORDER BY candidate_proof_id, created_at").fetchall()
     return [_row_to_evidence_check(row) for row in rows]
 
 
