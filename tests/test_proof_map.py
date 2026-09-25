@@ -11,6 +11,7 @@ from proof_cli.proof_map import (
     compute_interface_fingerprint,
     create_node,
     decide_acceptance,
+    decide_evidence_review,
     decide_reference_review,
     dependency_pin_is_current,
     dismiss_challenge,
@@ -19,6 +20,7 @@ from proof_cli.proof_map import (
     get_blocked_reason,
     get_challenge,
     get_dependency_pin,
+    get_evidence_check,
     get_frontier,
     get_integrity_state,
     get_node,
@@ -28,9 +30,11 @@ from proof_cli.proof_map import (
     list_candidate_proofs,
     list_challenges,
     list_dependency_pins,
+    list_evidence_checks,
     list_nodes,
     open_challenge,
     promote_to_lemma,
+    record_evidence_check,
     release_node,
     require_node,
     revalidate_dependency,
@@ -2056,3 +2060,126 @@ def test_derived_from_distinguishes_a_split_subclaim_from_a_coincidental_lemma(t
 
     assert get_node(store, "clm_child_1").derived_from == "clm_parent"
     assert get_node(store, "lem_standalone").derived_from is None
+
+
+def test_record_evidence_check_attaches_to_a_specific_candidate_proof(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    proof = _submitted_claim(store, "clm_1")
+
+    check = record_evidence_check(store, proof.id, "passed", notes="ran the smt backend", run_by="ci-bot")
+
+    assert check.candidate_proof_id == proof.id
+    assert check.outcome.value == "passed"
+    assert check.run_by == "ci-bot"
+    assert list_evidence_checks(store, proof.id) == [check]
+
+
+def test_record_evidence_check_accepts_every_outcome_value(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    proof = _submitted_claim(store, "clm_1")
+
+    for outcome in ["passed", "failed", "inconclusive", "error", "stale"]:
+        check = record_evidence_check(store, proof.id, outcome)
+        assert check.outcome.value == outcome
+
+
+def test_record_evidence_check_invalid_outcome_is_rejected(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    proof = _submitted_claim(store, "clm_1")
+
+    with pytest.raises(ProofMapError) as exc_info:
+        record_evidence_check(store, proof.id, "definitely-correct")
+    assert exc_info.value.code == "INVALID_OUTCOME"
+
+
+def test_record_evidence_check_requires_no_confirmation(tmp_path: Path):
+    """Ungated: an automated checker records its own outcome, no
+    `confirmed` parameter exists on this function at all."""
+    import inspect
+
+    assert "confirmed" not in inspect.signature(record_evidence_check).parameters
+
+
+def test_decide_evidence_review_requires_confirmation(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    proof = _submitted_claim(store, "clm_1")
+    check = record_evidence_check(store, proof.id, "passed")
+
+    with pytest.raises(ProofMapError) as exc_info:
+        decide_evidence_review(store, check.id, "trusted", reviewer_id="researcher")
+    assert exc_info.value.code == "CONFIRMATION_REQUIRED"
+
+
+def test_decide_evidence_review_invalid_decision_is_rejected(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    proof = _submitted_claim(store, "clm_1")
+    check = record_evidence_check(store, proof.id, "passed")
+
+    with pytest.raises(ProofMapError) as exc_info:
+        decide_evidence_review(store, check.id, "approved", reviewer_id="researcher", confirmed=True)
+    assert exc_info.value.code == "INVALID_DECISION"
+
+
+def test_decide_evidence_review_records_trusted_or_unusable(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    proof = _submitted_claim(store, "clm_1")
+    check = record_evidence_check(store, proof.id, "passed")
+
+    record = decide_evidence_review(
+        store, check.id, "trusted", reviewer_id="researcher", rationale="checked the backend logs", confirmed=True
+    )
+
+    assert record.kind.value == "evidence_review"
+    assert record.decision.value == "trusted"
+    assert record.object_type == "evidence_check"
+    assert record.object_id == check.id
+
+
+def test_evidence_check_and_evidence_review_can_never_flip_acceptance_state(tmp_path: Path):
+    """The ticket's own explicit requirement: attempt to flip
+    acceptance_state via an Evidence check / evidence_review path and
+    assert it's impossible."""
+    store = ensure_project(tmp_path)
+    proof = _submitted_claim(store, "clm_1")
+
+    assert get_acceptance_state(store, "clm_1") == "unreviewed"
+
+    # a glowing, fully-trusted "passed" check changes nothing about
+    # acceptance_state — only decide_acceptance can, and nothing here calls it
+    check = record_evidence_check(store, proof.id, "passed", notes="all backends agree", run_by="ci-bot")
+    assert get_acceptance_state(store, "clm_1") == "unreviewed"
+
+    decide_evidence_review(
+        store, check.id, "trusted", reviewer_id="researcher", rationale="fully credible", confirmed=True
+    )
+    assert get_acceptance_state(store, "clm_1") == "unreviewed"
+
+    # architecturally: evidence_review is recorded against object_type
+    # "evidence_check", never "proof_map_node", so get_acceptance_state's
+    # own query (object_type="proof_map_node", kind=acceptance) can't see it
+    # no matter what decision it records — not just by convention.
+    acceptance_records = [
+        record
+        for record in list_review_records(store, object_type="proof_map_node", object_id="clm_1")
+        if record.kind is not None and record.kind.value == "acceptance"
+    ]
+    assert acceptance_records == []
+
+    # even a "unusable" judgment doesn't retroactively do anything either
+    failing_check = record_evidence_check(store, proof.id, "failed")
+    decide_evidence_review(store, failing_check.id, "unusable", reviewer_id="researcher", confirmed=True)
+    assert get_acceptance_state(store, "clm_1") == "unreviewed"
+
+
+def test_evidence_check_on_nonexistent_candidate_proof_raises_not_found(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    with pytest.raises(ProofMapError) as exc_info:
+        record_evidence_check(store, "does_not_exist", "passed")
+    assert exc_info.value.code == "CANDIDATE_PROOF_NOT_FOUND"
+
+
+def test_decide_evidence_review_on_nonexistent_check_raises_not_found(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    with pytest.raises(ProofMapError) as exc_info:
+        decide_evidence_review(store, "does_not_exist", "trusted", confirmed=True)
+    assert exc_info.value.code == "EVIDENCE_CHECK_NOT_FOUND"

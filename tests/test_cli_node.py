@@ -1022,3 +1022,119 @@ def test_node_split_invalid_child_spec_fails(tmp_path: Path):
     assert result.exit_code != 0
     payload = json.loads(result.stdout)
     assert payload["error"]["code"] == "INVALID_CHILD_SPEC"
+
+
+def _create_claimed_and_submitted(tmp_path: Path, node_id: str = "clm_1", claimant: str = "agent_a") -> str:
+    runner.invoke(app, ["node", "create", node_id, "claim", "stmt", "--root", str(tmp_path)])
+    runner.invoke(app, ["node", "claim", node_id, "--root", str(tmp_path), "--claimant", claimant])
+    submit = runner.invoke(
+        app,
+        [
+            "node", "submit", node_id, "--root", str(tmp_path),
+            "--claimant", claimant, "--content", "proof text", "--rationale", "scoped correctly", "--json",
+        ],
+    )
+    return json.loads(submit.stdout)["data"]["id"]
+
+
+def test_node_evidence_record_json_envelope(tmp_path: Path):
+    proof_id = _create_claimed_and_submitted(tmp_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "node", "evidence", "record", proof_id, "passed", "--root", str(tmp_path),
+            "--notes", "ran the smt backend", "--run-by", "ci-bot", "--json",
+        ],
+    )
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is True
+    assert payload["command"] == "node.evidence.record"
+    assert payload["data"]["outcome"] == "passed"
+    assert payload["data"]["candidate_proof_id"] == proof_id
+
+
+def test_node_evidence_record_human_readable(tmp_path: Path):
+    proof_id = _create_claimed_and_submitted(tmp_path)
+
+    result = runner.invoke(
+        app, ["node", "evidence", "record", proof_id, "passed", "--root", str(tmp_path)]
+    )
+    assert result.exit_code == 0
+    assert "passed" in result.stdout
+
+
+def test_node_evidence_record_invalid_outcome_json_error(tmp_path: Path):
+    proof_id = _create_claimed_and_submitted(tmp_path)
+
+    result = runner.invoke(
+        app, ["node", "evidence", "record", proof_id, "definitely-correct", "--root", str(tmp_path), "--json"]
+    )
+    assert result.exit_code != 0
+    payload = json.loads(result.stdout)
+    assert payload["error"]["code"] == "INVALID_OUTCOME"
+
+
+def test_node_evidence_review_requires_confirmation(tmp_path: Path):
+    proof_id = _create_claimed_and_submitted(tmp_path)
+    record = runner.invoke(
+        app, ["node", "evidence", "record", proof_id, "passed", "--root", str(tmp_path), "--json"]
+    )
+    check_id = json.loads(record.stdout)["data"]["id"]
+
+    result = runner.invoke(
+        app,
+        ["node", "evidence", "review", check_id, "trusted", "--root", str(tmp_path), "--reviewer", "researcher", "--json"],
+    )
+    assert result.exit_code != 0
+    payload = json.loads(result.stdout)
+    assert payload["error"]["code"] == "CONFIRMATION_REQUIRED"
+
+
+def test_node_evidence_review_json_envelope(tmp_path: Path):
+    proof_id = _create_claimed_and_submitted(tmp_path)
+    record = runner.invoke(
+        app, ["node", "evidence", "record", proof_id, "passed", "--root", str(tmp_path), "--json"]
+    )
+    check_id = json.loads(record.stdout)["data"]["id"]
+
+    result = runner.invoke(
+        app,
+        [
+            "node", "evidence", "review", check_id, "trusted", "--root", str(tmp_path),
+            "--reviewer", "researcher", "--confirm", "--json",
+        ],
+    )
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is True
+    assert payload["command"] == "node.evidence.review"
+    assert payload["data"]["kind"] == "evidence_review"
+    assert payload["data"]["decision"] == "trusted"
+
+
+def test_node_evidence_review_never_touches_acceptance_state(tmp_path: Path):
+    proof_id = _create_claimed_and_submitted(tmp_path)
+    record = runner.invoke(
+        app, ["node", "evidence", "record", proof_id, "passed", "--root", str(tmp_path), "--json"]
+    )
+    check_id = json.loads(record.stdout)["data"]["id"]
+    runner.invoke(
+        app,
+        [
+            "node", "evidence", "review", check_id, "trusted", "--root", str(tmp_path),
+            "--reviewer", "researcher", "--confirm",
+        ],
+    )
+
+    show = runner.invoke(app, ["node", "show", "clm_1", "--root", str(tmp_path), "--json"])
+    assert json.loads(show.stdout)["data"]["acceptance_state"] == "unreviewed"
+
+
+def test_verify_accept_and_reject_commands_no_longer_exist(tmp_path: Path):
+    result = runner.invoke(app, ["verify", "accept", "thm_x", "--root", str(tmp_path)])
+    assert result.exit_code != 0
+
+    result = runner.invoke(app, ["verify", "reject", "thm_x", "--root", str(tmp_path)])
+    assert result.exit_code != 0

@@ -45,9 +45,7 @@ from .commands import (
     cmd_proof_formalize_show,
     cmd_proof_trace_dependency,
     cmd_proof_trace_machine_check,
-    cmd_proof_verify_accept,
     cmd_proof_verify_queue,
-    cmd_proof_verify_reject,
     cmd_proof_verify_result,
     cmd_proof_verify_run,
     cmd_proof_verify_stale,
@@ -105,6 +103,7 @@ from .proof_map import (
     claim_node,
     create_node,
     decide_acceptance,
+    decide_evidence_review,
     decide_reference_review,
     dismiss_challenge,
     get_acceptance_state,
@@ -116,6 +115,7 @@ from .proof_map import (
     list_nodes,
     open_challenge,
     promote_to_lemma,
+    record_evidence_check,
     release_node,
     require_challenge,
     require_node,
@@ -146,6 +146,7 @@ project_app = typer.Typer(help="Project diagnostics workflows")
 goal_app = typer.Typer(help="Goal operations")
 theorem_app = typer.Typer(help="Theorem registry")
 node_app = typer.Typer(help="Proof map node operations")
+node_evidence_app = typer.Typer(help="Evidence check workflows")
 challenge_app = typer.Typer(help="Challenge workflows")
 obligation_app = typer.Typer(help="Obligation queue")
 blocker_app = typer.Typer(help="Blocker tracking")
@@ -627,6 +628,61 @@ def challenge_dismiss(
         raise typer.Exit(code=1)
     _emit_challenge(challenge, json_output, command="challenge.dismiss")
 
+
+def _emit_evidence_check(check, json_output: bool, *, command: str) -> None:
+    if json_output:
+        typer.echo(dump_envelope(success_envelope(command, check.model_dump(mode="json"))))
+    else:
+        typer.echo(
+            f"Evidence check {check.id}: {check.outcome.value} on candidate proof {check.candidate_proof_id} "
+            f"(run_by={check.run_by})"
+        )
+
+
+@node_evidence_app.command("record")
+def evidence_record(
+    candidate_proof_id: str,
+    outcome: str,
+    root: str = ".",
+    notes: str = "",
+    run_by: str = "system",
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Record an Evidence check against a specific Candidate proof. Advisory, ungated."""
+    store = get_store(_root(root))
+    try:
+        check = record_evidence_check(store, candidate_proof_id, outcome, notes=notes, run_by=run_by)
+    except ProofMapError as exc:
+        _emit_node_error(exc, json_output, command="node.evidence.record")
+        raise typer.Exit(code=1)
+    _emit_evidence_check(check, json_output, command="node.evidence.record")
+
+
+@node_evidence_app.command("review")
+def evidence_review(
+    check_id: str,
+    decision: str,
+    root: str = ".",
+    reviewer: str = "human",
+    rationale: str = "",
+    confirm: bool = typer.Option(
+        False, "--confirm", help="Explicit human confirmation; only a researcher may judge an Evidence check"
+    ),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Human Review's trusted/unusable judgment on an Evidence check. Never touches acceptance_state."""
+    store = get_store(_root(root))
+    try:
+        record = decide_evidence_review(
+            store, check_id, decision, reviewer_id=reviewer, rationale=rationale, confirmed=confirm
+        )
+    except ProofMapError as exc:
+        _emit_node_error(exc, json_output, command="node.evidence.review")
+        raise typer.Exit(code=1)
+    _emit_review_record(record, json_output, command="node.evidence.review")
+
+
+node_app.add_typer(node_evidence_app, name="evidence")
 
 app.add_typer(goal_app, name="goal")
 app.add_typer(codex_app, name="codex")
@@ -1384,16 +1440,6 @@ def verify_status(source_id: str, root: str = ".") -> None:
 @verify_app.command("result")
 def verify_result(source_id: str, root: str = ".") -> None:
     typer.echo(render_verification_output(f"verify result {source_id}", cmd_proof_verify_result(source_id, _root(root))))
-
-
-@verify_app.command("accept")
-def verify_accept(source_id: str, root: str = ".", notes: str = "") -> None:
-    typer.echo(render_verification_output(f"verify accept {source_id}", cmd_proof_verify_accept(source_id, _root(root), notes=notes)))
-
-
-@verify_app.command("reject")
-def verify_reject(source_id: str, root: str = ".", notes: str = "") -> None:
-    typer.echo(render_verification_output(f"verify reject {source_id}", cmd_proof_verify_reject(source_id, _root(root), notes=notes)))
 
 
 @verify_app.command("stale")

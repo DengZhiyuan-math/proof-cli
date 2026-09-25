@@ -22,6 +22,8 @@ from .domain import (
     ChallengeStatus,
     ClaimRecord,
     DependencyPin,
+    EvidenceCheck,
+    EvidenceOutcome,
     ProofMapNode,
     ProofMapNodeKind,
     TrustLevel,
@@ -35,14 +37,17 @@ from .storage import (
     get_challenge as _get_challenge,
     get_current_candidate_proof,
     get_dependency_pin as _get_dependency_pin,
+    get_evidence_check as _get_evidence_check,
     get_proof_map_node,
     insert_challenge,
     insert_claim,
     insert_candidate_proof,
+    insert_evidence_check,
     insert_proof_map_node,
     list_candidate_proofs_for_node,
     list_challenges as _list_challenges,
     list_dependency_pins_for_node,
+    list_evidence_checks_for_candidate_proof,
     list_proof_map_nodes,
     mark_challenge_dismissed,
     mark_claim_released,
@@ -520,6 +525,126 @@ def require_candidate_proof(store: ProjectStore, candidate_proof_id: str) -> Can
 def list_candidate_proofs(store: ProjectStore, node_id: str) -> list[CandidateProofRecord]:
     require_node(store, node_id)
     return list_candidate_proofs_for_node(store, node_id)
+
+
+def record_evidence_check(
+    store: ProjectStore,
+    candidate_proof_id: str,
+    outcome: EvidenceOutcome | str,
+    *,
+    notes: str = "",
+    run_by: str = "system",
+) -> EvidenceCheck:
+    """Record an automated or semi-automated check against a specific Candidate proof.
+
+    Purely advisory and ungated — an automated checker records its own
+    outcome directly, no Human Review needed to log a result. Nothing here
+    can close, block, or otherwise touch acceptance_state; the sole write
+    is this check's own row (ADR-0004 point 5).
+    """
+    require_candidate_proof(store, candidate_proof_id)
+
+    try:
+        resolved_outcome = EvidenceOutcome(outcome)
+    except ValueError as exc:
+        valid = ", ".join(member.value for member in EvidenceOutcome)
+        raise ProofMapError(
+            "INVALID_OUTCOME", f"'{outcome}' is not a valid evidence outcome; expected one of: {valid}"
+        ) from exc
+
+    check = EvidenceCheck(
+        id=str(uuid.uuid4()), candidate_proof_id=candidate_proof_id, outcome=resolved_outcome, notes=notes, run_by=run_by
+    )
+    insert_evidence_check(store, check)
+    append_event(
+        store,
+        "proof_map_evidence_check_recorded",
+        f"evidence check {resolved_outcome.value} for candidate proof {candidate_proof_id}",
+        entity_id=candidate_proof_id,
+        payload={"evidence_check_id": check.id, "outcome": resolved_outcome.value, "run_by": run_by},
+    )
+    return check
+
+
+def get_evidence_check(store: ProjectStore, check_id: str) -> EvidenceCheck | None:
+    return _get_evidence_check(store, check_id)
+
+
+def require_evidence_check(store: ProjectStore, check_id: str) -> EvidenceCheck:
+    check = get_evidence_check(store, check_id)
+    if check is None:
+        raise ProofMapError("EVIDENCE_CHECK_NOT_FOUND", f"evidence check {check_id} not found")
+    return check
+
+
+def list_evidence_checks(store: ProjectStore, candidate_proof_id: str) -> list[EvidenceCheck]:
+    require_candidate_proof(store, candidate_proof_id)
+    return list_evidence_checks_for_candidate_proof(store, candidate_proof_id)
+
+
+class EvidenceTrustDecision(str, Enum):
+    trusted = "trusted"
+    unusable = "unusable"
+
+
+_EVIDENCE_DECISION_TO_GOVERNANCE_STATE = {
+    EvidenceTrustDecision.trusted: ReviewGovernanceState.trusted,
+    EvidenceTrustDecision.unusable: ReviewGovernanceState.unusable,
+}
+
+_EVIDENCE_CHECK_OBJECT_TYPE = "evidence_check"
+
+
+def decide_evidence_review(
+    store: ProjectStore,
+    evidence_check_id: str,
+    decision: EvidenceTrustDecision | str,
+    *,
+    reviewer_id: str = "human",
+    rationale: str = "",
+    confirmed: bool = False,
+) -> ReviewRecord:
+    """Human Review's trust judgment on an Evidence check itself.
+
+    `trusted` or `unusable` — never `approved`/`rejected`, and never
+    against `object_type=proof_map_node`, so this can't be confused with,
+    or feed, acceptance_state no matter what it decides (ADR-0004 point 5).
+    """
+    check = require_evidence_check(store, evidence_check_id)
+
+    try:
+        resolved_decision = EvidenceTrustDecision(decision)
+    except ValueError as exc:
+        valid = ", ".join(member.value for member in EvidenceTrustDecision)
+        raise ProofMapError(
+            "INVALID_DECISION", f"'{decision}' is not a valid evidence trust judgment; expected one of: {valid}"
+        ) from exc
+
+    if not confirmed:
+        raise ProofMapError(
+            "CONFIRMATION_REQUIRED",
+            "a Human Review decision requires explicit confirmation; only a researcher may confirm one",
+        )
+
+    governance_state = _EVIDENCE_DECISION_TO_GOVERNANCE_STATE[resolved_decision]
+    request = record_review_request(
+        store,
+        _EVIDENCE_CHECK_OBJECT_TYPE,
+        evidence_check_id,
+        reviewer_id=reviewer_id,
+        rationale=rationale,
+        kind=ReviewRecordKind.evidence_review,
+    )
+    record = record_review_decision(store, request.id, governance_state, reviewer_id=reviewer_id, rationale=rationale)
+
+    append_event(
+        store,
+        "proof_map_evidence_review_decided",
+        f"evidence review for {evidence_check_id}: {resolved_decision.value}",
+        entity_id=check.candidate_proof_id,
+        payload={"decision": resolved_decision.value, "reviewer_id": reviewer_id, "review_id": record.id},
+    )
+    return record
 
 
 def _normalize_whitespace(text: str) -> str:
