@@ -132,3 +132,87 @@ def test_node_list_json_and_human(tmp_path: Path):
     assert human_result.exit_code == 0
     assert "lem_1" in human_result.stdout
     assert "lem_2" in human_result.stdout
+
+
+def test_node_claim_and_release_human_readable(tmp_path: Path):
+    runner.invoke(app, ["node", "create", "clm_1", "claim", "stmt", "--root", str(tmp_path)])
+
+    claim_result = runner.invoke(
+        app, ["node", "claim", "clm_1", "--root", str(tmp_path), "--claimant", "agent_a"]
+    )
+    assert claim_result.exit_code == 0
+    assert "agent_a" in claim_result.stdout
+
+    release_result = runner.invoke(
+        app, ["node", "release", "clm_1", "--root", str(tmp_path), "--claimant", "agent_a"]
+    )
+    assert release_result.exit_code == 0
+    assert "agent_a" in release_result.stdout
+
+
+def test_node_reclaim_same_claimant_is_idempotent_via_cli(tmp_path: Path):
+    runner.invoke(app, ["node", "create", "clm_1", "claim", "stmt", "--root", str(tmp_path)])
+
+    first = runner.invoke(
+        app, ["node", "claim", "clm_1", "--root", str(tmp_path), "--claimant", "agent_a", "--json"]
+    )
+    second = runner.invoke(
+        app, ["node", "claim", "clm_1", "--root", str(tmp_path), "--claimant", "agent_a", "--json"]
+    )
+    assert first.exit_code == 0
+    assert second.exit_code == 0
+    assert json.loads(first.stdout)["data"]["id"] == json.loads(second.stdout)["data"]["id"]
+
+
+def test_node_claim_conflict_json_envelope_includes_details(tmp_path: Path):
+    runner.invoke(app, ["node", "create", "clm_1", "claim", "stmt", "--root", str(tmp_path)])
+    runner.invoke(app, ["node", "claim", "clm_1", "--root", str(tmp_path), "--claimant", "agent_a"])
+
+    conflict = runner.invoke(
+        app, ["node", "claim", "clm_1", "--root", str(tmp_path), "--claimant", "agent_b", "--json"]
+    )
+    assert conflict.exit_code != 0
+    payload = json.loads(conflict.stdout)
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "CLAIM_CONFLICT"
+    assert payload["error"]["details"]["claimant_id"] == "agent_a"
+
+
+def test_node_release_without_ownership_or_force_is_rejected(tmp_path: Path):
+    runner.invoke(app, ["node", "create", "clm_1", "claim", "stmt", "--root", str(tmp_path)])
+    runner.invoke(app, ["node", "claim", "clm_1", "--root", str(tmp_path), "--claimant", "agent_a"])
+
+    result = runner.invoke(
+        app, ["node", "release", "clm_1", "--root", str(tmp_path), "--claimant", "agent_b", "--json"]
+    )
+    assert result.exit_code != 0
+    payload = json.loads(result.stdout)
+    assert payload["error"]["code"] == "NOT_CLAIMANT"
+
+
+def test_node_force_release_requires_actor_and_reason(tmp_path: Path):
+    runner.invoke(app, ["node", "create", "clm_1", "claim", "stmt", "--root", str(tmp_path)])
+    runner.invoke(app, ["node", "claim", "clm_1", "--root", str(tmp_path), "--claimant", "agent_a"])
+
+    missing_reason = runner.invoke(
+        app,
+        [
+            "node", "release", "clm_1", "--root", str(tmp_path),
+            "--claimant", "researcher", "--force", "--actor", "researcher", "--json",
+        ],
+    )
+    assert missing_reason.exit_code != 0
+    assert json.loads(missing_reason.stdout)["error"]["code"] == "FORCE_RELEASE_REQUIRES_REASON"
+
+    force_release = runner.invoke(
+        app,
+        [
+            "node", "release", "clm_1", "--root", str(tmp_path),
+            "--claimant", "researcher", "--force",
+            "--actor", "researcher", "--reason", "agent stuck", "--json",
+        ],
+    )
+    assert force_release.exit_code == 0
+    payload = json.loads(force_release.stdout)
+    assert payload["data"]["released_by"] == "researcher"
+    assert payload["data"]["release_reason"] == "agent stuck"

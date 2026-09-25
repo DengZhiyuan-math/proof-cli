@@ -3,7 +3,7 @@ from __future__ import annotations
 from rich.console import Console
 from rich.table import Table
 
-from .domain import ProjectSnapshot, ProofMapNode
+from .domain import ClaimRecord, ProjectSnapshot, ProofMapNode
 
 
 def render_status(data: dict[str, object]) -> str:
@@ -63,6 +63,24 @@ def render_proof_map_node(node: ProofMapNode) -> str:
     table.add_row("Dependencies", ", ".join(node.dependencies) or "none")
     table.add_row("Created by", node.created_by)
     table.add_row("Created at", node.created_at.isoformat())
+    console.print(table)
+    return console.export_text()
+
+
+def render_claim(claim: ClaimRecord) -> str:
+    console = Console(record=True, width=100)
+    console.rule(f"Claim on {claim.node_id}")
+    table = Table(show_header=False, box=None, pad_edge=False)
+    table.add_column("key", style="bold")
+    table.add_column("value")
+    table.add_row("Claim id", claim.id)
+    table.add_row("Claimant", claim.claimant_id)
+    table.add_row("Session", claim.session_id)
+    table.add_row("Claimed at", claim.claimed_at.isoformat())
+    if claim.released_at is not None:
+        table.add_row("Released at", claim.released_at.isoformat())
+        table.add_row("Released by", claim.released_by or "")
+        table.add_row("Release reason", claim.release_reason or "")
     console.print(table)
     return console.export_text()
 

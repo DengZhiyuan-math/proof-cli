@@ -98,8 +98,8 @@ from .commands import (
     get_store,
 )
 from .envelope import dump_envelope, error_envelope, success_envelope
-from .proof_map import ProofMapError, create_node, list_nodes, require_node
-from .rendering import render_proof_map_node, render_proof_map_node_list
+from .proof_map import ProofMapError, claim_node, create_node, list_nodes, release_node, require_node
+from .rendering import render_claim, render_proof_map_node, render_proof_map_node_list
 from .review import render_verification_output
 
 app = typer.Typer(add_completion=False, help="Mathematical Proof CLI")
@@ -200,9 +200,19 @@ def _emit_node(node, json_output: bool) -> None:
 
 def _emit_node_error(exc: ProofMapError, json_output: bool) -> None:
     if json_output:
-        typer.echo(dump_envelope(error_envelope(exc.code, exc.message)))
+        typer.echo(dump_envelope(error_envelope(exc.code, exc.message, details=exc.details or None)))
     else:
-        typer.echo(f"Error: {exc.message}")
+        detail_suffix = ""
+        if exc.details:
+            detail_suffix = " (" + ", ".join(f"{key}={value}" for key, value in exc.details.items()) + ")"
+        typer.echo(f"Error: {exc.message}{detail_suffix}")
+
+
+def _emit_claim(claim, json_output: bool) -> None:
+    if json_output:
+        typer.echo(dump_envelope(success_envelope(claim.model_dump(mode="json"))))
+    else:
+        typer.echo(render_claim(claim))
 
 
 @node_app.command("create")
@@ -261,6 +271,51 @@ def node_list(
         typer.echo(dump_envelope(success_envelope([node.model_dump(mode="json") for node in nodes])))
         return
     typer.echo(render_proof_map_node_list(nodes))
+
+
+@node_app.command("claim")
+def node_claim(
+    node_id: str,
+    root: str = ".",
+    claimant: str = "human",
+    session: str = "default",
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    store = get_store(_root(root))
+    try:
+        claim = claim_node(store, node_id, claimant_id=claimant, session_id=session)
+    except ProofMapError as exc:
+        _emit_node_error(exc, json_output)
+        raise typer.Exit(code=1)
+    _emit_claim(claim, json_output)
+
+
+@node_app.command("release")
+def node_release(
+    node_id: str,
+    root: str = ".",
+    claimant: str = "human",
+    session: str = "default",
+    force: bool = typer.Option(False, "--force", help="Force-release someone else's claim (requires --actor and --reason)"),
+    actor: str = typer.Option("", "--actor", help="Researcher identity performing a force-release"),
+    reason: str = typer.Option("", "--reason", help="Why this claim is being released"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    store = get_store(_root(root))
+    try:
+        claim = release_node(
+            store,
+            node_id,
+            claimant_id=claimant,
+            session_id=session,
+            force=force,
+            actor=actor or None,
+            reason=reason or None,
+        )
+    except ProofMapError as exc:
+        _emit_node_error(exc, json_output)
+        raise typer.Exit(code=1)
+    _emit_claim(claim, json_output)
 
 
 app.add_typer(goal_app, name="goal")
