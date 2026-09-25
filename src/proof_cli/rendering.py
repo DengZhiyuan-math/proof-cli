@@ -3,7 +3,7 @@ from __future__ import annotations
 from rich.console import Console
 from rich.table import Table
 
-from .domain import ProjectSnapshot
+from .domain import ProjectSnapshot, ProofMapNode
 
 
 def render_status(data: dict[str, object]) -> str:
@@ -46,5 +46,39 @@ def render_export(data: dict[str, object]) -> str:
     if isinstance(snapshot, ProjectSnapshot):
         console.print("Snapshot:")
         console.print(snapshot.model_dump_json(indent=2))
+    return console.export_text()
+
+
+def render_proof_map_node(node: ProofMapNode) -> str:
+    console = Console(record=True, width=100)
+    console.rule(f"Proof Map Node: {node.id}")
+    table = Table(show_header=False, box=None, pad_edge=False)
+    table.add_column("key", style="bold")
+    table.add_column("value")
+    table.add_row("Kind", node.kind.value)
+    if node.display_label:
+        table.add_row("Display label", node.display_label)
+    table.add_row("Statement", node.statement)
+    table.add_row("Assumptions", ", ".join(node.assumptions) or "none")
+    table.add_row("Dependencies", ", ".join(node.dependencies) or "none")
+    table.add_row("Created by", node.created_by)
+    table.add_row("Created at", node.created_at.isoformat())
+    console.print(table)
+    return console.export_text()
+
+
+def render_proof_map_node_list(nodes: list[ProofMapNode]) -> str:
+    console = Console(record=True, width=100)
+    console.rule("Proof Map Nodes")
+    if not nodes:
+        console.print("No proof map nodes")
+        return console.export_text()
+    table = Table()
+    table.add_column("id")
+    table.add_column("kind")
+    table.add_column("statement")
+    for node in nodes:
+        table.add_row(node.id, node.kind.value, node.statement)
+    console.print(table)
     return console.export_text()
 

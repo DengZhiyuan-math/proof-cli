@@ -13,6 +13,7 @@ from .db import connect, initialize
 from .domain import (
     BlockerRecord,
     EventRecord,
+    ProofMapNode,
     ProofObligation,
     ProjectSnapshot,
     ProjectState,
@@ -38,6 +39,7 @@ def _load(adapter, value: str):
 
 
 THEOREM_ADAPTER = TypeAdapter(TheoremContract)
+PROOF_MAP_NODE_ADAPTER = TypeAdapter(ProofMapNode)
 OBLIGATION_ADAPTER = TypeAdapter(ProofObligation)
 BLOCKER_ADAPTER = TypeAdapter(BlockerRecord)
 SNAPSHOT_ADAPTER = TypeAdapter(ProjectSnapshot)
@@ -68,6 +70,20 @@ CREATE INDEX IF NOT EXISTS idx_reference_reviews_reference_id
   ON reference_reviews(reference_id, created_at);
 """
 
+PROOF_MAP_SCHEMA = """
+CREATE TABLE IF NOT EXISTS proof_map_nodes (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  data TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_proof_map_nodes_one_theorem
+  ON proof_map_nodes(kind)
+  WHERE kind = 'theorem';
+"""
+
 
 @dataclass
 class ProjectStore:
@@ -81,6 +97,7 @@ class ProjectStore:
         conn = connect(self.db_path)
         initialize(conn)
         conn.executescript(REFERENCE_SCHEMA)
+        conn.executescript(PROOF_MAP_SCHEMA)
         conn.commit()
         return conn
 
@@ -489,6 +506,37 @@ def list_blockers(store: ProjectStore) -> list[BlockerRecord]:
     with store.connect() as conn:
         rows = conn.execute("SELECT data FROM blockers ORDER BY id").fetchall()
     return [BLOCKER_ADAPTER.validate_json(row["data"]) for row in rows]
+
+
+def insert_proof_map_node(store: ProjectStore, node: ProofMapNode) -> ProofMapNode:
+    with store.connect() as conn:
+        conn.execute(
+            "INSERT INTO proof_map_nodes(id, kind, data, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            (
+                node.id,
+                node.kind.value,
+                node.model_dump_json(),
+                node.created_at.isoformat(),
+                node.updated_at.isoformat(),
+            ),
+        )
+        conn.commit()
+    return node
+
+
+def get_proof_map_node(store: ProjectStore, node_id: str) -> ProofMapNode | None:
+    with store.connect() as conn:
+        row = conn.execute(
+            "SELECT data FROM proof_map_nodes WHERE id = ? LIMIT 1",
+            (node_id,),
+        ).fetchone()
+    return PROOF_MAP_NODE_ADAPTER.validate_json(row["data"]) if row else None
+
+
+def list_proof_map_nodes(store: ProjectStore) -> list[ProofMapNode]:
+    with store.connect() as conn:
+        rows = conn.execute("SELECT data FROM proof_map_nodes ORDER BY id").fetchall()
+    return [PROOF_MAP_NODE_ADAPTER.validate_json(row["data"]) for row in rows]
 
 
 def store_snapshot(store: ProjectStore, snapshot: ProjectSnapshot) -> ProjectSnapshot:
