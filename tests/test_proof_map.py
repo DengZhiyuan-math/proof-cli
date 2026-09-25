@@ -30,6 +30,7 @@ from proof_cli.proof_map import (
     list_dependency_pins,
     list_nodes,
     open_challenge,
+    promote_to_lemma,
     release_node,
     require_node,
     revalidate_dependency,
@@ -1810,3 +1811,111 @@ def test_stale_pin_reachability_walk_does_not_recurse_on_a_deep_chain(tmp_path: 
         create_node(store, node_id=f"n{i}", kind="lemma", statement=f"stmt {i}", dependencies=[f"n{i - 1}"])
 
     assert _is_downstream_of_challenge_or_stale_pin(store, f"n{depth - 1}") is False
+
+
+def test_promote_requires_claim_and_accepted(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="lem_1", kind="lemma", statement="Already a lemma")
+    _accept_via_full_cycle(store, "lem_1")
+
+    with pytest.raises(ProofMapError) as exc_info:
+        promote_to_lemma(store, "lem_1", confirmed=True)
+    assert exc_info.value.code == "NOT_A_CLAIM"
+
+    create_node(store, node_id="clm_1", kind="claim", statement="Not yet accepted")
+    with pytest.raises(ProofMapError) as exc_info:
+        promote_to_lemma(store, "clm_1", confirmed=True)
+    assert exc_info.value.code == "NOT_ACCEPTED"
+
+
+def test_promote_requires_confirmation(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_1", kind="claim", statement="A promotable claim")
+    _accept_via_full_cycle(store, "clm_1")
+
+    with pytest.raises(ProofMapError) as exc_info:
+        promote_to_lemma(store, "clm_1", promoted_by="researcher")
+    assert exc_info.value.code == "CONFIRMATION_REQUIRED"
+    assert get_node(store, "clm_1").kind == ProofMapNodeKind.claim
+
+
+def test_promote_changes_only_kind(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(
+        store,
+        node_id="clm_1",
+        kind="claim",
+        statement="A promotable claim",
+        assumptions=["A"],
+    )
+    _accept_via_full_cycle(store, "clm_1")
+    before = get_node(store, "clm_1")
+    before_proofs = list_candidate_proofs(store, "clm_1")
+
+    promoted = promote_to_lemma(store, "clm_1", promoted_by="researcher", confirmed=True)
+
+    assert promoted.kind == ProofMapNodeKind.lemma
+    assert promoted.id == before.id
+    assert promoted.statement == before.statement
+    assert promoted.assumptions == before.assumptions
+    assert promoted.dependencies == before.dependencies
+    assert promoted.created_at == before.created_at
+
+    after = get_node(store, "clm_1")
+    assert after.kind == ProofMapNodeKind.lemma
+    assert after.statement == before.statement
+
+    # Candidate-proof history is untouched, other than the interface
+    # fingerprint deliberately kept in sync with the new kind (see the next test)
+    after_proofs = list_candidate_proofs(store, "clm_1")
+    assert len(after_proofs) == len(before_proofs)
+    for before_proof, after_proof in zip(before_proofs, after_proofs):
+        assert after_proof.model_copy(update={"interface_fingerprint": None}) == before_proof.model_copy(
+            update={"interface_fingerprint": None}
+        )
+
+
+def test_promote_keeps_the_interface_fingerprint_internally_consistent(tmp_path: Path):
+    """The fingerprint is a function of (kind, statement, assumptions); kind
+    just changed, so the stored fingerprint is recomputed to match — a
+    dependent pinning this node afterward must see it as current, not as an
+    interface change caused by nothing more than a relabeling."""
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_1", kind="claim", statement="A promotable claim")
+    _accept_via_full_cycle(store, "clm_1")
+
+    promote_to_lemma(store, "clm_1", confirmed=True)
+
+    expected = compute_interface_fingerprint("lemma", "A promotable claim", [])
+    assert get_accepted_interface_fingerprint(store, "clm_1") == expected
+
+    create_node(store, node_id="clm_2", kind="claim", statement="Depends on the promoted lemma", dependencies=["clm_1"])
+    claim_node(store, "clm_2", claimant_id="agent_x", session_id="sess_x")
+    submit_candidate_proof(
+        store,
+        "clm_2",
+        claimant_id="agent_x",
+        session_id="sess_x",
+        scoping_rationale="scoped correctly",
+        content="proof text",
+    )
+    pin = get_dependency_pin(store, "clm_2", "clm_1")
+    assert dependency_pin_is_current(store, pin) is True
+
+
+def test_promote_has_no_demote_path(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_1", kind="claim", statement="A promotable claim")
+    _accept_via_full_cycle(store, "clm_1")
+    promote_to_lemma(store, "clm_1", confirmed=True)
+
+    with pytest.raises(ProofMapError) as exc_info:
+        promote_to_lemma(store, "clm_1", confirmed=True)
+    assert exc_info.value.code == "NOT_A_CLAIM"
+
+
+def test_promote_on_nonexistent_node_raises_node_not_found(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    with pytest.raises(ProofMapError) as exc_info:
+        promote_to_lemma(store, "does_not_exist", confirmed=True)
+    assert exc_info.value.code == "NODE_NOT_FOUND"

@@ -588,6 +588,23 @@ def insert_proof_map_node(store: ProjectStore, node: ProofMapNode) -> ProofMapNo
     return node
 
 
+def update_proof_map_node(store: ProjectStore, node: ProofMapNode) -> ProofMapNode:
+    """Overwrite an existing node's row in place.
+
+    The only legitimate caller is Promote (issue #22) changing `kind` from
+    `claim` to `lemma` on an already-Accepted node — every other ProofMapNode
+    field stays whatever it already was, since nothing else in the system
+    has a supported path to edit a node after creation.
+    """
+    with store.connect() as conn:
+        conn.execute(
+            "UPDATE proof_map_nodes SET kind = ?, data = ?, updated_at = ? WHERE id = ?",
+            (node.kind.value, node.model_dump_json(), node.updated_at.isoformat(), node.id),
+        )
+        conn.commit()
+    return node
+
+
 def get_proof_map_node(store: ProjectStore, node_id: str) -> ProofMapNode | None:
     with store.connect() as conn:
         row = conn.execute(
