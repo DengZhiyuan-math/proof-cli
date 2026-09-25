@@ -95,7 +95,11 @@ from .commands import (
     cmd_theorem_ground,
     cmd_theorem_list,
     cmd_theorem_show,
+    get_store,
 )
+from .envelope import dump_envelope, error_envelope, success_envelope
+from .proof_map import ProofMapError, create_node, list_nodes, require_node
+from .rendering import render_proof_map_node, render_proof_map_node_list
 from .review import render_verification_output
 
 app = typer.Typer(add_completion=False, help="Mathematical Proof CLI")
@@ -109,6 +113,7 @@ benchmark_app = typer.Typer(help="Automation evaluation workflows")
 project_app = typer.Typer(help="Project diagnostics workflows")
 goal_app = typer.Typer(help="Goal operations")
 theorem_app = typer.Typer(help="Theorem registry")
+node_app = typer.Typer(help="Proof map node operations")
 obligation_app = typer.Typer(help="Obligation queue")
 blocker_app = typer.Typer(help="Blocker tracking")
 reference_app = typer.Typer(help="Reference workflows")
@@ -186,6 +191,78 @@ def revalidate(source_id: str, root: str = ".", backend_target: str = "", notes:
     )
 
 
+def _emit_node(node, json_output: bool) -> None:
+    if json_output:
+        typer.echo(dump_envelope(success_envelope(node.model_dump(mode="json"))))
+    else:
+        typer.echo(render_proof_map_node(node))
+
+
+def _emit_node_error(exc: ProofMapError, json_output: bool) -> None:
+    if json_output:
+        typer.echo(dump_envelope(error_envelope(exc.code, exc.message)))
+    else:
+        typer.echo(f"Error: {exc.message}")
+
+
+@node_app.command("create")
+def node_create(
+    node_id: str,
+    kind: str,
+    statement: str,
+    root: str = ".",
+    display_label: str = "",
+    assumption: list[str] = typer.Option(None, "--assumption"),
+    dependency: list[str] = typer.Option(None, "--dependency"),
+    created_by: str = "human",
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    store = get_store(_root(root))
+    try:
+        node = create_node(
+            store,
+            node_id=node_id,
+            kind=kind,
+            statement=statement,
+            display_label=display_label,
+            assumptions=assumption,
+            dependencies=dependency,
+            created_by=created_by,
+        )
+    except ProofMapError as exc:
+        _emit_node_error(exc, json_output)
+        raise typer.Exit(code=1)
+    _emit_node(node, json_output)
+
+
+@node_app.command("show")
+def node_show(
+    node_id: str,
+    root: str = ".",
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    store = get_store(_root(root))
+    try:
+        node = require_node(store, node_id)
+    except ProofMapError as exc:
+        _emit_node_error(exc, json_output)
+        raise typer.Exit(code=1)
+    _emit_node(node, json_output)
+
+
+@node_app.command("list")
+def node_list(
+    root: str = ".",
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    store = get_store(_root(root))
+    nodes = list_nodes(store)
+    if json_output:
+        typer.echo(dump_envelope(success_envelope([node.model_dump(mode="json") for node in nodes])))
+        return
+    typer.echo(render_proof_map_node_list(nodes))
+
+
 app.add_typer(goal_app, name="goal")
 app.add_typer(codex_app, name="codex")
 app.add_typer(asset_app, name="asset")
@@ -197,6 +274,7 @@ app.add_typer(automate_app, name="automate")
 app.add_typer(benchmark_app, name="benchmark")
 app.add_typer(project_app, name="project")
 app.add_typer(theorem_app, name="theorem")
+app.add_typer(node_app, name="node")
 app.add_typer(obligation_app, name="obligation")
 app.add_typer(blocker_app, name="blocker")
 app.add_typer(reference_app, name="reference")

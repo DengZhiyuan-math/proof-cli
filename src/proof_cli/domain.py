@@ -58,6 +58,13 @@ class BlockerStatus(str, Enum):
     resolved = "resolved"
 
 
+class ProofMapNodeKind(str, Enum):
+    theorem = "theorem"
+    lemma = "lemma"
+    claim = "claim"
+    imported_result = "imported_result"
+
+
 class EventRecord(BaseModel):
     id: str
     kind: str
@@ -115,6 +122,21 @@ class BlockerRecord(BaseModel):
     related_steps: list[str] = Field(default_factory=list)
     related_contracts: list[str] = Field(default_factory=list)
     status: BlockerStatus = BlockerStatus.active
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class ProofMapNode(BaseModel):
+    """The single entity type for every vertex in a proof map. See ADR-0001."""
+
+    id: str
+    kind: ProofMapNodeKind
+    display_label: str = ""
+    statement: str
+    assumptions: list[str] = Field(default_factory=list)
+    dependencies: list[str] = Field(default_factory=list)
+    created_by: str = "human"
+    updated_by: str = "human"
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 
