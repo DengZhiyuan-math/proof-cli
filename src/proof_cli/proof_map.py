@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import sqlite3
 import uuid
 from enum import Enum
@@ -13,21 +15,25 @@ from .collaboration import (
     record_review_decision,
     record_review_request,
 )
-from .domain import CandidateProofRecord, ClaimRecord, ProofMapNode, ProofMapNodeKind, TrustLevel, utc_now
+from .domain import CandidateProofRecord, ClaimRecord, DependencyPin, ProofMapNode, ProofMapNodeKind, TrustLevel, utc_now
 from .storage import (
     ProjectStore,
     append_event,
     get_active_claim,
     get_candidate_proof as _get_candidate_proof,
     get_current_candidate_proof,
+    get_dependency_pin as _get_dependency_pin,
     get_proof_map_node,
     insert_claim,
     insert_candidate_proof,
     insert_proof_map_node,
     list_candidate_proofs_for_node,
+    list_dependency_pins_for_node,
     list_proof_map_nodes,
     mark_claim_released,
     next_candidate_proof_version,
+    set_candidate_proof_interface_fingerprint,
+    upsert_dependency_pin,
 )
 from .vault import candidate_proof_path, write_candidate_proof_file
 
@@ -370,6 +376,8 @@ def submit_candidate_proof(
             f"version {version} of node {node_id} is already indexed",
         ) from exc
 
+    pin_dependencies(store, node)
+
     mark_claim_released(
         store, claim.id, released_by=claimant_id, reason="candidate proof submitted", released_at=utc_now()
     )
@@ -403,6 +411,92 @@ def require_candidate_proof(store: ProjectStore, candidate_proof_id: str) -> Can
 def list_candidate_proofs(store: ProjectStore, node_id: str) -> list[CandidateProofRecord]:
     require_node(store, node_id)
     return list_candidate_proofs_for_node(store, node_id)
+
+
+def _normalize_whitespace(text: str) -> str:
+    return " ".join(text.split())
+
+
+def compute_interface_fingerprint(kind: str, statement: str, assumptions: list[str]) -> str:
+    """SHA-256 hex digest over the canonical JSON tuple `(kind, statement, assumptions)`.
+
+    Statement and each assumption are whitespace-normalized (trimmed,
+    internal runs collapsed) first, so two statements differing only by
+    whitespace produce the same fingerprint. "Mathematical scope" is treated
+    as already captured within statement + assumptions for v1.
+    """
+    canonical = json.dumps(
+        [kind, _normalize_whitespace(statement), [_normalize_whitespace(a) for a in assumptions]],
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def get_accepted_interface_fingerprint(store: ProjectStore, node_id: str) -> str | None:
+    """The interface fingerprint of `node_id`'s current Accepted candidate proof, or `None`.
+
+    `None` when the node isn't `accepted`, or (should it ever happen) it is
+    but has no current candidate proof to have fingerprinted.
+    """
+    if get_acceptance_state(store, node_id) != "accepted":
+        return None
+    current = get_current_candidate_proof(store, node_id)
+    return current.interface_fingerprint if current else None
+
+
+def pin_dependencies(store: ProjectStore, node: ProofMapNode) -> list[DependencyPin]:
+    """Snapshot what each of `node`'s dependencies currently offers.
+
+    Called on every Candidate proof submission, refreshing the pin to
+    reflect what this particular submission was actually checked against.
+    An `imported_result` target pins no version/fingerprint — it's
+    immutable, so there's nothing to have moved on. A local target not yet
+    Accepted pins `None` for both: nothing confirmed exists yet to check
+    against.
+    """
+    pins: list[DependencyPin] = []
+    for target_id in node.dependencies:
+        target = get_proof_map_node(store, target_id)
+        if target is None:
+            continue
+        if target.kind == ProofMapNodeKind.imported_result:
+            pinned_version, pinned_fingerprint = None, None
+        else:
+            current = get_current_candidate_proof(store, target_id)
+            pinned_version = current.version if current else None
+            pinned_fingerprint = get_accepted_interface_fingerprint(store, target_id)
+        pin = DependencyPin(
+            id=str(uuid.uuid4()),
+            node_id=node.id,
+            target_node_id=target_id,
+            pinned_version=pinned_version,
+            pinned_fingerprint=pinned_fingerprint,
+        )
+        pins.append(upsert_dependency_pin(store, pin))
+    return pins
+
+
+def get_dependency_pin(store: ProjectStore, node_id: str, target_node_id: str) -> DependencyPin | None:
+    return _get_dependency_pin(store, node_id, target_node_id)
+
+
+def list_dependency_pins(store: ProjectStore, node_id: str) -> list[DependencyPin]:
+    require_node(store, node_id)
+    return list_dependency_pins_for_node(store, node_id)
+
+
+def dependency_pin_is_current(store: ProjectStore, pin: DependencyPin) -> bool:
+    """Whether a pinned dependency's interface still matches what the target now offers.
+
+    Compared by fingerprint, never by version number: a target can move to
+    a new Accepted version whose interface fingerprint is unchanged (a
+    proof-only revision), and that must read as still current, not stale.
+    """
+    target = get_proof_map_node(store, pin.target_node_id)
+    if target is None or target.kind == ProofMapNodeKind.imported_result:
+        return True
+    current_fingerprint = get_accepted_interface_fingerprint(store, pin.target_node_id)
+    return pin.pinned_fingerprint is not None and pin.pinned_fingerprint == current_fingerprint
 
 
 class AcceptanceDecision(str, Enum):
@@ -477,6 +571,12 @@ def decide_acceptance(
         kind=ReviewRecordKind.acceptance,
     )
     record = record_review_decision(store, request.id, governance_state, reviewer_id=reviewer_id, rationale=rationale)
+
+    if resolved_decision == AcceptanceDecision.accept:
+        current_proof = get_current_candidate_proof(store, node_id)
+        if current_proof is not None:
+            fingerprint = compute_interface_fingerprint(node.kind.value, node.statement, node.assumptions)
+            set_candidate_proof_interface_fingerprint(store, current_proof.id, fingerprint)
 
     append_event(
         store,

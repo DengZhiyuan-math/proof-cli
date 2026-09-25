@@ -4,19 +4,25 @@ from pathlib import Path
 import pytest
 
 from proof_cli.domain import ProofMapNodeKind, utc_now
+from proof_cli.domain import DependencyPin
 from proof_cli.proof_map import (
     ProofMapError,
     claim_node,
+    compute_interface_fingerprint,
     create_node,
     decide_acceptance,
     decide_reference_review,
+    dependency_pin_is_current,
     get_acceptance_state,
+    get_accepted_interface_fingerprint,
+    get_dependency_pin,
     get_frontier,
     get_integrity_state,
     get_node,
     get_reference_review_state,
     get_workflow_state,
     list_candidate_proofs,
+    list_dependency_pins,
     list_nodes,
     release_node,
     require_node,
@@ -1040,3 +1046,192 @@ def test_frontier_lists_only_unclaimed_unblocked_nodes(tmp_path: Path):
 
     frontier_ids = {node.id for node in get_frontier(store)}
     assert frontier_ids == {"lem_base", "clm_open", "clm_blocked"}
+
+
+def test_compute_interface_fingerprint_ignores_whitespace_differences(tmp_path: Path):
+    a = compute_interface_fingerprint("claim", "A  implies   B", ["  A  "])
+    b = compute_interface_fingerprint("claim", "A implies B", ["A"])
+    assert a == b
+
+
+def test_compute_interface_fingerprint_differs_for_substantive_change(tmp_path: Path):
+    a = compute_interface_fingerprint("claim", "A implies B", ["A"])
+    b = compute_interface_fingerprint("claim", "A implies C", ["A"])
+    assert a != b
+
+    c = compute_interface_fingerprint("claim", "A implies B", ["A", "B"])
+    assert a != c
+
+
+def _accept_via_full_cycle(store, node_id: str, *, claimant: str = "agent_a", session: str = "sess_1") -> None:
+    claim_node(store, node_id, claimant_id=claimant, session_id=session)
+    submit_candidate_proof(
+        store,
+        node_id,
+        claimant_id=claimant,
+        session_id=session,
+        scoping_rationale="scoped correctly",
+        content="proof text",
+    )
+    decide_acceptance(store, node_id, "accept", reviewer_id="researcher", confirmed=True)
+
+
+def test_interface_fingerprint_is_unset_before_acceptance(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_1", kind="claim", statement="A implies B", assumptions=["A"])
+    claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
+    submit_candidate_proof(
+        store,
+        "clm_1",
+        claimant_id="agent_a",
+        session_id="sess_1",
+        scoping_rationale="scoped correctly",
+        content="proof text",
+    )
+    assert get_accepted_interface_fingerprint(store, "clm_1") is None
+
+
+def test_interface_fingerprint_persisted_on_candidate_proof_at_accept_time(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_1", kind="claim", statement="A implies B", assumptions=["A"])
+    _accept_via_full_cycle(store, "clm_1")
+
+    expected = compute_interface_fingerprint("claim", "A implies B", ["A"])
+    fingerprint = get_accepted_interface_fingerprint(store, "clm_1")
+    assert fingerprint == expected
+
+    # persisted on the candidate_proof row itself, not recomputed per read
+    current_proof = list_candidate_proofs(store, "clm_1")[-1]
+    assert current_proof.interface_fingerprint == expected
+
+
+def test_dependency_pin_for_local_target_records_pinned_version(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="lem_base", kind="lemma", statement="Base lemma")
+    _accept_via_full_cycle(store, "lem_base")
+    create_node(store, node_id="clm_1", kind="claim", statement="Depends on base", dependencies=["lem_base"])
+
+    claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
+    submit_candidate_proof(
+        store,
+        "clm_1",
+        claimant_id="agent_a",
+        session_id="sess_1",
+        scoping_rationale="scoped correctly",
+        content="proof text",
+    )
+
+    pin = get_dependency_pin(store, "clm_1", "lem_base")
+    assert pin is not None
+    assert pin.pinned_version == 1
+    assert pin.pinned_fingerprint == get_accepted_interface_fingerprint(store, "lem_base")
+
+
+def test_dependency_pin_for_imported_result_target_has_no_version(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(
+        store,
+        node_id="ref_1",
+        kind="imported_result",
+        statement="An external theorem",
+        source_locator="doi:10.1234/example",
+        source_version="v1",
+    )
+    create_node(store, node_id="clm_1", kind="claim", statement="Depends on ref_1", dependencies=["ref_1"])
+
+    claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
+    submit_candidate_proof(
+        store,
+        "clm_1",
+        claimant_id="agent_a",
+        session_id="sess_1",
+        scoping_rationale="scoped correctly",
+        content="proof text",
+    )
+
+    pin = get_dependency_pin(store, "clm_1", "ref_1")
+    assert pin is not None
+    assert pin.pinned_version is None
+    assert pin.pinned_fingerprint is None
+
+
+def test_dependency_pin_is_refreshed_not_accumulated_across_submissions(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="lem_base", kind="lemma", statement="Base lemma")
+    create_node(store, node_id="clm_1", kind="claim", statement="Depends on base", dependencies=["lem_base"])
+
+    claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
+    submit_candidate_proof(
+        store,
+        "clm_1",
+        claimant_id="agent_a",
+        session_id="sess_1",
+        scoping_rationale="first attempt",
+        content="v1 text",
+    )
+    first_pin = get_dependency_pin(store, "clm_1", "lem_base")
+    assert first_pin.pinned_version is None  # lem_base isn't accepted yet
+
+    _accept_via_full_cycle(store, "lem_base", claimant="agent_c", session="sess_3")
+
+    decide_acceptance(store, "clm_1", "revision-requested", reviewer_id="researcher", confirmed=True)
+    claim_node(store, "clm_1", claimant_id="agent_b", session_id="sess_2")
+    submit_candidate_proof(
+        store,
+        "clm_1",
+        claimant_id="agent_b",
+        session_id="sess_2",
+        scoping_rationale="second attempt",
+        content="v2 text",
+    )
+
+    second_pin = get_dependency_pin(store, "clm_1", "lem_base")
+    assert second_pin.pinned_version == 1
+    assert second_pin.id == first_pin.id  # refreshed in place, not a growing history
+    assert list_dependency_pins(store, "clm_1") == [second_pin]
+
+
+def test_dependency_pin_is_current_compares_by_fingerprint_not_version_number(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="lem_base", kind="lemma", statement="A implies B", assumptions=["A"])
+    _accept_via_full_cycle(store, "lem_base")
+    fingerprint = get_accepted_interface_fingerprint(store, "lem_base")
+
+    # a pin recording a version number that doesn't even exist, but the
+    # correct, current fingerprint: still reads as current.
+    stale_version_pin = DependencyPin(
+        id="pin_test", node_id="clm_x", target_node_id="lem_base", pinned_version=999, pinned_fingerprint=fingerprint
+    )
+    assert dependency_pin_is_current(store, stale_version_pin) is True
+
+    # the inverse: the "correct" version number but a fingerprint that no
+    # longer matches — must read as not current, purely from the fingerprint.
+    stale_fingerprint_pin = DependencyPin(
+        id="pin_test_2",
+        node_id="clm_x",
+        target_node_id="lem_base",
+        pinned_version=1,
+        pinned_fingerprint="0" * 64,
+    )
+    assert dependency_pin_is_current(store, stale_fingerprint_pin) is False
+
+
+def test_dependency_pin_is_current_true_for_imported_result_target(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(
+        store,
+        node_id="ref_1",
+        kind="imported_result",
+        statement="An external theorem",
+        source_locator="doi:10.1234/example",
+        source_version="v1",
+    )
+    pin = DependencyPin(id="pin_ref", node_id="clm_x", target_node_id="ref_1", pinned_version=None, pinned_fingerprint=None)
+    assert dependency_pin_is_current(store, pin) is True
+
+
+def test_dependency_pin_is_current_false_when_never_pinned_a_fingerprint(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="lem_base", kind="lemma", statement="A implies B")
+    unpinned = DependencyPin(id="pin_none", node_id="clm_x", target_node_id="lem_base", pinned_version=None, pinned_fingerprint=None)
+    assert dependency_pin_is_current(store, unpinned) is False
