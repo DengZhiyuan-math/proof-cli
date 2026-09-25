@@ -26,9 +26,18 @@ from proof_cli.proof_map import (
     list_nodes,
     release_node,
     require_node,
+    revalidate_dependency,
     submit_candidate_proof,
 )
-from proof_cli.storage import ensure_project, get_active_claim, get_current_candidate_proof, mark_claim_released, read_state
+from proof_cli.collaboration import list_review_records
+from proof_cli.storage import (
+    ensure_project,
+    get_active_claim,
+    get_current_candidate_proof,
+    mark_claim_released,
+    read_state,
+    upsert_dependency_pin,
+)
 from proof_cli.vault import read_candidate_proof_frontmatter
 
 
@@ -1343,3 +1352,200 @@ def test_workflow_state_review_needed_after_reclaim_is_not_masked_by_a_stale_rev
     v2 = get_current_candidate_proof(store, "clm_1")
     assert v2.review_record_id is None
     assert get_workflow_state(store, "clm_1") == "review-needed"
+
+
+def _dependent_with_accepted_dependency(store, dependent_id: str = "clm_1", target_id: str = "lem_base"):
+    """A dependent whose dependency is already Accepted at submission time,
+    so pin_dependencies pins a real (non-None) version + fingerprint."""
+    create_node(store, node_id=target_id, kind="lemma", statement="Base lemma")
+    _accept_via_full_cycle(store, target_id)
+    create_node(store, node_id=dependent_id, kind="claim", statement="Depends on base", dependencies=[target_id])
+    claim_node(store, dependent_id, claimant_id="agent_a", session_id="sess_1")
+    submit_candidate_proof(
+        store,
+        dependent_id,
+        claimant_id="agent_a",
+        session_id="sess_1",
+        scoping_rationale="scoped correctly",
+        content="proof text",
+    )
+    return get_dependency_pin(store, dependent_id, target_id)
+
+
+def test_revalidate_dependency_reaffirms_when_fingerprint_unchanged(tmp_path: Path):
+    """The target's accepted version advancing past what was pinned, with an
+    unchanged interface, isn't reachable end-to-end today — claim_node
+    refuses to reclaim an already-Accepted node, so nothing can yet push a
+    node past its first accepted version (that path is #25's Challenge
+    territory). This ages the pin's version directly, via a real persisted
+    row, to simulate that precondition against the real, current fingerprint
+    the accept cycle actually computed."""
+    store = ensure_project(tmp_path)
+    pin = _dependent_with_accepted_dependency(store)
+    assert pin.pinned_version == 1
+
+    aged_pin = pin.model_copy(update={"pinned_version": 0})
+    upsert_dependency_pin(store, aged_pin)
+    assert get_dependency_pin(store, "clm_1", "lem_base").pinned_version == 0
+
+    record = revalidate_dependency(
+        store, "clm_1", "lem_base", reviewer_id="researcher", rationale="interface unchanged", confirmed=True
+    )
+
+    assert record.kind.value == "dependency_revalidation"
+    assert record.decision.value == "reaffirmed"
+
+    refreshed = get_dependency_pin(store, "clm_1", "lem_base")
+    assert refreshed.pinned_version == 1
+    assert refreshed.pinned_fingerprint == get_accepted_interface_fingerprint(store, "lem_base")
+
+
+def test_revalidate_dependency_never_touches_the_reviewing_nodes_own_acceptance_state(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    _dependent_with_accepted_dependency(store)
+    before = get_acceptance_state(store, "clm_1")
+
+    revalidate_dependency(store, "clm_1", "lem_base", reviewer_id="researcher", confirmed=True)
+
+    assert get_acceptance_state(store, "clm_1") == before == "unreviewed"
+
+
+def test_revalidate_dependency_rejected_when_fingerprint_changed(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    _dependent_with_accepted_dependency(store)
+
+    stale_pin = get_dependency_pin(store, "clm_1", "lem_base").model_copy(update={"pinned_fingerprint": "0" * 64})
+    upsert_dependency_pin(store, stale_pin)
+
+    with pytest.raises(ProofMapError) as exc_info:
+        revalidate_dependency(store, "clm_1", "lem_base", reviewer_id="researcher", confirmed=True)
+    assert exc_info.value.code == "INTERFACE_CHANGED"
+
+
+def test_revalidate_dependency_requires_confirmation(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    _dependent_with_accepted_dependency(store)
+
+    with pytest.raises(ProofMapError) as exc_info:
+        revalidate_dependency(store, "clm_1", "lem_base", reviewer_id="researcher")
+    assert exc_info.value.code == "CONFIRMATION_REQUIRED"
+
+
+def test_revalidate_dependency_target_not_accepted_is_rejected(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="lem_base", kind="lemma", statement="Base lemma")
+    create_node(store, node_id="clm_1", kind="claim", statement="Depends on base", dependencies=["lem_base"])
+    claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
+    submit_candidate_proof(
+        store,
+        "clm_1",
+        claimant_id="agent_a",
+        session_id="sess_1",
+        scoping_rationale="scoped correctly",
+        content="proof text",
+    )
+
+    with pytest.raises(ProofMapError) as exc_info:
+        revalidate_dependency(store, "clm_1", "lem_base", reviewer_id="researcher", confirmed=True)
+    assert exc_info.value.code == "TARGET_NOT_ACCEPTED"
+
+
+def test_revalidate_dependency_without_a_pin_is_rejected(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="lem_base", kind="lemma", statement="Base lemma")
+    _accept_via_full_cycle(store, "lem_base")
+    create_node(store, node_id="clm_1", kind="claim", statement="Depends on base", dependencies=["lem_base"])
+
+    with pytest.raises(ProofMapError) as exc_info:
+        revalidate_dependency(store, "clm_1", "lem_base", reviewer_id="researcher", confirmed=True)
+    assert exc_info.value.code == "NO_DEPENDENCY_PIN"
+
+
+def test_revalidate_dependency_rejects_a_non_dependency(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="lem_base", kind="lemma", statement="Base lemma")
+    _accept_via_full_cycle(store, "lem_base")
+    create_node(store, node_id="clm_1", kind="claim", statement="Unrelated claim")
+
+    with pytest.raises(ProofMapError) as exc_info:
+        revalidate_dependency(store, "clm_1", "lem_base", reviewer_id="researcher", confirmed=True)
+    assert exc_info.value.code == "NOT_A_DEPENDENCY"
+
+
+def test_revalidate_dependency_rejects_imported_result_target(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(
+        store,
+        node_id="ref_1",
+        kind="imported_result",
+        statement="An external theorem",
+        source_locator="doi:10.1234/example",
+        source_version="v1",
+    )
+    create_node(store, node_id="clm_1", kind="claim", statement="Depends on ref_1", dependencies=["ref_1"])
+    claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
+    submit_candidate_proof(
+        store,
+        "clm_1",
+        claimant_id="agent_a",
+        session_id="sess_1",
+        scoping_rationale="scoped correctly",
+        content="proof text",
+    )
+
+    with pytest.raises(ProofMapError) as exc_info:
+        revalidate_dependency(store, "clm_1", "ref_1", reviewer_id="researcher", confirmed=True)
+    assert exc_info.value.code == "IMMUTABLE_NODE"
+
+
+def test_revalidate_dependency_pin_write_failure_leaves_no_review_record(tmp_path: Path, monkeypatch):
+    store = ensure_project(tmp_path)
+    pin = _dependent_with_accepted_dependency(store)
+    aged_pin = pin.model_copy(update={"pinned_version": 0})
+    upsert_dependency_pin(store, aged_pin)
+
+    import proof_cli.proof_map as proof_map_module
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("simulated pin-write failure")
+
+    monkeypatch.setattr(proof_map_module, "upsert_dependency_pin", _boom)
+
+    with pytest.raises(RuntimeError):
+        revalidate_dependency(store, "clm_1", "lem_base", reviewer_id="researcher", confirmed=True)
+
+    # neither side of the write took effect
+    assert get_dependency_pin(store, "clm_1", "lem_base").pinned_version == 0
+    assert not any(
+        record.kind is not None and record.kind.value == "dependency_revalidation"
+        for record in list_review_records_for_test(store, "clm_1")
+    )
+
+
+def test_revalidate_dependency_review_write_failure_rolls_back_the_pin(tmp_path: Path, monkeypatch):
+    store = ensure_project(tmp_path)
+    pin = _dependent_with_accepted_dependency(store)
+    aged_pin = pin.model_copy(update={"pinned_version": 0})
+    upsert_dependency_pin(store, aged_pin)
+
+    import proof_cli.proof_map as proof_map_module
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("simulated review-write failure")
+
+    monkeypatch.setattr(proof_map_module, "record_review_decision", _boom)
+
+    with pytest.raises(RuntimeError):
+        revalidate_dependency(store, "clm_1", "lem_base", reviewer_id="researcher", confirmed=True)
+
+    # the pin was rolled back to its pre-attempt value — neither write stuck
+    assert get_dependency_pin(store, "clm_1", "lem_base").pinned_version == 0
+    assert not any(
+        record.kind is not None and record.kind.value == "dependency_revalidation"
+        and record.decision.value == "reaffirmed"
+        for record in list_review_records_for_test(store, "clm_1")
+    )
+
+
+def list_review_records_for_test(store, node_id: str):
+    return list_review_records(store, object_type="proof_map_node", object_id=node_id)

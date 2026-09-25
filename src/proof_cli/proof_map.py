@@ -714,6 +714,120 @@ def get_reference_review_state(store: ProjectStore, node_id: str) -> str:
     return "unreviewed"
 
 
+REVALIDATION_DECISION = "dependency-revalidation"
+
+
+def revalidate_dependency(
+    store: ProjectStore,
+    node_id: str,
+    target_node_id: str,
+    *,
+    reviewer_id: str = "human",
+    rationale: str = "",
+    confirmed: bool = False,
+) -> ReviewRecord:
+    """Lightweight re-review: confirm an existing Candidate proof still holds after a dependency advanced.
+
+    Only available when the target's interface fingerprint hasn't changed
+    since it was last pinned — if it has, the old Candidate proof no longer
+    demonstrably accounts for the new premise, and a whole new Candidate
+    proof is required instead (`INTERFACE_CHANGED`). Records
+    `kind=dependency_revalidation, decision=reaffirmed` — deliberately
+    distinct from `approved` so it can never be misread as a fresh
+    Acceptance of `node_id` itself — and refreshes the dependency edge's
+    pin to the target's current accepted version and fingerprint.
+
+    The ReviewRecord lives in the JSON-backed collaboration store; the
+    DependencyPin lives in SQLite. A single native transaction can't span
+    both, so this orders the writes (pin first, review second) and, if the
+    review write fails, explicitly rolls the pin back to its prior value —
+    the same "neither or both" outcome a real transaction would give,
+    achieved by ordering and compensation instead of a shared commit.
+    """
+    node = require_node(store, node_id)
+    target = require_node(store, target_node_id)
+
+    if target_node_id not in node.dependencies:
+        raise ProofMapError(
+            "NOT_A_DEPENDENCY", f"{target_node_id} is not a dependency of {node_id}"
+        )
+
+    if target.kind == ProofMapNodeKind.imported_result:
+        raise ProofMapError(
+            "IMMUTABLE_NODE",
+            f"{target_node_id} is an imported_result; it has no accepted-version history to revalidate against",
+        )
+
+    pin = get_dependency_pin(store, node_id, target_node_id)
+    if pin is None:
+        raise ProofMapError(
+            "NO_DEPENDENCY_PIN",
+            f"{node_id} has never pinned {target_node_id}; submit a Candidate proof first",
+        )
+
+    current_fingerprint = get_accepted_interface_fingerprint(store, target_node_id)
+    if current_fingerprint is None:
+        raise ProofMapError(
+            "TARGET_NOT_ACCEPTED", f"{target_node_id} is not currently Accepted; nothing to revalidate against"
+        )
+
+    if pin.pinned_fingerprint != current_fingerprint:
+        raise ProofMapError(
+            "INTERFACE_CHANGED",
+            f"{target_node_id}'s accepted interface changed since {node_id} last pinned it; "
+            "a new Candidate proof is required, lightweight re-review is not available",
+        )
+
+    if not confirmed:
+        raise ProofMapError(
+            "CONFIRMATION_REQUIRED",
+            "a Human Review decision requires explicit confirmation; only a researcher may confirm one",
+        )
+
+    current_target_proof = get_current_candidate_proof(store, target_node_id)
+    new_version = current_target_proof.version if current_target_proof else None
+    old_pin = pin
+
+    refreshed_pin = DependencyPin(
+        id=pin.id,
+        node_id=node_id,
+        target_node_id=target_node_id,
+        pinned_version=new_version,
+        pinned_fingerprint=current_fingerprint,
+    )
+    upsert_dependency_pin(store, refreshed_pin)
+
+    try:
+        request = record_review_request(
+            store,
+            _ACCEPTANCE_OBJECT_TYPE,
+            node_id,
+            reviewer_id=reviewer_id,
+            rationale=rationale,
+            kind=ReviewRecordKind.dependency_revalidation,
+        )
+        record = record_review_decision(
+            store, request.id, ReviewGovernanceState.reaffirmed, reviewer_id=reviewer_id, rationale=rationale
+        )
+    except Exception:
+        upsert_dependency_pin(store, old_pin)
+        raise
+
+    append_event(
+        store,
+        "proof_map_dependency_revalidated",
+        f"revalidated {node_id}'s dependency on {target_node_id}",
+        entity_id=node_id,
+        payload={
+            "target_node_id": target_node_id,
+            "old_pinned_version": old_pin.pinned_version,
+            "new_pinned_version": new_version,
+            "review_id": record.id,
+        },
+    )
+    return record
+
+
 def _dependency_satisfied(store: ProjectStore, dependency_id: str) -> bool:
     """Whether a dependency has reached the standing that unblocks its dependents.
 

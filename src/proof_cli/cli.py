@@ -113,6 +113,7 @@ from .proof_map import (
     list_nodes,
     release_node,
     require_node,
+    revalidate_dependency,
     submit_candidate_proof,
 )
 from .rendering import (
@@ -451,6 +452,36 @@ def node_review(
         _emit_node_error(exc, json_output, command="node.review")
         raise typer.Exit(code=1)
     _emit_review_record(record, json_output, command="node.review")
+
+
+@node_app.command("revalidate")
+def node_revalidate(
+    node_id: str,
+    target_node_id: str,
+    root: str = ".",
+    reviewer: str = "human",
+    rationale: str = "",
+    confirm: bool = typer.Option(
+        False, "--confirm", help="Explicit human confirmation; every acceptance decision requires it"
+    ),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Lightweight re-review: confirm node_id's Candidate proof still holds after target_node_id advanced.
+
+    Only available when target_node_id's accepted interface hasn't
+    actually changed; otherwise a new Candidate proof is required instead.
+    Records dependency_revalidation/reaffirmed and refreshes the pin — never
+    node_id's own acceptance_state.
+    """
+    store = get_store(_root(root))
+    try:
+        record = revalidate_dependency(
+            store, node_id, target_node_id, reviewer_id=reviewer, rationale=rationale, confirmed=confirm
+        )
+    except ProofMapError as exc:
+        _emit_node_error(exc, json_output, command="node.revalidate")
+        raise typer.Exit(code=1)
+    _emit_review_record(record, json_output, command="node.revalidate")
 
 
 app.add_typer(goal_app, name="goal")

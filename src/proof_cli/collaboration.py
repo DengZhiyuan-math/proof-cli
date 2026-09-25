@@ -38,6 +38,7 @@ class ReviewGovernanceState(str, Enum):
     superseded = "superseded"
     disputed = "disputed"
     revision_requested = "revision_requested"
+    reaffirmed = "reaffirmed"
 
 
 class ReviewRecordKind(str, Enum):
