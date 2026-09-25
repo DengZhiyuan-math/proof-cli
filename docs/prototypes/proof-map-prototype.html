@@ -1,0 +1,851 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Proof Map Prototype</title>
+<meta name="description" content="A clickable sample Proof map for issue #10 — DAG vs tree views, frontier highlighting, three node-status encodings, and proof fog outside the graph.">
+<style>
+  :root {
+    color-scheme: light;
+    --surface-0:      #ffffff;
+    --surface-1:      #fcfcfb;
+    --surface-2:      #f2f1ee;
+    --border:         #ddd9d0;
+    --border-strong:  #b9b3a6;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #85817a;
+    --accent:         #2a78d6;
+    --accent-soft:    #cde2fb;
+    --good:           #0ca30c;
+    --good-soft:      #dff3df;
+    --warning:        #fab219;
+    --warning-soft:   #fff1d6;
+    --serious:        #ec835a;
+    --serious-soft:   #fde3d8;
+    --critical:       #d03b3b;
+    --critical-soft:  #f9dcdc;
+    --fog-surface:    #f6f2ff;
+    --fog-border:     #d9cdf2;
+    --shadow: 0 8px 24px rgba(0,0,0,0.12);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --surface-0:      #141413;
+      --surface-1:      #1a1a19;
+      --surface-2:      #232320;
+      --border:         #3a3934;
+      --border-strong:  #55534a;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #918d81;
+      --accent:         #3987e5;
+      --accent-soft:    #1c3352;
+      --good:           #0ca30c;
+      --good-soft:      #123a17;
+      --warning:        #fab219;
+      --warning-soft:   #4a370c;
+      --serious:        #ec835a;
+      --serious-soft:   #4a2c1c;
+      --critical:       #e66767;
+      --critical-soft:  #4a1f1f;
+      --fog-surface:    #241f33;
+      --fog-border:     #453a63;
+      --shadow: 0 8px 24px rgba(0,0,0,0.5);
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-0:      #141413;
+    --surface-1:      #1a1a19;
+    --surface-2:      #232320;
+    --border:         #3a3934;
+    --border-strong:  #55534a;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #918d81;
+    --accent:         #3987e5;
+    --accent-soft:    #1c3352;
+    --good:           #0ca30c;
+    --good-soft:      #123a17;
+    --warning:        #fab219;
+    --warning-soft:   #4a370c;
+    --serious:        #ec835a;
+    --serious-soft:   #4a2c1c;
+    --critical:       #e66767;
+    --critical-soft:  #4a1f1f;
+    --fog-surface:    #241f33;
+    --fog-border:     #453a63;
+    --shadow: 0 8px 24px rgba(0,0,0,0.5);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--surface-1);
+    color: var(--text-primary);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 20px 16px 100px;
+  }
+  header.top {
+    margin-bottom: 16px;
+  }
+  header.top h1 {
+    font-size: 20px;
+    margin: 0 0 4px;
+  }
+  header.top p {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 13px;
+    max-width: 68ch;
+  }
+  .frame {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface-0);
+    overflow: hidden;
+    margin-bottom: 16px;
+  }
+  .frame > .frame-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-2);
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+  .frame > .frame-head b { color: var(--text-primary); }
+  .graph-scroll {
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+  svg.graph { display: block; }
+  .node-shape rect {
+    fill: var(--surface-0);
+    stroke: var(--border-strong);
+    stroke-width: 1.5;
+  }
+  .node-shape.frontier rect {
+    stroke: var(--accent);
+    stroke-width: 2.5;
+  }
+  .node-shape.dimmed rect {
+    stroke-dasharray: 4 3;
+    opacity: 0.55;
+  }
+  .node-shape { cursor: pointer; }
+  .node-shape:focus { outline: none; }
+  .node-shape:focus rect, .node-shape:hover rect {
+    stroke: var(--accent);
+  }
+  .node-title { font-size: 12.5px; font-weight: 600; fill: var(--text-primary); }
+  .node-kind { font-size: 10px; fill: var(--text-muted); }
+  .node-badge-text { font-size: 9.5px; font-weight: 600; }
+  .edge-line { stroke: var(--border-strong); stroke-width: 1.5; fill: none; }
+  .frontier-tag {
+    font-size: 9.5px;
+    font-weight: 700;
+    fill: var(--accent);
+    letter-spacing: 0.02em;
+  }
+
+  /* floating switcher */
+  .switcher {
+    position: fixed;
+    left: 50%;
+    bottom: 16px;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    background: var(--surface-0);
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    padding: 6px 14px;
+    box-shadow: var(--shadow);
+    z-index: 40;
+    max-width: calc(100% - 24px);
+    overflow-x: auto;
+    font-size: 12px;
+  }
+  .switcher .grp { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+  .switcher .grp-label { color: var(--text-muted); margin-right: 2px; }
+  .switcher button {
+    font: inherit;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text-secondary);
+    border-radius: 999px;
+    padding: 4px 10px;
+    cursor: pointer;
+  }
+  .switcher button[aria-pressed="true"] {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  .switcher .sep { width: 1px; align-self: stretch; background: var(--border); }
+
+  /* inspector */
+  .inspector-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.35);
+    z-index: 50; display: none;
+  }
+  .inspector-backdrop.open { display: block; }
+  .inspector {
+    position: fixed;
+    top: 0; right: 0; bottom: 0;
+    width: min(400px, 100%);
+    background: var(--surface-0);
+    border-left: 1px solid var(--border);
+    box-shadow: var(--shadow);
+    z-index: 51;
+    transform: translateX(100%);
+    transition: transform 0.18s ease;
+    overflow-y: auto;
+    padding: 18px 18px 90px;
+  }
+  .inspector.open { transform: translateX(0); }
+  .inspector h2 { font-size: 16px; margin: 4px 0 2px; }
+  .inspector .kind-line { font-size: 12px; color: var(--text-muted); margin-bottom: 12px; }
+  .inspector .close-btn {
+    position: absolute; top: 12px; right: 12px;
+    border: none; background: var(--surface-2); border-radius: 8px;
+    width: 28px; height: 28px; cursor: pointer; font-size: 14px; color: var(--text-secondary);
+  }
+  .inspector section { margin-bottom: 16px; }
+  .inspector section h3 {
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--text-muted); margin: 0 0 6px;
+  }
+  .inspector p.statement { font-size: 13.5px; line-height: 1.5; margin: 0; }
+  .inspector ul.assump { margin: 0; padding-left: 18px; font-size: 12.5px; color: var(--text-secondary); }
+  .dep-row {
+    display: flex; justify-content: space-between; gap: 8px;
+    font-size: 12.5px; padding: 5px 0; border-bottom: 1px dashed var(--border);
+  }
+  .dep-row:last-child { border-bottom: none; }
+  .dep-pin { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .dep-pin.mismatch { color: var(--warning); font-weight: 600; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600;
+  }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .actions button {
+    font: inherit; font-size: 12.5px;
+    border: 1px solid var(--border-strong);
+    background: var(--surface-2); color: var(--text-primary);
+    border-radius: 8px; padding: 7px 11px; cursor: pointer;
+  }
+  .actions button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .actions button:disabled { opacity: 0.45; cursor: not-allowed; }
+  .toast {
+    position: fixed; bottom: 74px; left: 50%; transform: translateX(-50%);
+    background: var(--text-primary); color: var(--surface-0);
+    padding: 8px 14px; border-radius: 8px; font-size: 12.5px;
+    z-index: 60; opacity: 0; pointer-events: none; transition: opacity 0.15s ease;
+  }
+  .toast.show { opacity: 0.94; }
+
+  /* fog panel */
+  .fog {
+    border: 1px dashed var(--fog-border);
+    background: var(--fog-surface);
+    border-radius: 12px;
+    padding: 14px 16px;
+  }
+  .fog h2 { font-size: 14px; margin: 0 0 4px; }
+  .fog > p.lead { font-size: 12px; color: var(--text-secondary); margin: 0 0 10px; }
+  .fog-item {
+    background: var(--surface-0);
+    border: 1px solid var(--fog-border);
+    border-radius: 8px;
+    padding: 9px 11px;
+    margin-bottom: 8px;
+    font-size: 12.5px;
+  }
+  .fog-item:last-child { margin-bottom: 0; }
+  .fog-item .tag { font-size: 10.5px; color: var(--text-muted); margin-top: 4px; display: block; }
+  .fog-item .crystallize {
+    margin-top: 8px; font: inherit; font-size: 11.5px; font-weight: 600;
+    border: 1px solid var(--accent); color: var(--accent); background: transparent;
+    border-radius: 999px; padding: 4px 10px; cursor: pointer;
+  }
+
+  /* tree view */
+  .tree ul { list-style: none; margin: 0; padding-left: 22px; border-left: 1px solid var(--border); }
+  .tree > ul { padding-left: 0; border-left: none; }
+  .tree li { margin: 6px 0; position: relative; }
+  .tree .tree-node {
+    display: inline-flex; align-items: center; gap: 6px;
+    border: 1px solid var(--border-strong); border-radius: 8px;
+    padding: 5px 9px; cursor: pointer; background: var(--surface-0);
+    font-size: 12.5px;
+  }
+  .tree .tree-node.frontier { border-color: var(--accent); border-width: 2px; }
+  .tree .tree-node:hover { border-color: var(--accent); }
+  .tree .repeat-marker { font-size: 10.5px; color: var(--text-muted); margin-left: 4px; }
+
+  @media (max-width: 640px) {
+    .inspector { width: 100%; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="top">
+    <h1>Proof Map Prototype — issue #10</h1>
+    <p>A sample map (multi-layer Lemma/Claim, a shared-dependency DAG, an abandoned route, and proof fog) for sanity-checking whether the Wayfinder abstractions read at a glance. Click any node.</p>
+  </header>
+
+  <div class="frame">
+    <div class="frame-head">
+      <span id="view-caption">DAG view — the canonical, shared-dependency structure</span>
+      <span id="frontier-caption"></span>
+    </div>
+    <div class="graph-scroll">
+      <svg id="dag-svg" class="graph" viewBox="0 0 860 500" role="img" aria-label="Dependency graph of the sample proof map"></svg>
+      <div id="tree-root" class="tree" style="display:none; padding: 16px;"></div>
+    </div>
+  </div>
+
+  <div class="fog">
+    <h2>Proof fog</h2>
+    <p class="lead">Known trouble, not yet precise enough to be a Claim. Outside the graph on purpose — see CONTEXT.md / ADR discussion for issue #10.</p>
+    <div id="fog-list"></div>
+  </div>
+</div>
+
+<div class="inspector-backdrop" id="backdrop"></div>
+<aside class="inspector" id="inspector" aria-hidden="true">
+  <button class="close-btn" id="inspector-close" aria-label="Close">✕</button>
+  <div id="inspector-body"></div>
+</aside>
+
+<div class="toast" id="toast"></div>
+
+<div class="switcher" role="toolbar" aria-label="Prototype view switcher">
+  <div class="grp">
+    <span class="grp-label">View</span>
+    <button data-view="dag" aria-pressed="true">DAG</button>
+    <button data-view="tree" aria-pressed="false">Tree</button>
+  </div>
+  <div class="sep"></div>
+  <div class="grp">
+    <span class="grp-label">Node style</span>
+    <button data-style="A" aria-pressed="true">A · badges</button>
+    <button data-style="B" aria-pressed="false">B · border+icon</button>
+    <button data-style="C" aria-pressed="false">C · one line</button>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+// ---- data model -------------------------------------------------------
+// workflow: open | claimed | review-needed | revision-requested | blocked | null(terminal)
+// acceptance: unreviewed | accepted | rejected
+// integrity: current | potentially-stale | challenged | dependency-challenged
+const NODES = {
+  T: {
+    kind: "Theorem", label: "Main Theorem T",
+    statement: "Under hypotheses (H1)-(H3), the limiting profile is unique.",
+    assumptions: ["(H1) domain is bounded", "(H2) initial data in H^1", "(H3) nonlinearity is subcritical"],
+    workflow: "blocked", acceptance: "unreviewed", integrity: "current",
+    deps: [{ to: "A", pin: null, current: null }, { to: "B", pin: null, current: null }, { to: "C", pin: null, current: null }, { to: "E", pin: null, current: null }],
+    candidateProof: null,
+  },
+  A: {
+    kind: "Lemma", label: "Lemma A — energy bound",
+    statement: "The energy functional is bounded along the flow.",
+    assumptions: ["(H1)", "(H2)"],
+    workflow: null, acceptance: "accepted", integrity: "potentially-stale",
+    deps: [{ to: "IR1", pin: null, current: null }, { to: "C1", pin: 1, current: 1 }, { to: "D", pin: 3, current: 4 }],
+    candidateProof: { version: 2, file: "proofs/A/v2.md" },
+    integrityWhy: "Depends on D (v3 pinned, now at v4) — D itself is Challenged. Interface comparison not yet re-confirmed.",
+  },
+  B: {
+    kind: "Lemma", label: "Lemma B — compactness of orbit",
+    statement: "The orbit of the flow is precompact in H^1.",
+    assumptions: ["(H1)", "(H2)", "(H3)"],
+    workflow: "blocked", acceptance: "unreviewed", integrity: "dependency-challenged",
+    deps: [{ to: "D", pin: null, current: null }],
+    candidateProof: null,
+    integrityWhy: "Depends on D, which is Challenged — not yet Accepted itself, so this shows as Blocked · dependency-challenged rather than Potentially stale.",
+  },
+  C: {
+    kind: "Lemma", label: "Lemma C — decay estimate",
+    statement: "Solutions decay at the expected polynomial rate.",
+    assumptions: ["(H1)", "(H3)"],
+    workflow: "blocked", acceptance: "unreviewed", integrity: "current",
+    deps: [{ to: "C1", pin: null, current: null }, { to: "C2", pin: null, current: null }],
+    candidateProof: null,
+    splitNote: "Too large to submit directly — split into Claim C1 and Claim C2 (see derived_from). C still needs its own short combining Candidate proof once both are Accepted.",
+  },
+  C1: {
+    kind: "Claim", label: "Claim C1 — near-field estimate", derivedFrom: "C",
+    statement: "The near-field contribution to the decay integral is O(t^-1).",
+    assumptions: ["(H1)"],
+    workflow: null, acceptance: "accepted", integrity: "current",
+    deps: [],
+    candidateProof: { version: 1, file: "proofs/C1/v1.md" },
+    sharedNote: "Depended on by both Lemma A and Lemma C — a real DAG diamond, not a tree.",
+  },
+  C2: {
+    kind: "Claim", label: "Claim C2 — far-field estimate", derivedFrom: "C",
+    statement: "The far-field contribution to the decay integral is O(t^-1).",
+    assumptions: ["(H1)", "(H3)"],
+    workflow: "open", acceptance: "unreviewed", integrity: "current",
+    deps: [],
+    candidateProof: null,
+  },
+  D: {
+    kind: "Lemma", label: "Lemma D — spectral gap",
+    statement: "The linearized operator has a spectral gap of size >= c0.",
+    assumptions: ["(H2)"],
+    workflow: null, acceptance: "accepted", integrity: "challenged",
+    deps: [{ to: "IR1", pin: null, current: null }],
+    candidateProof: { version: 3, file: "proofs/D/v3.md" },
+    integrityWhy: "Open Challenge CH-04: the proof appears to use compactness of the domain, which is not among D's stated assumptions.",
+  },
+  E: {
+    kind: "Lemma", label: "Lemma E — boundary regularity",
+    statement: "Solutions are C^1 up to the boundary.",
+    assumptions: ["(H1)"],
+    workflow: "claimed", acceptance: "unreviewed", integrity: "current",
+    deps: [{ to: "IR2", pin: null, current: null }, { to: "G", pin: null, current: null }],
+    candidateProof: null,
+    claimant: "agent-07 (session-142)",
+  },
+  G: {
+    kind: "Claim", label: "Claim G — trace inequality",
+    statement: "A sharp trace inequality holds on the boundary.",
+    assumptions: [],
+    workflow: "review-needed", acceptance: "unreviewed", integrity: "current",
+    deps: [], candidateProof: { version: 1, file: "proofs/G/v1.md" },
+  },
+  IR1: {
+    kind: "Imported result", label: "IR1 — classical compactness thm.",
+    statement: "(Rellich–Kondrachov) Bounded sets in H^1 are precompact in L^2 on bounded domains.",
+    assumptions: [], workflow: null, acceptance: "accepted", integrity: "current",
+    deps: [], candidateProof: null, immutable: true,
+  },
+  IR2: {
+    kind: "Imported result", label: "IR2 — trace theorem",
+    statement: "(Classical) The trace operator is bounded from H^1 to H^{1/2} of the boundary.",
+    assumptions: [], workflow: null, acceptance: "accepted", integrity: "current",
+    deps: [], candidateProof: null, immutable: true,
+  },
+  X: {
+    kind: "Claim", label: "Claim X — direct compactness attempt", isolated: true,
+    statement: "(abandoned) Attempted to show orbit compactness directly via a fixed-point argument.",
+    assumptions: ["(H1)", "(H2)"],
+    workflow: null, acceptance: "rejected", integrity: "current",
+    deps: [], candidateProof: { version: 1, file: "proofs/X/v1.md" },
+    rejectedNote: "Superseded when Lemma D's spectral-gap route was found. Kept permanently as the record of this abandoned route (ADR-0002) — no longer wired into any active dependency.",
+  },
+};
+
+// hand-laid-out DAG coordinates (x,y = box centre), box 128x54
+const POS = {
+  T:  [430, 46],
+  A:  [110, 168], B: [290, 168], C: [470, 168], E: [660, 168],
+  D:  [290, 292], C1: [430, 292], C2: [560, 292], G: [700, 292],
+  IR1: [180, 416], IR2: [700, 416],
+  X:  [800, 168],
+};
+const BOX = { w: 132, h: 56 };
+
+const FOG_ITEMS = [
+  { text: "Not clear whether the M-type growth term closes under iteration once B and D are both settled — might need its own lemma.", tag: "relates to: B, D" },
+  { text: "Possible missing spectral input needed after Lemma D resolves — haven't found the right statement yet.", tag: "relates to: D" },
+  { text: "This might actually just be Claim C2's neighbor: a corner-case bound for the far-field term near t=0.", tag: "ready to crystallize", ready: true },
+];
+
+let state = { view: "dag", style: "A" };
+
+function frontierIds() {
+  return Object.entries(NODES)
+    .filter(([id, n]) => n.workflow === "open" && !n.isolated)
+    .map(([id]) => id);
+}
+
+function statusOf(n) {
+  // returns {label, tone} tone in good|warning|serious|critical|neutral
+  if (n.acceptance === "accepted" && n.integrity === "potentially-stale") return { a: "Accepted", aTone: "good", i: "Potentially stale", iTone: "warning" };
+  if (n.acceptance === "accepted" && n.integrity === "challenged") return { a: "Accepted", aTone: "good", i: "Challenged", iTone: "serious" };
+  if (n.acceptance === "accepted") return { a: "Accepted", aTone: "good", i: null };
+  if (n.acceptance === "rejected") return { a: "Rejected", aTone: "critical", i: null };
+  // unreviewed: show workflow, plus dependency-challenged if present
+  const wfLabels = { open: "Open", claimed: "Claimed", "review-needed": "Review-needed", "revision-requested": "Revision requested", blocked: "Blocked" };
+  const w = wfLabels[n.workflow] || "Open";
+  if (n.integrity === "dependency-challenged") return { w, wTone: "neutral", i: "dependency-challenged", iTone: "serious" };
+  return { w, wTone: "neutral", i: null };
+}
+
+const TONE_VARS = {
+  good: ["var(--good)", "var(--good-soft)"],
+  warning: ["var(--warning)", "var(--warning-soft)"],
+  serious: ["var(--serious)", "var(--serious-soft)"],
+  critical: ["var(--critical)", "var(--critical-soft)"],
+  neutral: ["var(--text-secondary)", "var(--surface-2)"],
+};
+
+function svgEl(tag, attrs) {
+  const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const k in attrs) el.setAttribute(k, attrs[k]);
+  return el;
+}
+
+function renderNodeBadgesSVG(g, n, cx, cy) {
+  // Renders style-dependent badge markup inside the node group, below the title.
+  const st = statusOf(n);
+  const style = state.style;
+  let y = cy - 4;
+
+  function chip(text, tone, x, yy, small) {
+    const [fg, bg] = TONE_VARS[tone];
+    const w = text.length * (small ? 5.1 : 5.6) + 14;
+    const rect = svgEl("rect", { x: x, y: yy - 8, width: w, height: 15, rx: 7.5, fill: bg, stroke: fg, "stroke-width": 1 });
+    const t = svgEl("text", { x: x + w / 2, y: yy + 3, "text-anchor": "middle", class: "node-badge-text", fill: fg });
+    t.textContent = text;
+    g.appendChild(rect); g.appendChild(t);
+    return w;
+  }
+
+  if (style === "C") {
+    // one compact line, literal glossary phrasing
+    let parts = [];
+    if (st.a) parts.push(st.a); if (st.w) parts.push(st.w);
+    if (st.i) parts.push(st.i);
+    const line = parts.join(" · ");
+    const t = svgEl("text", { x: cx, y: cy + 12, "text-anchor": "middle", class: "node-badge-text", fill: "var(--text-secondary)" });
+    t.textContent = line;
+    g.appendChild(t);
+    return;
+  }
+
+  if (style === "A") {
+    // stacked small chips, centered, wrap to two rows if needed
+    const primary = st.a || st.w;
+    const primaryTone = st.aTone || st.wTone || "neutral";
+    let x = cx - BOX.w / 2 + 8;
+    const w1 = chip(primary, primaryTone, x, cy + 10, true);
+    if (st.i) {
+      chip(st.i, st.iTone, cx - BOX.w / 2 + 8, cy + 28, true);
+    }
+    return;
+  }
+
+  if (style === "B") {
+    // left border colour = acceptance/workflow tone; icon badge top-right for integrity
+    const tone = st.aTone || st.wTone || "neutral";
+    const [fg] = TONE_VARS[tone];
+    const bar = svgEl("rect", { x: cx - BOX.w / 2, y: cy - BOX.h / 2, width: 4, height: BOX.h, fill: fg });
+    g.insertBefore(bar, g.firstChild);
+    const label = st.a || st.w;
+    const t = svgEl("text", { x: cx - BOX.w/2 + 12, y: cy + 12, class: "node-badge-text", fill: "var(--text-secondary)" });
+    t.textContent = label;
+    g.appendChild(t);
+    if (st.i) {
+      const [ifg] = TONE_VARS[st.iTone];
+      const icon = svgEl("circle", { cx: cx + BOX.w / 2 - 10, cy: cy - BOX.h / 2 + 10, r: 6, fill: ifg });
+      const mark = svgEl("text", { x: cx + BOX.w / 2 - 10, y: cy - BOX.h / 2 + 13.5, "text-anchor": "middle", fill: "#fff", style: "font-size:8px;font-weight:700" });
+      mark.textContent = "!";
+      g.appendChild(icon); g.appendChild(mark);
+    }
+    return;
+  }
+}
+
+function drawDag() {
+  const svg = document.getElementById("dag-svg");
+  svg.innerHTML = "";
+  const defs = svgEl("defs", {});
+  const marker = svgEl("marker", { id: "arrow", viewBox: "0 0 10 10", refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: "auto-start-reverse" });
+  const arrowPath = svgEl("path", { d: "M0,0 L10,5 L0,10 z", fill: "var(--border-strong)" });
+  marker.appendChild(arrowPath); defs.appendChild(marker); svg.appendChild(defs);
+
+  const frontier = new Set(frontierIds());
+
+  // edges first (so nodes draw on top)
+  for (const [id, n] of Object.entries(NODES)) {
+    if (n.isolated) continue;
+    for (const dep of n.deps) {
+      const [x1, y1] = POS[id], [x2, y2] = POS[dep.to];
+      const sx = x1, sy = y1 + BOX.h/2, ex = x2, ey = y2 - BOX.h/2;
+      const midY = (sy + ey) / 2;
+      const path = svgEl("path", {
+        d: `M ${sx} ${sy} C ${sx} ${midY}, ${ex} ${midY}, ${ex} ${ey}`,
+        class: "edge-line", "marker-end": "url(#arrow)",
+      });
+      svg.appendChild(path);
+      if (dep.pin !== null && dep.current !== null && dep.pin !== dep.current) {
+        const lx = (sx + ex) / 2, ly = midY;
+        const t = svgEl("text", { x: lx, y: ly - 4, "text-anchor": "middle", style: "font-size:9.5px;font-weight:700", fill: "var(--warning)" });
+        t.textContent = `pin v${dep.pin} ≠ v${dep.current}`;
+        svg.appendChild(t);
+      }
+    }
+  }
+
+  for (const [id, n] of Object.entries(NODES)) {
+    const [cx, cy] = POS[id];
+    const isFrontier = frontier.has(id);
+    const g = svgEl("g", {
+      class: "node-shape" + (isFrontier ? " frontier" : "") + (n.isolated ? " dimmed" : ""),
+      tabindex: "0", role: "button", "aria-label": n.label,
+    });
+    g.addEventListener("click", () => openInspector(id));
+    g.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") openInspector(id); });
+    const rect = svgEl("rect", { x: cx - BOX.w/2, y: cy - BOX.h/2, width: BOX.w, height: BOX.h, rx: 9 });
+    g.appendChild(rect);
+    const kind = svgEl("text", { x: cx, y: cy - BOX.h/2 + 13, "text-anchor": "middle", class: "node-kind" });
+    kind.textContent = n.kind;
+    g.appendChild(kind);
+    const title = svgEl("text", { x: cx, y: cy - 2, "text-anchor": "middle", class: "node-title" });
+    title.textContent = shortLabel(n.label);
+    g.appendChild(title);
+    renderNodeBadgesSVG(g, n, cx, cy);
+    if (isFrontier) {
+      const tag = svgEl("text", { x: cx, y: cy + BOX.h/2 + 13, "text-anchor": "middle", class: "frontier-tag" });
+      tag.textContent = "→ READY FOR AGENT";
+      g.appendChild(tag);
+    }
+    if (n.isolated) {
+      const tag = svgEl("text", { x: cx, y: cy + BOX.h/2 + 13, "text-anchor": "middle", style: "font-size:10px", fill: "var(--critical)" });
+      tag.textContent = "✕ rejected · abandoned route";
+      g.appendChild(tag);
+    }
+    svg.appendChild(g);
+  }
+}
+
+function shortLabel(label) {
+  return label.length > 26 ? label.slice(0, 24) + "…" : label;
+}
+
+function buildTree(rootId, seen, depth) {
+  seen = seen || new Set();
+  depth = depth || 0;
+  const n = NODES[rootId];
+  const li = document.createElement("li");
+  const isFrontier = n.workflow === "open" && !n.isolated;
+  const div = document.createElement("div");
+  div.className = "tree-node" + (isFrontier ? " frontier" : "");
+  div.textContent = shortLabel(n.label);
+  div.tabIndex = 0;
+  div.addEventListener("click", () => openInspector(rootId));
+  if (seen.has(rootId) && n.deps.length) {
+    const marker = document.createElement("span");
+    marker.className = "repeat-marker";
+    marker.textContent = "(shared — see DAG view)";
+    div.appendChild(marker);
+    li.appendChild(div);
+    return li;
+  }
+  li.appendChild(div);
+  const nextSeen = new Set(seen); nextSeen.add(rootId);
+  if (n.deps.length && depth < 8) {
+    const ul = document.createElement("ul");
+    for (const dep of n.deps) {
+      ul.appendChild(buildTree(dep.to, nextSeen, depth + 1));
+    }
+    li.appendChild(ul);
+  }
+  return li;
+}
+
+function drawTree() {
+  const root = document.getElementById("tree-root");
+  root.innerHTML = "";
+  const ul = document.createElement("ul");
+  ul.appendChild(buildTree("T", new Set(), 0));
+  root.appendChild(ul);
+  const note = document.createElement("p");
+  note.style.cssText = "font-size:12px;color:var(--text-secondary);margin-top:14px;";
+  note.textContent = "Rooted at the Main Theorem. “How is T proved?” — shared nodes (D, C1, IR1) repeat wherever they're used, marked (shared). This is why the DAG, not the tree, is canonical.";
+  root.appendChild(note);
+}
+
+function renderFog() {
+  const list = document.getElementById("fog-list");
+  list.innerHTML = "";
+  for (const item of FOG_ITEMS) {
+    const div = document.createElement("div");
+    div.className = "fog-item";
+    div.innerHTML = `<div>${item.text}</div><span class="tag">${item.tag}</span>`;
+    if (item.ready) {
+      const btn = document.createElement("button");
+      btn.className = "crystallize";
+      btn.textContent = "→ Crystallize into a new Claim";
+      btn.addEventListener("click", () => showToast("Prototype only — creating a Claim node is a real mutation, out of scope here (see ADR-0006 §9)."));
+      div.appendChild(btn);
+    }
+    list.appendChild(div);
+  }
+}
+
+function toneChip(text, tone) {
+  const [fg, bg] = TONE_VARS[tone];
+  return `<span class="pill" style="color:${fg};background:${bg};border:1px solid ${fg}">${text}</span>`;
+}
+
+function openInspector(id) {
+  const n = NODES[id];
+  const st = statusOf(n);
+  const body = document.getElementById("inspector-body");
+  let statusLine = "";
+  if (st.a) statusLine += toneChip(st.a, st.aTone);
+  if (st.w) statusLine += toneChip(st.w, st.wTone);
+  if (st.i) statusLine += " " + toneChip(st.i, st.iTone);
+
+  let depsHtml = "<p style='font-size:12.5px;color:var(--text-muted);margin:0;'>No dependencies — a leaf.</p>";
+  if (n.deps.length) {
+    depsHtml = n.deps.map(d => {
+      const target = NODES[d.to];
+      let pinText = "";
+      if (d.pin !== null) {
+        const mismatch = d.pin !== d.current;
+        pinText = `<span class="dep-pin${mismatch ? " mismatch" : ""}">${mismatch ? `pin v${d.pin} → current v${d.current}` : `v${d.pin} (current)`}</span>`;
+      } else if (target.kind === "Imported result") {
+        pinText = `<span class="dep-pin">immutable node — no version</span>`;
+      } else {
+        // this node never submitted a Candidate proof against this dependency yet,
+        // so there's nothing pinned — show the target's live status instead
+        const tst = statusOf(target);
+        const label = tst.a || tst.w;
+        const tone = tst.aTone || tst.wTone || "neutral";
+        const extra = tst.i ? ` · ${tst.i}` : "";
+        pinText = `<span class="dep-pin${tst.i ? " mismatch" : ""}">no pin yet — currently ${label}${extra}</span>`;
+      }
+      return `<div class="dep-row"><span>${shortLabel(target.label)}</span>${pinText}</div>`;
+    }).join("");
+  }
+
+  const cp = n.candidateProof
+    ? `<p class="statement">v${n.candidateProof.version} — <code>${n.candidateProof.file}</code></p>`
+    : `<p class="statement" style="color:var(--text-muted)">No Candidate proof submitted yet.</p>`;
+
+  function actionsFor(n) {
+    const acts = [];
+    if (n.workflow === "open") acts.push(["Claim", true]);
+    if (n.workflow === "claimed") acts.push(["Submit", true], ["Split", true], ["Release claim", true]);
+    if (n.workflow === "review-needed" || n.workflow === "blocked" || n.acceptance === "unreviewed") acts.push(["Split", true]);
+    if (n.acceptance === "unreviewed" && n.candidateProof) acts.push(["Accept", false], ["Request revision", false], ["Reject", false]);
+    if (n.acceptance === "accepted" && n.kind === "Claim") acts.push(["Promote to Lemma", false]);
+    if (n.integrity === "challenged" || n.integrity === "potentially-stale") acts.push(["Dismiss Challenge", false], ["Lightweight re-review", false]);
+    acts.push(["Open Challenge", true]);
+    // dedupe
+    const seen = new Set(); const out = [];
+    for (const a of acts) { if (!seen.has(a[0])) { seen.add(a[0]); out.push(a); } }
+    return out;
+  }
+
+  const actions = actionsFor(n).map(([label, agentReachable]) =>
+    `<button class="${agentReachable ? "" : "primary"}" data-action="${label}">${label}${agentReachable ? "" : " 🔒human"}</button>`
+  ).join("");
+
+  body.innerHTML = `
+    <div class="kind-line">${n.kind}${n.derivedFrom ? ` · split from ${NODES[n.derivedFrom].label}` : ""}</div>
+    <h2>${n.label}</h2>
+    <div style="margin-bottom:14px;">${statusLine}</div>
+    <section>
+      <h3>Statement</h3>
+      <p class="statement">${n.statement}</p>
+    </section>
+    ${n.assumptions && n.assumptions.length ? `<section><h3>Assumptions</h3><ul class="assump">${n.assumptions.map(a => `<li>${a}</li>`).join("")}</ul></section>` : ""}
+    <section>
+      <h3>Dependencies</h3>
+      ${depsHtml}
+    </section>
+    <section>
+      <h3>Candidate proof</h3>
+      ${cp}
+    </section>
+    ${n.claimant ? `<section><h3>Claimed by</h3><p class="statement">${n.claimant}</p></section>` : ""}
+    ${n.integrityWhy ? `<section><h3>Why this integrity state</h3><p class="statement" style="color:var(--text-secondary)">${n.integrityWhy}</p></section>` : ""}
+    ${n.splitNote ? `<section><h3>Split note</h3><p class="statement" style="color:var(--text-secondary)">${n.splitNote}</p></section>` : ""}
+    ${n.sharedNote ? `<section><h3>Shared dependency</h3><p class="statement" style="color:var(--text-secondary)">${n.sharedNote}</p></section>` : ""}
+    ${n.rejectedNote ? `<section><h3>History</h3><p class="statement" style="color:var(--text-secondary)">${n.rejectedNote}</p></section>` : ""}
+    <section>
+      <h3>Actions <span style="font-weight:400;color:var(--text-muted)">(illustrative — 🔒human = Human Review only, ADR-0004/0007)</span></h3>
+      <div class="actions">${actions}</div>
+    </section>
+  `;
+  body.querySelectorAll("button[data-action]").forEach(btn => {
+    btn.addEventListener("click", () => showToast(`"${btn.dataset.action}" is illustrative in this prototype — no mutation happens (see ADR-0006/0007).`));
+  });
+
+  document.getElementById("inspector").classList.add("open");
+  document.getElementById("inspector").setAttribute("aria-hidden", "false");
+  document.getElementById("backdrop").classList.add("open");
+}
+
+function closeInspector() {
+  document.getElementById("inspector").classList.remove("open");
+  document.getElementById("inspector").setAttribute("aria-hidden", "true");
+  document.getElementById("backdrop").classList.remove("open");
+}
+
+let toastTimer = null;
+function showToast(msg) {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show"), 2600);
+}
+
+function updateFrontierCaption() {
+  const ids = frontierIds();
+  document.getElementById("frontier-caption").textContent =
+    ids.length ? `Frontier now: ${ids.map(id => NODES[id].label.split(" — ")[0]).join(", ")}` : "Frontier is empty";
+}
+
+function render() {
+  const isDag = state.view === "dag";
+  document.getElementById("dag-svg").style.display = isDag ? "block" : "none";
+  document.getElementById("tree-root").style.display = isDag ? "none" : "block";
+  document.getElementById("view-caption").textContent = isDag
+    ? "DAG view — the canonical, shared-dependency structure"
+    : "Tree view — “How is T proved?”, rooted and expanded (shared nodes repeat)";
+  if (isDag) drawDag(); else drawTree();
+  updateFrontierCaption();
+}
+
+document.querySelectorAll(".switcher button[data-view]").forEach(btn => {
+  btn.addEventListener("click", () => {
+    state.view = btn.dataset.view;
+    document.querySelectorAll(".switcher button[data-view]").forEach(b => b.setAttribute("aria-pressed", b === btn));
+    render();
+  });
+});
+document.querySelectorAll(".switcher button[data-style]").forEach(btn => {
+  btn.addEventListener("click", () => {
+    state.style = btn.dataset.style;
+    document.querySelectorAll(".switcher button[data-style]").forEach(b => b.setAttribute("aria-pressed", b === btn));
+    render();
+  });
+});
+document.getElementById("inspector-close").addEventListener("click", closeInspector);
+document.getElementById("backdrop").addEventListener("click", closeInspector);
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeInspector(); });
+
+renderFog();
+render();
+</script>
+</body>
+</html>
