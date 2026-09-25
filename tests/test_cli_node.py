@@ -346,3 +346,122 @@ def test_node_second_submit_creates_v2(tmp_path: Path):
     assert payload["data"]["version"] == 2
     assert (tmp_path / "proofs" / "clm_1" / "v1.md").exists()
     assert (tmp_path / "proofs" / "clm_1" / "v2.md").exists()
+
+
+def _create_claim_and_submit(tmp_path: Path, node_id: str = "clm_1") -> None:
+    runner.invoke(app, ["node", "create", node_id, "claim", "stmt", "--root", str(tmp_path)])
+    runner.invoke(app, ["node", "claim", node_id, "--root", str(tmp_path), "--claimant", "agent_a"])
+    runner.invoke(
+        app,
+        [
+            "node", "submit", node_id, "--root", str(tmp_path),
+            "--claimant", "agent_a", "--content", "proof text", "--rationale", "scoped correctly",
+        ],
+    )
+
+
+def test_node_review_accept_requires_confirmation(tmp_path: Path):
+    _create_claim_and_submit(tmp_path)
+
+    result = runner.invoke(
+        app,
+        ["node", "review", "clm_1", "accept", "--root", str(tmp_path), "--reviewer", "researcher", "--json"],
+    )
+    assert result.exit_code != 0
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "CONFIRMATION_REQUIRED"
+
+
+def test_node_review_accept_human_readable(tmp_path: Path):
+    _create_claim_and_submit(tmp_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "node", "review", "clm_1", "accept", "--root", str(tmp_path),
+            "--reviewer", "researcher", "--rationale", "checks out", "--confirm",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "clm_1" in result.stdout
+    assert "approved" in result.stdout
+
+
+def test_node_review_accept_json_envelope(tmp_path: Path):
+    _create_claim_and_submit(tmp_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "node", "review", "clm_1", "accept", "--root", str(tmp_path),
+            "--reviewer", "researcher", "--confirm", "--json",
+        ],
+    )
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is True
+    assert payload["data"]["object_id"] == "clm_1"
+    assert payload["data"]["decision"] == "approved"
+    assert payload["data"]["kind"] == "acceptance"
+
+
+def test_node_review_invalid_decision_json_error(tmp_path: Path):
+    _create_claim_and_submit(tmp_path)
+
+    result = runner.invoke(
+        app,
+        ["node", "review", "clm_1", "approve", "--root", str(tmp_path), "--confirm", "--json"],
+    )
+    assert result.exit_code != 0
+    payload = json.loads(result.stdout)
+    assert payload["error"]["code"] == "INVALID_DECISION"
+
+
+def test_node_review_revision_requested_allows_a_fresh_submit(tmp_path: Path):
+    _create_claim_and_submit(tmp_path)
+
+    revise = runner.invoke(
+        app,
+        [
+            "node", "review", "clm_1", "revision-requested", "--root", str(tmp_path),
+            "--reviewer", "researcher", "--confirm", "--json",
+        ],
+    )
+    assert revise.exit_code == 0
+    assert json.loads(revise.stdout)["data"]["decision"] == "revision_requested"
+
+    reclaim = runner.invoke(
+        app, ["node", "claim", "clm_1", "--root", str(tmp_path), "--claimant", "agent_b", "--json"]
+    )
+    assert reclaim.exit_code == 0
+
+    resubmit = runner.invoke(
+        app,
+        [
+            "node", "submit", "clm_1", "--root", str(tmp_path),
+            "--claimant", "agent_b", "--content", "revised text", "--rationale", "addressed feedback", "--json",
+        ],
+    )
+    assert resubmit.exit_code == 0
+    assert json.loads(resubmit.stdout)["data"]["version"] == 2
+
+
+def test_node_review_reject_json_envelope(tmp_path: Path):
+    _create_claim_and_submit(tmp_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "node", "review", "clm_1", "reject", "--root", str(tmp_path),
+            "--reviewer", "researcher", "--rationale", "gap in the argument", "--confirm", "--json",
+        ],
+    )
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["data"]["decision"] == "rejected"
+
+    # the node remains queryable
+    show = runner.invoke(app, ["node", "show", "clm_1", "--root", str(tmp_path), "--json"])
+    assert show.exit_code == 0
+    assert json.loads(show.stdout)["ok"] is True

@@ -37,6 +37,25 @@ class ReviewGovernanceState(str, Enum):
     rejected = "rejected"
     superseded = "superseded"
     disputed = "disputed"
+    revision_requested = "revision_requested"
+
+
+class ReviewRecordKind(str, Enum):
+    """What a ReviewRecord's decision actually governs.
+
+    `None` (the field's default) means "predates this vocabulary" — every
+    review recorded before this existed, and every caller that hasn't been
+    migrated to it yet. Only `acceptance` is wired up as of this ticket; the
+    others are reserved for later tickets (#20, #27, #24). This is what makes
+    Human Acceptance Authority enforceable: `acceptance_state` is computed
+    exclusively from `kind == acceptance` records, so no other review flow
+    can accidentally feed it.
+    """
+
+    acceptance = "acceptance"
+    reference_review = "reference_review"
+    evidence_review = "evidence_review"
+    dependency_revalidation = "dependency_revalidation"
 
 
 class CommentThreadStatus(str, Enum):
@@ -94,6 +113,7 @@ class ReviewRecord(BaseModel):
     object_id: str
     reviewer_id: str
     decision: ReviewGovernanceState = ReviewGovernanceState.proposed_for_review
+    kind: ReviewRecordKind | None = None
     rationale: str = ""
     authorship: list[str] = Field(default_factory=list)
     provenance_notes: str = ""
@@ -320,6 +340,7 @@ def record_review_request(
     rationale: str = "",
     authorship: list[str] | None = None,
     provenance_notes: str = "",
+    kind: ReviewRecordKind | None = None,
 ) -> ReviewRecord:
     state = load_collaboration(store)
     record = ReviewRecord(
@@ -327,6 +348,7 @@ def record_review_request(
         object_id=object_id,
         reviewer_id=reviewer_id,
         decision=ReviewGovernanceState.proposed_for_review,
+        kind=kind,
         rationale=rationale,
         authorship=list(authorship or []),
         provenance_notes=provenance_notes,
@@ -767,6 +789,7 @@ __all__ = [
     "ContributorStatus",
     "ReviewGovernanceState",
     "ReviewRecord",
+    "ReviewRecordKind",
     "SharedAssetPublication",
     "SharedAssetPublicationStatus",
     "compare_branches",

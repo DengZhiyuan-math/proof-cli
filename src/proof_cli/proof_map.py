@@ -2,8 +2,17 @@ from __future__ import annotations
 
 import sqlite3
 import uuid
+from enum import Enum
 from typing import Any
 
+from .collaboration import (
+    ReviewGovernanceState,
+    ReviewRecord,
+    ReviewRecordKind,
+    list_review_records,
+    record_review_decision,
+    record_review_request,
+)
 from .domain import CandidateProofRecord, ClaimRecord, ProofMapNode, ProofMapNodeKind, utc_now
 from .storage import (
     ProjectStore,
@@ -364,3 +373,109 @@ def require_candidate_proof(store: ProjectStore, candidate_proof_id: str) -> Can
 def list_candidate_proofs(store: ProjectStore, node_id: str) -> list[CandidateProofRecord]:
     require_node(store, node_id)
     return list_candidate_proofs_for_node(store, node_id)
+
+
+class AcceptanceDecision(str, Enum):
+    """The only three ways a local node's acceptance_state may ever change.
+
+    Nothing else in the system — not a claim, not a submission, not an
+    Evidence check — is allowed to write acceptance_state; `decide_acceptance`
+    is the sole entry point, and it always requires explicit human
+    confirmation. See ADR (Human Acceptance Authority).
+    """
+
+    accept = "accept"
+    revision_requested = "revision-requested"
+    reject = "reject"
+
+
+_ACCEPTANCE_DECISION_TO_GOVERNANCE_STATE = {
+    AcceptanceDecision.accept: ReviewGovernanceState.approved,
+    AcceptanceDecision.revision_requested: ReviewGovernanceState.revision_requested,
+    AcceptanceDecision.reject: ReviewGovernanceState.rejected,
+}
+
+_ACCEPTANCE_OBJECT_TYPE = "proof_map_node"
+
+
+def decide_acceptance(
+    store: ProjectStore,
+    node_id: str,
+    decision: AcceptanceDecision | str,
+    *,
+    reviewer_id: str = "human",
+    rationale: str = "",
+    confirmed: bool = False,
+) -> ReviewRecord:
+    """Record a Human Review acceptance decision for a local node.
+
+    `revision_requested` keeps the node open for another claim/submit cycle
+    on the same node id, never a new node. `reject` is permanent: the node
+    and this decision remain in the project forever, and this function never
+    touches `ProjectState.failed_routes` — once a node exists for a route,
+    the node's own history is the record of it, never both.
+    """
+    node = require_node(store, node_id)
+
+    if node.kind == ProofMapNodeKind.imported_result:
+        raise ProofMapError(
+            "IMMUTABLE_NODE",
+            f"imported_result node {node_id} is judged by Reference review, not Acceptance",
+        )
+
+    try:
+        resolved_decision = AcceptanceDecision(decision)
+    except ValueError as exc:
+        valid = ", ".join(member.value for member in AcceptanceDecision)
+        raise ProofMapError(
+            "INVALID_DECISION", f"'{decision}' is not a valid acceptance decision; expected one of: {valid}"
+        ) from exc
+
+    if not confirmed:
+        raise ProofMapError(
+            "CONFIRMATION_REQUIRED",
+            "a Human Review decision requires explicit confirmation; only a researcher may confirm one",
+        )
+
+    governance_state = _ACCEPTANCE_DECISION_TO_GOVERNANCE_STATE[resolved_decision]
+    request = record_review_request(
+        store,
+        _ACCEPTANCE_OBJECT_TYPE,
+        node_id,
+        reviewer_id=reviewer_id,
+        rationale=rationale,
+        kind=ReviewRecordKind.acceptance,
+    )
+    record = record_review_decision(store, request.id, governance_state, reviewer_id=reviewer_id, rationale=rationale)
+
+    append_event(
+        store,
+        "proof_map_acceptance_decided",
+        f"acceptance decision for {node_id}: {resolved_decision.value}",
+        entity_id=node_id,
+        payload={"decision": resolved_decision.value, "reviewer_id": reviewer_id, "review_id": record.id},
+    )
+    return record
+
+
+def get_acceptance_state(store: ProjectStore, node_id: str) -> str:
+    """The node's acceptance_state, computed from its Human Review history.
+
+    One of `unreviewed`, `accepted`, `rejected` — never stored, always
+    re-derived from the latest `kind=acceptance` ReviewRecord for this node,
+    so it can never drift out of sync with what a human actually decided.
+    """
+    require_node(store, node_id)
+    records = [
+        record
+        for record in list_review_records(store, object_type=_ACCEPTANCE_OBJECT_TYPE, object_id=node_id)
+        if record.kind == ReviewRecordKind.acceptance
+    ]
+    if not records:
+        return "unreviewed"
+    latest = records[-1]
+    if latest.decision == ReviewGovernanceState.approved:
+        return "accepted"
+    if latest.decision == ReviewGovernanceState.rejected:
+        return "rejected"
+    return "unreviewed"

@@ -98,10 +98,12 @@ from .commands import (
     get_store,
 )
 from .envelope import dump_envelope, error_envelope, success_envelope
+from .collaboration import summarize_review_record
 from .proof_map import (
     ProofMapError,
     claim_node,
     create_node,
+    decide_acceptance,
     list_nodes,
     release_node,
     require_node,
@@ -359,6 +361,40 @@ def node_submit(
         _emit_node_error(exc, json_output)
         raise typer.Exit(code=1)
     _emit_candidate_proof(record, json_output)
+
+
+def _emit_review_record(record, json_output: bool) -> None:
+    if json_output:
+        typer.echo(dump_envelope(success_envelope(record.model_dump(mode="json"))))
+    else:
+        typer.echo(summarize_review_record(record))
+
+
+@node_app.command("review")
+def node_review(
+    node_id: str,
+    decision: str,
+    root: str = ".",
+    reviewer: str = "human",
+    rationale: str = "",
+    confirm: bool = typer.Option(
+        False, "--confirm", help="Explicit human confirmation; every acceptance decision requires it"
+    ),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Human Review's Accept / revision-requested / reject decision for a local node.
+
+    The only path that may set a node's acceptance_state.
+    """
+    store = get_store(_root(root))
+    try:
+        record = decide_acceptance(
+            store, node_id, decision, reviewer_id=reviewer, rationale=rationale, confirmed=confirm
+        )
+    except ProofMapError as exc:
+        _emit_node_error(exc, json_output)
+        raise typer.Exit(code=1)
+    _emit_review_record(record, json_output)
 
 
 app.add_typer(goal_app, name="goal")
