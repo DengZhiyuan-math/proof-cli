@@ -8,6 +8,8 @@ from proof_cli.proof_map import (
     ProofMapError,
     claim_node,
     create_node,
+    decide_acceptance,
+    get_acceptance_state,
     get_node,
     list_candidate_proofs,
     list_nodes,
@@ -15,7 +17,7 @@ from proof_cli.proof_map import (
     require_node,
     submit_candidate_proof,
 )
-from proof_cli.storage import ensure_project, get_active_claim, get_current_candidate_proof, mark_claim_released
+from proof_cli.storage import ensure_project, get_active_claim, get_current_candidate_proof, mark_claim_released, read_state
 from proof_cli.vault import read_candidate_proof_frontmatter
 
 
@@ -563,3 +565,134 @@ def test_submit_on_nonexistent_node_raises_node_not_found(tmp_path: Path):
             content="proof text",
         )
     assert exc_info.value.code == "NODE_NOT_FOUND"
+
+
+def _submitted_claim(store, node_id: str = "clm_1"):
+    create_node(store, node_id=node_id, kind="claim", statement="stmt")
+    claim_node(store, node_id, claimant_id="agent_a", session_id="sess_1")
+    return submit_candidate_proof(
+        store,
+        node_id,
+        claimant_id="agent_a",
+        session_id="sess_1",
+        scoping_rationale="scoped correctly",
+        content="proof text",
+    )
+
+
+def test_new_node_starts_unreviewed(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_1", kind="claim", statement="stmt")
+    assert get_acceptance_state(store, "clm_1") == "unreviewed"
+
+
+def test_decide_acceptance_requires_confirmation(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    _submitted_claim(store)
+
+    with pytest.raises(ProofMapError) as exc_info:
+        decide_acceptance(store, "clm_1", "accept", reviewer_id="researcher", rationale="looks right")
+    assert exc_info.value.code == "CONFIRMATION_REQUIRED"
+    assert get_acceptance_state(store, "clm_1") == "unreviewed"
+
+
+def test_decide_acceptance_invalid_decision_rejected(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    _submitted_claim(store)
+
+    with pytest.raises(ProofMapError) as exc_info:
+        decide_acceptance(store, "clm_1", "approve", reviewer_id="researcher", confirmed=True)
+    assert exc_info.value.code == "INVALID_DECISION"
+
+
+def test_decide_acceptance_on_nonexistent_node_raises_node_not_found(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    with pytest.raises(ProofMapError) as exc_info:
+        decide_acceptance(store, "does_not_exist", "accept", reviewer_id="researcher", confirmed=True)
+    assert exc_info.value.code == "NODE_NOT_FOUND"
+
+
+def test_decide_acceptance_on_imported_result_is_rejected(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="ref_1", kind="imported_result", statement="An external theorem")
+
+    with pytest.raises(ProofMapError) as exc_info:
+        decide_acceptance(store, "ref_1", "accept", reviewer_id="researcher", confirmed=True)
+    assert exc_info.value.code == "IMMUTABLE_NODE"
+
+
+def test_accept_sets_acceptance_state_to_accepted(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    _submitted_claim(store)
+
+    record = decide_acceptance(
+        store, "clm_1", "accept", reviewer_id="researcher", rationale="checks out", confirmed=True
+    )
+
+    assert record.decision.value == "approved"
+    assert get_acceptance_state(store, "clm_1") == "accepted"
+
+
+def test_revision_requested_keeps_node_open_for_a_fresh_claim_submit_cycle(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    _submitted_claim(store)
+
+    decide_acceptance(store, "clm_1", "revision-requested", reviewer_id="researcher", confirmed=True)
+
+    assert get_acceptance_state(store, "clm_1") == "unreviewed"
+    # same node id, not a new one: a fresh claim/submit cycle is possible
+    claim_node(store, "clm_1", claimant_id="agent_b", session_id="sess_2")
+    second = submit_candidate_proof(
+        store,
+        "clm_1",
+        claimant_id="agent_b",
+        session_id="sess_2",
+        scoping_rationale="addressed the reviewer's feedback",
+        content="revised proof text",
+    )
+    assert second.node_id == "clm_1"
+    assert second.version == 2
+
+
+def test_reject_is_permanent_and_never_touches_failed_routes(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    _submitted_claim(store)
+
+    before = read_state(store)
+    assert "clm_1" not in before.failed_routes
+
+    record = decide_acceptance(
+        store, "clm_1", "reject", reviewer_id="researcher", rationale="the argument has a gap", confirmed=True
+    )
+
+    assert record.decision.value == "rejected"
+    assert get_acceptance_state(store, "clm_1") == "rejected"
+    # the node and its full history remain queryable
+    assert require_node(store, "clm_1") is not None
+    assert len(list_candidate_proofs(store, "clm_1")) == 1
+    # nothing was written to ProjectState.failed_routes for a node that already exists
+    after = read_state(store)
+    assert "clm_1" not in after.failed_routes
+    assert after.failed_routes == before.failed_routes
+
+
+def test_no_other_code_path_can_write_acceptance_state(tmp_path: Path):
+    """Claiming and submitting are the only other node-lifecycle operations;
+    neither one is capable of moving acceptance_state off `unreviewed` — the
+    architectural guarantee this ticket exists to establish."""
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_1", kind="claim", statement="stmt")
+    assert get_acceptance_state(store, "clm_1") == "unreviewed"
+
+    claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
+    assert get_acceptance_state(store, "clm_1") == "unreviewed"
+
+    submit_candidate_proof(
+        store,
+        "clm_1",
+        claimant_id="agent_a",
+        session_id="sess_1",
+        scoping_rationale="scoped correctly",
+        content="proof text",
+    )
+    assert get_acceptance_state(store, "clm_1") == "unreviewed"
