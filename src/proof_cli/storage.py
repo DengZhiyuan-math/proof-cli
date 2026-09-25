@@ -12,6 +12,7 @@ from pydantic import TypeAdapter
 from .db import connect, initialize
 from .domain import (
     BlockerRecord,
+    ClaimRecord,
     EventRecord,
     ProofMapNode,
     ProofObligation,
@@ -82,6 +83,23 @@ CREATE TABLE IF NOT EXISTS proof_map_nodes (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_proof_map_nodes_one_theorem
   ON proof_map_nodes(kind)
   WHERE kind = 'theorem';
+
+CREATE TABLE IF NOT EXISTS claims (
+  id TEXT PRIMARY KEY,
+  node_id TEXT NOT NULL,
+  claimant_id TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  claimed_at TEXT NOT NULL,
+  released_at TEXT,
+  released_by TEXT,
+  release_reason TEXT
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_claims_one_active_per_node
+  ON claims(node_id)
+  WHERE released_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_claims_node_id ON claims(node_id, claimed_at);
 """
 
 
@@ -537,6 +555,82 @@ def list_proof_map_nodes(store: ProjectStore) -> list[ProofMapNode]:
     with store.connect() as conn:
         rows = conn.execute("SELECT data FROM proof_map_nodes ORDER BY id").fetchall()
     return [PROOF_MAP_NODE_ADAPTER.validate_json(row["data"]) for row in rows]
+
+
+def _row_to_claim(row: sqlite3.Row) -> ClaimRecord:
+    return ClaimRecord(
+        id=row["id"],
+        node_id=row["node_id"],
+        claimant_id=row["claimant_id"],
+        session_id=row["session_id"],
+        claimed_at=row["claimed_at"],
+        released_at=row["released_at"],
+        released_by=row["released_by"],
+        release_reason=row["release_reason"],
+    )
+
+
+def insert_claim(store: ProjectStore, claim: ClaimRecord) -> ClaimRecord:
+    with store.connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO claims(id, node_id, claimant_id, session_id, claimed_at, released_at, released_by, release_reason)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                claim.id,
+                claim.node_id,
+                claim.claimant_id,
+                claim.session_id,
+                claim.claimed_at.isoformat(),
+                claim.released_at.isoformat() if claim.released_at else None,
+                claim.released_by,
+                claim.release_reason,
+            ),
+        )
+        conn.commit()
+    return claim
+
+
+def get_active_claim(store: ProjectStore, node_id: str) -> ClaimRecord | None:
+    with store.connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM claims WHERE node_id = ? AND released_at IS NULL LIMIT 1",
+            (node_id,),
+        ).fetchone()
+    return _row_to_claim(row) if row else None
+
+
+def get_claim(store: ProjectStore, claim_id: str) -> ClaimRecord | None:
+    with store.connect() as conn:
+        row = conn.execute("SELECT * FROM claims WHERE id = ? LIMIT 1", (claim_id,)).fetchone()
+    return _row_to_claim(row) if row else None
+
+
+def mark_claim_released(
+    store: ProjectStore,
+    claim_id: str,
+    *,
+    released_by: str,
+    reason: str,
+    released_at: datetime,
+) -> bool:
+    """Release a claim, but only if it is still active.
+
+    The `released_at IS NULL` guard makes this the release-side counterpart
+    of claim_node's unique-index guard: two concurrent releases of the same
+    claim (e.g. the owner releasing at the same moment as a researcher's
+    force-release) can't both silently win — only the first UPDATE to reach
+    SQLite's write lock affects a row. Returns whether this call was the one
+    that released it.
+    """
+    with store.connect() as conn:
+        cursor = conn.execute(
+            "UPDATE claims SET released_at = ?, released_by = ?, release_reason = ? WHERE id = ? AND released_at IS NULL",
+            (released_at.isoformat(), released_by, reason, claim_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
 
 
 def store_snapshot(store: ProjectStore, snapshot: ProjectSnapshot) -> ProjectSnapshot:

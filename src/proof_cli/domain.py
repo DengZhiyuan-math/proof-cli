@@ -141,6 +141,24 @@ class ProofMapNode(BaseModel):
     updated_at: datetime = Field(default_factory=utc_now)
 
 
+class ClaimRecord(BaseModel):
+    """Exclusive ownership of a ProofMapNode while an agent works on it.
+
+    At most one active (unreleased) claim exists per node at a time — enforced
+    by a SQLite partial unique index, not an application-level check. See
+    ADR-0006.
+    """
+
+    id: str
+    node_id: str
+    claimant_id: str
+    session_id: str
+    claimed_at: datetime = Field(default_factory=utc_now)
+    released_at: datetime | None = None
+    released_by: str | None = None
+    release_reason: str | None = None
+
+
 class ProjectSnapshot(BaseModel):
     project_id: str
     active_theorem: str | None = None
