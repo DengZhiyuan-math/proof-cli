@@ -1057,8 +1057,8 @@ def reference_review(reference_id: str, action: str, root: str = ".", rationale:
 
 
 @memory_app.command("list")
-def memory_list(root: str = ".", layer: str = "", theorem_id: str = "", goal_id: str = "") -> None:
-    typer.echo(cmd_memory_list(_root(root), layer=layer, theorem_id=theorem_id, goal_id=goal_id))
+def memory_list(root: str = ".", layer: str = "", node_id: str = "", theorem_id: str = "", goal_id: str = "") -> None:
+    typer.echo(cmd_memory_list(_root(root), layer=layer, node_id=node_id, theorem_id=theorem_id, goal_id=goal_id))
 
 
 @memory_app.command("show")
@@ -1071,6 +1071,9 @@ def memory_add(
     content: str,
     root: str = ".",
     layer: str = "working",
+    node_id: str = "",
+    candidate_proof_id: str = "",
+    review_id: str = "",
     theorem_id: str = "",
     goal_id: str = "",
     obligation_id: str = "",
@@ -1087,6 +1090,9 @@ def memory_add(
             content,
             _root(root),
             layer=layer,
+            node_id=node_id,
+            candidate_proof_id=candidate_proof_id,
+            review_id=review_id,
             theorem_id=theorem_id,
             goal_id=goal_id,
             obligation_id=obligation_id,
