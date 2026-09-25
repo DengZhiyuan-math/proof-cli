@@ -515,19 +515,18 @@ def test_phase_four_cli_paths_cover_formal_bridge_workflows(tmp_path: Path):
     assert "Result:" in result.stdout
     assert "machine_checked" in result.stdout
 
-    result = runner.invoke(app, ["verify", "accept", theorem_id, "--root", str(tmp_path), "--notes", "accepted after review"])
-    assert result.exit_code == 0
-    assert "accepted_after_review" in result.stdout
-    assert "Verification record:" in result.stdout
+    # `verify accept`/`verify reject` were removed (issue #27): an Evidence
+    # check outcome must never be able to flip acceptance state, and these
+    # two commands did exactly that. See tests/test_proof_map.py for the
+    # replacement Evidence check / evidence_review workflow.
 
     result = runner.invoke(app, ["verify", "status", theorem_id, "--root", str(tmp_path)])
     assert result.exit_code == 0
     assert "Additional results:" in result.stdout
-    assert "accepted_after_review" in result.stdout
 
     result = runner.invoke(app, ["verify", "result", theorem_id, "--root", str(tmp_path)])
     assert result.exit_code == 0
-    assert "accepted_after_review" in result.stdout
+    assert "machine_checked" in result.stdout
 
     result = runner.invoke(app, ["trace", "machine-check", theorem_id, "--root", str(tmp_path)])
     assert result.exit_code == 0
