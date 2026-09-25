@@ -9,7 +9,20 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from .collaboration import CollaborationState, load_collaboration, save_collaboration
-from .domain import BlockerRecord, ProofObligation, ProjectSnapshot, ProjectState, TheoremContract, utc_now
+from .domain import (
+    BlockerRecord,
+    CandidateProofRecord,
+    Challenge,
+    ClaimRecord,
+    DependencyPin,
+    EvidenceCheck,
+    ProofMapNode,
+    ProofObligation,
+    ProjectSnapshot,
+    ProjectState,
+    TheoremContract,
+    utc_now,
+)
 from .domain_packs import DomainPack
 from .publication import PublicationWorkspace, list_publication_bundle_snapshots, load_publication_workspace, save_publication_workspace
 from .governance import GovernanceAssetRecord, GovernancePackRecord, GovernancePolicyRecord, list_domain_pack_records, list_policy_records, list_reusable_asset_records
@@ -20,16 +33,30 @@ from .reusable_assets import ReusableAsset
 from .storage import (
     ProjectStore,
     create_project,
+    import_reference_review,
+    import_theorem_contract,
+    insert_candidate_proof,
+    insert_challenge,
+    insert_claim,
+    insert_evidence_check,
+    insert_proof_map_node,
+    list_all_candidate_proofs,
+    list_all_claims,
+    list_all_dependency_pins,
+    list_all_evidence_checks,
     list_blockers,
+    list_challenges,
     list_obligations,
+    list_proof_map_nodes,
     list_references,
     list_reference_reviews,
     read_latest_snapshot,
+    set_project_id,
     store_blocker,
-    store_contract,
-    store_obligation,
     store_reference,
+    store_obligation,
     store_snapshot,
+    upsert_dependency_pin,
 )
 from .theorems import list_theorems
 
@@ -53,6 +80,17 @@ class ExchangeBundle(BaseModel):
     domain_packs: list[GovernancePackRecord] = Field(default_factory=list)
     policies: list[GovernancePolicyRecord] = Field(default_factory=list)
     publication_workspace: PublicationWorkspace | None = None
+    # The new ProofMapNode model (issue #31). candidate_proofs is only the
+    # index — id, version, file_path, fingerprint, etc; the proof text
+    # itself lives in the git-tracked Proof vault (proofs/<node>/v<n>.md),
+    # exchanged via git like the rest of the working tree, not through this
+    # JSON bundle.
+    proof_map_nodes: list[ProofMapNode] = Field(default_factory=list)
+    claims: list[ClaimRecord] = Field(default_factory=list)
+    candidate_proofs: list[CandidateProofRecord] = Field(default_factory=list)
+    dependency_pins: list[DependencyPin] = Field(default_factory=list)
+    challenges: list[Challenge] = Field(default_factory=list)
+    evidence_checks: list[EvidenceCheck] = Field(default_factory=list)
 
 
 class ExchangeImportReport(BaseModel):
@@ -73,44 +111,6 @@ class ExchangeInspectReport(BaseModel):
     rejected: list[str] = Field(default_factory=list)
     section_counts: dict[str, int] = Field(default_factory=dict)
     note: str = ""
-
-
-def _contract_table_upsert(store: ProjectStore, contract: TheoremContract) -> None:
-    with store.connect() as conn:
-        conn.execute("UPDATE theorem_contracts SET is_current = 0 WHERE id = ?", (contract.id,))
-        conn.execute(
-            """
-            INSERT INTO theorem_contracts(id, version, is_current, data, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id, version) DO UPDATE SET
-              is_current = excluded.is_current,
-              data = excluded.data,
-              created_at = excluded.created_at,
-              updated_at = excluded.updated_at
-            """,
-            (
-                contract.id,
-                contract.version,
-                1,
-                contract.model_dump_json(),
-                contract.created_at.isoformat(),
-                contract.updated_at.isoformat(),
-            ),
-        )
-        conn.commit()
-
-
-def _reference_upsert(store: ProjectStore, reference: ReferenceRecord) -> None:
-    store_reference(store, reference)
-
-
-def _reference_review_insert(store: ProjectStore, review: ReferenceReviewRecord) -> None:
-    with store.connect() as conn:
-        conn.execute(
-            "INSERT OR REPLACE INTO reference_reviews(id, reference_id, data, created_at) VALUES (?, ?, ?, ?)",
-            (review.id, review.reference_id, review.model_dump_json(), review.created_at.isoformat()),
-        )
-        conn.commit()
 
 
 def export_exchange_bundle(store: ProjectStore, *, note: str = "") -> ExchangeBundle:
@@ -135,6 +135,12 @@ def export_exchange_bundle(store: ProjectStore, *, note: str = "") -> ExchangeBu
         domain_packs=list_domain_pack_records(store),
         policies=list_policy_records(store),
         publication_workspace=publication_workspace,
+        proof_map_nodes=list_proof_map_nodes(store),
+        claims=list_all_claims(store),
+        candidate_proofs=list_all_candidate_proofs(store),
+        dependency_pins=list_all_dependency_pins(store),
+        challenges=list_challenges(store),
+        evidence_checks=list_all_evidence_checks(store),
     )
     return bundle
 
@@ -153,6 +159,12 @@ def inspect_exchange_bundle(bundle: ExchangeBundle | dict[str, Any]) -> Exchange
         "reusable_assets",
         "domain_packs",
         "policies",
+        "proof_map_nodes",
+        "claims",
+        "candidate_proofs",
+        "dependency_pins",
+        "challenges",
+        "evidence_checks",
     ]
     rejected: list[str] = []
     section_counts = {
@@ -163,6 +175,12 @@ def inspect_exchange_bundle(bundle: ExchangeBundle | dict[str, Any]) -> Exchange
         "reusable_assets": len(bundle.reusable_assets),
         "domain_packs": len(bundle.domain_packs),
         "policies": len(bundle.policies),
+        "proof_map_nodes": len(bundle.proof_map_nodes),
+        "claims": len(bundle.claims),
+        "candidate_proofs": len(bundle.candidate_proofs),
+        "dependency_pins": len(bundle.dependency_pins),
+        "challenges": len(bundle.challenges),
+        "evidence_checks": len(bundle.evidence_checks),
         "publication_views": len(bundle.publication_workspace.views) if bundle.publication_workspace is not None else 0,
         "publication_states": len(bundle.publication_workspace.states) if bundle.publication_workspace is not None else 0,
         "publication_releases": len(bundle.publication_workspace.release_records) if bundle.publication_workspace is not None else 0,
@@ -195,9 +213,7 @@ def import_exchange_bundle(store: ProjectStore, bundle: ExchangeBundle | dict[st
     if not isinstance(bundle, ExchangeBundle):
         bundle = ExchangeBundle.model_validate(bundle)
     create_project(store.root, bundle.project_id)
-    with store.connect() as conn:
-        conn.execute("INSERT OR REPLACE INTO project_meta(key, value) VALUES (?, ?)", ("project_id", bundle.project_id))
-        conn.commit()
+    set_project_id(store, bundle.project_id)
     save_state(store, bundle.project_state)
     save_memory(store, bundle.memory)
     save_collaboration(store, bundle.collaboration)
@@ -207,7 +223,7 @@ def import_exchange_bundle(store: ProjectStore, bundle: ExchangeBundle | dict[st
     rejected_sections: list[str] = []
 
     for contract in bundle.theorem_contracts:
-        _contract_table_upsert(store, contract)
+        import_theorem_contract(store, contract)
     if bundle.theorem_contracts:
         imported_sections.append("theorem_contracts")
 
@@ -222,14 +238,44 @@ def import_exchange_bundle(store: ProjectStore, bundle: ExchangeBundle | dict[st
         imported_sections.append("blockers")
 
     for reference in bundle.references:
-        _reference_upsert(store, reference)
+        store_reference(store, reference)
     if bundle.references:
         imported_sections.append("references")
 
     for review in bundle.reference_reviews:
-        _reference_review_insert(store, review)
+        import_reference_review(store, review)
     if bundle.reference_reviews:
         imported_sections.append("reference_reviews")
+
+    for node in bundle.proof_map_nodes:
+        insert_proof_map_node(store, node)
+    if bundle.proof_map_nodes:
+        imported_sections.append("proof_map_nodes")
+
+    for claim in bundle.claims:
+        insert_claim(store, claim)
+    if bundle.claims:
+        imported_sections.append("claims")
+
+    for proof in bundle.candidate_proofs:
+        insert_candidate_proof(store, proof)
+    if bundle.candidate_proofs:
+        imported_sections.append("candidate_proofs")
+
+    for pin in bundle.dependency_pins:
+        upsert_dependency_pin(store, pin)
+    if bundle.dependency_pins:
+        imported_sections.append("dependency_pins")
+
+    for challenge in bundle.challenges:
+        insert_challenge(store, challenge)
+    if bundle.challenges:
+        imported_sections.append("challenges")
+
+    for check in bundle.evidence_checks:
+        insert_evidence_check(store, check)
+    if bundle.evidence_checks:
+        imported_sections.append("evidence_checks")
 
     if bundle.latest_snapshot is not None:
         store_snapshot(store, bundle.latest_snapshot)
