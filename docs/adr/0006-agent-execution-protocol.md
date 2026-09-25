@@ -1,0 +1,31 @@
+# Agent execution protocol: exclusive claims, a unified command surface, a JSON contract
+
+**Status**: accepted
+
+Every prior decision in this map (ADR-0001 through ADR-0005) fixed the domain model. This one (issue #13) fixes how an agent is allowed to touch it: what a claim actually guards against, what commands exist and how they're grouped, what "the JSON output" concretely looks like, and how "split before you hallucinate a proof" is enforced given the system cannot itself judge whether a proof is too large or too weak. Twelve invariants:
+
+1. **Active claim is exclusive and atomic.** At most one active claim exists per node at a time. A claim record is `{claim_id, node_id, claimant_id, session_id, claimed_at}`; the exclusivity is enforced by a SQLite transaction/unique constraint, not a queue.
+2. **Claim conflicts fail fast.** A second claimant gets an immediate, structured `CLAIM_CONFLICT` error carrying the existing claim's basic info (who holds it, since when) — enough to decide what to do next without a second lookup — rather than blocking or queuing.
+3. **Repeating the same claim, from the same claimant and session, is idempotent.** It returns the existing claim rather than erroring, so a retried CLI call (network hiccup, agent retry logic) is safe.
+4. **Claims never expire automatically.** A long-running research session is a legitimate reason for a claim to sit for hours; a TTL would misfire on real work as often as it catches a stuck one. A display-only age hint (e.g. "claimed for 19h") may exist later, but it never changes state on its own.
+5. **The claimant may release their own claim; only the researcher may force-release someone else's.** `proof node release <id>` releases the caller's own active claim. `proof node release <id> --force` is Human authority, and always writes an event recording who forced it, which claim, when, and why — never a silent override.
+6. **All node actions live under one command group, `proof node ...`** (`claim`, `release`, `submit`, `split`, `challenge`, `show`), reflecting that ADR-0001 already unified Theorem/Lemma/Claim/Imported result into one entity. This also sidesteps a real naming collision: spreading these across the old `theorem`/`obligation`/`blocker` groups would put `claim` under a group named after a concept (`obligation`) that CONTEXT.md already retired in favor of Claim.
+7. **Human-readable output is the default; `--json` is the stable machine contract**, not just a formatting toggle. In `--json` mode: stdout is exactly one JSON document; no Rich markup; no interactive prompts; failures are also structured JSON, not just a message; every failure pairs a stable error code with a non-zero exit code; every response — success or failure — is wrapped in an envelope carrying a `schema_version`. For example:
+   ```json
+   {"schema_version": 1, "ok": true, "command": "node.claim",
+    "data": {"node_id": "lemma_17", "claim_id": "claim_42"}}
+   ```
+   ```json
+   {"schema_version": 1, "ok": false,
+    "error": {"code": "CLAIM_CONFLICT", "message": "Node is already claimed",
+              "node_id": "lemma_17", "active_claim_id": "claim_41"}}
+   ```
+8. **Only the active claimant may normally submit.** Anyone else calling `submit` on a node they don't hold the claim for — including no claim at all — fails with `CLAIM_OWNERSHIP_MISMATCH`. A researcher who needs to submit on someone else's behalf uses an explicit override path, never a silent bypass of the ownership check.
+9. **Every submission records an explicit decomposition rationale, permanently, as Candidate-proof metadata** — not a separate event log entry a reviewer has to go dig up. The system cannot judge whether a node should have been split further (no kernel, no way to assess mathematical scope automatically), so it doesn't try to. Instead `submit` requires a `--split-rationale` argument, always present, asserting *why* this node is appropriately scoped to prove directly right now: "I considered further decomposition and am asserting this node is appropriately scoped, for this reason" — never "the system verified this is appropriately scoped," which isn't a claim proof-cli can make. An agent that judges a node still needs decomposing calls `split` instead of `submit`.
+10. **Submit closes the active claim and hands the node to review-needed in the same action.** This tightens ADR-0002/#6's "any review decision ends the claim": since a review decision always comes strictly after submission, and the workflow-state derivation already stops showing `claimed` the moment a candidate proof is awaiting review, the claim is — and always was — already over by submit time. This ADR makes that precise rather than leaving it to be inferred: ownership moves from agent execution to Human Review at `submit`, not when the review decision eventually lands.
+11. **Adapters call the same application/service operations the CLI does.** The Codex plugin, Claude Code adapter, and any future web app surface are all thin callers of one underlying layer — never a separate path that could reach the domain model without going through it.
+12. **No agent-facing command can change acceptance state.** `claim`/`release`/`submit`/`split` and opening a `challenge` are all agent-reachable and none of them are Human Review actions; this is ADR-0004's Invariant 1 restated as a constraint on the command surface itself, not just on the domain functions underneath it.
+
+**Challenge gets its own command surface, not just a flag.** `proof node challenge <id> ...` opens a Challenge against a node (ADR-0005, Rule 4 — ungated, any agent or collaborator). Once open, a Challenge is independently addressable: `proof challenge list`, `proof challenge show <challenge-id>`. Resolving one — dismissing it, or the revision/re-Acceptance/reference-review decision that follows — goes through `proof review ...`, same as every other Human Review action. Treating Challenge only as a boolean on its target would lose exactly the auditable, listable identity ADR-0005 gave it.
+
+This is hard to reverse the way a public API always is: once the Codex plugin, any MCP tools, and a future web app are all built against this envelope shape and error-code vocabulary, changing it becomes a compatibility break across every adapter at once, not a local edit.

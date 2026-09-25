@@ -53,7 +53,7 @@ An automated or semi-automated check (a verifier, a checker) run against a speci
 _Avoid_: verification result, verify accept
 
 **Challenge**:
-A claim, raised against an already-Accepted node or an Imported result, that it may no longer be safe to depend on (for example, a missing assumption noticed after the fact). Any agent or collaborator may open one — raising a concern isn't a mathematical judgment, so it isn't gated. Opening a Challenge sets its target's integrity state to Challenged; it never changes the target's acceptance state. Only the researcher resolves a Challenge: for a local node, by dismissing it or by revising the node and re-Accepting it; for an Imported result, through Reference review (reaffirming trust, or treating it as no longer callable so dependents migrate to a corrected node). An ordinary observation that doesn't call a node's standing into doubt is a Comment, not a Challenge — Challenge is reserved for the invalidating case. See ADR-0004, ADR-0005.
+A claim, raised against an already-Accepted node or an Imported result, that it may no longer be safe to depend on (for example, a missing assumption noticed after the fact). Any agent or collaborator may open one — raising a concern isn't a mathematical judgment, so it isn't gated. Opening a Challenge sets its target's integrity state to Challenged; it never changes the target's acceptance state. Only the researcher resolves a Challenge: for a local node, by dismissing it or by revising the node and re-Accepting it; for an Imported result, through Reference review (reaffirming trust, or treating it as no longer callable so dependents migrate to a corrected node). An ordinary observation that doesn't call a node's standing into doubt is a Comment, not a Challenge — Challenge is reserved for the invalidating case. A Challenge is itself an addressable, listable object once opened, not just a flag on its target. See ADR-0004, ADR-0005, ADR-0006.
 _Avoid_: bug, finding
 
 **Accepted mathematical interface**:
@@ -73,7 +73,7 @@ A proof map node's state is tracked along three independent axes, never folded i
 - **integrity state**: current by default, Potentially stale, or Challenged — a derived warning overlay, never itself a workflow or acceptance value
 
 **Claimed** (a workflow state):
-A researcher or agent has taken ownership of a proof map node to work on it, and has not yet submitted a Candidate proof for it. A review decision on that Candidate proof — whatever the decision — ends the claim; the next attempt on the node needs a fresh claim.
+A researcher or agent has taken ownership of a proof map node to work on it, and has not yet submitted a Candidate proof for it. At most one claim is active on a node at a time; submitting a Candidate proof ends it, handing the node to review-needed — the next attempt needs a fresh claim. See ADR-0006.
 _Avoid_: assigned, in progress, proof-drafted
 
 **Review-needed** (a workflow state):
