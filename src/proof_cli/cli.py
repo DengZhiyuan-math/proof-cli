@@ -98,8 +98,16 @@ from .commands import (
     get_store,
 )
 from .envelope import dump_envelope, error_envelope, success_envelope
-from .proof_map import ProofMapError, claim_node, create_node, list_nodes, release_node, require_node
-from .rendering import render_claim, render_proof_map_node, render_proof_map_node_list
+from .proof_map import (
+    ProofMapError,
+    claim_node,
+    create_node,
+    list_nodes,
+    release_node,
+    require_node,
+    submit_candidate_proof,
+)
+from .rendering import render_candidate_proof, render_claim, render_proof_map_node, render_proof_map_node_list
 from .review import render_verification_output
 
 app = typer.Typer(add_completion=False, help="Mathematical Proof CLI")
@@ -316,6 +324,41 @@ def node_release(
         _emit_node_error(exc, json_output)
         raise typer.Exit(code=1)
     _emit_claim(claim, json_output)
+
+
+def _emit_candidate_proof(record, json_output: bool) -> None:
+    if json_output:
+        typer.echo(dump_envelope(success_envelope(record.model_dump(mode="json"))))
+    else:
+        typer.echo(render_candidate_proof(record))
+
+
+@node_app.command("submit")
+def node_submit(
+    node_id: str,
+    content: str = typer.Option(..., "--content", help="The candidate proof text"),
+    rationale: str = typer.Option(
+        ..., "--rationale", help="Why this node is now appropriately scoped to prove directly"
+    ),
+    root: str = ".",
+    claimant: str = "human",
+    session: str = "default",
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    store = get_store(_root(root))
+    try:
+        record = submit_candidate_proof(
+            store,
+            node_id,
+            claimant_id=claimant,
+            session_id=session,
+            scoping_rationale=rationale,
+            content=content,
+        )
+    except ProofMapError as exc:
+        _emit_node_error(exc, json_output)
+        raise typer.Exit(code=1)
+    _emit_candidate_proof(record, json_output)
 
 
 app.add_typer(goal_app, name="goal")

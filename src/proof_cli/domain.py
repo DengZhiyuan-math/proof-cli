@@ -159,6 +159,27 @@ class ClaimRecord(BaseModel):
     release_reason: str | None = None
 
 
+class CandidateProofRecord(BaseModel):
+    """One immutable, versioned proof attempt for a ProofMapNode.
+
+    The Markdown file under `proofs/<node_id>/v<version>.md` is the source of
+    truth for the proof text; this record is the SQLite index over it. `id`
+    is stable and independent of `file_path` — a review record references a
+    submission by `id`, never by where its file happens to live. See ADR
+    (candidate proof storage) and ProofMapNode.
+    """
+
+    id: str
+    node_id: str
+    version: int
+    file_path: str
+    is_current: bool = True
+    review_record_id: str | None = None
+    submitted_by: str = "human"
+    scoping_rationale: str
+    created_at: datetime = Field(default_factory=utc_now)
+
+
 class ProjectSnapshot(BaseModel):
     project_id: str
     active_theorem: str | None = None

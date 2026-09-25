@@ -216,3 +216,133 @@ def test_node_force_release_requires_actor_and_reason(tmp_path: Path):
     payload = json.loads(force_release.stdout)
     assert payload["data"]["released_by"] == "researcher"
     assert payload["data"]["release_reason"] == "agent stuck"
+
+
+def test_node_submit_human_readable(tmp_path: Path):
+    runner.invoke(app, ["node", "create", "clm_1", "claim", "stmt", "--root", str(tmp_path)])
+    runner.invoke(app, ["node", "claim", "clm_1", "--root", str(tmp_path), "--claimant", "agent_a"])
+
+    result = runner.invoke(
+        app,
+        [
+            "node", "submit", "clm_1", "--root", str(tmp_path),
+            "--claimant", "agent_a",
+            "--content", "By direct computation the claim holds.",
+            "--rationale", "This is a single algebraic step; no further decomposition needed.",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "clm_1" in result.stdout
+    assert "v1" in result.stdout.lower()
+    assert (tmp_path / "proofs" / "clm_1" / "v1.md").exists()
+
+
+def test_node_submit_json_envelope(tmp_path: Path):
+    runner.invoke(app, ["node", "create", "clm_1", "claim", "stmt", "--root", str(tmp_path)])
+    runner.invoke(app, ["node", "claim", "clm_1", "--root", str(tmp_path), "--claimant", "agent_a"])
+
+    result = runner.invoke(
+        app,
+        [
+            "node", "submit", "clm_1", "--root", str(tmp_path),
+            "--claimant", "agent_a",
+            "--content", "proof body",
+            "--rationale", "scoped correctly",
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is True
+    assert payload["data"]["node_id"] == "clm_1"
+    assert payload["data"]["version"] == 1
+    assert payload["data"]["file_path"] == "proofs/clm_1/v1.md"
+
+    # the claim ended automatically; the node can be claimed by someone else now
+    reclaim = runner.invoke(
+        app, ["node", "claim", "clm_1", "--root", str(tmp_path), "--claimant", "agent_b", "--json"]
+    )
+    assert reclaim.exit_code == 0
+
+
+def test_node_submit_by_non_claimant_rejected_with_json_error(tmp_path: Path):
+    runner.invoke(app, ["node", "create", "clm_1", "claim", "stmt", "--root", str(tmp_path)])
+    runner.invoke(app, ["node", "claim", "clm_1", "--root", str(tmp_path), "--claimant", "agent_a"])
+
+    result = runner.invoke(
+        app,
+        [
+            "node", "submit", "clm_1", "--root", str(tmp_path),
+            "--claimant", "agent_b",
+            "--content", "proof body",
+            "--rationale", "scoped correctly",
+            "--json",
+        ],
+    )
+    assert result.exit_code != 0
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "NOT_CLAIMANT"
+
+
+def test_node_submit_without_claim_rejected_with_json_error(tmp_path: Path):
+    runner.invoke(app, ["node", "create", "clm_1", "claim", "stmt", "--root", str(tmp_path)])
+
+    result = runner.invoke(
+        app,
+        [
+            "node", "submit", "clm_1", "--root", str(tmp_path),
+            "--claimant", "agent_a",
+            "--content", "proof body",
+            "--rationale", "scoped correctly",
+            "--json",
+        ],
+    )
+    assert result.exit_code != 0
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "NO_ACTIVE_CLAIM"
+
+
+def test_node_submit_without_rationale_rejected(tmp_path: Path):
+    runner.invoke(app, ["node", "create", "clm_1", "claim", "stmt", "--root", str(tmp_path)])
+    runner.invoke(app, ["node", "claim", "clm_1", "--root", str(tmp_path), "--claimant", "agent_a"])
+
+    result = runner.invoke(
+        app,
+        [
+            "node", "submit", "clm_1", "--root", str(tmp_path),
+            "--claimant", "agent_a",
+            "--content", "proof body",
+            "--rationale", "   ",
+            "--json",
+        ],
+    )
+    assert result.exit_code != 0
+    payload = json.loads(result.stdout)
+    assert payload["error"]["code"] == "SCOPING_RATIONALE_REQUIRED"
+
+
+def test_node_second_submit_creates_v2(tmp_path: Path):
+    runner.invoke(app, ["node", "create", "clm_1", "claim", "stmt", "--root", str(tmp_path)])
+    runner.invoke(app, ["node", "claim", "clm_1", "--root", str(tmp_path), "--claimant", "agent_a"])
+    runner.invoke(
+        app,
+        [
+            "node", "submit", "clm_1", "--root", str(tmp_path),
+            "--claimant", "agent_a", "--content", "v1 text", "--rationale", "first attempt",
+        ],
+    )
+    runner.invoke(app, ["node", "claim", "clm_1", "--root", str(tmp_path), "--claimant", "agent_b"])
+    second = runner.invoke(
+        app,
+        [
+            "node", "submit", "clm_1", "--root", str(tmp_path),
+            "--claimant", "agent_b", "--content", "v2 text", "--rationale", "second attempt", "--json",
+        ],
+    )
+    assert second.exit_code == 0
+    payload = json.loads(second.stdout)
+    assert payload["data"]["version"] == 2
+    assert (tmp_path / "proofs" / "clm_1" / "v1.md").exists()
+    assert (tmp_path / "proofs" / "clm_1" / "v2.md").exists()

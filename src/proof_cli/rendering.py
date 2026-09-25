@@ -3,7 +3,7 @@ from __future__ import annotations
 from rich.console import Console
 from rich.table import Table
 
-from .domain import ClaimRecord, ProjectSnapshot, ProofMapNode
+from .domain import CandidateProofRecord, ClaimRecord, ProjectSnapshot, ProofMapNode
 
 
 def render_status(data: dict[str, object]) -> str:
@@ -81,6 +81,24 @@ def render_claim(claim: ClaimRecord) -> str:
         table.add_row("Released at", claim.released_at.isoformat())
         table.add_row("Released by", claim.released_by or "")
         table.add_row("Release reason", claim.release_reason or "")
+    console.print(table)
+    return console.export_text()
+
+
+def render_candidate_proof(record: CandidateProofRecord) -> str:
+    console = Console(record=True, width=100)
+    console.rule(f"Candidate Proof {record.node_id} v{record.version}")
+    table = Table(show_header=False, box=None, pad_edge=False)
+    table.add_column("key", style="bold")
+    table.add_column("value")
+    table.add_row("Candidate proof id", record.id)
+    table.add_row("Node", record.node_id)
+    table.add_row("Version", str(record.version))
+    table.add_row("File", record.file_path)
+    table.add_row("Current", "yes" if record.is_current else "no")
+    table.add_row("Submitted by", record.submitted_by)
+    table.add_row("Submitted at", record.created_at.isoformat())
+    table.add_row("Scoping rationale", record.scoping_rationale)
     console.print(table)
     return console.export_text()
 
