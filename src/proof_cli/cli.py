@@ -686,13 +686,16 @@ node_app.add_typer(node_evidence_app, name="evidence")
 
 app.add_typer(goal_app, name="goal")
 app.add_typer(codex_app, name="codex")
-app.add_typer(asset_app, name="asset")
-app.add_typer(pack_app, name="pack")
-app.add_typer(policy_app, name="policy")
-app.add_typer(recommend_app, name="recommend")
-app.add_typer(reuse_app, name="reuse")
-app.add_typer(automate_app, name="automate")
-app.add_typer(benchmark_app, name="benchmark")
+# Frozen peripheral modules (issue #28): reachable, but no longer advertised
+# in default `proof --help` discoverability — the new proof-map node model
+# is the primary surface now.
+app.add_typer(asset_app, name="asset", hidden=True)
+app.add_typer(pack_app, name="pack", hidden=True)
+app.add_typer(policy_app, name="policy", hidden=True)
+app.add_typer(recommend_app, name="recommend", hidden=True)
+app.add_typer(reuse_app, name="reuse", hidden=True)
+app.add_typer(automate_app, name="automate", hidden=True)
+app.add_typer(benchmark_app, name="benchmark", hidden=True)
 app.add_typer(project_app, name="project")
 app.add_typer(theorem_app, name="theorem")
 app.add_typer(node_app, name="node")

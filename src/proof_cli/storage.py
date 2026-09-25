@@ -158,6 +158,15 @@ CREATE TABLE IF NOT EXISTS evidence_checks (
 );
 
 CREATE INDEX IF NOT EXISTS idx_evidence_checks_candidate_proof_id ON evidence_checks(candidate_proof_id);
+
+CREATE TABLE IF NOT EXISTS governance_records (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  data TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_governance_records_kind ON governance_records(kind, created_at);
 """
 
 
@@ -984,6 +993,31 @@ def list_evidence_checks_for_candidate_proof(store: ProjectStore, candidate_proo
             (candidate_proof_id,),
         ).fetchall()
     return [_row_to_evidence_check(row) for row in rows]
+
+
+def insert_governance_record(store: ProjectStore, *, kind: str, data: str) -> None:
+    """Append-only store for the frozen asset/pack/policy/recommend/reuse/
+    automate/benchmark modules (issue #28) — isolated off
+    `ProjectState.session_history`, which is core proof-map bookkeeping,
+    not a place for these peripheral modules' own records. `kind` is one of
+    their history-prefix constants; behavior is otherwise unchanged from
+    before this table existed.
+    """
+    with store.connect() as conn:
+        conn.execute(
+            "INSERT INTO governance_records(id, kind, data, created_at) VALUES (?, ?, ?, ?)",
+            (str(uuid.uuid4()), kind, data, utc_now().isoformat()),
+        )
+        conn.commit()
+
+
+def list_governance_records(store: ProjectStore, *, kind: str) -> list[str]:
+    with store.connect() as conn:
+        rows = conn.execute(
+            "SELECT data FROM governance_records WHERE kind = ? ORDER BY created_at, rowid",
+            (kind,),
+        ).fetchall()
+    return [row["data"] for row in rows]
 
 
 def store_snapshot(store: ProjectStore, snapshot: ProjectSnapshot) -> ProjectSnapshot:

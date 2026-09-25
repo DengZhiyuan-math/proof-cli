@@ -27,10 +27,10 @@ from .automation_eval import (
 )
 from .domain import utc_now
 from .domain_packs import DomainPack, DomainPackInstallation
-from .proof_state import load_state, save_state
+from .proof_state import load_state
 from .recommendations import CrossProjectRecommendationReport, recommend_cross_project_assets
 from .reusable_assets import ReusableAsset, ReusableAssetReuseStatus
-from .storage import ProjectStore, append_event
+from .storage import ProjectStore, append_event, insert_governance_record, list_governance_records
 
 
 def _new_id(prefix: str) -> str:
@@ -131,25 +131,22 @@ def _append_record(
     message: str,
     entity_id: str | None = None,
 ) -> None:
-    state = load_state(store)
+    """Append a governance record, isolated in its own table (issue #28) —
+    `ProjectState.session_history` is core proof-map bookkeeping, not
+    storage for this frozen, peripheral module. `prefix` is still the
+    per-domain key (now a table `kind` rather than a string prefix); every
+    caller and every record shape is otherwise unchanged.
+    """
     if isinstance(payload, BaseModel):
         payload_json = payload.model_dump(mode="json")
     else:
         payload_json = dict(payload)
-    state.session_history.append(f"{prefix}{json.dumps(payload_json, sort_keys=True)}")
-    save_state(store, state, message=message)
+    insert_governance_record(store, kind=prefix, data=json.dumps(payload_json, sort_keys=True))
     append_event(store, event_kind, message, entity_id=entity_id, payload=payload_json)
 
 
 def _records_from_history(store: ProjectStore, prefix: str, model: type[T]) -> list[T]:
-    state = load_state(store)
-    records: list[T] = []
-    for entry in state.session_history:
-        if not entry.startswith(prefix):
-            continue
-        payload = entry.removeprefix(prefix)
-        records.append(model.model_validate_json(payload))
-    return records
+    return [model.model_validate_json(data) for data in list_governance_records(store, kind=prefix)]
 
 
 def _latest_by(records: Iterable[T], key_fn) -> list[T]:

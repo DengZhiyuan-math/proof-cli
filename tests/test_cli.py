@@ -558,15 +558,18 @@ def test_cli_exposes_publication_workflows(tmp_path: Path) -> None:
 
 
 def test_phase_five_cli_surface_routes_to_governance_workflows(tmp_path: Path) -> None:
+    # issue #28: these frozen peripheral modules are hidden from default
+    # `--help` discoverability, but every command underneath is still
+    # fully reachable — the invocations below are the actual proof of that.
     help_result = runner.invoke(app, ["--help"])
     assert help_result.exit_code == 0
-    assert "asset" in help_result.stdout
-    assert "pack" in help_result.stdout
-    assert "policy" in help_result.stdout
-    assert "recommend" in help_result.stdout
-    assert "reuse" in help_result.stdout
-    assert "automate" in help_result.stdout
-    assert "benchmark" in help_result.stdout
+    assert "asset" not in help_result.stdout
+    assert "pack" not in help_result.stdout
+    assert "policy" not in help_result.stdout
+    assert "recommend" not in help_result.stdout
+    assert "reuse" not in help_result.stdout
+    assert "automate" not in help_result.stdout
+    assert "benchmark" not in help_result.stdout
 
     asset_result = runner.invoke(app, ["asset", "list", "--root", str(tmp_path)])
     assert asset_result.exit_code == 0
