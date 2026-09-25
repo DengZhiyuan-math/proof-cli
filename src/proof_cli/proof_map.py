@@ -11,6 +11,7 @@ from .collaboration import (
     ReviewGovernanceState,
     ReviewRecord,
     ReviewRecordKind,
+    delete_review_record,
     list_review_records,
     record_review_decision,
     record_review_request,
@@ -623,6 +624,8 @@ def decide_acceptance(
             fingerprint = compute_interface_fingerprint(node.kind.value, node.statement, node.assumptions)
             set_candidate_proof_interface_fingerprint(store, current_proof.id, fingerprint)
 
+    _resolve_open_challenges(store, node_id, resolved_by=reviewer_id)
+
     append_event(
         store,
         "proof_map_acceptance_decided",
@@ -707,6 +710,8 @@ def decide_reference_review(
         store, request.id, ReviewGovernanceState.approved, reviewer_id=reviewer_id, rationale=rationale
     )
 
+    _resolve_open_challenges(store, node_id, resolved_by=reviewer_id)
+
     append_event(
         store,
         "proof_map_reference_review_granted",
@@ -728,9 +733,6 @@ def get_reference_review_state(store: ProjectStore, node_id: str) -> str:
     if records and records[-1].decision == ReviewGovernanceState.approved:
         return "reviewed"
     return "unreviewed"
-
-
-REVALIDATION_DECISION = "dependency-revalidation"
 
 
 def revalidate_dependency(
@@ -813,6 +815,7 @@ def revalidate_dependency(
     )
     upsert_dependency_pin(store, refreshed_pin)
 
+    request = None
     try:
         request = record_review_request(
             store,
@@ -827,6 +830,12 @@ def revalidate_dependency(
         )
     except Exception:
         upsert_dependency_pin(store, old_pin)
+        if request is not None:
+            # the request write landed but its decision didn't — delete it
+            # rather than leave a permanently-pending request with no
+            # matching decision, the same "neither or both" outcome as the
+            # pin rollback above.
+            delete_review_record(store, request.id)
         raise
 
     append_event(
@@ -902,6 +911,30 @@ def has_open_challenge(store: ProjectStore, node_id: str) -> bool:
     return len(_list_challenges(store, target_node_id=node_id, status="open")) > 0
 
 
+def _resolve_open_challenges(store: ProjectStore, node_id: str, *, resolved_by: str) -> None:
+    """Dismiss every open Challenge against `node_id`.
+
+    Called from `decide_acceptance` and `decide_reference_review`: per
+    ADR-0005 Rule 4, only Human Review resolves a Challenge, either by an
+    explicit `challenge dismiss` or by directly addressing the concern —
+    revising and re-Accepting a local node, or reaffirming trust in an
+    Imported result's Reference review. Without this, a Challenge-driven
+    reclaim (`claim_node`'s one sanctioned way to revise an Accepted node)
+    would leave the node permanently `challenged` even after the concern was
+    addressed.
+    """
+    resolved_at = utc_now()
+    for challenge in _list_challenges(store, target_node_id=node_id, status="open"):
+        if mark_challenge_dismissed(store, challenge.id, resolved_by=resolved_by, resolved_at=resolved_at):
+            append_event(
+                store,
+                "proof_map_challenge_dismissed",
+                f"challenge {challenge.id} dismissed by {resolved_by} (resolved via review decision)",
+                entity_id=node_id,
+                payload={"challenge_id": challenge.id, "reviewer_id": resolved_by},
+            )
+
+
 def dismiss_challenge(
     store: ProjectStore,
     challenge_id: str,
@@ -942,33 +975,37 @@ def dismiss_challenge(
     return challenge.model_copy(update={"status": ChallengeStatus.dismissed, "resolved_by": reviewer_id, "resolved_at": resolved_at})
 
 
-def _is_downstream_of_challenge_or_stale_pin(store: ProjectStore, node_id: str, _visited: set[str] | None = None) -> bool:
+def _is_downstream_of_challenge_or_stale_pin(store: ProjectStore, node_id: str) -> bool:
     """Whether `node_id` is itself Challenged, or reachable (via dependency edges,
     transitively) from a Challenged node or a dependency edge whose pin no
     longer matches its target's current accepted interface.
 
     Pure graph reachability over persisted Challenge and DependencyPin
-    records — nothing is stored per node. See ADR-0004 point 4.
+    records — nothing is stored per node. See ADR-0004 point 4. Walked with
+    an explicit worklist, not recursion: a long-running project's dependency
+    chain can run hundreds of nodes deep, well past Python's default
+    recursion limit.
     """
-    if _visited is None:
-        _visited = set()
-    if node_id in _visited:
-        return False
-    _visited.add(node_id)
+    visited: set[str] = set()
+    pending = [node_id]
+    while pending:
+        current_id = pending.pop()
+        if current_id in visited:
+            continue
+        visited.add(current_id)
 
-    if has_open_challenge(store, node_id):
-        return True
-
-    node = get_proof_map_node(store, node_id)
-    if node is None:
-        return False
-
-    for dependency_id in node.dependencies:
-        pin = _get_dependency_pin(store, node_id, dependency_id)
-        if pin is not None and not dependency_pin_is_current(store, pin):
+        if has_open_challenge(store, current_id):
             return True
-        if _is_downstream_of_challenge_or_stale_pin(store, dependency_id, _visited):
-            return True
+
+        node = get_proof_map_node(store, current_id)
+        if node is None:
+            continue
+
+        for dependency_id in node.dependencies:
+            pin = _get_dependency_pin(store, current_id, dependency_id)
+            if pin is not None and not dependency_pin_is_current(store, pin):
+                return True
+            pending.append(dependency_id)
     return False
 
 
@@ -989,15 +1026,21 @@ def _dependency_satisfied(store: ProjectStore, dependency_id: str) -> bool:
     dependency = get_proof_map_node(store, dependency_id)
     if dependency is None:
         return True
-    if _is_downstream_of_challenge_or_stale_pin(store, dependency_id):
-        return False
     if dependency.kind == ProofMapNodeKind.imported_result:
-        return get_reference_review_state(store, dependency_id) == "reviewed"
-    return get_acceptance_state(store, dependency_id) == "accepted"
+        reached_standing = get_reference_review_state(store, dependency_id) == "reviewed"
+    else:
+        reached_standing = get_acceptance_state(store, dependency_id) == "accepted"
+    if not reached_standing:
+        return False
+    return not _is_downstream_of_challenge_or_stale_pin(store, dependency_id)
 
 
 def _has_unresolved_dependency(store: ProjectStore, node: ProofMapNode) -> bool:
     return any(not _dependency_satisfied(store, dependency_id) for dependency_id in node.dependencies)
+
+
+def _already_accepted(store: ProjectStore, node: ProofMapNode) -> bool:
+    return node.kind != ProofMapNodeKind.imported_result and get_acceptance_state(store, node.id) == "accepted"
 
 
 def get_workflow_state(store: ProjectStore, node_id: str) -> str:
@@ -1015,11 +1058,7 @@ def get_workflow_state(store: ProjectStore, node_id: str) -> str:
     """
     node = require_node(store, node_id)
 
-    already_accepted = (
-        node.kind != ProofMapNodeKind.imported_result and get_acceptance_state(store, node_id) == "accepted"
-    )
-
-    if not already_accepted and _has_unresolved_dependency(store, node):
+    if not _already_accepted(store, node) and _has_unresolved_dependency(store, node):
         return "blocked"
 
     if get_active_claim(store, node_id) is not None:
@@ -1066,7 +1105,7 @@ def get_blocked_reason(store: ProjectStore, node_id: str) -> str | None:
     Acceptance/Reference-review yet.
     """
     node = require_node(store, node_id)
-    if not _has_unresolved_dependency(store, node):
+    if _already_accepted(store, node) or not _has_unresolved_dependency(store, node):
         return None
     for dependency_id in node.dependencies:
         if not _dependency_satisfied(store, dependency_id) and _is_downstream_of_challenge_or_stale_pin(

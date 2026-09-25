@@ -1551,6 +1551,13 @@ def test_revalidate_dependency_review_write_failure_rolls_back_the_pin(tmp_path:
         and record.decision.value == "reaffirmed"
         for record in list_review_records_for_test(store, "clm_1")
     )
+    # and no dangling request either — a `proposed_for_review` record with
+    # no matching decision would itself be the "inconsistent state, not a
+    # valid intermediate one" ADR-0005 says must never happen
+    assert not any(
+        record.kind is not None and record.kind.value == "dependency_revalidation"
+        for record in list_review_records_for_test(store, "clm_1")
+    )
 
 
 def list_review_records_for_test(store, node_id: str):
@@ -1729,3 +1736,77 @@ def test_reclaiming_a_challenged_accepted_node_is_permitted(tmp_path: Path):
     claim = claim_node(store, "lem_1", claimant_id="agent_b", session_id="sess_2")
     assert claim.claimant_id == "agent_b"
     assert get_workflow_state(store, "lem_1") == "claimed"
+
+
+def test_reaccepting_a_challenged_node_dismisses_the_challenge(tmp_path: Path):
+    """Re-Accepting a revised Candidate proof is itself one of the sanctioned
+    ways to resolve a Challenge (ADR-0005 Rule 4) — it must not require a
+    separate `challenge dismiss` call afterward."""
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="lem_1", kind="lemma", statement="Base lemma")
+    _accept_via_full_cycle(store, "lem_1")
+
+    challenge = open_challenge(store, "lem_1", opened_by="agent_a", rationale="might be wrong")
+    assert get_integrity_state(store, "lem_1") == "challenged"
+
+    claim_node(store, "lem_1", claimant_id="agent_b", session_id="sess_2")
+    submit_candidate_proof(
+        store, "lem_1", claimant_id="agent_b", session_id="sess_2",
+        scoping_rationale="addressed the concern", content="revised proof",
+    )
+    decide_acceptance(store, "lem_1", "accept", reviewer_id="researcher", confirmed=True)
+
+    assert has_open_challenge(store, "lem_1") is False
+    assert get_challenge(store, challenge.id).status.value == "dismissed"
+    assert get_integrity_state(store, "lem_1") == "current"
+
+
+def test_reaffirming_reference_review_dismisses_the_challenge(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(
+        store, node_id="ref_1", kind="imported_result", statement="An external theorem",
+        source_locator="doi:10.1234/example", source_version="v1",
+    )
+    decide_reference_review(store, "ref_1", "reference-review", reviewer_id="researcher", confirmed=True)
+
+    open_challenge(store, "ref_1", opened_by="agent_a", rationale="source retracted?")
+    assert get_integrity_state(store, "ref_1") == "challenged"
+
+    decide_reference_review(store, "ref_1", "reference-review", reviewer_id="researcher", rationale="still trustworthy", confirmed=True)
+
+    assert has_open_challenge(store, "ref_1") is False
+    assert get_integrity_state(store, "ref_1") == "current"
+
+
+def test_get_blocked_reason_matches_get_workflow_state_for_an_already_accepted_node(tmp_path: Path):
+    """An already-Accepted node's own dependencies can become unresolved
+    later (e.g. one of them gets Challenged) without dragging this node's
+    *workflow* state back to `blocked` (ADR-0004). get_blocked_reason must
+    agree: it's the documented explanation for get_workflow_state's
+    `blocked`, so it must not return a reason when that axis doesn't."""
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="lem_base", kind="lemma", statement="Base lemma")
+    _accept_via_full_cycle(store, "lem_base")
+    create_node(store, node_id="clm_1", kind="claim", statement="Depends on base", dependencies=["lem_base"])
+    _accept_via_full_cycle(store, "clm_1")
+
+    open_challenge(store, "lem_base", opened_by="agent_a", rationale="might be wrong")
+
+    assert get_workflow_state(store, "clm_1") != "blocked"
+    assert get_blocked_reason(store, "clm_1") is None
+
+
+def test_stale_pin_reachability_walk_does_not_recurse_on_a_deep_chain(tmp_path: Path):
+    """A long-running research project (this tool's explicit use case) can
+    build a dependency chain hundreds of nodes deep. The Challenge/stale-pin
+    reachability walk must handle that iteratively, not via direct recursion
+    that would blow Python's default recursion limit."""
+    from proof_cli.proof_map import _is_downstream_of_challenge_or_stale_pin
+
+    store = ensure_project(tmp_path)
+    depth = 1500
+    create_node(store, node_id="n0", kind="lemma", statement="base")
+    for i in range(1, depth):
+        create_node(store, node_id=f"n{i}", kind="lemma", statement=f"stmt {i}", dependencies=[f"n{i - 1}"])
+
+    assert _is_downstream_of_challenge_or_stale_pin(store, f"n{depth - 1}") is False
