@@ -8,6 +8,26 @@ A human-machine collaborative proof system for research mathematics. It keeps a 
 The evolving dependency graph of one research effort, from its target theorem down to the claims and lemmas it rests on. It is an execution map: its proof map nodes are resolved by producing proofs, not decisions. A project holds exactly one proof map.
 _Avoid_: proof tree (it is a DAG), project
 
+**Frontier**:
+The set of proof map nodes ready to be worked right now — no unresolved dependency, no active claim. The first thing an agent or a researcher checks, and the strongest visual signal in any Proof map view, ahead of workflow/acceptance/integrity state. See ADR-0006, ADR-0008.
+_Avoid_: ready queue, backlog
+
+**Proof fog**:
+A known difficulty not yet precise enough to state as a Claim. It lives outside the proof map as its own list, never as a graph node — giving it a node would force a fake-precise statement, or a special kind every graph operation would have to account for. See ADR-0008.
+_Avoid_: fog node, vague claim
+
+**Crystallize**:
+Turning a Proof fog item into a proof map node once it becomes precise enough to state and depend on. An ordinary node creation, not a migration of the fog entry itself — the fog entry is just dropped once the node exists.
+_Avoid_: promote (already means Claim → Lemma), formalize the fog
+
+**DAG view**:
+The canonical presentation of a proof map — the real dependency structure, including a node depended on by more than one other node. The only Proof map presentation that's a source of truth; a Tree view is always derived from it. See ADR-0008.
+_Avoid_: graph view (ambiguous with Tree view, which is also a graph)
+
+**Tree view**:
+A presentation rooted at one node, answering "how is this proved?" — it deliberately re-shows a shared dependency at every place it's used, rather than deduplicating it the way the DAG view does. Derived from the DAG view on demand; never itself canonical. See ADR-0008.
+_Avoid_: proof tree (see Proof map's own _Avoid_ — a proof map is a DAG; this is one rooted, duplicating rendering of it, not a claim that the structure is a tree)
+
 **Proof map node**:
 The single entity type for every vertex in a proof map — theorem, lemma, claim, or imported result. All four share one structure (statement, assumptions, dependencies, status, candidate proof); `kind` distinguishes what role a node plays, not its shape. See ADR-0001.
 _Avoid_: node (ambiguous with generic graph/UI nodes), ticket (carries software-wayfinder connotations), work unit
