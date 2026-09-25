@@ -49,7 +49,13 @@ def render_export(data: dict[str, object]) -> str:
     return console.export_text()
 
 
-def render_proof_map_node(node: ProofMapNode) -> str:
+def render_proof_map_node(
+    node: ProofMapNode,
+    *,
+    workflow_state: str | None = None,
+    acceptance_state: str | None = None,
+    integrity_state: str | None = None,
+) -> str:
     console = Console(record=True, width=100)
     console.rule(f"Proof Map Node: {node.id}")
     table = Table(show_header=False, box=None, pad_edge=False)
@@ -67,8 +73,31 @@ def render_proof_map_node(node: ProofMapNode) -> str:
         table.add_row("Source version", node.source_version)
     if node.trust_level:
         table.add_row("Trust level", node.trust_level.value)
+    # Three independent, computed signals — never folded into one status word.
+    if workflow_state is not None:
+        table.add_row("Workflow state", workflow_state)
+    if acceptance_state is not None:
+        table.add_row("Acceptance state", acceptance_state)
+    if integrity_state is not None:
+        table.add_row("Integrity state", integrity_state)
     table.add_row("Created by", node.created_by)
     table.add_row("Created at", node.created_at.isoformat())
+    console.print(table)
+    return console.export_text()
+
+
+def render_frontier(nodes: list[ProofMapNode]) -> str:
+    console = Console(record=True, width=100)
+    console.rule("Proof Frontier")
+    if not nodes:
+        console.print("No frontier nodes")
+        return console.export_text()
+    table = Table()
+    table.add_column("id")
+    table.add_column("kind")
+    table.add_column("statement")
+    for node in nodes:
+        table.add_row(node.id, node.kind.value, node.statement)
     console.print(table)
     return console.export_text()
 

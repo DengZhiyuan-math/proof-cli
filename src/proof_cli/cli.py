@@ -106,12 +106,22 @@ from .proof_map import (
     create_node,
     decide_acceptance,
     decide_reference_review,
+    get_acceptance_state,
+    get_frontier,
+    get_integrity_state,
+    get_workflow_state,
     list_nodes,
     release_node,
     require_node,
     submit_candidate_proof,
 )
-from .rendering import render_candidate_proof, render_claim, render_proof_map_node, render_proof_map_node_list
+from .rendering import (
+    render_candidate_proof,
+    render_claim,
+    render_frontier,
+    render_proof_map_node,
+    render_proof_map_node_list,
+)
 from .review import render_verification_output
 
 app = typer.Typer(add_completion=False, help="Mathematical Proof CLI")
@@ -194,6 +204,17 @@ def reason(theorem_id: str, root: str = ".", notes: str = "") -> None:
 
 
 @app.command()
+def frontier(root: str = ".", json_output: bool = typer.Option(False, "--json")) -> None:
+    """Nodes with no unresolved dependency and no active claim."""
+    store = get_store(_root(root))
+    nodes = get_frontier(store)
+    if json_output:
+        typer.echo(dump_envelope(success_envelope([node.model_dump(mode="json") for node in nodes])))
+        return
+    typer.echo(render_frontier(nodes))
+
+
+@app.command()
 def revalidate(source_id: str, root: str = ".", backend_target: str = "", notes: str = "") -> None:
     typer.echo(
         render_verification_output(
@@ -272,10 +293,28 @@ def node_show(
     store = get_store(_root(root))
     try:
         node = require_node(store, node_id)
+        workflow_state = get_workflow_state(store, node_id)
+        acceptance_state = get_acceptance_state(store, node_id)
+        integrity_state = get_integrity_state(store, node_id)
     except ProofMapError as exc:
         _emit_node_error(exc, json_output)
         raise typer.Exit(code=1)
-    _emit_node(node, json_output)
+
+    if json_output:
+        payload = node.model_dump(mode="json")
+        payload["workflow_state"] = workflow_state
+        payload["acceptance_state"] = acceptance_state
+        payload["integrity_state"] = integrity_state
+        typer.echo(dump_envelope(success_envelope(payload)))
+    else:
+        typer.echo(
+            render_proof_map_node(
+                node,
+                workflow_state=workflow_state,
+                acceptance_state=acceptance_state,
+                integrity_state=integrity_state,
+            )
+        )
 
 
 @node_app.command("list")
