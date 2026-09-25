@@ -48,29 +48,53 @@ _Avoid_: acceptance, verification
 The researcher's explicit decision to change an Accepted Claim's kind to Lemma, marking it as independently reusable. Only possible after the Claim has been Accepted; a node's kind is never automatically reassigned, and Promote does not currently support demotion.
 _Avoid_: upgrade, generalize
 
+**Evidence check**:
+An automated or semi-automated check (a verifier, a checker) run against a specific Candidate proof, recorded as passed, failed, inconclusive, error, or stale. The researcher may separately judge an Evidence check trusted or unusable, but that only judges the check's own credibility — an Evidence check can never itself grant or revoke Acceptance, or close or block anything. See ADR-0004.
+_Avoid_: verification result, verify accept
+
+**Challenge**:
+A claim, raised against an already-Accepted node, that its Acceptance may no longer hold (for example, a missing assumption noticed after the fact). Opening a Challenge sets that node's integrity state to Challenged; it never changes the node's acceptance state. Only the researcher resolves a Challenge — by dismissing it, or by revising the node and re-Accepting it. An ordinary observation that doesn't call a node's Acceptance into doubt is a Comment, not a Challenge — Challenge is reserved for the invalidating case. See ADR-0004.
+_Avoid_: bug, finding
+
 ### Node lifecycle
 
-A proof map node's lifecycle state is never stored directly — it is always computed from lower-level records (an active claim, the node's latest candidate proof and its review decision, and its dependencies' own state). See ADR-0002.
+A proof map node's state is tracked along three independent axes, never folded into one flat status. None are stored directly — each is computed from lower-level records (an active claim, the node's latest Candidate proof and its review decision, its dependencies' own state, and any open Challenges). See ADR-0002, ADR-0004.
 
-**Claimed** (a node lifecycle state):
+- **workflow state**: Claimed, Review-needed, Revision requested, Blocked — how far the current attempt has gotten
+- **acceptance state**: Accepted, Rejected, or unreviewed by default — set only by the researcher's Human Review
+- **integrity state**: current by default, Potentially stale, or Challenged — a derived warning overlay, never itself a workflow or acceptance value
+
+**Claimed** (a workflow state):
 A researcher or agent has taken ownership of a proof map node to work on it, and has not yet submitted a Candidate proof for it. A review decision on that Candidate proof — whatever the decision — ends the claim; the next attempt on the node needs a fresh claim.
 _Avoid_: assigned, in progress, proof-drafted
 
-**Review-needed** (a node lifecycle state):
+**Review-needed** (a workflow state):
 A proof map node has a submitted Candidate proof awaiting the researcher's Acceptance or Reference review decision.
 _Avoid_: pending review, submitted
 
-**Revision requested** (a node lifecycle state):
+**Revision requested** (a workflow state):
 The researcher's decision that a Candidate proof does not stand, but the node itself is still worth pursuing — the next attempt targets the same node, not a new one.
 _Avoid_: rejected, needs work
 
-**Rejected** (a node lifecycle state):
+**Blocked** (a workflow state):
+A proof map node has at least one dependency that has not yet reached Acceptance (for a Theorem, Lemma, or Claim dependency) or Reference review (for an Imported result dependency). Blocked overrides Claimed, Review-needed, and Revision requested within the workflow axis. It says nothing about a node's acceptance or integrity state — those are separate axes, tracked and shown alongside it, not competed with for the same slot.
+_Avoid_: waiting
+
+**Accepted** (an acceptance state):
+The researcher has given this node Acceptance (or, for an Imported result, Reference review); it may be depended on. Only a Human Review decision sets or changes this — no other subsystem may.
+_Avoid_: verified, established
+
+**Rejected** (an acceptance state):
 The researcher's decision that a node's approach does not hold and should not be pursued further. The node and its full candidate-proof and review history stay in the proof map permanently, as the record of the abandoned route.
 _Avoid_: closed, abandoned, revision requested
 
-**Blocked** (a node lifecycle state):
-A proof map node has at least one dependency that has not yet reached Acceptance (for a Theorem, Lemma, or Claim dependency) or Reference review (for an Imported result dependency). Blocked overrides Claimed, Review-needed, and Revision requested in what's displayed, but never overrides Accepted or Rejected — those are terminal regardless of a node's dependencies.
-_Avoid_: waiting
+**Integrity state**:
+A derived overlay on a node's acceptance state — current, Potentially stale, or Challenged — computed from the dependency graph. It is never stored, and it is never itself a workflow or acceptance value, or a change to either. See ADR-0004.
+_Avoid_: status, health
+
+**Potentially stale** (an integrity state):
+An Accepted node has an ancestor with an open Challenge, or has an ancestor whose currently-accepted version has moved past the version this node's dependency edge was checked against. Computed by reachability over the dependency graph from every open Challenge's target and every version-mismatched edge, never stored per node — dismissing a Challenge, or reconfirming a dependency against a node's new accepted version, clears every Potentially stale node it alone caused, automatically. A node that isn't yet Accepted shows the same underlying cause as Blocked instead, labelled dependency-challenged, rather than Potentially stale.
+_Avoid_: stale, out of date
 
 **Split**:
 Decomposing a Theorem, Lemma, or Claim into new Claim nodes that become its dependencies, so each can be worked and Accepted independently. Not gated by review — it proposes work structure, not a mathematical result — so any agent or collaborator may do it. Splitting doesn't resolve the parent: once its new dependencies are Accepted, the parent still needs its own Candidate proof (even a short one) and its own Acceptance, combining them. A parent's existing dependencies aren't automatically reassigned to the new children; only a person or agent explicitly moving one decides that. Split doesn't apply to an Imported result (nothing to decompose) or a Rejected node (pursue a new node instead of reviving that one). A node produced by a split records which node it was split from, in `derived_from`.
