@@ -10,7 +10,8 @@ from typing import Any
 from pydantic import BaseModel, Field, model_serializer
 
 from .collaboration import CollaborationState, list_review_records, load_collaboration
-from .domain import ProjectSnapshot, TheoremContract, TheoremProvenanceKind, TheoremReviewState, TheoremStatus, utc_now
+from .domain import ProjectSnapshot, ProofMapNode, TheoremContract, TheoremProvenanceKind, utc_now
+from .proof_map import get_acceptance_state, get_integrity_state, get_node, list_nodes
 from .references import ReferenceRecord
 from .storage import (
     ProjectStore,
@@ -104,6 +105,11 @@ class PublicationSelection(BaseModel):
     visible: bool = True
     reason: str = ""
     section_label: str = ""
+    # Read live from the core model at selection time, never stored on the
+    # claim itself — orthogonal to the claim's own editorial `readiness`
+    # (issue #30). `None` for a claim not backed by a proof_map_node.
+    acceptance_state: str | None = None
+    integrity_state: str | None = None
 
 
 class PublicationView(BaseModel):
@@ -278,30 +284,22 @@ def _claim_visibility(claim: PublicationClaim) -> PublicationVisibility:
     return PublicationVisibility.internal_only
 
 
-def _derived_readiness(theorem: TheoremContract) -> PublicationReadiness:
-    if theorem.status in {TheoremStatus.blocked, TheoremStatus.failed}:
-        return PublicationReadiness.blocked
-    if theorem.review_state == TheoremReviewState.superseded:
-        return PublicationReadiness.superseded
-    if theorem.review_state == TheoremReviewState.rejected:
-        return PublicationReadiness.disputed
-    if theorem.review_state == TheoremReviewState.approved and theorem.provenance_kind == TheoremProvenanceKind.imported:
-        return PublicationReadiness.supplement_ready
-    if theorem.review_state == TheoremReviewState.approved:
-        return PublicationReadiness.paper_ready
-    if theorem.review_state == TheoremReviewState.candidate:
-        return PublicationReadiness.collaborator_ready
-    return PublicationReadiness.internal_draft
-
-
 def _claim_from_theorem(theorem: TheoremContract) -> PublicationClaim:
+    """A default publication claim for a theorem with no explicit editorial decision yet.
+
+    `readiness` starts at `internal_draft` — the editorial track is never
+    auto-derived from the theorem's own status/review_state (issue #30);
+    reaching anything past `internal_draft`, `paper_ready` above all,
+    always requires an explicit `set_publication_claim`/`set_publication_state`
+    call from a human editor.
+    """
     return PublicationClaim(
         object_type="theorem_contract",
         object_id=theorem.id,
         display_name=theorem.name,
         title=theorem.statement,
         section_placement="",
-        readiness=_derived_readiness(theorem),
+        readiness=PublicationReadiness.internal_draft,
         citation_kind=PublicationCitationKind.project_original if theorem.provenance_kind == TheoremProvenanceKind.local else PublicationCitationKind.imported_reference,
         internal_only=False,
         editorial_notes=list(theorem.local_usage_notes) or list(theorem.imported_usage_notes),
@@ -312,6 +310,44 @@ def _claim_from_theorem(theorem: TheoremContract) -> PublicationClaim:
         created_at=theorem.created_at,
         updated_at=theorem.updated_at,
     )
+
+
+def _claim_from_proof_map_node(node: ProofMapNode) -> PublicationClaim:
+    """A default publication claim for a ProofMapNode with no explicit editorial decision yet.
+
+    Same rule as `_claim_from_theorem`: `readiness` starts at `internal_draft`
+    regardless of the node's own acceptance_state — accepted and
+    paper-ready are orthogonal, and only a human editor's explicit call
+    ever moves the editorial track.
+    """
+    return PublicationClaim(
+        object_type="proof_map_node",
+        object_id=node.id,
+        display_name=node.display_label or node.id,
+        title=node.statement,
+        section_placement="",
+        readiness=PublicationReadiness.internal_draft,
+        citation_kind=PublicationCitationKind.project_original,
+        internal_only=False,
+        supporting_theorem_ids=list(node.dependencies),
+        updated_by=node.updated_by,
+        created_at=node.created_at,
+        updated_at=node.updated_at,
+    )
+
+
+def node_acceptance_and_integrity(store: ProjectStore, object_type: str, object_id: str) -> tuple[str | None, str | None]:
+    """The claim's underlying node's acceptance_state/integrity_state, read live from the core model.
+
+    `None, None` for anything that isn't a `proof_map_node` claim (e.g. a
+    `theorem_contract` claim, which predates the unified node model and has
+    no acceptance/integrity axes of its own). Never stored or cached here —
+    publication's own editorial `readiness` is a completely separate,
+    explicitly-set track (issue #30).
+    """
+    if object_type != "proof_map_node":
+        return None, None
+    return get_acceptance_state(store, object_id), get_integrity_state(store, object_id)
 
 
 def _claim_sort_key(claim: PublicationClaim) -> tuple[str, str, str]:
@@ -333,6 +369,10 @@ def _all_claims(store: ProjectStore) -> list[PublicationClaim]:
         key = ("theorem_contract", theorem.id)
         if key not in explicit:
             claims.append(_claim_from_theorem(theorem))
+    for node in list_nodes(store):
+        key = ("proof_map_node", node.id)
+        if key not in explicit:
+            claims.append(_claim_from_proof_map_node(node))
     claims.sort(key=_claim_sort_key)
     return claims
 
@@ -490,6 +530,10 @@ def get_publication_claim(store: ProjectStore, object_id: str, *, object_type: s
         theorem = next((item for item in list_theorems(store) if item.id == object_id), None)
         if theorem is not None:
             return _claim_from_theorem(theorem)
+    if object_type == "proof_map_node":
+        node = get_node(store, object_id)
+        if node is not None:
+            return _claim_from_proof_map_node(node)
     return None
 
 
@@ -545,6 +589,7 @@ def get_publication_view(store: ProjectStore, view_id: str) -> PublicationView |
 
 
 def _select_claims_for_audience(
+    store: ProjectStore,
     claims: list[PublicationClaim],
     *,
     audience: PublicationAudience,
@@ -583,12 +628,15 @@ def _select_claims_for_audience(
                 visible = False
                 reasons.append("not supplement ready")
         section_label = (section_mapping or {}).get(claim.object_id, claim.section_placement)
+        acceptance_state, integrity_state = node_acceptance_and_integrity(store, claim.object_type, claim.object_id)
         selections.append(
             PublicationSelection(
                 claim=claim,
                 visible=visible,
                 reason="; ".join(dict.fromkeys(reasons)),
                 section_label=section_label,
+                acceptance_state=acceptance_state,
+                integrity_state=integrity_state,
             )
         )
     return selections
@@ -606,6 +654,7 @@ def build_publication_view(
     explicit_view = get_publication_view(store, view_id) if view_id else next((view for view in reversed(state.views) if view.audience == audience_enum), None)
     if explicit_view is not None:
         selections = _select_claims_for_audience(
+            store,
             claims,
             audience=audience_enum,
             included_object_ids=explicit_view.included_object_ids,
@@ -616,7 +665,7 @@ def build_publication_view(
             explicit_view = None
         else:
             return explicit_view.model_copy(update={"selections": selections, "updated_at": utc_now()})
-    selections = _select_claims_for_audience(claims, audience=audience_enum)
+    selections = _select_claims_for_audience(store, claims, audience=audience_enum)
     return PublicationView(
         name=f"{audience_enum.value}_view",
         audience=audience_enum,
