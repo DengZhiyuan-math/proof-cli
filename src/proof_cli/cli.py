@@ -502,16 +502,6 @@ def _emit_challenge(challenge, json_output: bool, *, command: str) -> None:
         typer.echo(render_challenge(challenge))
 
 
-def _emit_challenge_error(exc: ProofMapError, json_output: bool, *, command: str) -> None:
-    if json_output:
-        typer.echo(dump_envelope(error_envelope(command, exc.code, exc.message, details=exc.details or None)))
-    else:
-        detail_suffix = ""
-        if exc.details:
-            detail_suffix = " (" + ", ".join(f"{key}={value}" for key, value in exc.details.items()) + ")"
-        typer.echo(f"Error: {exc.message}{detail_suffix}")
-
-
 @challenge_app.command("open")
 def challenge_open(
     target_id: str,
@@ -525,7 +515,7 @@ def challenge_open(
     try:
         challenge = open_challenge(store, target_id, opened_by=opened_by, rationale=rationale)
     except ProofMapError as exc:
-        _emit_challenge_error(exc, json_output, command="challenge.open")
+        _emit_node_error(exc, json_output, command="challenge.open")
         raise typer.Exit(code=1)
     _emit_challenge(challenge, json_output, command="challenge.open")
 
@@ -557,7 +547,7 @@ def challenge_show(
     try:
         challenge = require_challenge(store, challenge_id)
     except ProofMapError as exc:
-        _emit_challenge_error(exc, json_output, command="challenge.show")
+        _emit_node_error(exc, json_output, command="challenge.show")
         raise typer.Exit(code=1)
     _emit_challenge(challenge, json_output, command="challenge.show")
 
@@ -577,7 +567,7 @@ def challenge_dismiss(
     try:
         challenge = dismiss_challenge(store, challenge_id, reviewer_id=reviewer, rationale=rationale, confirmed=confirm)
     except ProofMapError as exc:
-        _emit_challenge_error(exc, json_output, command="challenge.dismiss")
+        _emit_node_error(exc, json_output, command="challenge.dismiss")
         raise typer.Exit(code=1)
     _emit_challenge(challenge, json_output, command="challenge.dismiss")
 

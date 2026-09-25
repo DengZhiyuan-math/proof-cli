@@ -411,6 +411,25 @@ def get_review_record(store: ProjectStore, review_id: str) -> ReviewRecord | Non
     return None
 
 
+def delete_review_record(store: ProjectStore, review_id: str) -> bool:
+    """Remove a review record outright, with no compensating event.
+
+    Only for a caller compensating for a request whose paired decision write
+    failed (record_review_request/record_review_decision aren't atomic with
+    each other) — restores the "as if it never happened" state a real
+    transaction would give, rather than leaving a request permanently stuck
+    at `proposed_for_review` with no matching decision. Never used for an
+    ordinary, successfully-decided review.
+    """
+    state = load_collaboration(store)
+    before = len(state.review_records)
+    state.review_records = [record for record in state.review_records if record.id != review_id]
+    if len(state.review_records) == before:
+        return False
+    save_collaboration(store, state)
+    return True
+
+
 def ensure_comment_thread(
     store: ProjectStore,
     object_type: str,
@@ -796,6 +815,7 @@ __all__ = [
     "SharedAssetPublicationStatus",
     "compare_branches",
     "create_branch",
+    "delete_review_record",
     "get_branch",
     "get_contributor",
     "get_policy",
