@@ -9,11 +9,14 @@ from proof_cli.proof_map import (
     claim_node,
     create_node,
     get_node,
+    list_candidate_proofs,
     list_nodes,
     release_node,
     require_node,
+    submit_candidate_proof,
 )
-from proof_cli.storage import ensure_project, get_active_claim, mark_claim_released
+from proof_cli.storage import ensure_project, get_active_claim, get_current_candidate_proof, mark_claim_released
+from proof_cli.vault import read_candidate_proof_frontmatter
 
 
 def test_create_and_get_node(tmp_path: Path):
@@ -351,3 +354,212 @@ def test_concurrent_release_and_force_release_only_one_wins(tmp_path: Path):
     assert outcomes.count("ok") == 1
     assert outcomes.count("error") == 1
     assert get_active_claim(store, "clm_1") is None
+
+
+def test_submit_candidate_proof_writes_vault_file_and_index(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_1", kind="claim", statement="stmt")
+    claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
+
+    record = submit_candidate_proof(
+        store,
+        "clm_1",
+        claimant_id="agent_a",
+        session_id="sess_1",
+        scoping_rationale="This claim is a single algebraic step, no further decomposition needed.",
+        content="## Proof\n\nBy direct computation, ...",
+    )
+
+    assert record.node_id == "clm_1"
+    assert record.version == 1
+    assert record.file_path == "proofs/clm_1/v1.md"
+    assert record.is_current is True
+
+    vault_file = tmp_path / record.file_path
+    assert vault_file.exists()
+    text = vault_file.read_text(encoding="utf-8")
+    assert "By direct computation" in text
+    frontmatter = read_candidate_proof_frontmatter(vault_file)
+    assert frontmatter["id"] == record.id
+    assert frontmatter["node_id"] == "clm_1"
+    assert "single algebraic step" in frontmatter["scoping_rationale"]
+
+
+def test_submit_requires_scoping_rationale(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_1", kind="claim", statement="stmt")
+    claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
+
+    with pytest.raises(ProofMapError) as exc_info:
+        submit_candidate_proof(
+            store,
+            "clm_1",
+            claimant_id="agent_a",
+            session_id="sess_1",
+            scoping_rationale="   ",
+            content="proof text",
+        )
+    assert exc_info.value.code == "SCOPING_RATIONALE_REQUIRED"
+
+
+def test_submit_without_active_claim_raises_no_active_claim(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_1", kind="claim", statement="stmt")
+
+    with pytest.raises(ProofMapError) as exc_info:
+        submit_candidate_proof(
+            store,
+            "clm_1",
+            claimant_id="agent_a",
+            session_id="sess_1",
+            scoping_rationale="scoped correctly",
+            content="proof text",
+        )
+    assert exc_info.value.code == "NO_ACTIVE_CLAIM"
+
+
+def test_submit_by_non_claimant_is_rejected(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_1", kind="claim", statement="stmt")
+    claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
+
+    with pytest.raises(ProofMapError) as exc_info:
+        submit_candidate_proof(
+            store,
+            "clm_1",
+            claimant_id="agent_b",
+            session_id="sess_2",
+            scoping_rationale="scoped correctly",
+            content="proof text",
+        )
+    assert exc_info.value.code == "NOT_CLAIMANT"
+    # the rightful claimant's claim must survive a rejected submit attempt
+    active = get_active_claim(store, "clm_1")
+    assert active is not None
+    assert active.claimant_id == "agent_a"
+
+
+def test_successful_submit_ends_the_claim(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_1", kind="claim", statement="stmt")
+    claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
+
+    submit_candidate_proof(
+        store,
+        "clm_1",
+        claimant_id="agent_a",
+        session_id="sess_1",
+        scoping_rationale="scoped correctly",
+        content="proof text",
+    )
+
+    # claim ends automatically; the node reads as review-needed via the
+    # closest available signal (no active claim, a pending candidate proof) —
+    # the full derived workflow_state axis lands in a later ticket.
+    assert get_active_claim(store, "clm_1") is None
+    current = get_current_candidate_proof(store, "clm_1")
+    assert current is not None
+    assert current.review_record_id is None
+
+    # released, so someone else could claim it again
+    claim_node(store, "clm_1", claimant_id="agent_b", session_id="sess_2")
+
+
+def test_second_submission_creates_v2_alongside_untouched_v1(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_1", kind="claim", statement="stmt")
+    claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
+    first = submit_candidate_proof(
+        store,
+        "clm_1",
+        claimant_id="agent_a",
+        session_id="sess_1",
+        scoping_rationale="first attempt",
+        content="v1 attempt",
+    )
+
+    claim_node(store, "clm_1", claimant_id="agent_b", session_id="sess_2")
+    second = submit_candidate_proof(
+        store,
+        "clm_1",
+        claimant_id="agent_b",
+        session_id="sess_2",
+        scoping_rationale="second attempt",
+        content="v2 attempt",
+    )
+
+    assert first.version == 1
+    assert second.version == 2
+
+    v1_path = tmp_path / first.file_path
+    v2_path = tmp_path / second.file_path
+    assert v1_path.exists() and v2_path.exists()
+    assert "v1 attempt" in v1_path.read_text(encoding="utf-8")
+    assert "v2 attempt" in v2_path.read_text(encoding="utf-8")
+
+    records = list_candidate_proofs(store, "clm_1")
+    assert [r.version for r in records] == [1, 2]
+    assert [r.is_current for r in records] == [False, True]
+
+    current = get_current_candidate_proof(store, "clm_1")
+    assert current is not None
+    assert current.id == second.id
+
+
+def test_renaming_vault_file_does_not_break_stable_id(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_1", kind="claim", statement="stmt")
+    claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
+    record = submit_candidate_proof(
+        store,
+        "clm_1",
+        claimant_id="agent_a",
+        session_id="sess_1",
+        scoping_rationale="scoped correctly",
+        content="proof text",
+    )
+
+    original_path = tmp_path / record.file_path
+    moved_path = tmp_path / "proofs" / "clm_1" / "renamed-by-obsidian.md"
+    original_path.rename(moved_path)
+
+    frontmatter = read_candidate_proof_frontmatter(moved_path)
+    assert frontmatter["id"] == record.id  # id lives in the file, not derived from its path
+
+    # the SQLite index is the real lookup surface for a review record and is
+    # untouched by the rename on disk
+    from proof_cli.proof_map import get_candidate_proof
+
+    indexed = get_candidate_proof(store, record.id)
+    assert indexed is not None
+    assert indexed.id == record.id
+
+
+def test_submit_on_imported_result_is_rejected(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="ref_1", kind="imported_result", statement="An external theorem")
+
+    with pytest.raises(ProofMapError) as exc_info:
+        submit_candidate_proof(
+            store,
+            "ref_1",
+            claimant_id="agent_a",
+            session_id="sess_1",
+            scoping_rationale="n/a",
+            content="n/a",
+        )
+    assert exc_info.value.code == "IMMUTABLE_NODE"
+
+
+def test_submit_on_nonexistent_node_raises_node_not_found(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    with pytest.raises(ProofMapError) as exc_info:
+        submit_candidate_proof(
+            store,
+            "does_not_exist",
+            claimant_id="agent_a",
+            session_id="sess_1",
+            scoping_rationale="scoped correctly",
+            content="proof text",
+        )
+    assert exc_info.value.code == "NODE_NOT_FOUND"

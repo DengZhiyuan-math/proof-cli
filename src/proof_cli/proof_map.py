@@ -4,17 +4,22 @@ import sqlite3
 import uuid
 from typing import Any
 
-from .domain import ClaimRecord, ProofMapNode, ProofMapNodeKind, utc_now
+from .domain import CandidateProofRecord, ClaimRecord, ProofMapNode, ProofMapNodeKind, utc_now
 from .storage import (
     ProjectStore,
     append_event,
     get_active_claim,
+    get_candidate_proof as _get_candidate_proof,
     get_proof_map_node,
     insert_claim,
+    insert_candidate_proof,
     insert_proof_map_node,
+    list_candidate_proofs_for_node,
     list_proof_map_nodes,
     mark_claim_released,
+    next_candidate_proof_version,
 )
+from .vault import candidate_proof_path, write_candidate_proof_file
 
 
 class ProofMapError(Exception):
@@ -242,3 +247,120 @@ def release_node(
         },
     )
     return claim.model_copy(update={"released_by": released_by, "release_reason": release_reason, "released_at": released_at})
+
+
+def submit_candidate_proof(
+    store: ProjectStore,
+    node_id: str,
+    *,
+    claimant_id: str,
+    session_id: str,
+    scoping_rationale: str,
+    content: str,
+) -> CandidateProofRecord:
+    """Submit a Candidate proof for a claimed node.
+
+    Only the node's current claimant may submit; a successful submission ends
+    that claim automatically (ownership passes from agent to researcher the
+    moment the work is done) and writes an immutable, versioned Markdown file
+    to the Proof vault, indexed by a stable id independent of its file path.
+    """
+    node = require_node(store, node_id)
+
+    if node.kind == ProofMapNodeKind.imported_result:
+        raise ProofMapError(
+            "IMMUTABLE_NODE",
+            f"imported_result node {node_id} is immutable and has no candidate proof to submit; "
+            "use Reference review instead",
+        )
+
+    if not scoping_rationale.strip():
+        raise ProofMapError(
+            "SCOPING_RATIONALE_REQUIRED",
+            "submitting a candidate proof requires stating why this node is now appropriately "
+            "scoped to prove directly",
+        )
+
+    claim = get_active_claim(store, node_id)
+    if claim is None:
+        raise ProofMapError(
+            "NO_ACTIVE_CLAIM", f"proof map node {node_id} has no active claim; claim it before submitting"
+        )
+    if claim.claimant_id != claimant_id or claim.session_id != session_id:
+        raise ProofMapError(
+            "NOT_CLAIMANT",
+            f"{claimant_id}/{session_id} does not hold the active claim on {node_id}",
+            details={
+                "claimant_id": claim.claimant_id,
+                "session_id": claim.session_id,
+                "claimed_at": claim.claimed_at.isoformat(),
+            },
+        )
+
+    version = next_candidate_proof_version(store, node_id)
+    proof_id = str(uuid.uuid4())
+    submitted_at = utc_now()
+    file_path = candidate_proof_path(store.root, node_id, version)
+
+    write_candidate_proof_file(
+        file_path,
+        id=proof_id,
+        node_id=node_id,
+        version=version,
+        submitted_by=claimant_id,
+        created_at=submitted_at.isoformat(),
+        scoping_rationale=scoping_rationale,
+        content=content,
+    )
+
+    record = CandidateProofRecord(
+        id=proof_id,
+        node_id=node_id,
+        version=version,
+        file_path=file_path.relative_to(store.root).as_posix(),
+        is_current=True,
+        submitted_by=claimant_id,
+        scoping_rationale=scoping_rationale,
+        created_at=submitted_at,
+    )
+    try:
+        insert_candidate_proof(store, record)
+    except sqlite3.IntegrityError as exc:
+        raise ProofMapError(
+            "CANDIDATE_PROOF_VERSION_CONFLICT",
+            f"version {version} of node {node_id} is already indexed",
+        ) from exc
+
+    mark_claim_released(
+        store, claim.id, released_by=claimant_id, reason="candidate proof submitted", released_at=utc_now()
+    )
+
+    append_event(
+        store,
+        "proof_map_candidate_proof_submitted",
+        f"submitted candidate proof v{version} for {node_id}",
+        entity_id=node_id,
+        payload={
+            "candidate_proof_id": proof_id,
+            "version": version,
+            "file_path": record.file_path,
+            "submitted_by": claimant_id,
+        },
+    )
+    return record
+
+
+def get_candidate_proof(store: ProjectStore, candidate_proof_id: str) -> CandidateProofRecord | None:
+    return _get_candidate_proof(store, candidate_proof_id)
+
+
+def require_candidate_proof(store: ProjectStore, candidate_proof_id: str) -> CandidateProofRecord:
+    record = get_candidate_proof(store, candidate_proof_id)
+    if record is None:
+        raise ProofMapError("CANDIDATE_PROOF_NOT_FOUND", f"candidate proof {candidate_proof_id} not found")
+    return record
+
+
+def list_candidate_proofs(store: ProjectStore, node_id: str) -> list[CandidateProofRecord]:
+    require_node(store, node_id)
+    return list_candidate_proofs_for_node(store, node_id)

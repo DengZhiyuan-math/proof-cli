@@ -12,6 +12,7 @@ from pydantic import TypeAdapter
 from .db import connect, initialize
 from .domain import (
     BlockerRecord,
+    CandidateProofRecord,
     ClaimRecord,
     EventRecord,
     ProofMapNode,
@@ -41,6 +42,7 @@ def _load(adapter, value: str):
 
 THEOREM_ADAPTER = TypeAdapter(TheoremContract)
 PROOF_MAP_NODE_ADAPTER = TypeAdapter(ProofMapNode)
+CANDIDATE_PROOF_ADAPTER = TypeAdapter(CandidateProofRecord)
 OBLIGATION_ADAPTER = TypeAdapter(ProofObligation)
 BLOCKER_ADAPTER = TypeAdapter(BlockerRecord)
 SNAPSHOT_ADAPTER = TypeAdapter(ProjectSnapshot)
@@ -100,6 +102,21 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_claims_one_active_per_node
   WHERE released_at IS NULL;
 
 CREATE INDEX IF NOT EXISTS idx_claims_node_id ON claims(node_id, claimed_at);
+
+CREATE TABLE IF NOT EXISTS candidate_proofs (
+  id TEXT PRIMARY KEY,
+  node_id TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  file_path TEXT NOT NULL,
+  is_current INTEGER NOT NULL DEFAULT 1,
+  review_record_id TEXT,
+  submitted_by TEXT NOT NULL,
+  scoping_rationale TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE(node_id, version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_candidate_proofs_node_id ON candidate_proofs(node_id, version);
 """
 
 
@@ -631,6 +648,88 @@ def mark_claim_released(
         )
         conn.commit()
         return cursor.rowcount > 0
+
+
+def _row_to_candidate_proof(row: sqlite3.Row) -> CandidateProofRecord:
+    return CandidateProofRecord(
+        id=row["id"],
+        node_id=row["node_id"],
+        version=row["version"],
+        file_path=row["file_path"],
+        is_current=bool(row["is_current"]),
+        review_record_id=row["review_record_id"],
+        submitted_by=row["submitted_by"],
+        scoping_rationale=row["scoping_rationale"],
+        created_at=row["created_at"],
+    )
+
+
+def next_candidate_proof_version(store: ProjectStore, node_id: str) -> int:
+    with store.connect() as conn:
+        row = conn.execute(
+            "SELECT COALESCE(MAX(version), 0) AS max_version FROM candidate_proofs WHERE node_id = ?",
+            (node_id,),
+        ).fetchone()
+    return int(row["max_version"]) + 1
+
+
+def insert_candidate_proof(store: ProjectStore, record: CandidateProofRecord) -> CandidateProofRecord:
+    """Index a new candidate proof, marking every prior version of this node not-current.
+
+    The unique index on (node_id, version) is the real guarantee against two
+    submissions racing onto the same version number; `submit_candidate_proof`
+    is the only caller, and it's already gated by claim exclusivity, but the
+    constraint means a double-submit fails loudly instead of corrupting the
+    index.
+    """
+    with store.connect() as conn:
+        conn.execute("UPDATE candidate_proofs SET is_current = 0 WHERE node_id = ?", (record.node_id,))
+        conn.execute(
+            """
+            INSERT INTO candidate_proofs(id, node_id, version, file_path, is_current, review_record_id, submitted_by, scoping_rationale, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                record.id,
+                record.node_id,
+                record.version,
+                record.file_path,
+                int(record.is_current),
+                record.review_record_id,
+                record.submitted_by,
+                record.scoping_rationale,
+                record.created_at.isoformat(),
+            ),
+        )
+        conn.commit()
+    return record
+
+
+def get_candidate_proof(store: ProjectStore, candidate_proof_id: str) -> CandidateProofRecord | None:
+    with store.connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM candidate_proofs WHERE id = ? LIMIT 1",
+            (candidate_proof_id,),
+        ).fetchone()
+    return _row_to_candidate_proof(row) if row else None
+
+
+def list_candidate_proofs_for_node(store: ProjectStore, node_id: str) -> list[CandidateProofRecord]:
+    with store.connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM candidate_proofs WHERE node_id = ? ORDER BY version",
+            (node_id,),
+        ).fetchall()
+    return [_row_to_candidate_proof(row) for row in rows]
+
+
+def get_current_candidate_proof(store: ProjectStore, node_id: str) -> CandidateProofRecord | None:
+    with store.connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM candidate_proofs WHERE node_id = ? AND is_current = 1 LIMIT 1",
+            (node_id,),
+        ).fetchone()
+    return _row_to_candidate_proof(row) if row else None
 
 
 def store_snapshot(store: ProjectStore, snapshot: ProjectSnapshot) -> ProjectSnapshot:
