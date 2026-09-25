@@ -127,7 +127,15 @@ class BlockerRecord(BaseModel):
 
 
 class ProofMapNode(BaseModel):
-    """The single entity type for every vertex in a proof map. See ADR-0001."""
+    """The single entity type for every vertex in a proof map. See ADR-0001.
+
+    `source_locator`/`source_version`/`trust_level` are only meaningful for
+    an `imported_result`-kind node: where it came from, which version of it,
+    and how much it's trusted. An `imported_result` is immutable once
+    created — there is no update path for any field on any ProofMapNode, so
+    a source correction is always a brand-new node, never an edit of this
+    one (see ADR on imported results).
+    """
 
     id: str
     kind: ProofMapNodeKind
@@ -135,6 +143,9 @@ class ProofMapNode(BaseModel):
     statement: str
     assumptions: list[str] = Field(default_factory=list)
     dependencies: list[str] = Field(default_factory=list)
+    source_locator: str | None = None
+    source_version: str | None = None
+    trust_level: TrustLevel | None = None
     created_by: str = "human"
     updated_by: str = "human"
     created_at: datetime = Field(default_factory=utc_now)

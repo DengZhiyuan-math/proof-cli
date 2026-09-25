@@ -13,7 +13,7 @@ from .collaboration import (
     record_review_decision,
     record_review_request,
 )
-from .domain import CandidateProofRecord, ClaimRecord, ProofMapNode, ProofMapNodeKind, utc_now
+from .domain import CandidateProofRecord, ClaimRecord, ProofMapNode, ProofMapNodeKind, TrustLevel, utc_now
 from .storage import (
     ProjectStore,
     append_event,
@@ -55,6 +55,9 @@ def create_node(
     assumptions: list[str] | None = None,
     dependencies: list[str] | None = None,
     created_by: str = "human",
+    source_locator: str | None = None,
+    source_version: str | None = None,
+    trust_level: TrustLevel | str | None = None,
 ) -> ProofMapNode:
     if get_proof_map_node(store, node_id) is not None:
         raise ProofMapError("NODE_ALREADY_EXISTS", f"proof map node {node_id} already exists")
@@ -75,6 +78,24 @@ def create_node(
                 f"dependency {dependency_id} does not exist; create it before depending on it",
             )
 
+    resolved_trust_level: TrustLevel | None = None
+    if trust_level is not None:
+        try:
+            resolved_trust_level = TrustLevel(trust_level)
+        except ValueError as exc:
+            valid_levels = ", ".join(member.value for member in TrustLevel)
+            raise ProofMapError(
+                "INVALID_TRUST_LEVEL",
+                f"'{trust_level}' is not a valid trust level; expected one of: {valid_levels}",
+            ) from exc
+
+    if resolved_kind == ProofMapNodeKind.imported_result:
+        if not (source_locator or "").strip() or not (source_version or "").strip():
+            raise ProofMapError(
+                "IMPORTED_RESULT_REQUIRES_SOURCE",
+                "an imported_result node requires both a source_locator and a source_version",
+            )
+
     node = ProofMapNode(
         id=node_id,
         kind=resolved_kind,
@@ -82,6 +103,9 @@ def create_node(
         statement=statement,
         assumptions=assumptions or [],
         dependencies=dependencies or [],
+        source_locator=source_locator,
+        source_version=source_version,
+        trust_level=resolved_trust_level,
         created_by=created_by,
         updated_by=created_by,
     )
@@ -148,7 +172,12 @@ def claim_node(
     genuine race between two claimants is still resolved correctly (see
     `tests/test_proof_map.py::test_claim_concurrency_...`).
     """
-    require_node(store, node_id)
+    node = require_node(store, node_id)
+    if node.kind == ProofMapNodeKind.imported_result:
+        raise ProofMapError(
+            "IMMUTABLE_NODE",
+            f"imported_result node {node_id} has no claim/submit workflow; use Reference review instead",
+        )
 
     existing = get_active_claim(store, node_id)
     if existing is not None:
@@ -478,4 +507,78 @@ def get_acceptance_state(store: ProjectStore, node_id: str) -> str:
         return "accepted"
     if latest.decision == ReviewGovernanceState.rejected:
         return "rejected"
+    return "unreviewed"
+
+
+REFERENCE_REVIEW_DECISION = "reference-review"
+
+
+def decide_reference_review(
+    store: ProjectStore,
+    node_id: str,
+    decision: str,
+    *,
+    reviewer_id: str = "human",
+    rationale: str = "",
+    confirmed: bool = False,
+) -> ReviewRecord:
+    """Grant Reference review to an imported_result node.
+
+    Judges the trustworthiness of a citation — never the node's
+    acceptance_state, which stays `unreviewed` for every imported_result
+    node forever; it is Reference-reviewed or it isn't, independently of
+    Acceptance (see ADR on imported results / story 22).
+    """
+    node = require_node(store, node_id)
+
+    if node.kind != ProofMapNodeKind.imported_result:
+        raise ProofMapError(
+            "NOT_IMPORTED_RESULT",
+            f"node {node_id} is not an imported_result; use Human Review acceptance instead",
+        )
+
+    if decision != REFERENCE_REVIEW_DECISION:
+        raise ProofMapError(
+            "INVALID_DECISION",
+            f"'{decision}' is not a valid reference review decision; expected: {REFERENCE_REVIEW_DECISION}",
+        )
+
+    if not confirmed:
+        raise ProofMapError(
+            "CONFIRMATION_REQUIRED",
+            "a Reference review decision requires explicit confirmation; only a researcher may confirm one",
+        )
+
+    request = record_review_request(
+        store,
+        _ACCEPTANCE_OBJECT_TYPE,
+        node_id,
+        reviewer_id=reviewer_id,
+        rationale=rationale,
+        kind=ReviewRecordKind.reference_review,
+    )
+    record = record_review_decision(
+        store, request.id, ReviewGovernanceState.approved, reviewer_id=reviewer_id, rationale=rationale
+    )
+
+    append_event(
+        store,
+        "proof_map_reference_review_granted",
+        f"reference review granted for {node_id}",
+        entity_id=node_id,
+        payload={"reviewer_id": reviewer_id, "review_id": record.id},
+    )
+    return record
+
+
+def get_reference_review_state(store: ProjectStore, node_id: str) -> str:
+    """`unreviewed` or `reviewed`, derived from `kind=reference_review` records only — never acceptance_state."""
+    require_node(store, node_id)
+    records = [
+        record
+        for record in list_review_records(store, object_type=_ACCEPTANCE_OBJECT_TYPE, object_id=node_id)
+        if record.kind == ReviewRecordKind.reference_review
+    ]
+    if records and records[-1].decision == ReviewGovernanceState.approved:
+        return "reviewed"
     return "unreviewed"

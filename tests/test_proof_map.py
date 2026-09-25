@@ -9,8 +9,10 @@ from proof_cli.proof_map import (
     claim_node,
     create_node,
     decide_acceptance,
+    decide_reference_review,
     get_acceptance_state,
     get_node,
+    get_reference_review_state,
     list_candidate_proofs,
     list_nodes,
     release_node,
@@ -539,7 +541,14 @@ def test_renaming_vault_file_does_not_break_stable_id(tmp_path: Path):
 
 def test_submit_on_imported_result_is_rejected(tmp_path: Path):
     store = ensure_project(tmp_path)
-    create_node(store, node_id="ref_1", kind="imported_result", statement="An external theorem")
+    create_node(
+        store,
+        node_id="ref_1",
+        kind="imported_result",
+        statement="An external theorem",
+        source_locator="doi:10.1234/example",
+        source_version="v1",
+    )
 
     with pytest.raises(ProofMapError) as exc_info:
         submit_candidate_proof(
@@ -614,7 +623,14 @@ def test_decide_acceptance_on_nonexistent_node_raises_node_not_found(tmp_path: P
 
 def test_decide_acceptance_on_imported_result_is_rejected(tmp_path: Path):
     store = ensure_project(tmp_path)
-    create_node(store, node_id="ref_1", kind="imported_result", statement="An external theorem")
+    create_node(
+        store,
+        node_id="ref_1",
+        kind="imported_result",
+        statement="An external theorem",
+        source_locator="doi:10.1234/example",
+        source_version="v1",
+    )
 
     with pytest.raises(ProofMapError) as exc_info:
         decide_acceptance(store, "ref_1", "accept", reviewer_id="researcher", confirmed=True)
@@ -696,3 +712,193 @@ def test_no_other_code_path_can_write_acceptance_state(tmp_path: Path):
         content="proof text",
     )
     assert get_acceptance_state(store, "clm_1") == "unreviewed"
+
+
+def test_create_imported_result_requires_source_locator_and_version(tmp_path: Path):
+    store = ensure_project(tmp_path)
+
+    with pytest.raises(ProofMapError) as exc_info:
+        create_node(store, node_id="ref_1", kind="imported_result", statement="An external theorem")
+    assert exc_info.value.code == "IMPORTED_RESULT_REQUIRES_SOURCE"
+    assert get_node(store, "ref_1") is None
+
+    with pytest.raises(ProofMapError) as exc_info:
+        create_node(
+            store,
+            node_id="ref_1",
+            kind="imported_result",
+            statement="An external theorem",
+            source_locator="doi:10.1234/example",
+        )
+    assert exc_info.value.code == "IMPORTED_RESULT_REQUIRES_SOURCE"
+
+
+def test_create_imported_result_with_source_fields_succeeds(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    node = create_node(
+        store,
+        node_id="ref_1",
+        kind="imported_result",
+        statement="An external theorem",
+        source_locator="doi:10.1234/example",
+        source_version="v2",
+        trust_level="external_reference",
+    )
+    assert node.source_locator == "doi:10.1234/example"
+    assert node.source_version == "v2"
+    assert node.trust_level.value == "external_reference"
+
+
+def test_create_imported_result_invalid_trust_level_rejected(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    with pytest.raises(ProofMapError) as exc_info:
+        create_node(
+            store,
+            node_id="ref_1",
+            kind="imported_result",
+            statement="An external theorem",
+            source_locator="doi:10.1234/example",
+            source_version="v1",
+            trust_level="rock_solid",
+        )
+    assert exc_info.value.code == "INVALID_TRUST_LEVEL"
+
+
+def test_claim_on_imported_result_is_rejected(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(
+        store,
+        node_id="ref_1",
+        kind="imported_result",
+        statement="An external theorem",
+        source_locator="doi:10.1234/example",
+        source_version="v1",
+    )
+    with pytest.raises(ProofMapError) as exc_info:
+        claim_node(store, "ref_1", claimant_id="agent_a", session_id="sess_1")
+    assert exc_info.value.code == "IMMUTABLE_NODE"
+
+
+def test_mutating_an_imported_result_in_place_is_rejected(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(
+        store,
+        node_id="ref_1",
+        kind="imported_result",
+        statement="Original statement",
+        source_locator="doi:10.1234/example",
+        source_version="v1",
+    )
+
+    with pytest.raises(ProofMapError) as exc_info:
+        create_node(
+            store,
+            node_id="ref_1",
+            kind="imported_result",
+            statement="A corrected statement",
+            source_locator="doi:10.1234/example",
+            source_version="v2",
+        )
+    assert exc_info.value.code == "NODE_ALREADY_EXISTS"
+
+    # the original is untouched by the rejected attempt
+    unchanged = get_node(store, "ref_1")
+    assert unchanged.statement == "Original statement"
+    assert unchanged.source_version == "v1"
+
+
+def test_source_correction_is_modeled_as_a_new_node_not_an_edit(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(
+        store,
+        node_id="ref_v1",
+        kind="imported_result",
+        statement="Original statement",
+        source_locator="doi:10.1234/example",
+        source_version="v1",
+    )
+    create_node(store, node_id="clm_dependent", kind="claim", statement="Uses ref_v1", dependencies=["ref_v1"])
+
+    corrected = create_node(
+        store,
+        node_id="ref_v2",
+        kind="imported_result",
+        statement="A corrected statement",
+        source_locator="doi:10.1234/example",
+        source_version="v2",
+    )
+
+    assert corrected.id == "ref_v2"
+    original = get_node(store, "ref_v1")
+    assert original.statement == "Original statement"
+
+    # the existing dependent keeps pointing at the old node until someone
+    # deliberately migrates it
+    dependent = get_node(store, "clm_dependent")
+    assert dependent.dependencies == ["ref_v1"]
+
+
+def test_decide_reference_review_grants_review_independent_of_acceptance_state(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(
+        store,
+        node_id="ref_1",
+        kind="imported_result",
+        statement="An external theorem",
+        source_locator="doi:10.1234/example",
+        source_version="v1",
+    )
+
+    assert get_reference_review_state(store, "ref_1") == "unreviewed"
+    assert get_acceptance_state(store, "ref_1") == "unreviewed"
+
+    record = decide_reference_review(
+        store, "ref_1", "reference-review", reviewer_id="researcher", rationale="trustworthy source", confirmed=True
+    )
+
+    assert record.kind.value == "reference_review"
+    assert get_reference_review_state(store, "ref_1") == "reviewed"
+    # acceptance_state is untouched by a Reference review decision
+    assert get_acceptance_state(store, "ref_1") == "unreviewed"
+
+
+def test_decide_reference_review_requires_confirmation(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(
+        store,
+        node_id="ref_1",
+        kind="imported_result",
+        statement="An external theorem",
+        source_locator="doi:10.1234/example",
+        source_version="v1",
+    )
+    with pytest.raises(ProofMapError) as exc_info:
+        decide_reference_review(store, "ref_1", "reference-review", reviewer_id="researcher")
+    assert exc_info.value.code == "CONFIRMATION_REQUIRED"
+    assert get_reference_review_state(store, "ref_1") == "unreviewed"
+
+
+def test_decide_reference_review_on_non_imported_result_is_rejected(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_1", kind="claim", statement="stmt")
+
+    with pytest.raises(ProofMapError) as exc_info:
+        decide_reference_review(store, "clm_1", "reference-review", reviewer_id="researcher", confirmed=True)
+    assert exc_info.value.code == "NOT_IMPORTED_RESULT"
+
+
+def test_decide_acceptance_still_rejects_imported_result_after_reference_review(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(
+        store,
+        node_id="ref_1",
+        kind="imported_result",
+        statement="An external theorem",
+        source_locator="doi:10.1234/example",
+        source_version="v1",
+    )
+    decide_reference_review(store, "ref_1", "reference-review", reviewer_id="researcher", confirmed=True)
+
+    with pytest.raises(ProofMapError) as exc_info:
+        decide_acceptance(store, "ref_1", "accept", reviewer_id="researcher", confirmed=True)
+    assert exc_info.value.code == "IMMUTABLE_NODE"
