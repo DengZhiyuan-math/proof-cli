@@ -45,7 +45,22 @@ class MemoryStatus(str, Enum):
 
 
 class MemoryScope(BaseModel):
+    """`node_id`/`candidate_proof_id`/`review_id` reference the unified
+    ProofMapNode model (issue #29): `node_id` for a memory about a Theorem/
+    Lemma/Claim/Imported result, `candidate_proof_id`/`review_id` for one
+    about a specific submission or Human Review decision. The four older
+    fields stay: they're still load-bearing for the frozen bug/debug/
+    verification-lifecycle system, whose reports genuinely cross-reference
+    several of `theorem_id`/`obligation_id`/`blocker_id` at once (e.g. a bug
+    report linked to both an obligation and a blocker) — collapsing them
+    into one slot would silently lose real, currently-populated data, not
+    just rename a field.
+    """
+
     project_id: str
+    node_id: str | None = None
+    candidate_proof_id: str | None = None
+    review_id: str | None = None
     theorem_id: str | None = None
     goal_id: str | None = None
     obligation_id: str | None = None
@@ -56,6 +71,9 @@ class MemoryScope(BaseModel):
 
 
 class LinkedProofState(BaseModel):
+    node_id: str | None = None
+    candidate_proof_id: str | None = None
+    review_id: str | None = None
     theorem_id: str | None = None
     goal_id: str | None = None
     obligation_id: str | None = None
@@ -1030,6 +1048,9 @@ def append_memory_artifact(
     entry: str,
     *,
     importance: str | MemoryImportance = MemoryImportance.medium,
+    node_id: str | None = None,
+    candidate_proof_id: str | None = None,
+    review_id: str | None = None,
     theorem_id: str | None = None,
     goal_id: str | None = None,
     obligation_id: str | None = None,
@@ -1049,6 +1070,9 @@ def append_memory_artifact(
         status=MemoryStatus(status) if isinstance(status, str) else (status or _LAYER_DEFAULT_STATUS[layer_enum]),
         scope=MemoryScope(
             project_id=memory.project_id,
+            node_id=node_id,
+            candidate_proof_id=candidate_proof_id,
+            review_id=review_id,
             theorem_id=theorem_id,
             goal_id=goal_id,
             obligation_id=obligation_id,
@@ -1060,6 +1084,9 @@ def append_memory_artifact(
         content=entry,
         importance=_coerce_importance(importance),
         linked_proof_state=LinkedProofState(
+            node_id=node_id,
+            candidate_proof_id=candidate_proof_id,
+            review_id=review_id,
             theorem_id=theorem_id,
             goal_id=goal_id,
             obligation_id=obligation_id,
@@ -1083,6 +1110,9 @@ def record_memory(
     entry: str,
     *,
     importance: str | MemoryImportance = MemoryImportance.medium,
+    node_id: str | None = None,
+    candidate_proof_id: str | None = None,
+    review_id: str | None = None,
     theorem_id: str | None = None,
     goal_id: str | None = None,
     obligation_id: str | None = None,
@@ -1100,6 +1130,9 @@ def record_memory(
         layer,
         entry,
         importance=importance,
+        node_id=node_id,
+        candidate_proof_id=candidate_proof_id,
+        review_id=review_id,
         theorem_id=theorem_id,
         goal_id=goal_id,
         obligation_id=obligation_id,
@@ -1120,6 +1153,7 @@ def _matching_artifacts(
     *,
     layer: str | MemoryLayer | None = None,
     status: MemoryStatus | str | None = None,
+    node_id: str | None = None,
     theorem_id: str | None = None,
     goal_id: str | None = None,
     minimum_importance: str | MemoryImportance | None = None,
@@ -1132,6 +1166,8 @@ def _matching_artifacts(
     if status is not None:
         status_enum = MemoryStatus(status) if isinstance(status, str) else status
         candidates = [artifact for artifact in candidates if artifact.status == status_enum]
+    if node_id is not None:
+        candidates = [artifact for artifact in candidates if artifact.scope.node_id == node_id or artifact.linked_proof_state.node_id == node_id]
     if theorem_id is not None:
         candidates = [artifact for artifact in candidates if artifact.scope.theorem_id == theorem_id or artifact.linked_proof_state.theorem_id == theorem_id]
     if goal_id is not None:
@@ -1148,6 +1184,7 @@ def list_memory_artifacts(
     *,
     layer: str | MemoryLayer | None = None,
     status: MemoryStatus | str | None = None,
+    node_id: str | None = None,
     theorem_id: str | None = None,
     goal_id: str | None = None,
     minimum_importance: str | MemoryImportance | None = None,
@@ -1156,6 +1193,7 @@ def list_memory_artifacts(
         store,
         layer=layer,
         status=status,
+        node_id=node_id,
         theorem_id=theorem_id,
         goal_id=goal_id,
         minimum_importance=minimum_importance,
