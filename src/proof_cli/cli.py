@@ -106,18 +106,25 @@ from .proof_map import (
     create_node,
     decide_acceptance,
     decide_reference_review,
+    dismiss_challenge,
     get_acceptance_state,
+    get_blocked_reason,
     get_frontier,
     get_integrity_state,
     get_workflow_state,
+    list_challenges,
     list_nodes,
+    open_challenge,
     release_node,
+    require_challenge,
     require_node,
     revalidate_dependency,
     submit_candidate_proof,
 )
 from .rendering import (
     render_candidate_proof,
+    render_challenge,
+    render_challenge_list,
     render_claim,
     render_frontier,
     render_proof_map_node,
@@ -137,6 +144,7 @@ project_app = typer.Typer(help="Project diagnostics workflows")
 goal_app = typer.Typer(help="Goal operations")
 theorem_app = typer.Typer(help="Theorem registry")
 node_app = typer.Typer(help="Proof map node operations")
+challenge_app = typer.Typer(help="Challenge workflows")
 obligation_app = typer.Typer(help="Obligation queue")
 blocker_app = typer.Typer(help="Blocker tracking")
 reference_app = typer.Typer(help="Reference workflows")
@@ -297,6 +305,7 @@ def node_show(
         workflow_state = get_workflow_state(store, node_id)
         acceptance_state = get_acceptance_state(store, node_id)
         integrity_state = get_integrity_state(store, node_id)
+        blocked_reason = get_blocked_reason(store, node_id) if workflow_state == "blocked" else None
     except ProofMapError as exc:
         _emit_node_error(exc, json_output, command="node.show")
         raise typer.Exit(code=1)
@@ -306,6 +315,7 @@ def node_show(
         payload["workflow_state"] = workflow_state
         payload["acceptance_state"] = acceptance_state
         payload["integrity_state"] = integrity_state
+        payload["blocked_reason"] = blocked_reason
         typer.echo(dump_envelope(success_envelope("node.show", payload)))
     else:
         typer.echo(
@@ -314,6 +324,7 @@ def node_show(
                 workflow_state=workflow_state,
                 acceptance_state=acceptance_state,
                 integrity_state=integrity_state,
+                blocked_reason=blocked_reason,
             )
         )
 
@@ -484,6 +495,93 @@ def node_revalidate(
     _emit_review_record(record, json_output, command="node.revalidate")
 
 
+def _emit_challenge(challenge, json_output: bool, *, command: str) -> None:
+    if json_output:
+        typer.echo(dump_envelope(success_envelope(command, challenge.model_dump(mode="json"))))
+    else:
+        typer.echo(render_challenge(challenge))
+
+
+def _emit_challenge_error(exc: ProofMapError, json_output: bool, *, command: str) -> None:
+    if json_output:
+        typer.echo(dump_envelope(error_envelope(command, exc.code, exc.message, details=exc.details or None)))
+    else:
+        detail_suffix = ""
+        if exc.details:
+            detail_suffix = " (" + ", ".join(f"{key}={value}" for key, value in exc.details.items()) + ")"
+        typer.echo(f"Error: {exc.message}{detail_suffix}")
+
+
+@challenge_app.command("open")
+def challenge_open(
+    target_id: str,
+    root: str = ".",
+    opened_by: str = "human",
+    rationale: str = "",
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Raise a Challenge against an already-Accepted (or Reference-reviewed) node. Ungated."""
+    store = get_store(_root(root))
+    try:
+        challenge = open_challenge(store, target_id, opened_by=opened_by, rationale=rationale)
+    except ProofMapError as exc:
+        _emit_challenge_error(exc, json_output, command="challenge.open")
+        raise typer.Exit(code=1)
+    _emit_challenge(challenge, json_output, command="challenge.open")
+
+
+@challenge_app.command("list")
+def challenge_list(
+    root: str = ".",
+    target_id: str = "",
+    status: str = "",
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    store = get_store(_root(root))
+    challenges = list_challenges(store, target_node_id=target_id, status=status)
+    if json_output:
+        typer.echo(
+            dump_envelope(success_envelope("challenge.list", [c.model_dump(mode="json") for c in challenges]))
+        )
+        return
+    typer.echo(render_challenge_list(challenges))
+
+
+@challenge_app.command("show")
+def challenge_show(
+    challenge_id: str,
+    root: str = ".",
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    store = get_store(_root(root))
+    try:
+        challenge = require_challenge(store, challenge_id)
+    except ProofMapError as exc:
+        _emit_challenge_error(exc, json_output, command="challenge.show")
+        raise typer.Exit(code=1)
+    _emit_challenge(challenge, json_output, command="challenge.show")
+
+
+@challenge_app.command("dismiss")
+def challenge_dismiss(
+    challenge_id: str,
+    root: str = ".",
+    reviewer: str = "human",
+    rationale: str = "",
+    confirm: bool = typer.Option(
+        False, "--confirm", help="Explicit human confirmation; only Human Review may resolve a Challenge"
+    ),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    store = get_store(_root(root))
+    try:
+        challenge = dismiss_challenge(store, challenge_id, reviewer_id=reviewer, rationale=rationale, confirmed=confirm)
+    except ProofMapError as exc:
+        _emit_challenge_error(exc, json_output, command="challenge.dismiss")
+        raise typer.Exit(code=1)
+    _emit_challenge(challenge, json_output, command="challenge.dismiss")
+
+
 app.add_typer(goal_app, name="goal")
 app.add_typer(codex_app, name="codex")
 app.add_typer(asset_app, name="asset")
@@ -496,6 +594,7 @@ app.add_typer(benchmark_app, name="benchmark")
 app.add_typer(project_app, name="project")
 app.add_typer(theorem_app, name="theorem")
 app.add_typer(node_app, name="node")
+app.add_typer(challenge_app, name="challenge")
 app.add_typer(obligation_app, name="obligation")
 app.add_typer(blocker_app, name="blocker")
 app.add_typer(reference_app, name="reference")
