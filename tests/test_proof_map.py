@@ -34,6 +34,7 @@ from proof_cli.proof_map import (
     release_node,
     require_node,
     revalidate_dependency,
+    split_node,
     submit_candidate_proof,
 )
 from proof_cli.collaboration import list_review_records
@@ -1919,3 +1920,139 @@ def test_promote_on_nonexistent_node_raises_node_not_found(tmp_path: Path):
     with pytest.raises(ProofMapError) as exc_info:
         promote_to_lemma(store, "does_not_exist", confirmed=True)
     assert exc_info.value.code == "NODE_NOT_FOUND"
+
+
+def test_split_creates_claim_children_with_derived_from(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_parent", kind="claim", statement="A big claim, too large to prove directly")
+
+    children = split_node(
+        store,
+        "clm_parent",
+        [
+            {"id": "clm_child_1", "statement": "First sub-claim"},
+            {"id": "clm_child_2", "statement": "Second sub-claim"},
+        ],
+        created_by="agent_a",
+    )
+
+    assert {c.id for c in children} == {"clm_child_1", "clm_child_2"}
+    for child in children:
+        assert child.kind == ProofMapNodeKind.claim
+        assert child.derived_from == "clm_parent"
+        assert child.created_by == "agent_a"
+
+    parent = get_node(store, "clm_parent")
+    assert set(parent.dependencies) == {"clm_child_1", "clm_child_2"}
+
+
+def test_split_requires_no_confirmation_argument(tmp_path: Path):
+    """Split is ungated — unlike Accept/reject/dismiss/promote, there is no
+    `confirmed` parameter to pass at all."""
+    import inspect
+
+    assert "confirmed" not in inspect.signature(split_node).parameters
+
+
+def test_split_leaves_parents_preexisting_dependencies_untouched(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="lem_base", kind="lemma", statement="A pre-existing dependency")
+    create_node(
+        store, node_id="clm_parent", kind="claim", statement="Depends on lem_base already", dependencies=["lem_base"]
+    )
+
+    split_node(store, "clm_parent", [{"id": "clm_child_1", "statement": "A sub-claim"}])
+
+    parent = get_node(store, "clm_parent")
+    assert "lem_base" in parent.dependencies
+    assert "clm_child_1" in parent.dependencies
+    assert len(parent.dependencies) == 2
+
+
+def test_parent_blocked_until_children_accepted_then_still_needs_own_acceptance(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_parent", kind="claim", statement="A big claim")
+    split_node(
+        store,
+        "clm_parent",
+        [
+            {"id": "clm_child_1", "statement": "First sub-claim"},
+            {"id": "clm_child_2", "statement": "Second sub-claim"},
+        ],
+    )
+
+    assert get_workflow_state(store, "clm_parent") == "blocked"
+
+    _accept_via_full_cycle(store, "clm_child_1", claimant="agent_1", session="sess_1")
+    assert get_workflow_state(store, "clm_parent") == "blocked"  # clm_child_2 still unaccepted
+
+    _accept_via_full_cycle(store, "clm_child_2", claimant="agent_2", session="sess_2")
+
+    # unblocked now that every child is Accepted, but never auto-accepted itself
+    assert get_workflow_state(store, "clm_parent") == "open"
+    assert get_acceptance_state(store, "clm_parent") == "unreviewed"
+
+    # the parent still needs its own Candidate proof and Acceptance
+    claim_node(store, "clm_parent", claimant_id="agent_p", session_id="sess_p")
+    submit_candidate_proof(
+        store,
+        "clm_parent",
+        claimant_id="agent_p",
+        session_id="sess_p",
+        scoping_rationale="the pieces combine",
+        content="proof combining the two sub-claims",
+    )
+    decide_acceptance(store, "clm_parent", "accept", reviewer_id="researcher", confirmed=True)
+    assert get_acceptance_state(store, "clm_parent") == "accepted"
+
+
+def test_split_on_imported_result_is_rejected(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(
+        store,
+        node_id="ref_1",
+        kind="imported_result",
+        statement="An external theorem",
+        source_locator="doi:10.1234/example",
+        source_version="v1",
+    )
+
+    with pytest.raises(ProofMapError) as exc_info:
+        split_node(store, "ref_1", [{"id": "clm_child_1", "statement": "A sub-claim"}])
+    assert exc_info.value.code == "IMMUTABLE_NODE"
+
+
+def test_split_on_rejected_node_is_rejected(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    _submitted_claim(store, "clm_parent")
+    decide_acceptance(store, "clm_parent", "reject", reviewer_id="researcher", confirmed=True)
+
+    with pytest.raises(ProofMapError) as exc_info:
+        split_node(store, "clm_parent", [{"id": "clm_child_1", "statement": "A sub-claim"}])
+    assert exc_info.value.code == "NODE_REJECTED"
+
+
+def test_split_requires_at_least_one_child(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_parent", kind="claim", statement="A big claim")
+
+    with pytest.raises(ProofMapError) as exc_info:
+        split_node(store, "clm_parent", [])
+    assert exc_info.value.code == "SPLIT_REQUIRES_CHILDREN"
+
+
+def test_split_on_nonexistent_parent_raises_node_not_found(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    with pytest.raises(ProofMapError) as exc_info:
+        split_node(store, "does_not_exist", [{"id": "clm_child_1", "statement": "A sub-claim"}])
+    assert exc_info.value.code == "NODE_NOT_FOUND"
+
+
+def test_derived_from_distinguishes_a_split_subclaim_from_a_coincidental_lemma(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_parent", kind="claim", statement="A big claim")
+    split_node(store, "clm_parent", [{"id": "clm_child_1", "statement": "A sub-claim"}])
+    create_node(store, node_id="lem_standalone", kind="lemma", statement="An independently authored lemma")
+
+    assert get_node(store, "clm_child_1").derived_from == "clm_parent"
+    assert get_node(store, "lem_standalone").derived_from is None

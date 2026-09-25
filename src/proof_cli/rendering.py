@@ -74,6 +74,8 @@ def render_proof_map_node(
         table.add_row("Source version", node.source_version)
     if node.trust_level:
         table.add_row("Trust level", node.trust_level.value)
+    if node.derived_from:
+        table.add_row("Derived from", node.derived_from)
     # Three independent, computed signals — never folded into one status word.
     if workflow_state is not None:
         table.add_row("Workflow state", workflow_state)

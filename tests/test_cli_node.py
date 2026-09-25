@@ -953,3 +953,72 @@ def test_node_promote_on_non_claim_fails(tmp_path: Path):
 def test_node_promote_has_no_demote_command(tmp_path: Path):
     result = runner.invoke(app, ["node", "demote", "lem_1", "--root", str(tmp_path)])
     assert result.exit_code != 0
+
+
+def test_node_split_creates_children_json_envelope(tmp_path: Path):
+    runner.invoke(app, ["node", "create", "clm_parent", "claim", "A big claim", "--root", str(tmp_path)])
+
+    result = runner.invoke(
+        app,
+        [
+            "node", "split", "clm_parent", "--root", str(tmp_path),
+            "--child", "clm_child_1=First sub-claim",
+            "--child", "clm_child_2=Second sub-claim",
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is True
+    assert payload["command"] == "node.split"
+    ids = {item["id"] for item in payload["data"]}
+    assert ids == {"clm_child_1", "clm_child_2"}
+    assert all(item["derived_from"] == "clm_parent" for item in payload["data"])
+
+    parent_show = runner.invoke(app, ["node", "show", "clm_parent", "--root", str(tmp_path), "--json"])
+    parent_deps = set(json.loads(parent_show.stdout)["data"]["dependencies"])
+    assert parent_deps == {"clm_child_1", "clm_child_2"}
+
+
+def test_node_split_human_readable(tmp_path: Path):
+    runner.invoke(app, ["node", "create", "clm_parent", "claim", "A big claim", "--root", str(tmp_path)])
+
+    result = runner.invoke(
+        app,
+        [
+            "node", "split", "clm_parent", "--root", str(tmp_path),
+            "--child", "clm_child_1=First sub-claim",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "clm_child_1" in result.stdout
+
+
+def test_node_split_on_imported_result_fails(tmp_path: Path):
+    runner.invoke(
+        app,
+        [
+            "node", "create", "ref_1", "imported_result", "An external theorem", "--root", str(tmp_path),
+            "--source-locator", "doi:10.1234/example", "--source-version", "v1",
+        ],
+    )
+
+    result = runner.invoke(
+        app,
+        ["node", "split", "ref_1", "--root", str(tmp_path), "--child", "clm_child_1=A sub-claim", "--json"],
+    )
+    assert result.exit_code != 0
+    payload = json.loads(result.stdout)
+    assert payload["error"]["code"] == "IMMUTABLE_NODE"
+
+
+def test_node_split_invalid_child_spec_fails(tmp_path: Path):
+    runner.invoke(app, ["node", "create", "clm_parent", "claim", "A big claim", "--root", str(tmp_path)])
+
+    result = runner.invoke(
+        app,
+        ["node", "split", "clm_parent", "--root", str(tmp_path), "--child", "not-a-valid-spec", "--json"],
+    )
+    assert result.exit_code != 0
+    payload = json.loads(result.stdout)
+    assert payload["error"]["code"] == "INVALID_CHILD_SPEC"

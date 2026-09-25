@@ -82,9 +82,13 @@ def create_node(
     source_locator: str | None = None,
     source_version: str | None = None,
     trust_level: TrustLevel | str | None = None,
+    derived_from: str | None = None,
 ) -> ProofMapNode:
     if get_proof_map_node(store, node_id) is not None:
         raise ProofMapError("NODE_ALREADY_EXISTS", f"proof map node {node_id} already exists")
+
+    if derived_from is not None and get_proof_map_node(store, derived_from) is None:
+        raise ProofMapError("DERIVED_FROM_NOT_FOUND", f"derived_from node {derived_from} does not exist")
 
     try:
         resolved_kind = ProofMapNodeKind(kind)
@@ -130,6 +134,7 @@ def create_node(
         source_locator=source_locator,
         source_version=source_version,
         trust_level=resolved_trust_level,
+        derived_from=derived_from,
         created_by=created_by,
         updated_by=created_by,
     )
@@ -166,6 +171,67 @@ def require_node(store: ProjectStore, node_id: str) -> ProofMapNode:
 
 def list_nodes(store: ProjectStore) -> list[ProofMapNode]:
     return list_proof_map_nodes(store)
+
+
+def split_node(
+    store: ProjectStore,
+    parent_id: str,
+    child_specs: list[dict[str, Any]],
+    *,
+    created_by: str = "human",
+) -> list[ProofMapNode]:
+    """Decompose `parent_id` into one or more new `claim`-kind children.
+
+    Ungated — no researcher approval needed, so "split first, don't force a
+    proof" is genuinely the path of least resistance. Each child gets
+    `derived_from=parent_id` and is appended to the parent's dependencies;
+    the parent's own pre-existing dependencies are untouched. This alone
+    doesn't get the parent any closer to Accepted — once every child is
+    Accepted the parent simply stops being `blocked`, and still needs its
+    own Candidate proof and Acceptance like any other node ("how the pieces
+    combine" is never assumed true without a human looking at it).
+
+    Each spec in `child_specs` is `{"id": str, "statement": str,
+    "assumptions": list[str] (optional), "display_label": str (optional)}`.
+    """
+    parent = require_node(store, parent_id)
+
+    if parent.kind == ProofMapNodeKind.imported_result:
+        raise ProofMapError("IMMUTABLE_NODE", f"imported_result node {parent_id} cannot be split")
+
+    if get_acceptance_state(store, parent_id) == "rejected":
+        raise ProofMapError(
+            "NODE_REJECTED", f"node {parent_id} was Rejected and should not be pursued further; split is unavailable"
+        )
+
+    if not child_specs:
+        raise ProofMapError("SPLIT_REQUIRES_CHILDREN", "split requires at least one child claim")
+
+    children: list[ProofMapNode] = []
+    for spec in child_specs:
+        child = create_node(
+            store,
+            node_id=spec["id"],
+            kind=ProofMapNodeKind.claim,
+            statement=spec["statement"],
+            display_label=spec.get("display_label", ""),
+            assumptions=spec.get("assumptions"),
+            created_by=created_by,
+            derived_from=parent_id,
+        )
+        children.append(child)
+
+    updated_parent = parent.model_copy(update={"dependencies": [*parent.dependencies, *(c.id for c in children)]})
+    update_proof_map_node(store, updated_parent)
+
+    append_event(
+        store,
+        "proof_map_node_split",
+        f"split {parent_id} into {len(children)} claim(s)",
+        entity_id=parent_id,
+        payload={"child_ids": [c.id for c in children], "created_by": created_by},
+    )
+    return children
 
 
 def _claim_conflict(existing: ClaimRecord) -> ProofMapError:
