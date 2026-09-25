@@ -25,7 +25,7 @@ A local proof obligation serving a specific parent node, not yet judged reusable
 _Avoid_: obligation, proof obligation, open goal
 
 **Imported result** (a proof map node kind):
-An external, already-established result pulled in as a dependency. It carries a trust level instead of a candidate proof, and enters the map through Reference review rather than Acceptance.
+An external, already-established result pulled in as a dependency. It carries a trust level instead of a candidate proof, and enters the map through Reference review rather than Acceptance. Immutable once created — its statement, source locator, and source version never change in place. If the cited source is corrected or reinterpreted, that's a new Imported result node, not a revision of this one; dependents migrate to it deliberately. Its `ReferenceRecord` (the citation itself — paper, book, arXiv entry) is a separate thing and can still be freely re-reviewed. See ADR-0005.
 _Avoid_: reference, external theorem
 
 **Candidate proof**:
@@ -53,8 +53,16 @@ An automated or semi-automated check (a verifier, a checker) run against a speci
 _Avoid_: verification result, verify accept
 
 **Challenge**:
-A claim, raised against an already-Accepted node, that its Acceptance may no longer hold (for example, a missing assumption noticed after the fact). Opening a Challenge sets that node's integrity state to Challenged; it never changes the node's acceptance state. Only the researcher resolves a Challenge — by dismissing it, or by revising the node and re-Accepting it. An ordinary observation that doesn't call a node's Acceptance into doubt is a Comment, not a Challenge — Challenge is reserved for the invalidating case. See ADR-0004.
+A claim, raised against an already-Accepted node or an Imported result, that it may no longer be safe to depend on (for example, a missing assumption noticed after the fact). Any agent or collaborator may open one — raising a concern isn't a mathematical judgment, so it isn't gated. Opening a Challenge sets its target's integrity state to Challenged; it never changes the target's acceptance state. Only the researcher resolves a Challenge: for a local node, by dismissing it or by revising the node and re-Accepting it; for an Imported result, through Reference review (reaffirming trust, or treating it as no longer callable so dependents migrate to a corrected node). An ordinary observation that doesn't call a node's standing into doubt is a Comment, not a Challenge — Challenge is reserved for the invalidating case. See ADR-0004, ADR-0005.
 _Avoid_: bug, finding
+
+**Accepted mathematical interface**:
+The part of a node's accepted content that other nodes actually depend on — its statement, assumptions, and mathematical scope. Never its internal proof, proof strategy, or Evidence checks: a dependent relies on what a node says, not how it was shown. Whether a dependency needs only a Lightweight re-review or a whole new Candidate proof after a revision turns on whether this — not the proof text — changed. See ADR-0005.
+_Avoid_: statement (too narrow — assumptions and scope matter too), interface version
+
+**Lightweight re-review**:
+Human Review's confirmation that an existing Candidate proof remains valid after one of its dependencies advanced to a new accepted version, because that dependency's Accepted mathematical interface didn't change — only its internal proof did. Updates the dependency edge's pinned version and is recorded as its own kind of review decision (`dependency_revalidation`, decision `reaffirmed`); it does not create a new Candidate proof, and it does not touch the reviewing node's own acceptance state. If the interface did change, this doesn't apply — a new Candidate proof is required instead. See ADR-0005.
+_Avoid_: reaccept, re-approve, revalidate (as a bare verb — say what's being revalidated)
 
 ### Node lifecycle
 
@@ -93,7 +101,7 @@ A derived overlay on a node's acceptance state — current, Potentially stale, o
 _Avoid_: status, health
 
 **Potentially stale** (an integrity state):
-An Accepted node has an ancestor with an open Challenge, or has an ancestor whose currently-accepted version has moved past the version this node's dependency edge was checked against. Computed by reachability over the dependency graph from every open Challenge's target and every version-mismatched edge, never stored per node — dismissing a Challenge, or reconfirming a dependency against a node's new accepted version, clears every Potentially stale node it alone caused, automatically. A node that isn't yet Accepted shows the same underlying cause as Blocked instead, labelled dependency-challenged, rather than Potentially stale.
+An Accepted node has an ancestor with an open Challenge, or has a dependency edge whose pinned version no longer matches its target's current accepted version (the two may still share the same Accepted mathematical interface — that's exactly what a Lightweight re-review checks). Computed by reachability over the dependency graph from every open Challenge's target and every version-mismatched edge, never stored per node: nothing is cleared by hand, dismissing a Challenge or reconfirming a dependency (by Lightweight re-review or a new Candidate proof) just makes the same query stop returning true. A node that isn't yet Accepted shows the same underlying cause as Blocked instead, labelled dependency-challenged, rather than Potentially stale. See ADR-0005.
 _Avoid_: stale, out of date
 
 **Split**:
