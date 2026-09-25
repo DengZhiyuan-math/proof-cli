@@ -631,3 +631,113 @@ def test_frontier_empty_project_human_readable(tmp_path: Path):
     result = runner.invoke(app, ["frontier", "--root", str(tmp_path)])
     assert result.exit_code == 0
     assert "No frontier nodes" in result.stdout
+
+
+def _create_dependent_with_accepted_dependency(tmp_path: Path, dependent: str = "clm_1", target: str = "lem_base") -> None:
+    runner.invoke(app, ["node", "create", target, "lemma", "Base lemma", "--root", str(tmp_path)])
+    runner.invoke(app, ["node", "claim", target, "--root", str(tmp_path), "--claimant", "agent_a"])
+    runner.invoke(
+        app,
+        [
+            "node", "submit", target, "--root", str(tmp_path),
+            "--claimant", "agent_a", "--content", "proof text", "--rationale", "scoped correctly",
+        ],
+    )
+    runner.invoke(
+        app,
+        ["node", "review", target, "accept", "--root", str(tmp_path), "--reviewer", "researcher", "--confirm"],
+    )
+    runner.invoke(
+        app,
+        [
+            "node", "create", dependent, "claim", "Depends on base", "--root", str(tmp_path),
+            "--dependency", target,
+        ],
+    )
+    runner.invoke(app, ["node", "claim", dependent, "--root", str(tmp_path), "--claimant", "agent_b"])
+    runner.invoke(
+        app,
+        [
+            "node", "submit", dependent, "--root", str(tmp_path),
+            "--claimant", "agent_b", "--content", "proof text", "--rationale", "scoped correctly",
+        ],
+    )
+
+
+def test_node_revalidate_requires_confirmation(tmp_path: Path):
+    _create_dependent_with_accepted_dependency(tmp_path)
+
+    result = runner.invoke(
+        app,
+        ["node", "revalidate", "clm_1", "lem_base", "--root", str(tmp_path), "--reviewer", "researcher", "--json"],
+    )
+    assert result.exit_code != 0
+    payload = json.loads(result.stdout)
+    assert payload["error"]["code"] == "CONFIRMATION_REQUIRED"
+
+
+def test_node_revalidate_human_readable(tmp_path: Path):
+    _create_dependent_with_accepted_dependency(tmp_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "node", "revalidate", "clm_1", "lem_base", "--root", str(tmp_path),
+            "--reviewer", "researcher", "--confirm",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "reaffirmed" in result.stdout
+    assert "dependency_revalidation" in result.stdout
+
+
+def test_node_revalidate_json_envelope(tmp_path: Path):
+    _create_dependent_with_accepted_dependency(tmp_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "node", "revalidate", "clm_1", "lem_base", "--root", str(tmp_path),
+            "--reviewer", "researcher", "--confirm", "--json",
+        ],
+    )
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is True
+    assert payload["command"] == "node.revalidate"
+    assert payload["data"]["kind"] == "dependency_revalidation"
+    assert payload["data"]["decision"] == "reaffirmed"
+
+
+def test_node_revalidate_no_pin_json_error(tmp_path: Path):
+    runner.invoke(app, ["node", "create", "lem_base", "lemma", "Base lemma", "--root", str(tmp_path)])
+    runner.invoke(app, ["node", "claim", "lem_base", "--root", str(tmp_path), "--claimant", "agent_a"])
+    runner.invoke(
+        app,
+        [
+            "node", "submit", "lem_base", "--root", str(tmp_path),
+            "--claimant", "agent_a", "--content", "proof text", "--rationale", "scoped correctly",
+        ],
+    )
+    runner.invoke(
+        app,
+        ["node", "review", "lem_base", "accept", "--root", str(tmp_path), "--reviewer", "researcher", "--confirm"],
+    )
+    runner.invoke(
+        app,
+        [
+            "node", "create", "clm_1", "claim", "Depends on base", "--root", str(tmp_path),
+            "--dependency", "lem_base",
+        ],
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "node", "revalidate", "clm_1", "lem_base", "--root", str(tmp_path),
+            "--reviewer", "researcher", "--confirm", "--json",
+        ],
+    )
+    assert result.exit_code != 0
+    payload = json.loads(result.stdout)
+    assert payload["error"]["code"] == "NO_DEPENDENCY_PIN"
