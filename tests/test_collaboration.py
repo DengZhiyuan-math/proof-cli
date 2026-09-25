@@ -16,7 +16,10 @@ from proof_cli.commands import (
     cmd_role_show,
     cmd_proof_asset_publish,
 )
+import pytest
+
 from proof_cli.domain import TheoremStatus, TrustLevel
+from proof_cli.proof_map import claim_node, create_node, decide_acceptance, submit_candidate_proof
 from proof_cli.reusable_assets import ReusableAsset, ReusableAssetKind, ReusableAssetPayload, ReusableAssetProvenance, ReusableAssetReuseStatus, ReusableAssetTrustLevel
 from proof_cli.storage import ensure_project
 from proof_cli.theorems import add_theorem
@@ -98,3 +101,63 @@ def test_collaboration_records_persist_authorship_review_comments_and_branches(t
     assert "Branches:" in export_text
     assert "Shared publications:" in export_text
     assert "Bridge pattern" in export_text
+
+
+def test_review_request_on_proof_map_node_is_rejected(tmp_path: Path) -> None:
+    """The generic `proof review request` command must not accept a
+    proof_map_node target: it would create a ReviewRecord with kind=None
+    that get_acceptance_state silently ignores, letting a researcher believe
+    a node was reviewed when acceptance_state never moved."""
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_1", kind="claim", statement="stmt")
+
+    with pytest.raises(ValueError, match="proof node review"):
+        cmd_review_request("proof_map_node", "clm_1", root=tmp_path, reviewer_id="researcher")
+
+
+def test_review_decide_on_proof_map_node_review_is_rejected(tmp_path: Path) -> None:
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_1", kind="claim", statement="stmt")
+    claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
+    submit_candidate_proof(
+        store, "clm_1", claimant_id="agent_a", session_id="sess_1",
+        scoping_rationale="scoped correctly", content="proof text",
+    )
+    record = decide_acceptance(store, "clm_1", "accept", reviewer_id="researcher", confirmed=True)
+
+    with pytest.raises(ValueError, match="proof node review"):
+        cmd_review_decide(record.id, "rejected", root=tmp_path, reviewer_id="researcher")
+
+
+def test_review_decide_invalid_decision_raises_clean_value_error(tmp_path: Path) -> None:
+    """A bad decision string (e.g. the hyphenated vocabulary `proof node
+    review` teaches) must fail with a catchable ValueError, not a bare
+    Python traceback from the ReviewGovernanceState(...) constructor."""
+    store = ensure_project(tmp_path)
+    add_theorem(
+        store,
+        theorem_id="thm_1",
+        kind="theorem",
+        name="A result",
+        statement="A implies B",
+    )
+    review_request = cmd_review_request("theorem_contract", "thm_1", root=tmp_path, reviewer_id="reviewer_1")
+    review_id = json.loads(review_request)["id"]
+
+    with pytest.raises(ValueError, match="not a valid review decision"):
+        cmd_review_decide(review_id, "revision-requested", root=tmp_path, reviewer_id="reviewer_1")
+
+
+def test_summarize_review_record_includes_kind_when_present() -> None:
+    from proof_cli.collaboration import ReviewGovernanceState, ReviewRecord, ReviewRecordKind, summarize_review_record
+
+    with_kind = ReviewRecord(
+        object_type="proof_map_node", object_id="clm_1", reviewer_id="researcher",
+        decision=ReviewGovernanceState.approved, kind=ReviewRecordKind.acceptance,
+    )
+    without_kind = ReviewRecord(
+        object_type="theorem_contract", object_id="thm_1", reviewer_id="researcher",
+        decision=ReviewGovernanceState.approved,
+    )
+    assert "kind=acceptance" in summarize_review_record(with_kind)
+    assert "kind=" not in summarize_review_record(without_kind)

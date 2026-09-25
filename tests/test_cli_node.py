@@ -40,8 +40,9 @@ def test_node_create_and_show_json_envelope(tmp_path: Path):
     )
     assert create.exit_code == 0
     payload = json.loads(create.stdout)
-    assert payload["schema_version"] == "1.0"
+    assert payload["schema_version"] == 1
     assert payload["ok"] is True
+    assert payload["command"] == "node.create"
     assert payload["data"]["id"] == "clm_1"
     assert payload["data"]["kind"] == "claim"
 
@@ -175,7 +176,7 @@ def test_node_claim_conflict_json_envelope_includes_details(tmp_path: Path):
     payload = json.loads(conflict.stdout)
     assert payload["ok"] is False
     assert payload["error"]["code"] == "CLAIM_CONFLICT"
-    assert payload["error"]["details"]["claimant_id"] == "agent_a"
+    assert payload["error"]["claimant_id"] == "agent_a"
 
 
 def test_node_release_without_ownership_or_force_is_rejected(tmp_path: Path):
