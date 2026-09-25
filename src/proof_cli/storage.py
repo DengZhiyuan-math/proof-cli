@@ -14,6 +14,7 @@ from .domain import (
     BlockerRecord,
     CandidateProofRecord,
     ClaimRecord,
+    DependencyPin,
     EventRecord,
     ProofMapNode,
     ProofObligation,
@@ -43,6 +44,7 @@ def _load(adapter, value: str):
 THEOREM_ADAPTER = TypeAdapter(TheoremContract)
 PROOF_MAP_NODE_ADAPTER = TypeAdapter(ProofMapNode)
 CANDIDATE_PROOF_ADAPTER = TypeAdapter(CandidateProofRecord)
+DEPENDENCY_PIN_ADAPTER = TypeAdapter(DependencyPin)
 OBLIGATION_ADAPTER = TypeAdapter(ProofObligation)
 BLOCKER_ADAPTER = TypeAdapter(BlockerRecord)
 SNAPSHOT_ADAPTER = TypeAdapter(ProjectSnapshot)
@@ -112,11 +114,24 @@ CREATE TABLE IF NOT EXISTS candidate_proofs (
   review_record_id TEXT,
   submitted_by TEXT NOT NULL,
   scoping_rationale TEXT NOT NULL,
+  interface_fingerprint TEXT,
   created_at TEXT NOT NULL,
   UNIQUE(node_id, version)
 );
 
 CREATE INDEX IF NOT EXISTS idx_candidate_proofs_node_id ON candidate_proofs(node_id, version);
+
+CREATE TABLE IF NOT EXISTS dependency_pins (
+  id TEXT PRIMARY KEY,
+  node_id TEXT NOT NULL,
+  target_node_id TEXT NOT NULL,
+  pinned_version INTEGER,
+  pinned_fingerprint TEXT,
+  created_at TEXT NOT NULL,
+  UNIQUE(node_id, target_node_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_dependency_pins_node_id ON dependency_pins(node_id);
 """
 
 
@@ -660,6 +675,7 @@ def _row_to_candidate_proof(row: sqlite3.Row) -> CandidateProofRecord:
         review_record_id=row["review_record_id"],
         submitted_by=row["submitted_by"],
         scoping_rationale=row["scoping_rationale"],
+        interface_fingerprint=row["interface_fingerprint"],
         created_at=row["created_at"],
     )
 
@@ -686,8 +702,8 @@ def insert_candidate_proof(store: ProjectStore, record: CandidateProofRecord) ->
         conn.execute("UPDATE candidate_proofs SET is_current = 0 WHERE node_id = ?", (record.node_id,))
         conn.execute(
             """
-            INSERT INTO candidate_proofs(id, node_id, version, file_path, is_current, review_record_id, submitted_by, scoping_rationale, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO candidate_proofs(id, node_id, version, file_path, is_current, review_record_id, submitted_by, scoping_rationale, interface_fingerprint, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record.id,
@@ -698,11 +714,21 @@ def insert_candidate_proof(store: ProjectStore, record: CandidateProofRecord) ->
                 record.review_record_id,
                 record.submitted_by,
                 record.scoping_rationale,
+                record.interface_fingerprint,
                 record.created_at.isoformat(),
             ),
         )
         conn.commit()
     return record
+
+
+def set_candidate_proof_interface_fingerprint(store: ProjectStore, candidate_proof_id: str, fingerprint: str) -> None:
+    with store.connect() as conn:
+        conn.execute(
+            "UPDATE candidate_proofs SET interface_fingerprint = ? WHERE id = ?",
+            (fingerprint, candidate_proof_id),
+        )
+        conn.commit()
 
 
 def get_candidate_proof(store: ProjectStore, candidate_proof_id: str) -> CandidateProofRecord | None:
@@ -730,6 +756,69 @@ def get_current_candidate_proof(store: ProjectStore, node_id: str) -> CandidateP
             (node_id,),
         ).fetchone()
     return _row_to_candidate_proof(row) if row else None
+
+
+def _row_to_dependency_pin(row: sqlite3.Row) -> DependencyPin:
+    return DependencyPin(
+        id=row["id"],
+        node_id=row["node_id"],
+        target_node_id=row["target_node_id"],
+        pinned_version=row["pinned_version"],
+        pinned_fingerprint=row["pinned_fingerprint"],
+        created_at=row["created_at"],
+    )
+
+
+def upsert_dependency_pin(store: ProjectStore, pin: DependencyPin) -> DependencyPin:
+    """Insert or refresh the pin for (node_id, target_node_id).
+
+    One row per pair — always the most recent pin. `id` is preserved across
+    a refresh so a caller holding an earlier pin's id can still look it up.
+    """
+    with store.connect() as conn:
+        existing = conn.execute(
+            "SELECT id FROM dependency_pins WHERE node_id = ? AND target_node_id = ? LIMIT 1",
+            (pin.node_id, pin.target_node_id),
+        ).fetchone()
+        pin_id = existing["id"] if existing else pin.id
+        conn.execute(
+            """
+            INSERT INTO dependency_pins(id, node_id, target_node_id, pinned_version, pinned_fingerprint, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(node_id, target_node_id) DO UPDATE SET
+              pinned_version = excluded.pinned_version,
+              pinned_fingerprint = excluded.pinned_fingerprint,
+              created_at = excluded.created_at
+            """,
+            (
+                pin_id,
+                pin.node_id,
+                pin.target_node_id,
+                pin.pinned_version,
+                pin.pinned_fingerprint,
+                pin.created_at.isoformat(),
+            ),
+        )
+        conn.commit()
+    return pin.model_copy(update={"id": pin_id})
+
+
+def get_dependency_pin(store: ProjectStore, node_id: str, target_node_id: str) -> DependencyPin | None:
+    with store.connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM dependency_pins WHERE node_id = ? AND target_node_id = ? LIMIT 1",
+            (node_id, target_node_id),
+        ).fetchone()
+    return _row_to_dependency_pin(row) if row else None
+
+
+def list_dependency_pins_for_node(store: ProjectStore, node_id: str) -> list[DependencyPin]:
+    with store.connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM dependency_pins WHERE node_id = ? ORDER BY target_node_id",
+            (node_id,),
+        ).fetchall()
+    return [_row_to_dependency_pin(row) for row in rows]
 
 
 def store_snapshot(store: ProjectStore, snapshot: ProjectSnapshot) -> ProjectSnapshot:

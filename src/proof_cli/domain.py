@@ -178,6 +178,12 @@ class CandidateProofRecord(BaseModel):
     is stable and independent of `file_path` — a review record references a
     submission by `id`, never by where its file happens to live. See ADR
     (candidate proof storage) and ProofMapNode.
+
+    `interface_fingerprint` is set once, at the moment this version's node
+    is Accepted (a pure function of that already-immutable version's kind,
+    statement, and assumptions), never recomputed afterward. A dependency
+    that pinned this version compares against it to tell an
+    interface-preserving revision from a substantive one.
     """
 
     id: str
@@ -188,6 +194,29 @@ class CandidateProofRecord(BaseModel):
     review_record_id: str | None = None
     submitted_by: str = "human"
     scoping_rationale: str
+    interface_fingerprint: str | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class DependencyPin(BaseModel):
+    """What a node's own Candidate proof was actually checked against.
+
+    Refreshed every time `node_id` submits a new Candidate proof — captures
+    the target's current accepted candidate-proof version and interface
+    fingerprint at that moment, so a later comparison can tell "the target
+    moved on but its interface didn't" from "the target's interface itself
+    changed" without re-deriving anything. `pinned_version` and
+    `pinned_fingerprint` are `None` for an `imported_result` target (it's
+    immutable, so there's nothing to have moved on) and also `None` if the
+    target wasn't yet Accepted at pin time. One row per (node_id,
+    target_node_id) — always the most recent pin, not a history.
+    """
+
+    id: str
+    node_id: str
+    target_node_id: str
+    pinned_version: int | None = None
+    pinned_fingerprint: str | None = None
     created_at: datetime = Field(default_factory=utc_now)
 
 
