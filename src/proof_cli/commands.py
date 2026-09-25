@@ -6,10 +6,6 @@ from pathlib import Path
 from .domain import (
     BlockerRecord,
     ProofObligation,
-    TheoremProvenanceKind,
-    TheoremReviewState,
-    TheoremStatus,
-    TrustLevel,
 )
 from .bugs import ProofBugReport, ProofBugReviewState, ProofBugScan, ProofBugSeverity, ProofBugStatus, ProofBugType, scan_proof_bugs
 from .automation import (
@@ -159,12 +155,9 @@ from .proof_state import (
     add_obligation,
     build_snapshot,
     load_state,
-    record_failed_route,
     set_current_theorem,
     save_state,
     summarize_state,
-    note_unresolved_trust_call,
-    record_theorem_usage,
 )
 from .snapshot import create_snapshot
 from .references import ReferenceRecord, ReferenceReviewStatus, ReferenceSourceType
@@ -882,55 +875,6 @@ def cmd_reference_review(reference_id: str, action: str, root: str | Path = ".",
     return f"review:{reference_id}:{review_status.value}"
 
 
-def cmd_proof_import(theorem_id: str, root: str | Path = ".") -> str:
-    store = get_store(root)
-    _append_history(store, f"import:{theorem_id}", message=f"import request for {theorem_id}")
-    ok, reason = theorem_callability(store, theorem_id)
-    if ok:
-        record_theorem_usage(store, theorem_id)
-        append_event(
-            store,
-            "dsl_imported",
-            f"imported theorem {theorem_id}",
-            entity_id=theorem_id,
-            payload={"theorem_id": theorem_id},
-        )
-        return f"import:{theorem_id}"
-
-    note_unresolved_trust_call(store, theorem_id)
-    if reason.startswith("missing assumptions:"):
-        missing = [item.strip() for item in reason.split(":", 1)[1].split(",") if item.strip()]
-        for item in missing:
-            add_obligation(
-                store,
-                ProofObligation(
-                    id=_next_obligation_id(theorem_id, item, "import"),
-                    goal_statement=item,
-                    required_for=theorem_id,
-                    blocking_reason=reason,
-                ),
-            )
-    else:
-        add_obligation(
-            store,
-            ProofObligation(
-                id=_next_obligation_id(theorem_id, "import"),
-                goal_statement=f"ground {theorem_id}",
-                required_for=theorem_id,
-                blocking_reason=reason,
-            ),
-        )
-    record_failed_route(store, f"import:{theorem_id}")
-    append_event(
-        store,
-        "dsl_import_blocked",
-        f"blocked import for {theorem_id}",
-        entity_id=theorem_id,
-        payload={"reason": reason},
-    )
-    return f"import:blocked:{reason}"
-
-
 def cmd_proof_ground(
     theorem_id: str,
     reference_ids: list[str],
@@ -997,85 +941,6 @@ def cmd_proof_ground(
     return f"ground:{theorem_id}:{','.join(approved)}"
 
 
-def cmd_proof_review(
-    target_id: str,
-    action: str,
-    root: str | Path = ".",
-    *,
-    rationale: str = "",
-) -> str:
-    store = get_store(root)
-    normalized = action.strip().lower()
-    status_map = {
-        "approve": "approved",
-        "approved": "approved",
-        "reject": "rejected",
-        "rejected": "rejected",
-        "defer": "deferred",
-        "deferred": "deferred",
-        "candidate": "candidate",
-        "downgrade": "deferred",
-    }
-    status_name = status_map.get(normalized)
-    if status_name is None:
-        return f"review:unsupported:{action}"
-
-    reference = get_reference(store, target_id)
-    if reference is not None:
-        reviewer = {
-            "approved": approve_reference,
-            "rejected": reject_reference,
-            "deferred": defer_reference,
-            "candidate": defer_reference,
-        }[status_name]
-        result = reviewer(store, target_id, confirmed=True, rationale=rationale)
-        _append_history(store, f"review:{target_id}:{status_name}", message=f"reviewed reference {target_id}")
-        return f"review:{target_id}:{status_name}" if result.allowed else f"review:blocked:{result.message}"
-
-    contract = get_contract(store, target_id)
-    if contract is None:
-        return f"review:blocked:target {target_id} not found"
-
-    if status_name == "approved" and contract.provenance_kind == TheoremProvenanceKind.imported and not contract.grounded_reference_ids:
-        add_obligation(
-            store,
-            ProofObligation(
-                id=_next_obligation_id(target_id, "review", "grounding"),
-                goal_statement=f"ground {target_id}",
-                required_for=target_id,
-                blocking_reason="imported theorem requires grounding before approval",
-            ),
-            supporting_reference_ids=list(contract.grounded_reference_ids),
-            route_notes=rationale or "grounding required before approval",
-        )
-        append_event(
-            store,
-            "dsl_review_blocked",
-            f"review blocked for {target_id}",
-            entity_id=target_id,
-            payload={"reason": "grounding required before approval"},
-        )
-        _append_history(store, f"review:{target_id}:{normalized}:blocked", message=f"blocked review for {target_id}")
-        return "review:blocked:grounding required before approval"
-
-    update_data: dict[str, object] = {"review_state": TheoremReviewState(status_name)}
-    if status_name == "approved":
-        update_data["status"] = TheoremStatus.verified if contract.provenance_kind == TheoremProvenanceKind.local else TheoremStatus.imported
-        update_data["trust_level"] = TrustLevel.project_verified if contract.provenance_kind == TheoremProvenanceKind.local else TrustLevel.external_reference
-    elif status_name == "rejected":
-        update_data["status"] = TheoremStatus.blocked
-    elif status_name == "deferred":
-        update_data["status"] = TheoremStatus.draft
-    updated = update_theorem(store, target_id, **update_data)
-    append_event(
-        store,
-        "dsl_reviewed",
-        f"reviewed theorem {target_id}",
-        entity_id=target_id,
-        payload={"action": normalized, "rationale": rationale, "review_state": updated.review_state.value},
-    )
-    _append_history(store, f"review:{target_id}:{normalized}", message=f"reviewed {target_id}")
-    return f"review:{target_id}:{updated.review_state.value}"
 
 
 def cmd_proof_reason(theorem_id: str, root: str | Path = ".", *, notes: str = "") -> str:
