@@ -704,7 +704,8 @@ def summarize_contributor(contributor: Contributor) -> str:
 
 
 def summarize_review_record(record: ReviewRecord) -> str:
-    return f"{record.id}: {record.object_type}/{record.object_id} [{record.decision.value}] reviewer={record.reviewer_id}"
+    kind = f" kind={record.kind.value}" if record.kind is not None else ""
+    return f"{record.id}: {record.object_type}/{record.object_id} [{record.decision.value}]{kind} reviewer={record.reviewer_id}"
 
 
 def summarize_comment_thread(thread: CommentThread) -> str:

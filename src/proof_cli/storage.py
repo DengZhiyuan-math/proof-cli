@@ -731,6 +731,15 @@ def set_candidate_proof_interface_fingerprint(store: ProjectStore, candidate_pro
         conn.commit()
 
 
+def set_candidate_proof_review_record_id(store: ProjectStore, candidate_proof_id: str, review_record_id: str) -> None:
+    with store.connect() as conn:
+        conn.execute(
+            "UPDATE candidate_proofs SET review_record_id = ? WHERE id = ?",
+            (review_record_id, candidate_proof_id),
+        )
+        conn.commit()
+
+
 def get_candidate_proof(store: ProjectStore, candidate_proof_id: str) -> CandidateProofRecord | None:
     with store.connect() as conn:
         row = conn.execute(

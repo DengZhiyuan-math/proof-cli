@@ -127,6 +127,7 @@ from .collaboration import (
     get_branch,
     get_contributor,
     get_policy as get_collaboration_policy,
+    get_review_record,
     list_branches,
     list_comment_threads,
     list_comments,
@@ -2178,6 +2179,12 @@ def cmd_review_request(
     reviewer_id: str = "human",
     rationale: str = "",
 ) -> str:
+    if object_type == "proof_map_node":
+        raise ValueError(
+            "proof_map_node Acceptance/Reference review must go through `proof node review`, "
+            "not the generic `proof review request` command, or the decision won't be reflected "
+            "in acceptance_state"
+        )
     record = record_review_request(get_store(root), object_type, object_id, reviewer_id=reviewer_id, rationale=rationale)
     return json.dumps(record.model_dump(mode="json"), indent=2)
 
@@ -2197,10 +2204,23 @@ def cmd_review_decide(
     reviewer_id: str = "human",
     rationale: str = "",
 ) -> str:
+    store = get_store(root)
+    existing = get_review_record(store, review_id)
+    if existing is not None and existing.object_type == "proof_map_node":
+        raise ValueError(
+            "proof_map_node Acceptance/Reference review must go through `proof node review`, "
+            "not the generic `proof review decide` command, or the decision won't be reflected "
+            "in acceptance_state"
+        )
+    try:
+        resolved_decision = ReviewGovernanceState(decision)
+    except ValueError as exc:
+        valid = ", ".join(member.value for member in ReviewGovernanceState)
+        raise ValueError(f"'{decision}' is not a valid review decision; expected one of: {valid}") from exc
     record = record_review_decision(
-        get_store(root),
+        store,
         review_id,
-        ReviewGovernanceState(decision),
+        resolved_decision,
         reviewer_id=reviewer_id,
         rationale=rationale,
     )

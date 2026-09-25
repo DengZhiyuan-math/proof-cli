@@ -398,6 +398,29 @@ def test_submit_candidate_proof_writes_vault_file_and_index(tmp_path: Path):
     assert "single algebraic step" in frontmatter["scoping_rationale"]
 
 
+def test_submit_with_preexisting_vault_file_raises_proof_map_error_not_file_exists_error(tmp_path: Path):
+    """A stray vault file at the next version's path (no matching sqlite row
+    — e.g. left over from manual tampering or an interrupted run) must fail
+    as a clean ProofMapError, not an uncaught FileExistsError that would
+    surface as a raw traceback through the CLI's --json path."""
+    from proof_cli.vault import candidate_proof_path
+
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_1", kind="claim", statement="stmt")
+    claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
+
+    stray_path = candidate_proof_path(store.root, "clm_1", 1)
+    stray_path.parent.mkdir(parents=True, exist_ok=True)
+    stray_path.write_text("leftover file", encoding="utf-8")
+
+    with pytest.raises(ProofMapError) as exc_info:
+        submit_candidate_proof(
+            store, "clm_1", claimant_id="agent_a", session_id="sess_1",
+            scoping_rationale="scoped correctly", content="proof text",
+        )
+    assert exc_info.value.code == "CANDIDATE_PROOF_VERSION_CONFLICT"
+
+
 def test_submit_requires_scoping_rationale(tmp_path: Path):
     store = ensure_project(tmp_path)
     create_node(store, node_id="clm_1", kind="claim", statement="stmt")
@@ -1235,3 +1258,88 @@ def test_dependency_pin_is_current_false_when_never_pinned_a_fingerprint(tmp_pat
     create_node(store, node_id="lem_base", kind="lemma", statement="A implies B")
     unpinned = DependencyPin(id="pin_none", node_id="clm_x", target_node_id="lem_base", pinned_version=None, pinned_fingerprint=None)
     assert dependency_pin_is_current(store, unpinned) is False
+
+
+def test_pin_dependencies_leaves_pinned_version_none_for_submitted_but_unaccepted_target(tmp_path: Path):
+    """A target with a *current* candidate proof that isn't yet Accepted must
+    pin neither a version nor a fingerprint (ADR-0005 Rule 2: a pin captures
+    a version that was current AND Accepted)."""
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="lem_base", kind="lemma", statement="Base lemma")
+    claim_node(store, "lem_base", claimant_id="agent_a", session_id="sess_1")
+    submit_candidate_proof(
+        store,
+        "lem_base",
+        claimant_id="agent_a",
+        session_id="sess_1",
+        scoping_rationale="scoped correctly",
+        content="proof text",
+    )
+    create_node(store, node_id="clm_1", kind="claim", statement="Depends on base", dependencies=["lem_base"])
+
+    claim_node(store, "clm_1", claimant_id="agent_b", session_id="sess_2")
+    submit_candidate_proof(
+        store,
+        "clm_1",
+        claimant_id="agent_b",
+        session_id="sess_2",
+        scoping_rationale="scoped correctly",
+        content="proof text",
+    )
+
+    pin = get_dependency_pin(store, "clm_1", "lem_base")
+    assert pin is not None
+    assert pin.pinned_version is None
+    assert pin.pinned_fingerprint is None
+
+
+def test_claim_on_rejected_node_is_refused(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    _submitted_claim(store)
+    decide_acceptance(store, "clm_1", "reject", reviewer_id="researcher", confirmed=True)
+
+    with pytest.raises(ProofMapError) as exc_info:
+        claim_node(store, "clm_1", claimant_id="agent_b", session_id="sess_2")
+    assert exc_info.value.code == "NODE_REJECTED"
+
+
+def test_claim_on_accepted_node_is_refused(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_1", kind="claim", statement="stmt")
+    _accept_via_full_cycle(store, "clm_1")
+
+    with pytest.raises(ProofMapError) as exc_info:
+        claim_node(store, "clm_1", claimant_id="agent_b", session_id="sess_2")
+    assert exc_info.value.code == "NODE_ALREADY_ACCEPTED"
+
+    # the interface fingerprint stays intact — no reclaim ever happened to
+    # desync it from the node's still-"accepted" acceptance_state
+    assert get_accepted_interface_fingerprint(store, "clm_1") is not None
+
+
+def test_workflow_state_review_needed_after_reclaim_is_not_masked_by_a_stale_review(tmp_path: Path):
+    """A prior revision_requested decision must not read as covering a
+    resubmission that happened after it, purely because get_workflow_state
+    now keys off the structural review_record_id link rather than wall-clock
+    timestamps."""
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_1", kind="claim", statement="stmt")
+    claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
+    submit_candidate_proof(
+        store, "clm_1", claimant_id="agent_a", session_id="sess_1",
+        scoping_rationale="first attempt", content="v1 text",
+    )
+    decide_acceptance(store, "clm_1", "revision-requested", reviewer_id="researcher", confirmed=True)
+
+    v1 = get_current_candidate_proof(store, "clm_1")
+    assert v1.review_record_id is not None
+
+    claim_node(store, "clm_1", claimant_id="agent_b", session_id="sess_2")
+    submit_candidate_proof(
+        store, "clm_1", claimant_id="agent_b", session_id="sess_2",
+        scoping_rationale="second attempt", content="v2 text",
+    )
+
+    v2 = get_current_candidate_proof(store, "clm_1")
+    assert v2.review_record_id is None
+    assert get_workflow_state(store, "clm_1") == "review-needed"

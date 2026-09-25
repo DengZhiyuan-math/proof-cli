@@ -33,6 +33,7 @@ from .storage import (
     mark_claim_released,
     next_candidate_proof_version,
     set_candidate_proof_interface_fingerprint,
+    set_candidate_proof_review_record_id,
     upsert_dependency_pin,
 )
 from .vault import candidate_proof_path, write_candidate_proof_file
@@ -178,12 +179,30 @@ def claim_node(
     lookup below is only an optimization, never the source of truth, so a
     genuine race between two claimants is still resolved correctly (see
     `tests/test_proof_map.py::test_claim_concurrency_...`).
+
+    Refuses a node that's Rejected (CONTEXT.md: "should not be pursued
+    further") or already Accepted (no supported revise-after-accept path
+    yet) — both are terminal for the Acceptance axis, so reopening the
+    claim/submit cycle on either would let a fresh submission silently
+    contradict a decision Human Review already made.
     """
     node = require_node(store, node_id)
     if node.kind == ProofMapNodeKind.imported_result:
         raise ProofMapError(
             "IMMUTABLE_NODE",
             f"imported_result node {node_id} has no claim/submit workflow; use Reference review instead",
+        )
+
+    acceptance_state = get_acceptance_state(store, node_id)
+    if acceptance_state == "rejected":
+        raise ProofMapError(
+            "NODE_REJECTED",
+            f"node {node_id} was Rejected and should not be pursued further; create a new node instead",
+        )
+    if acceptance_state == "accepted":
+        raise ProofMapError(
+            "NODE_ALREADY_ACCEPTED",
+            f"node {node_id} is already Accepted; there is no supported path to reclaim and revise it",
         )
 
     existing = get_active_claim(store, node_id)
@@ -347,16 +366,22 @@ def submit_candidate_proof(
     submitted_at = utc_now()
     file_path = candidate_proof_path(store.root, node_id, version)
 
-    write_candidate_proof_file(
-        file_path,
-        id=proof_id,
-        node_id=node_id,
-        version=version,
-        submitted_by=claimant_id,
-        created_at=submitted_at.isoformat(),
-        scoping_rationale=scoping_rationale,
-        content=content,
-    )
+    try:
+        write_candidate_proof_file(
+            file_path,
+            id=proof_id,
+            node_id=node_id,
+            version=version,
+            submitted_by=claimant_id,
+            created_at=submitted_at.isoformat(),
+            scoping_rationale=scoping_rationale,
+            content=content,
+        )
+    except FileExistsError as exc:
+        raise ProofMapError(
+            "CANDIDATE_PROOF_VERSION_CONFLICT",
+            f"version {version} of node {node_id} is already indexed",
+        ) from exc
 
     record = CandidateProofRecord(
         id=proof_id,
@@ -462,9 +487,12 @@ def pin_dependencies(store: ProjectStore, node: ProofMapNode) -> list[Dependency
         if target.kind == ProofMapNodeKind.imported_result:
             pinned_version, pinned_fingerprint = None, None
         else:
-            current = get_current_candidate_proof(store, target_id)
-            pinned_version = current.version if current else None
             pinned_fingerprint = get_accepted_interface_fingerprint(store, target_id)
+            if pinned_fingerprint is None:
+                pinned_version = None
+            else:
+                current = get_current_candidate_proof(store, target_id)
+                pinned_version = current.version if current else None
         pin = DependencyPin(
             id=str(uuid.uuid4()),
             node_id=node.id,
@@ -572,9 +600,10 @@ def decide_acceptance(
     )
     record = record_review_decision(store, request.id, governance_state, reviewer_id=reviewer_id, rationale=rationale)
 
-    if resolved_decision == AcceptanceDecision.accept:
-        current_proof = get_current_candidate_proof(store, node_id)
-        if current_proof is not None:
+    current_proof = get_current_candidate_proof(store, node_id)
+    if current_proof is not None:
+        set_candidate_proof_review_record_id(store, current_proof.id, record.id)
+        if resolved_decision == AcceptanceDecision.accept:
             fingerprint = compute_interface_fingerprint(node.kind.value, node.statement, node.assumptions)
             set_candidate_proof_interface_fingerprint(store, current_proof.id, fingerprint)
 
@@ -736,9 +765,13 @@ def get_workflow_state(store: ProjectStore, node_id: str) -> str:
     latest_review = acceptance_records[-1] if acceptance_records else None
 
     # Whether the latest Human Review decision already covers the current
-    # submission (nothing has been submitted since it was made).
+    # submission (nothing has been submitted since it was made). Keyed off
+    # the structural review_record_id link `decide_acceptance` stamps onto
+    # whatever candidate proof was current at decision time, never off
+    # timestamps — two writes can otherwise land within the same
+    # timestamp-resolution tick.
     review_is_current = latest_review is not None and (
-        current_proof is None or latest_review.updated_at >= current_proof.created_at
+        current_proof is None or current_proof.review_record_id == latest_review.id
     )
 
     if review_is_current and latest_review.decision == ReviewGovernanceState.revision_requested:

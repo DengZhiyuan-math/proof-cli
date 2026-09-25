@@ -209,7 +209,7 @@ def frontier(root: str = ".", json_output: bool = typer.Option(False, "--json"))
     store = get_store(_root(root))
     nodes = get_frontier(store)
     if json_output:
-        typer.echo(dump_envelope(success_envelope([node.model_dump(mode="json") for node in nodes])))
+        typer.echo(dump_envelope(success_envelope("frontier", [node.model_dump(mode="json") for node in nodes])))
         return
     typer.echo(render_frontier(nodes))
 
@@ -224,16 +224,16 @@ def revalidate(source_id: str, root: str = ".", backend_target: str = "", notes:
     )
 
 
-def _emit_node(node, json_output: bool) -> None:
+def _emit_node(node, json_output: bool, *, command: str) -> None:
     if json_output:
-        typer.echo(dump_envelope(success_envelope(node.model_dump(mode="json"))))
+        typer.echo(dump_envelope(success_envelope(command, node.model_dump(mode="json"))))
     else:
         typer.echo(render_proof_map_node(node))
 
 
-def _emit_node_error(exc: ProofMapError, json_output: bool) -> None:
+def _emit_node_error(exc: ProofMapError, json_output: bool, *, command: str) -> None:
     if json_output:
-        typer.echo(dump_envelope(error_envelope(exc.code, exc.message, details=exc.details or None)))
+        typer.echo(dump_envelope(error_envelope(command, exc.code, exc.message, details=exc.details or None)))
     else:
         detail_suffix = ""
         if exc.details:
@@ -241,9 +241,9 @@ def _emit_node_error(exc: ProofMapError, json_output: bool) -> None:
         typer.echo(f"Error: {exc.message}{detail_suffix}")
 
 
-def _emit_claim(claim, json_output: bool) -> None:
+def _emit_claim(claim, json_output: bool, *, command: str) -> None:
     if json_output:
-        typer.echo(dump_envelope(success_envelope(claim.model_dump(mode="json"))))
+        typer.echo(dump_envelope(success_envelope(command, claim.model_dump(mode="json"))))
     else:
         typer.echo(render_claim(claim))
 
@@ -279,9 +279,9 @@ def node_create(
             created_by=created_by,
         )
     except ProofMapError as exc:
-        _emit_node_error(exc, json_output)
+        _emit_node_error(exc, json_output, command="node.create")
         raise typer.Exit(code=1)
-    _emit_node(node, json_output)
+    _emit_node(node, json_output, command="node.create")
 
 
 @node_app.command("show")
@@ -297,7 +297,7 @@ def node_show(
         acceptance_state = get_acceptance_state(store, node_id)
         integrity_state = get_integrity_state(store, node_id)
     except ProofMapError as exc:
-        _emit_node_error(exc, json_output)
+        _emit_node_error(exc, json_output, command="node.show")
         raise typer.Exit(code=1)
 
     if json_output:
@@ -305,7 +305,7 @@ def node_show(
         payload["workflow_state"] = workflow_state
         payload["acceptance_state"] = acceptance_state
         payload["integrity_state"] = integrity_state
-        typer.echo(dump_envelope(success_envelope(payload)))
+        typer.echo(dump_envelope(success_envelope("node.show", payload)))
     else:
         typer.echo(
             render_proof_map_node(
@@ -325,7 +325,7 @@ def node_list(
     store = get_store(_root(root))
     nodes = list_nodes(store)
     if json_output:
-        typer.echo(dump_envelope(success_envelope([node.model_dump(mode="json") for node in nodes])))
+        typer.echo(dump_envelope(success_envelope("node.list", [node.model_dump(mode="json") for node in nodes])))
         return
     typer.echo(render_proof_map_node_list(nodes))
 
@@ -342,9 +342,9 @@ def node_claim(
     try:
         claim = claim_node(store, node_id, claimant_id=claimant, session_id=session)
     except ProofMapError as exc:
-        _emit_node_error(exc, json_output)
+        _emit_node_error(exc, json_output, command="node.claim")
         raise typer.Exit(code=1)
-    _emit_claim(claim, json_output)
+    _emit_claim(claim, json_output, command="node.claim")
 
 
 @node_app.command("release")
@@ -370,14 +370,14 @@ def node_release(
             reason=reason or None,
         )
     except ProofMapError as exc:
-        _emit_node_error(exc, json_output)
+        _emit_node_error(exc, json_output, command="node.release")
         raise typer.Exit(code=1)
-    _emit_claim(claim, json_output)
+    _emit_claim(claim, json_output, command="node.release")
 
 
-def _emit_candidate_proof(record, json_output: bool) -> None:
+def _emit_candidate_proof(record, json_output: bool, *, command: str) -> None:
     if json_output:
-        typer.echo(dump_envelope(success_envelope(record.model_dump(mode="json"))))
+        typer.echo(dump_envelope(success_envelope(command, record.model_dump(mode="json"))))
     else:
         typer.echo(render_candidate_proof(record))
 
@@ -405,14 +405,14 @@ def node_submit(
             content=content,
         )
     except ProofMapError as exc:
-        _emit_node_error(exc, json_output)
+        _emit_node_error(exc, json_output, command="node.submit")
         raise typer.Exit(code=1)
-    _emit_candidate_proof(record, json_output)
+    _emit_candidate_proof(record, json_output, command="node.submit")
 
 
-def _emit_review_record(record, json_output: bool) -> None:
+def _emit_review_record(record, json_output: bool, *, command: str) -> None:
     if json_output:
-        typer.echo(dump_envelope(success_envelope(record.model_dump(mode="json"))))
+        typer.echo(dump_envelope(success_envelope(command, record.model_dump(mode="json"))))
     else:
         typer.echo(summarize_review_record(record))
 
@@ -448,9 +448,9 @@ def node_review(
                 store, node_id, decision, reviewer_id=reviewer, rationale=rationale, confirmed=confirm
             )
     except ProofMapError as exc:
-        _emit_node_error(exc, json_output)
+        _emit_node_error(exc, json_output, command="node.review")
         raise typer.Exit(code=1)
-    _emit_review_record(record, json_output)
+    _emit_review_record(record, json_output, command="node.review")
 
 
 app.add_typer(goal_app, name="goal")
@@ -1021,7 +1021,11 @@ def review_request(
     reviewer_id: str = "human",
     rationale: str = "",
 ) -> None:
-    typer.echo(cmd_review_request(object_type, object_id, _root(root), reviewer_id=reviewer_id, rationale=rationale))
+    try:
+        typer.echo(cmd_review_request(object_type, object_id, _root(root), reviewer_id=reviewer_id, rationale=rationale))
+    except ValueError as exc:
+        typer.echo(f"Error: {exc}")
+        raise typer.Exit(code=1)
 
 
 @review_app.command("list")
@@ -1037,7 +1041,11 @@ def review_decide(
     reviewer_id: str = "human",
     rationale: str = "",
 ) -> None:
-    typer.echo(cmd_review_decide(review_id, decision, _root(root), reviewer_id=reviewer_id, rationale=rationale))
+    try:
+        typer.echo(cmd_review_decide(review_id, decision, _root(root), reviewer_id=reviewer_id, rationale=rationale))
+    except ValueError as exc:
+        typer.echo(f"Error: {exc}")
+        raise typer.Exit(code=1)
 
 
 @contributor_app.command("list")
