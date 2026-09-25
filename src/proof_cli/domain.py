@@ -132,9 +132,17 @@ class ProofMapNode(BaseModel):
     `source_locator`/`source_version`/`trust_level` are only meaningful for
     an `imported_result`-kind node: where it came from, which version of it,
     and how much it's trusted. An `imported_result` is immutable once
-    created — there is no update path for any field on any ProofMapNode, so
-    a source correction is always a brand-new node, never an edit of this
-    one (see ADR on imported results).
+    created — a source correction is always a brand-new node, never an edit
+    of this one (see ADR on imported results). `statement`/`assumptions`
+    likewise never change in place on any node, for the same reason. Two
+    narrow, deliberate exceptions exist to that rule: Promote changes `kind`
+    from `claim` to `lemma` (issue #22), and Split appends new child ids to
+    `dependencies` (issue #26) — both go through `update_proof_map_node`,
+    the only in-place write path this model has.
+
+    `derived_from` is set by Split: which node a purpose-built subclaim was
+    split from, distinguishing it from a coincidentally-shared Lemma. `None`
+    for a node that wasn't produced by a split.
     """
 
     id: str
@@ -146,6 +154,7 @@ class ProofMapNode(BaseModel):
     source_locator: str | None = None
     source_version: str | None = None
     trust_level: TrustLevel | None = None
+    derived_from: str | None = None
     created_by: str = "human"
     updated_by: str = "human"
     created_at: datetime = Field(default_factory=utc_now)

@@ -120,6 +120,7 @@ from .proof_map import (
     require_challenge,
     require_node,
     revalidate_dependency,
+    split_node,
     submit_candidate_proof,
 )
 from .rendering import (
@@ -514,6 +515,40 @@ def node_promote(
         _emit_node_error(exc, json_output, command="node.promote")
         raise typer.Exit(code=1)
     _emit_node(node, json_output, command="node.promote")
+
+
+@node_app.command("split")
+def node_split(
+    parent_id: str,
+    child: list[str] = typer.Option(
+        ..., "--child", help="Repeatable, one per child: <child-id>=<statement>"
+    ),
+    root: str = ".",
+    created_by: str = "human",
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Decompose parent_id into new claim-kind children. Ungated — no researcher approval needed."""
+    store = get_store(_root(root))
+    try:
+        specs = []
+        for entry in child:
+            if "=" not in entry:
+                raise ProofMapError(
+                    "INVALID_CHILD_SPEC", f"'{entry}' is not in the form <child-id>=<statement>"
+                )
+            child_id, statement = entry.split("=", 1)
+            specs.append({"id": child_id, "statement": statement})
+        children = split_node(store, parent_id, specs, created_by=created_by)
+    except ProofMapError as exc:
+        _emit_node_error(exc, json_output, command="node.split")
+        raise typer.Exit(code=1)
+
+    if json_output:
+        typer.echo(
+            dump_envelope(success_envelope("node.split", [node.model_dump(mode="json") for node in children]))
+        )
+    else:
+        typer.echo(render_proof_map_node_list(children))
 
 
 def _emit_challenge(challenge, json_output: bool, *, command: str) -> None:
