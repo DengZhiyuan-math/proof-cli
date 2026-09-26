@@ -8,7 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from .collaboration import CollaborationState, load_collaboration, save_collaboration
+from .collaboration import CollaborationState, import_review_records, load_collaboration, save_collaboration
 from .domain import (
     BlockerRecord,
     CandidateProofRecord,
@@ -216,11 +216,22 @@ def import_exchange_bundle(store: ProjectStore, bundle: ExchangeBundle | dict[st
     set_project_id(store, bundle.project_id)
     save_state(store, bundle.project_state)
     save_memory(store, bundle.memory)
+    # save_collaboration never writes review records; they're appended to
+    # the local Human Review history separately, and only the non-trust-
+    # bearing ones — an imported bundle can't revoke or forge a local
+    # Acceptance, Reference review, Evidence review or revalidation (#33).
     save_collaboration(store, bundle.collaboration)
+    _, refused_review_ids = import_review_records(store, bundle.collaboration.review_records)
     if bundle.publication_workspace is not None:
         save_publication_workspace(store, bundle.publication_workspace)
     imported_sections: list[str] = ["project_state", "memory", "collaboration"]
     rejected_sections: list[str] = []
+    warnings: list[str] = []
+    if refused_review_ids:
+        warnings.append(
+            f"{len(refused_review_ids)} Human Review decision(s) not imported: acceptance, reference, "
+            "evidence and revalidation decisions are only ever made locally"
+        )
 
     for contract in bundle.theorem_contracts:
         import_theorem_contract(store, contract)
@@ -303,6 +314,7 @@ def import_exchange_bundle(store: ProjectStore, bundle: ExchangeBundle | dict[st
         project_id=bundle.project_id,
         imported_sections=imported_sections,
         rejected_sections=rejected_sections,
+        warnings=warnings,
         snapshot_id=bundle.latest_snapshot.project_id if bundle.latest_snapshot is not None else None,
         note=bundle.note,
     )

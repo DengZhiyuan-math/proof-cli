@@ -70,7 +70,9 @@ CREATE TABLE IF NOT EXISTS state (
 def connect(db_path: str | Path) -> sqlite3.Connection:
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path)
+    # generous busy timeout: several CLI/agent processes may write the same
+    # project concurrently, and a writer should wait its turn, not fail.
+    conn = sqlite3.connect(path, timeout=30.0)
     conn.row_factory = sqlite3.Row
     return conn
 
