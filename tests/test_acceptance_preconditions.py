@@ -5,6 +5,8 @@ import threading
 from pathlib import Path
 
 import pytest
+
+from _authenticator import researcher, sign_cli
 from typer.testing import CliRunner
 
 from proof_cli.cli import app
@@ -20,7 +22,6 @@ from proof_cli.proof_map import (
     get_acceptance_state,
     get_workflow_state,
     open_challenge,
-    promote_to_lemma,
     split_node,
     submit_candidate_proof,
 )
@@ -45,7 +46,7 @@ def _awaiting_review(store, node_id: str = "clm_1", **node_fields) -> None:
 
 
 def _decide(store, node_id: str, decision: str):
-    return decide_acceptance(store, node_id, decision, reviewer_id="researcher", confirmed=True)
+    return researcher(store).decide_acceptance(node_id, decision)
 
 
 def _acceptance_records(store, node_id: str):
@@ -162,26 +163,32 @@ def test_concurrent_decisions_on_one_submission_let_exactly_one_through(tmp_path
     transaction, so two reviewers racing on one submission can't both win."""
     store = ensure_project(tmp_path)
     _awaiting_review(store)
-    barrier = threading.Barrier(4)
+    # all four signed up front, against the same history: only the submissions race
+    signed = [
+        (decision, researcher(store).sign("acceptance", "clm_1", decision))
+        for decision in ("accept", "reject", "accept", "revision-requested")
+    ]
+    barrier = threading.Barrier(len(signed))
     outcomes: list[str] = []
     lock = threading.Lock()
 
-    def _race(decision: str) -> None:
+    def _race(decision: str, signed_decision) -> None:
         barrier.wait()
         try:
-            _decide(store, "clm_1", decision)
+            decide_acceptance(store, "clm_1", decision, signed_decision=signed_decision)
             outcome = "ok"
         except ProofMapError as exc:
             outcome = exc.code
         with lock:
             outcomes.append(outcome)
 
-    threads = [threading.Thread(target=_race, args=(decision,)) for decision in ("accept", "reject", "accept", "revision-requested")]
+    threads = [threading.Thread(target=_race, args=pair) for pair in signed]
     for thread in threads:
         thread.start()
     for thread in threads:
         thread.join(timeout=60)
 
+    assert len(outcomes) == len(signed)
     assert outcomes.count("ok") == 1
     assert set(outcomes) - {"ok"} <= {"NODE_REJECTED", "NOT_REVIEW_NEEDED"}
     assert len(_acceptance_records(store, "clm_1")) == 1
@@ -199,7 +206,7 @@ def test_split_promote_verify_and_exchange_import_never_write_acceptance_state(t
 
     # promote refuses an unaccepted claim rather than accepting it along the way
     with pytest.raises(ProofMapError) as exc_info:
-        promote_to_lemma(store, "clm_child", confirmed=True)
+        researcher(store).promote_to_lemma("clm_child")
     assert exc_info.value.code == "NOT_ACCEPTED"
     assert get_acceptance_state(store, "clm_child") == "unreviewed"
 
@@ -252,7 +259,7 @@ def test_node_review_on_a_node_not_awaiting_review_json_error(tmp_path: Path):
     create_node(store, node_id="clm_1", kind="claim", statement="stmt")
 
     result = runner.invoke(
-        app, ["node", "review", "clm_1", "accept", "--root", str(tmp_path), "--reviewer", "researcher", "--confirm", "--json"]
+        app, sign_cli(["node", "review", "clm_1", "accept", "--root", str(tmp_path), "--reviewer", "researcher", "--confirm", "--json"])
     )
 
     assert result.exit_code != 0
@@ -268,7 +275,7 @@ def test_node_review_on_a_rejected_node_human_readable_error(tmp_path: Path):
     _decide(store, "clm_1", "reject")
 
     result = runner.invoke(
-        app, ["node", "review", "clm_1", "accept", "--root", str(tmp_path), "--reviewer", "researcher", "--confirm"]
+        app, sign_cli(["node", "review", "clm_1", "accept", "--root", str(tmp_path), "--reviewer", "researcher", "--confirm"])
     )
 
     assert result.exit_code != 0
@@ -280,7 +287,7 @@ def test_node_review_on_a_node_not_awaiting_review_human_readable_error(tmp_path
     create_node(store, node_id="clm_1", kind="claim", statement="stmt")
 
     result = runner.invoke(
-        app, ["node", "review", "clm_1", "accept", "--root", str(tmp_path), "--reviewer", "researcher", "--confirm"]
+        app, sign_cli(["node", "review", "clm_1", "accept", "--root", str(tmp_path), "--reviewer", "researcher", "--confirm"])
     )
 
     assert result.exit_code != 0

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import sys
 from pathlib import Path
 
 import typer
@@ -97,6 +99,14 @@ from .commands import (
 )
 from .envelope import dump_envelope, error_envelope, success_envelope
 from .collaboration import summarize_review_record
+from .authority import (
+    AuthorityError,
+    EnrollmentRequest,
+    enroll_reviewer_key,
+    list_authority_warnings,
+    list_reviewer_keys,
+    revoke_reviewer_key,
+)
 from .domain import ProofMapNodeKind
 from .proof_map import (
     ProofMapError,
@@ -114,6 +124,7 @@ from .proof_map import (
     list_challenges,
     list_nodes,
     open_challenge,
+    prepare_decision,
     promote_to_lemma,
     record_evidence_check,
     release_node,
@@ -133,6 +144,7 @@ from .rendering import (
     render_proof_map_node_list,
 )
 from .review import render_verification_output
+from .signing import SignedDecision, b64url_encode, batch_challenge, payload_hash
 
 app = typer.Typer(add_completion=False, help="Mathematical Proof CLI")
 asset_app = typer.Typer(help="Reusable asset workflows")
@@ -157,6 +169,7 @@ provenance_app = typer.Typer(help="Provenance workflows")
 bug_app = typer.Typer(help="Proof bug workflows")
 debug_app = typer.Typer(help="Proof debug workflows")
 review_app = typer.Typer(help="Proof review workflows")
+reviewer_app = typer.Typer(help="Reviewer passkey registry (ADR-0009)")
 contributor_app = typer.Typer(help="Contributor workflows")
 role_app = typer.Typer(help="Role workflows")
 comment_app = typer.Typer(help="Comment workflows")
@@ -241,6 +254,23 @@ def _emit_node(node, json_output: bool, *, command: str) -> None:
         typer.echo(dump_envelope(success_envelope(command, node.model_dump(mode="json"))))
     else:
         typer.echo(render_proof_map_node(node))
+
+
+_SIGNED_DECISION_HELP = (
+    "Path to a signed Human Review decision (JSON: the payload from `proof review payload` plus a "
+    "passkey assertion over it), or - for stdin. Without one, human-only operations fail with "
+    "HUMAN_REVIEW_REQUIRED (ADR-0009)."
+)
+
+
+def _load_signed_decision(path: str) -> SignedDecision | None:
+    if not path:
+        return None
+    try:
+        raw = sys.stdin.read() if path == "-" else Path(path).read_text()
+        return SignedDecision.model_validate_json(raw)
+    except (OSError, ValueError) as exc:
+        raise ProofMapError("MALFORMED_SIGNED_DECISION", f"could not read a signed decision from {path}: {exc}") from exc
 
 
 def _emit_node_error(exc: ProofMapError, json_output: bool, *, command: str) -> None:
@@ -368,9 +398,13 @@ def node_release(
     root: str = ".",
     claimant: str = "human",
     session: str = "default",
-    force: bool = typer.Option(False, "--force", help="Force-release someone else's claim (requires --actor and --reason)"),
-    actor: str = typer.Option("", "--actor", help="Researcher identity performing a force-release"),
-    reason: str = typer.Option("", "--reason", help="Why this claim is being released"),
+    force: bool = typer.Option(
+        False, "--force", help="Force-release someone else's claim: a Human Review decision, needs --signed-decision"
+    ),
+    reason: str = typer.Option("", "--reason", help="Why you're releasing your own claim"),
+    signed_decision: str = typer.Option(
+        "", "--signed-decision", help=_SIGNED_DECISION_HELP
+    ),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     store = get_store(_root(root))
@@ -381,8 +415,8 @@ def node_release(
             claimant_id=claimant,
             session_id=session,
             force=force,
-            actor=actor or None,
             reason=reason or None,
+            signed_decision=_load_signed_decision(signed_decision),
         )
     except ProofMapError as exc:
         _emit_node_error(exc, json_output, command="node.release")
@@ -437,14 +471,12 @@ def node_review(
     node_id: str,
     decision: str,
     root: str = ".",
-    reviewer: str = "human",
-    rationale: str = "",
-    confirm: bool = typer.Option(
-        False, "--confirm", help="Explicit human confirmation; every acceptance decision requires it"
+    signed_decision: str = typer.Option(
+        "", "--signed-decision", help=_SIGNED_DECISION_HELP
     ),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
-    """Human Review decision for a node.
+    """Human Review decision for a node, from a passkey-signed decision (ADR-0009).
 
     For a local node (theorem/lemma/claim): accept / revision-requested /
     reject — the only path that may set acceptance_state. For an
@@ -454,14 +486,11 @@ def node_review(
     store = get_store(_root(root))
     try:
         node = require_node(store, node_id)
+        signed = _load_signed_decision(signed_decision)
         if node.kind == ProofMapNodeKind.imported_result:
-            record = decide_reference_review(
-                store, node_id, decision, reviewer_id=reviewer, rationale=rationale, confirmed=confirm
-            )
+            record = decide_reference_review(store, node_id, decision, signed_decision=signed)
         else:
-            record = decide_acceptance(
-                store, node_id, decision, reviewer_id=reviewer, rationale=rationale, confirmed=confirm
-            )
+            record = decide_acceptance(store, node_id, decision, signed_decision=signed)
     except ProofMapError as exc:
         _emit_node_error(exc, json_output, command="node.review")
         raise typer.Exit(code=1)
@@ -473,10 +502,8 @@ def node_revalidate(
     node_id: str,
     target_node_id: str,
     root: str = ".",
-    reviewer: str = "human",
-    rationale: str = "",
-    confirm: bool = typer.Option(
-        False, "--confirm", help="Explicit human confirmation; every acceptance decision requires it"
+    signed_decision: str = typer.Option(
+        "", "--signed-decision", help=_SIGNED_DECISION_HELP
     ),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
@@ -490,7 +517,7 @@ def node_revalidate(
     store = get_store(_root(root))
     try:
         record = revalidate_dependency(
-            store, node_id, target_node_id, reviewer_id=reviewer, rationale=rationale, confirmed=confirm
+            store, node_id, target_node_id, signed_decision=_load_signed_decision(signed_decision)
         )
     except ProofMapError as exc:
         _emit_node_error(exc, json_output, command="node.revalidate")
@@ -502,16 +529,15 @@ def node_revalidate(
 def node_promote(
     node_id: str,
     root: str = ".",
-    promoted_by: str = "human",
-    confirm: bool = typer.Option(
-        False, "--confirm", help="Explicit human confirmation; only a researcher may promote a node"
+    signed_decision: str = typer.Option(
+        "", "--signed-decision", help=_SIGNED_DECISION_HELP
     ),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
-    """Promote an Accepted Claim to a Lemma, marking it independently reusable. No demote."""
+    """Promote an Accepted Claim to a Lemma, marking it independently reusable. No demote. Human Review only."""
     store = get_store(_root(root))
     try:
-        node = promote_to_lemma(store, node_id, promoted_by=promoted_by, confirmed=confirm)
+        node = promote_to_lemma(store, node_id, signed_decision=_load_signed_decision(signed_decision))
     except ProofMapError as exc:
         _emit_node_error(exc, json_output, command="node.promote")
         raise typer.Exit(code=1)
@@ -613,16 +639,15 @@ def challenge_show(
 def challenge_dismiss(
     challenge_id: str,
     root: str = ".",
-    reviewer: str = "human",
-    rationale: str = "",
-    confirm: bool = typer.Option(
-        False, "--confirm", help="Explicit human confirmation; only Human Review may resolve a Challenge"
+    signed_decision: str = typer.Option(
+        "", "--signed-decision", help=_SIGNED_DECISION_HELP
     ),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
+    """Dismiss a Challenge. Human Review only."""
     store = get_store(_root(root))
     try:
-        challenge = dismiss_challenge(store, challenge_id, reviewer_id=reviewer, rationale=rationale, confirmed=confirm)
+        challenge = dismiss_challenge(store, challenge_id, signed_decision=_load_signed_decision(signed_decision))
     except ProofMapError as exc:
         _emit_node_error(exc, json_output, command="challenge.dismiss")
         raise typer.Exit(code=1)
@@ -663,19 +688,15 @@ def evidence_review(
     check_id: str,
     decision: str,
     root: str = ".",
-    reviewer: str = "human",
-    rationale: str = "",
-    confirm: bool = typer.Option(
-        False, "--confirm", help="Explicit human confirmation; only a researcher may judge an Evidence check"
+    signed_decision: str = typer.Option(
+        "", "--signed-decision", help=_SIGNED_DECISION_HELP
     ),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Human Review's trusted/unusable judgment on an Evidence check. Never touches acceptance_state."""
     store = get_store(_root(root))
     try:
-        record = decide_evidence_review(
-            store, check_id, decision, reviewer_id=reviewer, rationale=rationale, confirmed=confirm
-        )
+        record = decide_evidence_review(store, check_id, decision, signed_decision=_load_signed_decision(signed_decision))
     except ProofMapError as exc:
         _emit_node_error(exc, json_output, command="node.evidence.review")
         raise typer.Exit(code=1)
@@ -683,6 +704,113 @@ def evidence_review(
 
 
 node_app.add_typer(node_evidence_app, name="evidence")
+
+
+@review_app.command("payload")
+def review_payload(
+    kind: str,
+    target_id: str,
+    decision: str,
+    root: str = ".",
+    rationale: str = "",
+    dependency: str = typer.Option("", "--dependency", help="For dependency_revalidation: the dependency being re-pinned"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Print the exact payload a Reviewer passkey must sign for a decision, and its WebAuthn challenge.
+
+    Decides nothing: it's what the signing surface shows and signs (ADR-0009).
+    """
+    store = get_store(_root(root))
+    try:
+        payload = prepare_decision(store, kind, target_id, decision, rationale=rationale, dependency_id=dependency or None)
+    except ProofMapError as exc:
+        _emit_node_error(exc, json_output, command="review.payload")
+        raise typer.Exit(code=1)
+    digest = payload_hash(payload)
+    data = {
+        "payload": payload.model_dump(mode="json"),
+        "payload_hash": digest,
+        "challenge": b64url_encode(batch_challenge([digest])),
+    }
+    if json_output:
+        typer.echo(dump_envelope(success_envelope("review.payload", data)))
+    else:
+        typer.echo(json.dumps(data, indent=2))
+
+
+@review_app.command("warnings")
+def review_warnings(root: str = ".", json_output: bool = typer.Option(False, "--json")) -> None:
+    """Everything about Human Review authority that doesn't verify: unsigned or forged decisions, broken chains."""
+    warnings = list_authority_warnings(get_store(_root(root)))
+    if json_output:
+        typer.echo(dump_envelope(success_envelope("review.warnings", [warning.model_dump(mode="json") for warning in warnings])))
+    elif not warnings:
+        typer.echo("No authority warnings")
+    else:
+        typer.echo("\n".join(f"{warning.code}: {warning.message}" for warning in warnings))
+
+
+def _emit_authority_error(exc: AuthorityError, json_output: bool, *, command: str) -> None:
+    _emit_node_error(ProofMapError(exc.code, exc.message, details=exc.details), json_output, command=command)
+
+
+@reviewer_app.command("enroll")
+def reviewer_enroll(
+    request_file: str = typer.Argument(..., help="Enrollment request JSON (key + signed reviewer_enrollment decision), or -"),
+    root: str = ".",
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Enroll a Reviewer passkey. The first is trust-on-first-use; later ones must be signed by an enrolled key."""
+    store = get_store(_root(root))
+    try:
+        raw = sys.stdin.read() if request_file == "-" else Path(request_file).read_text()
+        key = enroll_reviewer_key(store, EnrollmentRequest.model_validate_json(raw))
+    except AuthorityError as exc:
+        _emit_authority_error(exc, json_output, command="reviewer.enroll")
+        raise typer.Exit(code=1)
+    except (OSError, ValueError) as exc:
+        _emit_node_error(ProofMapError("MALFORMED_ENROLLMENT", str(exc)), json_output, command="reviewer.enroll")
+        raise typer.Exit(code=1)
+    if json_output:
+        typer.echo(dump_envelope(success_envelope("reviewer.enroll", key.model_dump(mode="json"))))
+    else:
+        typer.echo(f"Enrolled Reviewer key {key.fingerprint} ({key.display_name})")
+
+
+@reviewer_app.command("revoke")
+def reviewer_revoke(
+    signed_decision: str = typer.Argument(..., help="Signed reviewer_enrollment/revoke decision JSON, or -"),
+    root: str = ".",
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Revoke a Reviewer passkey, with a decision signed by an active key. Never the last active one."""
+    store = get_store(_root(root))
+    try:
+        key = revoke_reviewer_key(store, _load_signed_decision(signed_decision))
+    except AuthorityError as exc:
+        _emit_authority_error(exc, json_output, command="reviewer.revoke")
+        raise typer.Exit(code=1)
+    except ProofMapError as exc:
+        _emit_node_error(exc, json_output, command="reviewer.revoke")
+        raise typer.Exit(code=1)
+    if json_output:
+        typer.echo(dump_envelope(success_envelope("reviewer.revoke", key.model_dump(mode="json"))))
+    else:
+        typer.echo(f"Revoked Reviewer key {key.fingerprint} ({key.display_name})")
+
+
+@reviewer_app.command("list")
+def reviewer_list(root: str = ".", json_output: bool = typer.Option(False, "--json")) -> None:
+    """Enrolled Reviewer passkeys, with fingerprints — check the first one against the one you enrolled."""
+    keys = list_reviewer_keys(get_store(_root(root)))
+    if json_output:
+        typer.echo(dump_envelope(success_envelope("reviewer.list", [key.model_dump(mode="json") for key in keys])))
+    elif not keys:
+        typer.echo("No Reviewer keys enrolled")
+    else:
+        for key in keys:
+            status = f"revoked {key.revoked_at.isoformat()}" if key.revoked_at else "active"
+            typer.echo(f"{key.fingerprint} {key.display_name} [{status}]")
 
 app.add_typer(goal_app, name="goal")
 app.add_typer(codex_app, name="codex")
@@ -709,6 +837,7 @@ app.add_typer(provenance_app, name="provenance")
 app.add_typer(bug_app, name="bug")
 app.add_typer(debug_app, name="debug")
 app.add_typer(review_app, name="review")
+app.add_typer(reviewer_app, name="reviewer")
 app.add_typer(contributor_app, name="contributor")
 app.add_typer(role_app, name="role")
 app.add_typer(comment_app, name="comment")

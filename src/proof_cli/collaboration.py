@@ -12,6 +12,7 @@ from typing import Any, Iterable, Literal
 from pydantic import BaseModel, Field, ValidationError
 
 from .domain import EventRecord, utc_now
+from .signing import SignedDecision, payload_hash
 from .storage import (
     ProjectStore,
     active_transaction,
@@ -56,6 +57,7 @@ class ReviewGovernanceState(str, Enum):
     reaffirmed = "reaffirmed"
     trusted = "trusted"
     unusable = "unusable"
+    dismissed = "dismissed"
 
 
 class ReviewRecordKind(str, Enum):
@@ -74,6 +76,10 @@ class ReviewRecordKind(str, Enum):
     reference_review = "reference_review"
     evidence_review = "evidence_review"
     dependency_revalidation = "dependency_revalidation"
+    # ADR-0009's other human-only operations, recorded as signed rows (#35)
+    challenge_resolution = "challenge_resolution"
+    promote = "promote"
+    force_release = "force_release"
 
 
 class CommentThreadStatus(str, Enum):
@@ -141,6 +147,11 @@ class ReviewRecord(BaseModel):
     provenance_notes: str = ""
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
+    # the history row of the latest decision, and whether it carries a
+    # signed decision (ADR-0009); whether that signature *verifies* is
+    # `authority.decision_row_verifies(store, decision_row_id)`
+    decision_row_id: str | None = None
+    signed: bool = False
 
 
 class ReviewHistoryEntry(BaseModel):
@@ -165,6 +176,9 @@ class ReviewHistoryEntry(BaseModel):
     authorship: list[str] = Field(default_factory=list)
     provenance_notes: str = ""
     created_at: datetime
+    prev_row_hash: str | None = None
+    signed_decision: str | None = None
+    payload_hash: str | None = None
 
 
 class CommentThread(BaseModel):
@@ -433,6 +447,8 @@ def _fold_review_history(entries: Iterable[ReviewHistoryEntry]) -> list[ReviewRe
         record.reviewer_id = entry.reviewer_id
         record.rationale = entry.rationale or record.rationale
         record.updated_at = entry.created_at
+        record.decision_row_id = entry.id
+        record.signed = entry.signed_decision is not None
     return list(records.values())
 
 
@@ -492,8 +508,9 @@ def _decision_row(
     rationale: str,
     created_at: datetime,
     row_id: str | None = None,
+    signed_decision: SignedDecision | None = None,
 ) -> dict[str, Any]:
-    return _history_row(
+    row = _history_row(
         entry="decision",
         row_id=row_id or _new_id("decision"),
         review_id=record.id,
@@ -507,6 +524,10 @@ def _decision_row(
         provenance_notes=record.provenance_notes,
         created_at=created_at,
     )
+    if signed_decision is not None:
+        row["signed_decision"] = signed_decision.model_dump_json()
+        row["payload_hash"] = payload_hash(signed_decision.payload)
+    return row
 
 
 def _append_legacy_record(conn: sqlite3.Connection, record: ReviewRecord) -> bool:
@@ -701,10 +722,14 @@ def record_review_decision(
     *,
     reviewer_id: str,
     rationale: str = "",
+    signed_decision: SignedDecision | None = None,
     conn: sqlite3.Connection | None = None,
 ) -> ReviewRecord:
     """Append a decision on an existing review request. The request row is
-    never modified; the returned record is the review as it now reads."""
+    never modified; the returned record is the review as it now reads.
+
+    `signed_decision` is stored on the decision row as-is; the caller has
+    already checked (`authority.authorize`) that it authorizes this decision."""
     _migrate_legacy_review_records(store, conn)
     def _current(tx: sqlite3.Connection) -> ReviewRecord | None:
         rows = list_review_history_rows(store, review_id=review_id, conn=tx)
@@ -716,7 +741,15 @@ def record_review_decision(
         if record is None:
             raise KeyError(review_id)
         insert_review_history_row(
-            tx, _decision_row(record, decision, reviewer_id=reviewer_id, rationale=rationale, created_at=utc_now())
+            tx,
+            _decision_row(
+                record,
+                decision,
+                reviewer_id=reviewer_id,
+                rationale=rationale,
+                created_at=utc_now(),
+                signed_decision=signed_decision,
+            ),
         )
         record = _current(tx)
         append_event(
@@ -741,6 +774,7 @@ def record_decided_review(
     authorship: list[str] | None = None,
     provenance_notes: str = "",
     kind: ReviewRecordKind | None = None,
+    signed_decision: SignedDecision | None = None,
     conn: sqlite3.Connection | None = None,
 ) -> ReviewRecord:
     """A review requested and decided in one step: both rows land in the same
@@ -758,7 +792,15 @@ def record_decided_review(
             kind=kind,
             conn=tx,
         )
-        return record_review_decision(store, request.id, decision, reviewer_id=reviewer_id, rationale=rationale, conn=tx)
+        return record_review_decision(
+            store,
+            request.id,
+            decision,
+            reviewer_id=reviewer_id,
+            rationale=rationale,
+            signed_decision=signed_decision,
+            conn=tx,
+        )
 
 
 def import_review_records(store: ProjectStore, records: Iterable[ReviewRecord]) -> tuple[list[str], list[str]]:
@@ -786,7 +828,7 @@ def import_review_records(store: ProjectStore, records: Iterable[ReviewRecord]) 
     return imported, refused
 
 
-TRUST_BEARING_OBJECT_TYPES = frozenset({"proof_map_node", "evidence_check"})
+TRUST_BEARING_OBJECT_TYPES = frozenset({"proof_map_node", "evidence_check", "challenge", "claim"})
 
 
 def is_trust_bearing_review(record: ReviewRecord) -> bool:

@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from _authenticator import researcher
+
 from proof_cli.domain import ProofMapNodeKind, utc_now
 from proof_cli.domain import DependencyPin
 from proof_cli.proof_map import (
@@ -242,15 +244,20 @@ def test_non_owner_release_without_force_is_rejected(tmp_path: Path):
     assert get_active_claim(store, "clm_1") is not None
 
 
-def test_force_release_without_actor_or_reason_is_rejected(tmp_path: Path):
+def test_force_release_without_a_signed_decision_or_reason_is_rejected(tmp_path: Path):
     store = ensure_project(tmp_path)
     create_node(store, node_id="clm_1", kind="claim", statement="stmt")
-    claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
+    claim = claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
 
     with pytest.raises(ProofMapError) as exc_info:
         release_node(store, "clm_1", claimant_id="researcher", session_id="sess_r", force=True)
+    assert exc_info.value.code == "HUMAN_REVIEW_REQUIRED"
 
+    unreasoned = researcher(store).sign("force_release", claim.id, "force-release", rationale="  ")
+    with pytest.raises(ProofMapError) as exc_info:
+        release_node(store, "clm_1", claimant_id="researcher", session_id="sess_r", force=True, signed_decision=unreasoned)
     assert exc_info.value.code == "FORCE_RELEASE_REQUIRES_REASON"
+
     assert get_active_claim(store, "clm_1") is not None
 
 
@@ -259,17 +266,9 @@ def test_force_release_records_audit_trail(tmp_path: Path):
     create_node(store, node_id="clm_1", kind="claim", statement="stmt")
     claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
 
-    released = release_node(
-        store,
-        "clm_1",
-        claimant_id="researcher",
-        session_id="sess_r",
-        force=True,
-        actor="researcher",
-        reason="agent went unresponsive",
-    )
+    released = researcher(store).force_release("clm_1", reason="agent went unresponsive")
 
-    assert released.released_by == "researcher"
+    assert released.released_by == researcher(store).reviewer_id  # the passkey, not a self-declared name
     assert released.release_reason == "agent went unresponsive"
     assert released.claimant_id == "agent_a"  # original claimant is preserved for the audit trail
     assert get_active_claim(store, "clm_1") is None
@@ -352,7 +351,8 @@ def test_concurrent_release_and_force_release_only_one_wins(tmp_path: Path):
     must not both succeed and silently overwrite each other's audit trail."""
     store = ensure_project(tmp_path)
     create_node(store, node_id="clm_1", kind="claim", statement="stmt")
-    claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
+    claim = claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
+    signed = researcher(store).sign("force_release", claim.id, "force-release", rationale="stuck")
 
     barrier = threading.Barrier(2)
     results: dict[str, tuple[str, str]] = {}
@@ -374,8 +374,7 @@ def test_concurrent_release_and_force_release_only_one_wins(tmp_path: Path):
                 claimant_id="researcher",
                 session_id="sess_r",
                 force=True,
-                actor="researcher",
-                reason="stuck",
+                signed_decision=signed,
             )
             results["force"] = ("ok", released.released_by)
         except ProofMapError as exc:
@@ -651,13 +650,13 @@ def test_new_node_starts_unreviewed(tmp_path: Path):
     assert get_acceptance_state(store, "clm_1") == "unreviewed"
 
 
-def test_decide_acceptance_requires_confirmation(tmp_path: Path):
+def test_decide_acceptance_requires_a_signed_decision(tmp_path: Path):
     store = ensure_project(tmp_path)
     _submitted_claim(store)
 
     with pytest.raises(ProofMapError) as exc_info:
-        decide_acceptance(store, "clm_1", "accept", reviewer_id="researcher", rationale="looks right")
-    assert exc_info.value.code == "CONFIRMATION_REQUIRED"
+        decide_acceptance(store, "clm_1", "accept")
+    assert exc_info.value.code == "HUMAN_REVIEW_REQUIRED"
     assert get_acceptance_state(store, "clm_1") == "unreviewed"
 
 
@@ -666,14 +665,14 @@ def test_decide_acceptance_invalid_decision_rejected(tmp_path: Path):
     _submitted_claim(store)
 
     with pytest.raises(ProofMapError) as exc_info:
-        decide_acceptance(store, "clm_1", "approve", reviewer_id="researcher", confirmed=True)
+        researcher(store).decide_acceptance("clm_1", "approve")
     assert exc_info.value.code == "INVALID_DECISION"
 
 
 def test_decide_acceptance_on_nonexistent_node_raises_node_not_found(tmp_path: Path):
     store = ensure_project(tmp_path)
     with pytest.raises(ProofMapError) as exc_info:
-        decide_acceptance(store, "does_not_exist", "accept", reviewer_id="researcher", confirmed=True)
+        researcher(store).decide_acceptance("does_not_exist", "accept")
     assert exc_info.value.code == "NODE_NOT_FOUND"
 
 
@@ -689,7 +688,7 @@ def test_decide_acceptance_on_imported_result_is_rejected(tmp_path: Path):
     )
 
     with pytest.raises(ProofMapError) as exc_info:
-        decide_acceptance(store, "ref_1", "accept", reviewer_id="researcher", confirmed=True)
+        researcher(store).decide_acceptance("ref_1", "accept")
     assert exc_info.value.code == "IMMUTABLE_NODE"
 
 
@@ -697,9 +696,7 @@ def test_accept_sets_acceptance_state_to_accepted(tmp_path: Path):
     store = ensure_project(tmp_path)
     _submitted_claim(store)
 
-    record = decide_acceptance(
-        store, "clm_1", "accept", reviewer_id="researcher", rationale="checks out", confirmed=True
-    )
+    record = researcher(store).decide_acceptance("clm_1", "accept", rationale="checks out")
 
     assert record.decision.value == "approved"
     assert get_acceptance_state(store, "clm_1") == "accepted"
@@ -709,7 +706,7 @@ def test_revision_requested_keeps_node_open_for_a_fresh_claim_submit_cycle(tmp_p
     store = ensure_project(tmp_path)
     _submitted_claim(store)
 
-    decide_acceptance(store, "clm_1", "revision-requested", reviewer_id="researcher", confirmed=True)
+    researcher(store).decide_acceptance("clm_1", "revision-requested")
 
     assert get_acceptance_state(store, "clm_1") == "unreviewed"
     # same node id, not a new one: a fresh claim/submit cycle is possible
@@ -733,9 +730,7 @@ def test_reject_is_permanent_and_never_touches_failed_routes(tmp_path: Path):
     before = read_state(store)
     assert "clm_1" not in before.failed_routes
 
-    record = decide_acceptance(
-        store, "clm_1", "reject", reviewer_id="researcher", rationale="the argument has a gap", confirmed=True
-    )
+    record = researcher(store).decide_acceptance("clm_1", "reject", rationale="the argument has a gap")
 
     assert record.decision.value == "rejected"
     assert get_acceptance_state(store, "clm_1") == "rejected"
@@ -908,9 +903,7 @@ def test_decide_reference_review_grants_review_independent_of_acceptance_state(t
     assert get_reference_review_state(store, "ref_1") == "unreviewed"
     assert get_acceptance_state(store, "ref_1") == "unreviewed"
 
-    record = decide_reference_review(
-        store, "ref_1", "reference-review", reviewer_id="researcher", rationale="trustworthy source", confirmed=True
-    )
+    record = researcher(store).decide_reference_review("ref_1", "reference-review", rationale="trustworthy source")
 
     assert record.kind.value == "reference_review"
     assert get_reference_review_state(store, "ref_1") == "reviewed"
@@ -918,7 +911,7 @@ def test_decide_reference_review_grants_review_independent_of_acceptance_state(t
     assert get_acceptance_state(store, "ref_1") == "unreviewed"
 
 
-def test_decide_reference_review_requires_confirmation(tmp_path: Path):
+def test_decide_reference_review_requires_a_signed_decision(tmp_path: Path):
     store = ensure_project(tmp_path)
     create_node(
         store,
@@ -929,8 +922,8 @@ def test_decide_reference_review_requires_confirmation(tmp_path: Path):
         source_version="v1",
     )
     with pytest.raises(ProofMapError) as exc_info:
-        decide_reference_review(store, "ref_1", "reference-review", reviewer_id="researcher")
-    assert exc_info.value.code == "CONFIRMATION_REQUIRED"
+        decide_reference_review(store, "ref_1", "reference-review")
+    assert exc_info.value.code == "HUMAN_REVIEW_REQUIRED"
     assert get_reference_review_state(store, "ref_1") == "unreviewed"
 
 
@@ -939,7 +932,7 @@ def test_decide_reference_review_on_non_imported_result_is_rejected(tmp_path: Pa
     create_node(store, node_id="clm_1", kind="claim", statement="stmt")
 
     with pytest.raises(ProofMapError) as exc_info:
-        decide_reference_review(store, "clm_1", "reference-review", reviewer_id="researcher", confirmed=True)
+        researcher(store).decide_reference_review("clm_1", "reference-review")
     assert exc_info.value.code == "NOT_IMPORTED_RESULT"
 
 
@@ -953,10 +946,10 @@ def test_decide_acceptance_still_rejects_imported_result_after_reference_review(
         source_locator="doi:10.1234/example",
         source_version="v1",
     )
-    decide_reference_review(store, "ref_1", "reference-review", reviewer_id="researcher", confirmed=True)
+    researcher(store).decide_reference_review("ref_1", "reference-review")
 
     with pytest.raises(ProofMapError) as exc_info:
-        decide_acceptance(store, "ref_1", "accept", reviewer_id="researcher", confirmed=True)
+        researcher(store).decide_acceptance("ref_1", "accept")
     assert exc_info.value.code == "IMMUTABLE_NODE"
 
 
@@ -987,7 +980,7 @@ def test_workflow_state_is_recomputed_across_the_full_lifecycle_not_stored(tmp_p
     )
     assert get_workflow_state(store, "clm_1") == "review-needed"
 
-    decide_acceptance(store, "clm_1", "revision-requested", reviewer_id="researcher", confirmed=True)
+    researcher(store).decide_acceptance("clm_1", "revision-requested")
     assert get_workflow_state(store, "clm_1") == "revision-requested"
 
     claim_node(store, "clm_1", claimant_id="agent_b", session_id="sess_2")
@@ -1003,7 +996,7 @@ def test_workflow_state_is_recomputed_across_the_full_lifecycle_not_stored(tmp_p
     )
     assert get_workflow_state(store, "clm_1") == "review-needed"
 
-    decide_acceptance(store, "clm_1", "accept", reviewer_id="researcher", confirmed=True)
+    researcher(store).decide_acceptance("clm_1", "accept")
     assert get_workflow_state(store, "clm_1") == "open"
     assert get_acceptance_state(store, "clm_1") == "accepted"
 
@@ -1024,7 +1017,7 @@ def test_workflow_state_blocked_on_unaccepted_local_dependency(tmp_path: Path):
         scoping_rationale="scoped correctly",
         content="proof text",
     )
-    decide_acceptance(store, "lem_base", "accept", reviewer_id="researcher", confirmed=True)
+    researcher(store).decide_acceptance("lem_base", "accept")
 
     assert get_workflow_state(store, "clm_1") == "open"
 
@@ -1043,7 +1036,7 @@ def test_workflow_state_blocked_on_unreviewed_imported_result_dependency(tmp_pat
 
     assert get_workflow_state(store, "clm_1") == "blocked"
 
-    decide_reference_review(store, "ref_1", "reference-review", reviewer_id="researcher", confirmed=True)
+    researcher(store).decide_reference_review("ref_1", "reference-review")
 
     assert get_workflow_state(store, "clm_1") == "open"
 
@@ -1059,7 +1052,7 @@ def test_workflow_state_for_imported_result_is_always_open_never_claimable(tmp_p
         source_version="v1",
     )
     assert get_workflow_state(store, "ref_1") == "open"
-    decide_reference_review(store, "ref_1", "reference-review", reviewer_id="researcher", confirmed=True)
+    researcher(store).decide_reference_review("ref_1", "reference-review")
     assert get_workflow_state(store, "ref_1") == "open"
 
 
@@ -1089,7 +1082,7 @@ def test_frontier_lists_only_unclaimed_unblocked_nodes(tmp_path: Path):
         scoping_rationale="scoped correctly",
         content="proof text",
     )
-    decide_acceptance(store, "lem_base", "accept", reviewer_id="researcher", confirmed=True)
+    researcher(store).decide_acceptance("lem_base", "accept")
 
     frontier_ids = {node.id for node in get_frontier(store)}
     assert frontier_ids == {"lem_base", "clm_open", "clm_blocked"}
@@ -1120,7 +1113,7 @@ def _accept_via_full_cycle(store, node_id: str, *, claimant: str = "agent_a", se
         scoping_rationale="scoped correctly",
         content="proof text",
     )
-    decide_acceptance(store, node_id, "accept", reviewer_id="researcher", confirmed=True)
+    researcher(store).decide_acceptance(node_id, "accept")
 
 
 def test_interface_fingerprint_is_unset_before_acceptance(tmp_path: Path):
@@ -1221,7 +1214,7 @@ def test_dependency_pin_is_refreshed_not_accumulated_across_submissions(tmp_path
 
     _accept_via_full_cycle(store, "lem_base", claimant="agent_c", session="sess_3")
 
-    decide_acceptance(store, "clm_1", "revision-requested", reviewer_id="researcher", confirmed=True)
+    researcher(store).decide_acceptance("clm_1", "revision-requested")
     claim_node(store, "clm_1", claimant_id="agent_b", session_id="sess_2")
     submit_candidate_proof(
         store,
@@ -1320,7 +1313,7 @@ def test_pin_dependencies_leaves_pinned_version_none_for_submitted_but_unaccepte
 def test_claim_on_rejected_node_is_refused(tmp_path: Path):
     store = ensure_project(tmp_path)
     _submitted_claim(store)
-    decide_acceptance(store, "clm_1", "reject", reviewer_id="researcher", confirmed=True)
+    researcher(store).decide_acceptance("clm_1", "reject")
 
     with pytest.raises(ProofMapError) as exc_info:
         claim_node(store, "clm_1", claimant_id="agent_b", session_id="sess_2")
@@ -1353,7 +1346,7 @@ def test_workflow_state_review_needed_after_reclaim_is_not_masked_by_a_stale_rev
         store, "clm_1", claimant_id="agent_a", session_id="sess_1",
         scoping_rationale="first attempt", content="v1 text",
     )
-    decide_acceptance(store, "clm_1", "revision-requested", reviewer_id="researcher", confirmed=True)
+    researcher(store).decide_acceptance("clm_1", "revision-requested")
 
     v1 = get_current_candidate_proof(store, "clm_1")
     assert v1.review_record_id is not None
@@ -1403,9 +1396,7 @@ def test_revalidate_dependency_reaffirms_when_fingerprint_unchanged(tmp_path: Pa
     upsert_dependency_pin(store, aged_pin)
     assert get_dependency_pin(store, "clm_1", "lem_base").pinned_version == 0
 
-    record = revalidate_dependency(
-        store, "clm_1", "lem_base", reviewer_id="researcher", rationale="interface unchanged", confirmed=True
-    )
+    record = researcher(store).revalidate_dependency("clm_1", "lem_base", rationale="interface unchanged")
 
     assert record.kind.value == "dependency_revalidation"
     assert record.decision.value == "reaffirmed"
@@ -1420,7 +1411,7 @@ def test_revalidate_dependency_never_touches_the_reviewing_nodes_own_acceptance_
     _dependent_with_accepted_dependency(store)
     before = get_acceptance_state(store, "clm_1")
 
-    revalidate_dependency(store, "clm_1", "lem_base", reviewer_id="researcher", confirmed=True)
+    researcher(store).revalidate_dependency("clm_1", "lem_base")
 
     assert get_acceptance_state(store, "clm_1") == before == "unreviewed"
 
@@ -1433,17 +1424,17 @@ def test_revalidate_dependency_rejected_when_fingerprint_changed(tmp_path: Path)
     upsert_dependency_pin(store, stale_pin)
 
     with pytest.raises(ProofMapError) as exc_info:
-        revalidate_dependency(store, "clm_1", "lem_base", reviewer_id="researcher", confirmed=True)
+        researcher(store).revalidate_dependency("clm_1", "lem_base")
     assert exc_info.value.code == "INTERFACE_CHANGED"
 
 
-def test_revalidate_dependency_requires_confirmation(tmp_path: Path):
+def test_revalidate_dependency_requires_a_signed_decision(tmp_path: Path):
     store = ensure_project(tmp_path)
     _dependent_with_accepted_dependency(store)
 
     with pytest.raises(ProofMapError) as exc_info:
-        revalidate_dependency(store, "clm_1", "lem_base", reviewer_id="researcher")
-    assert exc_info.value.code == "CONFIRMATION_REQUIRED"
+        revalidate_dependency(store, "clm_1", "lem_base")
+    assert exc_info.value.code == "HUMAN_REVIEW_REQUIRED"
 
 
 def test_revalidate_dependency_target_not_accepted_is_rejected(tmp_path: Path):
@@ -1461,7 +1452,7 @@ def test_revalidate_dependency_target_not_accepted_is_rejected(tmp_path: Path):
     )
 
     with pytest.raises(ProofMapError) as exc_info:
-        revalidate_dependency(store, "clm_1", "lem_base", reviewer_id="researcher", confirmed=True)
+        researcher(store).revalidate_dependency("clm_1", "lem_base")
     assert exc_info.value.code == "TARGET_NOT_ACCEPTED"
 
 
@@ -1472,7 +1463,7 @@ def test_revalidate_dependency_without_a_pin_is_rejected(tmp_path: Path):
     create_node(store, node_id="clm_1", kind="claim", statement="Depends on base", dependencies=["lem_base"])
 
     with pytest.raises(ProofMapError) as exc_info:
-        revalidate_dependency(store, "clm_1", "lem_base", reviewer_id="researcher", confirmed=True)
+        researcher(store).revalidate_dependency("clm_1", "lem_base")
     assert exc_info.value.code == "NO_DEPENDENCY_PIN"
 
 
@@ -1483,7 +1474,7 @@ def test_revalidate_dependency_rejects_a_non_dependency(tmp_path: Path):
     create_node(store, node_id="clm_1", kind="claim", statement="Unrelated claim")
 
     with pytest.raises(ProofMapError) as exc_info:
-        revalidate_dependency(store, "clm_1", "lem_base", reviewer_id="researcher", confirmed=True)
+        researcher(store).revalidate_dependency("clm_1", "lem_base")
     assert exc_info.value.code == "NOT_A_DEPENDENCY"
 
 
@@ -1509,7 +1500,7 @@ def test_revalidate_dependency_rejects_imported_result_target(tmp_path: Path):
     )
 
     with pytest.raises(ProofMapError) as exc_info:
-        revalidate_dependency(store, "clm_1", "ref_1", reviewer_id="researcher", confirmed=True)
+        researcher(store).revalidate_dependency("clm_1", "ref_1")
     assert exc_info.value.code == "IMMUTABLE_NODE"
 
 
@@ -1527,7 +1518,7 @@ def test_revalidate_dependency_pin_write_failure_leaves_no_review_record(tmp_pat
     monkeypatch.setattr(proof_map_module, "upsert_dependency_pin", _boom)
 
     with pytest.raises(RuntimeError):
-        revalidate_dependency(store, "clm_1", "lem_base", reviewer_id="researcher", confirmed=True)
+        researcher(store).revalidate_dependency("clm_1", "lem_base")
 
     # neither side of the write took effect
     assert get_dependency_pin(store, "clm_1", "lem_base").pinned_version == 0
@@ -1553,7 +1544,7 @@ def test_revalidate_dependency_review_write_failure_rolls_back_the_pin(tmp_path:
     monkeypatch.setattr(collaboration_module, "record_review_decision", _boom)
 
     with pytest.raises(RuntimeError):
-        revalidate_dependency(store, "clm_1", "lem_base", reviewer_id="researcher", confirmed=True)
+        researcher(store).revalidate_dependency("clm_1", "lem_base")
 
     # the transaction rolled back the pin — neither write stuck
     assert get_dependency_pin(store, "clm_1", "lem_base").pinned_version == 0
@@ -1612,20 +1603,20 @@ def test_open_challenge_against_imported_result_requires_reference_review(tmp_pa
         open_challenge(store, "ref_1", opened_by="agent_a")
     assert exc_info.value.code == "TARGET_NOT_REVIEWED"
 
-    decide_reference_review(store, "ref_1", "reference-review", reviewer_id="researcher", confirmed=True)
+    researcher(store).decide_reference_review("ref_1", "reference-review")
     challenge = open_challenge(store, "ref_1", opened_by="agent_a")
     assert challenge.target_node_id == "ref_1"
 
 
-def test_dismiss_challenge_requires_confirmation(tmp_path: Path):
+def test_dismiss_challenge_requires_a_signed_decision(tmp_path: Path):
     store = ensure_project(tmp_path)
     create_node(store, node_id="lem_1", kind="lemma", statement="Base lemma")
     _accept_via_full_cycle(store, "lem_1")
     challenge = open_challenge(store, "lem_1", opened_by="agent_a")
 
     with pytest.raises(ProofMapError) as exc_info:
-        dismiss_challenge(store, challenge.id, reviewer_id="researcher")
-    assert exc_info.value.code == "CONFIRMATION_REQUIRED"
+        dismiss_challenge(store, challenge.id)
+    assert exc_info.value.code == "HUMAN_REVIEW_REQUIRED"
     assert get_challenge(store, challenge.id).status.value == "open"
 
 
@@ -1634,10 +1625,10 @@ def test_dismiss_challenge_on_already_dismissed_is_rejected(tmp_path: Path):
     create_node(store, node_id="lem_1", kind="lemma", statement="Base lemma")
     _accept_via_full_cycle(store, "lem_1")
     challenge = open_challenge(store, "lem_1", opened_by="agent_a")
-    dismiss_challenge(store, challenge.id, reviewer_id="researcher", confirmed=True)
+    researcher(store).dismiss_challenge(challenge.id)
 
     with pytest.raises(ProofMapError) as exc_info:
-        dismiss_challenge(store, challenge.id, reviewer_id="researcher", confirmed=True)
+        researcher(store).dismiss_challenge(challenge.id)
     assert exc_info.value.code == "CHALLENGE_NOT_OPEN"
 
 
@@ -1650,7 +1641,7 @@ def test_challenge_list_filters_by_target_and_status(tmp_path: Path):
 
     c1 = open_challenge(store, "lem_1", opened_by="agent_a")
     open_challenge(store, "lem_2", opened_by="agent_b")
-    dismiss_challenge(store, c1.id, reviewer_id="researcher", confirmed=True)
+    researcher(store).dismiss_challenge(c1.id)
 
     assert {c.target_node_id for c in list_challenges(store, target_node_id="lem_2")} == {"lem_2"}
     assert {c.target_node_id for c in list_challenges(store, status="open")} == {"lem_2"}
@@ -1711,7 +1702,7 @@ def test_architecture_proving_challenge_propagation_and_clearing(tmp_path: Path)
     assert get_workflow_state(store, "M") != "blocked"
     assert get_workflow_state(store, "N") != "blocked"
 
-    dismiss_challenge(store, challenge.id, reviewer_id="researcher", rationale="false alarm", confirmed=True)
+    researcher(store).dismiss_challenge(challenge.id, rationale="false alarm")
 
     # every overlay clears automatically — nothing cleaned up by hand
     assert get_integrity_state(store, "L") == "current"
@@ -1765,7 +1756,7 @@ def test_reaccepting_a_challenged_node_dismisses_the_challenge(tmp_path: Path):
         store, "lem_1", claimant_id="agent_b", session_id="sess_2",
         scoping_rationale="addressed the concern", content="revised proof",
     )
-    decide_acceptance(store, "lem_1", "accept", reviewer_id="researcher", confirmed=True)
+    researcher(store).decide_acceptance("lem_1", "accept")
 
     assert has_open_challenge(store, "lem_1") is False
     assert get_challenge(store, challenge.id).status.value == "dismissed"
@@ -1778,12 +1769,12 @@ def test_reaffirming_reference_review_dismisses_the_challenge(tmp_path: Path):
         store, node_id="ref_1", kind="imported_result", statement="An external theorem",
         source_locator="doi:10.1234/example", source_version="v1",
     )
-    decide_reference_review(store, "ref_1", "reference-review", reviewer_id="researcher", confirmed=True)
+    researcher(store).decide_reference_review("ref_1", "reference-review")
 
     open_challenge(store, "ref_1", opened_by="agent_a", rationale="source retracted?")
     assert get_integrity_state(store, "ref_1") == "challenged"
 
-    decide_reference_review(store, "ref_1", "reference-review", reviewer_id="researcher", rationale="still trustworthy", confirmed=True)
+    researcher(store).decide_reference_review("ref_1", "reference-review", rationale="still trustworthy")
 
     assert has_open_challenge(store, "ref_1") is False
     assert get_integrity_state(store, "ref_1") == "current"
@@ -1829,23 +1820,23 @@ def test_promote_requires_claim_and_accepted(tmp_path: Path):
     _accept_via_full_cycle(store, "lem_1")
 
     with pytest.raises(ProofMapError) as exc_info:
-        promote_to_lemma(store, "lem_1", confirmed=True)
+        researcher(store).promote_to_lemma("lem_1")
     assert exc_info.value.code == "NOT_A_CLAIM"
 
     create_node(store, node_id="clm_1", kind="claim", statement="Not yet accepted")
     with pytest.raises(ProofMapError) as exc_info:
-        promote_to_lemma(store, "clm_1", confirmed=True)
+        researcher(store).promote_to_lemma("clm_1")
     assert exc_info.value.code == "NOT_ACCEPTED"
 
 
-def test_promote_requires_confirmation(tmp_path: Path):
+def test_promote_requires_a_signed_decision(tmp_path: Path):
     store = ensure_project(tmp_path)
     create_node(store, node_id="clm_1", kind="claim", statement="A promotable claim")
     _accept_via_full_cycle(store, "clm_1")
 
     with pytest.raises(ProofMapError) as exc_info:
-        promote_to_lemma(store, "clm_1", promoted_by="researcher")
-    assert exc_info.value.code == "CONFIRMATION_REQUIRED"
+        promote_to_lemma(store, "clm_1")
+    assert exc_info.value.code == "HUMAN_REVIEW_REQUIRED"
     assert get_node(store, "clm_1").kind == ProofMapNodeKind.claim
 
 
@@ -1862,7 +1853,7 @@ def test_promote_changes_only_kind(tmp_path: Path):
     before = get_node(store, "clm_1")
     before_proofs = list_candidate_proofs(store, "clm_1")
 
-    promoted = promote_to_lemma(store, "clm_1", promoted_by="researcher", confirmed=True)
+    promoted = researcher(store).promote_to_lemma("clm_1")
 
     assert promoted.kind == ProofMapNodeKind.lemma
     assert promoted.id == before.id
@@ -1894,7 +1885,7 @@ def test_promote_leaves_the_interface_fingerprint_alone(tmp_path: Path):
     _accept_via_full_cycle(store, "clm_1")
     before = get_accepted_interface_fingerprint(store, "clm_1")
 
-    promote_to_lemma(store, "clm_1", confirmed=True)
+    researcher(store).promote_to_lemma("clm_1")
 
     assert get_accepted_interface_fingerprint(store, "clm_1") == before == compute_interface_fingerprint(
         "A promotable claim", []
@@ -1923,7 +1914,7 @@ def test_promote_does_not_make_an_existing_dependent_stale(tmp_path: Path):
     _accept_via_full_cycle(store, "lem_b", claimant="agent_b", session="sess_b")
     assert get_integrity_state(store, "lem_b") == "current"
 
-    promote_to_lemma(store, "clm_c", confirmed=True)
+    researcher(store).promote_to_lemma("clm_c")
 
     assert get_integrity_state(store, "lem_b") == "current"
     assert dependency_pin_is_current(store, get_dependency_pin(store, "lem_b", "clm_c")) is True
@@ -1969,7 +1960,7 @@ def test_a_challenged_node_cannot_be_promoted(tmp_path: Path):
     open_challenge(store, "clm_1", opened_by="agent_b", rationale="step 2 looks wrong")
 
     with pytest.raises(ProofMapError) as exc_info:
-        promote_to_lemma(store, "clm_1", confirmed=True)
+        researcher(store).promote_to_lemma("clm_1")
 
     assert exc_info.value.code == "NODE_CHALLENGED"
     assert get_node(store, "clm_1").kind == ProofMapNodeKind.claim
@@ -1979,17 +1970,17 @@ def test_promote_has_no_demote_path(tmp_path: Path):
     store = ensure_project(tmp_path)
     create_node(store, node_id="clm_1", kind="claim", statement="A promotable claim")
     _accept_via_full_cycle(store, "clm_1")
-    promote_to_lemma(store, "clm_1", confirmed=True)
+    researcher(store).promote_to_lemma("clm_1")
 
     with pytest.raises(ProofMapError) as exc_info:
-        promote_to_lemma(store, "clm_1", confirmed=True)
+        researcher(store).promote_to_lemma("clm_1")
     assert exc_info.value.code == "NOT_A_CLAIM"
 
 
 def test_promote_on_nonexistent_node_raises_node_not_found(tmp_path: Path):
     store = ensure_project(tmp_path)
     with pytest.raises(ProofMapError) as exc_info:
-        promote_to_lemma(store, "does_not_exist", confirmed=True)
+        researcher(store).promote_to_lemma("does_not_exist")
     assert exc_info.value.code == "NODE_NOT_FOUND"
 
 
@@ -2073,7 +2064,7 @@ def test_parent_blocked_until_children_accepted_then_still_needs_own_acceptance(
         scoping_rationale="the pieces combine",
         content="proof combining the two sub-claims",
     )
-    decide_acceptance(store, "clm_parent", "accept", reviewer_id="researcher", confirmed=True)
+    researcher(store).decide_acceptance("clm_parent", "accept")
     assert get_acceptance_state(store, "clm_parent") == "accepted"
 
 
@@ -2096,7 +2087,7 @@ def test_split_on_imported_result_is_rejected(tmp_path: Path):
 def test_split_on_rejected_node_is_rejected(tmp_path: Path):
     store = ensure_project(tmp_path)
     _submitted_claim(store, "clm_parent")
-    decide_acceptance(store, "clm_parent", "reject", reviewer_id="researcher", confirmed=True)
+    researcher(store).decide_acceptance("clm_parent", "reject")
 
     with pytest.raises(ProofMapError) as exc_info:
         split_node(store, "clm_parent", [{"id": "clm_child_1", "statement": "A sub-claim"}])
@@ -2167,14 +2158,14 @@ def test_record_evidence_check_requires_no_confirmation(tmp_path: Path):
     assert "confirmed" not in inspect.signature(record_evidence_check).parameters
 
 
-def test_decide_evidence_review_requires_confirmation(tmp_path: Path):
+def test_decide_evidence_review_requires_a_signed_decision(tmp_path: Path):
     store = ensure_project(tmp_path)
     proof = _submitted_claim(store, "clm_1")
     check = record_evidence_check(store, proof.id, "passed")
 
     with pytest.raises(ProofMapError) as exc_info:
-        decide_evidence_review(store, check.id, "trusted", reviewer_id="researcher")
-    assert exc_info.value.code == "CONFIRMATION_REQUIRED"
+        decide_evidence_review(store, check.id, "trusted")
+    assert exc_info.value.code == "HUMAN_REVIEW_REQUIRED"
 
 
 def test_decide_evidence_review_invalid_decision_is_rejected(tmp_path: Path):
@@ -2183,7 +2174,7 @@ def test_decide_evidence_review_invalid_decision_is_rejected(tmp_path: Path):
     check = record_evidence_check(store, proof.id, "passed")
 
     with pytest.raises(ProofMapError) as exc_info:
-        decide_evidence_review(store, check.id, "approved", reviewer_id="researcher", confirmed=True)
+        researcher(store).decide_evidence_review(check.id, "approved")
     assert exc_info.value.code == "INVALID_DECISION"
 
 
@@ -2192,9 +2183,7 @@ def test_decide_evidence_review_records_trusted_or_unusable(tmp_path: Path):
     proof = _submitted_claim(store, "clm_1")
     check = record_evidence_check(store, proof.id, "passed")
 
-    record = decide_evidence_review(
-        store, check.id, "trusted", reviewer_id="researcher", rationale="checked the backend logs", confirmed=True
-    )
+    record = researcher(store).decide_evidence_review(check.id, "trusted", rationale="checked the backend logs")
 
     assert record.kind.value == "evidence_review"
     assert record.decision.value == "trusted"
@@ -2216,9 +2205,7 @@ def test_evidence_check_and_evidence_review_can_never_flip_acceptance_state(tmp_
     check = record_evidence_check(store, proof.id, "passed", notes="all backends agree", run_by="ci-bot")
     assert get_acceptance_state(store, "clm_1") == "unreviewed"
 
-    decide_evidence_review(
-        store, check.id, "trusted", reviewer_id="researcher", rationale="fully credible", confirmed=True
-    )
+    researcher(store).decide_evidence_review(check.id, "trusted", rationale="fully credible")
     assert get_acceptance_state(store, "clm_1") == "unreviewed"
 
     # architecturally: evidence_review is recorded against object_type
@@ -2234,7 +2221,7 @@ def test_evidence_check_and_evidence_review_can_never_flip_acceptance_state(tmp_
 
     # even a "unusable" judgment doesn't retroactively do anything either
     failing_check = record_evidence_check(store, proof.id, "failed")
-    decide_evidence_review(store, failing_check.id, "unusable", reviewer_id="researcher", confirmed=True)
+    researcher(store).decide_evidence_review(failing_check.id, "unusable")
     assert get_acceptance_state(store, "clm_1") == "unreviewed"
 
 
@@ -2248,5 +2235,5 @@ def test_evidence_check_on_nonexistent_candidate_proof_raises_not_found(tmp_path
 def test_decide_evidence_review_on_nonexistent_check_raises_not_found(tmp_path: Path):
     store = ensure_project(tmp_path)
     with pytest.raises(ProofMapError) as exc_info:
-        decide_evidence_review(store, "does_not_exist", "trusted", confirmed=True)
+        researcher(store).decide_evidence_review("does_not_exist", "trusted")
     assert exc_info.value.code == "EVIDENCE_CHECK_NOT_FOUND"
