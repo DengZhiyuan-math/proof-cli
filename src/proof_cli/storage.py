@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Iterator
 
 from pydantic import TypeAdapter
 
@@ -169,6 +171,64 @@ CREATE TABLE IF NOT EXISTS governance_records (
 CREATE INDEX IF NOT EXISTS idx_governance_records_kind ON governance_records(kind, created_at);
 """
 
+# Human Review history (issue #33): insert-only. A request is a row whose
+# `review_id` is its own `id`; a decision is a later row carrying the
+# request's `review_id`, never an edit of the request. The triggers make the
+# table append-only for every writer, not just this module: UPDATE and
+# DELETE abort, and so does an INSERT that would collide with an existing
+# row (which `INSERT OR REPLACE` would otherwise resolve by deleting it).
+REVIEW_HISTORY_SCHEMA = """
+CREATE TABLE IF NOT EXISTS review_history (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  id TEXT NOT NULL UNIQUE,
+  review_id TEXT NOT NULL,
+  entry TEXT NOT NULL CHECK (entry IN ('request', 'decision')),
+  object_type TEXT NOT NULL,
+  object_id TEXT NOT NULL,
+  kind TEXT,
+  decision TEXT NOT NULL,
+  reviewer_id TEXT NOT NULL,
+  rationale TEXT NOT NULL,
+  authorship TEXT NOT NULL,
+  provenance_notes TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  CHECK ((entry = 'request') = (review_id = id))
+);
+
+CREATE INDEX IF NOT EXISTS idx_review_history_object ON review_history(object_type, object_id, seq);
+CREATE INDEX IF NOT EXISTS idx_review_history_review_id ON review_history(review_id, seq);
+
+CREATE TRIGGER IF NOT EXISTS review_history_no_update
+BEFORE UPDATE ON review_history
+BEGIN
+  SELECT RAISE(ABORT, 'review_history is append-only');
+END;
+
+CREATE TRIGGER IF NOT EXISTS review_history_no_delete
+BEFORE DELETE ON review_history
+BEGIN
+  SELECT RAISE(ABORT, 'review_history is append-only');
+END;
+
+CREATE TRIGGER IF NOT EXISTS review_history_no_overwrite
+BEFORE INSERT ON review_history
+WHEN EXISTS (SELECT 1 FROM review_history WHERE id = NEW.id OR seq = NEW.seq)
+BEGIN
+  SELECT RAISE(ABORT, 'review_history is append-only');
+END;
+
+CREATE TRIGGER IF NOT EXISTS review_history_decision_needs_request
+BEFORE INSERT ON review_history
+WHEN NEW.entry = 'decision' AND NOT EXISTS (
+  SELECT 1 FROM review_history
+  WHERE id = NEW.review_id AND entry = 'request'
+    AND object_type = NEW.object_type AND object_id = NEW.object_id AND kind IS NEW.kind
+)
+BEGIN
+  SELECT RAISE(ABORT, 'a review decision must reference an existing request for the same object');
+END;
+"""
+
 
 @dataclass
 class ProjectStore:
@@ -183,8 +243,55 @@ class ProjectStore:
         initialize(conn)
         conn.executescript(REFERENCE_SCHEMA)
         conn.executescript(PROOF_MAP_SCHEMA)
+        conn.executescript(REVIEW_HISTORY_SCHEMA)
         conn.commit()
         return conn
+
+    @contextmanager
+    def transaction(self) -> Iterator[sqlite3.Connection]:
+        """One SQLite write transaction: every write made on the yielded
+        connection commits together, or — on any exception — none do.
+
+        `BEGIN IMMEDIATE` takes the write lock up front, so a concurrent
+        writer waits on the busy timeout instead of failing mid-transaction
+        when a deferred read lock can't be upgraded.
+        """
+        conn = self.connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            yield conn
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+
+@contextmanager
+def in_transaction(store: ProjectStore, conn: sqlite3.Connection | None) -> Iterator[sqlite3.Connection]:
+    """Join the caller's `store.transaction()` if it passed one, else open one."""
+    if conn is not None:
+        yield conn
+        return
+    with store.transaction() as own:
+        yield own
+
+
+@contextmanager
+def _writing(store: ProjectStore, conn: sqlite3.Connection | None) -> Iterator[sqlite3.Connection]:
+    """The connection a write helper should use: the caller's, inside its
+    `store.transaction()` (left for the caller to commit), or else its own,
+    committed on success."""
+    if conn is not None:
+        yield conn
+        return
+    own = store.connect()
+    try:
+        yield own
+        own.commit()
+    finally:
+        own.close()
 
 
 def project_proof_dir(store: ProjectStore) -> Path:
@@ -193,6 +300,23 @@ def project_proof_dir(store: ProjectStore) -> Path:
 
 def collaboration_state_path(store: ProjectStore) -> Path:
     return project_proof_dir(store) / "collaboration.json"
+
+
+REVIEW_HISTORY_MIGRATED_KEY = "review_history_migrated"
+
+
+def is_review_history_migrated(conn: sqlite3.Connection) -> bool:
+    """Whether this project's one-shot `collaboration.json` → `review_history`
+    migration (issue #33) has already run."""
+    row = conn.execute("SELECT 1 FROM project_meta WHERE key = ? LIMIT 1", (REVIEW_HISTORY_MIGRATED_KEY,)).fetchone()
+    return row is not None
+
+
+def mark_review_history_migrated(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        "INSERT OR IGNORE INTO project_meta(key, value) VALUES (?, ?)",
+        (REVIEW_HISTORY_MIGRATED_KEY, utc_now().isoformat()),
+    )
 
 
 def create_project(root: str | Path, project_id: str) -> ProjectStore:
@@ -204,6 +328,10 @@ def create_project(root: str | Path, project_id: str) -> ProjectStore:
                 "INSERT INTO project_meta(key, value) VALUES (?, ?)",
                 ("project_id", project_id),
             )
+            if not collaboration_state_path(store).exists():
+                # a brand-new project has no JSON-era review records, so its
+                # one-shot migration is done before it ever starts
+                mark_review_history_migrated(conn)
         state_row = conn.execute("SELECT data FROM state WHERE project_id = ?", (project_id,)).fetchone()
         if state_row is None:
             state = ProjectState(project_id=project_id)
@@ -251,7 +379,15 @@ def write_state(store: ProjectStore, state: ProjectState) -> None:
         conn.commit()
 
 
-def append_event(store: ProjectStore, kind: str, message: str, *, entity_id: str | None = None, payload: dict | None = None) -> EventRecord:
+def append_event(
+    store: ProjectStore,
+    kind: str,
+    message: str,
+    *,
+    entity_id: str | None = None,
+    payload: dict | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> EventRecord:
     event = EventRecord(
         id=str(uuid.uuid4()),
         kind=kind,
@@ -259,7 +395,7 @@ def append_event(store: ProjectStore, kind: str, message: str, *, entity_id: str
         message=message,
         payload=payload or {},
     )
-    with store.connect() as conn:
+    with _writing(store, conn) as conn:
         conn.execute(
             "INSERT INTO events(id, kind, entity_id, message, payload, created_at) VALUES (?, ?, ?, ?, ?, ?)",
             (
@@ -274,7 +410,6 @@ def append_event(store: ProjectStore, kind: str, message: str, *, entity_id: str
                 event.created_at.isoformat(),
             ),
         )
-        conn.commit()
     return event
 
 
@@ -850,22 +985,24 @@ def insert_candidate_proof(store: ProjectStore, record: CandidateProofRecord) ->
     return record
 
 
-def set_candidate_proof_interface_fingerprint(store: ProjectStore, candidate_proof_id: str, fingerprint: str) -> None:
-    with store.connect() as conn:
+def set_candidate_proof_interface_fingerprint(
+    store: ProjectStore, candidate_proof_id: str, fingerprint: str, *, conn: sqlite3.Connection | None = None
+) -> None:
+    with _writing(store, conn) as conn:
         conn.execute(
             "UPDATE candidate_proofs SET interface_fingerprint = ? WHERE id = ?",
             (fingerprint, candidate_proof_id),
         )
-        conn.commit()
 
 
-def set_candidate_proof_review_record_id(store: ProjectStore, candidate_proof_id: str, review_record_id: str) -> None:
-    with store.connect() as conn:
+def set_candidate_proof_review_record_id(
+    store: ProjectStore, candidate_proof_id: str, review_record_id: str, *, conn: sqlite3.Connection | None = None
+) -> None:
+    with _writing(store, conn) as conn:
         conn.execute(
             "UPDATE candidate_proofs SET review_record_id = ? WHERE id = ?",
             (review_record_id, candidate_proof_id),
         )
-        conn.commit()
 
 
 def get_candidate_proof(store: ProjectStore, candidate_proof_id: str) -> CandidateProofRecord | None:
@@ -919,13 +1056,13 @@ def _row_to_dependency_pin(row: sqlite3.Row) -> DependencyPin:
     )
 
 
-def upsert_dependency_pin(store: ProjectStore, pin: DependencyPin) -> DependencyPin:
+def upsert_dependency_pin(store: ProjectStore, pin: DependencyPin, *, conn: sqlite3.Connection | None = None) -> DependencyPin:
     """Insert or refresh the pin for (node_id, target_node_id).
 
     One row per pair — always the most recent pin. `id` is preserved across
     a refresh so a caller holding an earlier pin's id can still look it up.
     """
-    with store.connect() as conn:
+    with _writing(store, conn) as conn:
         existing = conn.execute(
             "SELECT id FROM dependency_pins WHERE node_id = ? AND target_node_id = ? LIMIT 1",
             (pin.node_id, pin.target_node_id),
@@ -949,7 +1086,6 @@ def upsert_dependency_pin(store: ProjectStore, pin: DependencyPin) -> Dependency
                 pin.created_at.isoformat(),
             ),
         )
-        conn.commit()
     return pin.model_copy(update={"id": pin_id})
 
 
@@ -1038,7 +1174,12 @@ def list_challenges(store: ProjectStore, *, target_node_id: str = "", status: st
 
 
 def mark_challenge_dismissed(
-    store: ProjectStore, challenge_id: str, *, resolved_by: str, resolved_at: datetime
+    store: ProjectStore,
+    challenge_id: str,
+    *,
+    resolved_by: str,
+    resolved_at: datetime,
+    conn: sqlite3.Connection | None = None,
 ) -> bool:
     """Dismiss a challenge, but only if it's still open.
 
@@ -1046,13 +1187,22 @@ def mark_challenge_dismissed(
     can't both silently win — only the first UPDATE to reach SQLite's write
     lock affects a row. Returns whether this call was the one that dismissed it.
     """
-    with store.connect() as conn:
+    with _writing(store, conn) as conn:
         cursor = conn.execute(
             "UPDATE challenges SET status = 'dismissed', resolved_by = ?, resolved_at = ? WHERE id = ? AND status = 'open'",
             (resolved_by, resolved_at.isoformat(), challenge_id),
         )
-        conn.commit()
         return cursor.rowcount > 0
+
+
+def list_open_challenge_ids(conn: sqlite3.Connection, target_node_id: str) -> list[str]:
+    """Open Challenges against `target_node_id`, read on the caller's
+    transaction so the set it dismisses is the set it saw."""
+    rows = conn.execute(
+        "SELECT id FROM challenges WHERE target_node_id = ? AND status = 'open' ORDER BY created_at",
+        (target_node_id,),
+    ).fetchall()
+    return [row["id"] for row in rows]
 
 
 def _row_to_evidence_check(row: sqlite3.Row) -> EvidenceCheck:
@@ -1193,3 +1343,77 @@ def ensure_project(root: str | Path, project_id: str = "proj_alpha") -> ProjectS
     path = Path(root)
     path.mkdir(parents=True, exist_ok=True)
     return create_project(path, project_id)
+
+
+_REVIEW_HISTORY_COLUMNS = (
+    "id",
+    "review_id",
+    "entry",
+    "object_type",
+    "object_id",
+    "kind",
+    "decision",
+    "reviewer_id",
+    "rationale",
+    "authorship",
+    "provenance_notes",
+    "created_at",
+)
+
+
+def insert_review_history_row(conn: sqlite3.Connection, row: dict) -> None:
+    """Append one Human Review history row on the caller's transaction.
+
+    The only write path into `review_history`; there is deliberately no
+    update or delete counterpart (the table's triggers would refuse one).
+    """
+    values = [row[column] for column in _REVIEW_HISTORY_COLUMNS]
+    values[_REVIEW_HISTORY_COLUMNS.index("authorship")] = json.dumps(row["authorship"])
+    placeholders = ", ".join("?" for _ in _REVIEW_HISTORY_COLUMNS)
+    conn.execute(
+        f"INSERT INTO review_history({', '.join(_REVIEW_HISTORY_COLUMNS)}) VALUES ({placeholders})",
+        values,
+    )
+
+
+def review_history_row_exists(conn: sqlite3.Connection, row_id: str) -> bool:
+    return conn.execute("SELECT 1 FROM review_history WHERE id = ? LIMIT 1", (row_id,)).fetchone() is not None
+
+
+def _row_to_review_history(row: sqlite3.Row) -> dict:
+    data = {column: row[column] for column in _REVIEW_HISTORY_COLUMNS}
+    data["seq"] = row["seq"]
+    data["authorship"] = json.loads(row["authorship"])
+    return data
+
+
+def list_review_history_rows(
+    store: ProjectStore,
+    *,
+    object_type: str = "",
+    object_id: str = "",
+    review_id: str = "",
+    conn: sqlite3.Connection | None = None,
+) -> list[dict]:
+    """Review history rows in append order, optionally narrowed to one object or one review."""
+    query = "SELECT * FROM review_history"
+    conditions: list[str] = []
+    params: list[str] = []
+    if object_type:
+        conditions.append("object_type = ?")
+        params.append(object_type)
+    if object_id:
+        conditions.append("object_id = ?")
+        params.append(object_id)
+    if review_id:
+        conditions.append("review_id = ?")
+        params.append(review_id)
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
+    query += " ORDER BY seq"
+    if conn is not None:
+        rows = conn.execute(query, params).fetchall()
+    else:
+        with store.connect() as own:
+            rows = own.execute(query, params).fetchall()
+    return [_row_to_review_history(row) for row in rows]
