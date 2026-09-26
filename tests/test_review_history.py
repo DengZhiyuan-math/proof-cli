@@ -489,3 +489,41 @@ def test_review_records_injected_into_json_after_migration_are_ignored(tmp_path:
         assert [contributor.display_name for contributor in load_collaboration(store).contributors] == ["Alice"]
     get_acceptance_state(store, "clm_x")
     assert len(list_review_history_integrity_warnings(store)) == 1
+
+
+@pytest.mark.parametrize("pre_review_history", [False, True])
+def test_a_malformed_review_record_in_json_is_warned_about_not_fatal(tmp_path: Path, pre_review_history: bool):
+    """Before or after the one-shot migration, a record that doesn't even
+    validate must not wedge every read that derives Human Review state."""
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_1", kind="claim", statement="s")
+    if pre_review_history:
+        _as_pre_review_history_project(store)
+    legitimate = {**_forged_acceptance("clm_1", "review_legacy"), "reviewer_id": "researcher"}
+    bad = {"id": "rv_bad", "decision": "approved"}
+    path = collaboration_state_path(store)
+    path.write_text(
+        json.dumps({"review_records": [bad, legitimate] if pre_review_history else [bad]})
+    )
+
+    expected = "accepted" if pre_review_history else "unreviewed"
+    assert get_acceptance_state(store, "clm_1") == expected
+    assert get_acceptance_state(store, "clm_1") == expected
+
+    warnings = list_review_history_integrity_warnings(store)
+    assert len(warnings) == 1
+    assert warnings[0].payload["malformed"] == [bad]
+    assert warnings[0].payload["records"] == []
+    assert "review_records" not in json.loads(path.read_text())
+    assert "rv_bad" not in {row.review_id for row in list_review_history(store)}
+
+
+def test_a_non_list_review_records_value_is_warned_about_not_fatal(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_1", kind="claim", statement="s")
+    path = collaboration_state_path(store)
+    path.write_text(json.dumps({"review_records": {"id": "rv_bad"}}))
+
+    assert get_acceptance_state(store, "clm_1") == "unreviewed"
+    assert len(list_review_history_integrity_warnings(store)) == 1
+    assert "review_records" not in json.loads(path.read_text())
