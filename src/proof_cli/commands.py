@@ -109,6 +109,7 @@ from .governance import (
 )
 from .domain_packs import DomainPack
 from .collaboration import (
+    TRUST_BEARING_OBJECT_TYPES,
     BranchComparison,
     BranchStatus,
     CollaborationPolicy,
@@ -124,6 +125,7 @@ from .collaboration import (
     get_contributor,
     get_policy as get_collaboration_policy,
     get_review_record,
+    is_trust_bearing_review,
     list_branches,
     list_comment_threads,
     list_comments,
@@ -1972,11 +1974,12 @@ def cmd_review_request(
     reviewer_id: str = "human",
     rationale: str = "",
 ) -> str:
-    if object_type == "proof_map_node":
+    if object_type in TRUST_BEARING_OBJECT_TYPES:
         raise ValueError(
-            "proof_map_node Acceptance/Reference review must go through `proof node review`, "
+            f"{object_type} reviews are Human Review decisions with their own commands "
+            "(`proof node review`, `proof node evidence review`, `proof node revalidate`), "
             "not the generic `proof review request` command, or the decision won't be reflected "
-            "in acceptance_state"
+            "in the node's derived state"
         )
     record = record_review_request(get_store(root), object_type, object_id, reviewer_id=reviewer_id, rationale=rationale)
     return json.dumps(record.model_dump(mode="json"), indent=2)
@@ -1999,11 +2002,12 @@ def cmd_review_decide(
 ) -> str:
     store = get_store(root)
     existing = get_review_record(store, review_id)
-    if existing is not None and existing.object_type == "proof_map_node":
+    if existing is not None and is_trust_bearing_review(existing):
         raise ValueError(
-            "proof_map_node Acceptance/Reference review must go through `proof node review`, "
-            "not the generic `proof review decide` command, or the decision won't be reflected "
-            "in acceptance_state"
+            f"{existing.object_type} review {review_id} is a Human Review decision "
+            f"(kind={existing.kind.value if existing.kind else 'none'}); it can't be re-decided through "
+            "the generic `proof review decide` command — record a new decision with "
+            "`proof node review`, `proof node evidence review` or `proof node revalidate` instead"
         )
     try:
         resolved_decision = ReviewGovernanceState(decision)

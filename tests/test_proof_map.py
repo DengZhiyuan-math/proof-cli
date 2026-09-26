@@ -1540,17 +1540,19 @@ def test_revalidate_dependency_review_write_failure_rolls_back_the_pin(tmp_path:
     aged_pin = pin.model_copy(update={"pinned_version": 0})
     upsert_dependency_pin(store, aged_pin)
 
-    import proof_cli.proof_map as proof_map_module
+    import proof_cli.collaboration as collaboration_module
 
     def _boom(*args, **kwargs):
         raise RuntimeError("simulated review-write failure")
 
-    monkeypatch.setattr(proof_map_module, "record_review_decision", _boom)
+    # fails after the pin and the review request are already written on the
+    # transaction — the decision step is the last write before commit
+    monkeypatch.setattr(collaboration_module, "record_review_decision", _boom)
 
     with pytest.raises(RuntimeError):
         revalidate_dependency(store, "clm_1", "lem_base", reviewer_id="researcher", confirmed=True)
 
-    # the pin was rolled back to its pre-attempt value — neither write stuck
+    # the transaction rolled back the pin — neither write stuck
     assert get_dependency_pin(store, "clm_1", "lem_base").pinned_version == 0
     assert not any(
         record.kind is not None and record.kind.value == "dependency_revalidation"

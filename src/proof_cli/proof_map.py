@@ -11,10 +11,8 @@ from .collaboration import (
     ReviewGovernanceState,
     ReviewRecord,
     ReviewRecordKind,
-    delete_review_record,
     list_review_records,
-    record_review_decision,
-    record_review_request,
+    record_decided_review,
 )
 from .domain import (
     CandidateProofRecord,
@@ -48,6 +46,7 @@ from .storage import (
     list_challenges as _list_challenges,
     list_dependency_pins_for_node,
     list_evidence_checks_for_candidate_proof,
+    list_open_challenge_ids,
     list_proof_map_nodes,
     mark_challenge_dismissed,
     mark_claim_released,
@@ -627,23 +626,25 @@ def decide_evidence_review(
         )
 
     governance_state = _EVIDENCE_DECISION_TO_GOVERNANCE_STATE[resolved_decision]
-    request = record_review_request(
-        store,
-        _EVIDENCE_CHECK_OBJECT_TYPE,
-        evidence_check_id,
-        reviewer_id=reviewer_id,
-        rationale=rationale,
-        kind=ReviewRecordKind.evidence_review,
-    )
-    record = record_review_decision(store, request.id, governance_state, reviewer_id=reviewer_id, rationale=rationale)
-
-    append_event(
-        store,
-        "proof_map_evidence_review_decided",
-        f"evidence review for {evidence_check_id}: {resolved_decision.value}",
-        entity_id=check.candidate_proof_id,
-        payload={"decision": resolved_decision.value, "reviewer_id": reviewer_id, "review_id": record.id},
-    )
+    with store.transaction() as conn:
+        record = record_decided_review(
+            store,
+            _EVIDENCE_CHECK_OBJECT_TYPE,
+            evidence_check_id,
+            governance_state,
+            reviewer_id=reviewer_id,
+            rationale=rationale,
+            kind=ReviewRecordKind.evidence_review,
+            conn=conn,
+        )
+        append_event(
+            store,
+            "proof_map_evidence_review_decided",
+            f"evidence review for {evidence_check_id}: {resolved_decision.value}",
+            entity_id=check.candidate_proof_id,
+            payload={"decision": resolved_decision.value, "reviewer_id": reviewer_id, "review_id": record.id},
+            conn=conn,
+        )
     return record
 
 
@@ -799,33 +800,52 @@ def decide_acceptance(
         )
 
     governance_state = _ACCEPTANCE_DECISION_TO_GOVERNANCE_STATE[resolved_decision]
-    request = record_review_request(
-        store,
-        _ACCEPTANCE_OBJECT_TYPE,
-        node_id,
-        reviewer_id=reviewer_id,
-        rationale=rationale,
-        kind=ReviewRecordKind.acceptance,
-    )
-    record = record_review_decision(store, request.id, governance_state, reviewer_id=reviewer_id, rationale=rationale)
-
     current_proof = get_current_candidate_proof(store, node_id)
-    if current_proof is not None:
-        set_candidate_proof_review_record_id(store, current_proof.id, record.id)
-        if resolved_decision == AcceptanceDecision.accept:
-            fingerprint = compute_interface_fingerprint(node.kind.value, node.statement, node.assumptions)
-            set_candidate_proof_interface_fingerprint(store, current_proof.id, fingerprint)
+    # the review rows, the candidate-proof link and fingerprint, the
+    # Challenges it resolves and the events all commit together or not at
+    # all: a decision interrupted part-way leaves the node exactly as it was.
+    with store.transaction() as conn:
+        record = record_decided_review(
+            store,
+            _ACCEPTANCE_OBJECT_TYPE,
+            node_id,
+            governance_state,
+            reviewer_id=reviewer_id,
+            rationale=rationale,
+            kind=ReviewRecordKind.acceptance,
+            conn=conn,
+        )
+        if current_proof is not None:
+            set_candidate_proof_review_record_id(store, current_proof.id, record.id, conn=conn)
+            if resolved_decision == AcceptanceDecision.accept:
+                fingerprint = compute_interface_fingerprint(node.kind.value, node.statement, node.assumptions)
+                set_candidate_proof_interface_fingerprint(store, current_proof.id, fingerprint, conn=conn)
 
-    _resolve_open_challenges(store, node_id, resolved_by=reviewer_id)
+        _resolve_open_challenges(store, node_id, resolved_by=reviewer_id, conn=conn)
 
-    append_event(
-        store,
-        "proof_map_acceptance_decided",
-        f"acceptance decision for {node_id}: {resolved_decision.value}",
-        entity_id=node_id,
-        payload={"decision": resolved_decision.value, "reviewer_id": reviewer_id, "review_id": record.id},
-    )
+        append_event(
+            store,
+            "proof_map_acceptance_decided",
+            f"acceptance decision for {node_id}: {resolved_decision.value}",
+            entity_id=node_id,
+            payload={"decision": resolved_decision.value, "reviewer_id": reviewer_id, "review_id": record.id},
+            conn=conn,
+        )
     return record
+
+
+def _decided_reviews(store: ProjectStore, node_id: str, kind: ReviewRecordKind) -> list[ReviewRecord]:
+    """`node_id`'s reviews of `kind` that carry a decision, oldest first.
+
+    A request still at `proposed_for_review` is no decision at all, so it is
+    never the "latest" one a derived axis reads — a pending request can't
+    revoke an earlier Acceptance.
+    """
+    return [
+        record
+        for record in list_review_records(store, object_type=_ACCEPTANCE_OBJECT_TYPE, object_id=node_id)
+        if record.kind == kind and record.decision != ReviewGovernanceState.proposed_for_review
+    ]
 
 
 def get_acceptance_state(store: ProjectStore, node_id: str) -> str:
@@ -836,11 +856,7 @@ def get_acceptance_state(store: ProjectStore, node_id: str) -> str:
     so it can never drift out of sync with what a human actually decided.
     """
     require_node(store, node_id)
-    records = [
-        record
-        for record in list_review_records(store, object_type=_ACCEPTANCE_OBJECT_TYPE, object_id=node_id)
-        if record.kind == ReviewRecordKind.acceptance
-    ]
+    records = _decided_reviews(store, node_id, ReviewRecordKind.acceptance)
     if not records:
         return "unreviewed"
     latest = records[-1]
@@ -934,38 +950,33 @@ def decide_reference_review(
             "a Reference review decision requires explicit confirmation; only a researcher may confirm one",
         )
 
-    request = record_review_request(
-        store,
-        _ACCEPTANCE_OBJECT_TYPE,
-        node_id,
-        reviewer_id=reviewer_id,
-        rationale=rationale,
-        kind=ReviewRecordKind.reference_review,
-    )
-    record = record_review_decision(
-        store, request.id, ReviewGovernanceState.approved, reviewer_id=reviewer_id, rationale=rationale
-    )
-
-    _resolve_open_challenges(store, node_id, resolved_by=reviewer_id)
-
-    append_event(
-        store,
-        "proof_map_reference_review_granted",
-        f"reference review granted for {node_id}",
-        entity_id=node_id,
-        payload={"reviewer_id": reviewer_id, "review_id": record.id},
-    )
+    with store.transaction() as conn:
+        record = record_decided_review(
+            store,
+            _ACCEPTANCE_OBJECT_TYPE,
+            node_id,
+            ReviewGovernanceState.approved,
+            reviewer_id=reviewer_id,
+            rationale=rationale,
+            kind=ReviewRecordKind.reference_review,
+            conn=conn,
+        )
+        _resolve_open_challenges(store, node_id, resolved_by=reviewer_id, conn=conn)
+        append_event(
+            store,
+            "proof_map_reference_review_granted",
+            f"reference review granted for {node_id}",
+            entity_id=node_id,
+            payload={"reviewer_id": reviewer_id, "review_id": record.id},
+            conn=conn,
+        )
     return record
 
 
 def get_reference_review_state(store: ProjectStore, node_id: str) -> str:
     """`unreviewed` or `reviewed`, derived from `kind=reference_review` records only — never acceptance_state."""
     require_node(store, node_id)
-    records = [
-        record
-        for record in list_review_records(store, object_type=_ACCEPTANCE_OBJECT_TYPE, object_id=node_id)
-        if record.kind == ReviewRecordKind.reference_review
-    ]
+    records = _decided_reviews(store, node_id, ReviewRecordKind.reference_review)
     if records and records[-1].decision == ReviewGovernanceState.approved:
         return "reviewed"
     return "unreviewed"
@@ -991,12 +1002,8 @@ def revalidate_dependency(
     Acceptance of `node_id` itself — and refreshes the dependency edge's
     pin to the target's current accepted version and fingerprint.
 
-    The ReviewRecord lives in the JSON-backed collaboration store; the
-    DependencyPin lives in SQLite. A single native transaction can't span
-    both, so this orders the writes (pin first, review second) and, if the
-    review write fails, explicitly rolls the pin back to its prior value —
-    the same "neither or both" outcome a real transaction would give,
-    achieved by ordering and compensation instead of a shared commit.
+    The pin refresh and the review rows are written in one SQLite
+    transaction: neither lands without the other.
     """
     node = require_node(store, node_id)
     target = require_node(store, target_node_id)
@@ -1049,43 +1056,31 @@ def revalidate_dependency(
         pinned_version=new_version,
         pinned_fingerprint=current_fingerprint,
     )
-    upsert_dependency_pin(store, refreshed_pin)
-
-    request = None
-    try:
-        request = record_review_request(
+    with store.transaction() as conn:
+        upsert_dependency_pin(store, refreshed_pin, conn=conn)
+        record = record_decided_review(
             store,
             _ACCEPTANCE_OBJECT_TYPE,
             node_id,
+            ReviewGovernanceState.reaffirmed,
             reviewer_id=reviewer_id,
             rationale=rationale,
             kind=ReviewRecordKind.dependency_revalidation,
+            conn=conn,
         )
-        record = record_review_decision(
-            store, request.id, ReviewGovernanceState.reaffirmed, reviewer_id=reviewer_id, rationale=rationale
+        append_event(
+            store,
+            "proof_map_dependency_revalidated",
+            f"revalidated {node_id}'s dependency on {target_node_id}",
+            entity_id=node_id,
+            payload={
+                "target_node_id": target_node_id,
+                "old_pinned_version": old_pin.pinned_version,
+                "new_pinned_version": new_version,
+                "review_id": record.id,
+            },
+            conn=conn,
         )
-    except Exception:
-        upsert_dependency_pin(store, old_pin)
-        if request is not None:
-            # the request write landed but its decision didn't — delete it
-            # rather than leave a permanently-pending request with no
-            # matching decision, the same "neither or both" outcome as the
-            # pin rollback above.
-            delete_review_record(store, request.id)
-        raise
-
-    append_event(
-        store,
-        "proof_map_dependency_revalidated",
-        f"revalidated {node_id}'s dependency on {target_node_id}",
-        entity_id=node_id,
-        payload={
-            "target_node_id": target_node_id,
-            "old_pinned_version": old_pin.pinned_version,
-            "new_pinned_version": new_version,
-            "review_id": record.id,
-        },
-    )
     return record
 
 
@@ -1147,7 +1142,7 @@ def has_open_challenge(store: ProjectStore, node_id: str) -> bool:
     return len(_list_challenges(store, target_node_id=node_id, status="open")) > 0
 
 
-def _resolve_open_challenges(store: ProjectStore, node_id: str, *, resolved_by: str) -> None:
+def _resolve_open_challenges(store: ProjectStore, node_id: str, *, resolved_by: str, conn: sqlite3.Connection) -> None:
     """Dismiss every open Challenge against `node_id`.
 
     Called from `decide_acceptance` and `decide_reference_review`: per
@@ -1158,16 +1153,20 @@ def _resolve_open_challenges(store: ProjectStore, node_id: str, *, resolved_by: 
     reclaim (`claim_node`'s one sanctioned way to revise an Accepted node)
     would leave the node permanently `challenged` even after the concern was
     addressed.
+
+    Runs on the deciding review's own transaction (`conn`), so the Challenges
+    it resolves are dismissed exactly when that decision commits.
     """
     resolved_at = utc_now()
-    for challenge in _list_challenges(store, target_node_id=node_id, status="open"):
-        if mark_challenge_dismissed(store, challenge.id, resolved_by=resolved_by, resolved_at=resolved_at):
+    for challenge_id in list_open_challenge_ids(conn, node_id):
+        if mark_challenge_dismissed(store, challenge_id, resolved_by=resolved_by, resolved_at=resolved_at, conn=conn):
             append_event(
                 store,
                 "proof_map_challenge_dismissed",
-                f"challenge {challenge.id} dismissed by {resolved_by} (resolved via review decision)",
+                f"challenge {challenge_id} dismissed by {resolved_by} (resolved via review decision)",
                 entity_id=node_id,
-                payload={"challenge_id": challenge.id, "reviewer_id": resolved_by},
+                payload={"challenge_id": challenge_id, "reviewer_id": resolved_by},
+                conn=conn,
             )
 
 
@@ -1197,17 +1196,18 @@ def dismiss_challenge(
         )
 
     resolved_at = utc_now()
-    won_race = mark_challenge_dismissed(store, challenge_id, resolved_by=reviewer_id, resolved_at=resolved_at)
-    if not won_race:
-        raise ProofMapError("CHALLENGE_NOT_OPEN", f"challenge {challenge_id} is already dismissed")
-
-    append_event(
-        store,
-        "proof_map_challenge_dismissed",
-        f"challenge {challenge_id} dismissed by {reviewer_id}",
-        entity_id=challenge.target_node_id,
-        payload={"challenge_id": challenge_id, "reviewer_id": reviewer_id, "rationale": rationale},
-    )
+    with store.transaction() as conn:
+        won_race = mark_challenge_dismissed(store, challenge_id, resolved_by=reviewer_id, resolved_at=resolved_at, conn=conn)
+        if not won_race:
+            raise ProofMapError("CHALLENGE_NOT_OPEN", f"challenge {challenge_id} is already dismissed")
+        append_event(
+            store,
+            "proof_map_challenge_dismissed",
+            f"challenge {challenge_id} dismissed by {reviewer_id}",
+            entity_id=challenge.target_node_id,
+            payload={"challenge_id": challenge_id, "reviewer_id": reviewer_id, "rationale": rationale},
+            conn=conn,
+        )
     return challenge.model_copy(update={"status": ChallengeStatus.dismissed, "resolved_by": reviewer_id, "resolved_at": resolved_at})
 
 
@@ -1306,11 +1306,7 @@ def get_workflow_state(store: ProjectStore, node_id: str) -> str:
         return "open"
 
     current_proof = get_current_candidate_proof(store, node_id)
-    acceptance_records = [
-        record
-        for record in list_review_records(store, object_type=_ACCEPTANCE_OBJECT_TYPE, object_id=node_id)
-        if record.kind == ReviewRecordKind.acceptance
-    ]
+    acceptance_records = _decided_reviews(store, node_id, ReviewRecordKind.acceptance)
     latest_review = acceptance_records[-1] if acceptance_records else None
 
     # Whether the latest Human Review decision already covers the current
