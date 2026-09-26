@@ -760,6 +760,29 @@ _ACCEPTANCE_DECISION_TO_GOVERNANCE_STATE = {
 _ACCEPTANCE_OBJECT_TYPE = "proof_map_node"
 
 
+def _require_awaiting_acceptance_review(store: ProjectStore, node_id: str) -> None:
+    """A decision only ever answers a Candidate proof awaiting review.
+
+    `rejected` is terminal (story 24). Otherwise the node must read
+    `review-needed`: that one state already excludes a node with no
+    Candidate proof (`open`), one under an active claim (`claimed`), one
+    whose dependencies aren't settled (`blocked`), and a second decision on
+    a submission that was already decided (`open`/`revision-requested`).
+    """
+    if get_acceptance_state(store, node_id) == "rejected":
+        raise ProofMapError(
+            "NODE_REJECTED", f"node {node_id} was Rejected; that decision is permanent and can't be revisited"
+        )
+    workflow_state = get_workflow_state(store, node_id)
+    if workflow_state != "review-needed":
+        raise ProofMapError(
+            "NOT_REVIEW_NEEDED",
+            f"node {node_id} is {workflow_state}, not review-needed; "
+            "a Human Review decision only applies to a submitted Candidate proof awaiting review",
+            details={"workflow_state": workflow_state},
+        )
+
+
 def decide_acceptance(
     store: ProjectStore,
     node_id: str,
@@ -770,6 +793,9 @@ def decide_acceptance(
     confirmed: bool = False,
 ) -> ReviewRecord:
     """Record a Human Review acceptance decision for a local node.
+
+    Only for a node in `review-needed`, and never once it's `rejected` (see
+    `_require_awaiting_acceptance_review`).
 
     `revision_requested` keeps the node open for another claim/submit cycle
     on the same node id, never a new node. `reject` is permanent: the node
@@ -800,11 +826,14 @@ def decide_acceptance(
         )
 
     governance_state = _ACCEPTANCE_DECISION_TO_GOVERNANCE_STATE[resolved_decision]
-    current_proof = get_current_candidate_proof(store, node_id)
     # the review rows, the candidate-proof link and fingerprint, the
     # Challenges it resolves and the events all commit together or not at
     # all: a decision interrupted part-way leaves the node exactly as it was.
     with store.transaction() as conn:
+        # checked on the write lock, so no concurrent decision or submission
+        # can land between the check and the write
+        _require_awaiting_acceptance_review(store, node_id)
+        current_proof = get_current_candidate_proof(store, node_id)
         record = record_decided_review(
             store,
             _ACCEPTANCE_OBJECT_TYPE,

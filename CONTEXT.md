@@ -105,7 +105,7 @@ A researcher or agent has taken ownership of a proof map node to work on it, and
 _Avoid_: assigned, in progress, proof-drafted
 
 **Review-needed** (a workflow state):
-A proof map node has a submitted Candidate proof awaiting the researcher's Acceptance or Reference review decision.
+A proof map node has a submitted Candidate proof awaiting the researcher's Acceptance or Reference review decision. It is the only workflow state in which an Acceptance decision (accept, revision requested, reject) can be made. A node with no Candidate proof, under an active claim, Blocked, or whose current submission was already decided can't receive one.
 _Avoid_: pending review, submitted
 
 **Revision requested** (a workflow state):
@@ -121,7 +121,7 @@ The researcher has given this node Acceptance (or, for an Imported result, Refer
 _Avoid_: verified, established
 
 **Rejected** (an acceptance state):
-The researcher's decision that a node's approach does not hold and should not be pursued further. The node and its full candidate-proof and review history stay in the proof map permanently, as the record of the abandoned route.
+The researcher's decision that a node's approach does not hold and should not be pursued further. The node and its full candidate-proof and review history stay in the proof map permanently, as the record of the abandoned route. Rejected is terminal: the node can't be decided again, claimed, or split.
 _Avoid_: closed, abandoned, revision requested
 
 **Integrity state**:

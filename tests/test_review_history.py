@@ -1,11 +1,13 @@
 """Human Review history as an append-only SQLite table (issue #33)."""
 
+import contextvars
 import json
 import os
 import sqlite3
 import subprocess
 import sys
 import textwrap
+import threading
 from pathlib import Path
 
 import pytest
@@ -33,10 +35,18 @@ from proof_cli.proof_map import (
     decide_evidence_review,
     get_acceptance_state,
     get_workflow_state,
+    open_challenge,
     record_evidence_check,
     submit_candidate_proof,
 )
-from proof_cli.storage import REVIEW_HISTORY_MIGRATED_KEY, collaboration_state_path, ensure_project, list_events
+from proof_cli.storage import (
+    REVIEW_HISTORY_MIGRATED_KEY,
+    ProjectStore,
+    active_transaction,
+    collaboration_state_path,
+    ensure_project,
+    list_events,
+)
 
 SRC = Path(__file__).resolve().parents[1] / "src"
 
@@ -47,6 +57,19 @@ def _submitted_claim(store, node_id: str):
     return submit_candidate_proof(
         store, node_id, claimant_id="agent_a", session_id="sess_1", scoping_rationale="scoped", content="proof text"
     )
+
+
+def _accepted_then_resubmitted(store, node_id: str = "clm_1") -> None:
+    """An Accepted node with a fresh submission awaiting a new decision —
+    the Challenge-driven reclaim, the one way an Accepted node is re-decided."""
+    _submitted_claim(store, node_id)
+    decide_acceptance(store, node_id, "accept", reviewer_id="researcher", confirmed=True)
+    open_challenge(store, node_id, opened_by="agent_b", rationale="second look")
+    claim_node(store, node_id, claimant_id="agent_a", session_id="sess_2")
+    submit_candidate_proof(
+        store, node_id, claimant_id="agent_a", session_id="sess_2", scoping_rationale="scoped", content="revised proof"
+    )
+    assert get_workflow_state(store, node_id) == "review-needed"
 
 
 def _run_python(code: str, *args: str) -> subprocess.CompletedProcess:
@@ -78,7 +101,7 @@ def test_concurrent_decisions_from_several_processes_are_all_kept(tmp_path: Path
     store = ensure_project(tmp_path)
     node_ids = [f"clm_{index}" for index in range(30)]
     for node_id in node_ids:
-        create_node(store, node_id=node_id, kind="claim", statement=f"statement of {node_id}")
+        _submitted_claim(store, node_id)
     batches = [node_ids[offset::3] for offset in range(3)]
 
     env = {**os.environ, "PYTHONPATH": str(SRC)}
@@ -107,8 +130,7 @@ def test_concurrent_decisions_from_several_processes_are_all_kept(tmp_path: Path
 
 def test_a_decision_failing_after_its_request_leaves_prior_acceptance_unchanged(tmp_path: Path, monkeypatch):
     store = ensure_project(tmp_path)
-    _submitted_claim(store, "clm_1")
-    decide_acceptance(store, "clm_1", "accept", reviewer_id="researcher", confirmed=True)
+    _accepted_then_resubmitted(store)
     rows_before = list_review_history(store)
 
     def _boom(*args, **kwargs):
@@ -119,14 +141,13 @@ def test_a_decision_failing_after_its_request_leaves_prior_acceptance_unchanged(
         decide_acceptance(store, "clm_1", "reject", reviewer_id="researcher", confirmed=True)
 
     assert get_acceptance_state(store, "clm_1") == "accepted"
-    assert get_workflow_state(store, "clm_1") == "open"
+    assert get_workflow_state(store, "clm_1") == "review-needed"
     assert list_review_history(store) == rows_before
 
 
 def test_a_process_killed_between_request_and_decision_leaves_prior_acceptance_unchanged(tmp_path: Path):
     store = ensure_project(tmp_path)
-    _submitted_claim(store, "clm_1")
-    decide_acceptance(store, "clm_1", "accept", reviewer_id="researcher", confirmed=True)
+    _accepted_then_resubmitted(store)
     rows_before = list_review_history(store)
 
     result = _run_python(
@@ -221,7 +242,7 @@ def test_insert_or_replace_cannot_overwrite_a_review_history_row(tmp_path: Path)
 
 def test_a_decision_row_must_reference_an_existing_request_for_the_same_object(tmp_path: Path):
     store = ensure_project(tmp_path)
-    create_node(store, node_id="clm_1", kind="claim", statement="s")
+    _submitted_claim(store, "clm_1")
     create_node(store, node_id="clm_2", kind="claim", statement="t")
     record = decide_acceptance(store, "clm_1", "reject", reviewer_id="researcher", confirmed=True)
 
@@ -527,3 +548,83 @@ def test_a_non_list_review_records_value_is_warned_about_not_fatal(tmp_path: Pat
     assert get_acceptance_state(store, "clm_1") == "unreviewed"
     assert len(list_review_history_integrity_warnings(store)) == 1
     assert "review_records" not in json.loads(path.read_text())
+
+
+# -- nested transactions ----------------------------------------------------------
+
+
+def test_a_legacy_migration_first_triggered_inside_a_decision_joins_it(tmp_path: Path):
+    """A decision's precondition reads run while it holds the write lock. If
+    one of them triggers the one-shot migration, the migration must join
+    that transaction rather than wait on it until the busy timeout."""
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_old", kind="claim", statement="s")
+    _submitted_claim(store, "clm_1")
+    _as_pre_review_history_project(store)
+    path = collaboration_state_path(store)
+    path.write_text(json.dumps({"review_records": [{**_forged_acceptance("clm_old", "review_legacy"), "reviewer_id": "researcher"}]}))
+
+    errors: list[BaseException] = []
+
+    def _decide() -> None:
+        try:
+            decide_acceptance(store, "clm_1", "accept", reviewer_id="researcher", confirmed=True)
+        except BaseException as exc:  # surfaced below
+            errors.append(exc)
+
+    worker = threading.Thread(target=_decide)
+    worker.start()
+    worker.join(timeout=10)
+    assert not worker.is_alive(), "decision deadlocked on its own write lock"
+    assert errors == []
+
+    assert get_acceptance_state(store, "clm_1") == "accepted"
+    assert get_acceptance_state(store, "clm_old") == "accepted"
+    assert "review_records" not in json.loads(path.read_text())
+    assert list_review_history_integrity_warnings(store) == []
+
+
+def test_a_nested_transaction_rolls_back_with_the_outer_one(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    with pytest.raises(RuntimeError):
+        with store.transaction():
+            with store.transaction() as inner:
+                record_review_request(store, "theorem_contract", "thm_main", reviewer_id="advisor", conn=inner)
+            # a write helper called without `conn` joins the open transaction too
+            record_review_request(store, "theorem_contract", "thm_other", reviewer_id="advisor")
+            raise RuntimeError("abort the outer transaction")
+
+    assert list_review_history(store) == []
+
+
+def test_a_nested_transaction_that_raises_undoes_only_its_own_writes(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    with store.transaction() as outer:
+        record_review_request(store, "theorem_contract", "thm_kept", reviewer_id="advisor", conn=outer)
+        with pytest.raises(RuntimeError):
+            with store.transaction() as inner:
+                record_review_request(store, "theorem_contract", "thm_undone", reviewer_id="advisor", conn=inner)
+                raise RuntimeError("inner block fails, caller carries on")
+
+    assert [row.object_id for row in list_review_history(store)] == ["thm_kept"]
+
+
+def test_a_differently_spelled_root_joins_the_same_transaction(tmp_path: Path, monkeypatch):
+    store = ensure_project(tmp_path)
+    monkeypatch.chdir(tmp_path.parent)
+    relative = ProjectStore(Path(tmp_path.name))
+    with store.transaction() as conn:
+        assert active_transaction(relative) is conn
+
+
+def test_another_thread_never_joins_this_threads_transaction(tmp_path: Path):
+    """A worker that copies this context (as asyncio.to_thread does) must not
+    pick up a connection that belongs to another thread."""
+    store = ensure_project(tmp_path)
+    seen: list[object] = []
+    with store.transaction():
+        context = contextvars.copy_context()
+        worker = threading.Thread(target=lambda: seen.append(context.run(active_transaction, store)))
+        worker.start()
+        worker.join(timeout=10)
+    assert seen == [None]
