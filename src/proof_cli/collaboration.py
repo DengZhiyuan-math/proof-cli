@@ -9,7 +9,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Iterable, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from .domain import EventRecord, utc_now
 from .storage import (
@@ -532,21 +532,56 @@ def _append_legacy_record(conn: sqlite3.Connection, record: ReviewRecord) -> boo
 REVIEW_HISTORY_INTEGRITY_WARNING = "review_history_integrity_warning"
 
 
-def _legacy_review_records(path: Path) -> list[ReviewRecord]:
+def _legacy_review_records(path: Path) -> tuple[list[ReviewRecord], list[Any]]:
+    """The review records sitting in `collaboration.json`, as `(valid, malformed)`.
+
+    Validated one by one: JSON-held records are untrusted input, and a
+    single malformed entry must not stop the rest from being handled — or
+    stop the file from ever being cleaned, which would make every read that
+    derives Human Review state fail from then on.
+    """
     if not path.exists() or '"review_records"' not in path.read_text():
-        return []
-    data = _read_collaboration_json(path) or {}
-    return _latest_by_id((ReviewRecord.model_validate(raw) for raw in data.get("review_records") or []), "id")
+        return [], []
+    data = _read_collaboration_json(path)
+    raw_records = data.get("review_records") if isinstance(data, dict) else None
+    if not raw_records:
+        return [], []
+    if not isinstance(raw_records, list):
+        return [], [raw_records]
+    valid: list[ReviewRecord] = []
+    malformed: list[Any] = []
+    for raw in raw_records:
+        try:
+            valid.append(ReviewRecord.model_validate(raw))
+        except ValidationError:
+            malformed.append(raw)
+    return _latest_by_id(valid, "id"), malformed
 
 
 def _strip_legacy_review_records(path: Path) -> None:
     # re-read right before writing, so contributors/comments another
     # process saved since the migration started aren't overwritten
     data = _read_collaboration_json(path)
-    if data is None or "review_records" not in data:
+    if not isinstance(data, dict) or "review_records" not in data:
         return
     data.pop("review_records")
     _write_collaboration_json(path, json.dumps(data, indent=2))
+
+
+def _warn_ignored_review_records(
+    store: ProjectStore, conn: sqlite3.Connection, *, injected: list[ReviewRecord], malformed: list[Any]
+) -> None:
+    if not injected and not malformed:
+        return
+    append_event(
+        store,
+        REVIEW_HISTORY_INTEGRITY_WARNING,
+        f"ignored {len(injected) + len(malformed)} review record(s) found in collaboration.json "
+        f"({len(injected)} unknown, {len(malformed)} malformed); "
+        "Human Review decisions are never read from JSON",
+        payload={"records": [record.model_dump(mode="json") for record in injected], "malformed": malformed},
+        conn=conn,
+    )
 
 
 def _migrate_legacy_review_records(store: ProjectStore, conn: sqlite3.Connection | None = None) -> None:
@@ -561,14 +596,16 @@ def _migrate_legacy_review_records(store: ProjectStore, conn: sqlite3.Connection
     migration itself (it committed, but the JSON strip didn't happen yet)
     and are dropped quietly; any other id is recorded as a
     `review_history_integrity_warning` event carrying the raw records, then
-    dropped too.
+    dropped too. A malformed record, before or after the migration, is
+    never appended either: it goes into that same warning and is dropped.
 
     Run on a caller's transaction (`conn`), a pending migration appends
     there, and the JSON is left alone — the caller may still roll back —
-    for a later call that owns its own commit to strip.
+    for a later call that owns its own commit to warn about anything
+    malformed and strip.
     """
     path = _collaboration_path(store)
-    legacy = _legacy_review_records(path)
+    legacy, malformed = _legacy_review_records(path)
     if conn is not None:
         if not is_review_history_migrated(conn):
             _run_review_history_migration(store, conn, legacy)
@@ -581,23 +618,16 @@ def _migrate_legacy_review_records(store: ProjectStore, conn: sqlite3.Connection
         migrated = is_review_history_migrated(reader)
     finally:
         reader.close()
-    if migrated and not legacy:
+    if migrated and not legacy and not malformed:
         return
 
     with store.transaction() as tx:
         if not is_review_history_migrated(tx):
             _run_review_history_migration(store, tx, legacy)
+            injected: list[ReviewRecord] = []
         else:
             injected = [record for record in legacy if not review_history_row_exists(tx, record.id)]
-            if injected:
-                append_event(
-                    store,
-                    REVIEW_HISTORY_INTEGRITY_WARNING,
-                    f"ignored {len(injected)} review record(s) found in collaboration.json after the "
-                    "review history migration; Human Review decisions are never read from JSON",
-                    payload={"records": [record.model_dump(mode="json") for record in injected]},
-                    conn=tx,
-                )
+        _warn_ignored_review_records(store, tx, injected=injected, malformed=malformed)
     _strip_legacy_review_records(path)
 
 
@@ -615,9 +645,9 @@ def _run_review_history_migration(store: ProjectStore, conn: sqlite3.Connection,
 
 
 def list_review_history_integrity_warnings(store: ProjectStore) -> list[EventRecord]:
-    """Every time review records were found in `collaboration.json` after the
-    one-shot migration, and ignored — a sign someone tried to write a
-    decision around Human Review."""
+    """Every time review records in `collaboration.json` were ignored —
+    found after the one-shot migration, or malformed — a sign someone
+    tried to write a decision around Human Review."""
     _migrate_legacy_review_records(store)
     return [event for event in list_events(store) if event.kind == REVIEW_HISTORY_INTEGRITY_WARNING]
 
