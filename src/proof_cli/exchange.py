@@ -213,6 +213,13 @@ def import_exchange_bundle(store: ProjectStore, bundle: ExchangeBundle | dict[st
     if not isinstance(bundle, ExchangeBundle):
         bundle = ExchangeBundle.model_validate(bundle)
     create_project(store.root, bundle.project_id)
+    # Nodes that exist here before the import keep their own history. A
+    # bundle's claims, candidate proofs (and their evidence checks), pins
+    # and Challenges for such a node are refused: a foreign candidate proof
+    # would put a local Accepted node back into review-needed without any
+    # Challenge, opening it to a new Human Review decision (#19). The full
+    # atomic merge is #31.
+    local_node_ids = {node.id for node in list_proof_map_nodes(store)}
     set_project_id(store, bundle.project_id)
     save_state(store, bundle.project_state)
     save_memory(store, bundle.memory)
@@ -263,29 +270,49 @@ def import_exchange_bundle(store: ProjectStore, bundle: ExchangeBundle | dict[st
     if bundle.proof_map_nodes:
         imported_sections.append("proof_map_nodes")
 
-    for claim in bundle.claims:
+    claims = [claim for claim in bundle.claims if claim.node_id not in local_node_ids]
+    proofs = [proof for proof in bundle.candidate_proofs if proof.node_id not in local_node_ids]
+    pins = [pin for pin in bundle.dependency_pins if pin.node_id not in local_node_ids]
+    challenges = [challenge for challenge in bundle.challenges if challenge.target_node_id not in local_node_ids]
+    imported_proof_ids = {proof.id for proof in proofs}
+    checks = [check for check in bundle.evidence_checks if check.candidate_proof_id in imported_proof_ids]
+    refused_counts = {
+        "claims": len(bundle.claims) - len(claims),
+        "candidate_proofs": len(bundle.candidate_proofs) - len(proofs),
+        "dependency_pins": len(bundle.dependency_pins) - len(pins),
+        "challenges": len(bundle.challenges) - len(challenges),
+        "evidence_checks": len(bundle.evidence_checks) - len(checks),
+    }
+    refused = {section: count for section, count in refused_counts.items() if count}
+    if refused:
+        warnings.append(
+            "not imported for nodes that already exist locally: "
+            + ", ".join(f"{count} {section}" for section, count in refused.items())
+        )
+
+    for claim in claims:
         insert_claim(store, claim)
-    if bundle.claims:
+    if claims:
         imported_sections.append("claims")
 
-    for proof in bundle.candidate_proofs:
+    for proof in proofs:
         insert_candidate_proof(store, proof)
-    if bundle.candidate_proofs:
+    if proofs:
         imported_sections.append("candidate_proofs")
 
-    for pin in bundle.dependency_pins:
+    for pin in pins:
         upsert_dependency_pin(store, pin)
-    if bundle.dependency_pins:
+    if pins:
         imported_sections.append("dependency_pins")
 
-    for challenge in bundle.challenges:
+    for challenge in challenges:
         insert_challenge(store, challenge)
-    if bundle.challenges:
+    if challenges:
         imported_sections.append("challenges")
 
-    for check in bundle.evidence_checks:
+    for check in checks:
         insert_evidence_check(store, check)
-    if bundle.evidence_checks:
+    if checks:
         imported_sections.append("evidence_checks")
 
     if bundle.latest_snapshot is not None:
