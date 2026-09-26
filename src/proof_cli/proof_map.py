@@ -7,10 +7,19 @@ import uuid
 from enum import Enum
 from typing import Any
 
+from .authority import (
+    AuthorityError,
+    ReviewerKey,
+    authorize,
+    build_decision_payload,
+    decision_row_verifies,
+    human_review_required,
+)
 from .collaboration import (
     ReviewGovernanceState,
     ReviewRecord,
     ReviewRecordKind,
+    get_review_record,
     list_review_records,
     record_decided_review,
 )
@@ -27,6 +36,7 @@ from .domain import (
     TrustLevel,
     utc_now,
 )
+from .signing import DecisionKind, DecisionPayload, PinnedDependency, SignedDecision
 from .storage import (
     ProjectStore,
     append_event,
@@ -46,7 +56,6 @@ from .storage import (
     list_challenges as _list_challenges,
     list_dependency_pins_for_node,
     list_evidence_checks_for_candidate_proof,
-    list_open_challenge_ids,
     list_proof_map_nodes,
     mark_challenge_dismissed,
     mark_claim_released,
@@ -71,6 +80,41 @@ class ProofMapError(Exception):
         self.code = code
         self.message = message
         self.details = details or {}
+
+
+def _require_signed(signed_decision: SignedDecision | None, kind: DecisionKind, target_id: str) -> SignedDecision:
+    """Fail fast, before any work, when a human-only operation has no signed decision at all."""
+    if signed_decision is None:
+        exc = human_review_required(kind, target_id)
+        raise ProofMapError(exc.code, exc.message, details=exc.details)
+    return signed_decision
+
+
+def _authorize(
+    store: ProjectStore,
+    signed_decision: SignedDecision,
+    *,
+    kind: DecisionKind,
+    target_id: str,
+    decision: str,
+    conn: sqlite3.Connection,
+    dependency_id: str | None = None,
+) -> ReviewerKey:
+    """ADR-0009: the signed decision must authorize exactly this operation, bound
+    to what `decision_binding` says the reviewer must have seen. Checked on the
+    operation's own write transaction."""
+    try:
+        return authorize(
+            store,
+            signed_decision,
+            kind=kind,
+            target_id=target_id,
+            decision=decision,
+            conn=conn,
+            **decision_binding(store, kind, target_id, dependency_id=dependency_id),
+        )
+    except AuthorityError as exc:
+        raise ProofMapError(exc.code, exc.message, details=exc.details) from exc
 
 
 def create_node(
@@ -335,16 +379,18 @@ def release_node(
     claimant_id: str,
     session_id: str,
     force: bool = False,
-    actor: str | None = None,
     reason: str | None = None,
+    signed_decision: SignedDecision | None = None,
 ) -> ClaimRecord:
     """Release the active claim on a node.
 
     The owning (claimant_id, session_id) can release its own claim at any
-    time. Releasing someone else's claim requires `force=True` with both an
-    explicit `actor` and `reason` — an audit trail, never a hidden bypass.
-    Claims never expire on their own; this is the only way one ends besides
-    a Candidate proof submission (a later ticket).
+    time. Releasing someone else's claim (`force=True`) is a Human Review
+    decision: it needs a signed `force_release` decision naming that claim,
+    with a reason as its rationale (ADR-0009), recorded as its own review
+    row — an audit trail, never a hidden bypass. Claims never expire on
+    their own; this is the only way one ends besides a Candidate proof
+    submission.
     """
     require_node(store, node_id)
     claim = get_active_claim(store, node_id)
@@ -354,14 +400,10 @@ def release_node(
     is_owner = claim.claimant_id == claimant_id and claim.session_id == session_id
 
     if force:
-        if not actor or not reason:
-            raise ProofMapError(
-                "FORCE_RELEASE_REQUIRES_REASON",
-                "force-release requires an explicit actor and reason",
-            )
-        released_by = actor
-        release_reason = reason
-        event_kind = "proof_map_claim_force_released"
+        signed = _require_signed(signed_decision, DecisionKind.force_release, claim.id)
+        if not signed.payload.rationale.strip():
+            raise ProofMapError("FORCE_RELEASE_REQUIRES_REASON", "force-release requires a reason, signed as its rationale")
+        return _force_release(store, node_id, claim, signed)
     elif is_owner:
         released_by = claimant_id
         release_reason = reason or "released by claimant"
@@ -399,6 +441,52 @@ def release_node(
         },
     )
     return claim.model_copy(update={"released_by": released_by, "release_reason": release_reason, "released_at": released_at})
+
+
+def _force_release(store: ProjectStore, node_id: str, claim: ClaimRecord, signed: SignedDecision) -> ClaimRecord:
+    released_at = utc_now()
+    with store.transaction() as conn:
+        key = _authorize(
+            store, signed, kind=DecisionKind.force_release, target_id=claim.id, decision="force-release", conn=conn
+        )
+        record = record_decided_review(
+            store,
+            "claim",
+            claim.id,
+            ReviewGovernanceState.approved,
+            reviewer_id=key.reviewer_id,
+            rationale=signed.payload.rationale,
+            kind=ReviewRecordKind.force_release,
+            signed_decision=signed,
+            conn=conn,
+        )
+        if not mark_claim_released(
+            store,
+            claim.id,
+            released_by=key.reviewer_id,
+            reason=signed.payload.rationale,
+            released_at=released_at,
+            conn=conn,
+        ):
+            raise ProofMapError("NO_ACTIVE_CLAIM", f"proof map node {node_id} has no active claim")
+        append_event(
+            store,
+            "proof_map_claim_force_released",
+            f"released claim on {node_id} by {key.reviewer_id}",
+            entity_id=node_id,
+            payload={
+                "claim_id": claim.id,
+                "original_claimant_id": claim.claimant_id,
+                "original_session_id": claim.session_id,
+                "released_by": key.reviewer_id,
+                "reason": signed.payload.rationale,
+                "review_id": record.id,
+            },
+            conn=conn,
+        )
+    return claim.model_copy(
+        update={"released_by": key.reviewer_id, "release_reason": signed.payload.rationale, "released_at": released_at}
+    )
 
 
 def submit_candidate_proof(
@@ -599,11 +687,12 @@ def decide_evidence_review(
     evidence_check_id: str,
     decision: EvidenceTrustDecision | str,
     *,
-    reviewer_id: str = "human",
-    rationale: str = "",
-    confirmed: bool = False,
+    signed_decision: SignedDecision | None = None,
 ) -> ReviewRecord:
     """Human Review's trust judgment on an Evidence check itself.
+
+    Needs a signed `evidence_review` decision bound to the checked
+    Candidate proof's text (ADR-0009).
 
     `trusted` or `unusable` — never `approved`/`rejected`, and never
     against `object_type=proof_map_node`, so this can't be confused with,
@@ -619,22 +708,26 @@ def decide_evidence_review(
             "INVALID_DECISION", f"'{decision}' is not a valid evidence trust judgment; expected one of: {valid}"
         ) from exc
 
-    if not confirmed:
-        raise ProofMapError(
-            "CONFIRMATION_REQUIRED",
-            "a Human Review decision requires explicit confirmation; only a researcher may confirm one",
-        )
-
+    signed = _require_signed(signed_decision, DecisionKind.evidence_review, evidence_check_id)
     governance_state = _EVIDENCE_DECISION_TO_GOVERNANCE_STATE[resolved_decision]
     with store.transaction() as conn:
+        key = _authorize(
+            store,
+            signed,
+            kind=DecisionKind.evidence_review,
+            target_id=evidence_check_id,
+            decision=resolved_decision.value,
+            conn=conn,
+        )
         record = record_decided_review(
             store,
             _EVIDENCE_CHECK_OBJECT_TYPE,
             evidence_check_id,
             governance_state,
-            reviewer_id=reviewer_id,
-            rationale=rationale,
+            reviewer_id=key.reviewer_id,
+            rationale=signed.payload.rationale,
             kind=ReviewRecordKind.evidence_review,
+            signed_decision=signed,
             conn=conn,
         )
         append_event(
@@ -642,7 +735,7 @@ def decide_evidence_review(
             "proof_map_evidence_review_decided",
             f"evidence review for {evidence_check_id}: {resolved_decision.value}",
             entity_id=check.candidate_proof_id,
-            payload={"decision": resolved_decision.value, "reviewer_id": reviewer_id, "review_id": record.id},
+            payload={"decision": resolved_decision.value, "reviewer_id": key.reviewer_id, "review_id": record.id},
             conn=conn,
         )
     return record
@@ -822,14 +915,15 @@ def decide_acceptance(
     node_id: str,
     decision: AcceptanceDecision | str,
     *,
-    reviewer_id: str = "human",
-    rationale: str = "",
-    confirmed: bool = False,
+    signed_decision: SignedDecision | None = None,
 ) -> ReviewRecord:
     """Record a Human Review acceptance decision for a local node.
 
     Only for a node in `review-needed`, and never once it's `rejected` (see
-    `_require_awaiting_acceptance_review`).
+    `_require_awaiting_acceptance_review`). Needs a signed `acceptance`
+    decision from an enrolled Reviewer passkey, bound to the current
+    Candidate proof's exact text and the node's dependency pins (ADR-0009);
+    the recorded decision counts only while that signature verifies.
 
     `revision_requested` keeps the node open for another claim/submit cycle
     on the same node id, never a new node. `reject` is permanent: the node
@@ -853,12 +947,7 @@ def decide_acceptance(
             "INVALID_DECISION", f"'{decision}' is not a valid acceptance decision; expected one of: {valid}"
         ) from exc
 
-    if not confirmed:
-        raise ProofMapError(
-            "CONFIRMATION_REQUIRED",
-            "a Human Review decision requires explicit confirmation; only a researcher may confirm one",
-        )
-
+    signed = _require_signed(signed_decision, DecisionKind.acceptance, node_id)
     governance_state = _ACCEPTANCE_DECISION_TO_GOVERNANCE_STATE[resolved_decision]
     # the review rows, the candidate-proof link and fingerprint, the
     # Challenges it resolves and the events all commit together or not at
@@ -867,15 +956,19 @@ def decide_acceptance(
         # checked on the write lock, so no concurrent decision or submission
         # can land between the check and the write
         _require_awaiting_acceptance_review(store, node_id)
+        key = _authorize(
+            store, signed, kind=DecisionKind.acceptance, target_id=node_id, decision=resolved_decision.value, conn=conn
+        )
         current_proof = get_current_candidate_proof(store, node_id)
         record = record_decided_review(
             store,
             _ACCEPTANCE_OBJECT_TYPE,
             node_id,
             governance_state,
-            reviewer_id=reviewer_id,
-            rationale=rationale,
+            reviewer_id=key.reviewer_id,
+            rationale=signed.payload.rationale,
             kind=ReviewRecordKind.acceptance,
+            signed_decision=signed,
             conn=conn,
         )
         if current_proof is not None:
@@ -884,17 +977,94 @@ def decide_acceptance(
                 fingerprint = compute_interface_fingerprint(node.statement, node.assumptions)
                 set_candidate_proof_interface_fingerprint(store, current_proof.id, fingerprint, conn=conn)
 
-        _resolve_open_challenges(store, node_id, resolved_by=reviewer_id, conn=conn)
+        _resolve_open_challenges(store, node_id, resolved_by=key.reviewer_id, review_id=record.id, conn=conn)
 
         append_event(
             store,
             "proof_map_acceptance_decided",
             f"acceptance decision for {node_id}: {resolved_decision.value}",
             entity_id=node_id,
-            payload={"decision": resolved_decision.value, "reviewer_id": reviewer_id, "review_id": record.id},
+            payload={"decision": resolved_decision.value, "reviewer_id": key.reviewer_id, "review_id": record.id},
             conn=conn,
         )
     return record
+
+
+def _pins_of(store: ProjectStore, node_id: str) -> list[PinnedDependency]:
+    return [
+        PinnedDependency(
+            target_node_id=pin.target_node_id, pinned_version=pin.pinned_version, pinned_fingerprint=pin.pinned_fingerprint
+        )
+        for pin in list_dependency_pins_for_node(store, node_id)
+    ]
+
+
+def _refreshed_pin(store: ProjectStore, target_node_id: str) -> PinnedDependency:
+    """What a Lightweight re-review re-pins a dependency to: its current accepted version and interface."""
+    current = get_current_candidate_proof(store, target_node_id)
+    return PinnedDependency(
+        target_node_id=target_node_id,
+        pinned_version=current.version if current else None,
+        pinned_fingerprint=get_accepted_interface_fingerprint(store, target_node_id),
+    )
+
+
+def _current_proof_id(store: ProjectStore, node_id: str) -> str | None:
+    current = get_current_candidate_proof(store, node_id)
+    return current.id if current else None
+
+
+def decision_binding(
+    store: ProjectStore, kind: DecisionKind, target_id: str, *, dependency_id: str | None = None
+) -> dict[str, Any]:
+    """What a decision of `kind` on `target_id` must be signed over, as of now.
+
+    The Candidate proof (its id; `authority` adds the SHA-256 of its text)
+    and the dependency pins the reviewer is deciding against. The same
+    function builds the payload to sign (`prepare_decision`) and checks it
+    at decision time (`_authorize`), so the two can't drift apart.
+    """
+    if kind in (DecisionKind.acceptance, DecisionKind.promote):
+        return {"candidate_proof_id": _current_proof_id(store, target_id), "dependency_pins": _pins_of(store, target_id)}
+    if kind == DecisionKind.dependency_revalidation:
+        if dependency_id is None:
+            raise ProofMapError("DEPENDENCY_REQUIRED", "a Lightweight re-review names the dependency it re-pins")
+        return {"candidate_proof_id": _current_proof_id(store, target_id), "dependency_pins": [_refreshed_pin(store, dependency_id)]}
+    if kind == DecisionKind.evidence_review:
+        check = require_evidence_check(store, target_id)
+        return {"candidate_proof_id": check.candidate_proof_id, "dependency_pins": []}
+    if kind in (DecisionKind.reference_review, DecisionKind.challenge_resolution, DecisionKind.force_release):
+        return {"candidate_proof_id": None, "dependency_pins": []}
+    raise ProofMapError("INVALID_DECISION_KIND", f"{kind.value} is not a proof-map decision")
+
+
+def prepare_decision(
+    store: ProjectStore,
+    kind: DecisionKind | str,
+    target_id: str,
+    decision: str,
+    *,
+    rationale: str = "",
+    dependency_id: str | None = None,
+) -> DecisionPayload:
+    """The exact payload a Reviewer passkey must sign to make this decision now.
+
+    Agent-reachable and harmless: preparing a payload decides nothing. The
+    web app (#36) renders it and asks for the passkey tap; anything else
+    that can obtain a real assertion over it may submit the result.
+    """
+    try:
+        resolved_kind = DecisionKind(kind)
+    except ValueError as exc:
+        raise ProofMapError("INVALID_DECISION_KIND", f"'{kind}' is not a decision kind") from exc
+    return build_decision_payload(
+        store,
+        resolved_kind,
+        target_id,
+        decision,
+        rationale=rationale,
+        **decision_binding(store, resolved_kind, target_id, dependency_id=dependency_id),
+    )
 
 
 def _decided_reviews(store: ProjectStore, node_id: str, kind: ReviewRecordKind) -> list[ReviewRecord]:
@@ -902,12 +1072,16 @@ def _decided_reviews(store: ProjectStore, node_id: str, kind: ReviewRecordKind) 
 
     A request still at `proposed_for_review` is no decision at all, so it is
     never the "latest" one a derived axis reads — a pending request can't
-    revoke an earlier Acceptance.
+    revoke an earlier Acceptance. Nor is a decision whose signature doesn't
+    verify (ADR-0009 point 2): unsigned legacy, forged, or signed over proof
+    text that has since changed — those surface as authority warnings.
     """
     return [
         record
         for record in list_review_records(store, object_type=_ACCEPTANCE_OBJECT_TYPE, object_id=node_id)
-        if record.kind == kind and record.decision != ReviewGovernanceState.proposed_for_review
+        if record.kind == kind
+        and record.decision != ReviewGovernanceState.proposed_for_review
+        and decision_row_verifies(store, record.decision_row_id)
     ]
 
 
@@ -930,16 +1104,17 @@ def get_acceptance_state(store: ProjectStore, node_id: str) -> str:
     return "unreviewed"
 
 
-def promote_to_lemma(store: ProjectStore, node_id: str, *, promoted_by: str = "human", confirmed: bool = False) -> ProofMapNode:
+def promote_to_lemma(store: ProjectStore, node_id: str, *, signed_decision: SignedDecision | None = None) -> ProofMapNode:
     """Promote an Accepted Claim to a Lemma, marking it independently reusable.
 
-    The researcher's explicit decision, never automatic. Only available for
-    `kind=claim` nodes that are already Accepted and not under an open
-    Challenge (a node whose soundness is in question isn't something to
-    advertise as reusable); there is no demote. Every field but `kind` is
+    The researcher's explicit decision, never automatic: it needs a signed
+    `promote` decision (ADR-0009), recorded as its own review row. Only
+    available for `kind=claim` nodes that are already Accepted and not under
+    an open Challenge (a node whose soundness is in question isn't something
+    to advertise as reusable); there is no demote. Every field but `kind` is
     unchanged — the Candidate-proof history and the interface fingerprint
-    included, since `kind` isn't part of the interface: every dependent's
-    pin stays current across a promotion.
+    included, since `kind` isn't part of the interface (#22): every
+    dependent's pin stays current across a promotion.
     """
     node = require_node(store, node_id)
 
@@ -954,22 +1129,32 @@ def promote_to_lemma(store: ProjectStore, node_id: str, *, promoted_by: str = "h
             "NODE_CHALLENGED", f"node {node_id} is under an open Challenge; resolve it before promoting to Lemma"
         )
 
-    if not confirmed:
-        raise ProofMapError(
-            "CONFIRMATION_REQUIRED",
-            "promoting a node requires explicit confirmation; only a researcher may confirm one",
+    signed = _require_signed(signed_decision, DecisionKind.promote, node_id)
+    with store.transaction() as conn:
+        key = _authorize(store, signed, kind=DecisionKind.promote, target_id=node_id, decision="promote", conn=conn)
+        record = record_decided_review(
+            store,
+            _ACCEPTANCE_OBJECT_TYPE,
+            node_id,
+            ReviewGovernanceState.approved,
+            reviewer_id=key.reviewer_id,
+            rationale=signed.payload.rationale,
+            kind=ReviewRecordKind.promote,
+            signed_decision=signed,
+            conn=conn,
         )
-
-    promoted = node.model_copy(update={"kind": ProofMapNodeKind.lemma, "updated_by": promoted_by, "updated_at": utc_now()})
-    update_proof_map_node(store, promoted)
-
-    append_event(
-        store,
-        "proof_map_node_promoted",
-        f"promoted {node_id} from claim to lemma",
-        entity_id=node_id,
-        payload={"promoted_by": promoted_by},
-    )
+        promoted = node.model_copy(
+            update={"kind": ProofMapNodeKind.lemma, "updated_by": key.reviewer_id, "updated_at": utc_now()}
+        )
+        update_proof_map_node(store, promoted, conn=conn)
+        append_event(
+            store,
+            "proof_map_node_promoted",
+            f"promoted {node_id} from claim to lemma",
+            entity_id=node_id,
+            payload={"promoted_by": key.reviewer_id, "review_id": record.id},
+            conn=conn,
+        )
     return promoted
 
 
@@ -981,11 +1166,9 @@ def decide_reference_review(
     node_id: str,
     decision: str,
     *,
-    reviewer_id: str = "human",
-    rationale: str = "",
-    confirmed: bool = False,
+    signed_decision: SignedDecision | None = None,
 ) -> ReviewRecord:
-    """Grant Reference review to an imported_result node.
+    """Grant Reference review to an imported_result node (a signed `reference_review` decision, ADR-0009).
 
     Judges the trustworthiness of a citation — never the node's
     acceptance_state, which stays `unreviewed` for every imported_result
@@ -1006,30 +1189,29 @@ def decide_reference_review(
             f"'{decision}' is not a valid reference review decision; expected: {REFERENCE_REVIEW_DECISION}",
         )
 
-    if not confirmed:
-        raise ProofMapError(
-            "CONFIRMATION_REQUIRED",
-            "a Reference review decision requires explicit confirmation; only a researcher may confirm one",
-        )
-
+    signed = _require_signed(signed_decision, DecisionKind.reference_review, node_id)
     with store.transaction() as conn:
+        key = _authorize(
+            store, signed, kind=DecisionKind.reference_review, target_id=node_id, decision=decision, conn=conn
+        )
         record = record_decided_review(
             store,
             _ACCEPTANCE_OBJECT_TYPE,
             node_id,
             ReviewGovernanceState.approved,
-            reviewer_id=reviewer_id,
-            rationale=rationale,
+            reviewer_id=key.reviewer_id,
+            rationale=signed.payload.rationale,
             kind=ReviewRecordKind.reference_review,
+            signed_decision=signed,
             conn=conn,
         )
-        _resolve_open_challenges(store, node_id, resolved_by=reviewer_id, conn=conn)
+        _resolve_open_challenges(store, node_id, resolved_by=key.reviewer_id, review_id=record.id, conn=conn)
         append_event(
             store,
             "proof_map_reference_review_granted",
             f"reference review granted for {node_id}",
             entity_id=node_id,
-            payload={"reviewer_id": reviewer_id, "review_id": record.id},
+            payload={"reviewer_id": key.reviewer_id, "review_id": record.id},
             conn=conn,
         )
     return record
@@ -1049,11 +1231,12 @@ def revalidate_dependency(
     node_id: str,
     target_node_id: str,
     *,
-    reviewer_id: str = "human",
-    rationale: str = "",
-    confirmed: bool = False,
+    signed_decision: SignedDecision | None = None,
 ) -> ReviewRecord:
     """Lightweight re-review: confirm an existing Candidate proof still holds after a dependency advanced.
+
+    Needs a signed `dependency_revalidation` decision whose pins are exactly
+    the refreshed pin this writes (ADR-0009).
 
     Only available when the target's interface fingerprint hasn't changed
     since it was last pinned — if it has, the old Candidate proof no longer
@@ -1101,14 +1284,9 @@ def revalidate_dependency(
             "a new Candidate proof is required, lightweight re-review is not available",
         )
 
-    if not confirmed:
-        raise ProofMapError(
-            "CONFIRMATION_REQUIRED",
-            "a Human Review decision requires explicit confirmation; only a researcher may confirm one",
-        )
-
-    current_target_proof = get_current_candidate_proof(store, target_node_id)
-    new_version = current_target_proof.version if current_target_proof else None
+    signed = _require_signed(signed_decision, DecisionKind.dependency_revalidation, node_id)
+    refreshed = _refreshed_pin(store, target_node_id)
+    new_version = refreshed.pinned_version
     old_pin = pin
 
     refreshed_pin = DependencyPin(
@@ -1119,15 +1297,25 @@ def revalidate_dependency(
         pinned_fingerprint=current_fingerprint,
     )
     with store.transaction() as conn:
+        key = _authorize(
+            store,
+            signed,
+            kind=DecisionKind.dependency_revalidation,
+            target_id=node_id,
+            decision="reaffirmed",
+            dependency_id=target_node_id,
+            conn=conn,
+        )
         upsert_dependency_pin(store, refreshed_pin, conn=conn)
         record = record_decided_review(
             store,
             _ACCEPTANCE_OBJECT_TYPE,
             node_id,
             ReviewGovernanceState.reaffirmed,
-            reviewer_id=reviewer_id,
-            rationale=rationale,
+            reviewer_id=key.reviewer_id,
+            rationale=signed.payload.rationale,
             kind=ReviewRecordKind.dependency_revalidation,
+            signed_decision=signed,
             conn=conn,
         )
         append_event(
@@ -1185,8 +1373,41 @@ def open_challenge(store: ProjectStore, target_node_id: str, *, opened_by: str =
     return challenge
 
 
+_CHALLENGE_RESOLVING_KINDS = (ReviewRecordKind.acceptance, ReviewRecordKind.reference_review)
+
+
+def _dismissal_counts(store: ProjectStore, challenge: Challenge) -> bool:
+    """A stored dismissal counts only while the signed decision that made it
+    verifies *and* is a decision about this Challenge: a `challenge_resolution`
+    on this Challenge's id, or an Acceptance / Reference review of its target
+    made after the Challenge was opened. Pointing a dismissal at some other,
+    genuinely signed decision resolves nothing."""
+    if challenge.resolution_review_id is None:
+        return False
+    record = get_review_record(store, challenge.resolution_review_id)
+    if record is None or not decision_row_verifies(store, record.decision_row_id):
+        return False
+    if record.kind == ReviewRecordKind.challenge_resolution:
+        return record.object_type == "challenge" and record.object_id == challenge.id
+    return (
+        record.kind in _CHALLENGE_RESOLVING_KINDS
+        and record.object_type == _ACCEPTANCE_OBJECT_TYPE
+        and record.object_id == challenge.target_node_id
+        and record.updated_at >= challenge.created_at
+    )
+
+
+def _effective(store: ProjectStore, challenge: Challenge) -> Challenge:
+    """The Challenge as it counts: a dismissal that doesn't verify (unsigned
+    legacy, forged, or resting on changed proof text) reads as still open."""
+    if challenge.status == ChallengeStatus.dismissed and not _dismissal_counts(store, challenge):
+        return challenge.model_copy(update={"status": ChallengeStatus.open})
+    return challenge
+
+
 def get_challenge(store: ProjectStore, challenge_id: str) -> Challenge | None:
-    return _get_challenge(store, challenge_id)
+    challenge = _get_challenge(store, challenge_id)
+    return _effective(store, challenge) if challenge is not None else None
 
 
 def require_challenge(store: ProjectStore, challenge_id: str) -> Challenge:
@@ -1197,15 +1418,18 @@ def require_challenge(store: ProjectStore, challenge_id: str) -> Challenge:
 
 
 def list_challenges(store: ProjectStore, *, target_node_id: str = "", status: str = "") -> list[Challenge]:
-    return _list_challenges(store, target_node_id=target_node_id, status=status)
+    challenges = [_effective(store, challenge) for challenge in _list_challenges(store, target_node_id=target_node_id)]
+    return [challenge for challenge in challenges if not status or challenge.status.value == status]
 
 
 def has_open_challenge(store: ProjectStore, node_id: str) -> bool:
-    return len(_list_challenges(store, target_node_id=node_id, status="open")) > 0
+    return bool(list_challenges(store, target_node_id=node_id, status="open"))
 
 
-def _resolve_open_challenges(store: ProjectStore, node_id: str, *, resolved_by: str, conn: sqlite3.Connection) -> None:
-    """Dismiss every open Challenge against `node_id`.
+def _resolve_open_challenges(
+    store: ProjectStore, node_id: str, *, resolved_by: str, review_id: str, conn: sqlite3.Connection
+) -> None:
+    """Dismiss every open Challenge against `node_id`, as resolved by review `review_id`.
 
     Called from `decide_acceptance` and `decide_reference_review`: per
     ADR-0005 Rule 4, only Human Review resolves a Challenge, either by an
@@ -1217,17 +1441,27 @@ def _resolve_open_challenges(store: ProjectStore, node_id: str, *, resolved_by: 
     addressed.
 
     Runs on the deciding review's own transaction (`conn`), so the Challenges
-    it resolves are dismissed exactly when that decision commits.
+    it resolves are dismissed exactly when that decision commits; the
+    dismissal points at that signed decision and counts only while it verifies.
     """
     resolved_at = utc_now()
-    for challenge_id in list_open_challenge_ids(conn, node_id):
-        if mark_challenge_dismissed(store, challenge_id, resolved_by=resolved_by, resolved_at=resolved_at, conn=conn):
+    for challenge in list_challenges(store, target_node_id=node_id, status="open"):
+        reopened = _get_challenge(store, challenge.id).status != ChallengeStatus.open
+        if mark_challenge_dismissed(
+            store,
+            challenge.id,
+            resolved_by=resolved_by,
+            resolved_at=resolved_at,
+            resolution_review_id=review_id,
+            reopened=reopened,
+            conn=conn,
+        ):
             append_event(
                 store,
                 "proof_map_challenge_dismissed",
-                f"challenge {challenge_id} dismissed by {resolved_by} (resolved via review decision)",
+                f"challenge {challenge.id} dismissed by {resolved_by} (resolved via review decision)",
                 entity_id=node_id,
-                payload={"challenge_id": challenge_id, "reviewer_id": resolved_by},
+                payload={"challenge_id": challenge.id, "reviewer_id": resolved_by, "review_id": review_id},
                 conn=conn,
             )
 
@@ -1236,11 +1470,9 @@ def dismiss_challenge(
     store: ProjectStore,
     challenge_id: str,
     *,
-    reviewer_id: str = "human",
-    rationale: str = "",
-    confirmed: bool = False,
+    signed_decision: SignedDecision | None = None,
 ) -> Challenge:
-    """Dismiss a Challenge — Human Review only.
+    """Dismiss a Challenge — Human Review only: a signed `challenge_resolution` decision (ADR-0009).
 
     Nothing un-sets `potentially-stale`/`challenged` by hand: both are
     computed fresh from the set of *open* Challenges (and stale pins) on
@@ -1251,26 +1483,56 @@ def dismiss_challenge(
     if challenge.status != ChallengeStatus.open:
         raise ProofMapError("CHALLENGE_NOT_OPEN", f"challenge {challenge_id} is already {challenge.status.value}")
 
-    if not confirmed:
-        raise ProofMapError(
-            "CONFIRMATION_REQUIRED",
-            "a Human Review decision requires explicit confirmation; only a researcher may confirm one",
-        )
-
+    signed = _require_signed(signed_decision, DecisionKind.challenge_resolution, challenge_id)
     resolved_at = utc_now()
     with store.transaction() as conn:
-        won_race = mark_challenge_dismissed(store, challenge_id, resolved_by=reviewer_id, resolved_at=resolved_at, conn=conn)
-        if not won_race:
+        # re-read on the write lock: a concurrent dismissal may have landed
+        if require_challenge(store, challenge_id).status != ChallengeStatus.open:
             raise ProofMapError("CHALLENGE_NOT_OPEN", f"challenge {challenge_id} is already dismissed")
+        key = _authorize(
+            store, signed, kind=DecisionKind.challenge_resolution, target_id=challenge_id, decision="dismissed", conn=conn
+        )
+        record = record_decided_review(
+            store,
+            "challenge",
+            challenge_id,
+            ReviewGovernanceState.dismissed,
+            reviewer_id=key.reviewer_id,
+            rationale=signed.payload.rationale,
+            kind=ReviewRecordKind.challenge_resolution,
+            signed_decision=signed,
+            conn=conn,
+        )
+        mark_challenge_dismissed(
+            store,
+            challenge_id,
+            resolved_by=key.reviewer_id,
+            resolved_at=resolved_at,
+            resolution_review_id=record.id,
+            reopened=True,
+            conn=conn,
+        )
         append_event(
             store,
             "proof_map_challenge_dismissed",
-            f"challenge {challenge_id} dismissed by {reviewer_id}",
+            f"challenge {challenge_id} dismissed by {key.reviewer_id}",
             entity_id=challenge.target_node_id,
-            payload={"challenge_id": challenge_id, "reviewer_id": reviewer_id, "rationale": rationale},
+            payload={
+                "challenge_id": challenge_id,
+                "reviewer_id": key.reviewer_id,
+                "rationale": signed.payload.rationale,
+                "review_id": record.id,
+            },
             conn=conn,
         )
-    return challenge.model_copy(update={"status": ChallengeStatus.dismissed, "resolved_by": reviewer_id, "resolved_at": resolved_at})
+    return challenge.model_copy(
+        update={
+            "status": ChallengeStatus.dismissed,
+            "resolved_by": key.reviewer_id,
+            "resolved_at": resolved_at,
+            "resolution_review_id": record.id,
+        }
+    )
 
 
 def _is_downstream_of_challenge_or_stale_pin(store: ProjectStore, node_id: str) -> bool:

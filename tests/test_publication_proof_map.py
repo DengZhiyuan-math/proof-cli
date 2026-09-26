@@ -1,3 +1,4 @@
+from _authenticator import researcher, sign_cli
 """Issue #30: publication tracks two orthogonal states for a ProofMapNode —
 the node's own acceptance_state/integrity_state, read live from the core
 model, and a separate editorial readiness track that only a human editor
@@ -30,7 +31,7 @@ def _accept(store, node_id, *, claimant="agent_a", session="sess_1"):
         store, node_id, claimant_id=claimant, session_id=session,
         scoping_rationale="scoped correctly", content="proof text",
     )
-    return decide_acceptance(store, node_id, "accept", reviewer_id="researcher", confirmed=True)
+    return researcher(store).decide_acceptance(node_id, "accept")
 
 
 def test_fresh_node_gets_a_default_internal_draft_claim_regardless_of_acceptance(tmp_path: Path):
@@ -135,7 +136,7 @@ def test_cli_publication_export_bundle_carries_live_acceptance_state(tmp_path: P
     )
     runner.invoke(
         app,
-        ["node", "review", "clm_1", "accept", "--root", str(tmp_path), "--reviewer", "researcher", "--confirm"],
+        sign_cli(["node", "review", "clm_1", "accept", "--root", str(tmp_path), "--reviewer", "researcher", "--confirm"]),
     )
     runner.invoke(
         app,

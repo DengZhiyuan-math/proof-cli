@@ -1,3 +1,4 @@
+from _authenticator import researcher
 """Issue #31: exchange carries the new ProofMapNode model, and none of its
 reads/writes bypass the storage layer with direct SQL anymore.
 """
@@ -37,7 +38,7 @@ def _build_source_project(root: Path) -> None:
         store, "lem_1", claimant_id="agent_a", session_id="sess_1",
         scoping_rationale="scoped correctly", content="proof text",
     )
-    decide_acceptance(store, "lem_1", "accept", reviewer_id="researcher", confirmed=True)
+    researcher(store).decide_acceptance("lem_1", "accept")
     open_challenge(store, "lem_1", opened_by="agent_b", rationale="double check this")
 
     create_node(store, node_id="clm_1", kind="claim", statement="Depends on lem_1", dependencies=["lem_1"])

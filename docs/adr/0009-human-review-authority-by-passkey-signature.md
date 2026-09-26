@@ -37,3 +37,18 @@ Threat model, stated honestly: agents run as the same OS user as the researcher.
 What this costs: human-only decisions are impossible without a browser and an authenticator. Headless or remote-only use (e.g. over SSH) needs a security key or passkey on the machine where the browser runs. A passphrase-protected software key for headless machines is a possible later addition, and would need its own ADR.
 
 This is hard to reverse: once review history is a signed hash chain and agents are built against "request, never decide", going back to a trust-me flag would silently re-open the hole this ADR closes.
+
+**Update (issue #35, service layer):** the implementation settled a few details this ADR left open.
+
+- **Batch signing.** A passkey signs one challenge: the SHA-256 of the ordered list of payload hashes. So a batch of N decisions costs one tap, and a single decision is a batch of one. `previous_row_hash` in a payload is the history head the signer saw. It commits the payload to that prefix of the chain; it is not the row's own chain link, which `review_history.prev_row_hash` stores.
+- **What makes a decision count on read.** The signature verifies under a registry key that was active at the payload's `signed_at`. The payload is exactly the recorded row: kind, target and decision value. The prefix it commits to is still in the chain. That prefix already contains every earlier decision on the same object and kind; anyone can append a validly-linked row, so this rule is what stops a replayed or reordered decision. A decision about a Candidate proof also needs the proof's text on disk to still hash to the signed value.
+- **Trust on first use** applies only while no key has *ever* been enrolled. A self-signed enrollment therefore can't be backdated in ahead of the researcher's key. The user-level pin is keyed by the project's location on disk, not its id, because many projects share the default id. A registry whose first key disagrees with the pin is not trusted at all.
+- **Interim CLI, until #36/#37.** Human-only commands take `--signed-decision FILE`: the payload from `proof review payload` plus a WebAuthn assertion over it. Without one, they fail with `HUMAN_REVIEW_REQUIRED`. `--confirm` is gone. The signature carries the authority, not the surface, so submitting through the CLI grants an agent nothing. The legacy theorem-contract and reference trust functions in `review.py` and `storage.py` still take `confirmed`; #37 removes them.
+- **Identity.** A decision is attributed to `passkey:<first 16 hex of the key fingerprint>`, never to the self-declared display name. A row's recorded rationale and reviewer must equal what was signed, or the row doesn't verify.
+- **Challenge resolution.** A stored dismissal counts only if the signed decision it points at is about that Challenge: a `challenge_resolution` on its id, or an Acceptance / Reference review of its target made after it was opened.
+- **Known limits.**
+  - Revocation relies on the signer's own `signed_at`, so a compromised key can still backdate decisions to before its revocation.
+  - Deleting the newest history rows can't be detected from the chain.
+  - Tables outside the two chains, such as `dependency_pins` and node `kind`, are protected only by the service layer: a promote or revalidation is signature-gated when it happens, but not re-verified on read.
+  - Claim ownership is still self-declared (`claimant_id`/`session_id`), so an agent can release another claim "as its owner"; #37 covers this.
+  - Integrity warnings are surfaced by `proof review warnings`, not yet next to each node; #36 shows them in the web app.
