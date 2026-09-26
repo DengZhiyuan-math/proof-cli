@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 import uuid
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, NamedTuple
 
 from pydantic import TypeAdapter
 
@@ -230,6 +232,25 @@ END;
 """
 
 
+class _ActiveTransaction(NamedTuple):
+    db_path: Path
+    thread_id: int
+    conn: sqlite3.Connection
+
+
+# The write transaction this thread currently holds open. A nested
+# `store.transaction()` — or a `_writing` helper called without `conn` —
+# joins it instead of opening a second connection that would wait on this
+# one's own write lock until the busy timeout expired. Keyed by resolved
+# database path and by thread: a task or worker thread that copies this
+# context never picks up a connection belonging to another thread.
+#
+# Only helpers that go through `_writing` join. The older helpers that open
+# `store.connect()` and commit it themselves (write_state, store_contract,
+# ...) must not be called inside a transaction.
+_ACTIVE_TRANSACTION: ContextVar[_ActiveTransaction | None] = ContextVar("proof_cli_active_transaction", default=None)
+
+
 @dataclass
 class ProjectStore:
     root: Path
@@ -255,8 +276,28 @@ class ProjectStore:
         `BEGIN IMMEDIATE` takes the write lock up front, so a concurrent
         writer waits on the busy timeout instead of failing mid-transaction
         when a deferred read lock can't be upgraded.
+
+        Nested inside another `transaction()` on the same database in the
+        same thread, it joins the outer one as a SAVEPOINT: an exception out
+        of the nested block undoes the nested block's writes, and whatever
+        it did write only commits when the outer transaction does — so code
+        after a nested `transaction()` must not assume its writes are
+        durable yet (see `active_transaction`).
         """
+        joined = active_transaction(self)
+        if joined is not None:
+            savepoint = f"nested_{uuid.uuid4().hex}"
+            joined.execute(f"SAVEPOINT {savepoint}")
+            try:
+                yield joined
+            except BaseException:
+                joined.execute(f"ROLLBACK TO {savepoint}")
+                joined.execute(f"RELEASE {savepoint}")
+                raise
+            joined.execute(f"RELEASE {savepoint}")
+            return
         conn = self.connect()
+        token = _ACTIVE_TRANSACTION.set(_ActiveTransaction(self.db_path.resolve(), threading.get_ident(), conn))
         try:
             conn.execute("BEGIN IMMEDIATE")
             yield conn
@@ -265,7 +306,22 @@ class ProjectStore:
             conn.rollback()
             raise
         finally:
+            _ACTIVE_TRANSACTION.reset(token)
             conn.close()
+
+
+def active_transaction(store: ProjectStore) -> sqlite3.Connection | None:
+    """The `store.transaction()` connection this thread currently holds open, if any.
+
+    Code with a side effect outside SQLite that must only happen once its
+    writes are committed (the review-history migration's JSON strip, say)
+    checks this to know whether it is running inside someone else's
+    transaction.
+    """
+    active = _ACTIVE_TRANSACTION.get()
+    if active is not None and active.thread_id == threading.get_ident() and active.db_path == store.db_path.resolve():
+        return active.conn
+    return None
 
 
 @contextmanager
@@ -282,7 +338,10 @@ def in_transaction(store: ProjectStore, conn: sqlite3.Connection | None) -> Iter
 def _writing(store: ProjectStore, conn: sqlite3.Connection | None) -> Iterator[sqlite3.Connection]:
     """The connection a write helper should use: the caller's, inside its
     `store.transaction()` (left for the caller to commit), or else its own,
-    committed on success."""
+    committed on success. With no `conn` inside an open `store.transaction()`,
+    it joins that transaction."""
+    if conn is None:
+        conn = active_transaction(store)
     if conn is not None:
         yield conn
         return

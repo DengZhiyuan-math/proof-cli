@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field, ValidationError
 from .domain import EventRecord, utc_now
 from .storage import (
     ProjectStore,
+    active_transaction,
     append_event,
     collaboration_state_path,
     in_transaction,
@@ -606,6 +607,11 @@ def _migrate_legacy_review_records(store: ProjectStore, conn: sqlite3.Connection
     """
     path = _collaboration_path(store)
     legacy, malformed = _legacy_review_records(path)
+    # called with no `conn` from inside an open transaction (a read helper,
+    # say), it must still act as the caller's-transaction case: the JSON
+    # can't be stripped until that transaction has actually committed
+    if conn is None:
+        conn = active_transaction(store)
     if conn is not None:
         if not is_review_history_migrated(conn):
             _run_review_history_migration(store, conn, legacy)
