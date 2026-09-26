@@ -18,6 +18,8 @@ from proof_cli.commands import (
 )
 import pytest
 
+from _authenticator import researcher
+
 from proof_cli.domain import TheoremStatus, TrustLevel
 from proof_cli.proof_map import claim_node, create_node, decide_acceptance, submit_candidate_proof
 from proof_cli.reusable_assets import ReusableAsset, ReusableAssetKind, ReusableAssetPayload, ReusableAssetProvenance, ReusableAssetReuseStatus, ReusableAssetTrustLevel
@@ -123,7 +125,7 @@ def test_review_decide_on_proof_map_node_review_is_rejected(tmp_path: Path) -> N
         store, "clm_1", claimant_id="agent_a", session_id="sess_1",
         scoping_rationale="scoped correctly", content="proof text",
     )
-    record = decide_acceptance(store, "clm_1", "accept", reviewer_id="researcher", confirmed=True)
+    record = researcher(store).decide_acceptance("clm_1", "accept")
 
     with pytest.raises(ValueError, match="proof node review"):
         cmd_review_decide(record.id, "rejected", root=tmp_path, reviewer_id="researcher")

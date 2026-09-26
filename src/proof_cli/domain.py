@@ -253,6 +253,8 @@ class Challenge(BaseModel):
     created_at: datetime = Field(default_factory=utc_now)
     resolved_by: str | None = None
     resolved_at: datetime | None = None
+    # the signed Human Review decision that resolved it (ADR-0009, #35)
+    resolution_review_id: str | None = None
 
 
 class EvidenceOutcome(str, Enum):

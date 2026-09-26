@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import threading
@@ -194,11 +195,23 @@ CREATE TABLE IF NOT EXISTS review_history (
   authorship TEXT NOT NULL,
   provenance_notes TEXT NOT NULL,
   created_at TEXT NOT NULL,
+  prev_row_hash TEXT,
+  signed_decision TEXT,
+  payload_hash TEXT,
   CHECK ((entry = 'request') = (review_id = id))
 );
+"""
 
+# Added by issue #35 (ADR-0009): the hash chain link and the signed decision.
+# Existing databases get them by ALTER TABLE before the triggers below, which
+# reference `payload_hash`, are (re)created.
+_REVIEW_HISTORY_ADDED_COLUMNS = {"prev_row_hash": "TEXT", "signed_decision": "TEXT", "payload_hash": "TEXT"}
+_CHALLENGE_ADDED_COLUMNS = {"resolution_review_id": "TEXT"}
+
+REVIEW_HISTORY_TRIGGERS = """
 CREATE INDEX IF NOT EXISTS idx_review_history_object ON review_history(object_type, object_id, seq);
 CREATE INDEX IF NOT EXISTS idx_review_history_review_id ON review_history(review_id, seq);
+CREATE INDEX IF NOT EXISTS idx_review_history_payload_hash ON review_history(payload_hash);
 
 CREATE TRIGGER IF NOT EXISTS review_history_no_update
 BEFORE UPDATE ON review_history
@@ -212,9 +225,13 @@ BEGIN
   SELECT RAISE(ABORT, 'review_history is append-only');
 END;
 
-CREATE TRIGGER IF NOT EXISTS review_history_no_overwrite
+DROP TRIGGER IF EXISTS review_history_no_overwrite;
+CREATE TRIGGER IF NOT EXISTS review_history_no_overwrite_v2
 BEFORE INSERT ON review_history
-WHEN EXISTS (SELECT 1 FROM review_history WHERE id = NEW.id OR seq = NEW.seq)
+WHEN EXISTS (
+  SELECT 1 FROM review_history
+  WHERE id = NEW.id OR seq = NEW.seq OR (NEW.payload_hash IS NOT NULL AND payload_hash = NEW.payload_hash)
+)
 BEGIN
   SELECT RAISE(ABORT, 'review_history is append-only');
 END;
@@ -230,6 +247,66 @@ BEGIN
   SELECT RAISE(ABORT, 'a review decision must reference an existing request for the same object');
 END;
 """
+
+# The Reviewer key registry (ADR-0009 point 5): append-only and hash-chained
+# like review_history. A revoke row repeats the revoked key's fields.
+REVIEWER_KEYS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS reviewer_keys (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  id TEXT NOT NULL UNIQUE,
+  entry TEXT NOT NULL CHECK (entry IN ('enroll', 'revoke')),
+  credential_id TEXT NOT NULL,
+  public_key_spki TEXT NOT NULL,
+  alg INTEGER NOT NULL,
+  fingerprint TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  signed_decision TEXT NOT NULL,
+  prev_row_hash TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TRIGGER IF NOT EXISTS reviewer_keys_no_update
+BEFORE UPDATE ON reviewer_keys
+BEGIN
+  SELECT RAISE(ABORT, 'reviewer_keys is append-only');
+END;
+
+CREATE TRIGGER IF NOT EXISTS reviewer_keys_no_delete
+BEFORE DELETE ON reviewer_keys
+BEGIN
+  SELECT RAISE(ABORT, 'reviewer_keys is append-only');
+END;
+
+CREATE TRIGGER IF NOT EXISTS reviewer_keys_no_overwrite
+BEFORE INSERT ON reviewer_keys
+WHEN EXISTS (SELECT 1 FROM reviewer_keys WHERE id = NEW.id OR seq = NEW.seq)
+BEGIN
+  SELECT RAISE(ABORT, 'reviewer_keys is append-only');
+END;
+"""
+
+# The first link of every hash chain.
+GENESIS_ROW_HASH = "0" * 64
+
+
+def chain_row_hash(row: dict) -> str:
+    """SHA-256 over a stored row's canonical JSON — every column, `seq` and
+    `prev_row_hash` included, so editing, reordering or re-linking any row
+    changes its hash and breaks the next row's link."""
+    canonical = json.dumps(row, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _add_missing_columns(conn: sqlite3.Connection, table: str, columns: dict[str, str]) -> None:
+    existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    for name, column_type in columns.items():
+        if name not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {column_type}")
+
+
+def _last_row_hash(conn: sqlite3.Connection, table: str) -> str:
+    last = conn.execute(f"SELECT * FROM {table} ORDER BY seq DESC LIMIT 1").fetchone()
+    return chain_row_hash(dict(last)) if last is not None else GENESIS_ROW_HASH
 
 
 class _ActiveTransaction(NamedTuple):
@@ -265,6 +342,10 @@ class ProjectStore:
         conn.executescript(REFERENCE_SCHEMA)
         conn.executescript(PROOF_MAP_SCHEMA)
         conn.executescript(REVIEW_HISTORY_SCHEMA)
+        _add_missing_columns(conn, "review_history", _REVIEW_HISTORY_ADDED_COLUMNS)
+        _add_missing_columns(conn, "challenges", _CHALLENGE_ADDED_COLUMNS)
+        conn.executescript(REVIEW_HISTORY_TRIGGERS)
+        conn.executescript(REVIEWER_KEYS_SCHEMA)
         conn.commit()
         return conn
 
@@ -872,7 +953,7 @@ def insert_proof_map_node(store: ProjectStore, node: ProofMapNode) -> ProofMapNo
     return node
 
 
-def update_proof_map_node(store: ProjectStore, node: ProofMapNode) -> ProofMapNode:
+def update_proof_map_node(store: ProjectStore, node: ProofMapNode, *, conn: sqlite3.Connection | None = None) -> ProofMapNode:
     """Overwrite an existing node's row in place.
 
     The only legitimate caller is Promote (issue #22) changing `kind` from
@@ -880,12 +961,11 @@ def update_proof_map_node(store: ProjectStore, node: ProofMapNode) -> ProofMapNo
     field stays whatever it already was, since nothing else in the system
     has a supported path to edit a node after creation.
     """
-    with store.connect() as conn:
+    with _writing(store, conn) as conn:
         conn.execute(
             "UPDATE proof_map_nodes SET kind = ?, data = ?, updated_at = ? WHERE id = ?",
             (node.kind.value, node.model_dump_json(), node.updated_at.isoformat(), node.id),
         )
-        conn.commit()
     return node
 
 
@@ -968,6 +1048,7 @@ def mark_claim_released(
     released_by: str,
     reason: str,
     released_at: datetime,
+    conn: sqlite3.Connection | None = None,
 ) -> bool:
     """Release a claim, but only if it is still active.
 
@@ -978,12 +1059,11 @@ def mark_claim_released(
     SQLite's write lock affects a row. Returns whether this call was the one
     that released it.
     """
-    with store.connect() as conn:
+    with _writing(store, conn) as conn:
         cursor = conn.execute(
             "UPDATE claims SET released_at = ?, released_by = ?, release_reason = ? WHERE id = ? AND released_at IS NULL",
             (released_at.isoformat(), released_by, reason, claim_id),
         )
-        conn.commit()
         return cursor.rowcount > 0
 
 
@@ -1183,6 +1263,7 @@ def _row_to_challenge(row: sqlite3.Row) -> Challenge:
         created_at=row["created_at"],
         resolved_by=row["resolved_by"],
         resolved_at=row["resolved_at"],
+        resolution_review_id=row["resolution_review_id"],
     )
 
 
@@ -1238,30 +1319,27 @@ def mark_challenge_dismissed(
     *,
     resolved_by: str,
     resolved_at: datetime,
+    resolution_review_id: str | None = None,
+    reopened: bool = False,
     conn: sqlite3.Connection | None = None,
 ) -> bool:
-    """Dismiss a challenge, but only if it's still open.
+    """Dismiss a challenge, recording the signed decision that resolved it.
 
-    Mirrors `mark_claim_released`'s guard: two concurrent dismiss attempts
-    can't both silently win — only the first UPDATE to reach SQLite's write
-    lock affects a row. Returns whether this call was the one that dismissed it.
+    By default only a still-open row is updated — the guard that stops two
+    racing dismissals both winning; returns whether this call changed it.
+    `resolution_review_id` names the signed Human Review decision; a
+    dismissal counts only while that decision verifies (ADR-0009 point 2).
+    `reopened=True` also re-dismisses a row whose stored dismissal no longer
+    counts; the caller has then already settled the race by re-reading the
+    Challenge on its own write transaction.
     """
     with _writing(store, conn) as conn:
         cursor = conn.execute(
-            "UPDATE challenges SET status = 'dismissed', resolved_by = ?, resolved_at = ? WHERE id = ? AND status = 'open'",
-            (resolved_by, resolved_at.isoformat(), challenge_id),
+            "UPDATE challenges SET status = 'dismissed', resolved_by = ?, resolved_at = ?, resolution_review_id = ? "
+            "WHERE id = ?" + ("" if reopened else " AND status = 'open'"),
+            (resolved_by, resolved_at.isoformat(), resolution_review_id, challenge_id),
         )
         return cursor.rowcount > 0
-
-
-def list_open_challenge_ids(conn: sqlite3.Connection, target_node_id: str) -> list[str]:
-    """Open Challenges against `target_node_id`, read on the caller's
-    transaction so the set it dismisses is the set it saw."""
-    rows = conn.execute(
-        "SELECT id FROM challenges WHERE target_node_id = ? AND status = 'open' ORDER BY created_at",
-        (target_node_id,),
-    ).fetchall()
-    return [row["id"] for row in rows]
 
 
 def _row_to_evidence_check(row: sqlite3.Row) -> EvidenceCheck:
@@ -1417,6 +1495,9 @@ _REVIEW_HISTORY_COLUMNS = (
     "authorship",
     "provenance_notes",
     "created_at",
+    "prev_row_hash",
+    "signed_decision",
+    "payload_hash",
 )
 
 
@@ -1425,12 +1506,61 @@ def insert_review_history_row(conn: sqlite3.Connection, row: dict) -> None:
 
     The only write path into `review_history`; there is deliberately no
     update or delete counterpart (the table's triggers would refuse one).
+    The row is linked to the hash of the row before it (`prev_row_hash`),
+    computed here, on the write lock — callers never supply it.
     """
-    values = [row[column] for column in _REVIEW_HISTORY_COLUMNS]
+    stored = {**row, "prev_row_hash": _last_row_hash(conn, "review_history")}
+    stored.setdefault("signed_decision", None)
+    stored.setdefault("payload_hash", None)
+    values = [stored[column] for column in _REVIEW_HISTORY_COLUMNS]
     values[_REVIEW_HISTORY_COLUMNS.index("authorship")] = json.dumps(row["authorship"])
     placeholders = ", ".join("?" for _ in _REVIEW_HISTORY_COLUMNS)
     conn.execute(
         f"INSERT INTO review_history({', '.join(_REVIEW_HISTORY_COLUMNS)}) VALUES ({placeholders})",
+        values,
+    )
+
+
+def review_history_payload_recorded(conn: sqlite3.Connection, payload_hash: str) -> bool:
+    return (
+        conn.execute("SELECT 1 FROM review_history WHERE payload_hash = ? LIMIT 1", (payload_hash,)).fetchone()
+        is not None
+    )
+
+
+def review_history_head(conn: sqlite3.Connection) -> str:
+    """The hash of the latest review-history row: what a new signed payload commits to."""
+    return _last_row_hash(conn, "review_history")
+
+
+def list_raw_chain_rows(store: ProjectStore, table: str) -> list[dict]:
+    """Every row of a hash-chained table (`review_history`, `reviewer_keys`), exactly as stored."""
+    if table not in {"review_history", "reviewer_keys"}:
+        raise ValueError(f"{table} is not a hash-chained table")
+    with store.connect() as conn:
+        rows = conn.execute(f"SELECT * FROM {table} ORDER BY seq").fetchall()
+    return [dict(row) for row in rows]
+
+
+_REVIEWER_KEY_COLUMNS = (
+    "id",
+    "entry",
+    "credential_id",
+    "public_key_spki",
+    "alg",
+    "fingerprint",
+    "display_name",
+    "signed_decision",
+    "created_at",
+)
+
+
+def insert_reviewer_key_row(conn: sqlite3.Connection, row: dict) -> None:
+    """Append one enrollment/revocation row to the Reviewer key registry, hash-linked."""
+    columns = (*_REVIEWER_KEY_COLUMNS, "prev_row_hash")
+    values = [row[column] for column in _REVIEWER_KEY_COLUMNS] + [_last_row_hash(conn, "reviewer_keys")]
+    conn.execute(
+        f"INSERT INTO reviewer_keys({', '.join(columns)}) VALUES ({', '.join('?' for _ in columns)})",
         values,
     )
 

@@ -1,3 +1,4 @@
+from _authenticator import researcher
 """Issue #29: memory records can reference the unified ProofMapNode id,
 plus a specific Candidate proof or Human Review decision, without losing
 the older split id fields the frozen bug/debug system still relies on.
@@ -38,7 +39,7 @@ def test_record_memory_links_to_a_specific_candidate_proof_and_review(tmp_path: 
         scoping_rationale="scoped correctly",
         content="proof text",
     )
-    review = decide_acceptance(store, "clm_1", "accept", reviewer_id="researcher", confirmed=True)
+    review = researcher(store).decide_acceptance("clm_1", "accept")
 
     record_memory(
         store,
