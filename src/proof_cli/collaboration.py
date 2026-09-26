@@ -1,16 +1,30 @@
 from __future__ import annotations
 
 import json
+import os
+import sqlite3
 import uuid
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Literal
 
 from pydantic import BaseModel, Field
 
-from .domain import utc_now
-from .storage import ProjectStore, append_event, collaboration_state_path, read_state
+from .domain import EventRecord, utc_now
+from .storage import (
+    ProjectStore,
+    append_event,
+    collaboration_state_path,
+    in_transaction,
+    insert_review_history_row,
+    is_review_history_migrated,
+    list_events,
+    list_review_history_rows,
+    mark_review_history_migrated,
+    read_state,
+    review_history_row_exists,
+)
 
 
 def _new_id(prefix: str) -> str:
@@ -111,6 +125,10 @@ class CollaborationPolicy(BaseModel):
 
 
 class ReviewRecord(BaseModel):
+    """One review, as currently decided — a view folded from its
+    `review_history` rows (its request plus every later decision on it),
+    never a stored, editable record of its own."""
+
     id: str = Field(default_factory=lambda: _new_id("review"))
     object_type: str
     object_id: str
@@ -122,6 +140,30 @@ class ReviewRecord(BaseModel):
     provenance_notes: str = ""
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
+
+
+class ReviewHistoryEntry(BaseModel):
+    """One append-only `review_history` row (issue #33).
+
+    `entry=request` opens a review (its `review_id` is its own `id`);
+    `entry=decision` records a decision on the request named by
+    `review_id`. Rows are never edited or deleted — a re-decision is simply
+    a later row.
+    """
+
+    seq: int
+    id: str
+    review_id: str
+    entry: Literal["request", "decision"]
+    object_type: str
+    object_id: str
+    kind: ReviewRecordKind | None = None
+    decision: ReviewGovernanceState
+    reviewer_id: str
+    rationale: str = ""
+    authorship: list[str] = Field(default_factory=list)
+    provenance_notes: str = ""
+    created_at: datetime
 
 
 class CommentThread(BaseModel):
@@ -176,6 +218,8 @@ class CollaborationState(BaseModel):
     version: int = 1
     contributors: list[Contributor] = Field(default_factory=list)
     policies: list[CollaborationPolicy] = Field(default_factory=list)
+    # A read-only view of the SQLite review history, filled in by
+    # `load_collaboration`; `save_collaboration` never writes it back (issue #33).
     review_records: list[ReviewRecord] = Field(default_factory=list)
     comment_threads: list[CommentThread] = Field(default_factory=list)
     comments: list[Comment] = Field(default_factory=list)
@@ -212,22 +256,42 @@ def _latest_by_id(items: Iterable[BaseModel], key_name: str) -> list[BaseModel]:
     return ordered
 
 
+def _read_collaboration_json(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    return json.loads(path.read_text())
+
+
+def _write_collaboration_json(path: Path, data: str) -> None:
+    # write-then-rename, so a concurrent reader never sees a half-written file
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
+    tmp.write_text(data)
+    os.replace(tmp, path)
+
+
 def load_collaboration(store: ProjectStore) -> CollaborationState:
+    _migrate_legacy_review_records(store)
     path = _collaboration_path(store)
     project_id = _project_id(store)
-    if not path.exists():
-        return CollaborationState(project_id=project_id)
-    data = json.loads(path.read_text())
+    data = _read_collaboration_json(path) or {}
+    data.pop("review_records", None)
     state = CollaborationState.model_validate({**data, "project_id": data.get("project_id", project_id)})
+    state.review_records = list_review_records(store)
     return state
 
 
 def save_collaboration(store: ProjectStore, state: CollaborationState) -> CollaborationState:
+    """Persist the JSON-backed, non-trust-bearing collaboration state.
+
+    `state.review_records` is never written: Human Review history lives
+    only in the append-only SQLite table, so no caller — exchange import
+    included — can revoke or forge a decision by saving a whole state.
+    """
     path = _collaboration_path(store)
-    path.parent.mkdir(parents=True, exist_ok=True)
     state.project_id = _project_id(store)
     state.version = 1
-    path.write_text(state.model_dump_json(indent=2))
+    _write_collaboration_json(path, state.model_dump_json(indent=2, exclude={"review_records"}))
     return state
 
 
@@ -334,6 +398,230 @@ def set_policy(store: ProjectStore, policy: CollaborationPolicy) -> Collaboratio
     return policy
 
 
+def _row_to_history_entry(row: dict[str, Any]) -> ReviewHistoryEntry:
+    return ReviewHistoryEntry.model_validate(row)
+
+
+def _fold_review_history(entries: Iterable[ReviewHistoryEntry]) -> list[ReviewRecord]:
+    """Each review's current state: its request, overlaid by its latest decision.
+
+    Ordered by when each review was requested — the same order the old
+    in-place-edited JSON list had, so "latest record" keeps its meaning.
+    """
+    records: dict[str, ReviewRecord] = {}
+    for entry in entries:
+        if entry.entry == "request":
+            records[entry.review_id] = ReviewRecord(
+                id=entry.review_id,
+                object_type=entry.object_type,
+                object_id=entry.object_id,
+                reviewer_id=entry.reviewer_id,
+                decision=entry.decision,
+                kind=entry.kind,
+                rationale=entry.rationale,
+                authorship=list(entry.authorship),
+                provenance_notes=entry.provenance_notes,
+                created_at=entry.created_at,
+                updated_at=entry.created_at,
+            )
+            continue
+        record = records.get(entry.review_id)
+        if record is None:
+            continue
+        record.decision = entry.decision
+        record.reviewer_id = entry.reviewer_id
+        record.rationale = entry.rationale or record.rationale
+        record.updated_at = entry.created_at
+    return list(records.values())
+
+
+def _history_row(
+    *,
+    entry: str,
+    row_id: str,
+    review_id: str,
+    object_type: str,
+    object_id: str,
+    kind: ReviewRecordKind | None,
+    decision: ReviewGovernanceState,
+    reviewer_id: str,
+    rationale: str,
+    authorship: list[str],
+    provenance_notes: str,
+    created_at: datetime,
+) -> dict[str, Any]:
+    return {
+        "id": row_id,
+        "review_id": review_id,
+        "entry": entry,
+        "object_type": object_type,
+        "object_id": object_id,
+        "kind": kind.value if kind is not None else None,
+        "decision": decision.value,
+        "reviewer_id": reviewer_id,
+        "rationale": rationale,
+        "authorship": list(authorship),
+        "provenance_notes": provenance_notes,
+        "created_at": created_at.isoformat(),
+    }
+
+
+def _request_row(record: ReviewRecord) -> dict[str, Any]:
+    return _history_row(
+        entry="request",
+        row_id=record.id,
+        review_id=record.id,
+        object_type=record.object_type,
+        object_id=record.object_id,
+        kind=record.kind,
+        decision=ReviewGovernanceState.proposed_for_review,
+        reviewer_id=record.reviewer_id,
+        rationale=record.rationale,
+        authorship=record.authorship,
+        provenance_notes=record.provenance_notes,
+        created_at=record.created_at,
+    )
+
+
+def _decision_row(
+    record: ReviewRecord,
+    decision: ReviewGovernanceState,
+    *,
+    reviewer_id: str,
+    rationale: str,
+    created_at: datetime,
+    row_id: str | None = None,
+) -> dict[str, Any]:
+    return _history_row(
+        entry="decision",
+        row_id=row_id or _new_id("decision"),
+        review_id=record.id,
+        object_type=record.object_type,
+        object_id=record.object_id,
+        kind=record.kind,
+        decision=decision,
+        reviewer_id=reviewer_id,
+        rationale=rationale,
+        authorship=record.authorship,
+        provenance_notes=record.provenance_notes,
+        created_at=created_at,
+    )
+
+
+def _append_legacy_record(conn: sqlite3.Connection, record: ReviewRecord) -> bool:
+    """Append a JSON-era ReviewRecord (request, plus its decision if it has one)
+    unless its request is already in the history. Whether anything was appended."""
+    if review_history_row_exists(conn, record.id):
+        return False
+    insert_review_history_row(conn, _request_row(record))
+    if record.decision != ReviewGovernanceState.proposed_for_review:
+        insert_review_history_row(
+            conn,
+            _decision_row(
+                record,
+                record.decision,
+                reviewer_id=record.reviewer_id,
+                rationale=record.rationale,
+                created_at=record.updated_at,
+                row_id=f"{record.id}_decision",
+            ),
+        )
+    return True
+
+
+REVIEW_HISTORY_INTEGRITY_WARNING = "review_history_integrity_warning"
+
+
+def _legacy_review_records(path: Path) -> list[ReviewRecord]:
+    if not path.exists() or '"review_records"' not in path.read_text():
+        return []
+    data = _read_collaboration_json(path) or {}
+    return _latest_by_id((ReviewRecord.model_validate(raw) for raw in data.get("review_records") or []), "id")
+
+
+def _strip_legacy_review_records(path: Path) -> None:
+    # re-read right before writing, so contributors/comments another
+    # process saved since the migration started aren't overwritten
+    data = _read_collaboration_json(path)
+    if data is None or "review_records" not in data:
+        return
+    data.pop("review_records")
+    _write_collaboration_json(path, json.dumps(data, indent=2))
+
+
+def _migrate_legacy_review_records(store: ProjectStore, conn: sqlite3.Connection | None = None) -> None:
+    """Move review records out of a pre-#33 `collaboration.json` into `review_history` — once.
+
+    The migration is one-shot: it runs in the same transaction that sets
+    `project_meta.review_history_migrated`, and never again after. Review
+    records that turn up in the JSON after that are not Human Review
+    decisions — nothing legitimate writes them there any more — so they
+    are never appended (an append-only row could never be taken back).
+    Records whose ids are already in the history are leftovers of the
+    migration itself (it committed, but the JSON strip didn't happen yet)
+    and are dropped quietly; any other id is recorded as a
+    `review_history_integrity_warning` event carrying the raw records, then
+    dropped too.
+
+    Run on a caller's transaction (`conn`), a pending migration appends
+    there, and the JSON is left alone — the caller may still roll back —
+    for a later call that owns its own commit to strip.
+    """
+    path = _collaboration_path(store)
+    legacy = _legacy_review_records(path)
+    if conn is not None:
+        if not is_review_history_migrated(conn):
+            _run_review_history_migration(store, conn, legacy)
+        return
+
+    # the common case — migrated long ago, nothing in the JSON — must not
+    # take the write lock on what is usually a read path
+    reader = store.connect()
+    try:
+        migrated = is_review_history_migrated(reader)
+    finally:
+        reader.close()
+    if migrated and not legacy:
+        return
+
+    with store.transaction() as tx:
+        if not is_review_history_migrated(tx):
+            _run_review_history_migration(store, tx, legacy)
+        else:
+            injected = [record for record in legacy if not review_history_row_exists(tx, record.id)]
+            if injected:
+                append_event(
+                    store,
+                    REVIEW_HISTORY_INTEGRITY_WARNING,
+                    f"ignored {len(injected)} review record(s) found in collaboration.json after the "
+                    "review history migration; Human Review decisions are never read from JSON",
+                    payload={"records": [record.model_dump(mode="json") for record in injected]},
+                    conn=tx,
+                )
+    _strip_legacy_review_records(path)
+
+
+def _run_review_history_migration(store: ProjectStore, conn: sqlite3.Connection, legacy: list[ReviewRecord]) -> None:
+    migrated = [record.id for record in legacy if _append_legacy_record(conn, record)]
+    mark_review_history_migrated(conn)
+    if migrated:
+        append_event(
+            store,
+            "collaboration_review_history_migrated",
+            f"migrated {len(migrated)} review record(s) from collaboration.json into review history",
+            payload={"review_ids": migrated},
+            conn=conn,
+        )
+
+
+def list_review_history_integrity_warnings(store: ProjectStore) -> list[EventRecord]:
+    """Every time review records were found in `collaboration.json` after the
+    one-shot migration, and ignored — a sign someone tried to write a
+    decision around Human Review."""
+    _migrate_legacy_review_records(store)
+    return [event for event in list_events(store) if event.kind == REVIEW_HISTORY_INTEGRITY_WARNING]
+
+
 def record_review_request(
     store: ProjectStore,
     object_type: str,
@@ -344,8 +632,9 @@ def record_review_request(
     authorship: list[str] | None = None,
     provenance_notes: str = "",
     kind: ReviewRecordKind | None = None,
+    conn: sqlite3.Connection | None = None,
 ) -> ReviewRecord:
-    state = load_collaboration(store)
+    _migrate_legacy_review_records(store, conn)
     record = ReviewRecord(
         object_type=object_type,
         object_id=object_id,
@@ -356,15 +645,16 @@ def record_review_request(
         authorship=list(authorship or []),
         provenance_notes=provenance_notes,
     )
-    state.review_records.append(record)
-    _update_state(
-        store,
-        state,
-        event_kind="collaboration_review_requested",
-        message=f"requested review for {object_type} {object_id}",
-        entity_id=object_id,
-        payload=record.model_dump(mode="json"),
-    )
+    with in_transaction(store, conn) as tx:
+        insert_review_history_row(tx, _request_row(record))
+        append_event(
+            store,
+            "collaboration_review_requested",
+            f"requested review for {object_type} {object_id}",
+            entity_id=object_id,
+            payload=record.model_dump(mode="json"),
+            conn=tx,
+        )
     return record
 
 
@@ -375,61 +665,117 @@ def record_review_decision(
     *,
     reviewer_id: str,
     rationale: str = "",
+    conn: sqlite3.Connection | None = None,
 ) -> ReviewRecord:
-    state = load_collaboration(store)
-    record = next((item for item in reversed(state.review_records) if item.id == review_id), None)
-    if record is None:
-        raise KeyError(review_id)
-    record.decision = decision
-    record.reviewer_id = reviewer_id
-    record.rationale = rationale or record.rationale
-    record.updated_at = utc_now()
-    _update_state(
-        store,
-        state,
-        event_kind="collaboration_review_decided",
-        message=f"review {review_id} -> {decision.value}",
-        entity_id=record.object_id,
-        payload=record.model_dump(mode="json"),
-    )
+    """Append a decision on an existing review request. The request row is
+    never modified; the returned record is the review as it now reads."""
+    _migrate_legacy_review_records(store, conn)
+    def _current(tx: sqlite3.Connection) -> ReviewRecord | None:
+        rows = list_review_history_rows(store, review_id=review_id, conn=tx)
+        folded = _fold_review_history(_row_to_history_entry(row) for row in rows)
+        return folded[0] if folded else None
+
+    with in_transaction(store, conn) as tx:
+        record = _current(tx)
+        if record is None:
+            raise KeyError(review_id)
+        insert_review_history_row(
+            tx, _decision_row(record, decision, reviewer_id=reviewer_id, rationale=rationale, created_at=utc_now())
+        )
+        record = _current(tx)
+        append_event(
+            store,
+            "collaboration_review_decided",
+            f"review {review_id} -> {decision.value}",
+            entity_id=record.object_id,
+            payload=record.model_dump(mode="json"),
+            conn=tx,
+        )
     return record
 
 
+def record_decided_review(
+    store: ProjectStore,
+    object_type: str,
+    object_id: str,
+    decision: ReviewGovernanceState,
+    *,
+    reviewer_id: str,
+    rationale: str = "",
+    authorship: list[str] | None = None,
+    provenance_notes: str = "",
+    kind: ReviewRecordKind | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> ReviewRecord:
+    """A review requested and decided in one step: both rows land in the same
+    transaction (the caller's, if given), so there is never a moment — not
+    even after a crash — when the request exists without its decision."""
+    with in_transaction(store, conn) as tx:
+        request = record_review_request(
+            store,
+            object_type,
+            object_id,
+            reviewer_id=reviewer_id,
+            rationale=rationale,
+            authorship=authorship,
+            provenance_notes=provenance_notes,
+            kind=kind,
+            conn=tx,
+        )
+        return record_review_decision(store, request.id, decision, reviewer_id=reviewer_id, rationale=rationale, conn=tx)
+
+
+def import_review_records(store: ProjectStore, records: Iterable[ReviewRecord]) -> tuple[list[str], list[str]]:
+    """Append another project's review records to the local history, for exchange import.
+
+    Only non-trust-bearing reviews are taken; a record that could feed a
+    derived Human Review axis (any `kind`, or an object type the proof map
+    derives state from) is refused, so an imported bundle can never forge
+    — or, since nothing here overwrites, revoke — a local decision. A record
+    whose id is already in the local history is skipped. Returns
+    `(imported_ids, refused_ids)`.
+    """
+    imported: list[str] = []
+    refused: list[str] = []
+    candidates = list(records)
+    if not candidates:
+        return imported, refused
+    _migrate_legacy_review_records(store)
+    with store.transaction() as conn:
+        for record in _latest_by_id(candidates, "id"):
+            if is_trust_bearing_review(record):
+                refused.append(record.id)
+            elif _append_legacy_record(conn, record):
+                imported.append(record.id)
+    return imported, refused
+
+
+TRUST_BEARING_OBJECT_TYPES = frozenset({"proof_map_node", "evidence_check"})
+
+
+def is_trust_bearing_review(record: ReviewRecord) -> bool:
+    """Whether this review feeds a derived proof-map axis, and so may only be
+    written by its own Human Review service function (never the generic
+    `proof review` commands, never an import)."""
+    return record.kind is not None or record.object_type in TRUST_BEARING_OBJECT_TYPES
+
+
+def list_review_history(store: ProjectStore, *, object_type: str = "", object_id: str = "", review_id: str = "") -> list[ReviewHistoryEntry]:
+    """The raw append-only rows, in append order."""
+    _migrate_legacy_review_records(store)
+    return [
+        _row_to_history_entry(row)
+        for row in list_review_history_rows(store, object_type=object_type, object_id=object_id, review_id=review_id)
+    ]
+
+
 def list_review_records(store: ProjectStore, *, object_type: str = "", object_id: str = "") -> list[ReviewRecord]:
-    state = load_collaboration(store)
-    records = _latest_by_id(state.review_records, "id")
-    if object_type:
-        records = [record for record in records if record.object_type == object_type]
-    if object_id:
-        records = [record for record in records if record.object_id == object_id]
-    return records
+    return _fold_review_history(list_review_history(store, object_type=object_type, object_id=object_id))
 
 
 def get_review_record(store: ProjectStore, review_id: str) -> ReviewRecord | None:
-    state = load_collaboration(store)
-    for record in reversed(state.review_records):
-        if record.id == review_id:
-            return record
-    return None
-
-
-def delete_review_record(store: ProjectStore, review_id: str) -> bool:
-    """Remove a review record outright, with no compensating event.
-
-    Only for a caller compensating for a request whose paired decision write
-    failed (record_review_request/record_review_decision aren't atomic with
-    each other) — restores the "as if it never happened" state a real
-    transaction would give, rather than leaving a request permanently stuck
-    at `proposed_for_review` with no matching decision. Never used for an
-    ordinary, successfully-decided review.
-    """
-    state = load_collaboration(store)
-    before = len(state.review_records)
-    state.review_records = [record for record in state.review_records if record.id != review_id]
-    if len(state.review_records) == before:
-        return False
-    save_collaboration(store, state)
-    return True
+    folded = _fold_review_history(list_review_history(store, review_id=review_id))
+    return folded[0] if folded else None
 
 
 def ensure_comment_thread(
@@ -811,26 +1157,31 @@ __all__ = [
     "Contributor",
     "ContributorStatus",
     "ReviewGovernanceState",
+    "ReviewHistoryEntry",
     "ReviewRecord",
     "ReviewRecordKind",
     "SharedAssetPublication",
     "SharedAssetPublicationStatus",
     "compare_branches",
     "create_branch",
-    "delete_review_record",
     "get_branch",
     "get_contributor",
     "get_policy",
     "get_review_record",
+    "import_review_records",
+    "is_trust_bearing_review",
     "list_branches",
     "list_comment_threads",
     "list_comments",
     "list_contributors",
     "list_publications",
+    "list_review_history",
+    "list_review_history_integrity_warnings",
     "list_review_records",
     "load_collaboration",
     "merge_branch",
     "publish_shared_asset",
+    "record_decided_review",
     "record_review_decision",
     "record_review_request",
     "save_collaboration",

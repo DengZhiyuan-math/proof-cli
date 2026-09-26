@@ -7,7 +7,7 @@ from typing import Any
 
 from .checks import run_standard_checks
 from .blockers import resolve_blocker
-from .collaboration import ReviewGovernanceState, list_review_records, record_review_decision, record_review_request, summarize_review_record
+from .collaboration import ReviewGovernanceState, list_review_records, record_decided_review, summarize_review_record
 from .domain import BlockerRecord, ProofObligation, TheoremContract, TheoremStatus, TrustLevel
 from .formalization_recommendations import FormalizationRecommendation
 from .obligations import close_obligation
@@ -59,16 +59,16 @@ def _record_collaboration_review(
     authorship: list[str] | None = None,
     provenance_notes: str = "",
 ) -> None:
-    request = record_review_request(
+    record_decided_review(
         store,
         object_type,
         object_id,
+        decision,
         reviewer_id=reviewer_id,
         rationale=rationale,
         authorship=authorship,
         provenance_notes=provenance_notes,
     )
-    record_review_decision(store, request.id, decision, reviewer_id=reviewer_id, rationale=rationale)
 
 
 def change_trust_level(
