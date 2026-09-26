@@ -84,6 +84,14 @@ _Avoid_: statement (too narrow — assumptions and scope matter too), interface 
 Human Review's confirmation that an existing Candidate proof remains valid after one of its dependencies advanced to a new accepted version, because that dependency's Accepted mathematical interface didn't change — only its internal proof did. Updates the dependency edge's pinned version and is recorded as its own kind of review decision (`dependency_revalidation`, decision `reaffirmed`); it does not create a new Candidate proof, and it does not touch the reviewing node's own acceptance state. If the interface did change, this doesn't apply — a new Candidate proof is required instead. See ADR-0005.
 _Avoid_: reaccept, re-approve, revalidate (as a bare verb — say what's being revalidated)
 
+**Signed decision**:
+A Human Review decision (Acceptance, Reference review, Evidence review, Lightweight re-review, Challenge resolution, Promote, force-release, reviewer enrollment) as it is actually recorded: a review-history row signed with an enrolled Reviewer passkey over exactly what was decided — including the hash of the Candidate proof text the researcher read. Only signed decisions count; an unsigned or foreign-signed record is shown, never obeyed. Issued only from the web app; the CLI and agents can only request one. See ADR-0009.
+_Avoid_: confirmation, `--confirm`, approval flag
+
+**Reviewer passkey**:
+The researcher's WebAuthn credential (Touch ID, Windows Hello, or a security key) enrolled in a project. It is what makes a decision human: an agent can read and write project files but cannot produce a passkey signature. Enrolling or revoking one is itself a Signed decision. See ADR-0009.
+_Avoid_: reviewer id, reviewer name (a self-declared name proves nothing)
+
 ### Node lifecycle
 
 A proof map node's state is tracked along three independent axes, never folded into one flat status. None are stored directly — each is computed from lower-level records (an active claim, the node's latest Candidate proof and its review decision, its dependencies' own state, and any open Challenges). See ADR-0002, ADR-0004.
