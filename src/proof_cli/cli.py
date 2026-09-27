@@ -704,6 +704,70 @@ def evidence_review(
 node_app.add_typer(node_evidence_app, name="evidence")
 
 
+def _running_review_app(store) -> bool:
+    """Whether this project's review app already answers on its pinned origin."""
+    import urllib.request
+
+    from .storage import read_project_instance_id
+    from .webapp.server import project_url
+
+    try:
+        with urllib.request.urlopen(f"{project_url(store)}/api/health", timeout=2) as response:
+            return json.loads(response.read())["data"]["instance"] == read_project_instance_id(store)
+    except (OSError, ValueError, KeyError):
+        return False
+
+
+@review_app.command("serve")
+def review_serve(root: str = ".") -> None:
+    """Run this project's review app on its own localhost origin — the only place decisions are signed (ADR-0009).
+
+    Runs in the foreground until interrupted. Bound to 127.0.0.1; it holds
+    no authority itself: every decision needs a passkey tap in the page.
+    """
+    from .webapp.server import ReviewServer
+
+    store = get_store(_root(root))
+    try:
+        server = ReviewServer(store)
+    except OSError as exc:
+        typer.echo(f"Error: can't bind this project's review port ({exc}); is it already running? Try `proof review open`.")
+        raise typer.Exit(code=1)
+    typer.echo(f"Review app for this project: {server.url}  (Ctrl-C to stop)")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+
+
+@review_app.command("open")
+def review_open(node_id: str = typer.Argument("", help="Open this node's decision page"), root: str = ".") -> None:
+    """Open this project's review app (starting it in the background if needed), optionally at a node."""
+    import subprocess
+    import time
+    import webbrowser
+
+    from .webapp.server import project_url
+
+    store = get_store(_root(root))
+    if not _running_review_app(store):
+        subprocess.Popen(
+            [sys.executable, "-m", "proof_cli.cli", "review", "serve", "--root", str(_root(root))],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        for _ in range(50):
+            if _running_review_app(store):
+                break
+            time.sleep(0.1)
+    url = project_url(store, node_id or None)
+    typer.echo(url)
+    webbrowser.open(url)
+
+
 @review_app.command("payload")
 def review_payload(
     kind: str,
@@ -1568,3 +1632,7 @@ def verify_stale(
             cmd_proof_verify_stale(source_id, _root(root), reason=reason, changed_dependency_ids=dependency),
         )
     )
+
+
+if __name__ == "__main__":
+    app()

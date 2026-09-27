@@ -15,6 +15,7 @@ import os
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519
 
+from proof_cli.authority import project_origin
 from proof_cli.signing import (
     ALG_EDDSA,
     ALG_ES256,
@@ -22,6 +23,7 @@ from proof_cli.signing import (
     DecisionPayload,
     SignedDecision,
     WebAuthnAssertion,
+    b64url_decode,
     b64url_encode,
     batch_challenge,
     payload_hash,
@@ -30,10 +32,40 @@ from proof_cli.signing import (
 _FLAGS_UP_UV = 0x05
 
 
+def cbor_encode(value) -> bytes:
+    """Just enough CBOR to build attestation objects and COSE keys in tests."""
+
+    def head(major: int, length: int) -> bytes:
+        if length < 24:
+            return bytes([major << 5 | length])
+        for info, size in ((24, 1), (25, 2), (26, 4), (27, 8)):
+            if length < 1 << (8 * size):
+                return bytes([major << 5 | info]) + length.to_bytes(size, "big")
+        raise ValueError("too long")
+
+    if isinstance(value, bool) or value is None:
+        return bytes([0xF5 if value is True else 0xF4 if value is False else 0xF6])
+    if isinstance(value, int):
+        return head(0, value) if value >= 0 else head(1, -1 - value)
+    if isinstance(value, bytes):
+        return head(2, len(value)) + value
+    if isinstance(value, str):
+        encoded = value.encode("utf-8")
+        return head(3, len(encoded)) + encoded
+    if isinstance(value, list):
+        return head(4, len(value)) + b"".join(cbor_encode(item) for item in value)
+    if isinstance(value, dict):
+        return head(5, len(value)) + b"".join(cbor_encode(k) + cbor_encode(v) for k, v in value.items())
+    raise TypeError(type(value))
+
+
 class SoftwareAuthenticator:
-    def __init__(self, alg: int = ALG_ES256, *, display_name: str = "researcher") -> None:
+    def __init__(self, alg: int = ALG_ES256, *, display_name: str = "researcher", counter: bool = False) -> None:
         self.alg = alg
         self.display_name = display_name
+        # most passkeys keep no signature counter (always 0); a security key does
+        self.counter = counter
+        self.sign_count = 0
         self.credential_id = b64url_encode(os.urandom(16))
         if alg == ALG_ES256:
             self._private_key = ec.generate_private_key(ec.SECP256R1())
@@ -60,7 +92,9 @@ class SoftwareAuthenticator:
         client_data = json.dumps(
             {"type": ceremony, "challenge": b64url_encode(challenge), "origin": origin, "crossOrigin": False}
         ).encode("utf-8")
-        authenticator_data = hashlib.sha256(rp_id.encode("ascii")).digest() + bytes([flags]) + (0).to_bytes(4, "big")
+        if self.counter:
+            self.sign_count += 1
+        authenticator_data = hashlib.sha256(rp_id.encode("ascii")).digest() + bytes([flags]) + self.sign_count.to_bytes(4, "big")
         signed_data = authenticator_data + hashlib.sha256(client_data).digest()
         if self.alg == ALG_ES256:
             signature = self._private_key.sign(signed_data, ec.ECDSA(hashes.SHA256()))
@@ -72,6 +106,31 @@ class SoftwareAuthenticator:
             client_data_json=b64url_encode(client_data),
             signature=b64url_encode(signature),
         )
+
+    def register(self, challenge: bytes, *, origin: str, rp_id: str = RP_ID, flags: int = _FLAGS_UP_UV | 0x40) -> dict:
+        """A `navigator.credentials.create()` response with `none` attestation, as an Apple passkey gives."""
+        public = self._private_key.public_key()
+        if self.alg == ALG_ES256:
+            numbers = public.public_numbers()
+            cose = {1: 2, 3: ALG_ES256, -1: 1, -2: numbers.x.to_bytes(32, "big"), -3: numbers.y.to_bytes(32, "big")}
+        else:
+            raw = public.public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+            cose = {1: 1, 3: ALG_EDDSA, -1: 6, -2: raw}
+        credential = b64url_decode(self.credential_id)
+        authenticator_data = (
+            hashlib.sha256(rp_id.encode("ascii")).digest()
+            + bytes([flags])
+            + self.sign_count.to_bytes(4, "big")
+            + bytes(16)  # AAGUID: not disclosed
+            + len(credential).to_bytes(2, "big")
+            + credential
+            + cbor_encode(cose)
+        )
+        client_data = json.dumps({"type": "webauthn.create", "challenge": b64url_encode(challenge), "origin": origin, "crossOrigin": False}).encode()
+        return {
+            "client_data_json": b64url_encode(client_data),
+            "attestation_object": b64url_encode(cbor_encode({"fmt": "none", "attStmt": {}, "authData": authenticator_data})),
+        }
 
     def sign(self, payload: DecisionPayload, **assertion_options) -> SignedDecision:
         return self.sign_batch([payload], **assertion_options)[0]
@@ -88,7 +147,7 @@ class SoftwareAuthenticator:
 
 def enroll(store, authenticator: "SoftwareAuthenticator", *, signer: "SoftwareAuthenticator | None" = None):
     """Enroll `authenticator`'s key: self-signed if it's the first, else signed by `signer`."""
-    from proof_cli.authority import EnrollmentRequest, build_decision_payload, enroll_reviewer_key
+    from proof_cli.authority import EnrollmentRequest, build_decision_payload, enroll_reviewer_key, project_origin
     from proof_cli.signing import DecisionKind, public_key_fingerprint
 
     payload = build_decision_payload(
@@ -103,7 +162,7 @@ def enroll(store, authenticator: "SoftwareAuthenticator", *, signer: "SoftwareAu
         public_key_spki=b64url_encode(authenticator.public_key_spki),
         alg=authenticator.alg,
         display_name=authenticator.display_name,
-        signed_decision=(signer or authenticator).sign(payload),
+        signed_decision=(signer or authenticator).sign(payload, origin=project_origin(store)),
     )
     return enroll_reviewer_key(store, request)
 
@@ -133,7 +192,7 @@ class Researcher:
         from proof_cli.proof_map import prepare_decision
 
         payload = prepare_decision(self.store, kind, target_id, decision, rationale=rationale, dependency_id=dependency_id)
-        return self.authenticator.sign(payload)
+        return self.authenticator.sign(payload, origin=project_origin(self.store))
 
     def decide_acceptance(self, node_id: str, decision: str, *, rationale: str = ""):
         from proof_cli.proof_map import decide_acceptance
