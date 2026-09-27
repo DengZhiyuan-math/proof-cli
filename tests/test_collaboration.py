@@ -113,21 +113,20 @@ def test_review_request_on_proof_map_node_is_rejected(tmp_path: Path) -> None:
     store = ensure_project(tmp_path)
     create_node(store, node_id="clm_1", kind="claim", statement="stmt")
 
-    with pytest.raises(ValueError, match="proof node review"):
+    with pytest.raises(ValueError, match="review app"):
         cmd_review_request("proof_map_node", "clm_1", root=tmp_path, reviewer_id="researcher")
 
 
 def test_review_decide_on_proof_map_node_review_is_rejected(tmp_path: Path) -> None:
     store = ensure_project(tmp_path)
     create_node(store, node_id="clm_1", kind="claim", statement="stmt")
-    claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
+    _claim_token = claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1").claim_token
     submit_candidate_proof(
         store, "clm_1", claimant_id="agent_a", session_id="sess_1",
-        scoping_rationale="scoped correctly", content="proof text",
-    )
+        scoping_rationale="scoped correctly", content="proof text", claim_token=_claim_token)
     record = researcher(store).decide_acceptance("clm_1", "accept")
 
-    with pytest.raises(ValueError, match="proof node review"):
+    with pytest.raises(ValueError, match="review app"):
         cmd_review_decide(record.id, "rejected", root=tmp_path, reviewer_id="researcher")
 
 

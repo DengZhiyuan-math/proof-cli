@@ -150,7 +150,6 @@ from .collaboration import (
 )
 from .memory import MemoryArtifact, MemoryLayer, list_memory_artifacts, record_memory
 from .recommendations import recommend_cross_project_assets
-from .obligations import close_obligation
 from .proof_state import (
     add_blocker,
     add_goal,
@@ -162,20 +161,17 @@ from .proof_state import (
     summarize_state,
 )
 from .snapshot import create_snapshot
-from .references import ReferenceRecord, ReferenceReviewStatus, ReferenceSourceType
+from .references import ReferenceRecord, ReferenceSourceType
 from .rendering import render_status
 from .reusable_assets import ReusableAsset
 from .storage import (
     ProjectStore,
-    approve_reference,
-    defer_reference,
     ensure_project,
     get_reference,
     list_blockers,
     list_events,
     list_obligations,
     list_references,
-    reject_reference,
     append_event,
     import_reference,
 )
@@ -754,20 +750,6 @@ def _find_memory_artifact(store: ProjectStore, artifact_id: str) -> MemoryArtifa
     return None
 
 
-def _reference_review_action(action: str) -> ReferenceReviewStatus | None:
-    normalized = action.strip().lower()
-    mapping = {
-        "approve": ReferenceReviewStatus.approved,
-        "approved": ReferenceReviewStatus.approved,
-        "reject": ReferenceReviewStatus.rejected,
-        "rejected": ReferenceReviewStatus.rejected,
-        "defer": ReferenceReviewStatus.deferred,
-        "deferred": ReferenceReviewStatus.deferred,
-        "candidate": ReferenceReviewStatus.candidate,
-    }
-    return mapping.get(normalized)
-
-
 def cmd_proof_search(
     query: str,
     root: str | Path = ".",
@@ -857,24 +839,6 @@ def cmd_reference_import(
     stored = import_reference(store, reference)
     _append_history(store, f"reference_import:{reference_id}", message=f"imported reference {reference_id}")
     return stored.model_dump_json(indent=2)
-
-
-def cmd_reference_review(reference_id: str, action: str, root: str | Path = ".", *, rationale: str = "") -> str:
-    store = get_store(root)
-    review_status = _reference_review_action(action)
-    if review_status is None:
-        return f"review:unsupported:{action}"
-    reviewer = {
-        ReferenceReviewStatus.approved: approve_reference,
-        ReferenceReviewStatus.rejected: reject_reference,
-        ReferenceReviewStatus.deferred: defer_reference,
-        ReferenceReviewStatus.candidate: defer_reference,
-    }[review_status]
-    result = reviewer(store, reference_id, confirmed=True, rationale=rationale)
-    if not result.allowed:
-        return f"review:blocked:{result.message}"
-    _append_history(store, f"reference_review:{reference_id}:{review_status.value}", message=f"reviewed reference {reference_id}")
-    return f"review:{reference_id}:{review_status.value}"
 
 
 def cmd_proof_ground(
@@ -1807,16 +1771,6 @@ def cmd_obligation_add(goal_statement: str, root: str | Path = ".", source_step_
     return obligation.model_dump_json(indent=2)
 
 
-def cmd_obligation_resolve(
-    obligation_id: str,
-    root: str | Path = ".",
-    *,
-    rationale: str = "",
-) -> str:
-    obligation = close_obligation(get_store(root), obligation_id, rationale=rationale or None)
-    return obligation.model_dump_json(indent=2)
-
-
 def cmd_obligation_list(root: str | Path = ".") -> str:
     items = list_obligations(get_store(root))
     return "\n".join([f"{item.id}: {item.goal_statement} [{item.status.value}]" for item in items]) or "No obligations"
@@ -1976,10 +1930,8 @@ def cmd_review_request(
 ) -> str:
     if object_type in TRUST_BEARING_OBJECT_TYPES:
         raise ValueError(
-            f"{object_type} reviews are Human Review decisions with their own commands "
-            "(`proof node review`, `proof node evidence review`, `proof node revalidate`), "
-            "not the generic `proof review request` command, or the decision won't be reflected "
-            "in the node's derived state"
+            f"{object_type} reviews are Human Review decisions, made in the review app "
+            "(`proof review open`), not through the generic `proof review request` command"
         )
     record = record_review_request(get_store(root), object_type, object_id, reviewer_id=reviewer_id, rationale=rationale)
     return json.dumps(record.model_dump(mode="json"), indent=2)
@@ -2006,8 +1958,8 @@ def cmd_review_decide(
         raise ValueError(
             f"{existing.object_type} review {review_id} is a Human Review decision "
             f"(kind={existing.kind.value if existing.kind else 'none'}); it can't be re-decided through "
-            "the generic `proof review decide` command — record a new decision with "
-            "`proof node review`, `proof node evidence review` or `proof node revalidate` instead"
+            "the generic `proof review decide` command — it needs the researcher's passkey in the review app "
+            "(`proof review open`)"
         )
     try:
         resolved_decision = ReviewGovernanceState(decision)

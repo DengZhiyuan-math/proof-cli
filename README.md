@@ -23,6 +23,17 @@ proof-codex status
 proof codex doctor
 ```
 
+## Human Review
+
+Decisions that change what the project trusts (accepting a Candidate proof, Reference review, dismissing a Challenge, promoting, force-releasing a claim) are made only in the local review app, signed with the researcher's passkey (ADR-0009):
+
+```bash
+proof review serve      # start the review app for this project
+proof review open <id>  # open a node's decision page
+```
+
+No CLI command or agent tool can make them. Those commands answer `HUMAN_REVIEW_REQUIRED` with the page's URL. An agent that claims a node gets a claim token back, and needs it to submit or release.
+
 Proof state is persisted locally. Generated workspace state under `.proof/` is intentionally excluded from version control.
 
 ## Project principles

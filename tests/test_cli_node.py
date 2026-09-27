@@ -1,14 +1,37 @@
 import json
+import re
+
+import pytest
 from pathlib import Path
 
 from typer.testing import CliRunner
 
-from _authenticator import sign_cli
+from _authenticator import researcher
+from proof_cli.storage import load_project
 
 from proof_cli.cli import app
 
 
 runner = CliRunner()
+
+
+def _claim_via_cli(tmp_path: Path, node_id: str, claimant: str) -> str:
+    """Claim through the CLI; return the claim token only the claimant gets."""
+    result = runner.invoke(app, ["node", "claim", node_id, "--root", str(tmp_path), "--claimant", claimant, "--json"])
+    assert result.exit_code == 0, result.stdout
+    return json.loads(result.stdout)["data"]["claim_token"]
+
+
+def _submit_via_cli(tmp_path: Path, node_id: str, claimant: str) -> None:
+    token = _claim_via_cli(tmp_path, node_id, claimant)
+    result = runner.invoke(
+        app,
+        [
+            "node", "submit", node_id, "--root", str(tmp_path), "--claimant", claimant, "--claim-token", token,
+            "--content", "proof text", "--rationale", "scoped correctly",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
 
 
 def test_node_create_and_show_human_readable(tmp_path: Path):
@@ -145,9 +168,10 @@ def test_node_claim_and_release_human_readable(tmp_path: Path):
     )
     assert claim_result.exit_code == 0
     assert "agent_a" in claim_result.stdout
+    token = re.search(r"Claim token\s+(\S+)", claim_result.stdout).group(1)  # shown once, to the claimant
 
     release_result = runner.invoke(
-        app, ["node", "release", "clm_1", "--root", str(tmp_path), "--claimant", "agent_a"]
+        app, ["node", "release", "clm_1", "--root", str(tmp_path), "--claimant", "agent_a", "--claim-token", token]
     )
     assert release_result.exit_code == 0
     assert "agent_a" in release_result.stdout
@@ -169,7 +193,7 @@ def test_node_reclaim_same_claimant_is_idempotent_via_cli(tmp_path: Path):
 
 def test_node_claim_conflict_json_envelope_includes_details(tmp_path: Path):
     runner.invoke(app, ["node", "create", "clm_1", "claim", "stmt", "--root", str(tmp_path)])
-    runner.invoke(app, ["node", "claim", "clm_1", "--root", str(tmp_path), "--claimant", "agent_a"])
+    _claim_via_cli(tmp_path, "clm_1", "agent_a")
 
     conflict = runner.invoke(
         app, ["node", "claim", "clm_1", "--root", str(tmp_path), "--claimant", "agent_b", "--json"]
@@ -183,7 +207,7 @@ def test_node_claim_conflict_json_envelope_includes_details(tmp_path: Path):
 
 def test_node_release_without_ownership_or_force_is_rejected(tmp_path: Path):
     runner.invoke(app, ["node", "create", "clm_1", "claim", "stmt", "--root", str(tmp_path)])
-    runner.invoke(app, ["node", "claim", "clm_1", "--root", str(tmp_path), "--claimant", "agent_a"])
+    _claim_via_cli(tmp_path, "clm_1", "agent_a")
 
     result = runner.invoke(
         app, ["node", "release", "clm_1", "--root", str(tmp_path), "--claimant", "agent_b", "--json"]
@@ -193,43 +217,15 @@ def test_node_release_without_ownership_or_force_is_rejected(tmp_path: Path):
     assert payload["error"]["code"] == "NOT_CLAIMANT"
 
 
-def test_node_force_release_requires_a_signed_reason(tmp_path: Path):
-    runner.invoke(app, ["node", "create", "clm_1", "claim", "stmt", "--root", str(tmp_path)])
-    runner.invoke(app, ["node", "claim", "clm_1", "--root", str(tmp_path), "--claimant", "agent_a"])
-
-    missing_reason = runner.invoke(
-        app,
-        sign_cli([
-            "node", "release", "clm_1", "--root", str(tmp_path),
-            "--claimant", "researcher", "--force", "--actor", "researcher", "--json",
-        ]),
-    )
-    assert missing_reason.exit_code != 0
-    assert json.loads(missing_reason.stdout)["error"]["code"] == "FORCE_RELEASE_REQUIRES_REASON"
-
-    force_release = runner.invoke(
-        app,
-        sign_cli([
-            "node", "release", "clm_1", "--root", str(tmp_path),
-            "--claimant", "researcher", "--force",
-            "--actor", "researcher", "--reason", "agent stuck", "--json",
-        ]),
-    )
-    assert force_release.exit_code == 0
-    payload = json.loads(force_release.stdout)
-    assert payload["data"]["released_by"].startswith("passkey:")
-    assert payload["data"]["release_reason"] == "agent stuck"
-
-
 def test_node_submit_human_readable(tmp_path: Path):
     runner.invoke(app, ["node", "create", "clm_1", "claim", "stmt", "--root", str(tmp_path)])
-    runner.invoke(app, ["node", "claim", "clm_1", "--root", str(tmp_path), "--claimant", "agent_a"])
+    _token = _claim_via_cli(tmp_path, "clm_1", "agent_a")
 
     result = runner.invoke(
         app,
         [
             "node", "submit", "clm_1", "--root", str(tmp_path),
-            "--claimant", "agent_a",
+            "--claimant", "agent_a", "--claim-token", _token,
             "--content", "By direct computation the claim holds.",
             "--rationale", "This is a single algebraic step; no further decomposition needed.",
         ],
@@ -242,13 +238,13 @@ def test_node_submit_human_readable(tmp_path: Path):
 
 def test_node_submit_json_envelope(tmp_path: Path):
     runner.invoke(app, ["node", "create", "clm_1", "claim", "stmt", "--root", str(tmp_path)])
-    runner.invoke(app, ["node", "claim", "clm_1", "--root", str(tmp_path), "--claimant", "agent_a"])
+    _token = _claim_via_cli(tmp_path, "clm_1", "agent_a")
 
     result = runner.invoke(
         app,
         [
             "node", "submit", "clm_1", "--root", str(tmp_path),
-            "--claimant", "agent_a",
+            "--claimant", "agent_a", "--claim-token", _token,
             "--content", "proof body",
             "--rationale", "scoped correctly",
             "--json",
@@ -270,7 +266,7 @@ def test_node_submit_json_envelope(tmp_path: Path):
 
 def test_node_submit_by_non_claimant_rejected_with_json_error(tmp_path: Path):
     runner.invoke(app, ["node", "create", "clm_1", "claim", "stmt", "--root", str(tmp_path)])
-    runner.invoke(app, ["node", "claim", "clm_1", "--root", str(tmp_path), "--claimant", "agent_a"])
+    _claim_via_cli(tmp_path, "clm_1", "agent_a")
 
     result = runner.invoke(
         app,
@@ -309,13 +305,13 @@ def test_node_submit_without_claim_rejected_with_json_error(tmp_path: Path):
 
 def test_node_submit_without_rationale_rejected(tmp_path: Path):
     runner.invoke(app, ["node", "create", "clm_1", "claim", "stmt", "--root", str(tmp_path)])
-    runner.invoke(app, ["node", "claim", "clm_1", "--root", str(tmp_path), "--claimant", "agent_a"])
+    _token = _claim_via_cli(tmp_path, "clm_1", "agent_a")
 
     result = runner.invoke(
         app,
         [
             "node", "submit", "clm_1", "--root", str(tmp_path),
-            "--claimant", "agent_a",
+            "--claimant", "agent_a", "--claim-token", _token,
             "--content", "proof body",
             "--rationale", "   ",
             "--json",
@@ -328,20 +324,20 @@ def test_node_submit_without_rationale_rejected(tmp_path: Path):
 
 def test_node_second_submit_creates_v2(tmp_path: Path):
     runner.invoke(app, ["node", "create", "clm_1", "claim", "stmt", "--root", str(tmp_path)])
-    runner.invoke(app, ["node", "claim", "clm_1", "--root", str(tmp_path), "--claimant", "agent_a"])
+    _token = _claim_via_cli(tmp_path, "clm_1", "agent_a")
     runner.invoke(
         app,
         [
             "node", "submit", "clm_1", "--root", str(tmp_path),
-            "--claimant", "agent_a", "--content", "v1 text", "--rationale", "first attempt",
+            "--claimant", "agent_a", "--claim-token", _token, "--content", "v1 text", "--rationale", "first attempt",
         ],
     )
-    runner.invoke(app, ["node", "claim", "clm_1", "--root", str(tmp_path), "--claimant", "agent_b"])
+    _token = _claim_via_cli(tmp_path, "clm_1", "agent_b")
     second = runner.invoke(
         app,
         [
             "node", "submit", "clm_1", "--root", str(tmp_path),
-            "--claimant", "agent_b", "--content", "v2 text", "--rationale", "second attempt", "--json",
+            "--claimant", "agent_b", "--claim-token", _token, "--content", "v2 text", "--rationale", "second attempt", "--json",
         ],
     )
     assert second.exit_code == 0
@@ -353,121 +349,14 @@ def test_node_second_submit_creates_v2(tmp_path: Path):
 
 def _create_claim_and_submit(tmp_path: Path, node_id: str = "clm_1") -> None:
     runner.invoke(app, ["node", "create", node_id, "claim", "stmt", "--root", str(tmp_path)])
-    runner.invoke(app, ["node", "claim", node_id, "--root", str(tmp_path), "--claimant", "agent_a"])
+    _token = _claim_via_cli(tmp_path, node_id, "agent_a")
     runner.invoke(
         app,
         [
             "node", "submit", node_id, "--root", str(tmp_path),
-            "--claimant", "agent_a", "--content", "proof text", "--rationale", "scoped correctly",
+            "--claimant", "agent_a", "--claim-token", _token, "--content", "proof text", "--rationale", "scoped correctly",
         ],
     )
-
-
-def test_node_review_accept_requires_confirmation(tmp_path: Path):
-    _create_claim_and_submit(tmp_path)
-
-    result = runner.invoke(
-        app,
-        ["node", "review", "clm_1", "accept", "--root", str(tmp_path), "--json"],
-    )
-    assert result.exit_code != 0
-    payload = json.loads(result.stdout)
-    assert payload["ok"] is False
-    assert payload["error"]["code"] == "HUMAN_REVIEW_REQUIRED"
-
-
-def test_node_review_accept_human_readable(tmp_path: Path):
-    _create_claim_and_submit(tmp_path)
-
-    result = runner.invoke(
-        app,
-        sign_cli([
-            "node", "review", "clm_1", "accept", "--root", str(tmp_path),
-            "--reviewer", "researcher", "--rationale", "checks out", "--confirm",
-        ]),
-    )
-    assert result.exit_code == 0
-    assert "clm_1" in result.stdout
-    assert "approved" in result.stdout
-
-
-def test_node_review_accept_json_envelope(tmp_path: Path):
-    _create_claim_and_submit(tmp_path)
-
-    result = runner.invoke(
-        app,
-        sign_cli([
-            "node", "review", "clm_1", "accept", "--root", str(tmp_path),
-            "--reviewer", "researcher", "--confirm", "--json",
-        ]),
-    )
-    assert result.exit_code == 0
-    payload = json.loads(result.stdout)
-    assert payload["ok"] is True
-    assert payload["data"]["object_id"] == "clm_1"
-    assert payload["data"]["decision"] == "approved"
-    assert payload["data"]["kind"] == "acceptance"
-
-
-def test_node_review_invalid_decision_json_error(tmp_path: Path):
-    _create_claim_and_submit(tmp_path)
-
-    result = runner.invoke(
-        app,
-        sign_cli(["node", "review", "clm_1", "approve", "--root", str(tmp_path), "--confirm", "--json"]),
-    )
-    assert result.exit_code != 0
-    payload = json.loads(result.stdout)
-    assert payload["error"]["code"] == "INVALID_DECISION"
-
-
-def test_node_review_revision_requested_allows_a_fresh_submit(tmp_path: Path):
-    _create_claim_and_submit(tmp_path)
-
-    revise = runner.invoke(
-        app,
-        sign_cli([
-            "node", "review", "clm_1", "revision-requested", "--root", str(tmp_path),
-            "--reviewer", "researcher", "--confirm", "--json",
-        ]),
-    )
-    assert revise.exit_code == 0
-    assert json.loads(revise.stdout)["data"]["decision"] == "revision_requested"
-
-    reclaim = runner.invoke(
-        app, ["node", "claim", "clm_1", "--root", str(tmp_path), "--claimant", "agent_b", "--json"]
-    )
-    assert reclaim.exit_code == 0
-
-    resubmit = runner.invoke(
-        app,
-        [
-            "node", "submit", "clm_1", "--root", str(tmp_path),
-            "--claimant", "agent_b", "--content", "revised text", "--rationale", "addressed feedback", "--json",
-        ],
-    )
-    assert resubmit.exit_code == 0
-    assert json.loads(resubmit.stdout)["data"]["version"] == 2
-
-
-def test_node_review_reject_json_envelope(tmp_path: Path):
-    _create_claim_and_submit(tmp_path)
-
-    result = runner.invoke(
-        app,
-        sign_cli([
-            "node", "review", "clm_1", "reject", "--root", str(tmp_path),
-            "--reviewer", "researcher", "--rationale", "gap in the argument", "--confirm", "--json",
-        ]),
-    )
-    assert result.exit_code == 0
-    payload = json.loads(result.stdout)
-    assert payload["data"]["decision"] == "rejected"
-
-    # the node remains queryable
-    show = runner.invoke(app, ["node", "show", "clm_1", "--root", str(tmp_path), "--json"])
-    assert show.exit_code == 0
-    assert json.loads(show.stdout)["ok"] is True
 
 
 def test_node_create_imported_result_requires_source_fields(tmp_path: Path):
@@ -519,50 +408,6 @@ def test_node_claim_on_imported_result_rejected_with_json_error(tmp_path: Path):
     assert payload["error"]["code"] == "IMMUTABLE_NODE"
 
 
-def test_node_review_reference_review_json_envelope(tmp_path: Path):
-    _create_imported_result(tmp_path)
-
-    result = runner.invoke(
-        app,
-        sign_cli([
-            "node", "review", "ref_1", "reference-review", "--root", str(tmp_path),
-            "--reviewer", "researcher", "--rationale", "trustworthy source", "--confirm", "--json",
-        ]),
-    )
-    assert result.exit_code == 0
-    payload = json.loads(result.stdout)
-    assert payload["ok"] is True
-    assert payload["data"]["kind"] == "reference_review"
-    assert payload["data"]["decision"] == "approved"
-
-
-def test_node_review_reference_review_requires_confirmation(tmp_path: Path):
-    _create_imported_result(tmp_path)
-
-    result = runner.invoke(
-        app,
-        ["node", "review", "ref_1", "reference-review", "--root", str(tmp_path), "--json"],
-    )
-    assert result.exit_code != 0
-    payload = json.loads(result.stdout)
-    assert payload["error"]["code"] == "HUMAN_REVIEW_REQUIRED"
-
-
-def test_node_review_reference_review_decision_invalid_on_local_node(tmp_path: Path):
-    _create_claim_and_submit(tmp_path)
-
-    result = runner.invoke(
-        app,
-        sign_cli([
-            "node", "review", "clm_1", "reference-review", "--root", str(tmp_path),
-            "--confirm", "--json",
-        ]),
-    )
-    assert result.exit_code != 0
-    payload = json.loads(result.stdout)
-    assert payload["error"]["code"] == "INVALID_DECISION"
-
-
 def test_node_show_displays_all_three_axes_human_readable(tmp_path: Path):
     runner.invoke(app, ["node", "create", "clm_1", "claim", "stmt", "--root", str(tmp_path)])
 
@@ -578,7 +423,7 @@ def test_node_show_displays_all_three_axes_human_readable(tmp_path: Path):
 
 def test_node_show_axes_json_envelope(tmp_path: Path):
     runner.invoke(app, ["node", "create", "clm_1", "claim", "stmt", "--root", str(tmp_path)])
-    runner.invoke(app, ["node", "claim", "clm_1", "--root", str(tmp_path), "--claimant", "agent_a"])
+    _claim_via_cli(tmp_path, "clm_1", "agent_a")
 
     result = runner.invoke(app, ["node", "show", "clm_1", "--root", str(tmp_path), "--json"])
     assert result.exit_code == 0
@@ -637,128 +482,19 @@ def test_frontier_empty_project_human_readable(tmp_path: Path):
 
 def _create_dependent_with_accepted_dependency(tmp_path: Path, dependent: str = "clm_1", target: str = "lem_base") -> None:
     runner.invoke(app, ["node", "create", target, "lemma", "Base lemma", "--root", str(tmp_path)])
-    runner.invoke(app, ["node", "claim", target, "--root", str(tmp_path), "--claimant", "agent_a"])
+    _submit_via_cli(tmp_path, target, "agent_a")
+    researcher(load_project(tmp_path)).decide_acceptance(target, "accept")
     runner.invoke(
         app,
-        [
-            "node", "submit", target, "--root", str(tmp_path),
-            "--claimant", "agent_a", "--content", "proof text", "--rationale", "scoped correctly",
-        ],
+        ["node", "create", dependent, "claim", "Depends on base", "--root", str(tmp_path), "--dependency", target],
     )
-    runner.invoke(
-        app,
-        sign_cli(["node", "review", target, "accept", "--root", str(tmp_path), "--reviewer", "researcher", "--confirm"]),
-    )
-    runner.invoke(
-        app,
-        [
-            "node", "create", dependent, "claim", "Depends on base", "--root", str(tmp_path),
-            "--dependency", target,
-        ],
-    )
-    runner.invoke(app, ["node", "claim", dependent, "--root", str(tmp_path), "--claimant", "agent_b"])
-    runner.invoke(
-        app,
-        [
-            "node", "submit", dependent, "--root", str(tmp_path),
-            "--claimant", "agent_b", "--content", "proof text", "--rationale", "scoped correctly",
-        ],
-    )
-
-
-def test_node_revalidate_requires_confirmation(tmp_path: Path):
-    _create_dependent_with_accepted_dependency(tmp_path)
-
-    result = runner.invoke(
-        app,
-        ["node", "revalidate", "clm_1", "lem_base", "--root", str(tmp_path), "--json"],
-    )
-    assert result.exit_code != 0
-    payload = json.loads(result.stdout)
-    assert payload["error"]["code"] == "HUMAN_REVIEW_REQUIRED"
-
-
-def test_node_revalidate_human_readable(tmp_path: Path):
-    _create_dependent_with_accepted_dependency(tmp_path)
-
-    result = runner.invoke(
-        app,
-        sign_cli([
-            "node", "revalidate", "clm_1", "lem_base", "--root", str(tmp_path),
-            "--reviewer", "researcher", "--confirm",
-        ]),
-    )
-    assert result.exit_code == 0
-    assert "reaffirmed" in result.stdout
-    assert "dependency_revalidation" in result.stdout
-
-
-def test_node_revalidate_json_envelope(tmp_path: Path):
-    _create_dependent_with_accepted_dependency(tmp_path)
-
-    result = runner.invoke(
-        app,
-        sign_cli([
-            "node", "revalidate", "clm_1", "lem_base", "--root", str(tmp_path),
-            "--reviewer", "researcher", "--confirm", "--json",
-        ]),
-    )
-    assert result.exit_code == 0
-    payload = json.loads(result.stdout)
-    assert payload["ok"] is True
-    assert payload["command"] == "node.revalidate"
-    assert payload["data"]["kind"] == "dependency_revalidation"
-    assert payload["data"]["decision"] == "reaffirmed"
-
-
-def test_node_revalidate_no_pin_json_error(tmp_path: Path):
-    runner.invoke(app, ["node", "create", "lem_base", "lemma", "Base lemma", "--root", str(tmp_path)])
-    runner.invoke(app, ["node", "claim", "lem_base", "--root", str(tmp_path), "--claimant", "agent_a"])
-    runner.invoke(
-        app,
-        [
-            "node", "submit", "lem_base", "--root", str(tmp_path),
-            "--claimant", "agent_a", "--content", "proof text", "--rationale", "scoped correctly",
-        ],
-    )
-    runner.invoke(
-        app,
-        sign_cli(["node", "review", "lem_base", "accept", "--root", str(tmp_path), "--reviewer", "researcher", "--confirm"]),
-    )
-    runner.invoke(
-        app,
-        [
-            "node", "create", "clm_1", "claim", "Depends on base", "--root", str(tmp_path),
-            "--dependency", "lem_base",
-        ],
-    )
-
-    result = runner.invoke(
-        app,
-        sign_cli([
-            "node", "revalidate", "clm_1", "lem_base", "--root", str(tmp_path),
-            "--reviewer", "researcher", "--confirm", "--json",
-        ]),
-    )
-    assert result.exit_code != 0
-    payload = json.loads(result.stdout)
-    assert payload["error"]["code"] == "NO_DEPENDENCY_PIN"
+    _submit_via_cli(tmp_path, dependent, "agent_b")
 
 
 def _create_and_accept_node(tmp_path: Path, node_id: str = "lem_1", claimant: str = "agent_a") -> None:
-    runner.invoke(app, ["node", "create", node_id, "lemma", "Base lemma", "--root", str(tmp_path)])
-    runner.invoke(app, ["node", "claim", node_id, "--root", str(tmp_path), "--claimant", claimant])
-    runner.invoke(
-        app,
-        [
-            "node", "submit", node_id, "--root", str(tmp_path),
-            "--claimant", claimant, "--content", "proof text", "--rationale", "scoped correctly",
-        ],
-    )
-    runner.invoke(
-        app,
-        sign_cli(["node", "review", node_id, "accept", "--root", str(tmp_path), "--reviewer", "researcher", "--confirm"]),
-    )
+    runner.invoke(app, ["node", "create", node_id, "lemma", "stmt", "--root", str(tmp_path)])
+    _submit_via_cli(tmp_path, node_id, claimant)
+    researcher(load_project(tmp_path)).decide_acceptance(node_id, "accept")
 
 
 def test_challenge_open_requires_no_confirmation(tmp_path: Path):
@@ -807,19 +543,6 @@ def test_challenge_list_json(tmp_path: Path):
     assert any(item["target_node_id"] == "lem_1" for item in payload["data"])
 
 
-def test_challenge_dismiss_requires_confirmation(tmp_path: Path):
-    _create_and_accept_node(tmp_path)
-    open_result = runner.invoke(app, ["challenge", "open", "lem_1", "--root", str(tmp_path), "--json"])
-    challenge_id = json.loads(open_result.stdout)["data"]["id"]
-
-    result = runner.invoke(
-        app, ["challenge", "dismiss", challenge_id, "--root", str(tmp_path), "--json"]
-    )
-    assert result.exit_code != 0
-    payload = json.loads(result.stdout)
-    assert payload["error"]["code"] == "HUMAN_REVIEW_REQUIRED"
-
-
 def test_challenge_dismiss_clears_integrity_overlay(tmp_path: Path):
     _create_and_accept_node(tmp_path)
     open_result = runner.invoke(app, ["challenge", "open", "lem_1", "--root", str(tmp_path), "--json"])
@@ -828,15 +551,8 @@ def test_challenge_dismiss_clears_integrity_overlay(tmp_path: Path):
     show_challenged = runner.invoke(app, ["node", "show", "lem_1", "--root", str(tmp_path), "--json"])
     assert json.loads(show_challenged.stdout)["data"]["integrity_state"] == "challenged"
 
-    dismiss = runner.invoke(
-        app,
-        sign_cli([
-            "challenge", "dismiss", challenge_id, "--root", str(tmp_path),
-            "--reviewer", "researcher", "--confirm", "--json",
-        ]),
-    )
-    assert dismiss.exit_code == 0
-    assert json.loads(dismiss.stdout)["data"]["status"] == "dismissed"
+    # the dismissal itself is a passkey decision made in the review app
+    researcher(load_project(tmp_path)).dismiss_challenge(challenge_id, rationale="checked")
 
     show_cleared = runner.invoke(app, ["node", "show", "lem_1", "--root", str(tmp_path), "--json"])
     assert json.loads(show_cleared.stdout)["data"]["integrity_state"] == "current"
@@ -860,96 +576,9 @@ def test_challenge_unlocks_reclaim_of_accepted_node(tmp_path: Path):
 
 
 def _create_and_accept_claim(tmp_path: Path, node_id: str = "clm_1", claimant: str = "agent_a") -> None:
-    runner.invoke(app, ["node", "create", node_id, "claim", "A promotable claim", "--root", str(tmp_path)])
-    runner.invoke(app, ["node", "claim", node_id, "--root", str(tmp_path), "--claimant", claimant])
-    runner.invoke(
-        app,
-        [
-            "node", "submit", node_id, "--root", str(tmp_path),
-            "--claimant", claimant, "--content", "proof text", "--rationale", "scoped correctly",
-        ],
-    )
-    runner.invoke(
-        app,
-        sign_cli(["node", "review", node_id, "accept", "--root", str(tmp_path), "--reviewer", "researcher", "--confirm"]),
-    )
-
-
-def test_node_promote_requires_confirmation(tmp_path: Path):
-    _create_and_accept_claim(tmp_path)
-
-    result = runner.invoke(
-        app, ["node", "promote", "clm_1", "--root", str(tmp_path), "--json"]
-    )
-    assert result.exit_code != 0
-    payload = json.loads(result.stdout)
-    assert payload["error"]["code"] == "HUMAN_REVIEW_REQUIRED"
-
-
-def test_node_promote_human_readable(tmp_path: Path):
-    _create_and_accept_claim(tmp_path)
-
-    result = runner.invoke(
-        app,
-        sign_cli([
-            "node", "promote", "clm_1", "--root", str(tmp_path),
-            "--promoted-by", "researcher", "--confirm",
-        ]),
-    )
-    assert result.exit_code == 0
-    assert "lemma" in result.stdout
-
-
-def test_node_promote_json_envelope(tmp_path: Path):
-    _create_and_accept_claim(tmp_path)
-
-    result = runner.invoke(
-        app,
-        sign_cli([
-            "node", "promote", "clm_1", "--root", str(tmp_path),
-            "--promoted-by", "researcher", "--confirm", "--json",
-        ]),
-    )
-    assert result.exit_code == 0
-    payload = json.loads(result.stdout)
-    assert payload["ok"] is True
-    assert payload["command"] == "node.promote"
-    assert payload["data"]["kind"] == "lemma"
-    assert payload["data"]["id"] == "clm_1"
-
-
-def test_node_promote_on_unaccepted_claim_fails(tmp_path: Path):
-    runner.invoke(app, ["node", "create", "clm_1", "claim", "Not yet accepted", "--root", str(tmp_path)])
-
-    result = runner.invoke(
-        app, sign_cli(["node", "promote", "clm_1", "--root", str(tmp_path), "--confirm", "--json"])
-    )
-    assert result.exit_code != 0
-    payload = json.loads(result.stdout)
-    assert payload["error"]["code"] == "NOT_ACCEPTED"
-
-
-def test_node_promote_on_non_claim_fails(tmp_path: Path):
-    runner.invoke(app, ["node", "create", "lem_1", "lemma", "Already a lemma", "--root", str(tmp_path)])
-    runner.invoke(app, ["node", "claim", "lem_1", "--root", str(tmp_path), "--claimant", "agent_a"])
-    runner.invoke(
-        app,
-        [
-            "node", "submit", "lem_1", "--root", str(tmp_path),
-            "--claimant", "agent_a", "--content", "proof text", "--rationale", "scoped correctly",
-        ],
-    )
-    runner.invoke(
-        app,
-        sign_cli(["node", "review", "lem_1", "accept", "--root", str(tmp_path), "--reviewer", "researcher", "--confirm"]),
-    )
-
-    result = runner.invoke(
-        app, sign_cli(["node", "promote", "lem_1", "--root", str(tmp_path), "--confirm", "--json"])
-    )
-    assert result.exit_code != 0
-    payload = json.loads(result.stdout)
-    assert payload["error"]["code"] == "NOT_A_CLAIM"
+    runner.invoke(app, ["node", "create", node_id, "claim", "stmt", "--root", str(tmp_path)])
+    _submit_via_cli(tmp_path, node_id, claimant)
+    researcher(load_project(tmp_path)).decide_acceptance(node_id, "accept")
 
 
 def test_node_promote_has_no_demote_command(tmp_path: Path):
@@ -1028,12 +657,12 @@ def test_node_split_invalid_child_spec_fails(tmp_path: Path):
 
 def _create_claimed_and_submitted(tmp_path: Path, node_id: str = "clm_1", claimant: str = "agent_a") -> str:
     runner.invoke(app, ["node", "create", node_id, "claim", "stmt", "--root", str(tmp_path)])
-    runner.invoke(app, ["node", "claim", node_id, "--root", str(tmp_path), "--claimant", claimant])
+    _token = _claim_via_cli(tmp_path, node_id, claimant)
     submit = runner.invoke(
         app,
         [
             "node", "submit", node_id, "--root", str(tmp_path),
-            "--claimant", claimant, "--content", "proof text", "--rationale", "scoped correctly", "--json",
+            "--claimant", claimant, "--claim-token", _token, "--content", "proof text", "--rationale", "scoped correctly", "--json",
         ],
     )
     return json.loads(submit.stdout)["data"]["id"]
@@ -1078,57 +707,13 @@ def test_node_evidence_record_invalid_outcome_json_error(tmp_path: Path):
     assert payload["error"]["code"] == "INVALID_OUTCOME"
 
 
-def test_node_evidence_review_requires_confirmation(tmp_path: Path):
-    proof_id = _create_claimed_and_submitted(tmp_path)
-    record = runner.invoke(
-        app, ["node", "evidence", "record", proof_id, "passed", "--root", str(tmp_path), "--json"]
-    )
-    check_id = json.loads(record.stdout)["data"]["id"]
-
-    result = runner.invoke(
-        app,
-        ["node", "evidence", "review", check_id, "trusted", "--root", str(tmp_path), "--json"],
-    )
-    assert result.exit_code != 0
-    payload = json.loads(result.stdout)
-    assert payload["error"]["code"] == "HUMAN_REVIEW_REQUIRED"
-
-
-def test_node_evidence_review_json_envelope(tmp_path: Path):
-    proof_id = _create_claimed_and_submitted(tmp_path)
-    record = runner.invoke(
-        app, ["node", "evidence", "record", proof_id, "passed", "--root", str(tmp_path), "--json"]
-    )
-    check_id = json.loads(record.stdout)["data"]["id"]
-
-    result = runner.invoke(
-        app,
-        sign_cli([
-            "node", "evidence", "review", check_id, "trusted", "--root", str(tmp_path),
-            "--reviewer", "researcher", "--confirm", "--json",
-        ]),
-    )
-    assert result.exit_code == 0
-    payload = json.loads(result.stdout)
-    assert payload["ok"] is True
-    assert payload["command"] == "node.evidence.review"
-    assert payload["data"]["kind"] == "evidence_review"
-    assert payload["data"]["decision"] == "trusted"
-
-
 def test_node_evidence_review_never_touches_acceptance_state(tmp_path: Path):
     proof_id = _create_claimed_and_submitted(tmp_path)
     record = runner.invoke(
         app, ["node", "evidence", "record", proof_id, "passed", "--root", str(tmp_path), "--json"]
     )
     check_id = json.loads(record.stdout)["data"]["id"]
-    runner.invoke(
-        app,
-        sign_cli([
-            "node", "evidence", "review", check_id, "trusted", "--root", str(tmp_path),
-            "--reviewer", "researcher", "--confirm",
-        ]),
-    )
+    researcher(load_project(tmp_path)).decide_evidence_review(check_id, "trusted")
 
     show = runner.invoke(app, ["node", "show", "clm_1", "--root", str(tmp_path), "--json"])
     assert json.loads(show.stdout)["data"]["acceptance_state"] == "unreviewed"
@@ -1142,11 +727,68 @@ def test_verify_accept_and_reject_commands_no_longer_exist(tmp_path: Path):
     assert result.exit_code != 0
 
 
-def test_node_promote_on_a_challenged_claim_fails(tmp_path: Path):
+HUMAN_ONLY_COMMANDS = [
+    ["node", "review", "clm_1", "accept"],
+    ["node", "review", "clm_1", "reject"],
+    ["node", "review", "ref_1", "reference-review"],
+    ["node", "revalidate", "clm_1", "lem_base"],
+    ["node", "promote", "clm_1"],
+    ["node", "evidence", "review", "chk_1", "trusted"],
+    ["node", "release", "clm_1", "--force", "--reason", "stuck"],
+    ["challenge", "dismiss", "ch_1"],
+    ["reference", "review", "ref_std", "approve"],
+    ["obligation", "resolve", "obl_1"],
+]
+# whatever an agent tries adding to them
+EXTRA_FLAGS = [[], ["--confirm"], ["--signed-decision", "decision.json"], ["--reviewer", "researcher", "--rationale", "trust me"]]
+
+
+@pytest.mark.parametrize("command", HUMAN_ONLY_COMMANDS, ids=lambda c: " ".join(c[:3]))
+@pytest.mark.parametrize("json_output", [True, False])
+def test_every_human_only_command_says_where_to_decide_and_changes_nothing(tmp_path: Path, command, json_output):
+    """ADR-0009, #37: the CLI never makes a Human Review decision, whatever flags it's given."""
     _create_and_accept_claim(tmp_path)
-    runner.invoke(app, ["challenge", "open", "clm_1", "--root", str(tmp_path), "--opened-by", "agent_b", "--rationale", "?"])
+    store = load_project(tmp_path)
+    before = runner.invoke(app, ["node", "show", "clm_1", "--root", str(tmp_path), "--json"]).stdout
 
-    result = runner.invoke(app, sign_cli(["node", "promote", "clm_1", "--root", str(tmp_path), "--confirm", "--json"]))
+    for extra in EXTRA_FLAGS:
+        result = runner.invoke(app, [*command, "--root", str(tmp_path), *extra, *(["--json"] if json_output else [])])
+        assert result.exit_code != 0, (command, extra)
+        if extra in ([], ["--reviewer", "researcher", "--rationale", "trust me"]) or extra == ["--confirm"]:
+            pass  # an unknown flag is a usage error (exit 2) — also no decision
+        if json_output and result.exit_code == 1:
+            error = json.loads(result.stdout)["error"]
+            assert error["code"] == "HUMAN_REVIEW_REQUIRED" and error["url"].startswith("http://localhost:")
+        elif result.exit_code == 1:
+            assert "review app" in result.output and "http://localhost:" in result.output
 
+    assert runner.invoke(app, ["node", "show", "clm_1", "--root", str(tmp_path), "--json"]).stdout == before
+    assert store  # (the project is untouched)
+
+
+def test_a_bare_human_only_command_is_a_clean_human_review_required(tmp_path: Path):
+    _create_and_accept_claim(tmp_path)
+    result = runner.invoke(app, ["node", "review", "clm_1", "accept", "--root", str(tmp_path), "--json"])
     assert result.exit_code == 1
-    assert json.loads(result.stdout)["error"]["code"] == "NODE_CHALLENGED"
+    error = json.loads(result.stdout)["error"]
+    assert error["code"] == "HUMAN_REVIEW_REQUIRED"
+    assert error["url"].endswith("/#/node/clm_1")
+
+
+def test_releasing_someone_elses_claim_needs_their_token(tmp_path: Path):
+    """Naming the holder's claimant and session proves nothing (#37)."""
+    runner.invoke(app, ["node", "create", "clm_1", "claim", "stmt", "--root", str(tmp_path)])
+    token = _claim_via_cli(tmp_path, "clm_1", "agent_a")
+
+    impostor = runner.invoke(app, ["node", "release", "clm_1", "--root", str(tmp_path), "--claimant", "agent_a", "--json"])
+    assert impostor.exit_code == 1 and json.loads(impostor.stdout)["error"]["code"] == "NOT_CLAIMANT"
+    hijack = runner.invoke(
+        app,
+        ["node", "submit", "clm_1", "--root", str(tmp_path), "--claimant", "agent_a", "--content", "x", "--rationale", "y", "--json"],
+    )
+    assert hijack.exit_code == 1 and json.loads(hijack.stdout)["error"]["code"] == "NOT_CLAIMANT"
+
+    owner = runner.invoke(
+        app, ["node", "release", "clm_1", "--root", str(tmp_path), "--claimant", "agent_a", "--claim-token", token, "--json"]
+    )
+    assert owner.exit_code == 0

@@ -11,7 +11,9 @@ from proof_cli.memory import list_memory_artifacts, record_memory
 from proof_cli.obligations import add_obligation, list_obligations
 from proof_cli.proof_state import load_state, record_theorem_usage, set_current_context, set_current_theorem
 from proof_cli.references import ReferenceRecord, ReferenceSourceType
-from proof_cli.storage import approve_reference, defer_reference, ensure_project, import_reference
+from _legacy_seed import seed_reference_review
+from proof_cli.references import ReferenceReviewStatus
+from proof_cli.storage import ensure_project, import_reference
 from proof_cli.theorems import add_theorem
 
 
@@ -61,7 +63,7 @@ def _seed_phase_two_project(tmp_path: Path) -> tuple[str, str, str]:
             notes="Callable standard result.",
         ),
     )
-    approve_reference(store, standard_reference.id, confirmed=True, rationale="standard reference is trusted")
+    seed_reference_review(store, standard_reference.id, ReferenceReviewStatus.approved)
 
     paper_reference = import_reference(
         store,
@@ -78,7 +80,7 @@ def _seed_phase_two_project(tmp_path: Path) -> tuple[str, str, str]:
             notes="Needs manual review before reuse.",
         ),
     )
-    defer_reference(store, paper_reference.id, confirmed=True, rationale="assumptions still need checking")
+    seed_reference_review(store, paper_reference.id, ReferenceReviewStatus.deferred)
 
     add_obligation(
         store,
@@ -133,7 +135,7 @@ def _seed_phase_three_project(tmp_path: Path) -> str:
             notes="Callable standard result.",
         ),
     )
-    approve_reference(store, standard_reference.id, confirmed=True, rationale="standard reference is trusted")
+    seed_reference_review(store, standard_reference.id, ReferenceReviewStatus.approved)
 
     add_theorem(
         store,
@@ -338,12 +340,12 @@ def test_phase_two_cli_paths_are_reachable_and_readable(tmp_path: Path):
             "defer",
             "--root",
             str(tmp_path),
-            "--rationale",
-            "still needs checking",
+            "--json",
         ],
     )
-    assert result.exit_code == 0
-    assert f"review:{paper_reference_id}:deferred" in result.stdout
+    # reference approval is retired (#37): trust comes from Reference-reviewing an imported_result node
+    assert result.exit_code == 1
+    assert json.loads(result.stdout)["error"]["code"] == "HUMAN_REVIEW_REQUIRED"
 
     result = runner.invoke(app, ["theorem", "extract", "thm_main", "--root", str(tmp_path)])
     assert result.exit_code == 0
@@ -632,7 +634,8 @@ def test_codex_surface_shows_guided_catalog_and_discovers_workspace_root(tmp_pat
     assert "proof codex status" in result.stdout
     assert "proof codex snapshot" in result.stdout
     assert "proof codex doctor" in result.stdout
-    assert "proof codex obligation resolve" in result.stdout
+    assert "proof codex obligation resolve" not in result.stdout  # a Human Review decision, not an agent command
+    assert "review app" in result.stdout
 
 
 def test_codex_surface_routes_real_read_only_commands(tmp_path: Path) -> None:
@@ -723,24 +726,12 @@ def test_codex_surface_runs_mutations_through_wrapper(tmp_path: Path) -> None:
     assert obligation_payload["required_for"] == "thm_tiny"
 
     resolve_result = runner.invoke(
-        app,
-        [
-            "codex",
-            "obligation",
-            "resolve",
-            obligation_payload["id"],
-            "--root",
-            str(tmp_path),
-            "--rationale",
-            "proved explicitly",
-        ],
+        app, ["codex", "obligation", "resolve", obligation_payload["id"], "--root", str(tmp_path), "--rationale", "proved explicitly"]
     )
-    assert resolve_result.exit_code == 0
-    assert "Persisted proof state: changed" in resolve_result.stdout
-    resolved_payload = json.loads(resolve_result.stdout.split("Result:\n", 1)[1])
-    assert resolved_payload["status"] == "resolved"
-    assert list_obligations(store)[-1].status.value == "resolved"
-    assert obligation_payload["id"] not in load_state(store).open_obligations
+    # discharging an obligation is a Human Review decision (#37): the codex surface refuses it
+    assert resolve_result.exit_code == 1
+    assert json.loads(resolve_result.stdout)["error"]["code"] == "HUMAN_REVIEW_REQUIRED"
+    assert list_obligations(store)[-1].status.value == "open"
 
     blocker_result = runner.invoke(
         app,
@@ -756,7 +747,7 @@ def test_codex_surface_runs_mutations_through_wrapper(tmp_path: Path) -> None:
     assert snapshot_payload["handoff_note"] == "checkpoint"
 
 
-def test_obligation_resolve_is_available_on_the_base_cli(tmp_path: Path) -> None:
+def test_obligation_resolve_is_a_human_review_decision_on_the_base_cli(tmp_path: Path) -> None:
     store = ensure_project(tmp_path)
     add_obligation(
         store,
@@ -767,16 +758,11 @@ def test_obligation_resolve_is_available_on_the_base_cli(tmp_path: Path) -> None
         ),
     )
 
-    result = runner.invoke(
-        app,
-        ["obligation", "resolve", "obl_base_resolve", "--root", str(tmp_path), "--rationale", "proved explicitly"],
-    )
+    result = runner.invoke(app, ["obligation", "resolve", "obl_base_resolve", "--root", str(tmp_path), "--json"])
 
-    assert result.exit_code == 0
-    payload = json.loads(result.stdout)
-    assert payload["status"] == "resolved"
-    assert list_obligations(store)[0].status.value == "resolved"
-    assert load_state(store).open_obligations == []
+    assert result.exit_code == 1
+    assert json.loads(result.stdout)["error"]["code"] == "HUMAN_REVIEW_REQUIRED"
+    assert list_obligations(store)[0].status.value == "open"
 
 
 def test_codex_surface_honors_root_precedence_for_mutations(tmp_path: Path, monkeypatch) -> None:
