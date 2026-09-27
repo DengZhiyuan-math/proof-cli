@@ -35,7 +35,9 @@ from proof_cli.obligations import add_obligation
 from proof_cli.proof_state import load_state, record_theorem_usage, set_current_context, set_current_theorem
 from proof_cli.references import ReferenceRecord, ReferenceSourceType
 from proof_cli.snapshot import create_snapshot
-from proof_cli.storage import approve_reference, ensure_project, import_reference, list_references, read_latest_snapshot
+from _legacy_seed import seed_reference_review
+from proof_cli.references import ReferenceReviewStatus
+from proof_cli.storage import ensure_project, import_reference, list_references, read_latest_snapshot
 from proof_cli.reusable_assets import ReusableAsset, ReusableAssetKind, ReusableAssetPayload, ReusableAssetProvenance, ReusableAssetReuseStatus, ReusableAssetTrustLevel
 from proof_cli.theorems import add_theorem, list_theorems
 from proof_cli.verification_ir import (
@@ -71,7 +73,7 @@ def _seed_real_project(tmp_path: Path) -> tuple[str, str]:
             notes="Callable standard result.",
         ),
     )
-    approve_reference(store, standard_reference.id, confirmed=True, rationale="standard reference is trusted")
+    seed_reference_review(store, standard_reference.id, ReferenceReviewStatus.approved)
 
     add_theorem(
         store,

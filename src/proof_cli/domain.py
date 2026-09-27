@@ -177,6 +177,12 @@ class ClaimRecord(BaseModel):
     released_at: datetime | None = None
     released_by: str | None = None
     release_reason: str | None = None
+    # The secret that proves ownership, returned once by `claim_node` and
+    # never stored (only its SHA-256 is): submitting or releasing as the
+    # owner needs it, so no agent can pass itself off as another session
+    # by naming its claimant and session ids (#37).
+    claim_token: str | None = None
+    has_token: bool = False
 
 
 class CandidateProofRecord(BaseModel):

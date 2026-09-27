@@ -54,10 +54,9 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 
 def _submitted_claim(store, node_id: str):
     create_node(store, node_id=node_id, kind="claim", statement=f"statement of {node_id}")
-    claim_node(store, node_id, claimant_id="agent_a", session_id="sess_1")
+    _claim_token = claim_node(store, node_id, claimant_id="agent_a", session_id="sess_1").claim_token
     return submit_candidate_proof(
-        store, node_id, claimant_id="agent_a", session_id="sess_1", scoping_rationale="scoped", content="proof text"
-    )
+        store, node_id, claimant_id="agent_a", session_id="sess_1", scoping_rationale="scoped", content="proof text", claim_token=_claim_token)
 
 
 def _accepted_then_resubmitted(store, node_id: str = "clm_1") -> None:
@@ -66,10 +65,9 @@ def _accepted_then_resubmitted(store, node_id: str = "clm_1") -> None:
     _submitted_claim(store, node_id)
     researcher(store).decide_acceptance(node_id, "accept")
     open_challenge(store, node_id, opened_by="agent_b", rationale="second look")
-    claim_node(store, node_id, claimant_id="agent_a", session_id="sess_2")
+    _claim_token = claim_node(store, node_id, claimant_id="agent_a", session_id="sess_2").claim_token
     submit_candidate_proof(
-        store, node_id, claimant_id="agent_a", session_id="sess_2", scoping_rationale="scoped", content="revised proof"
-    )
+        store, node_id, claimant_id="agent_a", session_id="sess_2", scoping_rationale="scoped", content="revised proof", claim_token=_claim_token)
     assert get_workflow_state(store, node_id) == "review-needed"
 
 
@@ -355,7 +353,7 @@ def test_generic_review_decide_refuses_evidence_and_revalidation_records(tmp_pat
         "trusted",
     ]
 
-    with pytest.raises(ValueError, match="proof node evidence review"):
+    with pytest.raises(ValueError, match="review app"):
         cmd_review_request("evidence_check", check.id, root=tmp_path)
 
 

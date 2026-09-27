@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import secrets
 import sqlite3
 import uuid
 from dataclasses import dataclass
@@ -52,6 +53,7 @@ from .signing import DecisionKind, DecisionPayload, PinnedDependency, SignedDeci
 from .storage import (
     ProjectStore,
     append_ledger_row,
+    claim_token_matches,
     append_event,
     get_active_claim,
     get_candidate_proof as _get_candidate_proof,
@@ -293,9 +295,16 @@ def split_node(
     if parent.kind == ProofMapNodeKind.imported_result:
         raise ProofMapError("IMMUTABLE_NODE", f"imported_result node {parent_id} cannot be split")
 
-    if get_acceptance_state(store, parent_id) == "rejected":
+    acceptance = get_acceptance_state(store, parent_id)
+    if acceptance == "rejected":
         raise ProofMapError(
             "NODE_REJECTED", f"node {parent_id} was Rejected and should not be pursued further; split is unavailable"
+        )
+    if acceptance in ("accepted", "unverifiable"):
+        # new dependencies would change the interface the researcher signed, and
+        # silently void the acceptance: that's a decision, not a split (#37)
+        raise ProofMapError(
+            "NODE_ACCEPTED", f"node {parent_id} is {acceptance}; splitting it would void that decision, so split is unavailable"
         )
 
     if not child_specs:
@@ -329,14 +338,31 @@ def split_node(
 
 
 def _claim_conflict(existing: ClaimRecord) -> ProofMapError:
+    # never the holder's session id: nothing that proves ownership leaks out
     return ProofMapError(
         "CLAIM_CONFLICT",
         f"node {existing.node_id} is already claimed by {existing.claimant_id}",
-        details={
-            "claimant_id": existing.claimant_id,
-            "session_id": existing.session_id,
-            "claimed_at": existing.claimed_at.isoformat(),
-        },
+        details={"claimant_id": existing.claimant_id, "claimed_at": existing.claimed_at.isoformat()},
+    )
+
+
+def _holds(store: ProjectStore, claim: ClaimRecord, claimant_id: str, session_id: str, claim_token: str | None) -> bool:
+    """Whether the caller owns `claim`: it presents the claim's secret token (#37).
+
+    Naming the claimant and session proves nothing — anyone can type them.
+    A claim made before tokens existed has none; for it, the old
+    (claimant_id, session_id) match still stands.
+    """
+    if claim.has_token:
+        return claim_token_matches(store, claim.id, claim_token)
+    return claim.claimant_id == claimant_id and claim.session_id == session_id
+
+
+def _not_claimant(node_id: str, claim: ClaimRecord) -> ProofMapError:
+    return ProofMapError(
+        "NOT_CLAIMANT",
+        f"the caller doesn't hold the active claim on {node_id} (its claim token is required)",
+        details={"claimant_id": claim.claimant_id, "claimed_at": claim.claimed_at.isoformat()},
     )
 
 
@@ -392,10 +418,17 @@ def claim_node(
     existing = get_active_claim(store, node_id)
     if existing is not None:
         if existing.claimant_id == claimant_id and existing.session_id == session_id:
-            return existing
+            return existing  # idempotent — but without the token: only the original caller has that
         raise _claim_conflict(existing)
 
-    claim = ClaimRecord(id=str(uuid.uuid4()), node_id=node_id, claimant_id=claimant_id, session_id=session_id)
+    claim = ClaimRecord(
+        id=str(uuid.uuid4()),
+        node_id=node_id,
+        claimant_id=claimant_id,
+        session_id=session_id,
+        claim_token=secrets.token_urlsafe(24),
+        has_token=True,
+    )
     try:
         insert_claim(store, claim)
     except sqlite3.IntegrityError as exc:
@@ -433,11 +466,12 @@ def release_node(
     force: bool = False,
     reason: str | None = None,
     signed_decision: SignedDecision | None = None,
+    claim_token: str | None = None,
 ) -> ClaimRecord:
     """Release the active claim on a node.
 
-    The owning (claimant_id, session_id) can release its own claim at any
-    time. Releasing someone else's claim (`force=True`) is a Human Review
+    The claim's holder — whoever presents its claim token — can release it
+    at any time. Releasing someone else's claim (`force=True`) is a Human Review
     decision: it needs a signed `force_release` decision naming that claim,
     with a reason as its rationale (ADR-0009), recorded as its own review
     row — an audit trail, never a hidden bypass. Claims never expire on
@@ -449,7 +483,7 @@ def release_node(
     if claim is None:
         raise ProofMapError("NO_ACTIVE_CLAIM", f"proof map node {node_id} has no active claim")
 
-    is_owner = claim.claimant_id == claimant_id and claim.session_id == session_id
+    is_owner = _holds(store, claim, claimant_id, session_id, claim_token)
 
     if force:
         signed = _require_signed(signed_decision, DecisionKind.force_release, claim.id)
@@ -461,15 +495,7 @@ def release_node(
         release_reason = reason or "released by claimant"
         event_kind = "proof_map_claim_released"
     else:
-        raise ProofMapError(
-            "NOT_CLAIMANT",
-            f"{claimant_id}/{session_id} does not hold the active claim on {node_id}",
-            details={
-                "claimant_id": claim.claimant_id,
-                "session_id": claim.session_id,
-                "claimed_at": claim.claimed_at.isoformat(),
-            },
-        )
+        raise _not_claimant(node_id, claim)
 
     released_at = utc_now()
     won_race = mark_claim_released(
@@ -549,6 +575,7 @@ def submit_candidate_proof(
     session_id: str,
     scoping_rationale: str,
     content: str,
+    claim_token: str | None = None,
 ) -> CandidateProofRecord:
     """Submit a Candidate proof for a claimed node.
 
@@ -578,16 +605,8 @@ def submit_candidate_proof(
         raise ProofMapError(
             "NO_ACTIVE_CLAIM", f"proof map node {node_id} has no active claim; claim it before submitting"
         )
-    if claim.claimant_id != claimant_id or claim.session_id != session_id:
-        raise ProofMapError(
-            "NOT_CLAIMANT",
-            f"{claimant_id}/{session_id} does not hold the active claim on {node_id}",
-            details={
-                "claimant_id": claim.claimant_id,
-                "session_id": claim.session_id,
-                "claimed_at": claim.claimed_at.isoformat(),
-            },
-        )
+    if not _holds(store, claim, claimant_id, session_id, claim_token):
+        raise _not_claimant(node_id, claim)
 
     version = next_candidate_proof_version(store, node_id)
     proof_id = str(uuid.uuid4())
