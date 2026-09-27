@@ -260,6 +260,7 @@ CREATE TABLE IF NOT EXISTS reviewer_keys (
   alg INTEGER NOT NULL,
   fingerprint TEXT NOT NULL,
   display_name TEXT NOT NULL,
+  aaguid TEXT,
   signed_decision TEXT NOT NULL,
   prev_row_hash TEXT NOT NULL,
   created_at TEXT NOT NULL
@@ -1695,6 +1696,7 @@ _REVIEWER_KEY_COLUMNS = (
     "alg",
     "fingerprint",
     "display_name",
+    "aaguid",
     "signed_decision",
     "created_at",
 )
@@ -1731,7 +1733,7 @@ def chain_versions(store: ProjectStore) -> tuple:
 def insert_reviewer_key_row(conn: sqlite3.Connection, row: dict) -> None:
     """Append one enrollment/revocation row to the Reviewer key registry, hash-linked."""
     columns = (*_REVIEWER_KEY_COLUMNS, "prev_row_hash")
-    values = [row[column] for column in _REVIEWER_KEY_COLUMNS] + [_last_row_hash(conn, "reviewer_keys")]
+    values = [row.get(column) for column in _REVIEWER_KEY_COLUMNS] + [_last_row_hash(conn, "reviewer_keys")]
     conn.execute(
         f"INSERT INTO reviewer_keys({', '.join(columns)}) VALUES ({', '.join('?' for _ in columns)})",
         values,
