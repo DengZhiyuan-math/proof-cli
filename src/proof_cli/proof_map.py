@@ -23,6 +23,8 @@ from .authority import (
     decision_row_for,
     decision_rows,
     human_review_required,
+    is_legacy_review,
+    is_legacy_row,
     ledger_entries,
     legacy_handled,
     list_authority_warnings,
@@ -1280,9 +1282,11 @@ def _acceptance(store: ProjectStore, node: ProofMapNode) -> tuple[str, _Counted 
 
     Only the *newest* decision is ever read (B): if it doesn't verify, the
     node reads `unverifiable` — never an older decision it superseded. A
-    Reject is terminal however it's recorded, and bound to the node, not to
-    the proof text: a later edit, an unsigned legacy row, a signature that
-    no longer verifies — none of them reopen a Rejected node.
+    signed Reject, or an unsigned legacy one, is terminal and bound to the
+    node, not to the proof text: a later edit or a later row never reopens
+    it. Any other Reject that doesn't verify was forged or tampered with:
+    it's only the newest decision, so the node reads `unverifiable` and a
+    signed decision on the current proof supersedes it (#35 H3).
     """
     rows = [
         row
@@ -1291,13 +1295,15 @@ def _acceptance(store: ProjectStore, node: ProofMapNode) -> tuple[str, _Counted 
     ]
     if not rows:
         return "unreviewed", None, None
-    # Reject is terminal, so legitimately nothing ever follows one: any
-    # Reject row keeps the node rejected, even if something (a replay, a
+    # Reject is terminal, so legitimately nothing ever follows one: a Reject
+    # that counts keeps the node rejected, even if something (a replay, a
     # forged row) was appended after it.
-    reject = next((row for row in reversed(rows) if row["decision"] == ReviewGovernanceState.rejected.value), None)
-    if reject is not None:
-        verdict = verify_decision_row(store, reject["id"])
-        return "rejected", _Counted(reject, verdict), None if verdict.status == "verified" else verdict.reason
+    for row in reversed(rows):
+        if row["decision"] != ReviewGovernanceState.rejected.value:
+            continue
+        verdict = verify_decision_row(store, row["id"])
+        if verdict.status == "verified" or is_legacy_row(store, row):
+            return "rejected", _Counted(row, verdict), None if verdict.status == "verified" else verdict.reason
     latest = _Counted(rows[-1], verify_decision_row(store, rows[-1]["id"]))
     if latest.verdict.status != "verified":
         return "unverifiable", latest, latest.verdict.reason
@@ -1471,9 +1477,10 @@ def decide_reference_review(
 
 
 def _no_longer_callable(store: ProjectStore, node_id: str) -> bool:
-    """Whether any Reference review row says `no-longer-callable`: terminal however it's recorded, like a Reject."""
+    """Whether a Reference review row that counts says `no-longer-callable`: signed or legacy, terminal like a Reject."""
     return any(
         row["decision"] == ReviewGovernanceState.rejected.value
+        and (verify_decision_row(store, row["id"]).status == "verified" or is_legacy_row(store, row))
         for row in decision_rows(store, _ACCEPTANCE_OBJECT_TYPE, node_id, ReviewRecordKind.reference_review.value)
     )
 
@@ -2198,6 +2205,8 @@ def list_legacy_decisions(store: ProjectStore) -> list[LegacyDecision]:
     for record in list_review_records(store):
         if record.signed or record.kind is None or record.id in handled:
             continue
+        if not is_legacy_review(store, record.id):
+            continue  # appended after the project met ADR-0009: forged, however it's dated
         kind = _LEGACY_KINDS.get(record.kind.value)
         decision = _LEGACY_PAYLOAD_DECISIONS.get((record.kind.value, record.decision.value))
         if kind is None or decision is None:

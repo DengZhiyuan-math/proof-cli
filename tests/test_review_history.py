@@ -411,9 +411,9 @@ def _migrated_but_unsigned(store, node_id: str, review_id: str, decision: Review
 
 def _as_pre_review_history_project(store) -> None:
     """Make a fresh test project look like one created before #33, whose
-    one-shot migration hasn't run yet."""
+    one-shot migration hasn't run yet (nor, then, fixed its legacy cutoff)."""
     conn = store.connect()
-    conn.execute("DELETE FROM project_meta WHERE key = ?", (REVIEW_HISTORY_MIGRATED_KEY,))
+    conn.execute("DELETE FROM project_meta WHERE key IN (?, 'legacy_review_cutoff')", (REVIEW_HISTORY_MIGRATED_KEY,))
     conn.commit()
     conn.close()
 

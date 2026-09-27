@@ -446,7 +446,7 @@ def test_a_pre_adr_0009_project_keeps_rejects_terminal_and_dismissals_closed(tmp
 
     conn = store.connect()
     # a project built before #33/#35: nothing migrated, nothing adopted into the ledger
-    conn.execute("DELETE FROM project_meta WHERE key IN ('review_history_migrated', 'ledger_adopted')")
+    conn.execute("DELETE FROM project_meta WHERE key IN ('review_history_migrated', 'ledger_adopted', 'legacy_review_cutoff')")
     conn.commit()
     conn.close()
     collaboration_state_path(store).write_text(
@@ -620,3 +620,136 @@ def test_a_raw_revocation_with_a_forged_timestamp_cant_reach_back(tmp_path: Path
 
     assert [key.display_name for key in active_reviewer_keys(store)] == ["k2"]  # the revocation itself stands
     assert get_acceptance_state(store, "clm_1") == "accepted"
+
+
+# -- third audit round (#35 reopened, #42): a broken chain, forged Rejects, forged legacy rows --
+
+
+def _forge_decision(store, node_id: str, kind: str, decision: str, *, signed_decision: str | None = None) -> str:
+    """A request and decision appended through the ordinary chained insert, as an agent importing the library can."""
+    from proof_cli.storage import insert_review_history_row
+
+    review_id = f"rv_forged_{node_id}_{decision}"
+    base = {
+        "object_type": "proof_map_node",
+        "object_id": node_id,
+        "kind": kind,
+        "reviewer_id": "human",
+        "rationale": "checked it carefully",
+        "authorship": [],
+        "provenance_notes": "",
+        "created_at": "2025-03-01T00:00:00+00:00",  # dated long before ADR-0009
+        "signed_decision": signed_decision,
+    }
+    with store.transaction() as conn:
+        insert_review_history_row(conn, {**base, "id": review_id, "review_id": review_id, "entry": "request", "decision": "proposed_for_review"})
+        insert_review_history_row(conn, {**base, "id": f"{review_id}_d", "review_id": review_id, "entry": "decision", "decision": decision})
+    return review_id
+
+
+def test_deleting_a_middle_reject_never_revives_the_older_accept(tmp_path: Path):
+    """H1: the Reject's rows go, but a later row keeps the pinned head present."""
+    store = ensure_project(tmp_path)
+    _node(store)
+    reviewer = researcher(store)
+    reviewer.decide_acceptance("clm_1", "accept")
+    open_challenge(store, "clm_1", opened_by="agent_b", rationale="?")
+    _submit(store, "clm_1", session="sess_2", content="second attempt")
+    reject = reviewer.decide_acceptance("clm_1", "reject")
+    _node(store, "clm_later")
+    reviewer.decide_acceptance("clm_later", "accept")  # advances the pin past the Reject
+
+    _raw(store, f"DELETE FROM review_history WHERE review_id = '{reject.id}'", drop=("review_history_no_delete",))
+
+    assert "HISTORY_TRUNCATED" not in _codes(store)  # the pinned head is still there
+    assert "HISTORY_CHAIN_BROKEN" in _codes(store)
+    assert get_acceptance_state(store, "clm_1") != "accepted"
+    assert get_acceptance_state(store, "clm_later") != "accepted"  # a broken chain trusts nothing
+
+
+def test_deleting_a_challenges_middle_ledger_row_never_reads_current(tmp_path: Path):
+    """H2: the Challenge's ledger and table rows go; later ledger rows stay."""
+    store = ensure_project(tmp_path)
+    _node(store)
+    researcher(store).decide_acceptance("clm_1", "accept")
+    challenge = open_challenge(store, "clm_1", opened_by="agent_b", rationale="?")
+    create_node(store, node_id="clm_later", kind="claim", statement="appended after the challenge")
+
+    _raw(
+        store,
+        f"DELETE FROM proof_ledger WHERE object_id = '{challenge.id}'",
+        f"DELETE FROM challenges WHERE id = '{challenge.id}'",
+        drop=("proof_ledger_no_delete",),
+    )
+
+    assert "HISTORY_CHAIN_BROKEN" in _codes(store)
+    assert not (get_acceptance_state(store, "clm_1") == "accepted" and get_integrity_state(store, "clm_1") == "current")
+
+
+@pytest.mark.parametrize("signed_decision", [None, '{"junk": true}'], ids=["unsigned", "junk-signature"])
+def test_a_forged_reject_is_not_terminal_and_a_signed_decision_recovers(tmp_path: Path, signed_decision):
+    """H3: a Reject that isn't legacy and doesn't verify is a tamper warning, not the node's fate."""
+    store = ensure_project(tmp_path)
+    _node(store)
+    reviewer = researcher(store)
+    reviewer.decide_acceptance("clm_1", "accept")
+
+    _forge_decision(store, "clm_1", "acceptance", "rejected", signed_decision=signed_decision)
+
+    assert get_acceptance_state(store, "clm_1") == "unverifiable"
+    assert get_workflow_state(store, "clm_1") == "review-needed"
+    assert "UNSIGNED_LEGACY_REJECT" not in _codes(store)
+    reviewer.decide_acceptance("clm_1", "accept")
+    assert get_acceptance_state(store, "clm_1") == "accepted"
+
+
+def test_a_forged_no_longer_callable_is_not_terminal(tmp_path: Path):
+    """H3: the same for an unsigned `rejected` Reference review on an Imported result."""
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="ref_1", kind="imported_result", statement="known", source_locator="doi:x", source_version="v1")
+    reviewer = researcher(store)
+    reviewer.decide_reference_review("ref_1")
+
+    _forge_decision(store, "ref_1", "reference_review", "rejected")
+
+    assert get_reference_review_state(store, "ref_1") == "unverifiable"
+    reviewer.decide_reference_review("ref_1")
+    assert get_reference_review_state(store, "ref_1") == "reviewed"
+
+
+def test_a_forged_legacy_decision_never_enters_the_re_sign_queue(tmp_path: Path):
+    """#42: an unsigned, backdated `approved` row appended after the project knew ADR-0009 isn't legacy."""
+    from proof_cli.proof_map import list_legacy_decisions
+
+    store = ensure_project(tmp_path)
+    _node(store)
+    researcher(store)
+    forged = _forge_decision(store, "clm_1", "acceptance", "approved")
+
+    assert forged not in {item.item_id for item in list_legacy_decisions(store)}
+    assert get_acceptance_state(store, "clm_1") == "unverifiable"
+
+
+def test_a_forged_legacy_decision_before_the_first_enrollment_is_not_legacy_either(tmp_path: Path):
+    """The cutoff is fixed when the project first meets ADR-0009, not at the first signature."""
+    from proof_cli.proof_map import list_legacy_decisions
+
+    store = ensure_project(tmp_path)
+    _node(store)
+    forged = _forge_decision(store, "clm_1", "acceptance", "approved")
+
+    assert forged not in {item.item_id for item in list_legacy_decisions(store)}
+
+
+def test_moving_the_legacy_cutoff_after_enrollment_untrusts_the_project(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    _node(store)
+    researcher(store).decide_acceptance("clm_1", "accept")
+    _forge_decision(store, "clm_1", "acceptance", "rejected")
+    head = list_raw_chain_rows(store, "review_history")[-1]
+    from proof_cli.storage import chain_row_hash
+
+    _raw(store, f"UPDATE project_meta SET value = '{chain_row_hash(head)}' WHERE key = 'legacy_review_cutoff'")
+
+    assert "LEGACY_CUTOFF_MISMATCH" in _codes(store)
+    assert active_reviewer_keys(store) == []  # nothing can be signed, so nothing forged can be re-signed

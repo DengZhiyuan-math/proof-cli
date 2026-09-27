@@ -516,10 +516,10 @@ def test_an_edit_in_place_is_seen_by_a_long_running_process(tmp_path: Path):
 
     _tamper(store, f"UPDATE review_history SET decision = 'rejected' WHERE review_id = '{record.id}' AND entry = 'decision'")
 
-    # a Reject row, however it got there, keeps the node terminal — at worst
-    # a forged one is denial of service, never an escalation — and is flagged
-    assert get_acceptance_state(store, "clm_1") == "rejected"
-    assert "UNSIGNED_LEGACY_REJECT" in _codes(store)
+    # a Reject that doesn't verify and isn't legacy was forged: never terminal
+    # (#35 H3), but never the stale 'accepted' either
+    assert get_acceptance_state(store, "clm_1") == "unverifiable"
+    assert "UNSIGNED_LEGACY_REJECT" not in _codes(store)
     # the newest row: nothing links after it, so it's the signature check that catches it
     assert "UNVERIFIABLE_REVIEW_RECORD" in _codes(store)
 

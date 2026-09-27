@@ -19,6 +19,7 @@ from .storage import (
     active_transaction,
     append_event,
     collaboration_state_path,
+    fix_legacy_review_cutoff,
     in_transaction,
     insert_review_history_row,
     is_review_history_migrated,
@@ -663,6 +664,7 @@ def _migrate_legacy_review_records(store: ProjectStore, conn: sqlite3.Connection
 def _run_review_history_migration(store: ProjectStore, conn: sqlite3.Connection, legacy: list[ReviewRecord]) -> None:
     migrated = [record.id for record in legacy if _append_legacy_record(conn, record)]
     mark_review_history_migrated(conn)
+    fix_legacy_review_cutoff(conn)
     if migrated:
         append_event(
             store,
