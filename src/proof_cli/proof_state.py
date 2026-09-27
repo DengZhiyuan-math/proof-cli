@@ -318,13 +318,6 @@ def note_unresolved_trust_call(store: ProjectStore, theorem_id: str) -> ProjectS
     return save_state(store, state, message=f"noted unresolved trust-sensitive call {theorem_id}")
 
 
-def clear_unresolved_trust_call(store: ProjectStore, theorem_id: str) -> ProjectState:
-    state = load_state(store)
-    if theorem_id in state.unresolved_trust_sensitive_calls:
-        state.unresolved_trust_sensitive_calls.remove(theorem_id)
-    return save_state(store, state, message=f"cleared unresolved trust-sensitive call {theorem_id}")
-
-
 def build_snapshot(store: ProjectStore, handoff_note: str = "") -> ProjectSnapshot:
     from .analysis import build_project_diagnostic_report
 

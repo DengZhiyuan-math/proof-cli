@@ -1,21 +1,13 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from .blockers import integrate_verification_result as _integrate_blocker_result
-from .domain import TheoremContract, utc_now
-from .obligations import block_obligation, close_obligation
-from .proof_state import (
-    clear_unresolved_trust_call,
-    load_state,
-    note_unresolved_trust_call,
-    record_verification_result_entry,
-    save_state,
-)
-from .storage import ProjectStore, append_event, get_contract, store_contract
+from .domain import EvidenceOutcome, utc_now
+from .proof_state import load_state, record_verification_result_entry, save_state
+from .storage import ProjectStore, append_event
 from .verification_ir import (
     VerificationFragment,
     VerificationFragmentStatus,
@@ -83,72 +75,25 @@ def _default_effect(
     return "neutral"
 
 
+# A machine check's own status as an Evidence check outcome. Only what the
+# machine did counts: the IR's review statuses are someone's judgment, and
+# read as inconclusive here (ADR-0004 point 5).
+_EVIDENCE_OUTCOMES = {
+    VerificationFragmentStatus.machine_checked: EvidenceOutcome.passed,
+    VerificationFragmentStatus.backend_failed: EvidenceOutcome.failed,
+    VerificationFragmentStatus.translation_failed: EvidenceOutcome.error,
+    VerificationFragmentStatus.stale_after_change: EvidenceOutcome.stale,
+}
+VERIFY_RUN_CHECKER = "proof verify run"
+
+
+def evidence_outcome_for(status: VerificationFragmentStatus) -> EvidenceOutcome:
+    """The Evidence check outcome a machine check with this status records (#27)."""
+    return _EVIDENCE_OUTCOMES.get(status, EvidenceOutcome.inconclusive)
+
+
 def _record_or_default(value: str | None, fallback: str | None) -> str | None:
     return value if value is not None else fallback
-
-
-def _update_contract(
-    store: ProjectStore,
-    theorem_id: str | None,
-    record: VerificationResultRecord,
-) -> None:
-    if theorem_id is None:
-        return
-    contract = get_contract(store, theorem_id)
-    if contract is None:
-        return
-    entry = record.summary()
-    if entry not in contract.local_usage_notes:
-        contract.local_usage_notes.append(entry)
-    if record.notes:
-        contract.notes = record.notes if not contract.notes else f"{contract.notes}; {record.notes}"
-    contract.updated_at = utc_now()
-    store_contract(store, contract)
-    append_event(
-        store,
-        "verification_result_attached_to_contract",
-        f"attached verification result {record.result.id} to theorem contract {theorem_id}",
-        entity_id=theorem_id,
-        payload={"contract": contract.model_dump(mode="json"), "verification_result": record.model_dump(mode="json")},
-    )
-
-
-def _update_obligation(
-    store: ProjectStore,
-    obligation_id: str | None,
-    record: VerificationResultRecord,
-) -> None:
-    if obligation_id is None:
-        return
-    if record.effect == "strengthening":
-        close_obligation(
-            store,
-            obligation_id,
-            rationale=record.summary(),
-            route_notes=f"machine-check result {record.result.id}",
-        )
-        return
-
-    reason = record.summary()
-    block_obligation(
-        store,
-        obligation_id,
-        reason,
-        route_notes=f"machine-check result {record.result.id}",
-    )
-
-
-def _update_state_for_effect(
-    store: ProjectStore,
-    theorem_id: str | None,
-    record: VerificationResultRecord,
-) -> None:
-    if theorem_id is None:
-        return
-    if record.effect == "strengthening":
-        clear_unresolved_trust_call(store, theorem_id)
-    elif record.effect == "weakening":
-        note_unresolved_trust_call(store, theorem_id)
 
 
 def record_verification_result(
@@ -196,12 +141,9 @@ def record_verification_result(
         payload={"verification_result": record.model_dump(mode="json")},
     )
 
-    _update_contract(store, theorem_id, record)
-    _update_obligation(store, obligation_id, record)
-    _update_state_for_effect(store, theorem_id, record)
-
-    if blocker_id is not None:
-        _integrate_blocker_result(store, blocker_id, record)
+    # Recorded, never acted on: a checker's output is advisory, like an
+    # Evidence check. It closes, blocks or resolves nothing, and writes to no
+    # theorem contract, obligation or blocker; the record above links them (#27).
 
     return record
 
@@ -214,7 +156,9 @@ def list_verification_results(store: ProjectStore) -> list[VerificationResultRec
 
 
 __all__ = [
+    "VERIFY_RUN_CHECKER",
     "VerificationResultRecord",
+    "evidence_outcome_for",
     "list_verification_results",
     "record_verification_result",
 ]

@@ -1468,13 +1468,20 @@ def verify_queue(source_id: str, root: str = ".", backend_target: str = "", rout
 
 
 @verify_app.command("run")
-def verify_run(source_id: str, root: str = ".", backend_target: str = "", notes: str = "") -> None:
-    typer.echo(
-        render_verification_output(
-            f"verify run {source_id}",
-            cmd_proof_verify_run(source_id, _root(root), backend_target=backend_target, notes=notes),
-        )
-    )
+def verify_run(
+    source_id: str,
+    root: str = ".",
+    backend_target: str = "",
+    notes: str = "",
+    candidate_proof: str = typer.Option("", "--candidate-proof", help="Also record the outcome as an (advisory) Evidence check on this Candidate proof"),
+) -> None:
+    """Run a machine check. Its result is advisory: it never closes, blocks or resolves anything."""
+    try:
+        output = cmd_proof_verify_run(source_id, _root(root), backend_target=backend_target, notes=notes, candidate_proof_id=candidate_proof)
+    except ValueError as exc:
+        typer.echo(f"Error: {exc}")
+        raise typer.Exit(code=1)
+    typer.echo(render_verification_output(f"verify run {source_id}", output))
 
 
 @verify_app.command("status")
