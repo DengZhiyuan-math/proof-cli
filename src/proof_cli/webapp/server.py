@@ -35,6 +35,8 @@ from pydantic import ValidationError
 from .. import proof_map
 from ..authority import (
     ACKNOWLEDGE,
+    ENROLL,
+    REVOKE,
     AuthorityError,
     EnrollmentRequest,
     acknowledge_registry,
@@ -43,6 +45,7 @@ from ..authority import (
     list_reviewer_keys,
     project_origin,
     registry_status,
+    revoke_reviewer_key,
 )
 from ..collaboration import list_review_records
 from ..domain import ProofMapNodeKind
@@ -59,7 +62,7 @@ from ..signing import (
     public_key_fingerprint,
     verify_registration,
 )
-from ..storage import ProjectStore, chain_head, get_current_candidate_proof, read_project_instance_id, read_state
+from ..storage import ProjectStore, chain_head, get_active_claim, get_claim, get_current_candidate_proof, list_foreign_attestations, read_project_instance_id, read_state
 
 _STATIC = resources.files("proof_cli.webapp") / "static"
 _CONTENT_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8"}
@@ -90,6 +93,73 @@ def _warnings_for(warnings: list, *ids: str) -> list[dict]:
         for warning in warnings
         if wanted & {str(value) for value in warning.details.values() if isinstance(value, str)}
     ]
+
+
+def _remedy(dependency: dict) -> str | None:
+    """What a lagging or changed pin needs: a Lightweight re-review, or a new Candidate proof (#23, #24)."""
+    pin = dependency["pin"]
+    if pin is None:
+        return None
+    if dependency["current"] is False:
+        return "new-candidate-proof"
+    if dependency["accepted_version"] is not None and pin["pinned_version"] != dependency["accepted_version"]:
+        return "lightweight-re-review"
+    return None
+
+
+def _available_decisions(store: ProjectStore, node, *, claim, proof, dependencies: list[dict], challenges: list) -> list[dict]:
+    """Every Human Review decision the researcher could sign on this node's page right now.
+
+    Only what to offer: whether one may be made is checked again, with the
+    signature, by the service function each lands on.
+    """
+    offered: list[dict] = []
+    if node.kind == ProofMapNodeKind.imported_result:
+        if proof_map.get_reference_review_state(store, node.id) != "no-longer-callable":
+            offered += [{"kind": "reference_review", "target_id": node.id, "decision": d} for d in proof_map.REFERENCE_REVIEW_DECISIONS]
+    else:
+        if proof_map.get_workflow_state(store, node.id) == "review-needed":
+            offered += [{"kind": "acceptance", "target_id": node.id, "decision": d.value} for d in proof_map.AcceptanceDecision]
+        accepted = proof_map.get_acceptance_state(store, node.id) == "accepted"
+        if node.kind == ProofMapNodeKind.claim and accepted and not any(c.status.value == "open" for c in challenges):
+            offered.append({"kind": "promote", "target_id": node.id, "decision": "promote"})
+        for dependency in dependencies:
+            # a changed interface needs a new Candidate proof, not a re-review (#24): the page says so
+            if accepted and dependency["remedy"] == "lightweight-re-review":
+                offered.append({"kind": "dependency_revalidation", "target_id": node.id, "decision": "reaffirmed", "dependency_id": dependency["node_id"]})
+        if proof is not None:
+            for check in proof_map.list_evidence_checks(store, proof.id):
+                offered += [{"kind": "evidence_review", "target_id": check.id, "decision": d} for d in ("trusted", "unusable")]
+    for challenge in challenges:
+        if challenge.status.value == "open":
+            offered.append({"kind": "challenge_resolution", "target_id": challenge.id, "decision": "dismissed"})
+    if claim is not None:
+        offered.append({"kind": "force_release", "target_id": claim.id, "decision": "force-release", "claimant_id": claim.claimant_id})
+    return offered
+
+
+_REMAKEABLE_KINDS = {
+    DecisionKind.acceptance.value,
+    DecisionKind.reference_review.value,
+    DecisionKind.evidence_review.value,
+    DecisionKind.challenge_resolution.value,
+    DecisionKind.promote.value,
+}
+
+
+def _foreign_attestations(store: ProjectStore, decisions: list[dict], *object_ids: str) -> list[dict]:
+    """Another project's signed decisions on these objects: shown, never counted (ADR-0009 point 6).
+
+    `accept_as_local` is the same decision, to be made here and signed with
+    a local passkey — offered only while it is one this page could make now.
+    """
+    shown = []
+    for attestation in list_foreign_attestations(store, object_ids=object_ids):
+        same = {"kind": attestation.kind, "target_id": attestation.object_id, "decision": attestation.decision}
+        # a re-review names its dependency and a force-release a local claim: neither carries over
+        offered = attestation.kind in _REMAKEABLE_KINDS and next((d for d in decisions if {k: d.get(k) for k in same} == same), None)
+        shown.append({**attestation.model_dump(mode="json"), "accept_as_local": same if offered else None})
+    return shown
 
 
 class ReviewApp:
@@ -137,7 +207,25 @@ class ReviewApp:
             ],
             "warnings": [warning.model_dump(mode="json") for warning in warnings],
             "pending": self._pending(),
+            "foreign_attestations": [
+                {**attestation.model_dump(mode="json"), "node_id": self._node_of(attestation.object_type, attestation.object_id)}
+                for attestation in list_foreign_attestations(self.store)
+            ],
         }
+
+    def _node_of(self, object_type: str, object_id: str) -> str | None:
+        """The node whose page shows a decision on this object."""
+        if object_type == "challenge":
+            challenge = proof_map.get_challenge(self.store, object_id)
+            return challenge.target_node_id if challenge else None
+        if object_type == "evidence_check":
+            check = proof_map.get_evidence_check(self.store, object_id)
+            proof = proof_map.get_candidate_proof(self.store, check.candidate_proof_id) if check else None
+            return proof.node_id if proof else None
+        if object_type == "claim":
+            claim = get_claim(self.store, object_id)
+            return claim.node_id if claim else None
+        return object_id
 
     def _pending(self) -> list[dict]:
         pending = []
@@ -146,8 +234,8 @@ class ReviewApp:
             if node.id in legacy:
                 continue  # re-sign or decline it on the legacy list, with its original context
             if node.kind == ProofMapNodeKind.imported_result:
-                if proof_map.get_reference_review_state(self.store, node.id) != "reviewed":
-                    pending.append({"node_id": node.id, "kind": "reference_review", "decisions": ["reference-review"], "statement": node.statement})
+                if proof_map.get_reference_review_state(self.store, node.id) in ("unreviewed", "unverifiable"):
+                    pending.append({"node_id": node.id, "kind": "reference_review", "decisions": list(proof_map.REFERENCE_REVIEW_DECISIONS), "statement": node.statement})
                 continue
             if proof_map.get_workflow_state(self.store, node.id) == "review-needed":
                 proof = get_current_candidate_proof(self.store, node.id)
@@ -213,12 +301,20 @@ class ReviewApp:
                     "node_id": dependency_id,
                     "statement": dependency.statement if dependency else None,
                     "pin": pin.model_dump(mode="json") if pin else None,
+                    # the pin lag a Lightweight re-review is about (#23/#24)
+                    "accepted_version": proof_map.get_accepted_version(store, dependency_id),
                     "current": proof_map.dependency_pin_is_current(store, pin) if pin else None,
                 }
             )
+            dependencies[-1]["remedy"] = _remedy(dependencies[-1])
         challenges = proof_map.list_challenges(store, target_node_id=node_id)
         warnings = proof_map.list_integrity_warnings(store)
+        claim = get_active_claim(store, node_id)
+        decisions = _available_decisions(store, node, claim=claim, proof=proof, dependencies=dependencies, challenges=challenges)
         return {
+            # who holds it, for a force-release; never the session id, which a
+            # pre-token claim still accepts as proof of holding it (#37)
+            "claim": {"id": claim.id, "claimant_id": claim.claimant_id, "claimed_at": claim.claimed_at.isoformat()} if claim else None,
             "node": node.model_dump(mode="json"),
             "workflow_state": proof_map.get_workflow_state(store, node_id),
             "acceptance_state": (
@@ -236,6 +332,8 @@ class ReviewApp:
                 for record in list_review_records(store, object_type="proof_map_node", object_id=node_id)
             ],
             "warnings": _warnings_for(warnings, node_id, *(challenge.id for challenge in challenges)),
+            "decisions": decisions,
+            "foreign_attestations": _foreign_attestations(store, decisions, node_id, *(challenge.id for challenge in challenges), *(check["id"] for check in checks)),
         }
 
     # -- decisions: prepare (no authority), then decide (a fresh assertion) -------
@@ -380,6 +478,83 @@ class ReviewApp:
         key = enroll_reviewer_key(self.store, request)
         return {**key.model_dump(mode="json"), "reviewer_id": key.reviewer_id}
 
+    # -- revoking a key: signed by one that's already enrolled (#38) --------------
+
+    def revoke_prepare(self, body: dict) -> dict:
+        fingerprint = str(body.get("fingerprint") or "")
+        key = next((key for key in list_reviewer_keys(self.store) if key.fingerprint == fingerprint and key.revoked_seq is None), None)
+        if key is None:
+            raise RequestError(HTTPStatus.NOT_FOUND, "NOT_ENROLLED", f"no active Reviewer key {fingerprint}")
+        payload = build_decision_payload(
+            self.store, DecisionKind.reviewer_enrollment, fingerprint, REVOKE, credential_id=key.credential_id,
+            rationale=str(body.get("rationale") or ""),
+        )
+        return self._to_sign([payload])
+
+    def revoke(self, body: dict) -> dict:
+        payloads, batch, assertion = self._signed_batch(body)
+        if len(payloads) != 1 or payloads[0].kind != DecisionKind.reviewer_enrollment or payloads[0].decision != REVOKE:
+            raise RequestError(HTTPStatus.BAD_REQUEST, "NOT_A_REVOCATION", "this endpoint only takes one signed key revocation")
+        key = revoke_reviewer_key(self.store, SignedDecision(payload=payloads[0], batch=batch, assertion=assertion))
+        return {**key.model_dump(mode="json"), "reviewer_id": key.reviewer_id}
+
+    # -- enrolling another project's reviewer key: signed by a local key (#38) ------
+
+    def enroll_foreign_prepare(self, body: dict) -> dict:
+        """Enroll the key behind a foreign attestation. It then signs decisions here from now on;
+        what it signed elsewhere never counts. Never a project's first key: that one proves
+        possession by signing its own enrollment, on this app."""
+        fingerprint = str(body.get("fingerprint") or "")
+        # only a key whose signature checked out: never one a bundle merely names
+        signer = next(
+            (a for a in list_foreign_attestations(self.store) if a.signer_fingerprint == fingerprint and a.signature == "valid"),
+            None,
+        )
+        if signer is None:
+            raise RequestError(HTTPStatus.NOT_FOUND, "UNKNOWN_FOREIGN_KEY", f"no foreign attestation carries a valid signature by {fingerprint}")
+        keys = list_reviewer_keys(self.store)
+        if not [key for key in keys if key.revoked_seq is None]:
+            raise RequestError(HTTPStatus.CONFLICT, "NO_LOCAL_KEY", "enroll a passkey of your own first; it will sign the other reviewer's enrollment")
+        if any(key.fingerprint == fingerprint for key in keys):
+            raise RequestError(HTTPStatus.CONFLICT, "ALREADY_ENROLLED", f"{fingerprint} is already enrolled here (or was, and is revoked)")
+        payload = build_decision_payload(
+            self.store, DecisionKind.reviewer_enrollment, fingerprint, ENROLL, credential_id=signer.signer_credential_id,
+            rationale=f"enrolling {signer.signer_name or 'a reviewer'} from project {signer.source_project_id}",
+        )
+        token = self._remember(
+            {
+                "step": "foreign",
+                "credential_id": signer.signer_credential_id,
+                "public_key_spki": signer.signer_public_key_spki,
+                "alg": signer.signer_alg,
+                "display_name": f"{signer.signer_name or 'reviewer'} (from {signer.source_project_id})",
+                "payload": payload.model_dump(mode="json"),
+            }
+        )
+        return {"token": token, **self._to_sign([payload])}
+
+    def enroll_foreign(self, body: dict) -> dict:
+        ceremony = self._recall(str(body.get("token", "")))
+        if ceremony.get("step") != "foreign":
+            raise RequestError(HTTPStatus.BAD_REQUEST, "CEREMONY_EXPIRED", "not a foreign-key enrollment in progress")
+        payload = DecisionPayload.model_validate(ceremony["payload"])
+        try:
+            assertion = WebAuthnAssertion.model_validate(body["assertion"])
+        except (KeyError, ValidationError) as exc:
+            raise RequestError(HTTPStatus.BAD_REQUEST, "HUMAN_REVIEW_REQUIRED", "a passkey assertion is required") from exc
+        key = enroll_reviewer_key(
+            self.store,
+            EnrollmentRequest(
+                credential_id=ceremony["credential_id"],
+                public_key_spki=ceremony["public_key_spki"],
+                alg=ceremony["alg"],
+                aaguid=None,
+                display_name=ceremony["display_name"],
+                signed_decision=SignedDecision(payload=payload, batch=[payload_hash(payload)], assertion=assertion),
+            ),
+        )
+        return {**key.model_dump(mode="json"), "reviewer_id": key.reviewer_id}
+
     # -- acknowledging the registry: a tap, so an agent can't silence the banner ---
 
     def acknowledge_prepare(self) -> dict:
@@ -489,6 +664,10 @@ class _Handler(BaseHTTPRequestHandler):
             "/api/enroll/begin": lambda: self.app.enroll_begin(body),
             "/api/enroll/register": lambda: self.app.enroll_register(body),
             "/api/enroll/complete": lambda: self.app.enroll_complete(body),
+            "/api/keys/revoke/prepare": lambda: self.app.revoke_prepare(body),
+            "/api/keys/enroll-foreign/prepare": lambda: self.app.enroll_foreign_prepare(body),
+            "/api/keys/enroll-foreign": lambda: self.app.enroll_foreign(body),
+            "/api/keys/revoke": lambda: self.app.revoke(body),
             "/api/acknowledge/prepare": self.app.acknowledge_prepare,
             "/api/acknowledge": lambda: self.app.acknowledge(body),
         }

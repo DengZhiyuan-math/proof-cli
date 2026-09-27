@@ -51,6 +51,7 @@ from .domain import (
 )
 from .signing import DecisionKind, DecisionPayload, PinnedDependency, SignedDecision
 from .storage import (
+    get_claim,
     ProjectStore,
     append_ledger_row,
     claim_token_matches,
@@ -1319,6 +1320,12 @@ def _accepted_proof(store: ProjectStore, node_id: str) -> CandidateProofRecord |
     return _get_candidate_proof(store, latest.verdict.payload.candidate_proof_id)
 
 
+def get_accepted_version(store: ProjectStore, node_id: str) -> int | None:
+    """The version of the Candidate proof a node's counted Acceptance names, or None if it isn't Accepted."""
+    proof = _accepted_proof(store, node_id)
+    return proof.version if proof else None
+
+
 def get_acceptance_state(store: ProjectStore, node_id: str) -> str:
     """The node's acceptance_state, computed from its signed Human Review history.
 
@@ -1389,6 +1396,9 @@ def promote_to_lemma(store: ProjectStore, node_id: str, *, signed_decision: Sign
 
 
 REFERENCE_REVIEW_DECISION = "reference-review"
+# the citation was found wanting: terminal, like a Reject — a corrected source is a new node (#20, #38)
+REFERENCE_NOT_CALLABLE_DECISION = "no-longer-callable"
+REFERENCE_REVIEW_DECISIONS = (REFERENCE_REVIEW_DECISION, REFERENCE_NOT_CALLABLE_DECISION)
 
 
 def decide_reference_review(
@@ -1413,11 +1423,17 @@ def decide_reference_review(
             f"node {node_id} is not an imported_result; use Human Review acceptance instead",
         )
 
-    if decision != REFERENCE_REVIEW_DECISION:
+    if decision not in REFERENCE_REVIEW_DECISIONS:
         raise ProofMapError(
             "INVALID_DECISION",
-            f"'{decision}' is not a valid reference review decision; expected: {REFERENCE_REVIEW_DECISION}",
+            f"'{decision}' is not a valid reference review decision; expected one of: {', '.join(REFERENCE_REVIEW_DECISIONS)}",
         )
+    if _no_longer_callable(store, node_id):
+        raise ProofMapError(
+            "REFERENCE_NOT_CALLABLE",
+            f"{node_id} is no longer callable, and that is final; cite a corrected source as a new imported_result node",
+        )
+    not_callable = decision == REFERENCE_NOT_CALLABLE_DECISION
 
     signed = _require_signed(signed_decision, DecisionKind.reference_review, node_id)
     with store.transaction() as conn:
@@ -1428,7 +1444,7 @@ def decide_reference_review(
             store,
             _ACCEPTANCE_OBJECT_TYPE,
             node_id,
-            ReviewGovernanceState.approved,
+            ReviewGovernanceState.rejected if not_callable else ReviewGovernanceState.approved,
             reviewer_id=key.reviewer_id,
             rationale=signed.payload.rationale,
             kind=ReviewRecordKind.reference_review,
@@ -1445,8 +1461,8 @@ def decide_reference_review(
         )
         append_event(
             store,
-            "proof_map_reference_review_granted",
-            f"reference review granted for {node_id}",
+            "proof_map_no_longer_callable" if not_callable else "proof_map_reference_review_granted",
+            f"{node_id} is no longer callable" if not_callable else f"reference review granted for {node_id}",
             entity_id=node_id,
             payload={"reviewer_id": key.reviewer_id, "review_id": record.id},
             conn=conn,
@@ -1454,13 +1470,24 @@ def decide_reference_review(
     return record
 
 
+def _no_longer_callable(store: ProjectStore, node_id: str) -> bool:
+    """Whether any Reference review row says `no-longer-callable`: terminal however it's recorded, like a Reject."""
+    return any(
+        row["decision"] == ReviewGovernanceState.rejected.value
+        for row in decision_rows(store, _ACCEPTANCE_OBJECT_TYPE, node_id, ReviewRecordKind.reference_review.value)
+    )
+
+
 def get_reference_review_state(store: ProjectStore, node_id: str) -> str:
-    """`unreviewed`, `reviewed` or `unverifiable`, from the newest `kind=reference_review` decision only.
+    """`unreviewed`, `reviewed`, `unverifiable` or `no-longer-callable`, from the newest `kind=reference_review` decision.
 
     Counts only while it verifies and the imported result still cites what
-    was signed (statement and source) — never acceptance_state.
+    was signed (statement and source) — never acceptance_state. Once found
+    wanting, an imported result stays `no-longer-callable`.
     """
     node = require_node(store, node_id)
+    if _no_longer_callable(store, node_id):
+        return "no-longer-callable"
     latest = _latest_decision(store, node_id, ReviewRecordKind.reference_review)
     if latest is None:
         return "unreviewed"
@@ -1669,15 +1696,26 @@ def _derived_challenges(store: ProjectStore) -> list[Challenge]:
     return derived
 
 
+def _challenge_outcome(row: dict) -> ChallengeStatus:
+    """How the signed decision `row` ended the Challenges it names (#25)."""
+    if row["kind"] == ReviewRecordKind.challenge_resolution.value:
+        return ChallengeStatus.dismissed
+    approved = row["decision"] == ReviewGovernanceState.approved.value
+    if row["kind"] == ReviewRecordKind.reference_review.value:
+        return ChallengeStatus.dismissed if approved else ChallengeStatus.upheld
+    return ChallengeStatus.resolved_by_revision if approved else ChallengeStatus.upheld
+
+
 def _with_resolution(store: ProjectStore, challenge: Challenge, *, legacy_dismissed: bool = False) -> Challenge:
     row = challenge_resolution(store, challenge.id)
     if row is not None:
         return challenge.model_copy(
             update={
-                "status": ChallengeStatus.dismissed,
+                "status": _challenge_outcome(row),
                 "resolved_by": row["reviewer_id"],
                 "resolved_at": row["created_at"],
                 "resolution_review_id": row["review_id"],
+                "resolution_rationale": verify_decision_row(store, row["id"]).payload.rationale,
             }
         )
     if legacy_dismissed:
@@ -1856,6 +1894,8 @@ def _is_downstream_of_challenge_or_stale_pin(store: ProjectStore, node_id: str) 
         node = get_node(store, current_id)
         if node is None:
             continue
+        if node.kind == ProofMapNodeKind.imported_result and _no_longer_callable(store, current_id):
+            return True  # a citation found wanting: whatever rests on it needs a second look
 
         for dependency_id in node.dependencies:
             pin = get_dependency_pin(store, current_id, dependency_id)
@@ -1962,6 +2002,10 @@ def get_blocked_reason(store: ProjectStore, node_id: str) -> str | None:
     node = require_node(store, node_id)
     if _already_accepted(store, node) or not _has_unresolved_dependency(store, node):
         return None
+    for dependency_id in node.dependencies:
+        dependency = get_node(store, dependency_id)
+        if dependency is not None and dependency.kind == ProofMapNodeKind.imported_result and _no_longer_callable(store, dependency_id):
+            return "dependency-not-callable"
     for dependency_id in node.dependencies:
         if not _dependency_satisfied(store, dependency_id) and _is_downstream_of_challenge_or_stale_pin(
             store, dependency_id
@@ -2332,6 +2376,12 @@ def apply_signed_decision(store: ProjectStore, signed: SignedDecision) -> Any:
         return dismiss_challenge(store, target, signed_decision=signed)
     if kind == DecisionKind.promote:
         return promote_to_lemma(store, target, signed_decision=signed)
+    if kind == DecisionKind.force_release:
+        claim = get_claim(store, target)
+        if claim is None:
+            raise ProofMapError("NO_ACTIVE_CLAIM", f"claim {target} not found")
+        # the signature names the claim: if another claim is active by now, it won't authorize that one
+        return release_node(store, claim.node_id, claimant_id="", session_id="", force=True, signed_decision=signed)
     raise ProofMapError("UNSUPPORTED_DECISION", f"{kind.value} decisions aren't applied here")
 
 

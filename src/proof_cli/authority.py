@@ -108,6 +108,7 @@ _DECISION_ROWS: dict[tuple[DecisionKind, str], tuple[str, str]] = {
     (DecisionKind.acceptance, "revision-requested"): ("proof_map_node", "revision_requested"),
     (DecisionKind.acceptance, "reject"): ("proof_map_node", "rejected"),
     (DecisionKind.reference_review, "reference-review"): ("proof_map_node", "approved"),
+    (DecisionKind.reference_review, "no-longer-callable"): ("proof_map_node", "rejected"),
     (DecisionKind.evidence_review, "trusted"): ("evidence_check", "trusted"),
     (DecisionKind.evidence_review, "unusable"): ("evidence_check", "unusable"),
     (DecisionKind.dependency_revalidation, "reaffirmed"): ("proof_map_node", "reaffirmed"),
@@ -121,6 +122,14 @@ _DECISION_ROWS: dict[tuple[DecisionKind, str], tuple[str, str]] = {
 def decision_row_for(kind: DecisionKind, decision: str) -> tuple[str, str]:
     """(row object_type, row decision value) a signed decision of this kind and value is recorded as."""
     return _DECISION_ROWS[(kind, decision)]
+
+
+def payload_decision_for(kind: DecisionKind, object_type: str, row_decision: str) -> str | None:
+    """The signed decision value a review-history row of this kind stands for (the inverse of `decision_row_for`)."""
+    return next(
+        (decision for (candidate, decision), row in _DECISION_ROWS.items() if candidate == kind and row == (object_type, row_decision)),
+        None,
+    )
 
 
 class AuthorityError(Exception):

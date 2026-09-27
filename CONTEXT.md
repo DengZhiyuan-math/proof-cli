@@ -73,7 +73,7 @@ An automated or semi-automated check (a verifier, a checker) run against a speci
 _Avoid_: verification result, verify accept
 
 **Challenge**:
-A claim, raised against an already-Accepted node or an Imported result, that it may no longer be safe to depend on (for example, a missing assumption noticed after the fact). Any agent or collaborator may open one — raising a concern isn't a mathematical judgment, so it isn't gated. Opening a Challenge sets its target's integrity state to Challenged; it never changes the target's acceptance state. Only the researcher resolves a Challenge: for a local node, by dismissing it or by revising the node and re-Accepting it; for an Imported result, through Reference review (reaffirming trust, or treating it as no longer callable so dependents migrate to a corrected node). An ordinary observation that doesn't call a node's standing into doubt is a Comment, not a Challenge — Challenge is reserved for the invalidating case. A Challenge is itself an addressable, listable object once opened, not just a flag on its target. See ADR-0004, ADR-0005, ADR-0006.
+A claim, raised against an already-Accepted node or an Imported result, that it may no longer be safe to depend on (for example, a missing assumption noticed after the fact). Any agent or collaborator may open one — raising a concern isn't a mathematical judgment, so it isn't gated. Opening a Challenge sets its target's integrity state to Challenged; it never changes the target's acceptance state. Only the researcher resolves a Challenge: for a local node, by dismissing it or by revising the node and re-Accepting it; for an Imported result, through Reference review (reaffirming trust, or treating it as no longer callable so dependents migrate to a corrected node). How it ended is recorded from the signed decision that closed it: **dismissed** (a false alarm, or the Imported result reaffirmed), **upheld** (the revision was rejected or sent back, or the Imported result is no longer callable), or **resolved-by-revision** (a revised proof was Accepted). An ordinary observation that doesn't call a node's standing into doubt is a Comment, not a Challenge — Challenge is reserved for the invalidating case. A Challenge is itself an addressable, listable object once opened, not just a flag on its target. See ADR-0004, ADR-0005, ADR-0006.
 _Avoid_: bug, finding
 
 **Accepted mathematical interface**:
@@ -99,6 +99,14 @@ _Avoid_: dashboard, admin panel
 **Reviewer key registry**:
 The project's append-only, hash-chained list of enrolled and revoked Reviewer passkeys. The Review app shows it on every page, with a banner whenever it changed since the researcher last *acknowledged* it. Acknowledging it is itself a passkey tap.
 _Avoid_: key store, allowlist
+
+**Foreign attestation**:
+A Human Review decision another project signed, arriving in an exchange bundle. The Review app shows it next to its node with whether its signature checks out, and it counts for nothing here: the researcher can make the same decision locally with their own passkey, or enroll the other reviewer's key, which then counts only for decisions it signs in this project from now on. See ADR-0009 point 6.
+_Avoid_: imported approval, remote decision
+
+**No longer callable** (a Reference review outcome):
+The researcher's signed judgment that an Imported result can't be relied on after all. Final: its dependents read potentially stale or blocked, and a corrected source becomes a new Imported result node. See ADR-0009, #20.
+_Avoid_: rejected reference, revoked citation
 
 **Legacy decision**:
 A Human Review decision recorded before ADR-0009, and so unsigned. It doesn't count until the researcher **re-signs** it: a new Signed decision of the same kind and value, with the original row left untouched. It can also be **declined**, which is signed too; the decision stays uncounted and leaves the list. A legacy Reject keeps its node terminal and a legacy dismissal keeps its Challenge closed until re-signed. Neither can be declined. See ADR-0009, issue #42.
