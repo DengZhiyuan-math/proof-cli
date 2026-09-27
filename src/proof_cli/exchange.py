@@ -8,8 +8,10 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from .attestations import exported_signatures, record_foreign_attestations
 from .collaboration import CollaborationState, import_review_records, load_collaboration, save_collaboration
 from .domain import (
+    ExportedReviewerKey,
     BlockerRecord,
     BlockerStatus,
     CandidateProofRecord,
@@ -96,6 +98,11 @@ class ExchangeBundle(BaseModel):
     dependency_pins: list[DependencyPin] = Field(default_factory=list)
     challenges: list[Challenge] = Field(default_factory=list)
     evidence_checks: list[EvidenceCheck] = Field(default_factory=list)
+    # Signatures travel, authority doesn't (ADR-0009 point 6, #38): each
+    # review record's signed decision, and the public keys that signed them.
+    # On import they are foreign attestations, shown and never counted.
+    signed_decisions: dict[str, dict] = Field(default_factory=dict)
+    reviewer_keys: list[ExportedReviewerKey] = Field(default_factory=list)
 
 
 class ExchangeImportReport(BaseModel):
@@ -147,6 +154,7 @@ def export_exchange_bundle(store: ProjectStore, *, note: str = "") -> ExchangeBu
         challenges=list_challenges(store),
         evidence_checks=list_all_evidence_checks(store),
     )
+    bundle.signed_decisions, bundle.reviewer_keys = exported_signatures(store, collaboration.review_records)
     return bundle
 
 
@@ -251,6 +259,15 @@ def import_exchange_bundle(store: ProjectStore, bundle: ExchangeBundle | dict[st
     # Acceptance, Reference review, Evidence review or revalidation (#33).
     save_collaboration(store, bundle.collaboration)
     _, refused_review_ids = import_review_records(store, bundle.collaboration.review_records)
+    refused_ids = set(refused_review_ids)
+    attested = record_foreign_attestations(
+        store,
+        bundle_id=bundle.id,
+        source_project_id=bundle.project_id,
+        records=[record for record in bundle.collaboration.review_records if record.id in refused_ids],
+        signed_decisions=bundle.signed_decisions,
+        reviewer_keys=bundle.reviewer_keys,
+    )
     if bundle.publication_workspace is not None:
         save_publication_workspace(store, bundle.publication_workspace)
     imported_sections: list[str] = ["project_state", "memory", "collaboration"]
@@ -258,8 +275,9 @@ def import_exchange_bundle(store: ProjectStore, bundle: ExchangeBundle | dict[st
     warnings: list[str] = []
     if refused_review_ids:
         warnings.append(
-            f"{len(refused_review_ids)} Human Review decision(s) not imported: acceptance, reference, "
-            "evidence and revalidation decisions are only ever made locally"
+            f"{len(refused_review_ids)} Human Review decision(s) not imported as decisions: they are only ever made "
+            f"locally. {attested} new one(s) kept as foreign attestations, shown in the review app, counting for "
+            "nothing until you make the same decision here yourself"
         )
 
     # Exchange carries records, never trust (ADR-0009 point 6, #37): whatever
