@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import sys
@@ -15,7 +14,6 @@ from .commands import (
     cmd_blocker_list,
     cmd_obligation_add,
     cmd_obligation_list,
-    cmd_obligation_resolve,
     cmd_project_analyze,
     cmd_proof_retrieve,
     cmd_search,
@@ -205,7 +203,6 @@ def _catalog(root: ResolvedRoot) -> str:
             "  proof codex theorem list",
             "  proof codex theorem show <theorem_id>",
             "  proof codex obligation list",
-            "  proof codex obligation resolve <obligation_id>",
             "  proof codex blocker list",
             '  proof codex search "<query>"',
             '  proof codex retrieve "<query>"',
@@ -216,7 +213,6 @@ def _catalog(root: ResolvedRoot) -> str:
             "  proof codex new theorem <theorem_id> <name> <statement>",
             "  proof codex theorem add <theorem_id> <name> <statement>",
             '  proof codex obligation add "<goal_statement>"',
-            "  proof codex obligation resolve <obligation_id>",
             '  proof codex blocker add "<description>"',
             "  proof codex snapshot",
             "",
@@ -225,6 +221,8 @@ def _catalog(root: ResolvedRoot) -> str:
             "  - Retrieval-first and local-state-first still apply.",
             "  - Mutation commands always show the selected root before or after state changes.",
             "  - The global ~/.codex/skills/proof/ skill is the canonical entry path.",
+            "  - Human Review decisions (accept, reject, resolve, promote, ...) are never made here:",
+            "    they need the researcher's passkey in the review app (`proof review open`).",
             "  - Project-local proof skills are for repository debugging and development work.",
         ]
     )
@@ -319,16 +317,20 @@ def theorem_add(
             )
         )
         return
-    payload = cmd_theorem_add(
-        theorem_id=theorem_id or "",
-        name=name or "",
-        statement=statement or "",
-        root=context.root.path,
-        kind=kind,
-        assumption=assumption or None,
-        export=export or None,
-        notes=notes,
-    )
+    try:
+        payload = cmd_theorem_add(
+            theorem_id=theorem_id or "",
+            name=name or "",
+            statement=statement or "",
+            root=context.root.path,
+            kind=kind,
+            assumption=assumption or None,
+            export=export or None,
+            notes=notes,
+        )
+    except ValueError as exc:
+        typer.echo(f"Error: {exc}")
+        raise typer.Exit(code=1)
     typer.echo(_render_mutation_result(context, payload))
 
 
@@ -357,16 +359,20 @@ def new_theorem(
             )
         )
         return
-    payload = cmd_theorem_add(
-        theorem_id=theorem_id or "",
-        name=name or "",
-        statement=statement or "",
-        root=context.root.path,
-        kind=kind,
-        assumption=assumption or None,
-        export=export or None,
-        notes=notes,
-    )
+    try:
+        payload = cmd_theorem_add(
+            theorem_id=theorem_id or "",
+            name=name or "",
+            statement=statement or "",
+            root=context.root.path,
+            kind=kind,
+            assumption=assumption or None,
+            export=export or None,
+            notes=notes,
+        )
+    except ValueError as exc:
+        typer.echo(f"Error: {exc}")
+        raise typer.Exit(code=1)
     typer.echo(_render_mutation_result(context, payload))
 
 
@@ -405,26 +411,12 @@ def obligation_add(
 
 
 @obligation_app.command("resolve")
-def obligation_resolve(
-    obligation_id: str | None = typer.Argument(None),
-    root: str = "",
-    rationale: str = "",
-) -> None:
-    context = _mutation_context(root or None, "obligation resolve")
-    if isinstance(context, str):
-        typer.echo(context)
-        return
-    if not obligation_id:
-        typer.echo(
-            _render_missing_details(
-                context,
-                ["obligation_id"],
-                "proof codex obligation resolve <obligation_id> [--rationale \"...\"]",
-            )
-        )
-        return
-    payload = cmd_obligation_resolve(obligation_id, root=context.root.path, rationale=rationale)
-    typer.echo(_render_mutation_result(context, payload))
+def obligation_resolve(obligation_id: str | None = typer.Argument(None), root: str = "", rationale: str = "") -> None:  # rationale: old callers get the refusal, not a usage error
+    """Retired (ADR-0001, ADR-0009, #37): an obligation is discharged by an Accepted proof-map node,
+    and acceptance is the researcher's passkey decision in the review app — never an agent command."""
+    from .cli import human_review_required
+
+    human_review_required(root or ".", command="obligation.resolve", kind="obligation_resolution", target_id=obligation_id or "", node_id=None, json_output=True)
 
 
 @blocker_app.command("list")

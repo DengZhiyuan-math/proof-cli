@@ -70,7 +70,6 @@ from .commands import (
     cmd_init,
     cmd_obligation_add,
     cmd_obligation_list,
-    cmd_obligation_resolve,
     cmd_memory_add,
     cmd_memory_list,
     cmd_memory_show,
@@ -84,7 +83,6 @@ from .commands import (
     cmd_proof_provenance_show,
     cmd_reference_import,
     cmd_reference_list,
-    cmd_reference_review,
     cmd_reference_show,
     cmd_search,
     cmd_snapshot,
@@ -102,17 +100,11 @@ from .collaboration import summarize_review_record
 from .authority import (
     AuthorityError,
     list_reviewer_keys,
-    revoke_reviewer_key,
 )
-from .domain import ProofMapNodeKind
 from .proof_map import (
     ProofMapError,
     claim_node,
     create_node,
-    decide_acceptance,
-    decide_evidence_review,
-    decide_reference_review,
-    dismiss_challenge,
     get_acceptance_state,
     get_blocked_reason,
     get_frontier,
@@ -122,13 +114,10 @@ from .proof_map import (
     list_integrity_warnings,
     list_nodes,
     open_challenge,
-    prepare_decision,
-    promote_to_lemma,
     record_evidence_check,
     release_node,
     require_challenge,
     require_node,
-    revalidate_dependency,
     split_node,
     submit_candidate_proof,
 )
@@ -142,7 +131,6 @@ from .rendering import (
     render_proof_map_node_list,
 )
 from .review import render_verification_output
-from .signing import SignedDecision, b64url_encode, batch_challenge, payload_hash
 
 app = typer.Typer(add_completion=False, help="Mathematical Proof CLI")
 asset_app = typer.Typer(help="Reusable asset workflows")
@@ -254,21 +242,23 @@ def _emit_node(node, json_output: bool, *, command: str) -> None:
         typer.echo(render_proof_map_node(node))
 
 
-_SIGNED_DECISION_HELP = (
-    "Path to a signed Human Review decision (JSON: the payload from `proof review payload` plus a "
-    "passkey assertion over it), or - for stdin. Without one, human-only operations fail with "
-    "HUMAN_REVIEW_REQUIRED (ADR-0009)."
-)
+def human_review_required(root: str, *, command: str, kind: str, target_id: str, node_id: str | None, json_output: bool) -> None:
+    """Every human-only operation is made in the review app, never here (ADR-0009, #37): say where, and fail."""
+    from .webapp.server import project_url
 
-
-def _load_signed_decision(path: str) -> SignedDecision | None:
-    if not path:
-        return None
-    try:
-        raw = sys.stdin.read() if path == "-" else Path(path).read_text()
-        return SignedDecision.model_validate_json(raw)
-    except (OSError, ValueError) as exc:
-        raise ProofMapError("MALFORMED_SIGNED_DECISION", f"could not read a signed decision from {path}: {exc}") from exc
+    # not a project yet: nothing to decide, and a refusal shouldn't create one
+    url = project_url(get_store(_root(root)), node_id) if (_root(root) / ".proof").exists() else None
+    _emit_node_error(
+        ProofMapError(
+            "HUMAN_REVIEW_REQUIRED",
+            f"{kind} on {target_id} is a Human Review decision: make it with your passkey in the review app"
+            f"{f', at {url}' if url else ''} (run `{('proof review open ' + node_id) if node_id else 'proof review open'}`)",
+            details={"kind": kind, "target_id": target_id, "url": url},
+        ),
+        json_output,
+        command=command,
+    )
+    raise typer.Exit(code=1)
 
 
 def _emit_node_error(exc: ProofMapError, json_output: bool, *, command: str) -> None:
@@ -396,25 +386,19 @@ def node_release(
     root: str = ".",
     claimant: str = "human",
     session: str = "default",
+    claim_token: str = typer.Option("", "--claim-token", help="The secret `node claim` printed; only its holder can release"),
     force: bool = typer.Option(
-        False, "--force", help="Force-release someone else's claim: a Human Review decision, needs --signed-decision"
+        False, "--force", help="Ending someone else's claim is a Human Review decision, made in the review app"
     ),
     reason: str = typer.Option("", "--reason", help="Why you're releasing your own claim"),
-    signed_decision: str = typer.Option(
-        "", "--signed-decision", help=_SIGNED_DECISION_HELP
-    ),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
+    if force:
+        human_review_required(root, command="node.release", kind="force_release", target_id=node_id, node_id=node_id, json_output=json_output)
     store = get_store(_root(root))
     try:
         claim = release_node(
-            store,
-            node_id,
-            claimant_id=claimant,
-            session_id=session,
-            force=force,
-            reason=reason or None,
-            signed_decision=_load_signed_decision(signed_decision),
+            store, node_id, claimant_id=claimant, session_id=session, claim_token=claim_token or None, reason=reason or None
         )
     except ProofMapError as exc:
         _emit_node_error(exc, json_output, command="node.release")
@@ -439,6 +423,7 @@ def node_submit(
     root: str = ".",
     claimant: str = "human",
     session: str = "default",
+    claim_token: str = typer.Option("", "--claim-token", help="The secret `node claim` printed; only its holder can submit"),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     store = get_store(_root(root))
@@ -450,6 +435,7 @@ def node_submit(
             session_id=session,
             scoping_rationale=rationale,
             content=content,
+            claim_token=claim_token or None,
         )
     except ProofMapError as exc:
         _emit_node_error(exc, json_output, command="node.submit")
@@ -465,81 +451,27 @@ def _emit_review_record(record, json_output: bool, *, command: str) -> None:
 
 
 @node_app.command("review")
-def node_review(
-    node_id: str,
-    decision: str,
-    root: str = ".",
-    signed_decision: str = typer.Option(
-        "", "--signed-decision", help=_SIGNED_DECISION_HELP
-    ),
-    json_output: bool = typer.Option(False, "--json"),
-) -> None:
-    """Human Review decision for a node, from a passkey-signed decision (ADR-0009).
+def node_review(node_id: str, decision: str = typer.Argument(""), root: str = ".", json_output: bool = typer.Option(False, "--json")) -> None:
+    """Accept / revision-requested / reject a node, or Reference-review an imported result — in the review app.
 
-    For a local node (theorem/lemma/claim): accept / revision-requested /
-    reject — the only path that may set acceptance_state. For an
-    imported_result node: reference-review, which grants Reference review
-    independently of acceptance_state.
+    A Human Review decision needs the researcher's passkey (ADR-0009): this
+    command never makes one, whatever flags it's given. It prints where to.
     """
-    store = get_store(_root(root))
-    try:
-        node = require_node(store, node_id)
-        signed = _load_signed_decision(signed_decision)
-        if node.kind == ProofMapNodeKind.imported_result:
-            record = decide_reference_review(store, node_id, decision, signed_decision=signed)
-        else:
-            record = decide_acceptance(store, node_id, decision, signed_decision=signed)
-    except ProofMapError as exc:
-        _emit_node_error(exc, json_output, command="node.review")
-        raise typer.Exit(code=1)
-    _emit_review_record(record, json_output, command="node.review")
+    human_review_required(root, command="node.review", kind="acceptance", target_id=node_id, node_id=node_id, json_output=json_output)
 
 
 @node_app.command("revalidate")
-def node_revalidate(
-    node_id: str,
-    target_node_id: str,
-    root: str = ".",
-    signed_decision: str = typer.Option(
-        "", "--signed-decision", help=_SIGNED_DECISION_HELP
-    ),
-    json_output: bool = typer.Option(False, "--json"),
-) -> None:
-    """Lightweight re-review: confirm node_id's Candidate proof still holds after target_node_id advanced.
-
-    Only available when target_node_id's accepted interface hasn't
-    actually changed; otherwise a new Candidate proof is required instead.
-    Records dependency_revalidation/reaffirmed and refreshes the pin — never
-    node_id's own acceptance_state.
-    """
-    store = get_store(_root(root))
-    try:
-        record = revalidate_dependency(
-            store, node_id, target_node_id, signed_decision=_load_signed_decision(signed_decision)
-        )
-    except ProofMapError as exc:
-        _emit_node_error(exc, json_output, command="node.revalidate")
-        raise typer.Exit(code=1)
-    _emit_review_record(record, json_output, command="node.revalidate")
+def node_revalidate(node_id: str, target_node_id: str = typer.Argument(""), root: str = ".", json_output: bool = typer.Option(False, "--json")) -> None:
+    """Lightweight re-review of node_id's dependency on target_node_id — in the review app (ADR-0009)."""
+    human_review_required(
+        root, command="node.revalidate", kind="dependency_revalidation", target_id=node_id, node_id=node_id, json_output=json_output
+    )
 
 
 @node_app.command("promote")
-def node_promote(
-    node_id: str,
-    root: str = ".",
-    signed_decision: str = typer.Option(
-        "", "--signed-decision", help=_SIGNED_DECISION_HELP
-    ),
-    json_output: bool = typer.Option(False, "--json"),
-) -> None:
-    """Promote an Accepted Claim to a Lemma, marking it independently reusable. No demote. Human Review only."""
-    store = get_store(_root(root))
-    try:
-        node = promote_to_lemma(store, node_id, signed_decision=_load_signed_decision(signed_decision))
-    except ProofMapError as exc:
-        _emit_node_error(exc, json_output, command="node.promote")
-        raise typer.Exit(code=1)
-    _emit_node(node, json_output, command="node.promote")
+def node_promote(node_id: str, root: str = ".", json_output: bool = typer.Option(False, "--json")) -> None:
+    """Promote an Accepted Claim to a Lemma — in the review app (ADR-0009)."""
+    human_review_required(root, command="node.promote", kind="promote", target_id=node_id, node_id=node_id, json_output=json_output)
 
 
 @node_app.command("split")
@@ -634,22 +566,16 @@ def challenge_show(
 
 
 @challenge_app.command("dismiss")
-def challenge_dismiss(
-    challenge_id: str,
-    root: str = ".",
-    signed_decision: str = typer.Option(
-        "", "--signed-decision", help=_SIGNED_DECISION_HELP
-    ),
-    json_output: bool = typer.Option(False, "--json"),
-) -> None:
-    """Dismiss a Challenge. Human Review only."""
+def challenge_dismiss(challenge_id: str, root: str = ".", json_output: bool = typer.Option(False, "--json")) -> None:
+    """Resolve a Challenge — in the review app (ADR-0009)."""
     store = get_store(_root(root))
     try:
-        challenge = dismiss_challenge(store, challenge_id, signed_decision=_load_signed_decision(signed_decision))
-    except ProofMapError as exc:
-        _emit_node_error(exc, json_output, command="challenge.dismiss")
-        raise typer.Exit(code=1)
-    _emit_challenge(challenge, json_output, command="challenge.dismiss")
+        target = require_challenge(store, challenge_id).target_node_id
+    except ProofMapError:
+        target = None
+    human_review_required(
+        root, command="challenge.dismiss", kind="challenge_resolution", target_id=challenge_id, node_id=target, json_output=json_output
+    )
 
 
 def _emit_evidence_check(check, json_output: bool, *, command: str) -> None:
@@ -682,23 +608,9 @@ def evidence_record(
 
 
 @node_evidence_app.command("review")
-def evidence_review(
-    check_id: str,
-    decision: str,
-    root: str = ".",
-    signed_decision: str = typer.Option(
-        "", "--signed-decision", help=_SIGNED_DECISION_HELP
-    ),
-    json_output: bool = typer.Option(False, "--json"),
-) -> None:
-    """Human Review's trusted/unusable judgment on an Evidence check. Never touches acceptance_state."""
-    store = get_store(_root(root))
-    try:
-        record = decide_evidence_review(store, check_id, decision, signed_decision=_load_signed_decision(signed_decision))
-    except ProofMapError as exc:
-        _emit_node_error(exc, json_output, command="node.evidence.review")
-        raise typer.Exit(code=1)
-    _emit_review_record(record, json_output, command="node.evidence.review")
+def evidence_review(check_id: str, decision: str = typer.Argument(""), root: str = ".", json_output: bool = typer.Option(False, "--json")) -> None:
+    """Judge an Evidence check trusted/unusable — in the review app (ADR-0009)."""
+    human_review_required(root, command="node.evidence.review", kind="evidence_review", target_id=check_id, node_id=None, json_output=json_output)
 
 
 node_app.add_typer(node_evidence_app, name="evidence")
@@ -768,38 +680,6 @@ def review_open(node_id: str = typer.Argument("", help="Open this node's decisio
     webbrowser.open(url)
 
 
-@review_app.command("payload")
-def review_payload(
-    kind: str,
-    target_id: str,
-    decision: str,
-    root: str = ".",
-    rationale: str = "",
-    dependency: str = typer.Option("", "--dependency", help="For dependency_revalidation: the dependency being re-pinned"),
-    json_output: bool = typer.Option(False, "--json"),
-) -> None:
-    """Print the exact payload a Reviewer passkey must sign for a decision, and its WebAuthn challenge.
-
-    Decides nothing: it's what the signing surface shows and signs (ADR-0009).
-    """
-    store = get_store(_root(root))
-    try:
-        payload = prepare_decision(store, kind, target_id, decision, rationale=rationale, dependency_id=dependency or None)
-    except ProofMapError as exc:
-        _emit_node_error(exc, json_output, command="review.payload")
-        raise typer.Exit(code=1)
-    digest = payload_hash(payload)
-    data = {
-        "payload": payload.model_dump(mode="json"),
-        "payload_hash": digest,
-        "challenge": b64url_encode(batch_challenge([digest])),
-    }
-    if json_output:
-        typer.echo(dump_envelope(success_envelope("review.payload", data)))
-    else:
-        typer.echo(json.dumps(data, indent=2))
-
-
 @review_app.command("warnings")
 def review_warnings(root: str = ".", json_output: bool = typer.Option(False, "--json")) -> None:
     """Everything about Human Review authority that doesn't verify: unsigned or forged decisions, broken chains."""
@@ -814,28 +694,6 @@ def review_warnings(root: str = ".", json_output: bool = typer.Option(False, "--
 
 def _emit_authority_error(exc: AuthorityError, json_output: bool, *, command: str) -> None:
     _emit_node_error(ProofMapError(exc.code, exc.message, details=exc.details), json_output, command=command)
-
-
-@reviewer_app.command("revoke")
-def reviewer_revoke(
-    signed_decision: str = typer.Argument(..., help="Signed reviewer_enrollment/revoke decision JSON, or -"),
-    root: str = ".",
-    json_output: bool = typer.Option(False, "--json"),
-) -> None:
-    """Revoke a Reviewer passkey, with a decision signed by an active key. Never the last active one."""
-    store = get_store(_root(root))
-    try:
-        key = revoke_reviewer_key(store, _load_signed_decision(signed_decision))
-    except AuthorityError as exc:
-        _emit_authority_error(exc, json_output, command="reviewer.revoke")
-        raise typer.Exit(code=1)
-    except ProofMapError as exc:
-        _emit_node_error(exc, json_output, command="reviewer.revoke")
-        raise typer.Exit(code=1)
-    if json_output:
-        typer.echo(dump_envelope(success_envelope("reviewer.revoke", key.model_dump(mode="json"))))
-    else:
-        typer.echo(f"Revoked Reviewer key {key.fingerprint} ({key.display_name})")
 
 
 @reviewer_app.command("list")
@@ -1098,22 +956,26 @@ def theorem_add(
     contributor: list[str] = typer.Option(None, "--contributor"),
     notes: str = "",
 ) -> None:
-    typer.echo(
-        cmd_theorem_add(
-            theorem_id=theorem_id,
-            name=name,
-            statement=statement,
-            root=_root(root),
-            kind=kind,
-            assumption=assumption,
-            export=export,
-            source_ref=source_ref,
-            created_by=created_by,
-            updated_by=updated_by,
-            contributor=contributor,
-            notes=notes,
+    try:
+        typer.echo(
+            cmd_theorem_add(
+                theorem_id=theorem_id,
+                name=name,
+                statement=statement,
+                root=_root(root),
+                kind=kind,
+                assumption=assumption,
+                export=export,
+                source_ref=source_ref,
+                created_by=created_by,
+                updated_by=updated_by,
+                contributor=contributor,
+                notes=notes,
+            )
         )
-    )
+    except ValueError as exc:
+        typer.echo(f"Error: {exc}")
+        raise typer.Exit(code=1)
 
 
 @theorem_app.command("show")
@@ -1159,8 +1021,9 @@ def obligation_list(root: str = ".") -> None:
 
 
 @obligation_app.command("resolve")
-def obligation_resolve(obligation_id: str, root: str = ".", rationale: str = "") -> None:
-    typer.echo(cmd_obligation_resolve(obligation_id, _root(root), rationale=rationale))
+def obligation_resolve(obligation_id: str, root: str = ".", json_output: bool = typer.Option(False, "--json")) -> None:
+    """Retired (ADR-0001, #37): a proof obligation is discharged by an Accepted proof-map node, not by a command."""
+    human_review_required(root, command="obligation.resolve", kind="obligation_resolution", target_id=obligation_id, node_id=None, json_output=json_output)
 
 
 @obligation_app.command("derive")
@@ -1202,26 +1065,31 @@ def reference_import(
     url: str = "",
     notes: str = "",
 ) -> None:
-    typer.echo(
-        cmd_reference_import(
-            reference_id,
-            title,
-            year,
-            _root(root),
-            author=author,
-            source_type=source_type,  # type: ignore[arg-type]
-            origin=origin,
-            bibliographic_source=bibliographic_source,
-            identifier=identifier,
-            url=url,
-            notes=notes,
+    try:
+        typer.echo(
+            cmd_reference_import(
+                reference_id,
+                title,
+                year,
+                _root(root),
+                author=author,
+                source_type=source_type,  # type: ignore[arg-type]
+                origin=origin,
+                bibliographic_source=bibliographic_source,
+                identifier=identifier,
+                url=url,
+                notes=notes,
+            )
         )
-    )
+    except ValueError as exc:
+        typer.echo(f"Error: {exc}")
+        raise typer.Exit(code=1)
 
 
 @reference_app.command("review")
-def reference_review(reference_id: str, action: str, root: str = ".", rationale: str = "") -> None:
-    typer.echo(cmd_reference_review(reference_id, action, root=_root(root), rationale=rationale))
+def reference_review(reference_id: str, action: str = typer.Argument(""), root: str = ".", json_output: bool = typer.Option(False, "--json")) -> None:
+    """Retired (ADR-0001, #37): a reference is trusted by Reference-reviewing its imported_result node, in the review app."""
+    human_review_required(root, command="reference.review", kind="reference_review", target_id=reference_id, node_id=None, json_output=json_output)
 
 
 @memory_app.command("list")

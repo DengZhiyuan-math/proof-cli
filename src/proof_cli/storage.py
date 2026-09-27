@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import secrets
 import sqlite3
 import threading
 import uuid
@@ -32,7 +33,6 @@ from .domain import (
 from .references import (
     ReferenceRecord,
     ReferenceReviewRecord,
-    ReferenceReviewResult,
     ReferenceReviewStatus,
     ReferenceSourceType,
     ReferenceTrustLevel,
@@ -207,6 +207,7 @@ CREATE TABLE IF NOT EXISTS review_history (
 # reference `payload_hash`, are (re)created.
 _REVIEW_HISTORY_ADDED_COLUMNS = {"prev_row_hash": "TEXT", "signed_decision": "TEXT", "payload_hash": "TEXT"}
 _CHALLENGE_ADDED_COLUMNS = {"resolution_review_id": "TEXT"}
+_CLAIM_ADDED_COLUMNS = {"token_hash": "TEXT"}
 
 REVIEW_HISTORY_TRIGGERS = """
 CREATE INDEX IF NOT EXISTS idx_review_history_object ON review_history(object_type, object_id, seq);
@@ -407,6 +408,7 @@ class ProjectStore:
         conn.executescript(REVIEW_HISTORY_SCHEMA)
         _add_missing_columns(conn, "review_history", _REVIEW_HISTORY_ADDED_COLUMNS)
         _add_missing_columns(conn, "challenges", _CHALLENGE_ADDED_COLUMNS)
+        _add_missing_columns(conn, "claims", _CLAIM_ADDED_COLUMNS)
         conn.executescript(REVIEW_HISTORY_TRIGGERS)
         conn.executescript(REVIEWER_KEYS_SCHEMA)
         conn.executescript(PROOF_LEDGER_SCHEMA)
@@ -868,6 +870,9 @@ def store_reference(store: ProjectStore, reference: ReferenceRecord) -> Referenc
 
 
 def import_reference(store: ProjectStore, reference: ReferenceRecord) -> ReferenceRecord:
+    if get_reference(store, reference.id) is not None:
+        # importing again would reset a reviewed reference to a candidate (issue #37)
+        raise ValueError(f"reference {reference.id} already exists; import the new record under a new id")
     candidate = reference.model_copy(
         update={
             "review_status": ReferenceReviewStatus.candidate,
@@ -895,119 +900,6 @@ def import_reference(store: ProjectStore, reference: ReferenceRecord) -> Referen
         payload={"reference": stored.model_dump(mode="json"), "review": review.model_dump(mode="json")},
     )
     return stored
-
-
-def review_reference(
-    store: ProjectStore,
-    reference_id: str,
-    review_status: ReferenceReviewStatus,
-    *,
-    confirmed: bool = False,
-    rationale: str = "",
-    reviewer: str = "human",
-) -> ReferenceReviewResult:
-    if not confirmed:
-        append_event(
-            store,
-            "reference_review_blocked",
-            f"review blocked for {reference_id}: confirmation required",
-            entity_id=reference_id,
-            payload={"review_status": review_status.value, "reason": "confirmation required"},
-        )
-        return ReferenceReviewResult(False, "confirmation required")
-
-    reference = get_reference(store, reference_id)
-    if reference is None:
-        return ReferenceReviewResult(False, "reference not found")
-
-    updated = reference.model_copy(
-        update={
-            "review_status": review_status,
-            "trust_level": _reference_trust_level(reference, review_status),
-            "is_callable": review_status == ReferenceReviewStatus.approved,
-            "updated_at": utc_now(),
-        }
-    )
-    stored = _upsert_reference(store, updated)
-    review = ReferenceReviewRecord(
-        id=str(uuid.uuid4()),
-        reference_id=stored.id,
-        previous_status=reference.review_status,
-        review_status=review_status,
-        trust_level=stored.trust_level,
-        is_callable=stored.is_callable,
-        reviewer=reviewer,
-        rationale=rationale,
-    )
-    _append_reference_review(store, review)
-    event_kind = {
-        ReferenceReviewStatus.approved: "reference_review_approved",
-        ReferenceReviewStatus.rejected: "reference_review_rejected",
-        ReferenceReviewStatus.deferred: "reference_review_deferred",
-        ReferenceReviewStatus.candidate: "reference_review_candidate",
-    }[review_status]
-    append_event(
-        store,
-        event_kind,
-        f"{event_kind.replace('_', ' ')} for {stored.id}",
-        entity_id=stored.id,
-        payload={"reference": stored.model_dump(mode="json"), "review": review.model_dump(mode="json")},
-    )
-    return ReferenceReviewResult(True, review_status.value)
-
-
-def approve_reference(
-    store: ProjectStore,
-    reference_id: str,
-    *,
-    confirmed: bool = False,
-    rationale: str = "",
-    reviewer: str = "human",
-) -> ReferenceReviewResult:
-    return review_reference(
-        store,
-        reference_id,
-        ReferenceReviewStatus.approved,
-        confirmed=confirmed,
-        rationale=rationale,
-        reviewer=reviewer,
-    )
-
-
-def reject_reference(
-    store: ProjectStore,
-    reference_id: str,
-    *,
-    confirmed: bool = False,
-    rationale: str = "",
-    reviewer: str = "human",
-) -> ReferenceReviewResult:
-    return review_reference(
-        store,
-        reference_id,
-        ReferenceReviewStatus.rejected,
-        confirmed=confirmed,
-        rationale=rationale,
-        reviewer=reviewer,
-    )
-
-
-def defer_reference(
-    store: ProjectStore,
-    reference_id: str,
-    *,
-    confirmed: bool = False,
-    rationale: str = "",
-    reviewer: str = "human",
-) -> ReferenceReviewResult:
-    return review_reference(
-        store,
-        reference_id,
-        ReferenceReviewStatus.deferred,
-        confirmed=confirmed,
-        rationale=rationale,
-        reviewer=reviewer,
-    )
 
 
 def get_reference(store: ProjectStore, reference_id: str) -> ReferenceRecord | None:
@@ -1119,15 +1011,37 @@ def _row_to_claim(row: sqlite3.Row) -> ClaimRecord:
         released_at=row["released_at"],
         released_by=row["released_by"],
         release_reason=row["release_reason"],
+        has_token=row["token_hash"] is not None,
     )
+
+
+def claim_token_hash(token: str) -> str:
+    return hashlib.sha256(f"proof-cli claim {token}".encode("utf-8")).hexdigest()
+
+
+def claim_token_matches(store: ProjectStore, claim_id: str, token: str | None) -> bool:
+    """Whether `token` is the secret the claim was issued with (only its hash is stored)."""
+    with store.connect() as conn:
+        row = conn.execute("SELECT token_hash FROM claims WHERE id = ?", (claim_id,)).fetchone()
+    return row is not None and token is not None and row["token_hash"] == claim_token_hash(token)
+
+
+def _claim_token_hash_for(claim: ClaimRecord) -> str | None:
+    if claim.claim_token:
+        return claim_token_hash(claim.claim_token)
+    if claim.has_token:
+        # a token-bound claim arriving without its token (an imported bundle): it stays
+        # bound, to a token nobody holds, never falling back to a typed claimant name
+        return claim_token_hash(secrets.token_urlsafe(24))
+    return None
 
 
 def insert_claim(store: ProjectStore, claim: ClaimRecord) -> ClaimRecord:
     with store.connect() as conn:
         conn.execute(
             """
-            INSERT INTO claims(id, node_id, claimant_id, session_id, claimed_at, released_at, released_by, release_reason)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO claims(id, node_id, claimant_id, session_id, claimed_at, released_at, released_by, release_reason, token_hash)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 claim.id,
@@ -1138,6 +1052,7 @@ def insert_claim(store: ProjectStore, claim: ClaimRecord) -> ClaimRecord:
                 claim.released_at.isoformat() if claim.released_at else None,
                 claim.released_by,
                 claim.release_reason,
+                _claim_token_hash_for(claim),
             ),
         )
         conn.commit()

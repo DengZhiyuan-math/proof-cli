@@ -6,13 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from _authenticator import researcher, sign_cli
-from typer.testing import CliRunner
+from _authenticator import researcher
 
-from proof_cli.cli import app
 from proof_cli.collaboration import ReviewRecordKind, list_review_records
 from proof_cli.commands import cmd_proof_verify_run
-from proof_cli.domain import TrustLevel
 from proof_cli.exchange import export_exchange_bundle, import_exchange_bundle
 from proof_cli.proof_map import (
     ProofMapError,
@@ -25,18 +22,15 @@ from proof_cli.proof_map import (
     split_node,
     submit_candidate_proof,
 )
-from proof_cli.review import change_trust_level, mark_verified
 from proof_cli.storage import ensure_project, get_current_candidate_proof
 from proof_cli.theorems import add_theorem
 
-runner = CliRunner()
 
 
 def _submit(store, node_id: str, *, session: str = "sess_1") -> None:
-    claim_node(store, node_id, claimant_id="agent_a", session_id=session)
+    _claim_token = claim_node(store, node_id, claimant_id="agent_a", session_id=session).claim_token
     submit_candidate_proof(
-        store, node_id, claimant_id="agent_a", session_id=session, scoping_rationale="scoped", content="proof text"
-    )
+        store, node_id, claimant_id="agent_a", session_id=session, scoping_rationale="scoped", content="proof text", claim_token=_claim_token)
 
 
 def _awaiting_review(store, node_id: str = "clm_1", **node_fields) -> None:
@@ -210,10 +204,9 @@ def test_split_promote_verify_and_exchange_import_never_write_acceptance_state(t
     assert exc_info.value.code == "NOT_ACCEPTED"
     assert get_acceptance_state(store, "clm_child") == "unreviewed"
 
-    # the legacy theorem-contract verify / trust paths, on a contract sharing the node's id
+    # the legacy theorem-contract verify path, on a contract sharing the node's id (the trust
+    # commands themselves are gone, #37)
     add_theorem(store, theorem_id="clm_child", kind="lemma", name="child", statement="child")
-    assert mark_verified(store, "clm_child", confirmed=True, rationale="legacy verify").allowed
-    change_trust_level(store, "clm_child", TrustLevel.project_verified, confirmed=True, rationale="legacy trust")
     assert json.loads(cmd_proof_verify_run("clm_child", root=tmp_path / "local"))["machine_check_status"] == "machine_checked"
     assert get_acceptance_state(store, "clm_child") == "unreviewed"
 
@@ -242,7 +235,7 @@ def test_exchange_import_cannot_reopen_a_local_accepted_node_for_review(tmp_path
 
     report = import_exchange_bundle(local, bundle)
 
-    assert any("already exist locally" in warning for warning in report.warnings)
+    assert any("already exists here" in warning for warning in report.warnings)
     assert get_current_candidate_proof(local, "clm_1").id == v1.id
     assert get_workflow_state(local, "clm_1") == "open"
     with pytest.raises(ProofMapError) as exc_info:
@@ -254,42 +247,3 @@ def test_exchange_import_cannot_reopen_a_local_accepted_node_for_review(tmp_path
 # -- CLI contract ---------------------------------------------------------------
 
 
-def test_node_review_on_a_node_not_awaiting_review_json_error(tmp_path: Path):
-    store = ensure_project(tmp_path)
-    create_node(store, node_id="clm_1", kind="claim", statement="stmt")
-
-    result = runner.invoke(
-        app, sign_cli(["node", "review", "clm_1", "accept", "--root", str(tmp_path), "--reviewer", "researcher", "--confirm", "--json"])
-    )
-
-    assert result.exit_code != 0
-    payload = json.loads(result.stdout)
-    assert payload["ok"] is False
-    assert payload["error"]["code"] == "NOT_REVIEW_NEEDED"
-    assert payload["error"]["workflow_state"] == "open"  # details are flattened into `error`
-
-
-def test_node_review_on_a_rejected_node_human_readable_error(tmp_path: Path):
-    store = ensure_project(tmp_path)
-    _awaiting_review(store)
-    _decide(store, "clm_1", "reject")
-
-    result = runner.invoke(
-        app, sign_cli(["node", "review", "clm_1", "accept", "--root", str(tmp_path), "--reviewer", "researcher", "--confirm"])
-    )
-
-    assert result.exit_code != 0
-    assert result.output.startswith("Error: node clm_1 was Rejected")
-
-
-def test_node_review_on_a_node_not_awaiting_review_human_readable_error(tmp_path: Path):
-    store = ensure_project(tmp_path)
-    create_node(store, node_id="clm_1", kind="claim", statement="stmt")
-
-    result = runner.invoke(
-        app, sign_cli(["node", "review", "clm_1", "accept", "--root", str(tmp_path), "--reviewer", "researcher", "--confirm"])
-    )
-
-    assert result.exit_code != 0
-    assert result.output.startswith("Error: node clm_1 is open, not review-needed")
-    assert "(workflow_state=open)" in result.output

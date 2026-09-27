@@ -1,5 +1,6 @@
 """Human Review authority is a passkey signature (ADR-0009, issue #35)."""
 
+import importlib
 import inspect
 import json
 import sqlite3
@@ -56,10 +57,9 @@ runner = CliRunner()
 def _submitted(store, node_id: str = "clm_1", *, session: str = "sess_1", **fields):
     if get_node(store, node_id) is None:
         create_node(store, node_id=node_id, kind=fields.pop("kind", "claim"), statement=f"stmt {node_id}", **fields)
-    claim_node(store, node_id, claimant_id="agent_a", session_id=session)
+    _claim_token = claim_node(store, node_id, claimant_id="agent_a", session_id=session).claim_token
     return submit_candidate_proof(
-        store, node_id, claimant_id="agent_a", session_id=session, scoping_rationale="scoped", content=f"proof of {node_id}"
-    )
+        store, node_id, claimant_id="agent_a", session_id=session, scoping_rationale="scoped", content=f"proof of {node_id}", claim_token=_claim_token)
 
 
 def _codes(store) -> list[str]:
@@ -112,6 +112,7 @@ def _setup_promote(store):
 def _setup_force_release(store):
     create_node(store, node_id="clm_1", kind="claim", statement="stmt")
     claim = claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
+
     return "force_release", claim.id, "force-release", {}
 
 
@@ -219,12 +220,18 @@ def test_no_service_function_accepts_confirmed():
         parameters = inspect.signature(function).parameters
         assert "confirmed" not in parameters, function.__name__
         assert "signed_decision" in parameters, function.__name__
-    # nothing else in the proof-map service layer still takes the old flag
-    assert not [
-        name
-        for name, function in inspect.getmembers(proof_map, inspect.isfunction)
-        if function.__module__ == proof_map.__name__ and "confirmed" in inspect.signature(function).parameters
-    ]
+    # nothing anywhere in the package still takes the old flag (#37)
+    import pkgutil
+
+    import proof_cli
+
+    takes_flag = []
+    for module_info in pkgutil.walk_packages(proof_cli.__path__, "proof_cli."):
+        module = importlib.import_module(module_info.name)
+        for name, function in inspect.getmembers(module, inspect.isfunction):
+            if function.__module__ == module.__name__ and {"confirmed", "confirm"} & set(inspect.signature(function).parameters):
+                takes_flag.append(f"{module.__name__}.{name}")
+    assert not takes_flag
 
 
 # -- the signature binds to exactly what was decided ---------------------------------
@@ -729,31 +736,6 @@ def test_an_unsigned_challenge_dismissal_reads_as_open_again(tmp_path: Path):
 # -- CLI --------------------------------------------------------------------------
 
 
-def test_cli_payload_sign_and_submit_round_trip(tmp_path: Path):
-    """The interim ADR-0009 workflow: an agent prepares, a passkey signs
-    elsewhere, the signed file is submitted."""
-    store = ensure_project(tmp_path)
-    _submitted(store)
-    reviewer = researcher(store)
-
-    prepared = runner.invoke(app, ["review", "payload", "acceptance", "clm_1", "accept", "--root", str(tmp_path), "--rationale", "ok", "--json"])
-    assert prepared.exit_code == 0, prepared.output
-    data = json.loads(prepared.stdout)["data"]
-    from proof_cli.signing import DecisionPayload, b64url_decode
-
-    payload = DecisionPayload.model_validate(data["payload"])
-    signed = reviewer.authenticator.sign(payload, origin=project_origin(store))
-    # the printed challenge is exactly what the passkey signs
-    assert json.loads(b64url_decode(signed.assertion.client_data_json))["challenge"] == data["challenge"]
-    signed_file = tmp_path / "signed.json"
-    signed_file.write_text(signed.model_dump_json())
-
-    result = runner.invoke(app, ["node", "review", "clm_1", "accept", "--root", str(tmp_path), "--signed-decision", str(signed_file), "--json"])
-    assert result.exit_code == 0, result.output
-    assert json.loads(result.stdout)["data"]["signed"] is True
-    assert get_acceptance_state(store, "clm_1") == "accepted"
-
-
 @pytest.mark.parametrize("json_output", [True, False])
 def test_cli_human_review_required_without_a_signed_decision(tmp_path: Path, json_output: bool):
     store = ensure_project(tmp_path)
@@ -766,7 +748,7 @@ def test_cli_human_review_required_without_a_signed_decision(tmp_path: Path, jso
     if json_output:
         assert json.loads(result.stdout)["error"]["code"] == "HUMAN_REVIEW_REQUIRED"
     else:
-        assert "needs a signed decision" in result.output
+        assert "review app" in result.output and "http://localhost:" in result.output
     assert get_acceptance_state(store, "clm_1") == "unreviewed"
 
 
