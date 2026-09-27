@@ -69,7 +69,7 @@ The researcher's explicit decision to change an Accepted Claim's kind to Lemma, 
 _Avoid_: upgrade, generalize
 
 **Evidence check**:
-An automated or semi-automated check (a verifier, a checker) run against a specific Candidate proof, recorded as passed, failed, inconclusive, error, or stale. The researcher may separately judge an Evidence check trusted or unusable, but that only judges the check's own credibility — an Evidence check can never itself grant or revoke Acceptance, or close or block anything. See ADR-0004.
+An automated or semi-automated check (a verifier, a checker) run against a specific Candidate proof, recorded as passed, failed, inconclusive, error, or stale. The researcher may separately judge an Evidence check trusted or unusable, but that only judges the check's own credibility — an Evidence check can never itself grant or revoke Acceptance, or close or block anything. `proof verify run --candidate-proof <id>` records its machine check this way; without one, the run is only logged against the legacy obligation, theorem or blocker it names, and changes none of their statuses (#27). See ADR-0004.
 _Avoid_: verification result, verify accept
 
 **Challenge**:

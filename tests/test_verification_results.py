@@ -1,8 +1,13 @@
 from pathlib import Path
 
+import pytest
+from typer.testing import CliRunner
+
 from proof_cli.blockers import add_blocker, list_blockers
 from proof_cli.domain import BlockerRecord, BlockerStatus, ProofObligation, ProofObligationStatus, TheoremContract, TheoremStatus, TrustLevel, TheoremProvenanceKind, TheoremReviewState
+from proof_cli.cli import app
 from proof_cli.obligations import add_obligation, list_obligations
+from proof_cli.proof_map import claim_node, create_node, get_acceptance_state, list_evidence_checks, submit_candidate_proof
 from proof_cli.proof_state import build_snapshot, load_state, note_unresolved_trust_call, summarize_state
 from proof_cli.storage import ensure_project, get_contract, store_contract
 from proof_cli.verification_ir import (
@@ -20,7 +25,7 @@ from proof_cli.verification_ir import (
     VerificationTheoremApplication,
     VerificationTranslationStatus,
 )
-from proof_cli.verification_results import VerificationResultRecord, list_verification_results, record_verification_result
+from proof_cli.verification_results import VERIFY_RUN_CHECKER, VerificationResultRecord, evidence_outcome_for, list_verification_results, record_verification_result
 
 
 def _contract() -> TheoremContract:
@@ -164,60 +169,82 @@ def test_verification_result_record_round_trips_with_explicit_status_fields() ->
     assert "machine_checked/accepted_after_review" in reloaded.summary()
 
 
-def test_record_verification_result_strengthens_state_and_resolves_blocker(tmp_path: Path) -> None:
+@pytest.mark.parametrize("status", [VerificationFragmentStatus.machine_checked, VerificationFragmentStatus.stale_after_change, VerificationFragmentStatus.backend_failed])
+def test_a_machine_check_is_recorded_and_changes_nothing_it_names(tmp_path: Path, status) -> None:
+    """A checker's output never closes, blocks or resolves anything, and writes to no
+    theorem contract, obligation or blocker — not even a note (#27, ADR-0004 point 5)."""
     store = ensure_project(tmp_path)
     store_contract(store, _contract())
     add_obligation(store, _obligation())
     add_blocker(store, _blocker())
     note_unresolved_trust_call(store, "thm_bridge")
+    before = (get_contract(store, "thm_bridge"), list_obligations(store), list_blockers(store), load_state(store).unresolved_trust_sensitive_calls, load_state(store).failed_routes)
 
-    fragment = _fragment()
+    fragment = _fragment(status=status)
     result = _result(fragment).accept(notes="accepted after stronger checking")
-
     record = record_verification_result(store, fragment, result)
-    state = load_state(store)
-    contract = get_contract(store, "thm_bridge")
-    obligations = list_obligations(store)
-    blockers = list_blockers(store)
-    summary = summarize_state(store)
-    snapshot = build_snapshot(store, handoff_note="resume after accepted machine check")
 
-    assert record.effect == "strengthening"
-    assert record.result.id == result.id
-    assert any(entry.startswith("verification_result:") for entry in state.session_history)
-    assert state.unresolved_trust_sensitive_calls == []
-    assert contract is not None
-    assert record.summary() in contract.local_usage_notes
-    assert obligations[0].status == ProofObligationStatus.resolved
-    assert blockers[0].status == BlockerStatus.resolved
-    assert any(reference == f"supporting_ref:{result.id}" for reference in blockers[0].related_contracts)
-    assert summary["verification_result_summaries"] == [record.summary()]
-    assert summary["verification_results"][0]["review_status"] == VerificationReviewStatus.accepted_after_review.value
-    assert summary["verification_results"][0]["result_status"] == VerificationFragmentStatus.machine_checked.value
-    assert record.summary() in snapshot.validated_results
+    after = (get_contract(store, "thm_bridge"), list_obligations(store), list_blockers(store), load_state(store).unresolved_trust_sensitive_calls, load_state(store).failed_routes)
+    assert after == before
+    assert list_verification_results(store)[0].result.id == result.id
+    assert summarize_state(store)["verification_result_summaries"] == [record.summary()]
+    assert record.summary() in build_snapshot(store).validated_results
 
 
-def test_record_verification_result_weakens_state_and_keeps_blocker_active(tmp_path: Path) -> None:
+def test_a_verification_never_reopens_what_a_researcher_resolved(tmp_path: Path) -> None:
     store = ensure_project(tmp_path)
     store_contract(store, _contract())
+    add_obligation(store, _obligation().model_copy(update={"status": ProofObligationStatus.resolved}))
+    add_blocker(store, _blocker().model_copy(update={"status": BlockerStatus.resolved}))
+
+    fragment = _fragment(status=VerificationFragmentStatus.backend_failed)
+    record_verification_result(store, fragment, _result(fragment))
+
+    assert list_obligations(store)[0].status == ProofObligationStatus.resolved
+    assert list_blockers(store)[0].status == BlockerStatus.resolved
+
+
+# -- a checker's output goes into the advisory Evidence path (#27) ----------------------
+
+@pytest.mark.parametrize(
+    "status, outcome",
+    [
+        (VerificationFragmentStatus.machine_checked, "passed"),
+        (VerificationFragmentStatus.backend_failed, "failed"),
+        (VerificationFragmentStatus.translation_failed, "error"),
+        (VerificationFragmentStatus.stale_after_change, "stale"),
+        (VerificationFragmentStatus.queued_for_verification, "inconclusive"),
+        # someone's judgment, not the machine's: never a pass or a fail here
+        (VerificationFragmentStatus.accepted_after_review, "inconclusive"),
+        (VerificationFragmentStatus.rejected_by_human, "inconclusive"),
+    ],
+)
+def test_every_machine_check_status_maps_to_an_evidence_outcome(status, outcome) -> None:
+    assert evidence_outcome_for(status).value == outcome
+
+
+def test_verify_run_records_its_outcome_as_an_evidence_check_and_decides_nothing(tmp_path: Path) -> None:
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="lem", kind="lemma", statement="show the bridge condition")
+    token = claim_node(store, "lem", claimant_id="agent_a", session_id="s").claim_token
+    proof = submit_candidate_proof(store, "lem", claimant_id="agent_a", session_id="s", scoping_rationale="scoped", content="proof", claim_token=token)
     add_obligation(store, _obligation())
-    add_blocker(store, _blocker())
 
-    fragment = _fragment(status=VerificationFragmentStatus.stale_after_change)
-    result = _result(fragment).reject(notes="reviewer rejected the stale machine-check result")
+    result = CliRunner().invoke(app, ["verify", "run", "obl_bridge", "--candidate-proof", proof.id, "--root", str(tmp_path)])
 
-    record = record_verification_result(store, fragment, result)
-    state = load_state(store)
-    blockers = list_blockers(store)
-    obligations = list_obligations(store)
-    summary = summarize_state(store)
+    assert result.exit_code == 0, result.output
+    (check,) = list_evidence_checks(store, proof.id)
+    assert check.run_by == VERIFY_RUN_CHECKER
+    assert get_acceptance_state(store, "lem") == "unreviewed"
+    assert list_obligations(store)[0].status == ProofObligationStatus.open
 
-    assert record.effect == "weakening"
-    assert state.unresolved_trust_sensitive_calls == ["thm_bridge"]
-    assert blockers[0].status == BlockerStatus.active
-    assert any(entry.startswith("verification:blk_bridge:") for entry in state.failed_routes)
-    assert obligations[0].status == ProofObligationStatus.blocked
-    assert summary["verification_results"][0]["review_status"] == VerificationReviewStatus.rejected_by_human.value
-    assert summary["verification_results"][0]["result_status"] == VerificationFragmentStatus.stale_after_change.value
-    assert "verification:" in blockers[0].description
-    assert list_verification_results(store)[0].result.id == result.id
+
+def test_verify_run_refuses_an_unknown_candidate_proof_before_running(tmp_path: Path) -> None:
+    store = ensure_project(tmp_path)
+    add_obligation(store, _obligation())
+
+    result = CliRunner().invoke(app, ["verify", "run", "obl_bridge", "--candidate-proof", "nope", "--root", str(tmp_path)])
+
+    assert result.exit_code == 1
+    assert "nope" in result.output
+    assert list_verification_results(store) == []

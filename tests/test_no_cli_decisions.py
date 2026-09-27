@@ -10,7 +10,11 @@ Challenge or editing a dependency is ordinary agent work.)
 """
 
 import ast
+import contextlib
 import json
+import os
+import shutil
+import sqlite3
 from pathlib import Path
 
 import click
@@ -112,6 +116,44 @@ def _protected(store) -> dict:
     }
 
 
+class _Pristine:
+    """The project and the user config as the walk found them, restored before every command.
+
+    Without this, one command's leftovers change what the next one reaches
+    — `theorem add obl_1` made `verify run obl_1` verify a theorem instead of
+    the obligation, hiding #27. The database is written back in place with
+    SQLite's backup, so it stays the same file and long-lived connections see
+    the change; every other file is copied back.
+    """
+
+    def __init__(self, store, snapshot_dir: Path) -> None:
+        self.store = store
+        self.live_db = {store.db_path.with_name(store.db_path.name + suffix) for suffix in ("", "-wal", "-shm", "-journal")}
+        self.db_copy = snapshot_dir / "project.sqlite3"
+        self.dirs = {store.root: snapshot_dir / "project", Path(os.environ["PROOF_CLI_CONFIG_HOME"]): snapshot_dir / "config"}
+        snapshot_dir.mkdir(parents=True)
+        self._backup(store.db_path, self.db_copy)
+        for live_dir, copy_dir in self.dirs.items():
+            shutil.copytree(live_dir, copy_dir, ignore=self._the_live_db)
+
+    @staticmethod
+    def _backup(source: Path, target: Path) -> None:
+        with contextlib.closing(sqlite3.connect(source)) as src, contextlib.closing(sqlite3.connect(target)) as dst:
+            src.backup(dst)
+
+    def _the_live_db(self, directory, names):
+        return [name for name in names if Path(directory) / name in self.live_db]
+
+    def restore(self) -> None:
+        self._backup(self.db_copy, self.store.db_path)
+        for live_dir, copy_dir in self.dirs.items():
+            for path in sorted(live_dir.rglob("*"), reverse=True):
+                if path in self.live_db or not path.exists() or (copy_dir / path.relative_to(live_dir)).exists():
+                    continue
+                shutil.rmtree(path) if path.is_dir() else path.unlink()
+            shutil.copytree(copy_dir, live_dir, dirs_exist_ok=True)
+
+
 def _commands(group: click.Group, prefix=()):
     for name, command in sorted(group.commands.items()):
         path = (*prefix, name)
@@ -177,9 +219,11 @@ def test_no_command_changes_any_protected_state(tmp_path: Path, monkeypatch):
     foreign_bundle = bundle_to_json(export_exchange_bundle(_rich_project(tmp_path / "foreign")))
     targets = ["lem_a", "clm_b", "rej", "rev", "ref", "clm_c", *challenge_ids, *review_ids, "thm_t", "ref_std", "obl_1", "blk_1", own_bundle, foreign_bundle]
 
+    pristine = _Pristine(store, tmp_path / "pristine")
     walked = 0
     changed = []
     for path, command in _commands(typer.main.get_command(app)):
+        pristine.restore()
         for args in _invocations(path, command, root, targets):
             runner.invoke(app, args, catch_exceptions=True)
             walked += 1
@@ -187,7 +231,7 @@ def test_no_command_changes_any_protected_state(tmp_path: Path, monkeypatch):
         now = _protected(store)
         for section, before in baseline.items():
             for key, value in before.items():
-                if now[section].get(key) != value and (section, key) not in {(c[1], c[2]) for c in changed}:
+                if now[section].get(key) != value:
                     changed.append((" ".join(path), section, key, value, now[section].get(key)))
 
     assert not changed, changed
