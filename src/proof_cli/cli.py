@@ -101,9 +101,6 @@ from .envelope import dump_envelope, error_envelope, success_envelope
 from .collaboration import summarize_review_record
 from .authority import (
     AuthorityError,
-    EnrollmentRequest,
-    enroll_reviewer_key,
-    list_authority_warnings,
     list_reviewer_keys,
     revoke_reviewer_key,
 )
@@ -122,6 +119,7 @@ from .proof_map import (
     get_integrity_state,
     get_workflow_state,
     list_challenges,
+    list_integrity_warnings,
     list_nodes,
     open_challenge,
     prepare_decision,
@@ -169,7 +167,7 @@ provenance_app = typer.Typer(help="Provenance workflows")
 bug_app = typer.Typer(help="Proof bug workflows")
 debug_app = typer.Typer(help="Proof debug workflows")
 review_app = typer.Typer(help="Proof review workflows")
-reviewer_app = typer.Typer(help="Reviewer passkey registry (ADR-0009)")
+reviewer_app = typer.Typer(help="Reviewer passkey registry (ADR-0009); keys are enrolled only in the web app")
 contributor_app = typer.Typer(help="Contributor workflows")
 role_app = typer.Typer(help="Role workflows")
 comment_app = typer.Typer(help="Comment workflows")
@@ -741,7 +739,7 @@ def review_payload(
 @review_app.command("warnings")
 def review_warnings(root: str = ".", json_output: bool = typer.Option(False, "--json")) -> None:
     """Everything about Human Review authority that doesn't verify: unsigned or forged decisions, broken chains."""
-    warnings = list_authority_warnings(get_store(_root(root)))
+    warnings = list_integrity_warnings(get_store(_root(root)))
     if json_output:
         typer.echo(dump_envelope(success_envelope("review.warnings", [warning.model_dump(mode="json") for warning in warnings])))
     elif not warnings:
@@ -752,29 +750,6 @@ def review_warnings(root: str = ".", json_output: bool = typer.Option(False, "--
 
 def _emit_authority_error(exc: AuthorityError, json_output: bool, *, command: str) -> None:
     _emit_node_error(ProofMapError(exc.code, exc.message, details=exc.details), json_output, command=command)
-
-
-@reviewer_app.command("enroll")
-def reviewer_enroll(
-    request_file: str = typer.Argument(..., help="Enrollment request JSON (key + signed reviewer_enrollment decision), or -"),
-    root: str = ".",
-    json_output: bool = typer.Option(False, "--json"),
-) -> None:
-    """Enroll a Reviewer passkey. The first is trust-on-first-use; later ones must be signed by an enrolled key."""
-    store = get_store(_root(root))
-    try:
-        raw = sys.stdin.read() if request_file == "-" else Path(request_file).read_text()
-        key = enroll_reviewer_key(store, EnrollmentRequest.model_validate_json(raw))
-    except AuthorityError as exc:
-        _emit_authority_error(exc, json_output, command="reviewer.enroll")
-        raise typer.Exit(code=1)
-    except (OSError, ValueError) as exc:
-        _emit_node_error(ProofMapError("MALFORMED_ENROLLMENT", str(exc)), json_output, command="reviewer.enroll")
-        raise typer.Exit(code=1)
-    if json_output:
-        typer.echo(dump_envelope(success_envelope("reviewer.enroll", key.model_dump(mode="json"))))
-    else:
-        typer.echo(f"Enrolled Reviewer key {key.fingerprint} ({key.display_name})")
 
 
 @reviewer_app.command("revoke")

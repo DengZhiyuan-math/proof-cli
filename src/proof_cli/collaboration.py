@@ -11,6 +11,7 @@ from typing import Any, Iterable, Literal
 
 from pydantic import BaseModel, Field, ValidationError
 
+from .authority import human_review_required, signature_key
 from .domain import EventRecord, utc_now
 from .signing import SignedDecision, payload_hash
 from .storage import (
@@ -689,9 +690,11 @@ def record_review_request(
     authorship: list[str] | None = None,
     provenance_notes: str = "",
     kind: ReviewRecordKind | None = None,
+    signed_decision: SignedDecision | None = None,
     conn: sqlite3.Connection | None = None,
 ) -> ReviewRecord:
     _migrate_legacy_review_records(store, conn)
+    _require_signature_if_trust_bearing(store, object_type, kind, signed_decision)
     record = ReviewRecord(
         object_type=object_type,
         object_id=object_id,
@@ -728,6 +731,11 @@ def record_review_decision(
     """Append a decision on an existing review request. The request row is
     never modified; the returned record is the review as it now reads.
 
+    A trust-bearing review (any `kind`, or an object type a derived axis
+    reads) is refused without a signed decision that verifies under an
+    active Reviewer key: the service layer itself can't append an unsigned
+    decision a derived axis would read (#35 B).
+
     `signed_decision` is stored on the decision row as-is; the caller has
     already checked (`authority.authorize`) that it authorizes this decision."""
     _migrate_legacy_review_records(store, conn)
@@ -740,6 +748,7 @@ def record_review_decision(
         record = _current(tx)
         if record is None:
             raise KeyError(review_id)
+        _require_signature_if_trust_bearing(store, record.object_type, record.kind, signed_decision)
         insert_review_history_row(
             tx,
             _decision_row(
@@ -790,6 +799,7 @@ def record_decided_review(
             authorship=authorship,
             provenance_notes=provenance_notes,
             kind=kind,
+            signed_decision=signed_decision,
             conn=tx,
         )
         return record_review_decision(
@@ -801,6 +811,16 @@ def record_decided_review(
             signed_decision=signed_decision,
             conn=tx,
         )
+
+
+def _require_signature_if_trust_bearing(
+    store: ProjectStore, object_type: str, kind: ReviewRecordKind | None, signed_decision: SignedDecision | None
+) -> None:
+    if kind is None and object_type not in TRUST_BEARING_OBJECT_TYPES:
+        return
+    if signed_decision is None:
+        raise human_review_required(kind or object_type, object_type)
+    signature_key(store, signed_decision)
 
 
 def import_review_records(store: ProjectStore, records: Iterable[ReviewRecord]) -> tuple[list[str], list[str]]:

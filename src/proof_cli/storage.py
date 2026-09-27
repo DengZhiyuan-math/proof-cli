@@ -285,8 +285,69 @@ BEGIN
 END;
 """
 
-# The first link of every hash chain.
-GENESIS_ROW_HASH = "0" * 64
+# Unsigned but chained facts an agent may legitimately record — a node's
+# creation (its kind) and a Challenge's opening — kept append-only and
+# hash-linked so they can't be quietly edited or deleted afterwards (#35 C).
+PROOF_LEDGER_SCHEMA = """
+CREATE TABLE IF NOT EXISTS proof_ledger (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  id TEXT NOT NULL UNIQUE,
+  entry TEXT NOT NULL CHECK (entry IN ('node_created', 'challenge_opened')),
+  object_id TEXT NOT NULL,
+  data TEXT NOT NULL,
+  prev_row_hash TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_proof_ledger_object ON proof_ledger(entry, object_id, seq);
+
+CREATE TRIGGER IF NOT EXISTS proof_ledger_no_update
+BEFORE UPDATE ON proof_ledger
+BEGIN
+  SELECT RAISE(ABORT, 'proof_ledger is append-only');
+END;
+
+CREATE TRIGGER IF NOT EXISTS proof_ledger_no_delete
+BEFORE DELETE ON proof_ledger
+BEGIN
+  SELECT RAISE(ABORT, 'proof_ledger is append-only');
+END;
+
+CREATE TRIGGER IF NOT EXISTS proof_ledger_no_overwrite
+BEFORE INSERT ON proof_ledger
+WHEN EXISTS (SELECT 1 FROM proof_ledger WHERE id = NEW.id OR seq = NEW.seq)
+BEGIN
+  SELECT RAISE(ABORT, 'proof_ledger is append-only');
+END;
+"""
+
+CHAINED_TABLES = ("review_history", "reviewer_keys", "proof_ledger")
+
+INSTANCE_ID_KEY = "instance_id"
+
+
+def project_instance_id(conn: sqlite3.Connection) -> str:
+    """This project database's random instance id, created on first use.
+
+    Not the display `project_id` (many projects share the default one) and
+    never carried by exchange import: it names this one database, so a
+    signed decision or a history prefix from any other project — a copy of
+    this one's history included — never matches here (ADR-0009, #35 E).
+    """
+    # read first: even an ignored INSERT takes the write lock, which would
+    # stall a reader running beside an open decision transaction
+    row = conn.execute("SELECT value FROM project_meta WHERE key = ?", (INSTANCE_ID_KEY,)).fetchone()
+    if row is not None:
+        return row["value"]
+    conn.execute(
+        "INSERT OR IGNORE INTO project_meta(key, value) VALUES (?, ?)", (INSTANCE_ID_KEY, uuid.uuid4().hex)
+    )
+    return conn.execute("SELECT value FROM project_meta WHERE key = ?", (INSTANCE_ID_KEY,)).fetchone()["value"]
+
+
+def genesis_row_hash(instance_id: str) -> str:
+    """The first link of both hash chains, unique to one project instance."""
+    return hashlib.sha256(f"proof-cli chain genesis {instance_id}".encode("utf-8")).hexdigest()
 
 
 def chain_row_hash(row: dict) -> str:
@@ -306,13 +367,14 @@ def _add_missing_columns(conn: sqlite3.Connection, table: str, columns: dict[str
 
 def _last_row_hash(conn: sqlite3.Connection, table: str) -> str:
     last = conn.execute(f"SELECT * FROM {table} ORDER BY seq DESC LIMIT 1").fetchone()
-    return chain_row_hash(dict(last)) if last is not None else GENESIS_ROW_HASH
+    return chain_row_hash(dict(last)) if last is not None else genesis_row_hash(project_instance_id(conn))
 
 
 class _ActiveTransaction(NamedTuple):
     db_path: Path
     thread_id: int
     conn: sqlite3.Connection
+    after_commit: list
 
 
 # The write transaction this thread currently holds open. A nested
@@ -346,6 +408,7 @@ class ProjectStore:
         _add_missing_columns(conn, "challenges", _CHALLENGE_ADDED_COLUMNS)
         conn.executescript(REVIEW_HISTORY_TRIGGERS)
         conn.executescript(REVIEWER_KEYS_SCHEMA)
+        conn.executescript(PROOF_LEDGER_SCHEMA)
         conn.commit()
         return conn
 
@@ -378,7 +441,8 @@ class ProjectStore:
             joined.execute(f"RELEASE {savepoint}")
             return
         conn = self.connect()
-        token = _ACTIVE_TRANSACTION.set(_ActiveTransaction(self.db_path.resolve(), threading.get_ident(), conn))
+        active = _ActiveTransaction(self.db_path.resolve(), threading.get_ident(), conn, [])
+        token = _ACTIVE_TRANSACTION.set(active)
         try:
             conn.execute("BEGIN IMMEDIATE")
             yield conn
@@ -389,6 +453,19 @@ class ProjectStore:
         finally:
             _ACTIVE_TRANSACTION.reset(token)
             conn.close()
+        for callback in active.after_commit:
+            callback()
+
+
+def after_commit(store: ProjectStore, callback) -> None:
+    """Run `callback` once this thread's open transaction on `store` has committed
+    (never if it rolls back); right away if none is open."""
+    active = _ACTIVE_TRANSACTION.get()
+    if active is not None and active.thread_id == threading.get_ident() and active.db_path == store.db_path.resolve():
+        if callback not in active.after_commit:
+            active.after_commit.append(callback)
+        return
+    callback()
 
 
 def active_transaction(store: ProjectStore) -> sqlite3.Connection | None:
@@ -403,6 +480,51 @@ def active_transaction(store: ProjectStore) -> sqlite3.Connection | None:
     if active is not None and active.thread_id == threading.get_ident() and active.db_path == store.db_path.resolve():
         return active.conn
     return None
+
+
+LEDGER_ADOPTED_KEY = "ledger_adopted"
+
+
+def adopt_legacy_into_ledger(store: ProjectStore) -> None:
+    """Record every pre-#35 node and Challenge in the chained ledger, once.
+
+    A project created before the ledger existed has nodes and Challenges
+    with no `proof_ledger` entry. They're adopted here as they stand —
+    a node's stored kind, a Challenge's stored status — so that afterwards
+    *every* node and Challenge has an entry, and one without is simply
+    flagged: "no ledger entry" never again means "trust the table" (#35 C).
+    Idempotent; a new project is marked adopted at creation.
+    """
+    with store.connect() as conn:
+        done = conn.execute("SELECT 1 FROM project_meta WHERE key = ?", (LEDGER_ADOPTED_KEY,)).fetchone()
+    if done is not None or active_transaction(store) is not None:
+        return
+    with store.transaction() as conn:
+        if conn.execute("SELECT 1 FROM project_meta WHERE key = ?", (LEDGER_ADOPTED_KEY,)).fetchone() is not None:
+            return
+        recorded = {
+            (row["entry"], row["object_id"]) for row in conn.execute("SELECT entry, object_id FROM proof_ledger").fetchall()
+        }
+        for row in conn.execute("SELECT id, kind FROM proof_map_nodes ORDER BY created_at, id").fetchall():
+            if ("node_created", row["id"]) not in recorded:
+                append_ledger_row(store, "node_created", row["id"], {"kind": row["kind"], "adopted": True}, conn=conn)
+        for row in conn.execute("SELECT * FROM challenges ORDER BY created_at, id").fetchall():
+            if ("challenge_opened", row["id"]) not in recorded:
+                append_ledger_row(
+                    store,
+                    "challenge_opened",
+                    row["id"],
+                    {
+                        "target_node_id": row["target_node_id"],
+                        "rationale": row["rationale"],
+                        "opened_by": row["opened_by"],
+                        "created_at": row["created_at"],
+                        "adopted": True,
+                        "adopted_status": row["status"],
+                    },
+                    conn=conn,
+                )
+        conn.execute("INSERT OR IGNORE INTO project_meta(key, value) VALUES (?, ?)", (LEDGER_ADOPTED_KEY, utc_now().isoformat()))
 
 
 @contextmanager
@@ -468,6 +590,9 @@ def create_project(root: str | Path, project_id: str) -> ProjectStore:
                 "INSERT INTO project_meta(key, value) VALUES (?, ?)",
                 ("project_id", project_id),
             )
+            project_instance_id(conn)
+            # a brand-new project has nothing to adopt into the ledger
+            conn.execute("INSERT OR IGNORE INTO project_meta(key, value) VALUES (?, ?)", (LEDGER_ADOPTED_KEY, utc_now().isoformat()))
             if not collaboration_state_path(store).exists():
                 # a brand-new project has no JSON-era review records, so its
                 # one-shot migration is done before it ever starts
@@ -937,8 +1062,8 @@ def list_blockers(store: ProjectStore) -> list[BlockerRecord]:
     return [BLOCKER_ADAPTER.validate_json(row["data"]) for row in rows]
 
 
-def insert_proof_map_node(store: ProjectStore, node: ProofMapNode) -> ProofMapNode:
-    with store.connect() as conn:
+def insert_proof_map_node(store: ProjectStore, node: ProofMapNode, *, conn: sqlite3.Connection | None = None) -> ProofMapNode:
+    with _writing(store, conn) as conn:
         conn.execute(
             "INSERT INTO proof_map_nodes(id, kind, data, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
             (
@@ -949,7 +1074,6 @@ def insert_proof_map_node(store: ProjectStore, node: ProofMapNode) -> ProofMapNo
                 node.updated_at.isoformat(),
             ),
         )
-        conn.commit()
     return node
 
 
@@ -1267,8 +1391,8 @@ def _row_to_challenge(row: sqlite3.Row) -> Challenge:
     )
 
 
-def insert_challenge(store: ProjectStore, challenge: Challenge) -> Challenge:
-    with store.connect() as conn:
+def insert_challenge(store: ProjectStore, challenge: Challenge, *, conn: sqlite3.Connection | None = None) -> Challenge:
+    with _writing(store, conn) as conn:
         conn.execute(
             """
             INSERT INTO challenges(id, target_node_id, status, rationale, opened_by, created_at, resolved_by, resolved_at)
@@ -1285,7 +1409,6 @@ def insert_challenge(store: ProjectStore, challenge: Challenge) -> Challenge:
                 challenge.resolved_at.isoformat() if challenge.resolved_at else None,
             ),
         )
-        conn.commit()
     return challenge
 
 
@@ -1533,9 +1656,31 @@ def review_history_head(conn: sqlite3.Connection) -> str:
     return _last_row_hash(conn, "review_history")
 
 
+def chain_head(store: ProjectStore, table: str) -> str:
+    """The hash of a chained table's newest row (its instance genesis when empty).
+
+    Read-only: the instance id is created first, through `_writing`, so this
+    never takes the write lock on a plain reading connection."""
+    if table not in CHAINED_TABLES:
+        raise ValueError(f"{table} is not a hash-chained table")
+    read_project_instance_id(store)
+    with store.connect() as conn:
+        return _last_row_hash(conn, table)
+
+
+def read_project_instance_id(store: ProjectStore) -> str:
+    """The instance id, created (once, on the caller's transaction if one is open) for a pre-#35 project."""
+    with store.connect() as conn:
+        row = conn.execute("SELECT value FROM project_meta WHERE key = ?", (INSTANCE_ID_KEY,)).fetchone()
+    if row is not None:
+        return row["value"]
+    with _writing(store, None) as conn:
+        return project_instance_id(conn)
+
+
 def list_raw_chain_rows(store: ProjectStore, table: str) -> list[dict]:
-    """Every row of a hash-chained table (`review_history`, `reviewer_keys`), exactly as stored."""
-    if table not in {"review_history", "reviewer_keys"}:
+    """Every row of a hash-chained table, exactly as stored."""
+    if table not in CHAINED_TABLES:
         raise ValueError(f"{table} is not a hash-chained table")
     with store.connect() as conn:
         rows = conn.execute(f"SELECT * FROM {table} ORDER BY seq").fetchall()
@@ -1553,6 +1698,34 @@ _REVIEWER_KEY_COLUMNS = (
     "signed_decision",
     "created_at",
 )
+
+
+def append_ledger_row(store: ProjectStore, entry: str, object_id: str, data: dict, *, conn: sqlite3.Connection | None = None) -> None:
+    """Append one hash-linked `proof_ledger` fact (a node created, a Challenge opened)."""
+    with _writing(store, conn) as conn:
+        conn.execute(
+            "INSERT INTO proof_ledger(id, entry, object_id, data, prev_row_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                f"ledger_{uuid.uuid4().hex[:12]}",
+                entry,
+                object_id,
+                json.dumps(data, sort_keys=True, default=str),
+                _last_row_hash(conn, "proof_ledger"),
+                utc_now().isoformat(),
+            ),
+        )
+
+
+def chain_versions(store: ProjectStore) -> tuple:
+    """A cheap fingerprint of all three chains' current state: each table's
+    row count and the hash of its newest row."""
+    with store.connect() as conn:
+        version = []
+        for table in CHAINED_TABLES:
+            last = conn.execute(f"SELECT * FROM {table} ORDER BY seq DESC LIMIT 1").fetchone()
+            count = conn.execute(f"SELECT COUNT(*) AS n FROM {table}").fetchone()["n"]
+            version.append((count, chain_row_hash(dict(last)) if last is not None else None))
+    return tuple(version)
 
 
 def insert_reviewer_key_row(conn: sqlite3.Connection, row: dict) -> None:

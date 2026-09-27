@@ -52,7 +52,6 @@ from proof_cli.storage import (
     get_current_candidate_proof,
     mark_claim_released,
     read_state,
-    set_candidate_proof_interface_fingerprint,
     upsert_dependency_pin,
 )
 from proof_cli.vault import read_candidate_proof_frontmatter
@@ -1929,28 +1928,27 @@ def _pre_22_fingerprint(kind: str, statement: str, assumptions: list[str]) -> st
     return hashlib.sha256(json.dumps(parts, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
-def test_pins_taken_before_22_stay_current_and_already_stale_projects_recover(tmp_path: Path):
-    """Existing projects store fingerprints that include `kind`. A pre-#22
-    pin (claim-kind) against a target whose stored fingerprint was
-    recomputed at promotion (lemma-kind, the #22 bug) is the same interface:
-    it reads current again."""
+def test_pins_taken_before_22_stay_current(tmp_path: Path):
+    """Existing projects store pins whose fingerprints include `kind`. Since
+    #35 an Accepted node's own fingerprint is recomputed, kind-free; a
+    stored pre-#22 pin of the same statement and assumptions — claim- or
+    lemma-kind — is still the same interface, and a different one isn't."""
     store = ensure_project(tmp_path)
     create_node(store, node_id="clm_c", kind="claim", statement="c holds", assumptions=["h"])
     _accept_via_full_cycle(store, "clm_c")
-    create_node(store, node_id="lem_b", kind="lemma", statement="b holds", dependencies=["clm_c"])
-    _accept_via_full_cycle(store, "lem_b", claimant="agent_b", session="sess_b")
+    create_node(store, node_id="clm_b", kind="claim", statement="b holds", dependencies=["clm_c"])
+    claim_node(store, "clm_b", claimant_id="agent_b", session_id="sess_b")
+    submit_candidate_proof(
+        store, "clm_b", claimant_id="agent_b", session_id="sess_b", scoping_rationale="scoped", content="proof"
+    )
+    pin = get_dependency_pin(store, "clm_b", "clm_c")
 
-    # recreate the on-disk state a pre-#22 promote left behind
-    current = get_current_candidate_proof(store, "clm_c")
-    set_candidate_proof_interface_fingerprint(store, current.id, _pre_22_fingerprint("lemma", "c holds", ["h"]))
-    pin = get_dependency_pin(store, "lem_b", "clm_c")
-    upsert_dependency_pin(store, pin.model_copy(update={"pinned_fingerprint": _pre_22_fingerprint("claim", "c holds", ["h"])}))
+    for legacy_kind in ("claim", "lemma"):
+        upsert_dependency_pin(store, pin.model_copy(update={"pinned_fingerprint": _pre_22_fingerprint(legacy_kind, "c holds", ["h"])}))
+        assert dependency_pin_is_current(store, get_dependency_pin(store, "clm_b", "clm_c")) is True
 
-    assert get_integrity_state(store, "lem_b") == "current"
-
-    # a genuinely different interface is still a change
-    set_candidate_proof_interface_fingerprint(store, current.id, _pre_22_fingerprint("claim", "c holds", ["h", "k"]))
-    assert get_integrity_state(store, "lem_b") == "potentially-stale"
+    upsert_dependency_pin(store, pin.model_copy(update={"pinned_fingerprint": _pre_22_fingerprint("claim", "c holds", ["h", "k"])}))
+    assert dependency_pin_is_current(store, get_dependency_pin(store, "clm_b", "clm_c")) is False
 
 
 def test_a_challenged_node_cannot_be_promoted(tmp_path: Path):
