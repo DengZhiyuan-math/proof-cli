@@ -31,8 +31,13 @@ def _payload(**overrides) -> DecisionPayload:
     return DecisionPayload(**{**fields, **overrides})
 
 
+ORIGIN = "http://localhost:8765"  # the software authenticator's default origin
+
+
 def _verify(authenticator: SoftwareAuthenticator, signed: SignedDecision) -> str:
-    return verify_signed_decision(signed, public_key_spki=authenticator.public_key_spki, alg=authenticator.alg)
+    return verify_signed_decision(
+        signed, public_key_spki=authenticator.public_key_spki, alg=authenticator.alg, expected_origin=ORIGIN
+    )
 
 
 @pytest.mark.parametrize("alg", [ALG_ES256, ALG_EDDSA])
@@ -106,6 +111,7 @@ def test_another_key_cannot_verify():
         ({"flags": 0x01}, "USER_NOT_VERIFIED"),
         ({"flags": 0x04}, "USER_NOT_VERIFIED"),
         ({"origin": "https://evil.example"}, "ORIGIN_MISMATCH"),
+        ({"origin": "http://localhost:9999"}, "ORIGIN_MISMATCH"),  # another localhost port is another origin
         ({"rp_id": "evil.example"}, "RP_ID_MISMATCH"),
         ({"ceremony": "webauthn.create"}, "MALFORMED_ASSERTION"),
     ],
@@ -122,7 +128,7 @@ def test_a_key_of_the_wrong_algorithm_is_rejected():
     authenticator = SoftwareAuthenticator(ALG_ES256)
     signed = authenticator.sign(_payload())
     with pytest.raises(SignatureError) as exc_info:
-        verify_signed_decision(signed, public_key_spki=authenticator.public_key_spki, alg=ALG_EDDSA)
+        verify_signed_decision(signed, public_key_spki=authenticator.public_key_spki, alg=ALG_EDDSA, expected_origin=ORIGIN)
     assert exc_info.value.code == "UNSUPPORTED_KEY"
 
 

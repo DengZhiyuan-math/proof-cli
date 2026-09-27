@@ -33,6 +33,7 @@ import hashlib
 import json
 import os
 import sqlite3
+import threading
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -43,6 +44,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from .domain import utc_now
 from .signing import (
+    RP_ID,
     SUPPORTED_ALGORITHMS,
     DecisionKind,
     DecisionPayload,
@@ -52,6 +54,7 @@ from .signing import (
     b64url_decode,
     payload_hash,
     public_key_fingerprint,
+    sign_count,
     verify_signed_decision,
 )
 from .storage import (
@@ -61,7 +64,6 @@ from .storage import (
     after_commit,
     chain_head,
     chain_row_hash,
-    chain_versions,
     genesis_row_hash,
     get_candidate_proof,
     in_transaction,
@@ -74,6 +76,24 @@ from .storage import (
 )
 
 USER_CONFIG_ENV_VAR = "PROOF_CLI_CONFIG_HOME"
+
+_ORIGIN_PORT_BASE = 20000
+_ORIGIN_PORT_SPAN = 30000
+
+
+def origin_port(instance: str) -> int:
+    """The review app's port for one project instance: stable, so its origin is too."""
+    return _ORIGIN_PORT_BASE + int(hashlib.sha256(f"proof-cli origin {instance}".encode()).hexdigest()[:8], 16) % _ORIGIN_PORT_SPAN
+
+
+def project_origin(store: ProjectStore) -> str:
+    """The one WebAuthn origin a signature for this project may come from (#36).
+
+    Derived from the project's instance id, so it's fixed for the project
+    and differs between projects: an assertion made on some other localhost
+    page — another project's review app included — never verifies here.
+    """
+    return f"http://{RP_ID}:{origin_port(read_project_instance_id(store))}"
 
 ENROLL = "enroll"
 REVOKE = "revoke"
@@ -94,7 +114,13 @@ _DECISION_ROWS: dict[tuple[DecisionKind, str], tuple[str, str]] = {
     (DecisionKind.challenge_resolution, "dismissed"): ("challenge", "dismissed"),
     (DecisionKind.promote, "promote"): ("proof_map_node", "approved"),
     (DecisionKind.force_release, "force-release"): ("claim", "approved"),
+    (DecisionKind.legacy_decline, "decline"): ("legacy_item", "superseded"),
 }
+
+
+def decision_row_for(kind: DecisionKind, decision: str) -> tuple[str, str]:
+    """(row object_type, row decision value) a signed decision of this kind and value is recorded as."""
+    return _DECISION_ROWS[(kind, decision)]
 
 
 class AuthorityError(Exception):
@@ -119,6 +145,7 @@ class ReviewerKey(BaseModel):
     alg: int
     fingerprint: str
     display_name: str
+    aaguid: str | None = None  # the authenticator model, where it discloses one
     # where in the registry chain the key was enrolled / revoked: the key is
     # valid for exactly the registry prefixes between the two
     enrolled_seq: int
@@ -151,6 +178,7 @@ class EnrollmentRequest(BaseModel):
     public_key_spki: str
     alg: int
     display_name: str
+    aaguid: str | None = None
     signed_decision: SignedDecision
 
 
@@ -258,6 +286,7 @@ class RowVerdict:
 @dataclass
 class _Snapshot:
     instance: str
+    origin: str
     trusted: bool
     keys: dict[str, ReviewerKey]  # by credential id, every key that was ever validly enrolled
     first_fingerprint: str | None
@@ -274,9 +303,50 @@ class _Snapshot:
     warnings: list[AuthorityWarning]
     verdicts: dict[str, RowVerdict] = field(default_factory=dict)
     resolutions: dict[str, dict] | None = None
+    legacy_handled: dict[str, tuple[str, dict]] | None = None
 
 
 _SNAPSHOTS: dict[tuple, _Snapshot] = {}
+_WATCHER_LIMIT = 8
+
+
+class _Watcher:
+    """One open, read-only connection per database, shared by every thread.
+
+    SQLite bumps a connection's `PRAGMA data_version` whenever *any other*
+    connection commits — an in-place edit with the triggers dropped and
+    the file's mtime put back included. A snapshot cached under (this
+    watcher's generation, its data_version) is therefore stale the moment
+    anyone changes anything, however long the process runs (#36). Each
+    watcher gets a fresh generation, so a closed-and-reopened connection
+    can never alias an older cache entry (an `id()` could).
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._connections: dict[str, tuple[int, sqlite3.Connection]] = {}
+        self._generation = 0
+
+    def version(self, store: ProjectStore) -> tuple[int, int]:
+        path = str(store.db_path.resolve())
+        with self._lock:
+            entry = self._connections.pop(path, None)
+            if entry is None:
+                if len(self._connections) >= _WATCHER_LIMIT:
+                    oldest_path = next(iter(self._connections))
+                    self._connections.pop(oldest_path)[1].close()
+                self._generation += 1
+                entry = (self._generation, sqlite3.connect(path, timeout=30.0, check_same_thread=False))
+            self._connections[path] = entry  # most recently used last
+            generation, conn = entry
+            return generation, conn.execute("PRAGMA data_version").fetchone()[0]
+
+
+_WATCHER = _Watcher()
+
+
+def _data_version(store: ProjectStore) -> tuple[int, int]:
+    return _WATCHER.version(store)
 
 
 def _chain_hashes(rows: list[dict], table: str, genesis: str, warnings: list[AuthorityWarning]) -> dict[str, int]:
@@ -386,7 +456,9 @@ def _registry_row_problem(
             return "not signed by an active Reviewer key"
         signer_spki, signer_alg = b64url_decode(signer.public_key_spki), signer.alg
     try:
-        verify_signed_decision(signed, public_key_spki=signer_spki, alg=signer_alg)
+        verify_signed_decision(
+            signed, public_key_spki=signer_spki, alg=signer_alg, expected_origin=f"http://{RP_ID}:{origin_port(instance)}"
+        )
     except SignatureError as exc:
         return exc.message
     return None
@@ -430,6 +502,7 @@ def _replay_registry(
                 alg=row["alg"],
                 fingerprint=row["fingerprint"],
                 display_name=row["display_name"],
+                aaguid=row.get("aaguid"),
                 enrolled_seq=row["seq"],
                 enrolled_at=_recorded_at(row),
             )
@@ -525,12 +598,9 @@ def _snapshot(store: ProjectStore) -> _Snapshot:
 
         _migrate_legacy_review_records(store)
         adopt_legacy_into_ledger(store)
-    db_stat = store.db_path.stat()
     cache_key = (
         _project_key(store),
-        chain_versions(store),
-        db_stat.st_mtime_ns,
-        db_stat.st_size,
+        _data_version(store),
         json.dumps(_project_pin(store), sort_keys=True, default=str),
     )
     cached = _SNAPSHOTS.get(cache_key)
@@ -566,6 +636,7 @@ def _snapshot(store: ProjectStore) -> _Snapshot:
             rows_by_object.setdefault((row["object_type"], row["object_id"], row["kind"]), []).append(row)
     snapshot = _Snapshot(
         instance=instance,
+        origin=f"http://{RP_ID}:{origin_port(instance)}",
         trusted=trusted,
         keys=keys,
         first_fingerprint=first_fingerprint,
@@ -615,6 +686,7 @@ def _key_row(credential: EnrollmentRequest | ReviewerKey, *, entry: str, signed:
         "alg": credential.alg,
         "fingerprint": public_key_fingerprint(b64url_decode(credential.public_key_spki)),
         "display_name": credential.display_name,
+        "aaguid": credential.aaguid,
         "signed_decision": signed.model_dump_json(),
         "created_at": utc_now().isoformat(),
     }
@@ -741,6 +813,7 @@ def build_decision_payload(
     dependency_pins: list[PinnedDependency] | None = None,
     resolves_challenges: list[str] | None = None,
     credential_id: str | None = None,
+    resigns: str | None = None,
 ) -> DecisionPayload:
     """The exact payload a reviewer's passkey must sign for this decision, as of now."""
     return DecisionPayload(
@@ -754,6 +827,7 @@ def build_decision_payload(
         dependency_pins=list(dependency_pins or []),
         resolves_challenges=list(resolves_challenges or []),
         credential_id=credential_id,
+        resigns=resigns,
         decision=decision,
         rationale=rationale,
         previous_row_hash=chain_head(store, "review_history"),
@@ -795,7 +869,9 @@ def signature_key(store: ProjectStore, signed: SignedDecision) -> ReviewerKey:
         raise AuthorityError("REGISTRY_NOT_TRUSTED", "the Reviewer key registry doesn't verify; no decision can be trusted")
     key = _signing_key(snapshot, signed, snapshot.registry_latest_seq)
     try:
-        verify_signed_decision(signed, public_key_spki=b64url_decode(key.public_key_spki), alg=key.alg)
+        verify_signed_decision(
+            signed, public_key_spki=b64url_decode(key.public_key_spki), alg=key.alg, expected_origin=snapshot.origin
+        )
     except SignatureError as exc:
         raise AuthorityError(exc.code, exc.message) from exc
     return key.model_copy()
@@ -812,6 +888,7 @@ def authorize(
     interface_fingerprint: str | None = None,
     dependency_pins: list[PinnedDependency] | None = None,
     resolves_challenges: list[str] | None = None,
+    resigns: str | None = None,
     conn: sqlite3.Connection | None = None,
 ) -> ReviewerKey:
     """Check that `signed` authorizes exactly this operation, now; return the signing key.
@@ -843,6 +920,7 @@ def authorize(
         "interface_fingerprint": interface_fingerprint,
         "dependency_pins": list(dependency_pins or []),
         "resolves_challenges": list(resolves_challenges or []),
+        "resigns": resigns,
     }
     for name, value in expected.items():
         if getattr(payload, name) != value:
@@ -932,7 +1010,9 @@ def _row_verdict(store: ProjectStore, snapshot: _Snapshot, row_id: str) -> RowVe
         return RowVerdict("invalid", payload, "the Reviewer key registry isn't trusted")
     try:
         key = _signing_key(snapshot, signed)
-        verify_signed_decision(signed, public_key_spki=b64url_decode(key.public_key_spki), alg=key.alg)
+        verify_signed_decision(
+            signed, public_key_spki=b64url_decode(key.public_key_spki), alg=key.alg, expected_origin=snapshot.origin
+        )
     except (AuthorityError, SignatureError) as exc:
         return RowVerdict("invalid", payload, exc.message)
     if row["rationale"] != payload.rationale or row["reviewer_id"] != key.reviewer_id:
@@ -945,10 +1025,44 @@ def decision_rows(store: ProjectStore, object_type: str, object_id: str, kind: s
 
     For a review that has a signed decision row, unsigned rows appended to
     it later are dropped: only the signed row speaks for that review (B).
+    A legacy decision the researcher declined (#42) is dropped too — every
+    legacy row predates every signed one, so that can only ever expose
+    older unsigned rows, never bring back a signed decision.
     """
     rows = _snapshot(store).rows_by_object.get((object_type, object_id, kind), [])
     signed_reviews = {row["review_id"] for row in rows if row["signed_decision"]}
-    return [row for row in rows if row["signed_decision"] or row["review_id"] not in signed_reviews]
+    declined = {item for item, (how, _) in legacy_handled(store).items() if how == "declined"}
+    return [
+        row
+        for row in rows
+        if (row["signed_decision"] or row["review_id"] not in signed_reviews) and row["review_id"] not in declined
+    ]
+
+
+def legacy_handled(store: ProjectStore) -> dict[str, tuple[str, dict]]:
+    """Legacy items (#42) the researcher has dealt with: item id -> ("resigned" | "declined", the signed row).
+
+    A re-sign is a verified signed decision whose payload `resigns` the
+    item; a decline is a verified `legacy_decline` on it. Computed once per
+    snapshot.
+    """
+    snapshot = _snapshot(store)
+    if snapshot.legacy_handled is None:
+        handled: dict[str, tuple[str, dict]] = {}
+        for row in sorted(snapshot.history_rows.values(), key=lambda row: row["seq"]):
+            if row["entry"] != "decision" or not row["signed_decision"]:
+                continue
+            if row["kind"] != DecisionKind.legacy_decline.value and '"resigns":"' not in row["signed_decision"]:
+                continue  # neither a decline nor a re-sign (a set `resigns` is a JSON string)
+            verdict = verify_decision_row(store, row["id"])
+            if verdict.status != "verified":
+                continue
+            if row["kind"] == DecisionKind.legacy_decline.value:
+                handled.setdefault(row["object_id"], ("declined", row))
+            elif verdict.payload.resigns:
+                handled.setdefault(verdict.payload.resigns, ("resigned", row))
+        snapshot.legacy_handled = handled
+    return snapshot.legacy_handled
 
 
 _RESOLVING_KINDS = (DecisionKind.acceptance.value, DecisionKind.reference_review.value)
@@ -983,6 +1097,89 @@ def challenge_resolution(store: ProjectStore, challenge_id: str) -> dict | None:
     return snapshot.resolutions.get(challenge_id)
 
 
+def _sign_count_warnings(snapshot: _Snapshot) -> list[AuthorityWarning]:
+    """An authenticator's counter going backwards means the credential was cloned (#36).
+
+    Most passkeys don't keep a counter (always 0); those are skipped. One
+    batch assertion covers several rows with the same counter, so a
+    signature already seen isn't a regression.
+    """
+    warnings: list[AuthorityWarning] = []
+    highest: dict[str, int] = {}
+    seen: dict[str, set[str]] = {}
+    for row in sorted(snapshot.history_rows.values(), key=lambda row: row["seq"]):
+        signed = _parse_signed(row["signed_decision"]) if row["entry"] == "decision" else None
+        if signed is None:
+            continue
+        credential, count = signed.assertion.credential_id, sign_count(signed.assertion)
+        signatures = seen.setdefault(credential, set())
+        if count and signed.assertion.signature not in signatures:
+            previous = highest.get(credential)
+            if previous is not None and count <= previous:
+                key = snapshot.keys.get(credential)
+                warnings.append(
+                    AuthorityWarning(
+                        code="SIGN_COUNT_REGRESSION",
+                        message=(
+                            f"the signature counter of Reviewer key {key.reviewer_id if key else credential} went "
+                            f"backwards ({previous} → {count}): the credential may have been cloned"
+                        ),
+                        details={"credential_id": credential, "seq": row["seq"]},
+                    )
+                )
+            highest[credential] = max(count, previous or 0)
+        signatures.add(signed.assertion.signature)
+    return warnings
+
+
+ACKNOWLEDGE = "acknowledge"
+
+
+def _acknowledgement_problem(store: ProjectStore, signed: SignedDecision, head: str) -> str | None:
+    payload = signed.payload
+    if (
+        payload.kind != DecisionKind.registry_acknowledgement
+        or payload.decision != ACKNOWLEDGE
+        or payload.target_id != head
+        or payload.project_instance != read_project_instance_id(store)
+    ):
+        return "not an acknowledgement of the registry as it stands now"
+    try:
+        signature_key(store, signed)
+    except AuthorityError as exc:
+        return exc.message
+    return None
+
+
+def registry_status(store: ProjectStore) -> dict[str, Any]:
+    """What the review app's banner shows on every page (#36).
+
+    Whether the registry is trusted, and whether the researcher has
+    acknowledged it as it stands. The acknowledgement is a passkey-signed
+    decision kept in the pin and re-verified here on every read, so editing
+    the pin file can't make the banner go away.
+    """
+    snapshot = _snapshot(store)
+    head = chain_head(store, "reviewer_keys")
+    stored = (_project_pin(store)[1] or {}).get("acknowledgement")
+    signed = _parse_signed(stored) if isinstance(stored, str) else None
+    return {
+        "trusted": snapshot.trusted,
+        "registry_head": head,
+        "acknowledged": signed is not None and _acknowledgement_problem(store, signed, head) is None,
+        "has_keys": bool(snapshot.keys),
+        "origin": snapshot.origin,
+    }
+
+
+def acknowledge_registry(store: ProjectStore, signed: SignedDecision) -> None:
+    """Record, with a passkey tap, that the researcher has looked at the current registry."""
+    problem = _acknowledgement_problem(store, signed, chain_head(store, "reviewer_keys"))
+    if problem is not None:
+        raise AuthorityError("SIGNATURE_MISMATCH", f"acknowledgement refused: {problem}")
+    _write_pin(store, acknowledgement=signed.model_dump_json())
+
+
 # -- integrity warnings -----------------------------------------------------------
 
 
@@ -999,8 +1196,9 @@ def list_authority_warnings(store: ProjectStore) -> list[AuthorityWarning]:
     """
     snapshot = _snapshot(store)
     warnings = list(snapshot.warnings)
+    handled = legacy_handled(store)
     for row_id, row in snapshot.history_rows.items():
-        if row["entry"] != "decision" or row["kind"] is None:
+        if row["entry"] != "decision" or row["kind"] is None or row["review_id"] in handled:
             continue
         verdict = verify_decision_row(store, row_id)
         if verdict.status == "verified":
@@ -1022,6 +1220,7 @@ def list_authority_warnings(store: ProjectStore) -> list[AuthorityWarning]:
                     details=details,
                 )
             )
+    warnings.extend(_sign_count_warnings(snapshot))
     for event in list_events(store):
         if event.kind == "review_history_integrity_warning":
             warnings.append(AuthorityWarning(code="IGNORED_JSON_REVIEW_RECORDS", message=event.message, details=event.payload))
@@ -1035,18 +1234,25 @@ __all__ = [
     "ReviewerKey",
     "RowVerdict",
     "USER_CONFIG_ENV_VAR",
+    "ACKNOWLEDGE",
+    "acknowledge_registry",
     "active_reviewer_keys",
     "authorize",
     "build_decision_payload",
     "candidate_proof_sha256",
     "challenge_resolution",
+    "decision_row_for",
     "decision_rows",
     "enroll_reviewer_key",
     "human_review_required",
     "ledger_entries",
+    "legacy_handled",
     "list_authority_warnings",
     "list_reviewer_keys",
+    "origin_port",
     "pinned_first_fingerprint",
+    "project_origin",
+    "registry_status",
     "revoke_reviewer_key",
     "schedule_history_pin_advance",
     "signature_key",

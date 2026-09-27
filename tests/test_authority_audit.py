@@ -14,6 +14,7 @@ import pytest
 
 from _authenticator import Researcher, SoftwareAuthenticator, enroll, researcher
 from proof_cli.authority import (
+    project_origin,
     AuthorityError,
     EnrollmentRequest,
     active_reviewer_keys,
@@ -94,7 +95,7 @@ def _enrollment(store, authenticator, *, signer=None, decision: str = "enroll", 
         public_key_spki=b64url_encode(authenticator.public_key_spki),
         alg=authenticator.alg,
         display_name=authenticator.display_name,
-        signed_decision=(signer or authenticator).sign(payload),
+        signed_decision=(signer or authenticator).sign(payload, origin=project_origin(store)),
     )
 
 
@@ -288,7 +289,7 @@ def _revocation(store, target, signer, **payload_overrides):
     payload = build_decision_payload(
         store, DecisionKind.reviewer_enrollment, public_key_fingerprint(target.public_key_spki), "revoke", credential_id=target.credential_id
     ).model_copy(update=payload_overrides)
-    return signer.sign(payload)
+    return signer.sign(payload, origin=project_origin(store))
 
 
 def _insert_registry_row(store, request: EnrollmentRequest, *, entry: str = "enroll", credential_id: str | None = None, created_at=None):
@@ -398,7 +399,7 @@ def test_a_decision_signed_for_another_project_with_the_same_id_never_verifies(t
         create_node(store, node_id="ref_1", kind="imported_result", statement="Known lemma X", source_locator="doi:good", source_version="v1")
         Researcher(store, authenticator)
 
-    signed_for_a = authenticator.sign(prepare_decision(a, "reference_review", "ref_1", "reference-review"))
+    signed_for_a = authenticator.sign(prepare_decision(a, "reference_review", "ref_1", "reference-review"), origin=project_origin(a))
 
     with pytest.raises(ProofMapError) as exc_info:
         decide_reference_review(b, "ref_1", "reference-review", signed_decision=signed_for_a)
