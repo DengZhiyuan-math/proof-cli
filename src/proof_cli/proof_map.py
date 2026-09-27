@@ -652,19 +652,53 @@ def _normalize_whitespace(text: str) -> str:
     return " ".join(text.split())
 
 
-def compute_interface_fingerprint(kind: str, statement: str, assumptions: list[str]) -> str:
-    """SHA-256 hex digest over the canonical JSON tuple `(kind, statement, assumptions)`.
+def compute_interface_fingerprint(statement: str, assumptions: list[str]) -> str:
+    """SHA-256 hex digest over the canonical JSON pair `(statement, assumptions)`.
 
-    Statement and each assumption are whitespace-normalized (trimmed,
-    internal runs collapsed) first, so two statements differing only by
-    whitespace produce the same fingerprint. "Mathematical scope" is treated
-    as already captured within statement + assumptions for v1.
+    That pair is the node's mathematical interface — what a dependent
+    actually relies on. `kind` is deliberately left out: claim vs lemma is a
+    label about reusability, and relabeling (Promote) must never read as an
+    interface change to existing dependents (#22). Statement and each
+    assumption are whitespace-normalized (trimmed, internal runs collapsed)
+    first, so two statements differing only by whitespace produce the same
+    fingerprint. "Mathematical scope" is treated as already captured within
+    statement + assumptions for v1.
     """
-    canonical = json.dumps(
-        [kind, _normalize_whitespace(statement), [_normalize_whitespace(a) for a in assumptions]],
-        separators=(",", ":"),
-    )
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return _digest([_normalize_whitespace(statement), [_normalize_whitespace(a) for a in assumptions]])
+
+
+def _digest(parts: list) -> str:
+    return hashlib.sha256(json.dumps(parts, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+_FINGERPRINTED_KINDS = (ProofMapNodeKind.theorem, ProofMapNodeKind.lemma, ProofMapNodeKind.claim)
+
+
+def _legacy_with_kind_fingerprint(kind: str, statement: str, assumptions: list[str]) -> str:
+    """The fingerprint as it was computed before #22, with `kind` inside it."""
+    return _digest([kind, _normalize_whitespace(statement), [_normalize_whitespace(a) for a in assumptions]])
+
+
+def _same_interface(store: ProjectStore, node_id: str, left: str | None, right: str | None) -> bool:
+    """Whether two stored fingerprints of `node_id` describe the same interface.
+
+    Fingerprints stored before #22 included the node's `kind`, so existing
+    projects hold several spellings of one interface: the current
+    `(statement, assumptions)` form and a with-kind form per kind. Any two
+    of those, for this node's statement and assumptions, are the same
+    interface — which is also what repairs a pin broken by a pre-#22 Promote.
+    """
+    if left is None or right is None:
+        return False
+    if left == right:
+        return True
+    node = get_proof_map_node(store, node_id)
+    if node is None:
+        return False
+    spellings = {compute_interface_fingerprint(node.statement, node.assumptions)} | {
+        _legacy_with_kind_fingerprint(kind.value, node.statement, node.assumptions) for kind in _FINGERPRINTED_KINDS
+    }
+    return left in spellings and right in spellings
 
 
 def get_accepted_interface_fingerprint(store: ProjectStore, node_id: str) -> str | None:
@@ -734,7 +768,7 @@ def dependency_pin_is_current(store: ProjectStore, pin: DependencyPin) -> bool:
     if target is None or target.kind == ProofMapNodeKind.imported_result:
         return True
     current_fingerprint = get_accepted_interface_fingerprint(store, pin.target_node_id)
-    return pin.pinned_fingerprint is not None and pin.pinned_fingerprint == current_fingerprint
+    return _same_interface(store, pin.target_node_id, pin.pinned_fingerprint, current_fingerprint)
 
 
 class AcceptanceDecision(str, Enum):
@@ -847,7 +881,7 @@ def decide_acceptance(
         if current_proof is not None:
             set_candidate_proof_review_record_id(store, current_proof.id, record.id, conn=conn)
             if resolved_decision == AcceptanceDecision.accept:
-                fingerprint = compute_interface_fingerprint(node.kind.value, node.statement, node.assumptions)
+                fingerprint = compute_interface_fingerprint(node.statement, node.assumptions)
                 set_candidate_proof_interface_fingerprint(store, current_proof.id, fingerprint, conn=conn)
 
         _resolve_open_challenges(store, node_id, resolved_by=reviewer_id, conn=conn)
@@ -900,13 +934,12 @@ def promote_to_lemma(store: ProjectStore, node_id: str, *, promoted_by: str = "h
     """Promote an Accepted Claim to a Lemma, marking it independently reusable.
 
     The researcher's explicit decision, never automatic. Only available for
-    `kind=claim` nodes that are already Accepted; there is no demote. Every
-    field but `kind` is unchanged — including the Candidate-proof history —
-    but since the interface fingerprint is a function of `(kind, statement,
-    assumptions)`, it's recomputed for the new kind on the currently
-    Accepted Candidate proof, so a dependent pinning this node afterward
-    isn't told its interface "changed" over a relabeling that changed
-    nothing it actually asserts.
+    `kind=claim` nodes that are already Accepted and not under an open
+    Challenge (a node whose soundness is in question isn't something to
+    advertise as reusable); there is no demote. Every field but `kind` is
+    unchanged — the Candidate-proof history and the interface fingerprint
+    included, since `kind` isn't part of the interface: every dependent's
+    pin stays current across a promotion.
     """
     node = require_node(store, node_id)
 
@@ -916,6 +949,11 @@ def promote_to_lemma(store: ProjectStore, node_id: str, *, promoted_by: str = "h
     if get_acceptance_state(store, node_id) != "accepted":
         raise ProofMapError("NOT_ACCEPTED", f"node {node_id} must be Accepted before it can be promoted to Lemma")
 
+    if has_open_challenge(store, node_id):
+        raise ProofMapError(
+            "NODE_CHALLENGED", f"node {node_id} is under an open Challenge; resolve it before promoting to Lemma"
+        )
+
     if not confirmed:
         raise ProofMapError(
             "CONFIRMATION_REQUIRED",
@@ -924,11 +962,6 @@ def promote_to_lemma(store: ProjectStore, node_id: str, *, promoted_by: str = "h
 
     promoted = node.model_copy(update={"kind": ProofMapNodeKind.lemma, "updated_by": promoted_by, "updated_at": utc_now()})
     update_proof_map_node(store, promoted)
-
-    current_proof = get_current_candidate_proof(store, node_id)
-    if current_proof is not None and current_proof.interface_fingerprint is not None:
-        fingerprint = compute_interface_fingerprint(promoted.kind.value, promoted.statement, promoted.assumptions)
-        set_candidate_proof_interface_fingerprint(store, current_proof.id, fingerprint)
 
     append_event(
         store,
@@ -1061,7 +1094,7 @@ def revalidate_dependency(
             "TARGET_NOT_ACCEPTED", f"{target_node_id} is not currently Accepted; nothing to revalidate against"
         )
 
-    if pin.pinned_fingerprint != current_fingerprint:
+    if not _same_interface(store, target_node_id, pin.pinned_fingerprint, current_fingerprint):
         raise ProofMapError(
             "INTERFACE_CHANGED",
             f"{target_node_id}'s accepted interface changed since {node_id} last pinned it; "

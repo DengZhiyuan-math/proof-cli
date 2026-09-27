@@ -1,3 +1,5 @@
+import hashlib
+import json
 import threading
 from pathlib import Path
 
@@ -48,6 +50,7 @@ from proof_cli.storage import (
     get_current_candidate_proof,
     mark_claim_released,
     read_state,
+    set_candidate_proof_interface_fingerprint,
     upsert_dependency_pin,
 )
 from proof_cli.vault import read_candidate_proof_frontmatter
@@ -1093,17 +1096,17 @@ def test_frontier_lists_only_unclaimed_unblocked_nodes(tmp_path: Path):
 
 
 def test_compute_interface_fingerprint_ignores_whitespace_differences(tmp_path: Path):
-    a = compute_interface_fingerprint("claim", "A  implies   B", ["  A  "])
-    b = compute_interface_fingerprint("claim", "A implies B", ["A"])
+    a = compute_interface_fingerprint("A  implies   B", ["  A  "])
+    b = compute_interface_fingerprint("A implies B", ["A"])
     assert a == b
 
 
 def test_compute_interface_fingerprint_differs_for_substantive_change(tmp_path: Path):
-    a = compute_interface_fingerprint("claim", "A implies B", ["A"])
-    b = compute_interface_fingerprint("claim", "A implies C", ["A"])
+    a = compute_interface_fingerprint("A implies B", ["A"])
+    b = compute_interface_fingerprint("A implies C", ["A"])
     assert a != b
 
-    c = compute_interface_fingerprint("claim", "A implies B", ["A", "B"])
+    c = compute_interface_fingerprint("A implies B", ["A", "B"])
     assert a != c
 
 
@@ -1140,7 +1143,7 @@ def test_interface_fingerprint_persisted_on_candidate_proof_at_accept_time(tmp_p
     create_node(store, node_id="clm_1", kind="claim", statement="A implies B", assumptions=["A"])
     _accept_via_full_cycle(store, "clm_1")
 
-    expected = compute_interface_fingerprint("claim", "A implies B", ["A"])
+    expected = compute_interface_fingerprint("A implies B", ["A"])
     fingerprint = get_accepted_interface_fingerprint(store, "clm_1")
     assert fingerprint == expected
 
@@ -1882,19 +1885,20 @@ def test_promote_changes_only_kind(tmp_path: Path):
         )
 
 
-def test_promote_keeps_the_interface_fingerprint_internally_consistent(tmp_path: Path):
-    """The fingerprint is a function of (kind, statement, assumptions); kind
-    just changed, so the stored fingerprint is recomputed to match — a
-    dependent pinning this node afterward must see it as current, not as an
-    interface change caused by nothing more than a relabeling."""
+def test_promote_leaves_the_interface_fingerprint_alone(tmp_path: Path):
+    """Promote is a relabel (story 25): kind is not part of the mathematical
+    interface, so the fingerprint doesn't change, and a dependent pinning the
+    node afterward sees it as current."""
     store = ensure_project(tmp_path)
     create_node(store, node_id="clm_1", kind="claim", statement="A promotable claim")
     _accept_via_full_cycle(store, "clm_1")
+    before = get_accepted_interface_fingerprint(store, "clm_1")
 
     promote_to_lemma(store, "clm_1", confirmed=True)
 
-    expected = compute_interface_fingerprint("lemma", "A promotable claim", [])
-    assert get_accepted_interface_fingerprint(store, "clm_1") == expected
+    assert get_accepted_interface_fingerprint(store, "clm_1") == before == compute_interface_fingerprint(
+        "A promotable claim", []
+    )
 
     create_node(store, node_id="clm_2", kind="claim", statement="Depends on the promoted lemma", dependencies=["clm_1"])
     claim_node(store, "clm_2", claimant_id="agent_x", session_id="sess_x")
@@ -1908,6 +1912,67 @@ def test_promote_keeps_the_interface_fingerprint_internally_consistent(tmp_path:
     )
     pin = get_dependency_pin(store, "clm_2", "clm_1")
     assert dependency_pin_is_current(store, pin) is True
+
+
+def test_promote_does_not_make_an_existing_dependent_stale(tmp_path: Path):
+    """The #22 audit's reproduction: B depends on C and is Accepted *before* C is promoted."""
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_c", kind="claim", statement="c holds")
+    _accept_via_full_cycle(store, "clm_c")
+    create_node(store, node_id="lem_b", kind="lemma", statement="b holds", dependencies=["clm_c"])
+    _accept_via_full_cycle(store, "lem_b", claimant="agent_b", session="sess_b")
+    assert get_integrity_state(store, "lem_b") == "current"
+
+    promote_to_lemma(store, "clm_c", confirmed=True)
+
+    assert get_integrity_state(store, "lem_b") == "current"
+    assert dependency_pin_is_current(store, get_dependency_pin(store, "lem_b", "clm_c")) is True
+    create_node(store, node_id="clm_top", kind="claim", statement="uses b", dependencies=["lem_b"])
+    assert get_blocked_reason(store, "clm_top") is None
+
+
+def _pre_22_fingerprint(kind: str, statement: str, assumptions: list[str]) -> str:
+    """The fingerprint as computed before #22, with `kind` inside it — an
+    independent re-implementation, so a regression in the src copy can't hide."""
+    parts = [kind, " ".join(statement.split()), [" ".join(a.split()) for a in assumptions]]
+    return hashlib.sha256(json.dumps(parts, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def test_pins_taken_before_22_stay_current_and_already_stale_projects_recover(tmp_path: Path):
+    """Existing projects store fingerprints that include `kind`. A pre-#22
+    pin (claim-kind) against a target whose stored fingerprint was
+    recomputed at promotion (lemma-kind, the #22 bug) is the same interface:
+    it reads current again."""
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_c", kind="claim", statement="c holds", assumptions=["h"])
+    _accept_via_full_cycle(store, "clm_c")
+    create_node(store, node_id="lem_b", kind="lemma", statement="b holds", dependencies=["clm_c"])
+    _accept_via_full_cycle(store, "lem_b", claimant="agent_b", session="sess_b")
+
+    # recreate the on-disk state a pre-#22 promote left behind
+    current = get_current_candidate_proof(store, "clm_c")
+    set_candidate_proof_interface_fingerprint(store, current.id, _pre_22_fingerprint("lemma", "c holds", ["h"]))
+    pin = get_dependency_pin(store, "lem_b", "clm_c")
+    upsert_dependency_pin(store, pin.model_copy(update={"pinned_fingerprint": _pre_22_fingerprint("claim", "c holds", ["h"])}))
+
+    assert get_integrity_state(store, "lem_b") == "current"
+
+    # a genuinely different interface is still a change
+    set_candidate_proof_interface_fingerprint(store, current.id, _pre_22_fingerprint("claim", "c holds", ["h", "k"]))
+    assert get_integrity_state(store, "lem_b") == "potentially-stale"
+
+
+def test_a_challenged_node_cannot_be_promoted(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_1", kind="claim", statement="A promotable claim")
+    _accept_via_full_cycle(store, "clm_1")
+    open_challenge(store, "clm_1", opened_by="agent_b", rationale="step 2 looks wrong")
+
+    with pytest.raises(ProofMapError) as exc_info:
+        promote_to_lemma(store, "clm_1", confirmed=True)
+
+    assert exc_info.value.code == "NODE_CHALLENGED"
+    assert get_node(store, "clm_1").kind == ProofMapNodeKind.claim
 
 
 def test_promote_has_no_demote_path(tmp_path: Path):
