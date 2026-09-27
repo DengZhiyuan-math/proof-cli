@@ -11,7 +11,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Iterator, NamedTuple
+from typing import Iterable, Iterator, NamedTuple
 
 from pydantic import TypeAdapter
 
@@ -20,6 +20,7 @@ from .domain import (
     BlockerRecord,
     CandidateProofRecord,
     Challenge,
+    ForeignAttestation,
     ClaimRecord,
     DependencyPin,
     EventRecord,
@@ -172,6 +173,15 @@ CREATE TABLE IF NOT EXISTS governance_records (
 );
 
 CREATE INDEX IF NOT EXISTS idx_governance_records_kind ON governance_records(kind, created_at);
+
+-- Signed decisions another project made, kept for display only: nothing reads
+-- them to derive a Human Review axis (ADR-0009 point 6, issue #38).
+CREATE TABLE IF NOT EXISTS foreign_attestations (
+  id TEXT PRIMARY KEY,
+  object_id TEXT NOT NULL,
+  data TEXT NOT NULL,
+  imported_at TEXT NOT NULL
+);
 """
 
 # Human Review history (issue #33): insert-only. A request is a row whose
@@ -1696,3 +1706,24 @@ def list_review_history_rows(
         with store.connect() as own:
             rows = own.execute(query, params).fetchall()
     return [_row_to_review_history(row) for row in rows]
+
+
+def insert_foreign_attestation(store: ProjectStore, attestation: ForeignAttestation) -> bool:
+    """Keep another project's signed decision for display; False if it's already here."""
+    with store.connect() as conn:
+        cursor = conn.execute(
+            "INSERT OR IGNORE INTO foreign_attestations(id, object_id, data, imported_at) VALUES (?, ?, ?, ?)",
+            (attestation.id, attestation.object_id, attestation.model_dump_json(), attestation.imported_at.isoformat()),
+        )
+        conn.commit()
+    return cursor.rowcount == 1
+
+
+def list_foreign_attestations(store: ProjectStore, *, object_ids: Iterable[str] | None = None) -> list[ForeignAttestation]:
+    with store.connect() as conn:
+        rows = conn.execute("SELECT data FROM foreign_attestations ORDER BY imported_at, id").fetchall()
+    attestations = [ForeignAttestation.model_validate_json(row["data"]) for row in rows]
+    if object_ids is None:
+        return attestations
+    wanted = set(object_ids)
+    return [attestation for attestation in attestations if attestation.object_id in wanted]

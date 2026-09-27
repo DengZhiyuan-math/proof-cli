@@ -8,13 +8,13 @@ a browser — or an agent `curl`ing it — would.
 import http.client
 import json
 import sqlite3
-import threading
 from pathlib import Path
 from urllib.parse import urlsplit
 
 import pytest
 
 from _authenticator import Researcher, SoftwareAuthenticator, researcher
+from _review_client import Client, serving
 from proof_cli.authority import list_reviewer_keys, pinned_first_fingerprint, project_origin
 from proof_cli.collaboration import list_review_records
 from proof_cli.proof_map import (
@@ -31,52 +31,13 @@ from proof_cli.signing import (
     verify_registration,
 )
 from proof_cli.storage import ensure_project
-from proof_cli.webapp.server import ReviewServer
 
 
 @pytest.fixture
 def app(tmp_path: Path):
     store = ensure_project(tmp_path)
-    server = ReviewServer(store)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    client = Client(server.url)
-    yield store, client
-    server.shutdown()
-    server.server_close()
-
-
-class Client:
-    """What a browser on the app's page sends: the pinned Host and Origin, JSON bodies."""
-
-    def __init__(self, origin: str) -> None:
-        self.origin = origin
-        self.netloc = urlsplit(origin).netloc
-
-    def request(self, method: str, path: str, body=None, *, host: str | None = None, origin: str | None = "same", content_type="application/json"):
-        port = urlsplit(self.origin).port
-        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
-        headers = {"Host": host or self.netloc}
-        if origin is not None:
-            headers["Origin"] = self.origin if origin == "same" else origin
-        payload = None
-        if body is not None:
-            payload = json.dumps(body).encode() if not isinstance(body, bytes) else body
-            headers["Content-Type"] = content_type
-        conn.request(method, path, body=payload, headers=headers)
-        response = conn.getresponse()
-        data = response.read()
-        conn.close()
-        try:
-            return response.status, json.loads(data)
-        except ValueError:
-            return response.status, data
-
-    def get(self, path, **kwargs):
-        return self.request("GET", path, **kwargs)
-
-    def post(self, path, body=None, **kwargs):
-        return self.request("POST", path, {} if body is None else body, **kwargs)
+    with serving(store) as client:
+        yield store, client
 
 
 def _submitted(store, node_id="clm_1"):
