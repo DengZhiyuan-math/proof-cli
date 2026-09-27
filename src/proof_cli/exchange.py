@@ -32,6 +32,7 @@ from .references import ReferenceRecord, ReferenceReviewRecord
 from .reusable_assets import ReusableAsset
 from .storage import (
     ProjectStore,
+    append_ledger_row,
     create_project,
     import_reference_review,
     import_theorem_contract,
@@ -267,6 +268,9 @@ def import_exchange_bundle(store: ProjectStore, bundle: ExchangeBundle | dict[st
 
     for node in bundle.proof_map_nodes:
         insert_proof_map_node(store, node)
+        # recorded in the local proof ledger as it arrives; its kind stands as
+        # created here, and nothing it was decided elsewhere counts locally
+        append_ledger_row(store, "node_created", node.id, {"kind": node.kind.value, "imported": True})
     if bundle.proof_map_nodes:
         imported_sections.append("proof_map_nodes")
 
@@ -307,6 +311,19 @@ def import_exchange_bundle(store: ProjectStore, bundle: ExchangeBundle | dict[st
 
     for challenge in challenges:
         insert_challenge(store, challenge)
+        # an imported Challenge is open here: a foreign resolution resolves nothing locally
+        append_ledger_row(
+            store,
+            "challenge_opened",
+            challenge.id,
+            {
+                "target_node_id": challenge.target_node_id,
+                "rationale": challenge.rationale,
+                "opened_by": challenge.opened_by,
+                "created_at": challenge.created_at.isoformat(),
+                "imported": True,
+            },
+        )
     if challenges:
         imported_sections.append("challenges")
 

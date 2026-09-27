@@ -97,7 +97,7 @@ _Avoid_: reviewer id, reviewer name (a self-declared name proves nothing)
 A proof map node's state is tracked along three independent axes, never folded into one flat status. None are stored directly — each is computed from lower-level records (an active claim, the node's latest Candidate proof and its review decision, its dependencies' own state, and any open Challenges). See ADR-0002, ADR-0004.
 
 - **workflow state**: Claimed, Review-needed, Revision requested, Blocked — how far the current attempt has gotten
-- **acceptance state**: Accepted, Rejected, or unreviewed by default — set only by the researcher's Human Review
+- **acceptance state**: Accepted, Rejected, or unreviewed by default — set only by the researcher's Human Review. Reads *unverifiable* when the node's newest decision doesn't verify (unsigned, tampered, or no longer describing the node); it never falls back to an older decision (ADR-0009)
 - **integrity state**: current by default, Potentially stale, or Challenged — a derived warning overlay, never itself a workflow or acceptance value
 
 **Claimed** (a workflow state):
@@ -119,6 +119,10 @@ _Avoid_: waiting
 **Accepted** (an acceptance state):
 The researcher has given this node Acceptance (or, for an Imported result, Reference review); it may be depended on. Only a Human Review decision sets or changes this — no other subsystem may.
 _Avoid_: verified, established
+
+**Unverifiable** (an acceptance state):
+The node's newest Human Review decision doesn't count: it's unsigned (a pre-ADR-0009 legacy decision), its signature doesn't verify, or it no longer describes the node (the proof text, statement, or dependencies changed since it was signed). The node is neither Accepted nor open to reclaim; a researcher re-signs or re-decides it. It never falls back to an older decision. See ADR-0009.
+_Avoid_: unsigned, invalid, unreviewed
 
 **Rejected** (an acceptance state):
 The researcher's decision that a node's approach does not hold and should not be pursued further. The node and its full candidate-proof and review history stay in the proof map permanently, as the record of the abandoned route. Rejected is terminal: the node can't be decided again, claimed, or split.
