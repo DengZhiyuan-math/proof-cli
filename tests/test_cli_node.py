@@ -1138,3 +1138,13 @@ def test_verify_accept_and_reject_commands_no_longer_exist(tmp_path: Path):
 
     result = runner.invoke(app, ["verify", "reject", "thm_x", "--root", str(tmp_path)])
     assert result.exit_code != 0
+
+
+def test_node_promote_on_a_challenged_claim_fails(tmp_path: Path):
+    _create_and_accept_claim(tmp_path)
+    runner.invoke(app, ["challenge", "open", "clm_1", "--root", str(tmp_path), "--opened-by", "agent_b", "--rationale", "?"])
+
+    result = runner.invoke(app, ["node", "promote", "clm_1", "--root", str(tmp_path), "--confirm", "--json"])
+
+    assert result.exit_code == 1
+    assert json.loads(result.stdout)["error"]["code"] == "NODE_CHALLENGED"
