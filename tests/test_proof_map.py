@@ -1721,7 +1721,7 @@ def test_reclaiming_a_challenged_accepted_node_is_permitted(tmp_path: Path):
     assert get_workflow_state(store, "lem_1") == "claimed"
 
 
-def test_reaccepting_a_challenged_node_dismisses_the_challenge(tmp_path: Path):
+def test_reaccepting_a_challenged_node_resolves_the_challenge_by_revision(tmp_path: Path):
     """Re-Accepting a revised Candidate proof is itself one of the sanctioned
     ways to resolve a Challenge (ADR-0005 Rule 4) — it must not require a
     separate `challenge dismiss` call afterward."""
@@ -1739,7 +1739,7 @@ def test_reaccepting_a_challenged_node_dismisses_the_challenge(tmp_path: Path):
     researcher(store).decide_acceptance("lem_1", "accept")
 
     assert has_open_challenge(store, "lem_1") is False
-    assert get_challenge(store, challenge.id).status.value == "dismissed"
+    assert get_challenge(store, challenge.id).status.value == "resolved-by-revision"
     assert get_integrity_state(store, "lem_1") == "current"
 
 

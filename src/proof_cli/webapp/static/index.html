@@ -13,7 +13,8 @@
     <div id="registry-banner" class="banner" hidden></div>
     <details id="keys-panel" open>
       <summary>Reviewer passkeys</summary>
-      <table id="keys"><thead><tr><th>Name</th><th>Fingerprint</th><th>Enrolled</th><th>Authenticator (AAGUID)</th><th>Status</th></tr></thead><tbody></tbody></table>
+      <table id="keys"><thead><tr><th>Name</th><th>Fingerprint</th><th>Enrolled</th><th>Authenticator (AAGUID)</th><th>Status</th><th></th></tr></thead><tbody></tbody></table>
+      <p class="hint">Revoking a key needs a tap from an enrolled key (the one being revoked will do, if you still have it). The last key can't be revoked.</p>
       <form id="enroll-form">
         <label>Enroll a passkey on this device, named <input id="enroll-name" required placeholder="e.g. MacBook Touch ID"></label>
         <button type="submit">Enroll</button>
@@ -33,6 +34,11 @@
         <div id="legacy"></div>
         <button id="sign-legacy" type="button">Sign the ticked items</button>
       </section>
+      <section id="foreign-section" hidden>
+        <h2>Foreign attestations (decisions another project signed)</h2>
+        <p class="hint">Imported decisions never count here. Open a node to make the same decision yourself, or to enroll the other reviewer's key. An enrolled key only counts for decisions it signs here from now on.</p>
+        <ul id="foreign"></ul>
+      </section>
       <h2>Integrity warnings</h2>
       <ul id="warnings"></ul>
     </section>
@@ -43,9 +49,10 @@
       <h3>Statement</h3>
       <div id="node-statement" class="statement"></div>
       <div id="node-assumptions"></div>
+      <p id="node-claim"></p>
       <h3>Dependencies and pins</h3>
-      <table id="node-deps"><thead><tr><th>Dependency</th><th>Pinned version</th><th>Pinned interface</th><th>Current?</th></tr></thead><tbody></tbody></table>
-      <h3>Open Challenges</h3>
+      <table id="node-deps"><thead><tr><th>Dependency</th><th>Pinned version</th><th>Accepted version now</th><th>Pinned interface</th><th>Current?</th></tr></thead><tbody></tbody></table>
+      <h3>Challenges</h3>
       <ul id="node-challenges"></ul>
       <h3>Candidate proof</h3>
       <p id="node-proof-meta"></p>
@@ -56,12 +63,11 @@
       </details>
       <h3>Evidence checks</h3>
       <ul id="node-evidence"></ul>
-      <h3>Decide</h3>
-      <form id="decide-form">
-        <select id="decide-choice"></select>
-        <input id="decide-rationale" placeholder="Rationale (signed with the decision)">
-        <button type="submit">Sign this decision</button>
-      </form>
+      <h3>Decisions you can make here</h3>
+      <p class="hint">Each is signed on its own with a passkey tap. The rationale is part of what you sign.</p>
+      <table id="node-decisions"><thead><tr><th>Decision</th><th>On</th><th>Rationale</th><th></th></tr></thead><tbody></tbody></table>
+      <h3>Foreign attestations</h3>
+      <ul id="node-foreign"></ul>
       <h3>Review history</h3>
       <ul id="node-history"></ul>
     </section>

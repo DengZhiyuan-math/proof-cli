@@ -180,7 +180,23 @@ function showKeys() {
     key.enrolled_at,
     key.aaguid && !/^0+$/.test(key.aaguid) ? key.aaguid : "not disclosed",
     key.revoked_seq ? `revoked ${key.revoked_at}` : "active",
+    key.revoked_seq ? "" : revokeButton(key),
   ])));
+}
+
+function revokeButton(key) {
+  const button = el("button", "Revoke");
+  button.onclick = async () => {
+    if (!confirm(`Revoke ${key.display_name} (${key.fingerprint})? Decisions it signs from now on won't count.`)) return;
+    try {
+      const toSign = await api("/api/keys/revoke/prepare", { fingerprint: key.fingerprint, rationale: "revoked in the review app" });
+      const assertion = await confirmAndSign(toSign);
+      await api("/api/keys/revoke", { payloads: toSign.payloads, batch: toSign.batch, assertion });
+      say(`Revoked ${key.display_name}.`, "ok");
+      await refresh();
+    } catch (error) { signError(error); }
+  };
+  return button;
 }
 
 function showWarnings(list, into) {
@@ -208,6 +224,12 @@ function showHome() {
     return tr;
   }));
   if (!state.pending.length) body.append(row(["", "Nothing is awaiting review.", "", "", ""]));
+  $("foreign-section").hidden = !state.foreign_attestations.length;
+  $("foreign").replaceChildren(...state.foreign_attestations.map((a) => {
+    const li = el("li");
+    li.append(el("a", a.object_id, { href: `#/node/${encodeURIComponent(a.node_id || a.object_id)}` }), ` — ${a.kind} · ${a.decision}, by ${a.signer_name || a.reviewer_id} (${a.source_project_id}), signature ${a.signature}`);
+    return li;
+  }));
   showWarnings(state.warnings, $("warnings"));
 }
 
@@ -242,6 +264,71 @@ async function showLegacy() {
   }));
 }
 
+// what each decision means, in the researcher's words
+const DECISION_LABELS = {
+  "acceptance:accept": "Accept this Candidate proof",
+  "acceptance:revision-requested": "Request a revision",
+  "acceptance:reject": "Reject (final)",
+  "reference_review:reference-review": "Reference-review: the citation can be relied on",
+  "reference_review:no-longer-callable": "No longer callable (final — cite a corrected source as a new node)",
+  "promote:promote": "Promote this Claim to a Lemma",
+  "dependency_revalidation:reaffirmed": "Lightweight re-review: the proof still holds against the new version",
+  "evidence_review:trusted": "Trust this Evidence check",
+  "evidence_review:unusable": "Mark this Evidence check unusable",
+  "challenge_resolution:dismissed": "Dismiss this Challenge (a false alarm)",
+  "force_release:force-release": "Force-release the claim (a reason is required)",
+};
+
+function signError(error) { say(error.code ? `${error.code}: ${error.message}` : error.message, "error"); }
+
+function decisionRow(decision, proof) {
+  const label = DECISION_LABELS[`${decision.kind}:${decision.decision}`] || `${decision.kind}: ${decision.decision}`;
+  const on = decision.dependency_id ? `dependency ${decision.dependency_id}` : decision.claimant_id ? `claim held by ${decision.claimant_id}` : decision.target_id;
+  const rationale = el("input", null, { placeholder: decision.kind === "force_release" ? "why (required)" : "why" });
+  const button = el("button", "Sign");
+  button.onclick = async () => {
+    const { claimant_id, ...signed } = decision;
+    const binds = ["acceptance", "promote", "dependency_revalidation"].includes(decision.kind) && proof;
+    try { await signAndSend([{ ...signed, rationale: rationale.value, ...(binds ? { viewed_candidate_proof_sha256: proof.sha256 } : {}) }]); }
+    catch (error) { signError(error); }
+  };
+  return row([label, on, rationale, button]);
+}
+
+async function enrollForeign(fingerprint) {
+  const toSign = await api("/api/keys/enroll-foreign/prepare", { fingerprint });
+  say("Confirm the other reviewer's key with a passkey that's already enrolled here.");
+  const assertion = await confirmAndSign(toSign);
+  const key = await api("/api/keys/enroll-foreign", { token: toSign.token, assertion });
+  say(`Enrolled ${key.display_name} — fingerprint ${key.fingerprint}. It counts only for decisions it signs here from now on.`, "ok");
+  await refresh();
+}
+
+function foreignItem(attestation, proof) {
+  const li = el("li", null, { class: attestation.signature === "valid" ? "" : "warning" });
+  li.append(
+    el("strong", `${attestation.kind} · ${attestation.decision}`),
+    ` on ${attestation.object_id}, by ${attestation.signer_name || attestation.reviewer_id} in project ${attestation.source_project_id} — signature ${attestation.signature}. Counts for nothing here.`,
+  );
+  if (attestation.rationale) li.append(el("div", `Their rationale: ${attestation.rationale}`));
+  if (attestation.accept_as_local) {
+    const button = el("button", "Make this decision here myself");
+    button.onclick = async () => {
+      const binds = ["acceptance", "promote"].includes(attestation.kind) && proof;
+      try { await signAndSend([{ ...attestation.accept_as_local, rationale: `accepting ${attestation.signer_name || attestation.reviewer_id}'s attestation ${attestation.id}`, ...(binds ? { viewed_candidate_proof_sha256: proof.sha256 } : {}) }]); }
+      catch (error) { signError(error); }
+    };
+    li.append(" ", button);
+  }
+  const enrolled = state.keys.some((key) => key.fingerprint === attestation.signer_fingerprint);
+  if (attestation.signature === "valid" && attestation.signer_fingerprint && !enrolled) {
+    const button = el("button", "Enroll this reviewer's key");
+    button.onclick = async () => { try { await enrollForeign(attestation.signer_fingerprint); } catch (error) { signError(error); } };
+    li.append(" ", button);
+  }
+  return li;
+}
+
 async function showNode(nodeId) {
   const view = await api(`/api/node/${encodeURIComponent(nodeId)}`);
   const node = view.node;
@@ -252,10 +339,17 @@ async function showNode(nodeId) {
   $("node-warnings").replaceChildren(el("h3", "Warnings for this node"), nodeWarnings);
   $("node-statement").textContent = node.statement;
   $("node-assumptions").replaceChildren(...(node.assumptions.length ? [el("h3", "Assumptions"), ...node.assumptions.map((a) => el("p", a))] : []));
-  $("node-deps").querySelector("tbody").replaceChildren(...view.dependencies.map((d) => row([
-    d.node_id, d.pin ? d.pin.pinned_version : null, d.pin ? el("span", d.pin.pinned_fingerprint || "—", { class: "fp" }) : null, d.current === null ? null : d.current ? "yes" : "NO — stale",
-  ])));
-  $("node-challenges").replaceChildren(...view.challenges.filter((c) => c.status === "open").map((c) => el("li", `${c.id}: ${c.rationale} (opened by ${c.opened_by})`)));
+  $("node-claim").textContent = view.claim ? `Claimed by ${view.claim.claimant_id} since ${view.claim.claimed_at} (claim ${view.claim.id}).` : "";
+  $("node-deps").querySelector("tbody").replaceChildren(...view.dependencies.map((d) => {
+    const lags = d.pin && d.accepted_version !== null && d.pin.pinned_version !== d.accepted_version;
+    return row([
+      d.node_id, d.pin ? d.pin.pinned_version : null, lags ? `${d.accepted_version} — the pin lags` : d.accepted_version,
+      d.pin ? el("span", d.pin.pinned_fingerprint || "—", { class: "fp" }) : null,
+      d.current === null ? null : d.current ? (d.remedy ? "yes — a Lightweight re-review will do" : "yes") : "NO — the interface changed: this node needs a new Candidate proof",
+    ]);
+  }));
+  $("node-challenges").replaceChildren(...view.challenges.map((c) => el("li",
+    `${c.id} · ${c.status}: "${c.rationale}" (opened by ${c.opened_by})` + (c.status === "open" ? "" : ` — ${c.resolved_by}: ${c.resolution_rationale || "no rationale"}`))));
   const proof = view.candidate_proof;
   if (proof) {
     $("node-proof-meta").textContent = `version ${proof.version} · ${proof.id} · SHA-256 ${proof.sha256}`;
@@ -266,20 +360,12 @@ async function showNode(nodeId) {
     $("node-proof-rendered").replaceChildren();
     $("node-proof-exact").textContent = "";
   }
-  $("node-evidence").replaceChildren(...view.evidence_checks.map((c) => el("li", `${c.outcome} — ${c.notes || "no notes"} (run by ${c.run_by})`)));
-  const choice = $("decide-choice");
-  const decisions = node.kind === "imported_result" ? ["reference-review"] : ["accept", "revision-requested", "reject"];
-  choice.replaceChildren(...decisions.map((d) => el("option", d)));
-  $("decide-form").onsubmit = async (event) => {
-    event.preventDefault();
-    try {
-      await signAndSend([{
-        kind: node.kind === "imported_result" ? "reference_review" : "acceptance", target_id: node.id, decision: choice.value,
-        rationale: $("decide-rationale").value,
-        ...(proof ? { viewed_candidate_proof_sha256: proof.sha256 } : {}),
-      }]);
-    } catch (error) { say(error.code ? `${error.code}: ${error.message}` : error.message, "error"); }
-  };
+  $("node-evidence").replaceChildren(...view.evidence_checks.map((c) => el("li", `${c.id}: ${c.outcome} — ${c.notes || "no notes"} (run by ${c.run_by})`)));
+  const decisions = $("node-decisions").querySelector("tbody");
+  decisions.replaceChildren(...view.decisions.map((d) => decisionRow(d, proof)));
+  if (!view.decisions.length) decisions.append(row(["No decision to make on this node right now.", "", "", ""]));
+  $("node-foreign").replaceChildren(...view.foreign_attestations.map((a) => foreignItem(a, proof)));
+  if (!view.foreign_attestations.length) $("node-foreign").append(el("li", "None."));
   $("node-history").replaceChildren(...view.history.filter((r) => r.kind).map((r) => el("li", `${r.updated_at} · ${r.kind} · ${r.decision} · ${r.reviewer_id}${r.signed ? "" : " · UNSIGNED"}`)));
 }
 

@@ -236,8 +236,15 @@ class DependencyPin(BaseModel):
 
 
 class ChallengeStatus(str, Enum):
+    """How a Challenge stands, read off the signed decision that closed it (#25, #38)."""
+
     open = "open"
+    # a false alarm: dismissed, or the Imported result's review reaffirmed
     dismissed = "dismissed"
+    # the concern stood: the revision was rejected or sent back, or the Imported result is no longer callable
+    upheld = "upheld"
+    # a revised Candidate proof was Accepted
+    resolved_by_revision = "resolved-by-revision"
 
 
 class Challenge(BaseModel):
@@ -261,6 +268,46 @@ class Challenge(BaseModel):
     resolved_at: datetime | None = None
     # the signed Human Review decision that resolved it (ADR-0009, #35)
     resolution_review_id: str | None = None
+    # that decision's signed rationale
+    resolution_rationale: str | None = None
+
+
+class ExportedReviewerKey(BaseModel):
+    """The public half of a Reviewer key, as an exchange bundle carries it (ADR-0009 point 6)."""
+
+    credential_id: str
+    public_key_spki: str
+    alg: int
+    display_name: str = ""
+
+
+class ForeignAttestation(BaseModel):
+    """A signed Human Review decision from another project, shown here and never counted (ADR-0009 point 6).
+
+    `signature` says whether it verifies against the key the bundle names
+    (`valid`), doesn't (`invalid`), or was never signed (`unsigned`) — none
+    of which makes it count: the researcher here can only accept it as a
+    new local decision of their own.
+    """
+
+    id: str
+    bundle_id: str
+    source_project_id: str
+    object_type: str
+    object_id: str
+    kind: str
+    # the decision value as signed (e.g. "accept"), so it can be made again locally
+    decision: str
+    reviewer_id: str
+    rationale: str = ""
+    decided_at: datetime | None = None
+    signature: str = "unsigned"
+    signer_credential_id: str | None = None
+    signer_fingerprint: str | None = None
+    signer_name: str | None = None
+    signer_public_key_spki: str | None = None
+    signer_alg: int | None = None
+    imported_at: datetime = Field(default_factory=utc_now)
 
 
 class EvidenceOutcome(str, Enum):

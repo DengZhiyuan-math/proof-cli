@@ -98,7 +98,7 @@ Nothing automates these steps. They are what re-anchors trust, so they must stay
 - Deleting the newest rows is detected only as far as this machine's pin has advanced. Rows appended by a process that couldn't write the pin file, and not yet covered by a later signed decision, can be removed without trace.
 - A copy of a project shares its instance id, so decisions carry over to the copy. That is intended.
 - Claim ownership rests on a bearer token (#37): `claim` returns it once, only its hash is stored, and `submit` and `release` require it. It proves the caller holds the claim, not who the caller is — anyone who reads the token can use it. Claims made before #37 carry no token and still match on `claimant_id`/`session_id`.
-- Integrity warnings are surfaced by `proof review warnings`; showing them next to each node is #36.
+- Integrity warnings are surfaced by `proof review warnings`, and next to each node in the review app (#36).
 - The legacy theorem-contract, reference, obligation and blocker trust functions are removed (#37). Nothing on the CLI raises their trust, and importing a project imports them untrusted. No signed page for them exists yet.
 
 **Update (issues #36, #42, the review app):**
@@ -115,4 +115,24 @@ Nothing automates these steps. They are what re-anchors trust, so they must stay
   - **Declining** is a signed `legacy_decline`; the item stops counting and leaves the list. Legacy rows all predate every signed one, so a decline can only expose older unsigned rows, never a signed decision.
   - **Legacy Challenge dismissals** (no review row before #35) are re-signed as a `challenge_resolution`.
   - **Legacy promotes** (also no review row) keep their kind through the one-time ledger adoption.
+
+**Update (issue #38, the remaining decision pages):**
+
+- **Every decision kind is made in the app.** A node's page lists each decision it could sign right now, and each one signs on its own. The list covers Acceptance, Reference review, Evidence review, Lightweight re-review (showing the pinned version against the dependency's accepted version now), Challenge dismissal, Promote, and force-release. Force-release shows who holds the claim but never the session id, which a pre-token claim still accepts, and requires a reason. The list only says what to offer. Each decision is checked again, with its signature, by the service function it lands on.
+- **Key revocation** is a tap from any active key (`/api/keys/revoke`). The last active key is never revoked.
+- **No longer callable.** A Reference review decision of value `no-longer-callable` says an Imported result can't be relied on after all. It is terminal, like a Reject: any row saying it keeps the node there, and a corrected source is a new Imported result node (#20). Accepted dependents read `potentially-stale`. New dependents read `blocked`, with reason `dependency-not-callable`.
+- **Challenge outcomes** (#25) are read off the signed decision that closed the Challenge, never off a column:
+
+  | Closing decision | Outcome |
+  | --- | --- |
+  | A dismissal, or a reaffirming Reference review | `dismissed` |
+  | Accepting a revised proof | `resolved-by-revision` |
+  | Reject or revision-requested on the revision, or no-longer-callable | `upheld` |
+
+  The Challenge carries that decision's signed rationale. Upholding a Challenge on a local node without a revision is simply leaving it open.
+- **Foreign attestations (point 6).** A bundle carries each review record's signed decision and the public keys that signed them. A signed payload names its own project instance, so that id does travel inside the signatures, and #31's rule is read as: the importer never adopts it. It is used only to check a foreign signature against its own origin. The instance id isn't a secret; knowing it doesn't let anyone sign.
+  - On import, each Human Review decision becomes a foreign attestation. It is kept for display only and nothing derives an axis from it.
+  - Its signature is checked against the key the bundle names, made on that project's own origin, and reads `valid`, `invalid` or `unsigned`. The signer's fingerprint is computed from the public key, not taken from the bundle.
+  - The node page shows it, and offers **"make this decision here"**: the same decision, prepared and signed locally, offered only while the page could make it now.
+  - **Enrolling the other reviewer's key** is a registry entry signed by a local key; a foreign key is never a project's first key. It lets that key sign decisions here from now on. What it signed elsewhere still never counts, since each signature binds its own project instance.
 
