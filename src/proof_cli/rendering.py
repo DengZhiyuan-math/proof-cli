@@ -117,6 +117,8 @@ def render_claim(claim: ClaimRecord) -> str:
     table.add_row("Claimant", claim.claimant_id)
     table.add_row("Session", claim.session_id)
     table.add_row("Claimed at", claim.claimed_at.isoformat())
+    if claim.claim_token:
+        table.add_row("Claim token", f"{claim.claim_token}  (keep it: `node submit` and `node release` need --claim-token)")
     if claim.released_at is not None:
         table.add_row("Released at", claim.released_at.isoformat())
         table.add_row("Released by", claim.released_by or "")

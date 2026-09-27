@@ -113,7 +113,7 @@ A proof map node's state is tracked along three independent axes, never folded i
 - **integrity state**: current by default, Potentially stale, or Challenged — a derived warning overlay, never itself a workflow or acceptance value
 
 **Claimed** (a workflow state):
-A researcher or agent has taken ownership of a proof map node to work on it, and has not yet submitted a Candidate proof for it. At most one claim is active on a node at a time; submitting a Candidate proof ends it, handing the node to review-needed — the next attempt needs a fresh claim. See ADR-0006.
+A researcher or agent has taken ownership of a proof map node to work on it, and has not yet submitted a Candidate proof for it. At most one claim is active on a node at a time; submitting a Candidate proof ends it, handing the node to review-needed — the next attempt needs a fresh claim. Claiming returns a claim token; submitting or releasing needs it (ADR-0009). See ADR-0006.
 _Avoid_: assigned, in progress, proof-drafted
 
 **Review-needed** (a workflow state):

@@ -39,8 +39,10 @@ def add_theorem(
     updated_by: str = "human",
     contributors: list[str] | None = None,
     notes: str = "",
-    supersedes_version: int | None = None,
 ) -> TheoremContract:
+    if get_contract(store, theorem_id) is not None:
+        # a new version over a reviewed contract would quietly replace its trust (issue #37)
+        raise ValueError(f"theorem {theorem_id} already exists; add the new statement under a new id")
     if provenance_kind == TheoremProvenanceKind.imported and review_state == TheoremReviewState.draft:
         review_state = TheoremReviewState.candidate
     contract = TheoremContract(
@@ -63,7 +65,6 @@ def add_theorem(
         created_by=created_by,
         updated_by=updated_by,
         contributors=list(dict.fromkeys([*(contributors or []), created_by])),
-        supersedes_version=supersedes_version,
         notes=notes,
     )
     if created_by:

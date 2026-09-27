@@ -97,9 +97,9 @@ Nothing automates these steps. They are what re-anchors trust, so they must stay
 - A compromised but not yet revoked key can sign whatever it likes. After revocation, it can still date a decision to before the revocation.
 - Deleting the newest rows is detected only as far as this machine's pin has advanced. Rows appended by a process that couldn't write the pin file, and not yet covered by a later signed decision, can be removed without trace.
 - A copy of a project shares its instance id, so decisions carry over to the copy. That is intended.
-- Claim ownership is still self-declared (`claimant_id`/`session_id`); #37 covers this.
+- Claim ownership rests on a bearer token (#37): `claim` returns it once, only its hash is stored, and `submit` and `release` require it. It proves the caller holds the claim, not who the caller is — anyone who reads the token can use it. Claims made before #37 carry no token and still match on `claimant_id`/`session_id`.
 - Integrity warnings are surfaced by `proof review warnings`; showing them next to each node is #36.
-- The legacy theorem-contract and reference trust functions in `review.py`/`storage.py` still take `confirmed`; #37 removes them.
+- The legacy theorem-contract, reference, obligation and blocker trust functions are removed (#37). Nothing on the CLI raises their trust, and importing a project imports them untrusted. No signed page for them exists yet.
 
 **Update (issues #36, #42, the review app):**
 

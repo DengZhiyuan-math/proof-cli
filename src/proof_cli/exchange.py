@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from .collaboration import CollaborationState, import_review_records, load_collaboration, save_collaboration
 from .domain import (
     BlockerRecord,
+    BlockerStatus,
     CandidateProofRecord,
     Challenge,
     ClaimRecord,
@@ -18,9 +19,12 @@ from .domain import (
     EvidenceCheck,
     ProofMapNode,
     ProofObligation,
+    ProofObligationStatus,
     ProjectSnapshot,
     ProjectState,
     TheoremContract,
+    TheoremStatus,
+    TrustLevel,
     utc_now,
 )
 from .domain_packs import DomainPack
@@ -28,7 +32,7 @@ from .publication import PublicationWorkspace, list_publication_bundle_snapshots
 from .governance import GovernanceAssetRecord, GovernancePackRecord, GovernancePolicyRecord, list_domain_pack_records, list_policy_records, list_reusable_asset_records
 from .memory import LayeredMemory, HandoffSnapshot, latest_handoff_snapshot, load_memory, save_memory
 from .proof_state import load_state, save_state
-from .references import ReferenceRecord, ReferenceReviewRecord
+from .references import ReferenceRecord, ReferenceReviewRecord, ReferenceReviewStatus
 from .reusable_assets import ReusableAsset
 from .storage import (
     ProjectStore,
@@ -221,6 +225,23 @@ def import_exchange_bundle(store: ProjectStore, bundle: ExchangeBundle | dict[st
     # Challenge, opening it to a new Human Review decision (#19). The full
     # atomic merge is #31.
     local_node_ids = {node.id for node in list_proof_map_nodes(store)}
+    # the same holds for every other record: one that exists here keeps its
+    # local version, so a bundle can't overwrite what a local review decided (#37)
+    local_ids = {
+        "theorem_contracts": {contract.id for contract in list_theorems(store)},
+        "obligations": {obligation.id for obligation in list_obligations(store)},
+        "blockers": {blocker.id for blocker in list_blockers(store)},
+        "references": {reference.id for reference in list_references(store)},
+        "proof_map_nodes": local_node_ids,
+    }
+    kept_local = {
+        "theorem_contracts": [c for c in bundle.theorem_contracts if c.id in local_ids["theorem_contracts"]],
+        "obligations": [o for o in bundle.obligations if o.id in local_ids["obligations"]],
+        "blockers": [b for b in bundle.blockers if b.id in local_ids["blockers"]],
+        "references": [r for r in bundle.references if r.id in local_ids["references"]],
+        "reference_reviews": [r for r in bundle.reference_reviews if r.reference_id in local_ids["references"]],
+        "proof_map_nodes": [n for n in bundle.proof_map_nodes if n.id in local_node_ids],
+    }
     set_project_id(store, bundle.project_id)
     save_state(store, bundle.project_state)
     save_memory(store, bundle.memory)
@@ -241,32 +262,65 @@ def import_exchange_bundle(store: ProjectStore, bundle: ExchangeBundle | dict[st
             "evidence and revalidation decisions are only ever made locally"
         )
 
+    # Exchange carries records, never trust (ADR-0009 point 6, #37): whatever
+    # a bundle says was verified, resolved or approved elsewhere arrives here
+    # as not yet trusted, and a local Human Review decides it afresh.
+    untrusted = {"theorem_contracts": 0, "obligations": 0, "blockers": 0, "references": 0}
     for contract in bundle.theorem_contracts:
+        if contract.id in local_ids["theorem_contracts"]:
+            continue
+        if contract.status == TheoremStatus.verified or contract.trust_level in (TrustLevel.project_verified, TrustLevel.foundational):
+            contract = contract.model_copy(update={"status": TheoremStatus.imported, "trust_level": TrustLevel.external_reference})
+            untrusted["theorem_contracts"] += 1
         import_theorem_contract(store, contract)
     if bundle.theorem_contracts:
         imported_sections.append("theorem_contracts")
 
     for obligation in bundle.obligations:
+        if obligation.id in local_ids["obligations"]:
+            continue
+        if obligation.status == ProofObligationStatus.resolved:
+            obligation = obligation.model_copy(update={"status": ProofObligationStatus.open})
+            untrusted["obligations"] += 1
         store_obligation(store, obligation)
     if bundle.obligations:
         imported_sections.append("obligations")
 
     for blocker in bundle.blockers:
+        if blocker.id in local_ids["blockers"]:
+            continue
+        if blocker.status == BlockerStatus.resolved:
+            blocker = blocker.model_copy(update={"status": BlockerStatus.active})
+            untrusted["blockers"] += 1
         store_blocker(store, blocker)
     if bundle.blockers:
         imported_sections.append("blockers")
 
     for reference in bundle.references:
+        if reference.id in local_ids["references"]:
+            continue
+        if reference.review_status != ReferenceReviewStatus.candidate or reference.is_callable:
+            reference = reference.model_copy(update={"review_status": ReferenceReviewStatus.candidate, "is_callable": False})
+            untrusted["references"] += 1
         store_reference(store, reference)
     if bundle.references:
         imported_sections.append("references")
+    if any(untrusted.values()):
+        warnings.append(
+            "imported as not yet trusted here (a local Human Review decides them afresh): "
+            + ", ".join(f"{count} {section}" for section, count in untrusted.items() if count)
+        )
 
     for review in bundle.reference_reviews:
+        if review.reference_id in local_ids["references"]:
+            continue
         import_reference_review(store, review)
     if bundle.reference_reviews:
         imported_sections.append("reference_reviews")
 
     for node in bundle.proof_map_nodes:
+        if node.id in local_node_ids:
+            continue
         insert_proof_map_node(store, node)
         # recorded in the local proof ledger as it arrives; its kind stands as
         # created here, and nothing it was decided elsewhere counts locally
@@ -287,10 +341,11 @@ def import_exchange_bundle(store: ProjectStore, bundle: ExchangeBundle | dict[st
         "challenges": len(bundle.challenges) - len(challenges),
         "evidence_checks": len(bundle.evidence_checks) - len(checks),
     }
+    refused_counts.update({section: len(records) for section, records in kept_local.items()})
     refused = {section: count for section, count in refused_counts.items() if count}
     if refused:
         warnings.append(
-            "not imported for nodes that already exist locally: "
+            "not imported, the local version kept (it already exists here): "
             + ", ".join(f"{count} {section}" for section, count in refused.items())
         )
 
