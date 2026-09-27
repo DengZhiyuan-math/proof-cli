@@ -185,13 +185,24 @@ def test_a_process_killed_between_request_and_decision_leaves_prior_acceptance_u
 
 
 def test_a_pending_request_never_counts_as_the_latest_decision(tmp_path: Path):
-    """Belt and braces: even a request row with no decision (which no
-    proof-map path can leave behind any more) doesn't revoke Acceptance."""
+    """An unsigned trust-bearing request is refused at the service layer;
+    and even one appended by hand (a request row, no decision) doesn't
+    revoke an Acceptance."""
+    from proof_cli.authority import AuthorityError
+    from proof_cli.collaboration import ReviewRecord, _request_row
+    from proof_cli.storage import insert_review_history_row
+
     store = ensure_project(tmp_path)
     _submitted_claim(store, "clm_1")
     researcher(store).decide_acceptance("clm_1", "accept")
 
-    record_review_request(store, "proof_map_node", "clm_1", reviewer_id="agent", kind=ReviewRecordKind.acceptance)
+    with pytest.raises(AuthorityError):
+        record_review_request(store, "proof_map_node", "clm_1", reviewer_id="agent", kind=ReviewRecordKind.acceptance)
+    with store.transaction() as conn:
+        insert_review_history_row(
+            conn,
+            _request_row(ReviewRecord(object_type="proof_map_node", object_id="clm_1", reviewer_id="agent", kind=ReviewRecordKind.acceptance)),
+        )
 
     assert get_acceptance_state(store, "clm_1") == "accepted"
     assert get_workflow_state(store, "clm_1") == "open"
@@ -323,6 +334,9 @@ def test_generic_review_decide_refuses_evidence_and_revalidation_records(tmp_pat
     proof = _submitted_claim(store, "clm_1")
     check = record_evidence_check(store, proof.id, "passed")
     evidence_review = researcher(store).decide_evidence_review(check.id, "trusted")
+    # any genuine signature gets past the service-layer guard; the point here
+    # is only that the generic command can't touch the record afterwards
+    signature = researcher(store).sign("evidence_review", check.id, "unusable")
     revalidation = collaboration_module.record_decided_review(
         store,
         "proof_map_node",
@@ -330,6 +344,7 @@ def test_generic_review_decide_refuses_evidence_and_revalidation_records(tmp_pat
         ReviewGovernanceState.reaffirmed,
         reviewer_id="researcher",
         kind=ReviewRecordKind.dependency_revalidation,
+        signed_decision=signature,
     )
 
     for record in (evidence_review, revalidation):
@@ -382,11 +397,14 @@ def test_exchange_import_never_revokes_or_forges_a_local_decision(tmp_path: Path
 
 
 def _migrated_but_unsigned(store, node_id: str, review_id: str, decision: ReviewGovernanceState) -> None:
-    """A JSON-era decision survives the migration intact, but, unsigned, it no
-    longer counts (ADR-0009 point 7): it's surfaced to be re-signed instead."""
+    """A JSON-era decision survives the migration intact. Unsigned, an
+    approval no longer counts (ADR-0009 point 7) — the node reads
+    `unverifiable`, not reopened — while a legacy Reject keeps the node
+    terminal (#35 F). Either way it's surfaced to be re-signed."""
     record = next(record for record in list_review_records(store) if record.id == review_id)
     assert (record.object_id, record.decision, record.signed) == (node_id, decision, False)
-    assert get_acceptance_state(store, node_id) == "unreviewed"
+    expected = "rejected" if decision == ReviewGovernanceState.rejected else "unverifiable"
+    assert get_acceptance_state(store, node_id) == expected
     assert any(
         warning.code == "UNSIGNED_DECISION" and warning.details["review_id"] == review_id
         for warning in list_authority_warnings(store)
@@ -554,8 +572,10 @@ def test_a_malformed_review_record_in_json_is_warned_about_not_fatal(tmp_path: P
         json.dumps({"review_records": [bad, legitimate] if pre_review_history else [bad]})
     )
 
-    assert get_acceptance_state(store, "clm_1") == "unreviewed"
-    assert get_acceptance_state(store, "clm_1") == "unreviewed"
+    # the legitimate legacy approval migrates, and (unsigned) reads unverifiable
+    expected = "unverifiable" if pre_review_history else "unreviewed"
+    assert get_acceptance_state(store, "clm_1") == expected
+    assert get_acceptance_state(store, "clm_1") == expected
     if pre_review_history:
         _migrated_but_unsigned(store, "clm_1", "review_legacy", ReviewGovernanceState.approved)
 

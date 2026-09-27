@@ -11,7 +11,6 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-from datetime import datetime
 from enum import Enum
 from typing import Any
 from urllib.parse import urlsplit
@@ -19,7 +18,7 @@ from urllib.parse import urlsplit
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519
-from pydantic import BaseModel, Field
+from pydantic import AwareDatetime, BaseModel, Field
 
 from .domain import utc_now
 
@@ -57,17 +56,35 @@ class DecisionPayload(BaseModel):
     """Exactly what the researcher's passkey signs (ADR-0009 point 1)."""
 
     project_id: str
+    # this one project database's random instance id (not the shared display
+    # id): a decision signed for any other project never verifies here
+    project_instance: str
     kind: DecisionKind
     target_id: str
     candidate_proof_id: str | None = None
     candidate_proof_sha256: str | None = None
+    # the accepted mathematical interface: for a local node its interface
+    # fingerprint (statement, assumptions); for an imported result, its
+    # statement and source
+    interface_fingerprint: str | None = None
     dependency_pins: list[PinnedDependency] = Field(default_factory=list)
+    # the Challenges this decision resolves, by id; a Challenge is resolved
+    # only by a signed decision that names it
+    resolves_challenges: list[str] = Field(default_factory=list)
+    # for reviewer_enrollment: the WebAuthn credential being enrolled/revoked
+    credential_id: str | None = None
     decision: str
     rationale: str = ""
-    signed_at: datetime = Field(default_factory=utc_now)
-    # the review-history row hash the signer saw as the latest: the payload
-    # commits to that whole prefix of the hash chain
+    # timezone-aware only: a naive timestamp can't be compared, so it's
+    # refused when the payload is parsed rather than crashing a read later
+    signed_at: AwareDatetime = Field(default_factory=utc_now)
+    # the newest row of each chain as the signer saw it: the payload commits
+    # to those prefixes of the review history, the Reviewer key registry and
+    # the proof ledger. Key validity is judged at that registry position, so
+    # a revocation appended later can't reach back over this decision.
     previous_row_hash: str | None = None
+    registry_head: str | None = None
+    ledger_head: str | None = None
 
 
 class WebAuthnAssertion(BaseModel):

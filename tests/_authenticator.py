@@ -92,7 +92,11 @@ def enroll(store, authenticator: "SoftwareAuthenticator", *, signer: "SoftwareAu
     from proof_cli.signing import DecisionKind, public_key_fingerprint
 
     payload = build_decision_payload(
-        store, DecisionKind.reviewer_enrollment, public_key_fingerprint(authenticator.public_key_spki), "enroll"
+        store,
+        DecisionKind.reviewer_enrollment,
+        public_key_fingerprint(authenticator.public_key_spki),
+        "enroll",
+        credential_id=authenticator.credential_id,
     )
     request = EnrollmentRequest(
         credential_id=authenticator.credential_id,

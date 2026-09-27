@@ -20,6 +20,7 @@ from proof_cli.signing import (
 def _payload(**overrides) -> DecisionPayload:
     fields = {
         "project_id": "proj_alpha",
+        "project_instance": "instance_1",
         "kind": DecisionKind.acceptance,
         "target_id": "clm_1",
         "candidate_proof_id": "cp_1",
@@ -55,6 +56,9 @@ def test_serialization_is_deterministic():
         ("target_id", "clm_2"),
         ("decision", "reject"),
         ("project_id", "proj_beta"),
+        ("project_instance", "instance_2"),
+        ("interface_fingerprint", "ef" * 32),
+        ("resolves_challenges", ["ch_other"]),
         ("rationale", "something else"),
     ],
 )
@@ -120,3 +124,16 @@ def test_a_key_of_the_wrong_algorithm_is_rejected():
     with pytest.raises(SignatureError) as exc_info:
         verify_signed_decision(signed, public_key_spki=authenticator.public_key_spki, alg=ALG_EDDSA)
     assert exc_info.value.code == "UNSUPPORTED_KEY"
+
+
+def test_a_naive_timestamp_is_refused_when_the_payload_is_parsed():
+    from datetime import datetime
+
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        _payload(signed_at=datetime(2026, 1, 1, 12, 0))
+    raw = _payload().model_dump(mode="json")
+    raw["signed_at"] = "2026-01-01T12:00:00"
+    with pytest.raises(ValidationError):
+        DecisionPayload.model_validate(raw)

@@ -17,7 +17,6 @@ from proof_cli.authority import (
     active_reviewer_keys,
     build_decision_payload,
     enroll_reviewer_key,
-    list_authority_warnings,
     list_reviewer_keys,
     pinned_first_fingerprint,
     revoke_reviewer_key,
@@ -36,6 +35,7 @@ from proof_cli.proof_map import (
     get_node,
     get_reference_review_state,
     get_workflow_state,
+    list_integrity_warnings,
     open_challenge,
     prepare_decision,
     record_evidence_check,
@@ -62,7 +62,7 @@ def _submitted(store, node_id: str = "clm_1", *, session: str = "sess_1", **fiel
 
 
 def _codes(store) -> list[str]:
-    return [warning.code for warning in list_authority_warnings(store)]
+    return [warning.code for warning in list_integrity_warnings(store)]
 
 
 # -- every human-only operation ------------------------------------------------------
@@ -273,8 +273,9 @@ def test_editing_accepted_proof_text_afterwards_voids_the_acceptance(tmp_path: P
     original = path.read_text()
     path.write_text(original.replace("proof of clm_1", "a quite different proof"))
 
-    assert get_acceptance_state(store, "clm_1") == "unreviewed"
-    assert "CANDIDATE_PROOF_CHANGED" in _codes(store)
+    # never falls back to "unreviewed" (which would let an agent reclaim it): it's unverifiable
+    assert get_acceptance_state(store, "clm_1") == "unverifiable"
+    assert "DECISION_NO_LONGER_APPLIES" in _codes(store)
 
     path.write_text(original)
     assert get_acceptance_state(store, "clm_1") == "accepted"
@@ -355,7 +356,7 @@ def test_editing_a_history_row_breaks_the_chain_and_voids_the_decision(tmp_path:
 
     _tamper(store, f"UPDATE review_history SET decision = 'approved' WHERE review_id = '{record.id}' AND entry = 'decision'")
 
-    assert get_acceptance_state(store, "clm_1") == "unreviewed"  # neither the forged accept nor the real reject counts
+    assert get_acceptance_state(store, "clm_1") == "unverifiable"  # neither the forged accept nor the real reject counts
     codes = _codes(store)
     assert "HISTORY_CHAIN_BROKEN" in codes
     assert "UNVERIFIABLE_REVIEW_RECORD" in codes
@@ -377,17 +378,33 @@ def test_any_edit_or_deletion_in_the_history_is_surfaced(tmp_path: Path, stateme
 
 
 def test_a_forged_unsigned_decision_row_never_counts(tmp_path: Path):
-    """An agent appending a perfectly-linked row, straight into SQLite."""
-    from proof_cli.collaboration import record_decided_review
+    """The service layer refuses an unsigned trust-bearing decision outright;
+    one appended straight into SQLite, perfectly linked, still counts for nothing."""
+    from proof_cli.collaboration import ReviewRecord, _decision_row, _request_row, record_decided_review
+    from proof_cli.domain import utc_now
+    from proof_cli.storage import insert_review_history_row
 
     store = ensure_project(tmp_path)
     _submitted(store)
     researcher(store)
-    record_decided_review(
-        store, "proof_map_node", "clm_1", ReviewGovernanceState.approved, reviewer_id="agent", kind=ReviewRecordKind.acceptance
-    )
-
+    with pytest.raises(AuthorityError) as exc_info:
+        record_decided_review(
+            store, "proof_map_node", "clm_1", ReviewGovernanceState.approved, reviewer_id="agent", kind=ReviewRecordKind.acceptance
+        )
+    assert exc_info.value.code == "HUMAN_REVIEW_REQUIRED"
     assert get_acceptance_state(store, "clm_1") == "unreviewed"
+
+    forged = ReviewRecord(object_type="proof_map_node", object_id="clm_1", reviewer_id="agent", kind=ReviewRecordKind.acceptance)
+    conn = sqlite3.connect(store.db_path)
+    conn.row_factory = sqlite3.Row
+    insert_review_history_row(conn, _request_row(forged))
+    insert_review_history_row(
+        conn, _decision_row(forged, ReviewGovernanceState.approved, reviewer_id="agent", rationale="", created_at=utc_now())
+    )
+    conn.commit()
+    conn.close()
+
+    assert get_acceptance_state(store, "clm_1") == "unverifiable"
     assert "UNSIGNED_DECISION" in _codes(store)
     assert "HISTORY_CHAIN_BROKEN" not in _codes(store)  # the chain is intact; the row just isn't authority
 
@@ -448,14 +465,14 @@ def test_a_tampered_rationale_or_reviewer_voids_that_decision_itself(tmp_path: P
     record = researcher(store).decide_acceptance("clm_1", "accept", rationale="checked every step")
 
     _tamper(store, f"UPDATE review_history SET rationale = 'skimmed it' WHERE review_id = '{record.id}' AND entry = 'decision'")
-    assert get_acceptance_state(store, "clm_1") == "unreviewed"
+    assert get_acceptance_state(store, "clm_1") == "unverifiable"
 
     _tamper(
         store,
         f"UPDATE review_history SET rationale = 'checked every step', reviewer_id = 'someone-else' "
         f"WHERE review_id = '{record.id}' AND entry = 'decision'",
     )
-    assert get_acceptance_state(store, "clm_1") == "unreviewed"
+    assert get_acceptance_state(store, "clm_1") == "unverifiable"
     assert "UNVERIFIABLE_REVIEW_RECORD" in _codes(store)
 
 
@@ -491,7 +508,10 @@ def test_an_edit_in_place_is_seen_by_a_long_running_process(tmp_path: Path):
 
     _tamper(store, f"UPDATE review_history SET decision = 'rejected' WHERE review_id = '{record.id}' AND entry = 'decision'")
 
-    assert get_acceptance_state(store, "clm_1") == "unreviewed"
+    # a Reject row, however it got there, keeps the node terminal — at worst
+    # a forged one is denial of service, never an escalation — and is flagged
+    assert get_acceptance_state(store, "clm_1") == "rejected"
+    assert "UNSIGNED_LEGACY_REJECT" in _codes(store)
     # the newest row: nothing links after it, so it's the signature check that catches it
     assert "UNVERIFIABLE_REVIEW_RECORD" in _codes(store)
 
@@ -578,7 +598,8 @@ def test_concurrent_first_enrollments_let_exactly_one_key_in(tmp_path: Path):
     for thread in threads:
         thread.join(timeout=60)
 
-    assert sorted(outcomes) == ["ENROLLMENT_REFUSED"] * 3 + ["ok"]
+    assert outcomes.count("ok") == 1
+    assert set(outcomes) - {"ok"} <= {"ENROLLMENT_REFUSED", "REGISTRY_NOT_TRUSTED"}
     assert len(active_reviewer_keys(store)) == 1
 
 
@@ -629,7 +650,7 @@ def test_a_registry_that_disagrees_with_the_user_config_pin_is_not_trusted(tmp_p
     pins["projects"][str(store.root.resolve())]["first_key_fingerprint"] = "f" * 64
     pins_path.write_text(json.dumps(pins))
 
-    assert get_acceptance_state(store, "clm_1") == "unreviewed"
+    assert get_acceptance_state(store, "clm_1") == "unverifiable"
     assert "REVIEWER_REGISTRY_MISMATCH" in _codes(store)
     assert active_reviewer_keys(store) == []
 
@@ -641,7 +662,11 @@ def test_a_revoked_key_can_no_longer_decide_and_the_last_key_cannot_be_revoked(t
 
     def _revocation(target, signer):
         payload = build_decision_payload(
-            store, DecisionKind.reviewer_enrollment, public_key_fingerprint(target.public_key_spki), "revoke"
+            store,
+            DecisionKind.reviewer_enrollment,
+            public_key_fingerprint(target.public_key_spki),
+            "revoke",
+            credential_id=target.credential_id,
         )
         return signer.sign(payload)
 
@@ -751,39 +776,28 @@ def test_cli_confirm_flag_is_gone(tmp_path: Path):
     assert "No such option" in result.output
 
 
-@pytest.mark.parametrize("json_output", [True, False])
-def test_cli_reviewer_enroll_list_and_warnings(tmp_path: Path, json_output: bool):
-    store = ensure_project(tmp_path)
-    authenticator = SoftwareAuthenticator(display_name="researcher")
-    payload = build_decision_payload(
-        store, DecisionKind.reviewer_enrollment, public_key_fingerprint(authenticator.public_key_spki), "enroll"
-    )
-    request_file = tmp_path / "enroll.json"
-    request_file.write_text(
-        EnrollmentRequest(
-            credential_id=authenticator.credential_id,
-            public_key_spki=b64url_encode(authenticator.public_key_spki),
-            alg=authenticator.alg,
-            display_name="researcher",
-            signed_decision=authenticator.sign(payload),
-        ).model_dump_json()
-    )
-    flag = ["--json"] if json_output else []
-    fingerprint = public_key_fingerprint(authenticator.public_key_spki)
+def test_no_cli_command_enrolls_a_reviewer_key(tmp_path: Path):
+    """Enrollment happens only in the web app's registration ceremony (#36):
+    a CLI path is exactly what let an agent enroll itself first (#35 A)."""
+    ensure_project(tmp_path)
+    result = runner.invoke(app, ["reviewer", "enroll", "--help"])
+    assert result.exit_code != 0
+    assert "No such command" in result.output
 
-    enrolled = runner.invoke(app, ["reviewer", "enroll", str(request_file), "--root", str(tmp_path), *flag])
+
+@pytest.mark.parametrize("json_output", [True, False])
+def test_cli_reviewer_list_and_warnings(tmp_path: Path, json_output: bool):
+    store = ensure_project(tmp_path)
+    key = enroll(store, SoftwareAuthenticator(display_name="researcher"))
+    flag = ["--json"] if json_output else []
+
     listed = runner.invoke(app, ["reviewer", "list", "--root", str(tmp_path), *flag])
     warnings = runner.invoke(app, ["review", "warnings", "--root", str(tmp_path), *flag])
 
-    assert enrolled.exit_code == listed.exit_code == warnings.exit_code == 0
+    assert listed.exit_code == warnings.exit_code == 0
     if json_output:
-        assert json.loads(enrolled.stdout)["data"]["fingerprint"] == fingerprint
-        assert [key["fingerprint"] for key in json.loads(listed.stdout)["data"]] == [fingerprint]
+        assert [entry["fingerprint"] for entry in json.loads(listed.stdout)["data"]] == [key.fingerprint]
         assert json.loads(warnings.stdout)["data"] == []
     else:
-        assert fingerprint in enrolled.output and fingerprint in listed.output
+        assert key.fingerprint in listed.output
         assert "No authority warnings" in warnings.output
-
-    again = runner.invoke(app, ["reviewer", "enroll", str(request_file), "--root", str(tmp_path), "--json"])
-    assert again.exit_code == 1
-    assert json.loads(again.stdout)["error"]["code"] == "ENROLLMENT_REFUSED"
