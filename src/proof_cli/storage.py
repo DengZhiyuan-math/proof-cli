@@ -578,6 +578,7 @@ def collaboration_state_path(store: ProjectStore) -> Path:
 
 
 REVIEW_HISTORY_MIGRATED_KEY = "review_history_migrated"
+LEGACY_CUTOFF_KEY = "legacy_review_cutoff"
 
 
 def is_review_history_migrated(conn: sqlite3.Connection) -> bool:
@@ -594,6 +595,52 @@ def mark_review_history_migrated(conn: sqlite3.Connection) -> None:
     )
 
 
+def fix_legacy_review_cutoff(conn: sqlite3.Connection) -> None:
+    """Fix, once, which review-history rows are legacy (#35 H3, #42): the
+    ones already there when the project first meets ADR-0009.
+
+    Stored as the hash of the last legacy row (the instance genesis when
+    there are none). Called by project creation (no legacy rows) and by the
+    one-shot collaboration.json migration, right after it appends them.
+    `INSERT OR IGNORE`: never moved once set.
+    """
+    conn.execute(
+        "INSERT OR IGNORE INTO project_meta(key, value) VALUES (?, ?)",
+        (LEGACY_CUTOFF_KEY, _last_row_hash(conn, "review_history")),
+    )
+
+
+def read_legacy_review_cutoff(store: ProjectStore) -> str | None:
+    with store.connect() as conn:
+        row = conn.execute("SELECT value FROM project_meta WHERE key = ?", (LEGACY_CUTOFF_KEY,)).fetchone()
+    return row["value"] if row is not None else None
+
+
+def adopt_legacy_review_cutoff(store: ProjectStore) -> None:
+    """Fix the legacy cutoff for a project migrated before the cutoff existed, once.
+
+    No legitimate unsigned decision row follows a signed one, so the cutoff
+    is the row before the first signed row — or, in a project that has
+    never signed anything, everything there is now.
+    """
+    if read_legacy_review_cutoff(store) is not None or active_transaction(store) is not None:
+        return
+    with store.transaction() as conn:
+        if conn.execute("SELECT 1 FROM project_meta WHERE key = ?", (LEGACY_CUTOFF_KEY,)).fetchone() is not None:
+            return
+        if not is_review_history_migrated(conn):
+            return  # the migration fixes it, right after appending the legacy rows
+        first_signed = conn.execute(
+            "SELECT seq FROM review_history WHERE signed_decision IS NOT NULL ORDER BY seq LIMIT 1"
+        ).fetchone()
+        if first_signed is None:
+            fix_legacy_review_cutoff(conn)
+            return
+        before = conn.execute("SELECT * FROM review_history WHERE seq < ? ORDER BY seq DESC LIMIT 1", (first_signed["seq"],)).fetchone()
+        cutoff = chain_row_hash(dict(before)) if before is not None else genesis_row_hash(project_instance_id(conn))
+        conn.execute("INSERT OR IGNORE INTO project_meta(key, value) VALUES (?, ?)", (LEGACY_CUTOFF_KEY, cutoff))
+
+
 def create_project(root: str | Path, project_id: str) -> ProjectStore:
     store = ProjectStore(Path(root))
     with store.connect() as conn:
@@ -608,8 +655,10 @@ def create_project(root: str | Path, project_id: str) -> ProjectStore:
             conn.execute("INSERT OR IGNORE INTO project_meta(key, value) VALUES (?, ?)", (LEDGER_ADOPTED_KEY, utc_now().isoformat()))
             if not collaboration_state_path(store).exists():
                 # a brand-new project has no JSON-era review records, so its
-                # one-shot migration is done before it ever starts
+                # one-shot migration is done before it ever starts, and it
+                # has no legacy decisions at all
                 mark_review_history_migrated(conn)
+                fix_legacy_review_cutoff(conn)
         state_row = conn.execute("SELECT data FROM state WHERE project_id = ?", (project_id,)).fetchone()
         if state_row is None:
             state = ProjectState(project_id=project_id)

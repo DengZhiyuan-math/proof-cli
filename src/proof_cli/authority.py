@@ -61,6 +61,7 @@ from .storage import (
     ProjectStore,
     active_transaction,
     adopt_legacy_into_ledger,
+    adopt_legacy_review_cutoff,
     after_commit,
     chain_head,
     chain_row_hash,
@@ -70,6 +71,7 @@ from .storage import (
     insert_reviewer_key_row,
     list_events,
     list_raw_chain_rows,
+    read_legacy_review_cutoff,
     read_project_instance_id,
     read_state,
     review_history_payload_recorded,
@@ -240,7 +242,7 @@ def _write_pin(store: ProjectStore, **fields: Any) -> None:
         raise AuthorityError("PIN_FILE_UNREADABLE", f"{_pins_path()} can't be read; fix or restore it by hand")
     projects = data.setdefault("projects", {})
     entry = dict(projects.get(_project_key(store)) or {})
-    for once in ("first_key_fingerprint", "project_instance"):
+    for once in ("first_key_fingerprint", "project_instance", "legacy_cutoff"):
         if once in entry:
             fields.pop(once, None)
     entry.update({"project_id": read_state(store).project_id, **fields})
@@ -269,6 +271,7 @@ def _advance_history_pins(store: ProjectStore) -> None:
             store,
             review_head=chain_head(store, "review_history"),
             ledger_head=chain_head(store, "proof_ledger"),
+            legacy_cutoff=read_legacy_review_cutoff(store),  # written once; fills in a pin that predates it
         )
     except (OSError, AuthorityError):
         pass
@@ -309,6 +312,7 @@ class _Snapshot:
     # entry -> object_id -> the *first* ledger row for it (later ones are ignored)
     ledger: dict[str, dict[str, dict]]
     has_signed_history: bool
+    legacy_seq: int  # review-history rows up to this seq predate ADR-0009 (#35 H3, #42)
     warnings: list[AuthorityWarning]
     verdicts: dict[str, RowVerdict] = field(default_factory=dict)
     resolutions: dict[str, dict] | None = None
@@ -563,6 +567,12 @@ def _check_pin(
             registry_first_fingerprint=first_fingerprint,
             pinned_first_fingerprint=pin.get("first_key_fingerprint"),
         )
+    pinned_cutoff = pin.get("legacy_cutoff")
+    if pinned_cutoff is not None and pinned_cutoff != read_legacy_review_cutoff(store):
+        _untrust(
+            "LEGACY_CUTOFF_MISMATCH",
+            "which review-history rows are legacy no longer matches what your user config recorded; no decision is trusted",
+        )
     for pin_field, table in (("registry_head", "reviewer_keys"), ("review_head", "review_history"), ("ledger_head", "proof_ledger")):
         pinned = pin.get(pin_field)
         if pinned is not None and pinned not in hashes[table]:
@@ -607,6 +617,7 @@ def _snapshot(store: ProjectStore) -> _Snapshot:
 
         _migrate_legacy_review_records(store)
         adopt_legacy_into_ledger(store)
+        adopt_legacy_review_cutoff(store)
     cache_key = (
         _project_key(store),
         _data_version(store),
@@ -628,6 +639,12 @@ def _snapshot(store: ProjectStore) -> _Snapshot:
     ledger_rows = list_raw_chain_rows(store, "proof_ledger")
     ledger_hashes = _chain_hashes(ledger_rows, "proof_ledger", genesis, warnings)
     hashes = {"reviewer_keys": registry_hashes, "review_history": history_hashes, "proof_ledger": ledger_hashes}
+    # A broken link means rows were deleted or edited somewhere before the
+    # newest one, and nothing says which: a deleted Reject would revive the
+    # Accept before it, a deleted Challenge would read current (#35 H1, H2).
+    # So nothing in the project is trusted until it's restored.
+    if any(warning.code == "HISTORY_CHAIN_BROKEN" for warning in warnings):
+        trusted = False
     trusted = (
         _check_pin(
             store,
@@ -657,12 +674,45 @@ def _snapshot(store: ProjectStore) -> _Snapshot:
         rows_by_object=rows_by_object,
         ledger=_ledger(ledger_rows, warnings),
         has_signed_history=any(row["signed_decision"] for row in history),
+        legacy_seq=_legacy_seq(store, history, history_hashes, genesis),
         warnings=warnings,
     )
     if len(_SNAPSHOTS) > 64:
         _SNAPSHOTS.clear()
     _SNAPSHOTS[cache_key] = snapshot
     return snapshot
+
+
+def _legacy_seq(store: ProjectStore, history: list[dict], history_hashes: dict[str, int], genesis: str) -> int:
+    """The seq of the last legacy review-history row; 0 when there are none.
+
+    With no cutoff recorded yet (read inside a transaction that opened
+    before the one-shot upkeep ran), every row counts as legacy, as it did
+    before the cutoff existed. A cutoff row that's gone was deleted, which
+    already breaks the chain; nothing is legacy then.
+    """
+    cutoff = read_legacy_review_cutoff(store)
+    if cutoff is None:
+        return history[-1]["seq"] if history else 0
+    if cutoff == genesis:
+        return 0
+    return history_hashes.get(cutoff, 0)
+
+
+def is_legacy_row(store: ProjectStore, row: dict) -> bool:
+    """Whether a review-history row is an unsigned pre-ADR-0009 decision (#35 H3, #42).
+
+    Only these stand without a signature where the ADR says a legacy
+    decision does (a Reject stays terminal) and can be re-signed. An
+    unsigned row appended after the cutoff was forged, however it's dated.
+    """
+    return not row["signed_decision"] and row["seq"] <= _snapshot(store).legacy_seq
+
+
+def is_legacy_review(store: ProjectStore, review_id: str) -> bool:
+    """Whether every decision row of this review is legacy (and there is one)."""
+    rows = [row for row in _snapshot(store).history_rows.values() if row["review_id"] == review_id and row["entry"] == "decision"]
+    return bool(rows) and all(is_legacy_row(store, row) for row in rows)
 
 
 def ledger_entries(store: ProjectStore, entry: str) -> dict[str, dict]:
@@ -746,6 +796,7 @@ def _advance_registry_pin(store: ProjectStore) -> None:
         registry_head=chain_row_hash(rows[-1]),
         review_head=chain_head(store, "review_history"),
         ledger_head=chain_head(store, "proof_ledger"),
+        legacy_cutoff=read_legacy_review_cutoff(store),
     )
 
 
@@ -1254,6 +1305,8 @@ __all__ = [
     "decision_rows",
     "enroll_reviewer_key",
     "human_review_required",
+    "is_legacy_review",
+    "is_legacy_row",
     "ledger_entries",
     "legacy_handled",
     "list_authority_warnings",
