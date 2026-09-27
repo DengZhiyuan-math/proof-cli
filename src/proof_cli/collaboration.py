@@ -81,6 +81,7 @@ class ReviewRecordKind(str, Enum):
     challenge_resolution = "challenge_resolution"
     promote = "promote"
     force_release = "force_release"
+    legacy_decline = "legacy_decline"
 
 
 class CommentThreadStatus(str, Enum):
@@ -848,7 +849,7 @@ def import_review_records(store: ProjectStore, records: Iterable[ReviewRecord]) 
     return imported, refused
 
 
-TRUST_BEARING_OBJECT_TYPES = frozenset({"proof_map_node", "evidence_check", "challenge", "claim"})
+TRUST_BEARING_OBJECT_TYPES = frozenset({"proof_map_node", "evidence_check", "challenge", "claim", "legacy_item"})
 
 
 def is_trust_bearing_review(record: ReviewRecord) -> bool:

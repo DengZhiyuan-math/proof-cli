@@ -100,3 +100,19 @@ Nothing automates these steps. They are what re-anchors trust, so they must stay
 - Claim ownership is still self-declared (`claimant_id`/`session_id`); #37 covers this.
 - Integrity warnings are surfaced by `proof review warnings`; showing them next to each node is #36.
 - The legacy theorem-contract and reference trust functions in `review.py`/`storage.py` still take `confirmed`; #37 removes them.
+
+**Update (issues #36, #42, the review app):**
+
+- **Stack.** The app uses the stdlib `ThreadingHTTPServer` (`proof review serve` / `proof review open [node]`) with vendored HTML, CSS and JS: no dependencies and no build. Threads rather than asyncio, because the open-transaction tracking is per thread and an asyncio task would inherit a transaction that isn't its own.
+- **One origin per project.** The server binds `127.0.0.1` on a port derived from the project's instance id, so its origin `http://localhost:<port>` is fixed for the project and differs between projects. Verification accepts assertions only from exactly that origin, never just any localhost page, and only with `crossOrigin` false. The server also refuses a `Host` other than its own (DNS rebinding) and a `POST` whose `Origin` isn't the page's.
+- **Enrollment** is a real `navigator.credentials.create()` ceremony with user verification required. The new key then signs its own enrollment: proof of possession, because `none` attestation proves nothing. Every later key is signed by an enrolled one, so enrolling a key takes two taps. Every page lists the enrolled keys (name, fingerprint, enrollment time, AAGUID where the authenticator discloses one). A banner stays up whenever the registry changed since the researcher last confirmed it, or the registry doesn't verify. Confirming is itself a passkey-signed acknowledgement, so an agent can't clear the banner.
+- **Signature counters.** An authenticator whose counter goes backwards (`SIGN_COUNT_REGRESSION`) is flagged as possibly cloned. Passkeys that keep no counter (always 0) are exempt.
+- **Fresh trust state.** The snapshot cache is keyed on `PRAGMA data_version` from a connection the thread keeps open. Any commit by anyone forces re-verification, so the long-running app never shows stale trust.
+- **The server holds no authority.** `prepare` builds unsigned payloads and the batch challenge. `decide` takes one assertion for the whole batch and hands each signed payload to its service function, which verifies it like any caller's.
+- **Legacy re-sign (#42).** The page lists every unsigned pre-ADR-0009 decision with what it would sign over: the node, its current proof text, and its pins.
+  - **Re-signing** records a new signed decision of the same kind and value whose payload `resigns` the legacy item. The legacy row is never edited.
+  - **Which items can be re-signed:** only the newest legacy decision on an object and kind, and an Acceptance only while the node's current proof is the one that decision covered. Re-signing therefore never accepts an unreviewed submission.
+  - **Declining** is a signed `legacy_decline`; the item stops counting and leaves the list. Legacy rows all predate every signed one, so a decline can only expose older unsigned rows, never a signed decision.
+  - **Legacy Challenge dismissals** (no review row before #35) are re-signed as a `challenge_resolution`.
+  - **Legacy promotes** (also no review row) keep their kind through the one-time ledger adoption.
+

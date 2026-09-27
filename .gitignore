@@ -10,3 +10,6 @@ __pycache__/
 .venv/
 venv/
 .proof/
+
+# test fixtures carry a real project database (e.g. one built by pre-ADR-0009 master)
+!tests/fixtures/**/.proof/

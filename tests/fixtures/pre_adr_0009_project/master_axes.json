@@ -1,0 +1,47 @@
+{
+  "acc": {
+    "acceptance": "accepted",
+    "integrity": "current",
+    "kind": "lemma",
+    "workflow": "open"
+  },
+  "challenges": {
+    "76c5cef6-94b1-46fe-ba07-114713bb7058": "dismissed"
+  },
+  "dep": {
+    "acceptance": "unreviewed",
+    "integrity": "current",
+    "kind": "claim",
+    "workflow": "open"
+  },
+  "dis": {
+    "acceptance": "accepted",
+    "integrity": "current",
+    "kind": "lemma",
+    "workflow": "open"
+  },
+  "pro": {
+    "acceptance": "accepted",
+    "integrity": "current",
+    "kind": "lemma",
+    "workflow": "open"
+  },
+  "ref": {
+    "acceptance": "reviewed",
+    "integrity": "current",
+    "kind": "imported_result",
+    "workflow": "open"
+  },
+  "rej": {
+    "acceptance": "rejected",
+    "integrity": "current",
+    "kind": "claim",
+    "workflow": "open"
+  },
+  "rev": {
+    "acceptance": "unreviewed",
+    "integrity": "current",
+    "kind": "claim",
+    "workflow": "revision-requested"
+  }
+}

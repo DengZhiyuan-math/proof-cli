@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Proof review</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header>
+    <h1><a href="#/">Proof review</a> <span id="project"></span></h1>
+    <div id="registry-banner" class="banner" hidden></div>
+    <details id="keys-panel" open>
+      <summary>Reviewer passkeys</summary>
+      <table id="keys"><thead><tr><th>Name</th><th>Fingerprint</th><th>Enrolled</th><th>Authenticator (AAGUID)</th><th>Status</th></tr></thead><tbody></tbody></table>
+      <form id="enroll-form">
+        <label>Enroll a passkey on this device, named <input id="enroll-name" required placeholder="e.g. MacBook Touch ID"></label>
+        <button type="submit">Enroll</button>
+      </form>
+    </details>
+  </header>
+  <main>
+    <div id="message" role="status"></div>
+    <section id="home">
+      <h2>Awaiting review</h2>
+      <p class="hint">Tick the decisions to make, choose each outcome and rationale, then sign them all with one passkey tap.</p>
+      <table id="pending"><thead><tr><th></th><th>Node</th><th>Statement</th><th>Decision</th><th>Rationale</th></tr></thead><tbody></tbody></table>
+      <button id="sign-batch" type="button">Sign selected decisions</button>
+      <section id="legacy-section" hidden>
+        <h2>Legacy decisions (made before passkeys)</h2>
+        <p class="hint">These decisions were made before Human Review was signed, so they don't count yet. A legacy Reject still keeps its node closed, and a legacy dismissal keeps its Challenge closed. Re-sign the ones you stand by, or decline them. One tap covers every ticked item.</p>
+        <div id="legacy"></div>
+        <button id="sign-legacy" type="button">Sign the ticked items</button>
+      </section>
+      <h2>Integrity warnings</h2>
+      <ul id="warnings"></ul>
+    </section>
+    <section id="node-page" hidden>
+      <h2 id="node-title"></h2>
+      <p id="node-axes"></p>
+      <div id="node-warnings"></div>
+      <h3>Statement</h3>
+      <div id="node-statement" class="statement"></div>
+      <div id="node-assumptions"></div>
+      <h3>Dependencies and pins</h3>
+      <table id="node-deps"><thead><tr><th>Dependency</th><th>Pinned version</th><th>Pinned interface</th><th>Current?</th></tr></thead><tbody></tbody></table>
+      <h3>Open Challenges</h3>
+      <ul id="node-challenges"></ul>
+      <h3>Candidate proof</h3>
+      <p id="node-proof-meta"></p>
+      <div id="node-proof-rendered" class="rendered"></div>
+      <details>
+        <summary>Exact text being signed (its SHA-256 is part of the signature)</summary>
+        <pre id="node-proof-exact"></pre>
+      </details>
+      <h3>Evidence checks</h3>
+      <ul id="node-evidence"></ul>
+      <h3>Decide</h3>
+      <form id="decide-form">
+        <select id="decide-choice"></select>
+        <input id="decide-rationale" placeholder="Rationale (signed with the decision)">
+        <button type="submit">Sign this decision</button>
+      </form>
+      <h3>Review history</h3>
+      <ul id="node-history"></ul>
+    </section>
+    <section id="confirm" hidden>
+      <h2>You are about to sign</h2>
+      <p class="hint">This is exactly what your passkey will sign. Check it, then confirm with Touch ID.</p>
+      <pre id="confirm-payloads"></pre>
+      <button id="confirm-sign" type="button">Sign with passkey</button>
+      <button id="confirm-cancel" type="button">Cancel</button>
+    </section>
+  </main>
+</body>
+</html>

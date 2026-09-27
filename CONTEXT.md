@@ -92,6 +92,18 @@ _Avoid_: confirmation, `--confirm`, approval flag
 The researcher's WebAuthn credential (Touch ID, Windows Hello, or a security key) enrolled in a project. It is what makes a decision human: an agent can read and write project files but cannot produce a passkey signature. Enrolling or revoking one is itself a Signed decision. See ADR-0009.
 _Avoid_: reviewer id, reviewer name (a self-declared name proves nothing)
 
+**Review app**:
+The project's local web page (`proof review serve` / `proof review open`), served on the project's own `http://localhost:<port>`. It is the only place a Signed decision is made: it shows exactly what is being decided and asks for the passkey tap. It holds no authority itself; every write it forwards is verified by the service layer like anyone else's. See ADR-0009.
+_Avoid_: dashboard, admin panel
+
+**Reviewer key registry**:
+The project's append-only, hash-chained list of enrolled and revoked Reviewer passkeys. The Review app shows it on every page, with a banner whenever it changed since the researcher last *acknowledged* it. Acknowledging it is itself a passkey tap.
+_Avoid_: key store, allowlist
+
+**Legacy decision**:
+A Human Review decision recorded before ADR-0009, and so unsigned. It doesn't count until the researcher **re-signs** it: a new Signed decision of the same kind and value, with the original row left untouched. It can also be **declined**, which is signed too; the decision stays uncounted and leaves the list. A legacy Reject keeps its node terminal and a legacy dismissal keeps its Challenge closed until re-signed. Neither can be declined. See ADR-0009, issue #42.
+_Avoid_: old decision, migration
+
 ### Node lifecycle
 
 A proof map node's state is tracked along three independent axes, never folded into one flat status. None are stored directly — each is computed from lower-level records (an active claim, the node's latest Candidate proof and its review decision, its dependencies' own state, and any open Challenges). See ADR-0002, ADR-0004.

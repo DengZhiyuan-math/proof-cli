@@ -12,6 +12,7 @@ from typer.testing import CliRunner
 import proof_cli.proof_map as proof_map
 from _authenticator import Researcher, SoftwareAuthenticator, enroll, researcher
 from proof_cli.authority import (
+    project_origin,
     AuthorityError,
     EnrollmentRequest,
     active_reviewer_keys,
@@ -184,7 +185,7 @@ def test_a_decision_signed_by_an_unenrolled_key_changes_nothing(tmp_path: Path, 
     payload = prepare_decision(store, kind, target_id, decision, rationale="trust me", dependency_id=options.get("dependency_id"))
 
     with pytest.raises(ProofMapError) as exc_info:
-        _perform(store, kind, target_id, decision, agent_key.sign(payload), **options)
+        _perform(store, kind, target_id, decision, agent_key.sign(payload, origin=project_origin(store)), **options)
 
     assert exc_info.value.code == "UNKNOWN_REVIEWER_KEY"
     assert _observable_state(store) == before
@@ -314,7 +315,7 @@ def test_an_assertion_without_user_verification_is_rejected(tmp_path: Path):
     payload = prepare_decision(store, "acceptance", "clm_1", "accept")
 
     with pytest.raises(ProofMapError) as exc_info:
-        decide_acceptance(store, "clm_1", "accept", signed_decision=reviewer.authenticator.sign(payload, flags=0x01))
+        decide_acceptance(store, "clm_1", "accept", signed_decision=reviewer.authenticator.sign(payload, flags=0x01, origin=project_origin(store)))
     assert exc_info.value.code == "USER_NOT_VERIFIED"
 
 
@@ -324,7 +325,7 @@ def test_one_tap_signs_a_batch_of_decisions(tmp_path: Path):
         _submitted(store, node_id)
     reviewer = researcher(store)
     payloads = [prepare_decision(store, "acceptance", node_id, "accept") for node_id in ("clm_1", "clm_2", "clm_3")]
-    batch = reviewer.authenticator.sign_batch(payloads)
+    batch = reviewer.authenticator.sign_batch(payloads, origin=project_origin(store))
 
     for node_id, signed in zip(("clm_1", "clm_2", "clm_3"), batch):
         decide_acceptance(store, node_id, "accept", signed_decision=signed)
@@ -572,7 +573,7 @@ def test_a_backdated_self_signed_enrollment_cannot_sneak_in_first(tmp_path: Path
         public_key_spki=b64url_encode(intruder.public_key_spki),
         alg=intruder.alg,
         display_name="agent",
-        signed_decision=intruder.sign(payload),
+        signed_decision=intruder.sign(payload, origin=project_origin(store)),
     )
     with pytest.raises(AuthorityError):
         enroll_reviewer_key(store, request)
@@ -623,7 +624,7 @@ def test_a_registry_row_inserted_behind_the_services_back_is_not_trusted(tmp_pat
                 "alg": intruder.alg,
                 "fingerprint": public_key_fingerprint(intruder.public_key_spki),
                 "display_name": "agent",
-                "signed_decision": intruder.sign(payload).model_dump_json(),
+                "signed_decision": intruder.sign(payload, origin=project_origin(store)).model_dump_json(),
                 "created_at": payload.signed_at.isoformat(),
             },
         )
@@ -633,7 +634,7 @@ def test_a_registry_row_inserted_behind_the_services_back_is_not_trusted(tmp_pat
     _submitted(store)
     with pytest.raises(ProofMapError) as exc_info:
         # the agent's key never made it into the registry, so its signature counts for nothing
-        decide_acceptance(store, "clm_1", "accept", signed_decision=intruder.sign(prepare_decision(store, "acceptance", "clm_1", "accept")))
+        decide_acceptance(store, "clm_1", "accept", signed_decision=intruder.sign(prepare_decision(store, "acceptance", "clm_1", "accept"), origin=project_origin(store)))
     assert exc_info.value.code == "UNKNOWN_REVIEWER_KEY"
     reviewer.decide_acceptance("clm_1", "accept")
     assert get_acceptance_state(store, "clm_1") == "accepted"
@@ -668,7 +669,7 @@ def test_a_revoked_key_can_no_longer_decide_and_the_last_key_cannot_be_revoked(t
             "revoke",
             credential_id=target.credential_id,
         )
-        return signer.sign(payload)
+        return signer.sign(payload, origin=project_origin(store))
 
     with pytest.raises(AuthorityError) as exc_info:
         revoke_reviewer_key(store, _revocation(old, old))
@@ -741,7 +742,7 @@ def test_cli_payload_sign_and_submit_round_trip(tmp_path: Path):
     from proof_cli.signing import DecisionPayload, b64url_decode
 
     payload = DecisionPayload.model_validate(data["payload"])
-    signed = reviewer.authenticator.sign(payload)
+    signed = reviewer.authenticator.sign(payload, origin=project_origin(store))
     # the printed challenge is exactly what the passkey signs
     assert json.loads(b64url_decode(signed.assertion.client_data_json))["challenge"] == data["challenge"]
     signed_file = tmp_path / "signed.json"
