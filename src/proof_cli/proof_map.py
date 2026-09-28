@@ -23,9 +23,9 @@ from .authority import (
     decision_row_for,
     decision_rows,
     human_review_required,
-    is_legacy_review,
     is_legacy_row,
     ledger_entries,
+    legacy_cutoff_seq,
     legacy_handled,
     list_authority_warnings,
     schedule_history_pin_advance,
@@ -35,7 +35,8 @@ from .collaboration import (
     ReviewGovernanceState,
     ReviewRecord,
     ReviewRecordKind,
-    list_review_records,
+    _fold_review_history,
+    list_review_history,
     record_decided_review,
 )
 from .domain import (
@@ -2202,11 +2203,12 @@ def list_legacy_decisions(store: ProjectStore) -> list[LegacyDecision]:
     """
     handled = legacy_handled(store)
     items: list[LegacyDecision] = []
-    for record in list_review_records(store):
+    # folded from the legacy rows alone: a row appended after the cutoff was
+    # forged, however it's dated, and neither adds an item nor alters one
+    cutoff = legacy_cutoff_seq(store)
+    for record in _fold_review_history(entry for entry in list_review_history(store) if entry.seq <= cutoff):
         if record.signed or record.kind is None or record.id in handled:
             continue
-        if not is_legacy_review(store, record.id):
-            continue  # appended after the project met ADR-0009: forged, however it's dated
         kind = _LEGACY_KINDS.get(record.kind.value)
         decision = _LEGACY_PAYLOAD_DECISIONS.get((record.kind.value, record.decision.value))
         if kind is None or decision is None:

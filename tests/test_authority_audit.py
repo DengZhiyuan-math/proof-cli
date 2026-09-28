@@ -753,3 +753,42 @@ def test_moving_the_legacy_cutoff_after_enrollment_untrusts_the_project(tmp_path
 
     assert "LEGACY_CUTOFF_MISMATCH" in _codes(store)
     assert active_reviewer_keys(store) == []  # nothing can be signed, so nothing forged can be re-signed
+
+
+def test_a_row_appended_to_a_legacy_reject_never_hides_it_from_re_signing(tmp_path: Path):
+    """Audit of 42187e7: a forged unsigned `rejected` row on the legacy review's own id."""
+    import shutil
+
+    from proof_cli.proof_map import list_legacy_decisions, resign_legacy_decision
+    from proof_cli.storage import insert_review_history_row, load_project
+
+    shutil.copytree(Path(__file__).parent / "fixtures" / "pre_adr_0009_project", tmp_path / "project")
+    store = load_project(tmp_path / "project")
+    reviewer = researcher(store)
+    item = next(item for item in list_legacy_decisions(store) if item.target_id == "rej")
+    legacy_row = next(row for row in list_raw_chain_rows(store, "review_history") if row["review_id"] == item.item_id and row["entry"] == "decision")
+    with store.transaction() as conn:
+        insert_review_history_row(conn, {**legacy_row, "id": "duplicate_legacy_reject", "signed_decision": None, "authorship": []})
+
+    assert get_acceptance_state(store, "rej") == "rejected"
+    assert item.item_id in {queued.item_id for queued in list_legacy_decisions(store)}
+    payload = prepare_decision(store, "acceptance", "rej", "reject", resigns=item.item_id)
+    resign_legacy_decision(store, item.item_id, signed_decision=reviewer.authenticator.sign(payload, origin=project_origin(store)))
+    assert get_acceptance_state(store, "rej") == "rejected"
+    assert item.item_id not in {queued.item_id for queued in list_legacy_decisions(store)}
+
+
+def test_the_pin_never_fixes_an_unknown_legacy_cutoff(tmp_path: Path):
+    """Audit of 42187e7: a pin advanced before the cutoff exists must not freeze it as null."""
+    store = ensure_project(tmp_path)
+    _node(store)
+    researcher(store).decide_acceptance("clm_1", "accept")
+    entry = json.loads(_pins_file().read_text())["projects"][str(store.root.resolve())]
+    entry.pop("legacy_cutoff")
+    _pins_file().write_text(json.dumps({"projects": {str(store.root.resolve()): entry}}))  # a pin from before the cutoff
+    _raw(store, "DELETE FROM project_meta WHERE key = 'legacy_review_cutoff'")
+
+    from proof_cli.authority import _advance_history_pins
+
+    _advance_history_pins(store)  # e.g. inside a transaction, before the upkeep ran
+    assert json.loads(_pins_file().read_text())["projects"][str(store.root.resolve())].get("legacy_cutoff") is not None
