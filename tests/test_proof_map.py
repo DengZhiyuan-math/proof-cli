@@ -1934,6 +1934,35 @@ def test_a_failed_split_leaves_a_folder_another_writer_created_meanwhile(tmp_pat
     assert (theirs / "proof.tex").exists()
 
 
+def test_a_split_whose_commit_fails_leaves_no_child_folder(tmp_path: Path, monkeypatch):
+    # PR #62 review: the cleanup covered only the split's own body, so a failed commit left
+    # the child's proof.tex, which a retry with a new statement then kept (never overwritten)
+    import sqlite3
+
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_parent", kind="claim", statement="parent")
+    real_connect = store.connect
+
+    def quick_connect():
+        conn = real_connect()
+        conn.execute("PRAGMA busy_timeout=20")  # a real "database is locked", just sooner
+        return conn
+
+    monkeypatch.setattr(store, "connect", quick_connect)
+    reader = sqlite3.connect(store.db_path)
+    reader.execute("BEGIN")
+    reader.execute("SELECT * FROM proof_map_nodes").fetchall()  # a read lock the commit must wait on
+    try:
+        with pytest.raises(sqlite3.OperationalError):
+            split_node(store, "clm_parent", [{"id": "child", "statement": "mine"}], created_by="agent_a")
+    finally:
+        reader.rollback()
+        reader.close()
+
+    assert get_node(store, "child") is None
+    assert not (tmp_path / "proofs" / "child").exists()
+
+
 def test_splitting_a_node_someone_else_holds_is_refused_unless_reassigned(tmp_path: Path):
     store = ensure_project(tmp_path)
     create_node(store, node_id="clm_parent", kind="claim", statement="parent")

@@ -5,6 +5,7 @@ import json
 import re
 import shutil
 import sqlite3
+from pathlib import Path
 import uuid
 from dataclasses import dataclass
 from enum import Enum
@@ -63,6 +64,7 @@ from .storage import (
     mark_challenge_dismissed,
     mark_claim_released,
     next_candidate_proof_version,
+    on_rollback,
     set_candidate_proof_interface_fingerprint,
     set_candidate_proof_review_record_id,
     update_proof_map_node,
@@ -322,20 +324,22 @@ def split_node(
     with store.transaction() as conn:
         # Under the write lock, a child with no node yet and no folder yet is ours alone: no one
         # else can create that node until this commits. Any other folder may be another writer's
-        # (create_node writes its proof.tex after committing), so a failed split leaves it be —
-        # and cleans up before the lock goes, while nobody else can have taken the id.
+        # (create_node writes its proof.tex after committing), so a failed split leaves it be.
+        # The cleanup is an on_rollback callback: it runs before the lock goes, while nobody else
+        # can have taken the id, and a failed commit runs it too.
         ours = {
             node_folder(store.root, spec["id"])
             for spec in child_specs
             if _SAFE_NODE_ID.fullmatch(spec["id"]) and get_proof_map_node(store, spec["id"]) is None
         }
         ours = {folder for folder in ours if not folder.exists()}
-        try:
-            return _split(store, conn, parent_id, child_specs, created_by=created_by, reassign=reassign)
-        except BaseException:
-            for folder in ours:
-                shutil.rmtree(folder, ignore_errors=True)
-            raise
+        on_rollback(store, lambda: _remove_folders(ours))
+        return _split(store, conn, parent_id, child_specs, created_by=created_by, reassign=reassign)
+
+
+def _remove_folders(folders: set[Path]) -> None:
+    for folder in folders:
+        shutil.rmtree(folder, ignore_errors=True)
 
 
 def _split(
