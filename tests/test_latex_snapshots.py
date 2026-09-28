@@ -3,7 +3,9 @@
 import hashlib
 import json
 import shutil
+import sqlite3
 import subprocess
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -227,6 +229,68 @@ def test_a_pdf_copy_that_fails_partway_leaves_no_pdf_behind(tmp_path: Path, monk
     with pytest.raises(OSError):
         request_review(store, "clm_1", requested_by="agent_a", rationale="r")
 
+    assert list((store.root / "proofs" / "clm_1" / "snapshots").iterdir()) == []
+
+
+def test_a_failed_request_never_removes_the_snapshot_a_later_one_wrote(tmp_path: Path, monkeypatch):
+    # PR #61 review: A fails before writing v1, B then snapshots v1; A's cleanup, run after
+    # its lock was gone, removed B's v1. Cleanup now runs before the lock goes.
+    from proof_cli import proof_map
+    from proof_cli.storage import ProjectStore
+
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_1", kind="claim", statement="s")
+    _write_proof(store, "clm_1", "work")
+    real_transaction = store.transaction
+    b_proofs = []
+
+    def no_space(*_args):
+        raise OSError("no space left on device, before the file was created")
+
+    @contextmanager
+    def then_b_requests_review():
+        try:
+            with real_transaction() as conn:
+                yield conn
+        except OSError:
+            monkeypatch.setattr(proof_map, "write_snapshot", real_write_snapshot)
+            b_proofs.append(request_review(ProjectStore(tmp_path), "clm_1", requested_by="agent_b", rationale="b"))
+            raise
+
+    real_write_snapshot = proof_map.write_snapshot
+    monkeypatch.setattr(proof_map, "write_snapshot", no_space)
+    monkeypatch.setattr(store, "transaction", then_b_requests_review)
+    with pytest.raises(OSError):
+        request_review(store, "clm_1", requested_by="agent_a", rationale="a")
+
+    (b_proof,) = b_proofs
+    assert (tmp_path / b_proof.file_path).read_bytes() == _working(store, "clm_1").read_bytes()
+
+
+def test_a_request_whose_commit_fails_leaves_no_snapshot(tmp_path: Path, monkeypatch):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_1", kind="claim", statement="s")
+    _write_proof(store, "clm_1", "work")
+    real_connect = store.connect
+
+    def quick_connect():
+        conn = real_connect()
+        conn.execute("PRAGMA busy_timeout=20")  # a real "database is locked", just sooner
+        return conn
+
+    list_integrity_warnings(store)  # the one-off review-history migration, done before the lock
+    monkeypatch.setattr(store, "connect", quick_connect)
+    reader = sqlite3.connect(store.db_path)
+    reader.execute("BEGIN")
+    reader.execute("SELECT * FROM candidate_proofs").fetchall()  # a read lock the commit must wait on
+    try:
+        with pytest.raises(sqlite3.OperationalError):
+            request_review(store, "clm_1", requested_by="agent_a", rationale="r")
+    finally:
+        reader.rollback()
+        reader.close()
+
+    assert list_candidate_proofs(store, "clm_1") == []
     assert list((store.root / "proofs" / "clm_1" / "snapshots").iterdir()) == []
 
 

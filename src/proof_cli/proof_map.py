@@ -64,6 +64,7 @@ from .storage import (
     mark_challenge_dismissed,
     mark_claim_released,
     next_candidate_proof_version,
+    on_rollback,
     set_candidate_proof_interface_fingerprint,
     set_candidate_proof_review_record_id,
     update_proof_map_node,
@@ -514,61 +515,62 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
     sha256 = hashlib.sha256(content).hexdigest()
 
     # The holder check and every write are one SQLite write transaction (#18): a reassignment
-    # can't slip in between them, it waits for this to commit. The files written go if it rolls back.
-    written: list[Path] = []
-    try:
-        with store.transaction() as conn:
-            claim = get_active_claim(store, node_id, conn=conn)
-            if claim is not None and claim.claimant_id != requested_by:  # a node someone holds is theirs to hand over
-                raise _not_claimant(node_id, claim)
-            current = get_current_candidate_proof(store, node_id, conn=conn)
-            if current is not None and current.sha256 == sha256:
-                raise ProofMapError(
-                    "WORKING_PROOF_UNCHANGED",
-                    f"{node_id}'s working proof is unchanged since snapshot v{current.version}, which is already the one under review",
-                )
-
-            # past any snapshot already on disk too: one the index never got is an orphan, reported
-            # by list_integrity_warnings, and never overwritten
-            version = max([next_candidate_proof_version(store, node_id, conn=conn), *(n + 1 for n in snapshots_on_disk(store.root, node_id))])
-            path = snapshot_path(store.root, node_id, version)
-            # listed before writing, so a write that fails partway still goes; and only if absent
-            # now, so a rollback never removes a file this request didn't write
-            written.extend(p for p in (path, path.with_suffix(".pdf")) if not p.exists())
-            write_snapshot(path, content)
-            if build_is_current(store.root, node_id):
-                # a PDF compiled from this very text, preamble included (prism-local's build): archived beside the snapshot
-                shutil.copyfile(build_pdf_path(store.root, node_id), path.with_suffix(".pdf"))
-            record = CandidateProofRecord(
-                id=str(uuid.uuid4()),
-                node_id=node_id,
-                version=version,
-                file_path=path.relative_to(store.root).as_posix(),
-                submitted_by=requested_by,
-                scoping_rationale=rationale,
-                sha256=sha256,
+    # can't slip in between them, it waits for this to commit. The files written go if it rolls
+    # back, before its write lock does, so no later request can have taken their version yet.
+    with store.transaction() as conn:
+        claim = get_active_claim(store, node_id, conn=conn)
+        if claim is not None and claim.claimant_id != requested_by:  # a node someone holds is theirs to hand over
+            raise _not_claimant(node_id, claim)
+        current = get_current_candidate_proof(store, node_id, conn=conn)
+        if current is not None and current.sha256 == sha256:
+            raise ProofMapError(
+                "WORKING_PROOF_UNCHANGED",
+                f"{node_id}'s working proof is unchanged since snapshot v{current.version}, which is already the one under review",
             )
-            try:
-                insert_candidate_proof(store, record, conn=conn)
-            except sqlite3.IntegrityError as exc:
-                raise ProofMapError("CANDIDATE_PROOF_VERSION_CONFLICT", f"version {version} of node {node_id} is already indexed") from exc
 
-            pin_dependencies(store, node)
-            if claim is not None:
-                mark_claim_released(store, claim.id, released_by=requested_by, reason="review requested", released_at=utc_now(), conn=conn)
-            append_event(
-                store,
-                "proof_map_review_requested",
-                f"snapshot v{version} of {node_id} requested for review",
-                entity_id=node_id,
-                payload={"candidate_proof_id": record.id, "version": version, "file_path": record.file_path, "sha256": sha256, "requested_by": requested_by},
-                conn=conn,
-            )
-    except BaseException:
-        for leftover in written:
-            leftover.unlink(missing_ok=True)
-        raise
+        # past any snapshot already on disk too: one the index never got is an orphan, reported
+        # by list_integrity_warnings, and never overwritten
+        version = max([next_candidate_proof_version(store, node_id, conn=conn), *(n + 1 for n in snapshots_on_disk(store.root, node_id))])
+        path = snapshot_path(store.root, node_id, version)
+        # listed before writing, so a write that fails partway still goes; and only if absent
+        # now, under the write lock, so a rollback never removes a file this request didn't write
+        ours = [p for p in (path, path.with_suffix(".pdf")) if not p.exists()]
+        on_rollback(store, lambda: _remove_files(ours))
+        write_snapshot(path, content)
+        if build_is_current(store.root, node_id):
+            # a PDF compiled from this very text, preamble included (prism-local's build): archived beside the snapshot
+            shutil.copyfile(build_pdf_path(store.root, node_id), path.with_suffix(".pdf"))
+        record = CandidateProofRecord(
+            id=str(uuid.uuid4()),
+            node_id=node_id,
+            version=version,
+            file_path=path.relative_to(store.root).as_posix(),
+            submitted_by=requested_by,
+            scoping_rationale=rationale,
+            sha256=sha256,
+        )
+        try:
+            insert_candidate_proof(store, record, conn=conn)
+        except sqlite3.IntegrityError as exc:
+            raise ProofMapError("CANDIDATE_PROOF_VERSION_CONFLICT", f"version {version} of node {node_id} is already indexed") from exc
+
+        pin_dependencies(store, node)
+        if claim is not None:
+            mark_claim_released(store, claim.id, released_by=requested_by, reason="review requested", released_at=utc_now(), conn=conn)
+        append_event(
+            store,
+            "proof_map_review_requested",
+            f"snapshot v{version} of {node_id} requested for review",
+            entity_id=node_id,
+            payload={"candidate_proof_id": record.id, "version": version, "file_path": record.file_path, "sha256": sha256, "requested_by": requested_by},
+            conn=conn,
+        )
     return record
+
+
+def _remove_files(paths: list[Path]) -> None:
+    for path in paths:
+        path.unlink(missing_ok=True)
 
 
 def get_candidate_proof(store: ProjectStore, candidate_proof_id: str) -> CandidateProofRecord | None:
