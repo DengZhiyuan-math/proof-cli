@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from .domain import EvidenceOutcome, utc_now
+from .domain import utc_now
 from .proof_state import load_state, record_verification_result_entry, save_state
 from .storage import ProjectStore, append_event
 from .verification_ir import (
@@ -75,23 +75,6 @@ def _default_effect(
     return "neutral"
 
 
-# A machine check's own status as an Evidence check outcome. Only what the
-# machine did counts: the IR's review statuses are someone's judgment, and
-# read as inconclusive here (ADR-0004 point 5).
-_EVIDENCE_OUTCOMES = {
-    VerificationFragmentStatus.machine_checked: EvidenceOutcome.passed,
-    VerificationFragmentStatus.backend_failed: EvidenceOutcome.failed,
-    VerificationFragmentStatus.translation_failed: EvidenceOutcome.error,
-    VerificationFragmentStatus.stale_after_change: EvidenceOutcome.stale,
-}
-VERIFY_RUN_CHECKER = "proof verify run"
-
-
-def evidence_outcome_for(status: VerificationFragmentStatus) -> EvidenceOutcome:
-    """The Evidence check outcome a machine check with this status records (#27)."""
-    return _EVIDENCE_OUTCOMES.get(status, EvidenceOutcome.inconclusive)
-
-
 def _record_or_default(value: str | None, fallback: str | None) -> str | None:
     return value if value is not None else fallback
 
@@ -156,9 +139,7 @@ def list_verification_results(store: ProjectStore) -> list[VerificationResultRec
 
 
 __all__ = [
-    "VERIFY_RUN_CHECKER",
     "VerificationResultRecord",
-    "evidence_outcome_for",
     "list_verification_results",
     "record_verification_result",
 ]
