@@ -108,6 +108,7 @@ class AgentManager:
             if self.active and not self.active.done:
                 return {"error": "The agent is still working on the previous message."}
             job = Job(next(self.ids))
+            job.provider = backend.id   # before it is visible as active: stop() finds its backend
             self.jobs[job.id] = job
             self.active = job
         job.scope = scope if mode == "edit" and scope else None
@@ -202,6 +203,7 @@ class AgentManager:
     def stop(self, jid: int) -> dict:
         job = self.jobs.get(jid)
         if job and not job.done:
+            job.cancel.set()            # whatever else: a turn not started yet then never starts
             backend = self.backends.get(job.provider)
             if backend:
                 backend.stop(job)
