@@ -22,11 +22,11 @@ from proof_cli.proof_map import (
     list_challenges,
     open_challenge,
     record_evidence_check,
-    submit_candidate_proof,
 )
 from proof_cli.collaboration import list_review_records
 from proof_cli.storage import ensure_project, get_active_claim, get_current_candidate_proof
 from _review_client import DirectClient, decide
+from _proofs import submit_proof
 
 
 @pytest.fixture
@@ -68,7 +68,7 @@ def _reviewed_reference(store, node_id="ref"):
 
 def _accepted(store, node_id, dependencies=()):
     create_node(store, node_id=node_id, kind="claim", statement=f"stmt {node_id}", dependencies=list(dependencies))
-    submit_candidate_proof(store, node_id, claimant_id="agent_a", session_id="s", scoping_rationale="scoped", content=f"proof {node_id}")
+    submit_proof(store, node_id, claimant_id="agent_a", session_id="s", scoping_rationale="scoped", content=f"proof {node_id}")
     researcher(store).decide_acceptance(node_id, "accept")
 
 
@@ -121,7 +121,7 @@ def _challenged_and_resubmitted(store, node_id="lem"):
     _accepted(store, node_id)
     challenge = open_challenge(store, node_id, opened_by="agent_b", rationale="step 2?")
     claim_node(store, node_id, claimant_id="agent_a", session_id="s2")
-    submit_candidate_proof(store, node_id, claimant_id="agent_a", session_id="s2", scoping_rationale="scoped", content="revised proof")
+    submit_proof(store, node_id, claimant_id="agent_a", session_id="s2", scoping_rationale="scoped", content="revised proof")
     return challenge
 
 
@@ -180,7 +180,7 @@ def test_a_lagging_pin_is_shown_and_re_reviewed_from_the_page(app):
     _accepted(store, "uses", ["lem"])
     challenge = open_challenge(store, "lem", opened_by="agent_b", rationale="?")
     claim_node(store, "lem", claimant_id="agent_a", session_id="s2")
-    submit_candidate_proof(store, "lem", claimant_id="agent_a", session_id="s2", scoping_rationale="scoped", content="v2")
+    submit_proof(store, "lem", claimant_id="agent_a", session_id="s2", scoping_rationale="scoped", content="v2")
     researcher(store).decide_acceptance("lem", "accept")  # v2, same interface
     assert get_challenge(store, challenge.id).status.value == "resolved-by-revision"
 

@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from _proofs import submit_proof
 from _researcher import researcher
 
 import proof_cli.collaboration as collaboration_module
@@ -38,7 +39,6 @@ from proof_cli.proof_map import (
     get_workflow_state,
     open_challenge,
     record_evidence_check,
-    submit_candidate_proof,
 )
 from proof_cli.storage import (
     REVIEW_HISTORY_MIGRATED_KEY,
@@ -55,7 +55,7 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 def _submitted_claim(store, node_id: str):
     create_node(store, node_id=node_id, kind="claim", statement=f"statement of {node_id}")
     claim_node(store, node_id, claimant_id="agent_a", session_id="sess_1")
-    return submit_candidate_proof(
+    return submit_proof(
         store, node_id, claimant_id="agent_a", session_id="sess_1", scoping_rationale="scoped", content="proof text")
 
 
@@ -66,7 +66,7 @@ def _accepted_then_resubmitted(store, node_id: str = "clm_1") -> None:
     researcher(store).decide_acceptance(node_id, "accept")
     open_challenge(store, node_id, opened_by="agent_b", rationale="second look")
     claim_node(store, node_id, claimant_id="agent_a", session_id="sess_2")
-    submit_candidate_proof(
+    submit_proof(
         store, node_id, claimant_id="agent_a", session_id="sess_2", scoping_rationale="scoped", content="revised proof")
     assert get_workflow_state(store, node_id) == "review-needed"
 

@@ -10,7 +10,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from proof_cli.cli import app
-from proof_cli.proof_map import claim_node, create_node, submit_candidate_proof
+from proof_cli.proof_map import claim_node, create_node
 from proof_cli.publication import (
     PublicationAudience,
     PublicationReadiness,
@@ -21,13 +21,14 @@ from proof_cli.publication import (
     set_publication_claim,
 )
 from proof_cli.storage import ensure_project, load_project
+from _proofs import submit_proof
 
 runner = CliRunner()
 
 
 def _accept(store, node_id, *, claimant="agent_a", session="sess_1"):
     claim_node(store, node_id, claimant_id=claimant, session_id=session)
-    submit_candidate_proof(
+    submit_proof(
         store, node_id, claimant_id=claimant, session_id=session,
         scoping_rationale="scoped correctly", content="proof text")
     return researcher(store).decide_acceptance(node_id, "accept")
@@ -126,12 +127,8 @@ def test_cli_publication_set_and_show_for_a_proof_map_node(tmp_path: Path):
 def test_cli_publication_export_bundle_carries_live_acceptance_state(tmp_path: Path):
     runner.invoke(app, ["node", "create", "clm_1", "claim", "A claim", "--root", str(tmp_path)])
     runner.invoke(app, ["node", "claim", "clm_1", "--root", str(tmp_path), "--claimant", "agent_a", "--json"])
-    runner.invoke(
-        app,
-        [
-            "node", "submit", "clm_1", "--root", str(tmp_path), "--claimant", "agent_a", "--content", "proof text", "--rationale", "scoped correctly",
-        ],
-    )
+    (tmp_path / "proofs" / "clm_1" / "proof.tex").write_text("proof text")
+    runner.invoke(app, ["node", "request-review", "clm_1", "--root", str(tmp_path), "--requested-by", "agent_a", "--rationale", "scoped correctly"])
     researcher(load_project(tmp_path)).decide_acceptance("clm_1", "accept")  # in the review app
     runner.invoke(
         app,
