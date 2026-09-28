@@ -5,6 +5,7 @@ import json
 import re
 import shutil
 import sqlite3
+from pathlib import Path
 import uuid
 from dataclasses import dataclass
 from enum import Enum
@@ -68,7 +69,7 @@ from .storage import (
     update_proof_map_node,
     upsert_dependency_pin,
 )
-from .vault import build_is_current, build_pdf_path, candidate_proof_path, snapshot_path, snapshots_on_disk, working_proof_path, write_candidate_proof_file, write_snapshot, write_working_proof
+from .vault import build_is_current, build_pdf_path, snapshot_path, snapshots_on_disk, working_proof_path, write_snapshot, write_working_proof
 
 
 class ProofMapError(Exception):
@@ -485,103 +486,6 @@ def release_node(
         payload={"claim_id": claim.id, "original_claimant_id": claim.claimant_id, "released_by": claimant_id, "reason": release_reason},
     )
     return claim.model_copy(update={"released_by": claimant_id, "release_reason": release_reason, "released_at": released_at})
-
-
-def submit_candidate_proof(
-    store: ProjectStore,
-    node_id: str,
-    *,
-    claimant_id: str,
-    session_id: str,
-    scoping_rationale: str,
-    content: str,
-) -> CandidateProofRecord:
-    """Submit a Candidate proof as an ADR-0003 Markdown file (superseded by `request_review`).
-
-    Needs no claim (ADR-0010); a node someone else has claimed is theirs to
-    submit, and a submission ends the submitter's own claim. Writes an
-    immutable, versioned Markdown file to the Proof vault, indexed by a
-    stable id independent of its file path.
-    """
-    node = require_node(store, node_id)
-
-    if node.kind == ProofMapNodeKind.imported_result:
-        raise ProofMapError(
-            "IMMUTABLE_NODE",
-            f"imported_result node {node_id} is immutable and has no candidate proof to submit; "
-            "use Reference review instead",
-        )
-
-    if not scoping_rationale.strip():
-        raise ProofMapError(
-            "SCOPING_RATIONALE_REQUIRED",
-            "submitting a candidate proof requires stating why this node is now appropriately "
-            "scoped to prove directly",
-        )
-
-    # a claim never gates writing (ADR-0010); a node someone else holds is theirs to submit
-    claim = get_active_claim(store, node_id)
-    if claim is not None and claim.claimant_id != claimant_id:
-        raise _not_claimant(node_id, claim)
-
-    version = next_candidate_proof_version(store, node_id)
-    proof_id = str(uuid.uuid4())
-    submitted_at = utc_now()
-    file_path = candidate_proof_path(store.root, node_id, version)
-
-    try:
-        write_candidate_proof_file(
-            file_path,
-            id=proof_id,
-            node_id=node_id,
-            version=version,
-            submitted_by=claimant_id,
-            created_at=submitted_at.isoformat(),
-            scoping_rationale=scoping_rationale,
-            content=content,
-        )
-    except FileExistsError as exc:
-        raise ProofMapError(
-            "CANDIDATE_PROOF_VERSION_CONFLICT",
-            f"version {version} of node {node_id} is already indexed",
-        ) from exc
-
-    record = CandidateProofRecord(
-        id=proof_id,
-        node_id=node_id,
-        version=version,
-        file_path=file_path.relative_to(store.root).as_posix(),
-        is_current=True,
-        submitted_by=claimant_id,
-        scoping_rationale=scoping_rationale,
-        created_at=submitted_at,
-    )
-    try:
-        insert_candidate_proof(store, record)
-    except sqlite3.IntegrityError as exc:
-        raise ProofMapError(
-            "CANDIDATE_PROOF_VERSION_CONFLICT",
-            f"version {version} of node {node_id} is already indexed",
-        ) from exc
-
-    pin_dependencies(store, node)
-
-    if claim is not None:
-        mark_claim_released(store, claim.id, released_by=claimant_id, reason="candidate proof submitted", released_at=utc_now())
-
-    append_event(
-        store,
-        "proof_map_candidate_proof_submitted",
-        f"submitted candidate proof v{version} for {node_id}",
-        entity_id=node_id,
-        payload={
-            "candidate_proof_id": proof_id,
-            "version": version,
-            "file_path": record.file_path,
-            "submitted_by": claimant_id,
-        },
-    )
-    return record
 
 
 def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rationale: str) -> CandidateProofRecord:
