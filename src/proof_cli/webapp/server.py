@@ -160,7 +160,17 @@ class ReviewApp:
     def health(self) -> dict:
         return {"project_id": read_state(self.store).project_id, "instance": read_project_instance_id(self.store), "origin": self.origin}
 
+    def _one_state(self):
+        """Hold the project's write lock while a page is read (PR #63 audit): no decision or other
+        write can land between reading what the page shows and computing the bindings it sends
+        back, so both describe one state. Writers wait for the read; it takes milliseconds."""
+        return self.store.transaction()
+
     def state(self) -> dict:
+        with self._one_state():
+            return self._state()
+
+    def _state(self) -> dict:
         warnings = proof_map.list_integrity_warnings(self.store)
         return {
             "project_id": read_state(self.store).project_id,
@@ -282,6 +292,10 @@ class ReviewApp:
         return pending
 
     def node(self, node_id: str) -> dict:
+        with self._one_state():
+            return self._node(node_id)
+
+    def _node(self, node_id: str) -> dict:
         store = self.store
         node = proof_map.get_node(store, node_id)
         if node is None:
