@@ -244,3 +244,48 @@ def test_browser_keys_cannot_collide_between_node_ids_with_dots():
     """PR #75 review: node `A` key `chat.session` and node `A.chat` key `session` were one key."""
     common = (STATIC / "common.js").read_text()
     assert "JSON.stringify([NODE, k])" in common
+
+
+def test_a_turn_admitted_but_not_yet_given_its_provider_is_still_cancelled_by_shutdown(tmp_path):
+    """PR #76 audit: shutdown landing after `active` was set but before `provider` was left the
+    turn uncancelled, and its CLI started anyway."""
+    from proof_cli.studio.agent import AgentManager
+    from proof_cli.studio.backends import Job
+
+    manager = AgentManager(lambda: tmp_path, lambda: [], backends=({}, "none", None))
+    job = Job(1)  # admitted: active, but no provider yet
+    manager.jobs[job.id] = job
+    manager.active = job
+
+    manager.shutdown()
+
+    assert job.cancel.is_set()  # so the CLI backend refuses to start (checked before and after its Popen)
+
+
+def test_a_turn_is_given_its_provider_before_it_becomes_active(tmp_path):
+    from proof_cli.studio.agent import AgentManager
+    from proof_cli.studio.backends import Backend
+
+    class Quiet(Backend):
+        def run(self, job):
+            return {}
+
+    manager = AgentManager(lambda: tmp_path, lambda: [], backends=({"quiet": Quiet("quiet")}, "quiet", None))
+    released = []
+
+    class Watched:
+        """The manager's lock, noting the active turn's provider each time it's let go."""
+
+        def __init__(self, lock):
+            self.lock = lock
+
+        def __enter__(self):
+            return self.lock.__enter__()
+
+        def __exit__(self, *exc):
+            released.append(manager.active.provider if manager.active else None)
+            return self.lock.__exit__(*exc)
+
+    manager.lock = Watched(manager.lock)
+    assert "job" in manager.start("hi", None, "ask")
+    assert released[0] == "quiet"  # already set when the turn was published as active
