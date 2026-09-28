@@ -7,7 +7,7 @@ from proof_cli.blockers import add_blocker, list_blockers
 from proof_cli.domain import BlockerRecord, BlockerStatus, ProofObligation, ProofObligationStatus, TheoremContract, TheoremStatus, TrustLevel, TheoremProvenanceKind, TheoremReviewState
 from proof_cli.cli import app
 from proof_cli.obligations import add_obligation, list_obligations
-from proof_cli.proof_map import claim_node, create_node, get_acceptance_state, list_evidence_checks, submit_candidate_proof
+from proof_cli.proof_map import claim_node, create_node, get_acceptance_state, list_evidence_checks
 from proof_cli.proof_state import build_snapshot, load_state, note_unresolved_trust_call, summarize_state
 from proof_cli.storage import ensure_project, get_contract, store_contract
 from proof_cli.verification_ir import (
@@ -26,6 +26,7 @@ from proof_cli.verification_ir import (
     VerificationTranslationStatus,
 )
 from proof_cli.verification_results import VERIFY_RUN_CHECKER, VerificationResultRecord, evidence_outcome_for, list_verification_results, record_verification_result
+from _proofs import submit_proof
 
 
 def _contract() -> TheoremContract:
@@ -227,7 +228,7 @@ def test_verify_run_records_its_outcome_as_an_evidence_check_and_decides_nothing
     store = ensure_project(tmp_path)
     create_node(store, node_id="lem", kind="lemma", statement="show the bridge condition")
     claim_node(store, "lem", claimant_id="agent_a", session_id="s")
-    proof = submit_candidate_proof(store, "lem", claimant_id="agent_a", session_id="s", scoping_rationale="scoped", content="proof")
+    proof = submit_proof(store, "lem", claimant_id="agent_a", session_id="s", scoping_rationale="scoped", content="proof")
     add_obligation(store, _obligation())
 
     result = CliRunner().invoke(app, ["verify", "run", "obl_bridge", "--candidate-proof", proof.id, "--root", str(tmp_path)])

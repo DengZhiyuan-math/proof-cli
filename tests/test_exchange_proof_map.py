@@ -23,9 +23,9 @@ from proof_cli.proof_map import (
     get_workflow_state,
     list_candidate_proofs,
     open_challenge,
-    submit_candidate_proof,
 )
 from proof_cli.storage import ensure_project, get_active_claim, get_dependency_pin
+from _proofs import submit_proof
 
 runner = CliRunner()
 
@@ -34,14 +34,14 @@ def _build_source_project(root: Path) -> None:
     store = ensure_project(root)
     create_node(store, node_id="lem_1", kind="lemma", statement="A base lemma")
     claim_node(store, "lem_1", claimant_id="agent_a", session_id="sess_1")
-    submit_candidate_proof(
+    submit_proof(
         store, "lem_1", claimant_id="agent_a", session_id="sess_1",
         scoping_rationale="scoped correctly", content="proof text")
     researcher(store).decide_acceptance("lem_1", "accept")
 
     create_node(store, node_id="clm_1", kind="claim", statement="Depends on lem_1", dependencies=["lem_1"])
     claim_node(store, "clm_1", claimant_id="agent_c", session_id="sess_c")
-    submit_candidate_proof(
+    submit_proof(
         store, "clm_1", claimant_id="agent_c", session_id="sess_c",
         scoping_rationale="scoped correctly", content="proof text")
     claim_node(store, "clm_1", claimant_id="agent_d", session_id="sess_d")

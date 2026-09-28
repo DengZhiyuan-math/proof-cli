@@ -117,7 +117,6 @@ from .proof_map import (
     request_review,
     require_node,
     split_node,
-    submit_candidate_proof,
 )
 from .vault import working_proof_path
 from .rendering import (
@@ -445,33 +444,6 @@ def node_request_review(
     _emit_candidate_proof(record, json_output, command="node.request_review")
 
 
-@node_app.command("submit")
-def node_submit(
-    node_id: str,
-    content: str = typer.Option(..., "--content", help="The candidate proof text"),
-    rationale: str = typer.Option(
-        ..., "--rationale", help="Why this node is now appropriately scoped to prove directly"
-    ),
-    root: str = ".",
-    claimant: str = typer.Option(..., "--claimant", help="The node's assignee"),
-    json_output: bool = typer.Option(False, "--json"),
-) -> None:
-    store = get_store(_root(root))
-    try:
-        record = submit_candidate_proof(
-            store,
-            node_id,
-            claimant_id=claimant,
-            session_id="",
-            scoping_rationale=rationale,
-            content=content,
-        )
-    except ProofMapError as exc:
-        _emit_node_error(exc, json_output, command="node.submit")
-        raise typer.Exit(code=1)
-    _emit_candidate_proof(record, json_output, command="node.submit")
-
-
 def _emit_review_record(record, json_output: bool, *, command: str) -> None:
     if json_output:
         typer.echo(dump_envelope(success_envelope(command, record.model_dump(mode="json"))))
@@ -713,7 +685,7 @@ def review_open(node_id: str = typer.Argument("", help="Open this node's decisio
 
 @review_app.command("warnings")
 def review_warnings(root: str = ".", json_output: bool = typer.Option(False, "--json")) -> None:
-    """Everything about Human Review authority that doesn't verify: unsigned or forged decisions, broken chains."""
+    """Everything about Human Review authority that doesn't verify, and Review snapshots the index never recorded."""
     warnings = list_integrity_warnings(get_store(_root(root)))
     if json_output:
         typer.echo(dump_envelope(success_envelope("review.warnings", [warning.model_dump(mode="json") for warning in warnings])))

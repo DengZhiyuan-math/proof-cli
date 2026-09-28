@@ -394,6 +394,7 @@ class _ActiveTransaction(NamedTuple):
     conn: sqlite3.Connection
     after_commit: list
     before_commit: list
+    on_rollback: list
 
 
 # The write transaction this thread currently holds open. A nested
@@ -451,18 +452,23 @@ class ProjectStore:
         """
         joined = active_transaction(self)
         if joined is not None:
+            outer = _ACTIVE_TRANSACTION.get()
+            own_from = len(outer.on_rollback)  # this block's on_rollback callbacks: those after these
             savepoint = f"nested_{uuid.uuid4().hex}"
             joined.execute(f"SAVEPOINT {savepoint}")
             try:
                 yield joined
             except BaseException:
-                joined.execute(f"ROLLBACK TO {savepoint}")
-                joined.execute(f"RELEASE {savepoint}")
+                try:
+                    _run_rollback_callbacks(outer.on_rollback, own_from)
+                finally:
+                    joined.execute(f"ROLLBACK TO {savepoint}")
+                    joined.execute(f"RELEASE {savepoint}")
                 raise
             joined.execute(f"RELEASE {savepoint}")
             return
         conn = self.connect()
-        active = _ActiveTransaction(self.db_path.resolve(), threading.get_ident(), conn, [], [])
+        active = _ActiveTransaction(self.db_path.resolve(), threading.get_ident(), conn, [], [], [])
         token = _ACTIVE_TRANSACTION.set(active)
         try:
             conn.execute("BEGIN IMMEDIATE")
@@ -471,7 +477,11 @@ class ProjectStore:
                 callback()
             conn.commit()
         except BaseException:
-            conn.rollback()
+            try:
+                # a failed commit (a reader it waited on, say) still holds the write lock too
+                _run_rollback_callbacks(active.on_rollback, 0)
+            finally:
+                conn.rollback()
             raise
         finally:
             _ACTIVE_TRANSACTION.reset(token)
@@ -500,6 +510,32 @@ def before_commit(store: ProjectStore, callback) -> None:
         active.before_commit.append(callback)
         return
     callback()
+
+
+def on_rollback(store: ProjectStore, callback) -> None:
+    """Run `callback` if this thread's open transaction on `store` rolls back — the block
+    raising, a `before_commit` callback raising, or the commit itself failing — while it still
+    holds the write lock, so no other writer has run in between. Inside a nested
+    `transaction()`, when that block's SAVEPOINT rolls back. Never after a commit; nothing to
+    do when no transaction is open. For undoing a side effect outside SQLite, such as a file
+    the transaction wrote."""
+    active = _ACTIVE_TRANSACTION.get()
+    if active is not None and active.thread_id == threading.get_ident() and active.db_path == store.db_path.resolve():
+        active.on_rollback.append(callback)
+
+
+def _run_rollback_callbacks(callbacks: list, start: int) -> None:
+    """Run `callbacks[start:]`, latest first, and drop them; each runs even if one before it raised."""
+    pending = callbacks[start:]
+    del callbacks[start:]
+    errors: list[BaseException] = []
+    for callback in reversed(pending):
+        try:
+            callback()
+        except BaseException as exc:
+            errors.append(exc)
+    if errors:
+        raise errors[0]
 
 
 def active_transaction(store: ProjectStore) -> sqlite3.Connection | None:
@@ -544,6 +580,20 @@ def _writing(store: ProjectStore, conn: sqlite3.Connection | None) -> Iterator[s
     try:
         yield own
         own.commit()
+    finally:
+        own.close()
+
+
+@contextmanager
+def _reading(store: ProjectStore, conn: sqlite3.Connection | None) -> Iterator[sqlite3.Connection]:
+    """The connection a read helper should use: the caller's, which sees its own uncommitted
+    writes and holds its write lock, or else a fresh one, closed afterwards."""
+    if conn is not None:
+        yield conn
+        return
+    own = store.connect()
+    try:
+        yield own
     finally:
         own.close()
 
@@ -1025,8 +1075,9 @@ def insert_claim(store: ProjectStore, claim: ClaimRecord) -> ClaimRecord:
     return claim
 
 
-def get_active_claim(store: ProjectStore, node_id: str) -> ClaimRecord | None:
-    with store.connect() as conn:
+def get_active_claim(store: ProjectStore, node_id: str, *, conn: sqlite3.Connection | None = None) -> ClaimRecord | None:
+    """`conn`: read inside the caller's `store.transaction()`, so the answer holds until it commits."""
+    with _reading(store, conn) as conn:
         row = conn.execute(
             "SELECT * FROM claims WHERE node_id = ? AND released_at IS NULL LIMIT 1",
             (node_id,),
@@ -1083,8 +1134,9 @@ def _row_to_candidate_proof(row: sqlite3.Row) -> CandidateProofRecord:
     )
 
 
-def next_candidate_proof_version(store: ProjectStore, node_id: str) -> int:
-    with store.connect() as conn:
+def next_candidate_proof_version(store: ProjectStore, node_id: str, *, conn: sqlite3.Connection | None = None) -> int:
+    """One past the highest indexed version; see `request_review` for files on disk the index doesn't know."""
+    with _reading(store, conn) as conn:
         row = conn.execute(
             "SELECT COALESCE(MAX(version), 0) AS max_version FROM candidate_proofs WHERE node_id = ?",
             (node_id,),
@@ -1092,16 +1144,17 @@ def next_candidate_proof_version(store: ProjectStore, node_id: str) -> int:
     return int(row["max_version"]) + 1
 
 
-def insert_candidate_proof(store: ProjectStore, record: CandidateProofRecord) -> CandidateProofRecord:
+def insert_candidate_proof(
+    store: ProjectStore, record: CandidateProofRecord, *, conn: sqlite3.Connection | None = None
+) -> CandidateProofRecord:
     """Index a new candidate proof, marking every prior version of this node not-current.
 
     The unique index on (node_id, version) is the real guarantee against two
-    submissions racing onto the same version number; `submit_candidate_proof`
-    is the only caller, and it's already gated by claim exclusivity, but the
-    constraint means a double-submit fails loudly instead of corrupting the
-    index.
+    requests racing onto the same version number; `request_review` already
+    takes the version inside its own write transaction, but the constraint
+    means a double insert fails loudly instead of corrupting the index.
     """
-    with store.connect() as conn:
+    with _writing(store, conn) as conn:
         conn.execute("UPDATE candidate_proofs SET is_current = 0 WHERE node_id = ?", (record.node_id,))
         conn.execute(
             """
@@ -1122,7 +1175,6 @@ def insert_candidate_proof(store: ProjectStore, record: CandidateProofRecord) ->
                 record.created_at.isoformat(),
             ),
         )
-        conn.commit()
     return record
 
 
@@ -1164,8 +1216,10 @@ def list_candidate_proofs_for_node(store: ProjectStore, node_id: str) -> list[Ca
     return [_row_to_candidate_proof(row) for row in rows]
 
 
-def get_current_candidate_proof(store: ProjectStore, node_id: str) -> CandidateProofRecord | None:
-    with store.connect() as conn:
+def get_current_candidate_proof(
+    store: ProjectStore, node_id: str, *, conn: sqlite3.Connection | None = None
+) -> CandidateProofRecord | None:
+    with _reading(store, conn) as conn:
         row = conn.execute(
             "SELECT * FROM candidate_proofs WHERE node_id = ? AND is_current = 1 LIMIT 1",
             (node_id,),

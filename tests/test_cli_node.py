@@ -19,14 +19,16 @@ def _claim_via_cli(tmp_path: Path, node_id: str, claimant: str) -> None:
     assert result.exit_code == 0, result.stdout
 
 
+def _request_review_via_cli(tmp_path: Path, node_id: str, by: str, *, content: str = "proof text", rationale: str = "scoped correctly", json_output: bool = False):
+    """Write the node's working proof.tex and request review of it, as an agent does (ADR-0010)."""
+    (tmp_path / "proofs" / node_id / "proof.tex").write_text(content)
+    args = ["node", "request-review", node_id, "--root", str(tmp_path), "--requested-by", by, "--rationale", rationale]
+    return runner.invoke(app, args + (["--json"] if json_output else []))
+
+
 def _submit_via_cli(tmp_path: Path, node_id: str, claimant: str) -> None:
     _claim_via_cli(tmp_path, node_id, claimant)
-    result = runner.invoke(
-        app,
-        [
-            "node", "submit", node_id, "--root", str(tmp_path), "--claimant", claimant, "--content", "proof text", "--rationale", "scoped correctly",
-        ],
-    )
+    result = _request_review_via_cli(tmp_path, node_id, claimant)
     assert result.exit_code == 0, result.stdout
 
 
@@ -210,43 +212,32 @@ def test_anyone_can_unassign_a_claim_on_the_cli(tmp_path: Path):
     assert json.loads(result.stdout)["data"]["released_by"] == "researcher"
 
 
-def test_node_submit_human_readable(tmp_path: Path):
+def test_node_request_review_human_readable(tmp_path: Path):
     runner.invoke(app, ["node", "create", "clm_1", "claim", "stmt", "--root", str(tmp_path)])
     _claim_via_cli(tmp_path, "clm_1", "agent_a")
 
-    result = runner.invoke(
-        app,
-        [
-            "node", "submit", "clm_1", "--root", str(tmp_path),
-            "--claimant", "agent_a", "--content", "By direct computation the claim holds.",
-            "--rationale", "This is a single algebraic step; no further decomposition needed.",
-        ],
+    result = _request_review_via_cli(
+        tmp_path, "clm_1", "agent_a",
+        content="By direct computation the claim holds.",
+        rationale="This is a single algebraic step; no further decomposition needed.",
     )
     assert result.exit_code == 0
     assert "clm_1" in result.stdout
     assert "v1" in result.stdout.lower()
-    assert (tmp_path / "proofs" / "clm_1" / "v1.md").exists()
+    assert (tmp_path / "proofs" / "clm_1" / "snapshots" / "v1.tex").exists()
 
 
-def test_node_submit_json_envelope(tmp_path: Path):
+def test_node_request_review_json_envelope(tmp_path: Path):
     runner.invoke(app, ["node", "create", "clm_1", "claim", "stmt", "--root", str(tmp_path)])
     _claim_via_cli(tmp_path, "clm_1", "agent_a")
 
-    result = runner.invoke(
-        app,
-        [
-            "node", "submit", "clm_1", "--root", str(tmp_path),
-            "--claimant", "agent_a", "--content", "proof body",
-            "--rationale", "scoped correctly",
-            "--json",
-        ],
-    )
+    result = _request_review_via_cli(tmp_path, "clm_1", "agent_a", json_output=True)
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert payload["ok"] is True
     assert payload["data"]["node_id"] == "clm_1"
     assert payload["data"]["version"] == 1
-    assert payload["data"]["file_path"] == "proofs/clm_1/v1.md"
+    assert payload["data"]["file_path"] == "proofs/clm_1/snapshots/v1.tex"
 
     # the claim ended automatically; the node can be claimed by someone else now
     reclaim = runner.invoke(
@@ -255,93 +246,53 @@ def test_node_submit_json_envelope(tmp_path: Path):
     assert reclaim.exit_code == 0
 
 
-def test_node_submit_by_non_claimant_rejected_with_json_error(tmp_path: Path):
-    runner.invoke(app, ["node", "create", "clm_1", "claim", "stmt", "--root", str(tmp_path)])
-    _claim_via_cli(tmp_path, "clm_1", "agent_a")
-
-    result = runner.invoke(
-        app,
-        [
-            "node", "submit", "clm_1", "--root", str(tmp_path),
-            "--claimant", "agent_b",
-            "--content", "proof body",
-            "--rationale", "scoped correctly",
-            "--json",
-        ],
-    )
-    assert result.exit_code != 0
-    payload = json.loads(result.stdout)
-    assert payload["ok"] is False
-    assert payload["error"]["code"] == "NOT_CLAIMANT"
-
-
-def test_node_submit_needs_no_claim_but_not_someone_elses(tmp_path: Path):
+def test_node_request_review_needs_no_claim_but_not_someone_elses(tmp_path: Path):
     runner.invoke(app, ["node", "create", "clm_1", "claim", "stmt", "--root", str(tmp_path)])
     _claim_via_cli(tmp_path, "clm_1", "agent_b")
 
-    result = runner.invoke(
-        app,
-        ["node", "submit", "clm_1", "--root", str(tmp_path), "--claimant", "agent_a", "--content", "proof body", "--rationale", "scoped correctly", "--json"],
-    )
+    result = _request_review_via_cli(tmp_path, "clm_1", "agent_a", json_output=True)
     assert result.exit_code != 0
     payload = json.loads(result.stdout)
     assert payload["ok"] is False
     assert payload["error"]["code"] == "NOT_CLAIMANT"
 
 
-def test_node_submit_without_rationale_rejected(tmp_path: Path):
+def test_node_request_review_without_rationale_rejected(tmp_path: Path):
     runner.invoke(app, ["node", "create", "clm_1", "claim", "stmt", "--root", str(tmp_path)])
     _claim_via_cli(tmp_path, "clm_1", "agent_a")
 
-    result = runner.invoke(
-        app,
-        [
-            "node", "submit", "clm_1", "--root", str(tmp_path),
-            "--claimant", "agent_a", "--content", "proof body",
-            "--rationale", "   ",
-            "--json",
-        ],
-    )
+    result = _request_review_via_cli(tmp_path, "clm_1", "agent_a", rationale="   ", json_output=True)
     assert result.exit_code != 0
     payload = json.loads(result.stdout)
     assert payload["error"]["code"] == "SCOPING_RATIONALE_REQUIRED"
 
 
-def test_node_second_submit_creates_v2(tmp_path: Path):
+def test_node_second_request_review_creates_v2(tmp_path: Path):
     runner.invoke(app, ["node", "create", "clm_1", "claim", "stmt", "--root", str(tmp_path)])
     _claim_via_cli(tmp_path, "clm_1", "agent_a")
-    runner.invoke(
-        app,
-        [
-            "node", "submit", "clm_1", "--root", str(tmp_path),
-            "--claimant", "agent_a", "--content", "v1 text", "--rationale", "first attempt",
-        ],
-    )
+    _request_review_via_cli(tmp_path, "clm_1", "agent_a", content="v1 text", rationale="first attempt")
     _claim_via_cli(tmp_path, "clm_1", "agent_b")
-    second = runner.invoke(
-        app,
-        [
-            "node", "submit", "clm_1", "--root", str(tmp_path),
-            "--claimant", "agent_b", "--content", "v2 text", "--rationale", "second attempt", "--json",
-        ],
-    )
+    second = _request_review_via_cli(tmp_path, "clm_1", "agent_b", content="v2 text", rationale="second attempt", json_output=True)
     assert second.exit_code == 0
     payload = json.loads(second.stdout)
     assert payload["data"]["version"] == 2
-    assert (tmp_path / "proofs" / "clm_1" / "v1.md").exists()
-    assert (tmp_path / "proofs" / "clm_1" / "v2.md").exists()
+    assert (tmp_path / "proofs" / "clm_1" / "snapshots" / "v1.tex").read_text() == "v1 text"
+    assert (tmp_path / "proofs" / "clm_1" / "snapshots" / "v2.tex").read_text() == "v2 text"
+
+
+def test_node_submit_is_retired(tmp_path: Path):
+    runner.invoke(app, ["node", "create", "clm_1", "claim", "stmt", "--root", str(tmp_path)])
+    result = runner.invoke(
+        app, ["node", "submit", "clm_1", "--root", str(tmp_path), "--claimant", "agent_a", "--content", "x", "--rationale", "r"]
+    )
+    assert result.exit_code != 0
+    assert not (tmp_path / "proofs" / "clm_1" / "v1.md").exists()
 
 
 def _create_claim_and_submit(tmp_path: Path, node_id: str = "clm_1") -> None:
     runner.invoke(app, ["node", "create", node_id, "claim", "stmt", "--root", str(tmp_path)])
     _claim_via_cli(tmp_path, node_id, "agent_a")
-    runner.invoke(
-        app,
-        [
-            "node", "submit", node_id, "--root", str(tmp_path),
-            "--claimant", "agent_a", "--content", "proof text", "--rationale", "scoped correctly",
-        ],
-    )
+    _request_review_via_cli(tmp_path, node_id, "agent_a")
 
 
 def test_node_create_imported_result_requires_source_fields(tmp_path: Path):
@@ -643,13 +594,7 @@ def test_node_split_invalid_child_spec_fails(tmp_path: Path):
 def _create_claimed_and_submitted(tmp_path: Path, node_id: str = "clm_1", claimant: str = "agent_a") -> str:
     runner.invoke(app, ["node", "create", node_id, "claim", "stmt", "--root", str(tmp_path)])
     _claim_via_cli(tmp_path, node_id, claimant)
-    submit = runner.invoke(
-        app,
-        [
-            "node", "submit", node_id, "--root", str(tmp_path),
-            "--claimant", claimant, "--content", "proof text", "--rationale", "scoped correctly", "--json",
-        ],
-    )
+    submit = _request_review_via_cli(tmp_path, node_id, claimant, json_output=True)
     return json.loads(submit.stdout)["data"]["id"]
 
 
