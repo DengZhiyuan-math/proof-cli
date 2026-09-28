@@ -69,6 +69,7 @@ from .storage import (
     set_candidate_proof_review_record_id,
     update_proof_map_node,
     upsert_dependency_pin,
+    delete_dependency_pin,
 )
 from .vault import build_is_current, build_pdf_path, node_folder, snapshot_path, snapshots_on_disk, working_proof_path, write_snapshot, write_working_proof
 
@@ -188,6 +189,12 @@ def create_node(
             "INVALID_KIND",
             f"'{kind}' is not a valid proof map node kind; expected one of: {valid_kinds}",
         ) from exc
+
+    if resolved_kind == ProofMapNodeKind.imported_result and dependencies:
+        raise ProofMapError(
+            "IMPORTED_RESULT_HAS_NO_DEPENDENCIES",
+            "an imported_result is established elsewhere, so nothing in this map is a premise of it",
+        )
 
     for dependency_id in dependencies or []:
         if get_proof_map_node(store, dependency_id) is None:
@@ -1108,6 +1115,17 @@ def decision_binding(
     if kind == DecisionKind.challenge_resolution:
         challenge = require_challenge(store, target_id)
         return {**none, "interface_fingerprint": _interface_of(require_node(store, challenge.target_node_id))}
+    if kind == DecisionKind.dependent_migration:
+        # the withdrawn citation, the exact correction its dependents move onto, and which dependents
+        if dependency_id is None:
+            raise ProofMapError("REPLACEMENT_REQUIRED", "moving dependents names the imported result they move onto")
+        replacement = require_node(store, dependency_id)
+        return {
+            **none,
+            "interface_fingerprint": _interface_of(require_node(store, target_id)),
+            "dependency_pins": [PinnedDependency(target_node_id=replacement.id, pinned_fingerprint=_interface_of(replacement))],
+            "migrated_dependents": [node.id for node in list_migratable_dependents(store, target_id)],
+        }
     raise ProofMapError("INVALID_DECISION_KIND", f"{kind.value} is not a proof-map decision")
 
 
@@ -1158,6 +1176,8 @@ def apply_decision(
         return dismiss_challenge(store, target_id, **who)
     if resolved_kind == DecisionKind.promote:
         return promote_to_lemma(store, target_id, **who)
+    if resolved_kind == DecisionKind.dependent_migration:
+        return migrate_dependents(store, target_id, dependency_id or "", **who)
     raise ProofMapError("UNSUPPORTED_DECISION", f"{resolved_kind.value} decisions aren't applied here")
 
 
@@ -1362,6 +1382,80 @@ def decide_reference_review(
             f"{node_id} is no longer callable" if not_callable else f"reference review granted for {node_id}",
             entity_id=node_id,
             payload={"reviewer_id": decided.reviewer_id, "review_id": record.id},
+            conn=conn,
+        )
+    return record
+
+
+def list_migratable_dependents(store: ProjectStore, node_id: str) -> list[ProofMapNode]:
+    """The nodes resting on `node_id` that moving dependents would move: all but the Rejected, the record of an abandoned route."""
+    return [
+        node
+        for node in list_nodes(store)
+        if node_id in node.dependencies and get_acceptance_state(store, node.id) != "rejected"
+    ]
+
+
+def migrate_dependents(
+    store: ProjectStore,
+    node_id: str,
+    replacement_id: str,
+    *,
+    reviewer: str | None = None, rationale: str = "",
+) -> ReviewRecord:
+    """Move the dependents of a no-longer-callable imported result onto its correction (#20, ADR-0005 Rule 1).
+
+    A Human Review decision (`dependent_migration`, recorded as `superseded`
+    in the withdrawn node's reviews.jsonl), made on the proof map page: a
+    corrected source is a new imported_result node, and what rested on the
+    old one moves deliberately, never by inheriting the correction. Every
+    dependent but a Rejected one has the old id swapped for the new one in
+    its dependencies, and its pin moved with it. An Accepted dependent's
+    Acceptance was made against the withdrawn citation, so it stops counting
+    (`unverifiable`, DECISION_NO_LONGER_APPLIES) and the node reads
+    review-needed until the researcher re-Accepts it against the correction.
+    """
+    node = require_node(store, node_id)
+    replacement = require_node(store, replacement_id)
+    if node.kind != ProofMapNodeKind.imported_result:
+        raise ProofMapError("NOT_IMPORTED_RESULT", f"{node_id} is not an imported_result; only a withdrawn citation's dependents move")
+    if replacement.kind != ProofMapNodeKind.imported_result:
+        raise ProofMapError(
+            "REPLACEMENT_NOT_IMPORTED_RESULT", f"{replacement_id} is not an imported_result; a corrected source is cited as a new one"
+        )
+    if replacement_id == node_id:
+        raise ProofMapError("SAME_NODE", f"{node_id} can't replace itself")
+    if not _no_longer_callable(store, node_id):
+        raise ProofMapError(
+            "REFERENCE_STILL_CALLABLE", f"{node_id} is still callable; its dependents move only once it is found no longer callable"
+        )
+    if _no_longer_callable(store, replacement_id):
+        raise ProofMapError("REPLACEMENT_NOT_CALLABLE", f"{replacement_id} is itself no longer callable")
+    dependents = list_migratable_dependents(store, node_id)
+    if not dependents:
+        raise ProofMapError("NO_DEPENDENTS", f"nothing that can move rests on {node_id}")
+
+    with store.transaction() as conn:
+        decided = _decide(
+            store, kind=DecisionKind.dependent_migration, target_id=node_id, decision="superseded",
+            reviewer=reviewer, rationale=rationale, dependency_id=replacement_id,
+        )
+        for dependent in dependents:
+            moved = list(dict.fromkeys(replacement_id if dependency == node_id else dependency for dependency in dependent.dependencies))
+            update_proof_map_node(
+                store, dependent.model_copy(update={"dependencies": moved, "updated_by": decided.reviewer_id, "updated_at": utc_now()}), conn=conn
+            )
+            if get_dependency_pin(store, dependent.id, node_id) is not None:
+                # an imported result pins no version: the pin just follows the edge
+                delete_dependency_pin(store, dependent.id, node_id, conn=conn)
+                upsert_dependency_pin(store, DependencyPin(id=str(uuid.uuid4()), node_id=dependent.id, target_node_id=replacement_id), conn=conn)
+        record = _record(store, decided, _ACCEPTANCE_OBJECT_TYPE, node_id, ReviewGovernanceState.superseded)
+        append_event(
+            store,
+            "proof_map_dependents_migrated",
+            f"moved {len(dependents)} dependent(s) of {node_id} onto {replacement_id}",
+            entity_id=node_id,
+            payload={"replacement_id": replacement_id, "dependents": [d.id for d in dependents], "review_id": record.id},
             conn=conn,
         )
     return record

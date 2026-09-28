@@ -16,10 +16,13 @@ from proof_cli.proof_map import (
     get_blocked_reason,
     get_challenge,
     get_node,
+    get_acceptance_state,
+    get_dependency_pin,
     get_integrity_state,
     get_reference_review_state,
     get_workflow_state,
     list_challenges,
+    list_integrity_warnings,
     open_challenge,
     record_evidence_check,
 )
@@ -95,6 +98,104 @@ def test_no_longer_callable_is_terminal(tmp_path: Path):
         researcher(store).decide_reference_review("ref", "reference-review")
     assert refused.value.code == "REFERENCE_NOT_CALLABLE"
     assert get_reference_review_state(store, "ref") == "no-longer-callable"
+
+
+# -- a corrected source: dependents move onto it by the researcher's decision (#20) ------
+
+
+def _withdrawn_with_a_correction(store):
+    """`ref` found wanting, `ref_v2` citing the corrected source, and nodes resting on `ref`."""
+    _reviewed_reference(store)
+    _accepted(store, "uses_ref", ["ref"])
+    create_node(store, node_id="new_dep", kind="claim", statement="later", dependencies=["ref"])
+    create_node(store, node_id="rej", kind="claim", statement="abandoned", dependencies=["ref"])
+    submit_proof(store, "rej", claimant_id="agent_a", scoping_rationale="scoped", content="proof rej")
+    researcher(store).decide_acceptance("rej", "reject")
+    researcher(store).decide_reference_review("ref", "no-longer-callable", rationale="the published proof has a gap")
+    _reviewed_reference(store, "ref_v2")
+
+
+def test_migrating_dependents_moves_them_onto_the_correction_and_makes_the_accepted_ones_re_confirm(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    _withdrawn_with_a_correction(store)
+
+    record = researcher(store).migrate_dependents("ref", "ref_v2", rationale="erratum published as v2")
+
+    assert get_node(store, "uses_ref").dependencies == ["ref_v2"]
+    assert get_node(store, "new_dep").dependencies == ["ref_v2"]
+    assert get_node(store, "rej").dependencies == ["ref"]  # Rejected: the record of an abandoned route, left as it was
+    # an acceptance made against the withdrawn citation no longer counts: the researcher looks again
+    assert get_acceptance_state(store, "uses_ref") == "unverifiable"
+    assert get_workflow_state(store, "uses_ref") == "review-needed"
+    assert any(w.code == "DECISION_NO_LONGER_APPLIES" and w.details["node_id"] == "uses_ref" for w in list_integrity_warnings(store))
+    assert get_workflow_state(store, "new_dep") == "open"
+    assert get_dependency_pin(store, "uses_ref", "ref") is None
+    assert get_dependency_pin(store, "uses_ref", "ref_v2") is not None
+
+    # the decision is a line in the withdrawn node's reviews.jsonl, naming the correction and who moved
+    from proof_cli.authority import verify_decision_row
+
+    assert (record.kind.value, record.decision.value) == ("dependent_migration", "superseded")
+    verdict = verify_decision_row(store, record.decision_row_id)
+    assert verdict.status == "verified"
+    assert [pin.target_node_id for pin in verdict.payload.dependency_pins] == ["ref_v2"]
+    assert verdict.payload.migrated_dependents == ["new_dep", "uses_ref"]
+    assert (tmp_path / "proofs" / "ref" / "reviews.jsonl").is_file()
+
+    # re-Accepting the same snapshot against the correction counts again
+    researcher(store).decide_acceptance("uses_ref", "accept")
+    assert get_acceptance_state(store, "uses_ref") == "accepted"
+    assert get_integrity_state(store, "uses_ref") == "current"
+
+
+@pytest.mark.parametrize(
+    "old, replacement, code",
+    [
+        ("ref_v2", "ref", "REFERENCE_STILL_CALLABLE"),  # only a withdrawn citation's dependents move
+        ("ref", "ref", "SAME_NODE"),
+        ("ref", "uses_ref", "REPLACEMENT_NOT_IMPORTED_RESULT"),
+        ("uses_ref", "ref_v2", "NOT_IMPORTED_RESULT"),
+        ("ref", "nope", "NODE_NOT_FOUND"),
+    ],
+)
+def test_migrating_dependents_is_refused_when_it_does_not_apply(tmp_path: Path, old, replacement, code):
+    store = ensure_project(tmp_path)
+    _withdrawn_with_a_correction(store)
+
+    with pytest.raises(ProofMapError) as refused:
+        researcher(store).migrate_dependents(old, replacement)
+
+    assert refused.value.code == code
+    assert get_node(store, "uses_ref").dependencies == ["ref"]
+
+
+def test_migrating_onto_a_withdrawn_replacement_or_with_nothing_to_move_is_refused(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    _withdrawn_with_a_correction(store)
+    create_node(store, node_id="ref_bad", kind="imported_result", statement="K", source_locator="doi:k", source_version="v3")
+    researcher(store).decide_reference_review("ref_bad", "no-longer-callable")
+
+    with pytest.raises(ProofMapError) as refused:
+        researcher(store).migrate_dependents("ref", "ref_bad")
+    assert refused.value.code == "REPLACEMENT_NOT_CALLABLE"
+
+    researcher(store).migrate_dependents("ref", "ref_v2")
+    with pytest.raises(ProofMapError) as refused:
+        researcher(store).migrate_dependents("ref", "ref_v2")
+    assert refused.value.code == "NO_DEPENDENTS"
+
+
+def test_the_page_offers_moving_dependents_onto_each_usable_correction(app):
+    store, client = app
+    _withdrawn_with_a_correction(store)
+
+    offered = [d for d in client.get("/api/node/ref")[1]["data"]["decisions"] if d["kind"] == "dependent_migration"]
+    assert offered == [{"kind": "dependent_migration", "target_id": "ref", "decision": "superseded", "dependency_id": "ref_v2"}]
+
+    status, body = decide(client, [{**offered[0], "rationale": "erratum"}])
+    assert status == 200, body
+    assert get_node(store, "uses_ref").dependencies == ["ref_v2"]
+    assert not [d for d in client.get("/api/node/ref")[1]["data"]["decisions"] if d["kind"] == "dependent_migration"]
 
 
 def test_the_app_offers_both_reference_decisions_and_stops_listing_a_withdrawn_one(app):

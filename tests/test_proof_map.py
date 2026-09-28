@@ -652,6 +652,18 @@ def test_create_imported_result_with_source_fields_succeeds(tmp_path: Path):
     assert node.trust_level.value == "external_reference"
 
 
+def test_an_imported_result_has_no_dependencies(tmp_path: Path):
+    """Established elsewhere: nothing in this map is a premise of it (#20)."""
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="lem", kind="lemma", statement="local")
+
+    with pytest.raises(ProofMapError) as exc_info:
+        create_node(store, node_id="ref", kind="imported_result", statement="K", source_locator="doi:k", source_version="v1", dependencies=["lem"])
+
+    assert exc_info.value.code == "IMPORTED_RESULT_HAS_NO_DEPENDENCIES"
+    assert get_node(store, "ref") is None
+
+
 def test_create_imported_result_invalid_trust_level_rejected(tmp_path: Path):
     store = ensure_project(tmp_path)
     with pytest.raises(ProofMapError) as exc_info:

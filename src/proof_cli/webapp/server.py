@@ -111,6 +111,15 @@ def _available_decisions(store: ProjectStore, node, *, claim, proof, dependencie
     if node.kind == ProofMapNodeKind.imported_result:
         if proof_map.get_reference_review_state(store, node.id) != "no-longer-callable":
             offered += [{"kind": "reference_review", "target_id": node.id, "decision": d} for d in proof_map.REFERENCE_REVIEW_DECISIONS]
+        elif proof_map.list_migratable_dependents(store, node.id):
+            # a corrected source is a new imported result: offer moving the dependents onto each usable one (#20)
+            offered += [
+                {"kind": "dependent_migration", "target_id": node.id, "decision": "superseded", "dependency_id": other.id}
+                for other in proof_map.list_nodes(store)
+                if other.kind == ProofMapNodeKind.imported_result
+                and other.id != node.id
+                and proof_map.get_reference_review_state(store, other.id) != "no-longer-callable"
+            ]
     else:
         if proof_map.get_workflow_state(store, node.id) == "review-needed":
             offered += [{"kind": "acceptance", "target_id": node.id, "decision": d.value} for d in proof_map.AcceptanceDecision]

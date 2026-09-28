@@ -79,6 +79,7 @@ class ReviewRecordKind(str, Enum):
     # ADR-0009's other human-only operations, recorded as signed rows (#35)
     challenge_resolution = "challenge_resolution"
     promote = "promote"
+    dependent_migration = "dependent_migration"
     force_release = "force_release"  # retired by ADR-0010; kept to read old rows
     legacy_decline = "legacy_decline"
 
