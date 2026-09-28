@@ -232,3 +232,39 @@ def test_opening_prism_local_is_refused_from_another_origin(http_app, monkeypatc
     monkeypatch.setenv("PROOF_CLI_PRISM_LOCAL", "/nonexistent/should-never-run")
     assert client.post("/api/node/lem/open", {}, origin="http://evil.example")[0] == 403
     assert client.post("/api/node/lem/open", {}, origin=None)[0] == 403
+
+
+# -- a node's studio sits behind the same checks (ADR-0011, #69) ---------------------
+
+
+def test_a_node_studio_is_behind_the_pages_host_and_origin_checks(http_app):
+    store, client = http_app
+    create_node(store, node_id="S1", kind="claim", statement="s")
+    proof = store.root / "proofs" / "S1" / "proof.tex"
+    before = proof.read_text()
+
+    assert client.get("/studio/S1/api/tree", host="attacker.example:80")[0] == 421  # DNS rebinding
+    assert client.get("/studio/S1/api/tree", origin="https://attacker.example")[0] == 403  # another site
+    save = {"path": "proof.tex", "content": "overwritten\n", "base_mtime": None, "force": True}
+    assert client.post("/studio/S1/api/file", save, origin="https://attacker.example")[0] == 403
+    assert client.post("/studio/S1/api/file", save, origin=None)[0] == 403
+    assert proof.read_text() == before
+
+    status, tree = client.get("/studio/S1/api/tree", origin=None)  # the page's own GETs send no Origin
+    assert status == 200 and {f["path"] for f in tree["files"]} == {"proof.tex"}
+    assert client.post("/studio/S1/api/file", save)[0] == 200
+    assert proof.read_text() == "overwritten\n"
+
+
+def test_a_node_studio_page_is_served_with_its_policy(http_app):
+    store, client = http_app
+    create_node(store, node_id="S1", kind="claim", statement="s")
+    port = urlsplit(client.origin).port
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    conn.request("GET", "/studio/S1/", headers={"Host": client.netloc})
+    response = conn.getresponse()
+    response.read()
+    conn.close()
+    assert response.status == 200
+    policy = response.getheader("Content-Security-Policy")
+    assert "script-src 'self'" in policy and "frame-ancestors 'none'" in policy
