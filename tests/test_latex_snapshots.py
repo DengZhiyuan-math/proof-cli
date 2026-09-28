@@ -145,16 +145,49 @@ def test_an_imported_result_has_nothing_to_review_this_way(tmp_path: Path):
     assert exc_info.value.code == "IMMUTABLE_NODE"
 
 
-@pytest.mark.skipif(shutil.which("pdflatex") is None, reason="needs pdflatex")
+def _local_tex() -> list[str] | None:
+    """The first LaTeX compiler installed here, as prism-local would pick one: a TeX distribution, else Tectonic."""
+    for engine in ("pdflatex", "xelatex", "lualatex"):
+        if shutil.which(engine):
+            return [engine, "-interaction=nonstopmode", "-halt-on-error", "-output-directory=build", "proof.tex"]
+    if shutil.which("tectonic"):
+        return ["tectonic", "--outdir", "build", "proof.tex"]
+    return None
+
+
+def _compile(folder: Path) -> subprocess.CompletedProcess:
+    (folder / "build").mkdir(exist_ok=True)
+    return subprocess.run(_local_tex(), cwd=folder, capture_output=True, text=True, timeout=600)
+
+
+needs_tex = pytest.mark.skipif(_local_tex() is None, reason="needs a local LaTeX compiler (pdflatex, xelatex, lualatex or tectonic)")
+
+
+@needs_tex
 def test_the_working_file_compiles_standalone(tmp_path: Path):
     store = ensure_project(tmp_path)
     create_node(store, node_id="clm_1", kind="claim", statement=r"$(f * g) * h = f * (g * h)$")
     folder = store.root / "proofs" / "clm_1"
-    result = subprocess.run(
-        ["pdflatex", "-interaction=nonstopmode", "-halt-on-error", "proof.tex"], cwd=folder, capture_output=True, text=True, timeout=120
-    )
-    assert result.returncode == 0, result.stdout[-2000:]
-    assert (folder / "proof.pdf").is_file()
+    result = _compile(folder)
+    assert result.returncode == 0, (result.stdout + result.stderr)[-3000:]
+    assert (folder / "build" / "proof.pdf").read_bytes().startswith(b"%PDF")
+
+
+@needs_tex
+def test_a_real_build_is_archived_with_the_snapshot(tmp_path: Path):
+    """The whole loop with a real compiler: write the proof, build it as prism-local would, request review."""
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="lem_1", kind="lemma", statement=r"$\|f * g\|_1 \le \|f\|_1 \|g\|_1$")
+    _write_proof(store, "lem_1", r"By Fubini, $\int |f * g| \le \int\int |f(x-y)||g(y)|\,dy\,dx = \|f\|_1\|g\|_1$.")
+    folder = store.root / "proofs" / "lem_1"
+    result = _compile(folder)
+    assert result.returncode == 0, (result.stdout + result.stderr)[-3000:]
+
+    snapshot = request_review(store, "lem_1", requested_by="agent_a", rationale="one estimate")
+
+    archived = (tmp_path / snapshot.file_path).with_suffix(".pdf")
+    assert archived.read_bytes() == (folder / "build" / "proof.pdf").read_bytes()
+    assert archived.read_bytes().startswith(b"%PDF")
 
 
 def test_request_review_and_show_on_the_cli(tmp_path: Path):
