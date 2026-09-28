@@ -208,3 +208,27 @@ def test_malformed_requests_get_an_error_response_not_a_dropped_connection(http_
     assert response.status == status
     assert json.loads(response.read())["ok"] is False
     conn.close()
+
+
+def test_a_pdf_is_served_as_a_pdf_for_the_browsers_own_viewer(http_app):
+    store, client = http_app
+    create_node(store, node_id="lem", kind="lemma", statement="Base")
+    pdf = store.root / "proofs" / "lem" / "build" / "proof.pdf"
+    pdf.parent.mkdir(parents=True)
+    pdf.write_bytes(b"%PDF-1.5 built\n")
+    port = urlsplit(client.origin).port
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+    conn.request("GET", "/api/node/lem/pdf/build", headers={"Host": client.netloc})
+    response = conn.getresponse()
+    assert (response.status, response.getheader("Content-Type"), response.read()) == (200, "application/pdf", b"%PDF-1.5 built\n")
+    assert response.getheader("Content-Security-Policy") is None
+    conn.close()
+    assert client.get("/api/node/lem/pdf/snapshot")[0] == 404
+
+
+def test_opening_prism_local_is_refused_from_another_origin(http_app, monkeypatch):
+    store, client = http_app
+    create_node(store, node_id="lem", kind="lemma", statement="Base")
+    monkeypatch.setenv("PROOF_CLI_PRISM_LOCAL", "/nonexistent/should-never-run")
+    assert client.post("/api/node/lem/open", {}, origin="http://evil.example")[0] == 403
+    assert client.post("/api/node/lem/open", {}, origin=None)[0] == 403

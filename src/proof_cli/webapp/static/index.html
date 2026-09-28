@@ -3,18 +3,36 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Proof review</title>
+  <title>Proof map</title>
   <link rel="stylesheet" href="/static/app.css">
   <script src="/static/app.js" defer></script>
 </head>
 <body>
   <header>
-    <h1><a href="#/">Proof review</a> <span id="project"></span></h1>
+    <h1><a href="#/">Proof map</a> <span id="project"></span></h1>
     <p id="reviewer" class="hint"></p>
   </header>
   <main>
     <div id="message" role="status"></div>
     <section id="home">
+      <div class="map-head">
+        <h2>Map</h2>
+        <div class="view-switch" role="group" aria-label="View">
+          <button id="view-dag" type="button" aria-pressed="true">DAG</button>
+          <button id="view-tree" type="button" aria-pressed="false">Tree</button>
+        </div>
+        <label id="tree-root-label" hidden>rooted at <select id="tree-root"></select></label>
+      </div>
+      <p class="hint" id="map-caption"></p>
+      <ul class="legend">
+        <li><span class="swatch frontier"></span>on the frontier: open, unblocked, unclaimed</li>
+        <li><span class="swatch accepted"></span>accepted / reviewed</li>
+        <li><span class="swatch review"></span>awaiting review</li>
+        <li><span class="swatch rejected"></span>rejected / no longer callable</li>
+        <li><span class="swatch warn"></span>unverifiable, stale or challenged</li>
+      </ul>
+      <div id="map-dag" class="map-scroll"><svg id="dag-svg" role="img" aria-label="Dependency graph of the proof map"></svg></div>
+      <div id="map-tree" hidden></div>
       <h2>Awaiting review</h2>
       <p class="hint">Tick the decisions to make, choose each outcome and rationale, then record them. Each decision is committed to git with its snapshot, as the identity shown above.</p>
       <table id="pending"><thead><tr><th></th><th>Node</th><th>Statement and snapshot</th><th>Decision</th><th>Rationale</th></tr></thead><tbody></tbody></table>
@@ -30,6 +48,7 @@
       <div id="node-statement" class="statement"></div>
       <div id="node-assumptions"></div>
       <p id="node-claim"></p>
+      <div id="node-folder"></div>
       <h3>Dependencies and pins</h3>
       <table id="node-deps"><thead><tr><th>Dependency</th><th>Pinned version</th><th>Accepted version now</th><th>Pinned interface</th><th>Current?</th></tr></thead><tbody></tbody></table>
       <h3>Challenges</h3>
@@ -37,6 +56,7 @@
       <h3>Review snapshot</h3>
       <p id="node-proof-meta"></p>
       <p class="hint">Exactly the LaTeX being decided on; its SHA-256 is recorded with the decision. Open the node's folder in prism-local (or any LaTeX editor) to read the compiled PDF.</p>
+      <p id="node-pdfs"></p>
       <pre id="node-proof-exact"></pre>
       <h3>Evidence checks</h3>
       <ul id="node-evidence"></ul>

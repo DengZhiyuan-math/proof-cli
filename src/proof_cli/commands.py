@@ -1946,7 +1946,7 @@ def cmd_review_request(
     if object_type in TRUST_BEARING_OBJECT_TYPES:
         raise ValueError(
             f"{object_type} reviews are Human Review decisions, made on the proof map page "
-            "(`proof review open`), not through the generic `proof review request` command"
+            "(`proof map open`), not through the generic `proof review request` command"
         )
     record = record_review_request(get_store(root), object_type, object_id, reviewer_id=reviewer_id, rationale=rationale)
     return json.dumps(record.model_dump(mode="json"), indent=2)
@@ -1974,7 +1974,7 @@ def cmd_review_decide(
             f"{existing.object_type} review {review_id} is a Human Review decision "
             f"(kind={existing.kind.value if existing.kind else 'none'}); it can't be re-decided through "
             "the generic `proof review decide` command — the researcher makes it on the proof map page "
-            "(`proof review open`)"
+            "(`proof map open`)"
         )
     try:
         resolved_decision = ReviewGovernanceState(decision)

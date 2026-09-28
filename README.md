@@ -33,13 +33,22 @@ proof node request-review <id> --rationale "why it is scoped to prove directly"
 
 This copies the working file to an immutable snapshot, `proofs/<id>/snapshots/v<N>.tex`, and records its SHA-256. Review is always of a snapshot, never of the working file (ADR-0010).
 
+## The proof map page
+
+`proof map open` starts the project's local page, bound to 127.0.0.1, and opens it:
+- **The map** is a DAG of every node, with a tree view rooted at any node. Frontier nodes (open, unblocked, unclaimed) are outlined as *ready to claim*. Each node shows its acceptance, workflow and integrity state, and its assignee.
+- **A node's page** shows the exact LaTeX of the snapshot under review, with its dependencies and pins, Challenges, Evidence checks and history. It links the compiled PDF when there is one: the PDF archived with the snapshot, or prism-local's current `build/proof.pdf`.
+- **Open in prism-local** opens the node's folder in [prism-local](https://github.com/DengZhiyuan-math/Local-Ai-agent-for-latex). The page runs `$PROOF_CLI_PRISM_LOCAL`, or `prism-local` if it's on your `PATH`; with neither, it shows the folder to open yourself. The two tools share only files.
+
+When you request review after compiling in prism-local, the fresh `build/proof.pdf` is archived as `snapshots/v<N>.pdf` next to the snapshot and committed with the decision. `proofs/.gitignore` keeps `build/` out of git.
+
 ## Human Review
 
 Decisions that change what the project trusts (accepting a Candidate proof, Reference review, dismissing a Challenge, promoting) are made only on the project's local proof map page:
 
 ```bash
-proof review serve      # start the page for this project
-proof review open <id>  # open a node's decision page
+proof map serve         # start the proof map page for this project
+proof map open [<id>]   # open the map, or a node's page
 ```
 
 Each decision is one line in the node's git-tracked `proofs/<id>/reviews.jsonl`, naming the SHA-256 of the snapshot it decides on. proof-cli commits that line together with the snapshot, as your own git identity (`user.name` / `user.email`); it never pushes. Once you push, the commit on GitHub is the record of who decided what (ADR-0010). Outside a git repository the decision is still recorded, just without that record. `proof review warnings` lists decisions git doesn't have yet.

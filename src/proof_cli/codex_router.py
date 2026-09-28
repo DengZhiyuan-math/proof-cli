@@ -222,7 +222,7 @@ def _catalog(root: ResolvedRoot) -> str:
             "  - Mutation commands always show the selected root before or after state changes.",
             "  - The global ~/.codex/skills/proof/ skill is the canonical entry path.",
             "  - Human Review decisions (accept, reject, resolve, promote, ...) are never made here:",
-            "    the researcher makes them on the proof map page (`proof review open`).",
+            "    the researcher makes them on the proof map page (`proof map open`).",
             "  - Project-local proof skills are for repository debugging and development work.",
         ]
     )

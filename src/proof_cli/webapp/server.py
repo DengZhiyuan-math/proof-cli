@@ -20,6 +20,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import shutil
+import subprocess
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
@@ -31,6 +34,14 @@ from ..collaboration import list_review_records
 from ..domain import ProofMapNodeKind
 from ..reviews import git_identity
 from ..storage import ProjectStore, get_active_claim, get_current_candidate_proof, read_project_instance_id, read_state
+from ..vault import build_pdf_path, node_folder
+
+PRISM_LOCAL_ENV_VAR = "PROOF_CLI_PRISM_LOCAL"
+
+
+def prism_local_command() -> str | None:
+    """The prism-local executable: `$PROOF_CLI_PRISM_LOCAL`, else `prism-local` on PATH (ADR-0010 point 5)."""
+    return os.environ.get(PRISM_LOCAL_ENV_VAR) or shutil.which("prism-local")
 
 RP_ID = "localhost"
 _ORIGIN_PORT_BASE = 20000
@@ -138,6 +149,62 @@ class ReviewApp:
             "pending": self._pending(),
         }
 
+    def map(self) -> dict:
+        """The whole proof map: every node with its three axes, its assignee, and whether it's on the frontier (ADR-0008)."""
+        frontier = {node.id for node in proof_map.get_frontier(self.store)}
+        nodes = []
+        for node in proof_map.list_nodes(self.store):
+            imported = node.kind == ProofMapNodeKind.imported_result
+            workflow = proof_map.get_workflow_state(self.store, node.id)
+            claim = get_active_claim(self.store, node.id)
+            nodes.append(
+                {
+                    "id": node.id,
+                    "kind": node.kind.value,
+                    "display_label": node.display_label,
+                    "statement": node.statement,
+                    "dependencies": node.dependencies,
+                    "workflow_state": workflow,
+                    "blocked_reason": proof_map.get_blocked_reason(self.store, node.id) if workflow == "blocked" else None,
+                    "acceptance_state": proof_map.get_reference_review_state(self.store, node.id) if imported else proof_map.get_acceptance_state(self.store, node.id),
+                    "integrity_state": proof_map.get_integrity_state(self.store, node.id),
+                    "assignee": claim.claimant_id if claim else None,
+                    "frontier": node.id in frontier,
+                }
+            )
+        return {"nodes": nodes}
+
+    def _pdfs(self, node_id: str, proof) -> dict:
+        """The compiled PDFs a reader can open: the one archived with the snapshot, and prism-local's current build."""
+        snapshot_pdf = (self.store.root / proof.file_path).with_suffix(".pdf") if proof is not None else None
+        return {
+            "snapshot": snapshot_pdf is not None and snapshot_pdf.is_file(),
+            "build": build_pdf_path(self.store.root, node_id).is_file(),
+        }
+
+    def pdf(self, node_id: str, which: str) -> bytes:
+        proof_map.require_node(self.store, node_id)  # a known node id: a plain folder name, never a path
+        if which == "snapshot":
+            proof = get_current_candidate_proof(self.store, node_id)
+            path = (self.store.root / proof.file_path).with_suffix(".pdf") if proof is not None else None
+        else:
+            path = build_pdf_path(self.store.root, node_id)
+        if path is None or not path.is_file():
+            raise RequestError(HTTPStatus.NOT_FOUND, "NO_PDF", f"no {which} PDF for {node_id}")
+        return path.read_bytes()
+
+    def open_in_prism(self, node_id: str) -> dict:
+        """Open the node's folder in prism-local, if it's configured; always say which folder it is."""
+        node = proof_map.require_node(self.store, node_id)
+        folder = node_folder(self.store.root, node.id)
+        command = prism_local_command()
+        if node.kind == ProofMapNodeKind.imported_result or not folder.is_dir():
+            raise RequestError(HTTPStatus.NOT_FOUND, "NO_PROOF_FOLDER", f"{node_id} has no proof folder to open")
+        if command is None:
+            return {"opened": False, "folder": str(folder), "hint": f"set {PRISM_LOCAL_ENV_VAR} or put prism-local on PATH"}
+        subprocess.Popen([command, str(folder)], cwd=str(folder), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        return {"opened": True, "folder": str(folder), "command": command}
+
     def _pending(self) -> list[dict]:
         pending = []
         for node in proof_map.list_nodes(self.store):
@@ -196,6 +263,8 @@ class ReviewApp:
             ),
             "integrity_state": proof_map.get_integrity_state(store, node_id),
             "candidate_proof": _proof_view(store, proof),
+            "folder": str(node_folder(store.root, node_id)) if node.kind != ProofMapNodeKind.imported_result else None,
+            "pdfs": self._pdfs(node_id, proof),
             "evidence_checks": checks,
             "dependencies": dependencies,
             "challenges": [challenge.model_dump(mode="json") for challenge in challenges],
@@ -254,17 +323,18 @@ class _Handler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: Any) -> None:  # keep the terminal quiet
         return
 
-    def _send(self, status: HTTPStatus, body: bytes, content_type: str) -> None:
+    def _send(self, status: HTTPStatus, body: bytes, content_type: str, *, policy: bool = True) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
-        self.send_header(
-            "Content-Security-Policy",
-            "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-ancestors 'none'",
-        )
+        if policy:  # a PDF goes to the browser's own viewer, which a page policy can break
+            self.send_header(
+                "Content-Security-Policy",
+                "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-ancestors 'none'",
+            )
         self.end_headers()
         self.wfile.write(body)
 
@@ -301,6 +371,17 @@ class _Handler(BaseHTTPRequestHandler):
             return self._guarded(self.app.health)
         if path == "/api/state":
             return self._guarded(self.app.state)
+        if path == "/api/map":
+            return self._guarded(self.app.map)
+        if path.startswith("/api/node/") and path.endswith(("/pdf/snapshot", "/pdf/build")):
+            node_id, _, which = unquote(path.removeprefix("/api/node/")).rpartition("/pdf/")
+            try:
+                data = self.app.pdf(node_id, which)
+            except RequestError as exc:
+                return self._error(exc.status, exc.code, exc.message)
+            except proof_map.ProofMapError as exc:
+                return self._error(HTTPStatus.NOT_FOUND, exc.code, exc.message)
+            return self._send(HTTPStatus.OK, data, "application/pdf", policy=False)
         if path.startswith("/api/node/"):
             node_id = unquote(path.removeprefix("/api/node/"))
             return self._guarded(lambda: self.app.node(node_id))
@@ -330,7 +411,11 @@ class _Handler(BaseHTTPRequestHandler):
         routes: dict[str, Callable[[], Any]] = {
             "/api/decide": lambda: self.app.decide(body),
         }
-        route = routes.get(urlsplit(self.path).path)
+        path = urlsplit(self.path).path
+        route = routes.get(path)
+        if route is None and path.startswith("/api/node/") and path.endswith("/open"):
+            node_id = unquote(path.removeprefix("/api/node/").removesuffix("/open"))
+            route = lambda: self.app.open_in_prism(node_id)
         if route is None:
             return self._error(HTTPStatus.NOT_FOUND, "NOT_FOUND", self.path)
         self._guarded(route)
