@@ -84,6 +84,7 @@ function showHome() {
     const tr = row([box, link, statement, choice, rationale]);
     tr.dataset.kind = item.kind; tr.dataset.target = item.node_id;
     if (item.candidate_proof && item.candidate_proof.sha256) tr.dataset.viewed = item.candidate_proof.sha256;
+    tr.dataset.bindings = JSON.stringify(item.bindings || {});
     return tr;
   }));
   if (!state.pending.length) body.append(row(["", "Nothing is awaiting review.", "", "", ""]));
@@ -376,6 +377,8 @@ document.addEventListener("DOMContentLoaded", () => {
         rationale: tr.querySelectorAll("input")[1].value,
         // the snapshot shown in this row: the server refuses the decision if it changed since
         ...(tr.dataset.viewed ? { viewed_candidate_proof_sha256: tr.dataset.viewed } : {}),
+        // everything else the row showed it is made on (dependencies, interface, …): refused too if it changed
+        binding: JSON.parse(tr.dataset.bindings || "{}")[tr.querySelector("select").value] ?? null,
       }));
     if (!decisions.length) return say("Tick at least one decision.", "error");
     try { await decide(decisions); } catch (error) { showError(error); }
