@@ -38,12 +38,25 @@ def snapshot_path(root: Path, node_id: str, version: int) -> Path:
     return vault_dir(root) / node_id / "snapshots" / f"v{version}.tex"
 
 
+def build_pdf_path(root: Path, node_id: str) -> Path:
+    """Where prism-local (default `outdir: build`) compiles the working proof.tex."""
+    return vault_dir(root) / node_id / "build" / "proof.pdf"
+
+
+def node_folder(root: Path, node_id: str) -> Path:
+    return vault_dir(root) / node_id
+
+
 def write_working_proof(root: Path, *, node_id: str, kind: str, statement: str) -> None:
     """Create the project preamble and a node's working `proof.tex`, if missing. Never overwrites."""
     preamble = preamble_path(root)
     if not preamble.exists():
         preamble.parent.mkdir(parents=True, exist_ok=True)
         preamble.write_text(PREAMBLE, encoding="utf-8")
+    ignore = vault_dir(root) / ".gitignore"
+    if not ignore.exists():
+        # build output is regenerated; what's reviewed is the snapshot (and its archived PDF)
+        ignore.write_text("*/build/\n", encoding="utf-8")
     path = working_proof_path(root, node_id)
     if path.exists():
         return

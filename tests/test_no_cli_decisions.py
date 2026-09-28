@@ -53,7 +53,7 @@ from proof_cli.theorems import add_theorem, list_theorems
 runner = CliRunner()
 
 # commands that don't return: a server, a browser
-SKIPPED = {("review", "serve"), ("review", "open")}
+SKIPPED = {("review", "serve"), ("review", "open"), ("map", "serve"), ("map", "open")}
 PLUGIN_SERVER = Path(__file__).resolve().parents[1] / "plugins" / "proof-routing" / "scripts" / "proof_mcp_server.py"
 
 

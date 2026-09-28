@@ -119,6 +119,171 @@ function decisionRow(decision, proof) {
   return row([label, on, rationale, button]);
 }
 
+
+// -- the map (ADR-0008): the DAG is canonical, the tree a rooted explanation of it ----------
+let mapData = null;
+let mapView = "dag";
+const SVG_NS = "http://www.w3.org/2000/svg";
+const BOX = { w: 176, h: 58, gapX: 28, gapY: 74, pad: 24 };
+
+function svg(tag, attrs) {
+  const node = document.createElementNS(SVG_NS, tag);
+  for (const [key, value] of Object.entries(attrs || {})) node.setAttribute(key, value);
+  return node;
+}
+
+function toneOf(n) {
+  if (["accepted", "reviewed"].includes(n.acceptance_state)) return "accepted";
+  if (["rejected", "no-longer-callable"].includes(n.acceptance_state)) return "rejected";
+  if (n.workflow_state === "review-needed") return "review";
+  return "none";
+}
+
+function warnsOf(n) { return n.acceptance_state === "unverifiable" || n.integrity_state !== "current"; }
+
+function short(text, length) { return text.length > length ? text.slice(0, length - 1) + "…" : text; }
+
+// Layers by longest path from the top (a node sits below everything that depends on it),
+// then a few barycenter sweeps to cut crossings. Enough for tens to hundreds of nodes.
+function layers(nodes) {
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const dependents = new Map(nodes.map((n) => [n.id, []]));
+  for (const n of nodes) for (const d of n.dependencies) if (dependents.has(d)) dependents.get(d).push(n.id);
+  const depth = new Map();
+  const visiting = new Set();
+  const depthOf = (id) => {
+    if (depth.has(id)) return depth.get(id);
+    if (visiting.has(id)) return 0; // never in a DAG; just don't loop
+    visiting.add(id);
+    const ups = dependents.get(id);
+    const value = ups.length ? 1 + Math.max(...ups.map(depthOf)) : 0;
+    visiting.delete(id);
+    depth.set(id, value);
+    return value;
+  };
+  nodes.forEach((n) => depthOf(n.id));
+  const sparse = [];
+  for (const n of nodes) (sparse[depth.get(n.id)] ||= []).push(n.id);
+  const rows = sparse.filter(Boolean); // contiguous in any DAG; compacted in case a cycle slipped in
+  rows.forEach((row) => row.sort());
+  const pos = new Map();
+  const place = () => rows.forEach((row) => row.forEach((id, i) => pos.set(id, i - (row.length - 1) / 2)));
+  const bary = (id, neighbours) => {
+    const xs = neighbours.filter((x) => pos.has(x)).map((x) => pos.get(x));
+    return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : pos.get(id);
+  };
+  place();
+  for (let sweep = 0; sweep < 6; sweep++) {
+    for (let i = 1; i < rows.length; i++) { rows[i].sort((a, b) => bary(a, dependents.get(a)) - bary(b, dependents.get(b))); place(); }
+    for (let i = rows.length - 2; i >= 0; i--) { rows[i].sort((a, b) => bary(a, byId.get(a).dependencies) - bary(b, byId.get(b).dependencies)); place(); }
+  }
+  return rows;
+}
+
+function drawDag(nodes) {
+  const box = $("dag-svg");
+  box.replaceChildren();
+  if (!nodes.length) {
+    box.setAttribute("width", 400); box.setAttribute("height", 60);
+    box.append(Object.assign(svg("text", { x: 16, y: 34 }), { textContent: "No nodes yet: create one with `proof node create`." }));
+    return;
+  }
+  const rows = layers(nodes);
+  const widest = Math.max(...rows.map((row) => row.length));
+  const width = BOX.pad * 2 + widest * BOX.w + (widest - 1) * BOX.gapX;
+  const height = BOX.pad * 2 + rows.length * BOX.h + (rows.length - 1) * BOX.gapY + 16;
+  box.setAttribute("width", width); box.setAttribute("height", height);
+  box.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  const at = new Map();
+  rows.forEach((row, r) => row.forEach((id, i) => {
+    const rowWidth = row.length * BOX.w + (row.length - 1) * BOX.gapX;
+    at.set(id, { x: (width - rowWidth) / 2 + i * (BOX.w + BOX.gapX) + BOX.w / 2, y: BOX.pad + r * (BOX.h + BOX.gapY) + BOX.h / 2 });
+  }));
+  const defs = svg("defs");
+  const marker = svg("marker", { id: "arrow", viewBox: "0 0 10 10", refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: "auto-start-reverse" });
+  marker.append(svg("path", { d: "M0,0 L10,5 L0,10 z", fill: "var(--map-edge)" }));
+  defs.append(marker);
+  box.append(defs);
+  for (const n of nodes) for (const d of n.dependencies) {
+    const from = at.get(n.id), to = at.get(d);
+    if (!from || !to) continue;
+    const y1 = from.y + BOX.h / 2, y2 = to.y - BOX.h / 2;
+    box.append(svg("path", { class: "edge", "marker-end": "url(#arrow)", d: `M${from.x},${y1} C${from.x},${y1 + 34} ${to.x},${y2 - 34} ${to.x},${y2}` }));
+  }
+  for (const n of nodes) {
+    const { x, y } = at.get(n.id);
+    const classes = ["node", n.frontier ? "frontier" : "", warnsOf(n) ? "warn" : ""].filter(Boolean).join(" ");
+    const g = svg("g", { class: classes, tabindex: 0, role: "link", "aria-label": `${n.kind} ${n.id}: ${n.acceptance_state}, ${n.workflow_state}${n.frontier ? ", on the frontier" : ""}` });
+    g.append(svg("rect", { class: "box", x: x - BOX.w / 2, y: y - BOX.h / 2, width: BOX.w, height: BOX.h, rx: 8 }));
+    g.append(svg("rect", { class: `bar ${toneOf(n)}`, x: x - BOX.w / 2, y: y - BOX.h / 2, width: 5, height: BOX.h, rx: 2 }));
+    const kind = svg("text", { class: "kind", x: x - BOX.w / 2 + 12, y: y - BOX.h / 2 + 15 });
+    kind.textContent = `${n.kind} · ${n.id}`;
+    const label = svg("text", { x: x - BOX.w / 2 + 12, y: y + 3 });
+    label.textContent = short(n.display_label || n.statement, 24);
+    const meta = svg("text", { class: "meta", x: x - BOX.w / 2 + 12, y: y + BOX.h / 2 - 9 });
+    meta.textContent = [n.acceptance_state, n.workflow_state, n.assignee ? `@${n.assignee}` : ""].filter(Boolean).join(" · ");
+    g.append(kind, label, meta);
+    if (n.frontier) {
+      const tag = svg("text", { class: "tag", x: x, y: y + BOX.h / 2 + 13, "text-anchor": "middle" });
+      tag.textContent = "ready to claim";
+      g.append(tag);
+    }
+    const title = svg("title");
+    title.textContent = n.statement;
+    g.append(title);
+    const open = () => { location.hash = `#/node/${encodeURIComponent(n.id)}`; };
+    g.addEventListener("click", open);
+    g.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); } });
+    box.append(g);
+  }
+}
+
+// The tree answers "how is this proved?": a shared dependency appears under each of its parents, marked as shared.
+function drawTree(nodes) {
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const dependedOn = new Set(nodes.flatMap((n) => n.dependencies));
+  const select = $("tree-root");
+  const roots = [...nodes.filter((n) => !dependedOn.has(n.id)), ...nodes.filter((n) => dependedOn.has(n.id))];
+  const chosen = select.value && byId.has(select.value) ? select.value : (roots[0] || {}).id;
+  select.replaceChildren(...roots.map((n) => el("option", `${n.id} (${n.kind})`, { value: n.id })));
+  if (chosen) select.value = chosen;
+  const seen = new Set();
+  const item = (id) => {
+    const n = byId.get(id);
+    const li = el("li");
+    if (!n) { li.append(el("span", `${id} (missing)`, { class: "warning" })); return li; }
+    li.append(el("a", n.id, { href: `#/node/${encodeURIComponent(n.id)}` }), ` — ${short(n.display_label || n.statement, 60)}`);
+    li.append(el("span", n.acceptance_state, { class: "state-chip" }), el("span", n.workflow_state, { class: "state-chip" }));
+    if (n.frontier) li.append(el("span", "ready to claim", { class: "state-chip" }));
+    if (seen.has(id)) { li.classList.add("shared"); li.append(" (shared: expanded above)"); return li; }
+    seen.add(id);
+    if (n.dependencies.length) { const ul = el("ul"); n.dependencies.forEach((d) => ul.append(item(d))); li.append(ul); }
+    return li;
+  };
+  const tree = el("ul");
+  if (chosen) tree.append(item(chosen));
+  $("map-tree").replaceChildren(tree);
+}
+
+function showMap() {
+  const nodes = mapData.nodes;
+  const frontier = nodes.filter((n) => n.frontier).length;
+  $("map-caption").textContent = `${nodes.length} node(s) · ${frontier} on the frontier · click a node to open it`;
+  $("map-dag").hidden = mapView !== "dag";
+  $("map-tree").hidden = mapView !== "tree";
+  $("tree-root-label").hidden = mapView !== "tree";
+  $("view-dag").setAttribute("aria-pressed", String(mapView === "dag"));
+  $("view-tree").setAttribute("aria-pressed", String(mapView === "tree"));
+  if (mapView === "dag") drawDag(nodes); else drawTree(nodes);
+}
+
+async function openInPrism(nodeId) {
+  try {
+    const result = await api(`/api/node/${encodeURIComponent(nodeId)}/open`, {});
+    say(result.opened ? `Opened ${result.folder} in prism-local.` : `prism-local isn't configured (${result.hint}). The node's folder: ${result.folder}`, result.opened ? "ok" : "");
+  } catch (error) { showError(error); }
+}
+
 async function showNode(nodeId) {
   const view = await api(`/api/node/${encodeURIComponent(nodeId)}`);
   const node = view.node;
@@ -130,6 +295,16 @@ async function showNode(nodeId) {
   $("node-statement").textContent = node.statement;
   $("node-assumptions").replaceChildren(...(node.assumptions.length ? [el("h3", "Assumptions"), ...node.assumptions.map((a) => el("p", a))] : []));
   $("node-claim").textContent = view.claim ? `Claimed by ${view.claim.claimant_id} since ${view.claim.claimed_at} (claim ${view.claim.id}).` : "";
+  $("node-folder").replaceChildren();
+  if (view.folder) {
+    const button = el("button", "Open in prism-local", { type: "button" });
+    button.onclick = () => openInPrism(node.id);
+    $("node-folder").append(el("span", "Proof folder: "), el("code", view.folder), " ", button);
+  }
+  const pdfs = [];
+  if (view.pdfs.snapshot) pdfs.push(el("a", "PDF archived with this snapshot", { href: `/api/node/${encodeURIComponent(node.id)}/pdf/snapshot`, target: "_blank", rel: "noopener" }));
+  if (view.pdfs.build) pdfs.push(el("a", "prism-local's current build (of the working file, which may be newer than the snapshot)", { href: `/api/node/${encodeURIComponent(node.id)}/pdf/build`, target: "_blank", rel: "noopener" }));
+  $("node-pdfs").replaceChildren(...pdfs.flatMap((link, i) => (i ? [" · ", link] : [link])));
   $("node-deps").querySelector("tbody").replaceChildren(...view.dependencies.map((d) => {
     const lags = d.pin && d.accepted_version !== null && d.pin.pinned_version !== d.accepted_version;
     return row([
@@ -166,9 +341,11 @@ async function route() {
 
 async function refresh() {
   state = await api("/api/state");
+  mapData = await api("/api/map");
   $("project").textContent = `· ${state.project_id} · ${state.origin}`;
   $("reviewer").textContent = `Decisions are recorded as ${state.reviewer}.`;
   showHome();
+  showMap();
   await route();
 }
 
@@ -185,6 +362,9 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!decisions.length) return say("Tick at least one decision.", "error");
     try { await decide(decisions); } catch (error) { showError(error); }
   });
+  $("view-dag").addEventListener("click", () => { mapView = "dag"; showMap(); });
+  $("view-tree").addEventListener("click", () => { mapView = "tree"; showMap(); });
+  $("tree-root").addEventListener("change", showMap);
   window.addEventListener("hashchange", route);
   refresh().catch((error) => say(error.message, "error"));
 });

@@ -262,7 +262,8 @@ def record_decision(
     if payload.candidate_proof_id:
         proof = get_candidate_proof(store, payload.candidate_proof_id)
         if proof is not None:
-            paths.append(store.root / proof.file_path)
+            snapshot = store.root / proof.file_path
+            paths += [snapshot, snapshot.with_suffix(".pdf")]  # the PDF only if one was archived
     message = f"review: {kind.value} {payload.decision} on {object_id}\n\n{rationale}".rstrip()
 
     def _write() -> None:

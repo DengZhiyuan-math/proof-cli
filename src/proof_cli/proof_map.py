@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shutil
 import sqlite3
 import uuid
 from dataclasses import dataclass
@@ -67,7 +68,7 @@ from .storage import (
     update_proof_map_node,
     upsert_dependency_pin,
 )
-from .vault import candidate_proof_path, snapshot_path, working_proof_path, write_candidate_proof_file, write_snapshot, write_working_proof
+from .vault import build_pdf_path, candidate_proof_path, snapshot_path, working_proof_path, write_candidate_proof_file, write_snapshot, write_working_proof
 
 
 class ProofMapError(Exception):
@@ -623,6 +624,10 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
         write_snapshot(path, content)
     except FileExistsError as exc:
         raise ProofMapError("CANDIDATE_PROOF_VERSION_CONFLICT", f"snapshot v{version} of node {node_id} already exists") from exc
+    built = build_pdf_path(store.root, node_id)
+    if built.is_file() and built.stat().st_mtime >= working.stat().st_mtime:
+        # a PDF compiled from this very text (prism-local's build): archived beside the snapshot
+        shutil.copyfile(built, path.with_suffix(".pdf"))
     record = CandidateProofRecord(
         id=str(uuid.uuid4()),
         node_id=node_id,

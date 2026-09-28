@@ -154,6 +154,7 @@ provenance_app = typer.Typer(help="Provenance workflows")
 bug_app = typer.Typer(help="Proof bug workflows")
 debug_app = typer.Typer(help="Proof debug workflows")
 review_app = typer.Typer(help="Proof review workflows")
+map_app = typer.Typer(help="The proof map page: the map, each node, and where Human Review decisions are made (ADR-0008, ADR-0010)")
 contributor_app = typer.Typer(help="Contributor workflows")
 role_app = typer.Typer(help="Role workflows")
 comment_app = typer.Typer(help="Comment workflows")
@@ -259,7 +260,7 @@ def human_review_required(root: str, *, command: str, kind: str, target_id: str,
         ProofMapError(
             "HUMAN_REVIEW_REQUIRED",
             f"{kind} on {target_id} is a Human Review decision: the researcher makes it on the proof map page"
-            f"{f', at {url}' if url else ''} (run `{('proof review open ' + node_id) if node_id else 'proof review open'}`)",
+            f"{f', at {url}' if url else ''} (run `{('proof map open ' + node_id) if node_id else 'proof map open'}`)",
             details={"kind": kind, "target_id": target_id, "url": url},
         ),
         json_output,
@@ -659,7 +660,7 @@ def _running_review_app(store) -> bool:
         return False
 
 
-@review_app.command("serve")
+@map_app.command("serve")
 def review_serve(root: str = ".") -> None:
     """Run this project's proof map page on its own localhost origin — the only place Human Review decisions are made (ADR-0010).
 
@@ -673,7 +674,7 @@ def review_serve(root: str = ".") -> None:
     try:
         server = ReviewServer(store)
     except OSError as exc:
-        typer.echo(f"Error: can't bind this project's review port ({exc}); is it already running? Try `proof review open`.")
+        typer.echo(f"Error: can't bind this project's review port ({exc}); is it already running? Try `proof map open`.")
         raise typer.Exit(code=1)
     typer.echo(f"Proof map page for this project: {server.url}  (Ctrl-C to stop)")
     try:
@@ -684,7 +685,7 @@ def review_serve(root: str = ".") -> None:
         server.server_close()
 
 
-@review_app.command("open")
+@map_app.command("open")
 def review_open(node_id: str = typer.Argument("", help="Open this node's decision page"), root: str = ".") -> None:
     """Open this project's proof map page (starting it in the background if needed), optionally at a node."""
     import subprocess
@@ -696,7 +697,7 @@ def review_open(node_id: str = typer.Argument("", help="Open this node's decisio
     store = get_store(_root(root))
     if not _running_review_app(store):
         subprocess.Popen(
-            [sys.executable, "-m", "proof_cli.cli", "review", "serve", "--root", str(_root(root))],
+            [sys.executable, "-m", "proof_cli.cli", "map", "serve", "--root", str(_root(root))],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
@@ -747,6 +748,10 @@ app.add_typer(provenance_app, name="provenance")
 app.add_typer(bug_app, name="bug")
 app.add_typer(debug_app, name="debug")
 app.add_typer(review_app, name="review")
+app.add_typer(map_app, name="map")
+# the page's commands before it was the map's home (ADR-0010): kept, out of sight
+review_app.command("serve", hidden=True)(review_serve)
+review_app.command("open", hidden=True)(review_open)
 app.add_typer(contributor_app, name="contributor")
 app.add_typer(role_app, name="role")
 app.add_typer(comment_app, name="comment")
