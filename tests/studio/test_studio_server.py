@@ -170,15 +170,23 @@ class Symbols(unittest.TestCase):
                           ("subsection", "Rd and SO(n)")])
 
 
-@unittest.skipUnless(shutil.which("pdflatex") and not os.environ.get("PRISM_SKIP_TEX"),
-                     "needs a TeX distribution")
+@unittest.skipUnless((shutil.which("pdflatex") or shutil.which("tectonic"))
+                     and not os.environ.get("PRISM_SKIP_TEX"),
+                     "needs a TeX distribution or Tectonic")
 class SyncTeX(unittest.TestCase):
     def test_source_to_pdf_and_back(self):
         from proof_cli.studio import build
-        root = project({})
-        shutil.copytree(Path(__file__).resolve().parents[1] / "examples" / "minimal", root,
-                        dirs_exist_ok=True, ignore=shutil.ignore_patterns("build"))
-        server.set_root(root)
+        root = project({
+            "main.tex": r"""\documentclass{article}
+\begin{document}
+\input{sections/intro}
+\end{document}
+""",
+            "sections/intro.tex": r"""\section{Introduction}
+This paragraph exercises source navigation in an included file.
+The PDF should map back to the same source line after a forward lookup.
+""",
+        })
         r = build.Build(root, server.CFG.main, server.CFG.outdir).run()
         self.assertEqual(r["exit"], 0, r["output"][-2000:])
         sync = server.SyncTex()
