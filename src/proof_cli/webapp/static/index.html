@@ -35,6 +35,29 @@
       </ul>
       <div id="map-dag" class="map-scroll"><svg id="dag-svg" role="img" aria-label="Dependency graph of the proof map"></svg></div>
       <div id="map-tree" hidden></div>
+      <h2>New node</h2>
+      <p class="hint">A theorem, lemma or claim opens in its own LaTeX studio; an imported result cites an external source. A corrected source is a new imported result.</p>
+      <form id="new-node">
+        <label>Kind <select id="new-kind">
+          <option value="claim">claim</option><option value="lemma">lemma</option>
+          <option value="theorem">theorem</option><option value="imported_result">imported result</option>
+        </select></label>
+        <label>Id <input id="new-id" required pattern="[A-Za-z0-9_\-][A-Za-z0-9._\-]*" placeholder="clm_bound"></label>
+        <label class="wide">Statement <textarea id="new-statement" required rows="2"></textarea></label>
+        <label class="wide">Assumptions, one per line <textarea id="new-assumptions" rows="2"></textarea></label>
+        <label class="wide">Depends on <select id="new-dependencies" multiple size="4"></select></label>
+        <fieldset id="new-source" hidden>
+          <legend>Source</legend>
+          <label>Locator <input id="new-locator" placeholder="doi:10.1000/xyz, arXiv:2501.01234"></label>
+          <label>Version <input id="new-version" placeholder="v2, published 2024"></label>
+          <label>Trust level <select id="new-trust">
+            <option value="">—</option><option value="external_reference">external reference</option>
+            <option value="foundational">foundational</option><option value="project_verified">project verified</option>
+            <option value="temporary_admit">temporary admit</option>
+          </select></label>
+        </fieldset>
+        <button type="submit">Create</button>
+      </form>
       <h2>Awaiting review</h2>
       <p class="hint">Tick the decisions to make, choose each outcome and rationale, then record them. Each decision is committed to git with its snapshot, as the identity shown above.</p>
       <table id="pending"><thead><tr><th></th><th>Node</th><th>Statement and snapshot</th><th>Decision</th><th>Rationale</th></tr></thead><tbody></tbody></table>
@@ -51,13 +74,15 @@
       <div id="node-assumptions"></div>
       <p id="node-claim"></p>
       <div id="node-folder"></div>
+      <div id="node-source"></div>
+      <p id="node-dependents"></p>
       <h3>Dependencies and pins</h3>
       <table id="node-deps"><thead><tr><th>Dependency</th><th>Pinned version</th><th>Accepted version now</th><th>Pinned interface</th><th>Current?</th></tr></thead><tbody></tbody></table>
       <h3>Challenges</h3>
       <ul id="node-challenges"></ul>
       <h3>Review snapshot</h3>
       <p id="node-proof-meta"></p>
-      <p class="hint">Exactly the LaTeX being decided on; its SHA-256 is recorded with the decision. Open the node's folder in prism-local (or any LaTeX editor) to read the compiled PDF.</p>
+      <p class="hint">Exactly the LaTeX being decided on; its SHA-256 is recorded with the decision. The node's studio shows its compiled PDF.</p>
       <p id="node-pdfs"></p>
       <pre id="node-proof-exact"></pre>
       <h3>Evidence checks</h3>
