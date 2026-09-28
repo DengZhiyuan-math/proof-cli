@@ -1039,10 +1039,10 @@ def insert_proof_map_node(store: ProjectStore, node: ProofMapNode, *, conn: sqli
 def update_proof_map_node(store: ProjectStore, node: ProofMapNode, *, conn: sqlite3.Connection | None = None) -> ProofMapNode:
     """Overwrite an existing node's row in place.
 
-    The only legitimate caller is Promote (issue #22) changing `kind` from
-    `claim` to `lemma` on an already-Accepted node — every other ProofMapNode
-    field stays whatever it already was, since nothing else in the system
-    has a supported path to edit a node after creation.
+    Its callers are the node's sanctioned edits: Promote (issue #22)
+    changing `kind` from `claim` to `lemma`, Split (issue #26) appending
+    children to `dependencies`, and moving dependents off a withdrawn
+    imported result (issue #20) swapping one dependency for its correction.
     """
     with _writing(store, conn) as conn:
         conn.execute(
@@ -1317,6 +1317,11 @@ def get_dependency_pin(store: ProjectStore, node_id: str, target_node_id: str) -
             (node_id, target_node_id),
         ).fetchone()
     return _row_to_dependency_pin(row) if row else None
+
+
+def delete_dependency_pin(store: ProjectStore, node_id: str, target_node_id: str, *, conn: sqlite3.Connection | None = None) -> None:
+    with _writing(store, conn) as conn:
+        conn.execute("DELETE FROM dependency_pins WHERE node_id = ? AND target_node_id = ?", (node_id, target_node_id))
 
 
 def list_dependency_pins_for_node(store: ProjectStore, node_id: str) -> list[DependencyPin]:

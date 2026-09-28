@@ -41,7 +41,7 @@ function row(cells) {
 function confirmDecisions(decisions) {
   return new Promise((resolve, reject) => {
     $("confirm-decisions").replaceChildren(...decisions.map((d) => el("li",
-      `${DECISION_LABELS[`${d.kind}:${d.decision}`] || `${d.kind}: ${d.decision}`} — ${d.target_id}${d.dependency_id ? ` (dependency ${d.dependency_id})` : ""}` +
+      `${DECISION_LABELS[`${d.kind}:${d.decision}`] || `${d.kind}: ${d.decision}`} — ${d.target_id}${d.dependency_id ? ` (${d.kind === "dependent_migration" ? "onto" : "dependency"} ${d.dependency_id})` : ""}` +
       `${d.viewed_candidate_proof_sha256 ? ` · snapshot SHA-256 ${d.viewed_candidate_proof_sha256}` : ""} · rationale: ${d.rationale || "none"}`)));
     for (const id of ["home", "node-page"]) $(id).hidden = true;
     $("confirm").hidden = false;
@@ -84,6 +84,7 @@ function showHome() {
     const tr = row([box, link, statement, choice, rationale]);
     tr.dataset.kind = item.kind; tr.dataset.target = item.node_id;
     if (item.candidate_proof && item.candidate_proof.sha256) tr.dataset.viewed = item.candidate_proof.sha256;
+    tr.dataset.bindings = JSON.stringify(item.bindings || {});
     return tr;
   }));
   if (!state.pending.length) body.append(row(["", "Nothing is awaiting review.", "", "", ""]));
@@ -102,13 +103,15 @@ const DECISION_LABELS = {
   "evidence_review:trusted": "Trust this Evidence check",
   "evidence_review:unusable": "Mark this Evidence check unusable",
   "challenge_resolution:dismissed": "Dismiss this Challenge (a false alarm)",
+  "dependent_migration:superseded": "Move every dependent onto this corrected source (Accepted ones need re-Accepting)",
 };
 
 function showError(error) { if (error.message !== "cancelled") say(error.code ? `${error.code}: ${error.message}` : error.message, "error"); }
 
 function decisionRow(decision, proof) {
   const label = DECISION_LABELS[`${decision.kind}:${decision.decision}`] || `${decision.kind}: ${decision.decision}`;
-  const on = decision.dependency_id ? `dependency ${decision.dependency_id}` : decision.target_id;
+  const on = decision.kind === "dependent_migration" ? `onto ${decision.dependency_id}`
+    : decision.dependency_id ? `dependency ${decision.dependency_id}` : decision.target_id;
   const rationale = el("input", null, { placeholder: "why" });
   const button = el("button", "Record");
   button.onclick = async () => {
@@ -302,7 +305,8 @@ async function createNode(event) {
   const body = {
     node_id: $("new-id").value.trim(), kind, statement: $("new-statement").value,
     assumptions: $("new-assumptions").value.split("\n").map((a) => a.trim()).filter(Boolean),
-    dependencies: [...$("new-dependencies").selectedOptions].map((o) => o.value),
+    // an imported result is established elsewhere: it takes no dependencies, whatever the (disabled) list still holds
+    dependencies: kind === "imported_result" ? [] : [...$("new-dependencies").selectedOptions].map((o) => o.value),
   };
   if (kind === "imported_result") Object.assign(body, { source_locator: $("new-locator").value, source_version: $("new-version").value, trust_level: $("new-trust").value });
   try {
@@ -319,6 +323,7 @@ function showNewNodeKind() {
   const imported = $("new-kind").value === "imported_result";
   $("new-source").hidden = !imported;
   $("new-dependencies").disabled = imported;  // an imported result is established elsewhere: no dependencies
+  if (imported) for (const option of $("new-dependencies").options) option.selected = false;
 }
 
 async function showNode(nodeId) {
@@ -394,6 +399,8 @@ document.addEventListener("DOMContentLoaded", () => {
         rationale: tr.querySelectorAll("input")[1].value,
         // the snapshot shown in this row: the server refuses the decision if it changed since
         ...(tr.dataset.viewed ? { viewed_candidate_proof_sha256: tr.dataset.viewed } : {}),
+        // everything else the row showed it is made on (dependencies, interface, …): refused too if it changed
+        binding: JSON.parse(tr.dataset.bindings || "{}")[tr.querySelector("select").value] ?? null,
       }));
     if (!decisions.length) return say("Tick at least one decision.", "error");
     try { await decide(decisions); } catch (error) { showError(error); }

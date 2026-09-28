@@ -110,6 +110,7 @@ def build_decision_payload(
     interface_fingerprint: str | None = None,
     dependency_pins: list[PinnedDependency] | None = None,
     resolves_challenges: list[str] | None = None,
+    migrated_dependents: list[str] | None = None,
 ) -> DecisionPayload:
     """What a decision of `kind` on `target_id` is made on, as of now."""
     return DecisionPayload(
@@ -122,6 +123,7 @@ def build_decision_payload(
         interface_fingerprint=interface_fingerprint,
         dependency_pins=list(dependency_pins or []),
         resolves_challenges=list(resolves_challenges or []),
+        migrated_dependents=list(migrated_dependents or []),
     )
 
 
