@@ -35,13 +35,13 @@ if (pdfChannel) {
   // Hold this lock while the tab lives: the browser drops it when the tab closes or
   // crashes, which is how the editor knows the viewer is gone (see app.js).
   if (navigator.locks && navigator.locks.request)
-    navigator.locks.request("prism-pdf-viewer", () => new Promise(() => {}));
+    navigator.locks.request("proof-studio-pdf-viewer:" + NODE, () => new Promise(() => {}));
   const alive = () => pdfChannel.postMessage({ type: "alive" });
   alive(); setInterval(alive, 2000);
   window.addEventListener("pagehide", () => pdfChannel.postMessage({ type: "bye" }));
 }
 // Theme changes made in the editor tab apply here too.
-window.addEventListener("storage", (e) => { if (e.key === "prism.theme") applyTheme(store.get("theme", null)); });
+window.addEventListener("storage", (e) => { if (e.key === "proof.studio.theme") applyTheme(store.get("theme", null)); });
 
 note(DEFAULT_NOTE);
 checkPdf();

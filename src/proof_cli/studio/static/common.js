@@ -2,9 +2,15 @@
 "use strict";
 
 const $ = (s) => document.querySelector(s);
+/* The node this studio page belongs to: the page lives at /studio/<node-id>/ (ADR-0011). Its
+   URLs are relative, so it only ever reaches its own node, and everything it keeps in the
+   browser is keyed by node, so two nodes never share open tabs, chat or an agent session.
+   Only the theme is shared: a preference, not a node's state. */
+const NODE = decodeURIComponent((location.pathname.match(/\/studio\/([^/]+)\//) || [])[1] || "");
+const storeKey = (k) => k === "theme" ? "proof.studio.theme" : `proof.studio.${NODE}.${k}`;
 const store = {
-  get(k, d) { try { const v = localStorage.getItem("prism." + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
-  set(k, v) { try { localStorage.setItem("prism." + k, JSON.stringify(v)); } catch { /* ignore */ } },
+  get(k, d) { try { const v = localStorage.getItem(storeKey(k)); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(storeKey(k), JSON.stringify(v)); } catch { /* ignore */ } },
 };
 
 async function api(path, body) {
@@ -12,7 +18,7 @@ async function api(path, body) {
     method: "POST", headers: { "Content-Type": "application/json", "X-Prism-Local": "1" },
     body: JSON.stringify(body),
   };
-  const r = await fetch(path, opts);
+  const r = await fetch(path.replace(/^\//, ""), opts);   // relative: this node's /studio/<id>/
   let data = {};
   try { data = await r.json(); } catch { /* non-JSON */ }
   data._status = r.status;
@@ -67,7 +73,7 @@ if (!IS_MAC) for (const el of document.querySelectorAll("[title*='⌘'], [placeh
 // Editor tab <-> pop-out PDF tab. Messages:
 //   viewer -> editor: {type:"alive"} (heartbeat), {type:"bye"}, {type:"inverse", page, x, y}
 //   editor -> viewer: {type:"forward", r} (SyncTeX box), {type:"pdf", mtime}
-const pdfChannel = "BroadcastChannel" in window ? new BroadcastChannel("prism-pdf") : null;
+const pdfChannel = "BroadcastChannel" in window ? new BroadcastChannel("proof-studio-pdf:" + NODE) : null;
 
 /* prism-local's page presence (heartbeat, idle exit) is not part of proof-cli: the server's
    lifecycle is proof-cli's own (ADR-0011). */

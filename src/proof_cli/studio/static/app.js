@@ -501,7 +501,7 @@ function setPopped(on) {
 }
 let popWin = null;
 function popOut() {
-  popWin = window.open("/viewer", "prism-pdf");
+  popWin = window.open("viewer", "proof-studio-pdf:" + NODE);
   if (popWin) popWin.focus();
 }
 $("#pdf-popout").onclick = (e) => { e.preventDefault(); popOut(); };
@@ -511,7 +511,7 @@ $("#pdf-popout").onclick = (e) => { e.preventDefault(); popOut(); };
 // that lock tells us when the last viewer is gone, however much the browser throttles a
 // hidden viewer's timers. (Its heartbeat can arrive a minute late, which used to make the
 // inline PDF flash back in; the heartbeat now only serves browsers without Web Locks.)
-const VIEWER_LOCK = "prism-pdf-viewer";
+const VIEWER_LOCK = "proof-studio-pdf-viewer:" + NODE;
 const LOCKS = navigator.locks && navigator.locks.request ? navigator.locks : null;
 let watchingViewer = false;
 function watchViewer() {

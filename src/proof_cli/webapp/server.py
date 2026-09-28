@@ -38,6 +38,7 @@ from ..domain import ProofMapNodeKind
 from ..reviews import git_identity
 from ..storage import ProjectStore, get_active_claim, get_current_candidate_proof, read_project_instance_id, read_state
 from ..vault import build_pdf_path, node_folder
+from .studios import StudioHub
 
 PRISM_LOCAL_ENV_VAR = "PROOF_CLI_PRISM_LOCAL"
 _PRISM_START_SECONDS = 10
@@ -136,6 +137,11 @@ class ReviewApp:
     def __init__(self, store: ProjectStore) -> None:
         self.store = store
         self.origin = project_origin(store)
+        self.studios = StudioHub(store)  # each local node's LaTeX studio (ADR-0011)
+
+    def close(self) -> None:
+        """Stop what the node studios still run: a build, an agent turn."""
+        self.studios.close()
 
     # -- reads -------------------------------------------------------------------
 
@@ -350,8 +356,10 @@ class _Handler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: Any) -> None:  # keep the terminal quiet
         return
 
-    def _send(self, status: HTTPStatus, body: bytes, content_type: str, *, policy: bool = True) -> None:
+    def _send(self, status: HTTPStatus, body: bytes, content_type: str, *, policy: bool | str = True, location: str | None = None) -> None:
         self.send_response(status)
+        if location is not None:
+            self.send_header("Location", location)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
@@ -360,7 +368,8 @@ class _Handler(BaseHTTPRequestHandler):
         if policy:  # a PDF goes to the browser's own viewer, which a page policy can break
             self.send_header(
                 "Content-Security-Policy",
-                "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-ancestors 'none'",
+                policy if isinstance(policy, str)
+                else "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-ancestors 'none'",
             )
         self.end_headers()
         self.wfile.write(body)
@@ -376,6 +385,17 @@ class _Handler(BaseHTTPRequestHandler):
         # won't match; this also refuses DNS-rebinding hosts
         return self.headers.get("Host") == urlsplit(self.app.origin).netloc
 
+    def _cross_site(self) -> bool:
+        """The browser says another site sent this: a fetch metadata header, or a foreign Origin."""
+        site = self.headers.get("Sec-Fetch-Site")
+        origin = self.headers.get("Origin")
+        return (site is not None and site not in ("same-origin", "none")) or (origin is not None and origin != self.app.origin)
+
+    def _studio(self, method: str, body: dict | None = None) -> None:
+        parts = urlsplit(self.path)
+        answer = self.app.studios.request(method, parts.path, parts.query, body, cross_site=self._cross_site())
+        self._send(HTTPStatus(answer.status), answer.body, answer.content_type, policy=answer.policy or False, location=answer.location)
+
     def _guarded(self, action: Callable[[], Any]) -> None:
         try:
             self._json(HTTPStatus.OK, {"ok": True, "data": action()})
@@ -390,6 +410,8 @@ class _Handler(BaseHTTPRequestHandler):
         if not self._host_ok():
             return self._error(HTTPStatus.MISDIRECTED_REQUEST, "WRONG_HOST", f"open this app at {self.app.origin}")
         path = urlsplit(self.path).path
+        if path.startswith("/studio/"):
+            return self._studio("GET")
         if path in ("/", "/index.html"):
             return self._static("index.html")
         if path.startswith("/static/"):
@@ -435,10 +457,12 @@ class _Handler(BaseHTTPRequestHandler):
             return self._error(HTTPStatus.BAD_REQUEST, "MALFORMED_JSON", "the request body isn't JSON")
         if not isinstance(body, dict):
             return self._error(HTTPStatus.BAD_REQUEST, "MALFORMED_JSON", "the request body must be a JSON object")
+        path = urlsplit(self.path).path
+        if path.startswith("/studio/"):
+            return self._studio("POST", body)
         routes: dict[str, Callable[[], Any]] = {
             "/api/decide": lambda: self.app.decide(body),
         }
-        path = urlsplit(self.path).path
         route = routes.get(path)
         if route is None and path.startswith("/api/node/") and path.endswith("/open"):
             node_id = unquote(path.removeprefix("/api/node/").removesuffix("/open"))
@@ -469,6 +493,10 @@ class ReviewServer(ThreadingHTTPServer):
     @property
     def url(self) -> str:
         return self.app.origin
+
+    def server_close(self) -> None:
+        super().server_close()
+        self.app.close()
 
 
 def serve(store: ProjectStore) -> ReviewServer:
