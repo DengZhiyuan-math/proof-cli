@@ -41,7 +41,7 @@ function row(cells) {
 function confirmDecisions(decisions) {
   return new Promise((resolve, reject) => {
     $("confirm-decisions").replaceChildren(...decisions.map((d) => el("li",
-      `${DECISION_LABELS[`${d.kind}:${d.decision}`] || `${d.kind}: ${d.decision}`} — ${d.target_id}${d.dependency_id ? ` (dependency ${d.dependency_id})` : ""}` +
+      `${DECISION_LABELS[`${d.kind}:${d.decision}`] || `${d.kind}: ${d.decision}`} — ${d.target_id}${d.dependency_id ? ` (${d.kind === "dependent_migration" ? "onto" : "dependency"} ${d.dependency_id})` : ""}` +
       `${d.viewed_candidate_proof_sha256 ? ` · snapshot SHA-256 ${d.viewed_candidate_proof_sha256}` : ""} · rationale: ${d.rationale || "none"}`)));
     for (const id of ["home", "node-page"]) $(id).hidden = true;
     $("confirm").hidden = false;
@@ -102,13 +102,15 @@ const DECISION_LABELS = {
   "evidence_review:trusted": "Trust this Evidence check",
   "evidence_review:unusable": "Mark this Evidence check unusable",
   "challenge_resolution:dismissed": "Dismiss this Challenge (a false alarm)",
+  "dependent_migration:superseded": "Move every dependent onto this corrected source (Accepted ones need re-Accepting)",
 };
 
 function showError(error) { if (error.message !== "cancelled") say(error.code ? `${error.code}: ${error.message}` : error.message, "error"); }
 
 function decisionRow(decision, proof) {
   const label = DECISION_LABELS[`${decision.kind}:${decision.decision}`] || `${decision.kind}: ${decision.decision}`;
-  const on = decision.dependency_id ? `dependency ${decision.dependency_id}` : decision.target_id;
+  const on = decision.kind === "dependent_migration" ? `onto ${decision.dependency_id}`
+    : decision.dependency_id ? `dependency ${decision.dependency_id}` : decision.target_id;
   const rationale = el("input", null, { placeholder: "why" });
   const button = el("button", "Record");
   button.onclick = async () => {
