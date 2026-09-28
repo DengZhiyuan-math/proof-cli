@@ -305,7 +305,8 @@ async function createNode(event) {
   const body = {
     node_id: $("new-id").value.trim(), kind, statement: $("new-statement").value,
     assumptions: $("new-assumptions").value.split("\n").map((a) => a.trim()).filter(Boolean),
-    dependencies: [...$("new-dependencies").selectedOptions].map((o) => o.value),
+    // an imported result is established elsewhere: it takes no dependencies, whatever the (disabled) list still holds
+    dependencies: kind === "imported_result" ? [] : [...$("new-dependencies").selectedOptions].map((o) => o.value),
   };
   if (kind === "imported_result") Object.assign(body, { source_locator: $("new-locator").value, source_version: $("new-version").value, trust_level: $("new-trust").value });
   try {
@@ -322,6 +323,7 @@ function showNewNodeKind() {
   const imported = $("new-kind").value === "imported_result";
   $("new-source").hidden = !imported;
   $("new-dependencies").disabled = imported;  // an imported result is established elsewhere: no dependencies
+  if (imported) for (const option of $("new-dependencies").options) option.selected = false;
 }
 
 async function showNode(nodeId) {
