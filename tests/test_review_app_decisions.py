@@ -282,6 +282,70 @@ def test_a_page_that_showed_the_old_dependencies_cannot_accept_the_new_ones(app)
     assert get_acceptance_state(store, "uses_ref") == "accepted"
 
 
+def _a_write_lands_mid_read(monkeypatch, name, write):
+    """Start `write` (on a second store, in another thread) just as the page is about to compute
+    its bindings — after it read what it shows. It must wait for the read, never land between."""
+    import threading
+
+    from proof_cli.webapp import server
+
+    original = getattr(server, name)
+    writer = threading.Thread(target=write)
+
+    def mid_read(*args, **kwargs):
+        if not writer.is_alive() and writer.ident is None:
+            writer.start()
+            writer.join(timeout=0.5)  # blocked on the page's read lock, if it holds one
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(server, name, mid_read)
+    return writer
+
+
+def test_a_page_shows_and_binds_one_state_even_with_a_migration_mid_read(app, monkeypatch):
+    """PR #63 audit (5b330a0): the page read `ref`, a migration landed, and the binding then described `ref_v2`."""
+    from proof_cli.storage import ProjectStore
+
+    store, client = app
+    _reviewed_reference(store)
+    _accepted(store, "uses_ref", ["ref"])
+    submit_proof(store, "uses_ref", claimant_id="agent_a", scoping_rationale="revision", content="revised proof")
+    researcher(store).decide_reference_review("ref", "no-longer-callable")
+    _reviewed_reference(store, "ref_v2")
+    writer = _a_write_lands_mid_read(
+        monkeypatch, "_available_decisions", lambda: researcher(ProjectStore(store.root)).migrate_dependents("ref", "ref_v2")
+    )
+
+    view = client.get("/api/node/uses_ref")[1]["data"]
+    writer.join()
+
+    assert view["node"]["dependencies"] == ["ref"]  # what the page showed …
+    accept = next(d for d in view["decisions"] if d["kind"] == "acceptance" and d["decision"] == "accept")
+    status, body = decide(client, [{**accept, "viewed_candidate_proof_sha256": view["candidate_proof"]["sha256"]}])
+    assert body["data"]["results"][0]["error"]["code"] == "STALE_VIEW", body  # … is what its binding describes
+    assert get_node(store, "uses_ref").dependencies == ["ref_v2"]
+
+
+def test_the_pending_list_shows_and_binds_one_state_even_with_a_snapshot_mid_read(app, monkeypatch):
+    from proof_cli.storage import ProjectStore
+
+    store, client = app
+    _reviewed_reference(store)
+    create_node(store, node_id="uses_ref", kind="claim", statement="s", dependencies=["ref"])
+    submit_proof(store, "uses_ref", claimant_id="agent_a", scoping_rationale="scoped", content="proof v1")
+    writer = _a_write_lands_mid_read(
+        monkeypatch, "_binding",
+        lambda: submit_proof(ProjectStore(store.root), "uses_ref", claimant_id="agent_a", scoping_rationale="scoped", content="proof v2"),
+    )
+
+    (item,) = [p for p in client.get("/api/state")[1]["data"]["pending"] if p["node_id"] == "uses_ref"]
+    writer.join()
+
+    assert item["candidate_proof"]["text"] == "proof v1"
+    status, body = decide(client, [{"kind": "acceptance", "target_id": "uses_ref", "decision": "accept", "binding": item["bindings"]["accept"]}])
+    assert body["data"]["results"][0]["error"]["code"] == "STALE_VIEW", body
+
+
 def test_the_pending_list_binds_each_decision_to_what_it_showed(app):
     store, client = app
     _reviewed_reference(store)
