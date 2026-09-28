@@ -1922,7 +1922,7 @@ def test_splitting_a_node_someone_else_holds_is_refused_unless_reassigned(tmp_pa
     split_node(store, "clm_parent", [{"id": "c3", "statement": "c"}], created_by="agent_a", reassign=True)
 
     assert get_node(store, "clm_parent").dependencies == ["c2", "c3"]
-    assert get_active_claim(store, "clm_parent").claimant_id == "agent_a"  # taken over, as `claim --reassign` does
+    assert get_active_claim(store, "clm_parent").claimant_id == "agent_a"  # taken over though Blocked on c2, which `claim` would refuse
     (event,) = [e for e in list_events(store) if e.kind == "proof_map_claim_reassigned" and e.entity_id == "clm_parent"]
     assert event.payload["previous_claimant_id"] == "agent_b"
 

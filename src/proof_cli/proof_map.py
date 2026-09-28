@@ -306,7 +306,9 @@ def split_node(
     combine" is never assumed true without a human looking at it).
 
     A node someone else has claimed is theirs to split (NOT_CLAIMANT), unless
-    `reassign` takes it over for `created_by`, as `claim --reassign` does.
+    `reassign` takes the claim over for `created_by`, recorded as `claim --reassign`
+    records it — but without claim's frontier check: a split parent is usually
+    Blocked on its earlier children, and splitting it again is still fine.
     All or nothing (#26): the checks, every child and the parent's new
     dependencies are one write transaction, and a failed split leaves no
     child, no child folder, and the parent as it was.
