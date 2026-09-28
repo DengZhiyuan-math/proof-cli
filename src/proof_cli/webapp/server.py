@@ -99,6 +99,15 @@ def _available_decisions(store: ProjectStore, node, *, claim, proof, dependencie
     if node.kind == ProofMapNodeKind.imported_result:
         if proof_map.get_reference_review_state(store, node.id) != "no-longer-callable":
             offered += [{"kind": "reference_review", "target_id": node.id, "decision": d} for d in proof_map.REFERENCE_REVIEW_DECISIONS]
+        elif proof_map.list_migratable_dependents(store, node.id):
+            # a corrected source is a new imported result: offer moving the dependents onto each usable one (#20)
+            offered += [
+                {"kind": "dependent_migration", "target_id": node.id, "decision": "superseded", "dependency_id": other.id}
+                for other in proof_map.list_nodes(store)
+                if other.kind == ProofMapNodeKind.imported_result
+                and other.id != node.id
+                and proof_map.get_reference_review_state(store, other.id) != "no-longer-callable"
+            ]
     else:
         if proof_map.get_workflow_state(store, node.id) == "review-needed":
             offered += [{"kind": "acceptance", "target_id": node.id, "decision": d.value} for d in proof_map.AcceptanceDecision]
@@ -115,7 +124,16 @@ def _available_decisions(store: ProjectStore, node, *, claim, proof, dependencie
     for challenge in challenges:
         if challenge.status.value == "open":
             offered.append({"kind": "challenge_resolution", "target_id": challenge.id, "decision": "dismissed"})
-    return offered
+    return [{**item, "binding": _binding(store, item["kind"], item["target_id"], item["decision"], item.get("dependency_id"))} for item in offered]
+
+
+def _binding(store: ProjectStore, kind: str, target_id: str, decision: str, dependency_id: str | None = None) -> str | None:
+    """What a decision offered on this page would be made on, as a digest the page sends back with it:
+    the decision is refused (STALE_VIEW) if that changed before it is recorded."""
+    try:
+        return proof_map.binding_digest(proof_map.prepare_decision(store, kind, target_id, decision, dependency_id=dependency_id))
+    except proof_map.ProofMapError:
+        return None
 
 
 class ReviewApp:
@@ -135,7 +153,17 @@ class ReviewApp:
     def health(self) -> dict:
         return {"project_id": read_state(self.store).project_id, "instance": read_project_instance_id(self.store), "origin": self.origin}
 
+    def _one_state(self):
+        """Hold the project's write lock while a page is read (PR #63 audit): no decision or other
+        write can land between reading what the page shows and computing the bindings it sends
+        back, so both describe one state. Writers wait for the read; it takes milliseconds."""
+        return self.store.transaction()
+
     def state(self) -> dict:
+        with self._one_state():
+            return self._state()
+
+    def _state(self) -> dict:
         warnings = proof_map.list_integrity_warnings(self.store)
         return {
             "project_id": read_state(self.store).project_id,
@@ -261,7 +289,16 @@ class ReviewApp:
         for node in proof_map.list_nodes(self.store):
             if node.kind == ProofMapNodeKind.imported_result:
                 if proof_map.get_reference_review_state(self.store, node.id) in ("unreviewed", "unverifiable"):
-                    pending.append({"node_id": node.id, "kind": "reference_review", "decisions": list(proof_map.REFERENCE_REVIEW_DECISIONS), "statement": node.statement})
+                    decisions = list(proof_map.REFERENCE_REVIEW_DECISIONS)
+                    pending.append(
+                        {
+                            "node_id": node.id,
+                            "kind": "reference_review",
+                            "decisions": decisions,
+                            "bindings": {d: _binding(self.store, "reference_review", node.id, d) for d in decisions},
+                            "statement": node.statement,
+                        }
+                    )
                 continue
             if proof_map.get_workflow_state(self.store, node.id) == "review-needed":
                 proof = get_current_candidate_proof(self.store, node.id)
@@ -270,6 +307,7 @@ class ReviewApp:
                         "node_id": node.id,
                         "kind": "acceptance",
                         "decisions": [decision.value for decision in proof_map.AcceptanceDecision],
+                        "bindings": {d.value: _binding(self.store, "acceptance", node.id, d.value) for d in proof_map.AcceptanceDecision},
                         "statement": node.statement,
                         "acceptance_state": proof_map.get_acceptance_state(self.store, node.id),
                         "candidate_proof": _proof_view(self.store, proof) or {"id": None, "text": "", "sha256": None},
@@ -278,6 +316,10 @@ class ReviewApp:
         return pending
 
     def node(self, node_id: str) -> dict:
+        with self._one_state():
+            return self._node(node_id)
+
+    def _node(self, node_id: str) -> dict:
         store = self.store
         node = proof_map.get_node(store, node_id)
         if node is None:
@@ -364,6 +406,8 @@ class ReviewApp:
                     decision,
                     rationale=str(item.get("rationale") or ""),
                     dependency_id=item.get("dependency_id"),
+                    # what the page showed this decision is made on: checked on the decision's own write transaction
+                    viewed_binding=item.get("binding"),
                 )
                 results.append({"target_id": target_id, "ok": True, "result": record.model_dump(mode="json")})
             except KeyError as exc:

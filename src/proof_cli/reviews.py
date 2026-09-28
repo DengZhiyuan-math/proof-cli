@@ -43,6 +43,7 @@ class DecisionKind(str, Enum):
     dependency_revalidation = "dependency_revalidation"
     challenge_resolution = "challenge_resolution"
     promote = "promote"
+    dependent_migration = "dependent_migration"
 
 
 class PinnedDependency(BaseModel):
@@ -70,6 +71,8 @@ class DecisionPayload(BaseModel):
     dependency_pins: list[PinnedDependency] = Field(default_factory=list)
     # the Challenges this decision resolves, by id
     resolves_challenges: list[str] = Field(default_factory=list)
+    # a dependent_migration: the nodes it moved off the withdrawn citation (#20)
+    migrated_dependents: list[str] = Field(default_factory=list)
 
 
 class ReviewEntry(BaseModel):
@@ -101,6 +104,8 @@ DECISION_ROWS: dict[tuple[DecisionKind, str], tuple[str, str]] = {
     (DecisionKind.dependency_revalidation, "reaffirmed"): ("proof_map_node", "reaffirmed"),
     (DecisionKind.challenge_resolution, "dismissed"): ("challenge", "dismissed"),
     (DecisionKind.promote, "promote"): ("proof_map_node", "approved"),
+    # a no-longer-callable imported result's dependents moved onto its correction (#20)
+    (DecisionKind.dependent_migration, "superseded"): ("proof_map_node", "superseded"),
 }
 
 

@@ -41,6 +41,11 @@ class Researcher:
 
         return promote_to_lemma(self.store, node_id, **self._who(rationale))
 
+    def migrate_dependents(self, node_id: str, replacement_id: str, *, rationale: str = ""):
+        from proof_cli.proof_map import migrate_dependents
+
+        return migrate_dependents(self.store, node_id, replacement_id, **self._who(rationale))
+
     def dismiss_challenge(self, challenge_id: str, *, rationale: str = ""):
         from proof_cli.proof_map import dismiss_challenge
 
