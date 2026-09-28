@@ -487,21 +487,24 @@ def _run_machine_check(
     backend_target: str | None = None,
     summary: str = "",
 ) -> tuple[VerificationFragment, VerificationResult, VerificationResult | None]:
+    """Log a run of `fragment` against `backend`. No backend is wired in, so this never reports a
+    machine check: the fragment stays queued and the result says no backend ran (#27). Nor does
+    it record anyone's judgment — every result here is `pending_review`."""
     backend = backend_target or fragment.backend_target or "proof_assistant"
     checks: list[str] = []
     if fragment.side_conditions:
         checks.extend(condition.statement for condition in fragment.side_conditions)
     if fragment.theorem_applications:
         checks.extend(application.statement for application in fragment.theorem_applications)
+    metadata: dict[str, object] = {"checks": checks, "backend_ran": False}
     if fragment.translation_status == VerificationFragmentStatus.translation_failed:
         failed_fragment = fragment.record_translation_failure("translation failed before run")
         result = VerificationResult(
             fragment_id=fragment.id,
             backend=backend,
             summary="translation failed before machine-check",
-            review_status=VerificationReviewStatus.rejected_by_human,
             notes=summary or "translation failure",
-            metadata={"checks": checks, "fragment_status": failed_fragment.status.value},
+            metadata={**metadata, "fragment_status": failed_fragment.status.value},
         )
         return failed_fragment, result, None
 
@@ -510,32 +513,24 @@ def _run_machine_check(
             fragment_id=fragment.id,
             backend=backend,
             summary="fragment is stale after dependency change",
-            review_status=VerificationReviewStatus.rejected_by_human,
             notes=summary or "stale fragment",
-            metadata={"checks": checks},
+            metadata=metadata,
         )
         return fragment, result, None
 
     if fragment.theorem_applications and any(application.fragile for application in fragment.theorem_applications):
-        result = VerificationResult(
-            fragment_id=fragment.id,
-            backend=backend,
-            summary=summary or "machine-check completed for fragile theorem application",
-            artifacts=[machine_check_trace(fragment, backend=backend, summary=summary or "fragile application checked")],
-            notes="fragile theorem application checked with explicit status",
-            metadata={"checks": checks, "fragile": True},
-        )
-        return fragment.record_machine_check(result_id=result.id, backend_target=backend), result, None
-
+        metadata["fragile"] = True
     result = VerificationResult(
         fragment_id=fragment.id,
         backend=backend,
-        summary=summary or "machine-check completed",
-        artifacts=[machine_check_trace(fragment, backend=backend, summary=summary or "machine-check completed")],
-        notes=summary or "machine-check completed",
-        metadata={"checks": checks},
+        summary=f"no backend ran: {backend} is not available; the fragment stays queued",
+        notes=summary,
+        metadata=metadata,
     )
-    return fragment.record_machine_check(result_id=result.id, backend_target=backend), result, None
+    ran = fragment.model_copy(
+        update={"status": VerificationFragmentStatus.queued_for_verification, "backend_target": backend, "result_id": result.id}
+    )
+    return ran, result, None
 
 
 def _record_verification_result(
