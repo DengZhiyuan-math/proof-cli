@@ -685,6 +685,7 @@ HUMAN_ONLY_COMMANDS = [
     ["node", "review", "ref_1", "reference-review"],
     ["node", "revalidate", "clm_1", "lem_base"],
     ["node", "promote", "clm_1"],
+    ["node", "migrate-dependents", "ref_1", "ref_2"],
     ["node", "evidence", "review", "chk_1", "trusted"],
     ["node", "release", "clm_1", "--force", "--reason", "stuck"],
     ["challenge", "dismiss", "ch_1"],
@@ -725,3 +726,13 @@ def test_a_bare_human_only_command_is_a_clean_human_review_required(tmp_path: Pa
     error = json.loads(result.stdout)["error"]
     assert error["code"] == "HUMAN_REVIEW_REQUIRED"
     assert error["url"].endswith("/#/node/clm_1")
+
+
+def test_migrate_dependents_points_at_the_page_of_the_project_proof_root_names(tmp_path: Path, monkeypatch):
+    """PR #77 review: with PROOF_ROOT set, the refusal must still carry the project's page URL."""
+    runner.invoke(app, ["init", "--root", str(tmp_path)])
+    monkeypatch.setenv("PROOF_ROOT", str(tmp_path))
+    monkeypatch.chdir(tmp_path.parent)
+    result = runner.invoke(app, ["node", "migrate-dependents", "ref_1", "ref_2", "--json"])
+    error = json.loads(result.stdout)["error"]
+    assert error["code"] == "HUMAN_REVIEW_REQUIRED" and error["url"].startswith("http://localhost:")

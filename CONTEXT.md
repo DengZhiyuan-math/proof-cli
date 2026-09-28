@@ -45,7 +45,7 @@ A local proof obligation serving a specific parent node, not yet judged reusable
 _Avoid_: obligation, proof obligation, open goal
 
 **Imported result** (a proof map node kind):
-An external, already-established result pulled in as a dependency. It carries a trust level instead of a candidate proof, and enters the map through Reference review rather than Acceptance. Immutable once created — its statement, source locator, and source version never change in place. If the cited source is corrected or reinterpreted, that's a new Imported result node, not a revision of this one; dependents migrate to it deliberately. Its `ReferenceRecord` (the citation itself — paper, book, arXiv entry) is a separate thing and can still be freely re-reviewed. See ADR-0005.
+An external, already-established result pulled in as a dependency. It carries a trust level instead of a candidate proof, and enters the map through Reference review rather than Acceptance. Immutable once created — its statement, source locator, and source version never change in place. If the cited source is corrected or reinterpreted, that's a new Imported result node, not a revision of this one; dependents migrate to it deliberately. An Imported result has no dependencies of its own: it is established elsewhere. Its `ReferenceRecord` (the citation itself — paper, book, arXiv entry) is a separate thing and can still be freely re-reviewed. See ADR-0005.
 _Avoid_: reference, external theorem
 
 **Candidate proof**:
@@ -89,7 +89,7 @@ Human Review's confirmation that an existing Candidate proof remains valid after
 _Avoid_: reaccept, re-approve, revalidate (as a bare verb — say what's being revalidated)
 
 **Review decision**:
-A Human Review decision (Acceptance, Reference review, Evidence review, Lightweight re-review, Challenge resolution, Promote) as it is recorded: one line in the node's git-tracked `reviews.jsonl`, naming the Review snapshot's SHA-256, the rationale and the time, committed together with that snapshot by the reviewer. The commit's author, a GitHub identity, *is* the reviewer, and the pushed commit is the record of who decided what. Made only on the proof map page; no CLI command, Codex route or MCP tool makes one. That boundary is a convention for cooperative agents, not a security mechanism. See ADR-0010.
+A Human Review decision (Acceptance, Reference review, Evidence review, Lightweight re-review, Challenge resolution, Promote, Dependent migration) as it is recorded: one line in the node's git-tracked `reviews.jsonl`, naming the Review snapshot's SHA-256, the rationale and the time, committed together with that snapshot by the reviewer. The commit's author, a GitHub identity, *is* the reviewer, and the pushed commit is the record of who decided what. Made only on the proof map page; no CLI command, Codex route or MCP tool makes one. That boundary is a convention for cooperative agents, not a security mechanism. See ADR-0010.
 _Avoid_: signed decision, confirmation, `--confirm`, approval flag
 
 **Proof map page**:
@@ -97,7 +97,7 @@ proof-cli's own local web page, the map's home, and the researcher's one entry: 
 _Avoid_: review app (its ADR-0009 name), dashboard, admin panel
 
 **No longer callable** (a Reference review outcome):
-The researcher's judgment that an Imported result can't be relied on after all. Final: its dependents read potentially stale or blocked, and a corrected source becomes a new Imported result node. See #20.
+The researcher's judgment that an Imported result can't be relied on after all. Final: its dependents read potentially stale or blocked, and a corrected source becomes a new Imported result node. The researcher then moves the dependents onto it on the proof map page (a Dependent migration decision). Rejected dependents stay where they were, as the record of an abandoned route. An Accepted dependent's Acceptance was made against the withdrawn citation, so it stops counting until the researcher re-Accepts the node against the correction. See #20.
 _Avoid_: rejected reference, revoked citation
 
 ### Node lifecycle
