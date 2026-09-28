@@ -229,14 +229,6 @@ class Researcher:
         signed = self.sign("challenge_resolution", challenge_id, "dismissed", rationale=rationale)
         return dismiss_challenge(self.store, challenge_id, signed_decision=signed)
 
-    def force_release(self, node_id: str, *, reason: str = "researcher override", claimant_id: str = "human", session_id: str = "default"):
-        from proof_cli.proof_map import release_node
-        from proof_cli.storage import get_active_claim
-
-        claim = get_active_claim(self.store, node_id)
-        signed = self.sign("force_release", claim.id if claim else "", "force-release", rationale=reason)
-        return release_node(self.store, node_id, claimant_id=claimant_id, session_id=session_id, force=True, signed_decision=signed)
-
 
 _RESEARCHERS: dict = {}
 

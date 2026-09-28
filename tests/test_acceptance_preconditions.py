@@ -28,9 +28,8 @@ from proof_cli.theorems import add_theorem
 
 
 def _submit(store, node_id: str, *, session: str = "sess_1") -> None:
-    _claim_token = claim_node(store, node_id, claimant_id="agent_a", session_id=session).claim_token
-    submit_candidate_proof(
-        store, node_id, claimant_id="agent_a", session_id=session, scoping_rationale="scoped", content="proof text", claim_token=_claim_token)
+    submit_candidate_proof(  # needs no claim (ADR-0010)
+        store, node_id, claimant_id="agent_a", session_id=session, scoping_rationale="scoped", content="proof text")
 
 
 def _awaiting_review(store, node_id: str = "clm_1", **node_fields) -> None:

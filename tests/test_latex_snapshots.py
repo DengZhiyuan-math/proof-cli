@@ -131,8 +131,10 @@ def test_writing_and_requesting_review_need_no_claim_and_end_one(tmp_path: Path)
     create_node(store, node_id="clm_3", kind="claim", statement="u")
     claim_node(store, "clm_3", claimant_id="agent_b", session_id="s")
     _write_proof(store, "clm_3", "someone else's request")
-    request_review(store, "clm_3", requested_by="agent_c", rationale="r")
-    assert get_active_claim(store, "clm_3").claimant_id == "agent_b"  # only its holder ends a claim
+    with pytest.raises(ProofMapError) as exc_info:
+        request_review(store, "clm_3", requested_by="agent_c", rationale="r")
+    assert exc_info.value.code == "NOT_CLAIMANT"  # a node someone holds is theirs to hand over
+    assert get_active_claim(store, "clm_3").claimant_id == "agent_b"
 
 
 def test_an_imported_result_has_nothing_to_review_this_way(tmp_path: Path):

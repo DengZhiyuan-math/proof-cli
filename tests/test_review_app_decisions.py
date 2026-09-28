@@ -43,7 +43,7 @@ def _passkey(store):
     return researcher(store).authenticator
 
 
-# -- force-release: shows who holds the claim, and asks why ---------------------------
+# -- a claim is shown as its assignee; there is no force-release (ADR-0010) ----------
 
 
 def test_the_node_page_shows_who_holds_the_claim_but_not_how_to_impersonate_them(app):
@@ -58,31 +58,15 @@ def test_the_node_page_shows_who_holds_the_claim_but_not_how_to_impersonate_them
     assert "secret_session" not in str(view)
 
 
-def test_a_researcher_force_releases_a_stuck_claim_with_a_reason(app):
+def test_a_claim_is_never_a_decision_on_the_page(app):
+    """A stale claim is reassigned or cleared on the CLI, by anyone: nothing to sign."""
     store, client = app
-    passkey = _passkey(store)
     create_node(store, node_id="clm_1", kind="claim", statement="C")
-    claim = claim_node(store, "clm_1", claimant_id="agent_a", session_id="s")
+    claim_node(store, "clm_1", claimant_id="agent_a", session_id="s")
 
-    status, outcome = _sign(client, passkey, [{"kind": "force_release", "target_id": claim.id, "decision": "force-release", "rationale": "agent crashed"}])
+    decisions = client.get("/api/node/clm_1")[1]["data"]["decisions"]
 
-    assert status == 200 and outcome["data"]["results"][0]["ok"], outcome
-    assert get_active_claim(store, "clm_1") is None
-
-
-def test_a_force_release_without_a_reason_is_refused(app):
-    store, client = app
-    passkey = _passkey(store)
-    create_node(store, node_id="clm_1", kind="claim", statement="C")
-    claim = claim_node(store, "clm_1", claimant_id="agent_a", session_id="s")
-
-    _, outcome = _sign(client, passkey, [{"kind": "force_release", "target_id": claim.id, "decision": "force-release", "rationale": "  "}])
-
-    assert outcome["data"]["results"][0]["error"]["code"] == "FORCE_RELEASE_REQUIRES_REASON"
-    assert get_active_claim(store, "clm_1") is not None
-
-
-# -- Reference review: reaffirm, or no longer callable (#20) --------------------------
+    assert all(decision["kind"] != "force_release" for decision in decisions)
 
 
 def _reviewed_reference(store, node_id="ref"):
@@ -92,8 +76,7 @@ def _reviewed_reference(store, node_id="ref"):
 
 def _accepted(store, node_id, dependencies=()):
     create_node(store, node_id=node_id, kind="claim", statement=f"stmt {node_id}", dependencies=list(dependencies))
-    token = claim_node(store, node_id, claimant_id="agent_a", session_id="s").claim_token
-    submit_candidate_proof(store, node_id, claimant_id="agent_a", session_id="s", scoping_rationale="scoped", content=f"proof {node_id}", claim_token=token)
+    submit_candidate_proof(store, node_id, claimant_id="agent_a", session_id="s", scoping_rationale="scoped", content=f"proof {node_id}")
     researcher(store).decide_acceptance(node_id, "accept")
 
 
@@ -146,8 +129,8 @@ def test_the_app_offers_both_reference_decisions_and_stops_listing_a_withdrawn_o
 def _challenged_and_resubmitted(store, node_id="lem"):
     _accepted(store, node_id)
     challenge = open_challenge(store, node_id, opened_by="agent_b", rationale="step 2?")
-    token = claim_node(store, node_id, claimant_id="agent_a", session_id="s2").claim_token
-    submit_candidate_proof(store, node_id, claimant_id="agent_a", session_id="s2", scoping_rationale="scoped", content="revised proof", claim_token=token)
+    claim_node(store, node_id, claimant_id="agent_a", session_id="s2")
+    submit_candidate_proof(store, node_id, claimant_id="agent_a", session_id="s2", scoping_rationale="scoped", content="revised proof")
     return challenge
 
 
@@ -207,8 +190,8 @@ def test_a_lagging_pin_is_shown_and_re_reviewed_from_the_page(app):
     _accepted(store, "lem")
     _accepted(store, "uses", ["lem"])
     challenge = open_challenge(store, "lem", opened_by="agent_b", rationale="?")
-    token = claim_node(store, "lem", claimant_id="agent_a", session_id="s2").claim_token
-    submit_candidate_proof(store, "lem", claimant_id="agent_a", session_id="s2", scoping_rationale="scoped", content="v2", claim_token=token)
+    claim_node(store, "lem", claimant_id="agent_a", session_id="s2")
+    submit_candidate_proof(store, "lem", claimant_id="agent_a", session_id="s2", scoping_rationale="scoped", content="v2")
     researcher(store).decide_acceptance("lem", "accept")  # v2, same interface
     assert get_challenge(store, challenge.id).status.value == "resolved-by-revision"
 

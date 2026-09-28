@@ -33,21 +33,20 @@ runner = CliRunner()
 def _build_source_project(root: Path) -> None:
     store = ensure_project(root)
     create_node(store, node_id="lem_1", kind="lemma", statement="A base lemma")
-    _claim_token = claim_node(store, "lem_1", claimant_id="agent_a", session_id="sess_1").claim_token
+    claim_node(store, "lem_1", claimant_id="agent_a", session_id="sess_1")
     submit_candidate_proof(
         store, "lem_1", claimant_id="agent_a", session_id="sess_1",
-        scoping_rationale="scoped correctly", content="proof text", claim_token=_claim_token)
+        scoping_rationale="scoped correctly", content="proof text")
     researcher(store).decide_acceptance("lem_1", "accept")
-    open_challenge(store, "lem_1", opened_by="agent_b", rationale="double check this")
 
     create_node(store, node_id="clm_1", kind="claim", statement="Depends on lem_1", dependencies=["lem_1"])
-    _claim_token = claim_node(store, "clm_1", claimant_id="agent_c", session_id="sess_c").claim_token
+    claim_node(store, "clm_1", claimant_id="agent_c", session_id="sess_c")
     submit_candidate_proof(
         store, "clm_1", claimant_id="agent_c", session_id="sess_c",
-        scoping_rationale="scoped correctly", content="proof text", claim_token=_claim_token)
-    _claim_token = claim_node(store, "clm_1", claimant_id="agent_d", session_id="sess_d").claim_token
-
-
+        scoping_rationale="scoped correctly", content="proof text")
+    claim_node(store, "clm_1", claimant_id="agent_d", session_id="sess_d")
+    # after the claims: the Challenge leaves clm_1 Blocked, and a Blocked node can't be claimed
+    open_challenge(store, "lem_1", opened_by="agent_b", rationale="double check this")
 def test_exchange_round_trips_the_full_proof_map_graph(tmp_path: Path) -> None:
     source_root = tmp_path / "alice"
     target_root = tmp_path / "bob"
