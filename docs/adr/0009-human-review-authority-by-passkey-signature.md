@@ -1,6 +1,6 @@
 # Human Review authority is a passkey signature issued from the web app
 
-**Status**: accepted (supersedes the "Human-only operations" bullet of ADR-0007; refines ADR-0004 Invariant 1 and ADR-0006 point 12)
+**Status**: superseded by ADR-0010. (Originally: supersedes the "Human-only operations" bullet of ADR-0007; refines ADR-0004 Invariant 1 and ADR-0006 point 12)
 
 A post-#31 audit (issue #32) showed that ADR-0004's Human Acceptance Authority was only a promise. Every human-only operation was gated by a boolean `confirmed=True` (CLI `--confirm`) and a self-declared `--reviewer` name. An agent with shell access could pass both, and did: an agent accepted its own Candidate proof. The service layer had no way to tell who was calling. ADR-0007 made this worse by listing the CLI's `confirmed=True` pattern as an acceptable human confirmation.
 

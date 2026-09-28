@@ -49,11 +49,15 @@ An external, already-established result pulled in as a dependency. It carries a 
 _Avoid_: reference, external theorem
 
 **Candidate proof**:
-A proof an agent or collaborator submits for a proof map node; it is a reviewable artifact, never an established result. Its text lives as a Markdown file in the Proof vault, one immutable file per attempt; the proof map node itself (id, kind, dependencies) stays in SQLite. See ADR-0003.
+A proof of a proof map node, written by an agent or collaborator; a reviewable artifact, never an established result. It is a standalone LaTeX document, the node's working file `proofs/<node-id>/proof.tex`, which agents and the researcher edit freely. What gets reviewed is never the moving working file but a Review snapshot of it. The proof map node itself (id, kind, dependencies) stays in SQLite. See ADR-0010.
 _Avoid_: resolution, solution
 
 **Proof vault**:
-The repo's top-level `proofs/` directory: one Markdown file per Candidate proof attempt (`proofs/<node-id>/v<N>.md`), openable directly as an Obsidian vault. Distinct from `.proof/`, which holds internal, non-human-authored project state.
+The repo's top-level `proofs/` directory. It holds a shared `preamble.tex`, and one folder per node with its working `proof.tex`, its Review snapshots (`snapshots/v<N>.tex`) and its Review decisions (`reviews.jsonl`), all tracked by git. Each node folder is an ordinary LaTeX project that prism-local (or any LaTeX editor) opens as is. Older `v<N>.md` files from ADR-0003 remain as read-only history. Distinct from `.proof/`, which holds internal, non-human-authored project state.
+
+**Review snapshot**:
+A copy of a node's working `proof.tex`, taken when its author requests review. It is never overwritten, and its SHA-256 is recorded. A Review decision is always about one snapshot, named by that hash; a compiled PDF may be archived beside it, but the `.tex` and its hash are what count. See ADR-0010.
+_Avoid_: version (ambiguous with a dependency's accepted version), submission
 _Avoid_: .proof, proof store
 
 **Acceptance**:
@@ -73,7 +77,7 @@ An automated or semi-automated check (a verifier, a checker) run against a speci
 _Avoid_: verification result, verify accept
 
 **Challenge**:
-A claim, raised against an already-Accepted node or an Imported result, that it may no longer be safe to depend on (for example, a missing assumption noticed after the fact). Any agent or collaborator may open one — raising a concern isn't a mathematical judgment, so it isn't gated. Opening a Challenge sets its target's integrity state to Challenged; it never changes the target's acceptance state. Only the researcher resolves a Challenge: for a local node, by dismissing it or by revising the node and re-Accepting it; for an Imported result, through Reference review (reaffirming trust, or treating it as no longer callable so dependents migrate to a corrected node). How it ended is recorded from the signed decision that closed it: **dismissed** (a false alarm, or the Imported result reaffirmed), **upheld** (the revision was rejected or sent back, or the Imported result is no longer callable), or **resolved-by-revision** (a revised proof was Accepted). An ordinary observation that doesn't call a node's standing into doubt is a Comment, not a Challenge — Challenge is reserved for the invalidating case. A Challenge is itself an addressable, listable object once opened, not just a flag on its target. See ADR-0004, ADR-0005, ADR-0006.
+A claim, raised against an already-Accepted node or an Imported result, that it may no longer be safe to depend on (for example, a missing assumption noticed after the fact). Any agent or collaborator may open one — raising a concern isn't a mathematical judgment, so it isn't gated. Opening a Challenge sets its target's integrity state to Challenged; it never changes the target's acceptance state. Only the researcher resolves a Challenge: for a local node, by dismissing it or by revising the node and re-Accepting it; for an Imported result, through Reference review (reaffirming trust, or treating it as no longer callable so dependents migrate to a corrected node). How it ended is read off the Review decision that closed it: **dismissed** (a false alarm, or the Imported result reaffirmed), **upheld** (the revision was rejected or sent back, or the Imported result is no longer callable), or **resolved-by-revision** (a revised proof was Accepted). An ordinary observation that doesn't call a node's standing into doubt is a Comment, not a Challenge — Challenge is reserved for the invalidating case. A Challenge is itself an addressable, listable object once opened, not just a flag on its target. See ADR-0004, ADR-0005, ADR-0006.
 _Avoid_: bug, finding
 
 **Accepted mathematical interface**:
@@ -84,48 +88,32 @@ _Avoid_: statement (too narrow — assumptions and scope matter too), interface 
 Human Review's confirmation that an existing Candidate proof remains valid after one of its dependencies advanced to a new accepted version, because that dependency's Accepted mathematical interface didn't change — only its internal proof did. Updates the dependency edge's pinned version and is recorded as its own kind of review decision (`dependency_revalidation`, decision `reaffirmed`); it does not create a new Candidate proof, and it does not touch the reviewing node's own acceptance state. If the interface did change, this doesn't apply — a new Candidate proof is required instead. See ADR-0005.
 _Avoid_: reaccept, re-approve, revalidate (as a bare verb — say what's being revalidated)
 
-**Signed decision**:
-A Human Review decision (Acceptance, Reference review, Evidence review, Lightweight re-review, Challenge resolution, Promote, force-release, reviewer enrollment) as it is actually recorded: a review-history row signed with an enrolled Reviewer passkey over exactly what was decided — including the hash of the Candidate proof text the researcher read. Only signed decisions count; an unsigned or foreign-signed record is shown, never obeyed. Issued only from the web app; the CLI and agents can only request one. See ADR-0009.
-_Avoid_: confirmation, `--confirm`, approval flag
+**Review decision**:
+A Human Review decision (Acceptance, Reference review, Evidence review, Lightweight re-review, Challenge resolution, Promote) as it is recorded: one line in the node's git-tracked `reviews.jsonl`, naming the Review snapshot's SHA-256, the rationale and the time, committed together with that snapshot by the reviewer. The commit's author, a GitHub identity, *is* the reviewer, and the pushed commit is the record of who decided what. Made only on the proof map page; no CLI command, Codex route or MCP tool makes one. That boundary is a convention for cooperative agents, not a security mechanism. See ADR-0010.
+_Avoid_: signed decision, confirmation, `--confirm`, approval flag
 
-**Reviewer passkey**:
-The researcher's WebAuthn credential (Touch ID, Windows Hello, or a security key) enrolled in a project. It is what makes a decision human: an agent can read and write project files but cannot produce a passkey signature. Enrolling or revoking one is itself a Signed decision. See ADR-0009.
-_Avoid_: reviewer id, reviewer name (a self-declared name proves nothing)
-
-**Review app**:
-The project's local web page (`proof review serve` / `proof review open`), served on the project's own `http://localhost:<port>`. It is the only place a Signed decision is made: it shows exactly what is being decided and asks for the passkey tap. It holds no authority itself; every write it forwards is verified by the service layer like anyone else's. See ADR-0009.
-_Avoid_: dashboard, admin panel
-
-**Reviewer key registry**:
-The project's append-only, hash-chained list of enrolled and revoked Reviewer passkeys. The Review app shows it on every page, with a banner whenever it changed since the researcher last *acknowledged* it. Acknowledging it is itself a passkey tap.
-_Avoid_: key store, allowlist
-
-**Foreign attestation**:
-A Human Review decision another project signed, arriving in an exchange bundle. The Review app shows it next to its node with whether its signature checks out, and it counts for nothing here: the researcher can make the same decision locally with their own passkey, or enroll the other reviewer's key, which then counts only for decisions it signs in this project from now on. See ADR-0009 point 6.
-_Avoid_: imported approval, remote decision
+**Proof map page**:
+proof-cli's own local web page and the map's home: the DAG and tree, the frontier, each node's three state axes, and the one place Review decisions are made. A node's page shows the Review snapshot under review, with its PDF if one was built, and offers **Open in prism-local** for the node's folder. See ADR-0008, ADR-0010.
+_Avoid_: review app (its ADR-0009 name), dashboard, admin panel
 
 **No longer callable** (a Reference review outcome):
-The researcher's signed judgment that an Imported result can't be relied on after all. Final: its dependents read potentially stale or blocked, and a corrected source becomes a new Imported result node. See ADR-0009, #20.
+The researcher's judgment that an Imported result can't be relied on after all. Final: its dependents read potentially stale or blocked, and a corrected source becomes a new Imported result node. See #20.
 _Avoid_: rejected reference, revoked citation
-
-**Legacy decision**:
-A Human Review decision recorded before ADR-0009, and so unsigned. It doesn't count until the researcher **re-signs** it: a new Signed decision of the same kind and value, with the original row left untouched. It can also be **declined**, which is signed too; the decision stays uncounted and leaves the list. A legacy Reject keeps its node terminal and a legacy dismissal keeps its Challenge closed until re-signed. Neither can be declined. See ADR-0009, issue #42.
-_Avoid_: old decision, migration
 
 ### Node lifecycle
 
 A proof map node's state is tracked along three independent axes, never folded into one flat status. None are stored directly — each is computed from lower-level records (an active claim, the node's latest Candidate proof and its review decision, its dependencies' own state, and any open Challenges). See ADR-0002, ADR-0004.
 
 - **workflow state**: Claimed, Review-needed, Revision requested, Blocked — how far the current attempt has gotten
-- **acceptance state**: Accepted, Rejected, or unreviewed by default — set only by the researcher's Human Review. Reads *unverifiable* when the node's newest decision doesn't verify (unsigned, tampered, or no longer describing the node); it never falls back to an older decision (ADR-0009)
+- **acceptance state**: Accepted, Rejected, or unreviewed by default — set only by the researcher's Human Review, and only ever read off the newest Review decision. Reads *unverifiable* when that decision no longer matches its snapshot or its node
 - **integrity state**: current by default, Potentially stale, or Challenged — a derived warning overlay, never itself a workflow or acceptance value
 
 **Claimed** (a workflow state):
-A researcher or agent has taken ownership of a proof map node to work on it, and has not yet submitted a Candidate proof for it. At most one claim is active on a node at a time; submitting a Candidate proof ends it, handing the node to review-needed — the next attempt needs a fresh claim. Claiming returns a claim token; submitting or releasing needs it (ADR-0009). See ADR-0006.
-_Avoid_: assigned, in progress, proof-drafted
+A researcher or agent has assigned a proof map node to itself before working on it, as a wayfinder ticket is claimed by its assignee: the assignee *is* the claim. It is transitional, a planning signal that tells concurrent agents to skip the node, never a lock. It doesn't gate editing the working file, carries no token, and a stale one is simply reassigned or cleared. One assignee per node; the claim ends when its holder requests review or unassigns. The **frontier** is the open, unblocked, unclaimed nodes. See ADR-0006, ADR-0010.
+_Avoid_: lock, lease, in progress, proof-drafted
 
 **Review-needed** (a workflow state):
-A proof map node has a submitted Candidate proof awaiting the researcher's Acceptance or Reference review decision. It is the only workflow state in which an Acceptance decision (accept, revision requested, reject) can be made. A node with no Candidate proof, under an active claim, Blocked, or whose current submission was already decided can't receive one.
+A proof map node's author has requested review, so a Review snapshot awaits the researcher's Acceptance or Reference review decision. It is the only workflow state in which an Acceptance decision (accept, revision requested, reject) can be made. A node with no snapshot, Blocked, or whose newest snapshot was already decided can't receive one.
 _Avoid_: pending review, submitted
 
 **Revision requested** (a workflow state):
@@ -141,7 +129,7 @@ The researcher has given this node Acceptance (or, for an Imported result, Refer
 _Avoid_: verified, established
 
 **Unverifiable** (an acceptance state):
-The node's newest Human Review decision doesn't count: it's unsigned (a pre-ADR-0009 legacy decision), its signature doesn't verify, or it no longer describes the node (the proof text, statement, or dependencies changed since it was signed). The node is neither Accepted nor open to reclaim; a researcher re-signs or re-decides it. It never falls back to an older decision. See ADR-0009.
+The node's newest Review decision no longer matches what it decided: its Review snapshot's file no longer hashes to the SHA-256 it names, or the node's statement, assumptions or dependencies changed since. The node is neither Accepted nor open to pick up; the researcher decides it afresh. It never falls back to an older decision. See ADR-0010.
 _Avoid_: unsigned, invalid, unreviewed
 
 **Rejected** (an acceptance state):

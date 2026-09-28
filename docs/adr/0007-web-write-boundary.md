@@ -1,6 +1,6 @@
 # The web app is a full human interaction surface, not a read-only viewer
 
-**Status**: accepted
+**Status**: accepted; amended by ADR-0010 (decisions are made on the proof map page without a passkey)
 
 The local web app (issue #5) could have stayed a pretty graph viewer, leaving every mutation — Accept, revise, Split, Promote, open or resolve a Challenge — to the CLI. That would break the product's own loop: a researcher who can *see* the structure but has to switch to a terminal to *act* on it isn't getting what a visual proof map is for.
 
