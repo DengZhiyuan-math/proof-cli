@@ -16,10 +16,13 @@ from proof_cli.proof_map import (
     get_blocked_reason,
     get_challenge,
     get_node,
+    get_acceptance_state,
+    get_dependency_pin,
     get_integrity_state,
     get_reference_review_state,
     get_workflow_state,
     list_challenges,
+    list_integrity_warnings,
     open_challenge,
     record_evidence_check,
 )
@@ -97,11 +100,271 @@ def test_no_longer_callable_is_terminal(tmp_path: Path):
     assert get_reference_review_state(store, "ref") == "no-longer-callable"
 
 
+# -- a corrected source: dependents move onto it by the researcher's decision (#20) ------
+
+
+def _withdrawn_with_a_correction(store):
+    """`ref` found wanting, `ref_v2` citing the corrected source, and nodes resting on `ref`."""
+    _reviewed_reference(store)
+    _accepted(store, "uses_ref", ["ref"])
+    create_node(store, node_id="new_dep", kind="claim", statement="later", dependencies=["ref"])
+    create_node(store, node_id="rej", kind="claim", statement="abandoned", dependencies=["ref"])
+    submit_proof(store, "rej", claimant_id="agent_a", scoping_rationale="scoped", content="proof rej")
+    researcher(store).decide_acceptance("rej", "reject")
+    researcher(store).decide_reference_review("ref", "no-longer-callable", rationale="the published proof has a gap")
+    _reviewed_reference(store, "ref_v2")
+
+
+def test_migrating_dependents_moves_them_onto_the_correction_and_makes_the_accepted_ones_re_confirm(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    _withdrawn_with_a_correction(store)
+
+    record = researcher(store).migrate_dependents("ref", "ref_v2", rationale="erratum published as v2")
+
+    assert get_node(store, "uses_ref").dependencies == ["ref_v2"]
+    assert get_node(store, "new_dep").dependencies == ["ref_v2"]
+    assert get_node(store, "rej").dependencies == ["ref"]  # Rejected: the record of an abandoned route, left as it was
+    # an acceptance made against the withdrawn citation no longer counts: the researcher looks again
+    assert get_acceptance_state(store, "uses_ref") == "unverifiable"
+    assert get_workflow_state(store, "uses_ref") == "review-needed"
+    assert any(w.code == "DECISION_NO_LONGER_APPLIES" and w.details["node_id"] == "uses_ref" for w in list_integrity_warnings(store))
+    assert get_workflow_state(store, "new_dep") == "open"
+    assert get_dependency_pin(store, "uses_ref", "ref") is None
+    assert get_dependency_pin(store, "uses_ref", "ref_v2") is not None
+
+    # the decision is a line in the withdrawn node's reviews.jsonl, naming the correction and who moved
+    from proof_cli.authority import verify_decision_row
+
+    assert (record.kind.value, record.decision.value) == ("dependent_migration", "superseded")
+    verdict = verify_decision_row(store, record.decision_row_id)
+    assert verdict.status == "verified"
+    assert [pin.target_node_id for pin in verdict.payload.dependency_pins] == ["ref_v2"]
+    assert verdict.payload.migrated_dependents == ["new_dep", "uses_ref"]
+    assert (tmp_path / "proofs" / "ref" / "reviews.jsonl").is_file()
+
+    # re-Accepting the same snapshot against the correction counts again
+    researcher(store).decide_acceptance("uses_ref", "accept")
+    assert get_acceptance_state(store, "uses_ref") == "accepted"
+    assert get_integrity_state(store, "uses_ref") == "current"
+
+
+@pytest.mark.parametrize(
+    "old, replacement, code",
+    [
+        ("ref_v2", "ref", "REFERENCE_STILL_CALLABLE"),  # only a withdrawn citation's dependents move
+        ("ref", "ref", "SAME_NODE"),
+        ("ref", "uses_ref", "REPLACEMENT_NOT_IMPORTED_RESULT"),
+        ("uses_ref", "ref_v2", "NOT_IMPORTED_RESULT"),
+        ("ref", "nope", "NODE_NOT_FOUND"),
+    ],
+)
+def test_migrating_dependents_is_refused_when_it_does_not_apply(tmp_path: Path, old, replacement, code):
+    store = ensure_project(tmp_path)
+    _withdrawn_with_a_correction(store)
+
+    with pytest.raises(ProofMapError) as refused:
+        researcher(store).migrate_dependents(old, replacement)
+
+    assert refused.value.code == code
+    assert get_node(store, "uses_ref").dependencies == ["ref"]
+
+
+def test_migrating_onto_a_withdrawn_replacement_or_with_nothing_to_move_is_refused(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    _withdrawn_with_a_correction(store)
+    create_node(store, node_id="ref_bad", kind="imported_result", statement="K", source_locator="doi:k", source_version="v3")
+    researcher(store).decide_reference_review("ref_bad", "no-longer-callable")
+
+    with pytest.raises(ProofMapError) as refused:
+        researcher(store).migrate_dependents("ref", "ref_bad")
+    assert refused.value.code == "REPLACEMENT_NOT_CALLABLE"
+
+    researcher(store).migrate_dependents("ref", "ref_v2")
+    with pytest.raises(ProofMapError) as refused:
+        researcher(store).migrate_dependents("ref", "ref_v2")
+    assert refused.value.code == "NO_DEPENDENTS"
+
+
+def test_the_page_offers_moving_dependents_onto_each_usable_correction(app):
+    store, client = app
+    _withdrawn_with_a_correction(store)
+
+    offered = [d for d in client.get("/api/node/ref")[1]["data"]["decisions"] if d["kind"] == "dependent_migration"]
+    assert [{k: v for k, v in d.items() if k != "binding"} for d in offered] == [
+        {"kind": "dependent_migration", "target_id": "ref", "decision": "superseded", "dependency_id": "ref_v2"}
+    ]
+
+    status, body = decide(client, [{**offered[0], "rationale": "erratum"}])
+    assert status == 200, body
+    assert get_node(store, "uses_ref").dependencies == ["ref_v2"]
+    assert not [d for d in client.get("/api/node/ref")[1]["data"]["decisions"] if d["kind"] == "dependent_migration"]
+
+
+def _another_writer_first(store, monkeypatch, write):
+    """Run `write` from a second store just before `store`'s next write transaction takes the lock:
+    the window between reading the project and writing it (PR #63 audit)."""
+    from contextlib import contextmanager
+
+    from proof_cli.storage import ProjectStore
+
+    original = store.transaction
+    pending = [write]
+
+    @contextmanager
+    def interleaved():
+        if pending:
+            pending.pop()(ProjectStore(store.root))
+        with original() as conn:
+            yield conn
+
+    monkeypatch.setattr(store, "transaction", interleaved)
+
+
+def test_a_split_just_before_migration_keeps_its_new_edge(tmp_path: Path, monkeypatch):
+    from proof_cli.proof_map import split_node
+
+    store = ensure_project(tmp_path)
+    _withdrawn_with_a_correction(store)
+    _another_writer_first(store, monkeypatch, lambda other: split_node(other, "new_dep", [{"id": "child", "statement": "c"}]))
+
+    researcher(store).migrate_dependents("ref", "ref_v2")
+
+    assert get_node(store, "new_dep").dependencies == ["ref_v2", "child"]
+
+
+def test_a_dependent_added_just_before_migration_is_moved_and_recorded(tmp_path: Path, monkeypatch):
+    from proof_cli.authority import verify_decision_row
+
+    store = ensure_project(tmp_path)
+    _withdrawn_with_a_correction(store)
+    _another_writer_first(store, monkeypatch, lambda other: create_node(other, node_id="late", kind="claim", statement="l", dependencies=["ref"]))
+
+    record = researcher(store).migrate_dependents("ref", "ref_v2")
+
+    assert get_node(store, "late").dependencies == ["ref_v2"]
+    assert verify_decision_row(store, record.decision_row_id).payload.migrated_dependents == ["late", "new_dep", "uses_ref"]
+
+
+def test_a_replacement_withdrawn_just_before_migration_is_refused(tmp_path: Path, monkeypatch):
+    store = ensure_project(tmp_path)
+    _withdrawn_with_a_correction(store)
+    _another_writer_first(store, monkeypatch, lambda other: researcher(other).decide_reference_review("ref_v2", "no-longer-callable"))
+
+    with pytest.raises(ProofMapError) as refused:
+        researcher(store).migrate_dependents("ref", "ref_v2")
+
+    assert refused.value.code == "REPLACEMENT_NOT_CALLABLE"
+    assert get_node(store, "uses_ref").dependencies == ["ref"]
+
+
+def test_a_page_that_showed_the_old_dependencies_cannot_accept_the_new_ones(app):
+    """PR #63 audit: an Accept from a page opened before a migration would bind a citation it never showed."""
+    store, client = app
+    _reviewed_reference(store)
+    _accepted(store, "uses_ref", ["ref"])
+    submit_proof(store, "uses_ref", claimant_id="agent_a", scoping_rationale="revision", content="revised proof")
+    view = client.get("/api/node/uses_ref")[1]["data"]
+    accept = next(d for d in view["decisions"] if d["kind"] == "acceptance" and d["decision"] == "accept")
+    stale = {**accept, "viewed_candidate_proof_sha256": view["candidate_proof"]["sha256"], "rationale": "read against ref"}
+
+    researcher(store).decide_reference_review("ref", "no-longer-callable")
+    _reviewed_reference(store, "ref_v2")
+    researcher(store).migrate_dependents("ref", "ref_v2")
+
+    status, body = decide(client, [stale])
+    assert body["data"]["results"][0]["error"]["code"] == "STALE_VIEW", body
+    assert get_acceptance_state(store, "uses_ref") == "unverifiable"
+
+    reloaded = client.get("/api/node/uses_ref")[1]["data"]
+    fresh = next(d for d in reloaded["decisions"] if d["kind"] == "acceptance" and d["decision"] == "accept")
+    status, body = decide(client, [{**fresh, "viewed_candidate_proof_sha256": reloaded["candidate_proof"]["sha256"]}])
+    assert body["data"]["results"][0]["ok"], body
+    assert get_acceptance_state(store, "uses_ref") == "accepted"
+
+
+def _a_write_lands_mid_read(monkeypatch, name, write):
+    """Start `write` (on a second store, in another thread) just as the page is about to compute
+    its bindings — after it read what it shows. It must wait for the read, never land between."""
+    import threading
+
+    from proof_cli.webapp import server
+
+    original = getattr(server, name)
+    writer = threading.Thread(target=write)
+
+    def mid_read(*args, **kwargs):
+        if not writer.is_alive() and writer.ident is None:
+            writer.start()
+            writer.join(timeout=0.5)  # blocked on the page's read lock, if it holds one
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(server, name, mid_read)
+    return writer
+
+
+def test_a_page_shows_and_binds_one_state_even_with_a_migration_mid_read(app, monkeypatch):
+    """PR #63 audit (5b330a0): the page read `ref`, a migration landed, and the binding then described `ref_v2`."""
+    from proof_cli.storage import ProjectStore
+
+    store, client = app
+    _reviewed_reference(store)
+    _accepted(store, "uses_ref", ["ref"])
+    submit_proof(store, "uses_ref", claimant_id="agent_a", scoping_rationale="revision", content="revised proof")
+    researcher(store).decide_reference_review("ref", "no-longer-callable")
+    _reviewed_reference(store, "ref_v2")
+    writer = _a_write_lands_mid_read(
+        monkeypatch, "_available_decisions", lambda: researcher(ProjectStore(store.root)).migrate_dependents("ref", "ref_v2")
+    )
+
+    view = client.get("/api/node/uses_ref")[1]["data"]
+    writer.join()
+
+    assert view["node"]["dependencies"] == ["ref"]  # what the page showed …
+    accept = next(d for d in view["decisions"] if d["kind"] == "acceptance" and d["decision"] == "accept")
+    status, body = decide(client, [{**accept, "viewed_candidate_proof_sha256": view["candidate_proof"]["sha256"]}])
+    assert body["data"]["results"][0]["error"]["code"] == "STALE_VIEW", body  # … is what its binding describes
+    assert get_node(store, "uses_ref").dependencies == ["ref_v2"]
+
+
+def test_the_pending_list_shows_and_binds_one_state_even_with_a_snapshot_mid_read(app, monkeypatch):
+    from proof_cli.storage import ProjectStore
+
+    store, client = app
+    _reviewed_reference(store)
+    create_node(store, node_id="uses_ref", kind="claim", statement="s", dependencies=["ref"])
+    submit_proof(store, "uses_ref", claimant_id="agent_a", scoping_rationale="scoped", content="proof v1")
+    writer = _a_write_lands_mid_read(
+        monkeypatch, "_binding",
+        lambda: submit_proof(ProjectStore(store.root), "uses_ref", claimant_id="agent_a", scoping_rationale="scoped", content="proof v2"),
+    )
+
+    (item,) = [p for p in client.get("/api/state")[1]["data"]["pending"] if p["node_id"] == "uses_ref"]
+    writer.join()
+
+    assert item["candidate_proof"]["text"] == "proof v1"
+    status, body = decide(client, [{"kind": "acceptance", "target_id": "uses_ref", "decision": "accept", "binding": item["bindings"]["accept"]}])
+    assert body["data"]["results"][0]["error"]["code"] == "STALE_VIEW", body
+
+
+def test_the_pending_list_binds_each_decision_to_what_it_showed(app):
+    store, client = app
+    _reviewed_reference(store)
+    create_node(store, node_id="uses_ref", kind="claim", statement="s", dependencies=["ref"])
+    submit_proof(store, "uses_ref", claimant_id="agent_a", scoping_rationale="scoped", content="proof")
+    (item,) = [p for p in client.get("/api/state")[1]["data"]["pending"] if p["node_id"] == "uses_ref"]
+    assert set(item["bindings"]) == {"accept", "revision-requested", "reject"}
+
+    submit_proof(store, "uses_ref", claimant_id="agent_a", scoping_rationale="scoped", content="a newer proof")  # not what the row showed
+    status, body = decide(client, [{"kind": "acceptance", "target_id": "uses_ref", "decision": "accept", "binding": item["bindings"]["accept"]}])
+    assert body["data"]["results"][0]["error"]["code"] == "STALE_VIEW", body
+
+
 def test_the_app_offers_both_reference_decisions_and_stops_listing_a_withdrawn_one(app):
     store, client = app
     create_node(store, node_id="ref", kind="imported_result", statement="K", source_locator="doi:k", source_version="v1")
 
     view = client.get("/api/node/ref")[1]["data"]
+    assert all(d.pop("binding") for d in view["decisions"])  # each bound to what the page shows
     assert view["decisions"] == [
         {"kind": "reference_review", "target_id": "ref", "decision": "reference-review"},
         {"kind": "reference_review", "target_id": "ref", "decision": "no-longer-callable"},
