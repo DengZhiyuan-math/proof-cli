@@ -133,8 +133,6 @@ def _available_decisions(store: ProjectStore, node, *, claim, proof, dependencie
     for challenge in challenges:
         if challenge.status.value == "open":
             offered.append({"kind": "challenge_resolution", "target_id": challenge.id, "decision": "dismissed"})
-    if claim is not None:
-        offered.append({"kind": "force_release", "target_id": claim.id, "decision": "force-release", "claimant_id": claim.claimant_id})
     return offered
 
 
@@ -312,8 +310,7 @@ class ReviewApp:
         claim = get_active_claim(store, node_id)
         decisions = _available_decisions(store, node, claim=claim, proof=proof, dependencies=dependencies, challenges=challenges)
         return {
-            # who holds it, for a force-release; never the session id, which a
-            # pre-token claim still accepts as proof of holding it (#37)
+            # its assignee: a planning signal, cleared with `proof node unassign` (ADR-0010)
             "claim": {"id": claim.id, "claimant_id": claim.claimant_id, "claimed_at": claim.claimed_at.isoformat()} if claim else None,
             "node": node.model_dump(mode="json"),
             "workflow_state": proof_map.get_workflow_state(store, node_id),

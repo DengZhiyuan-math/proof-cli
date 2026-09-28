@@ -47,6 +47,7 @@ from proof_cli.proof_map import (
 )
 from proof_cli.collaboration import list_review_records
 from proof_cli.storage import (
+    list_events,
     ensure_project,
     get_active_claim,
     get_current_candidate_proof,
@@ -207,9 +208,22 @@ def test_claiming_node_someone_else_holds_fails_with_conflict_details(tmp_path: 
         claim_node(store, "clm_1", claimant_id="agent_b", session_id="sess_2")
 
     assert exc_info.value.code == "CLAIM_CONFLICT"
-    assert exc_info.value.details["claimant_id"] == "agent_a"
-    assert "session_id" not in exc_info.value.details  # nothing that could help impersonate the holder leaks
+    assert exc_info.value.details["assignee"] == "agent_a"
+    assert exc_info.value.details["node_id"] == "clm_1"
     assert "claimed_at" in exc_info.value.details
+
+
+def test_a_claim_is_taken_over_only_on_request(tmp_path: Path):
+    """A claim is a planning signal (ADR-0010): a stale one is reassigned, not force-released."""
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_1", kind="claim", statement="stmt")
+    first = claim_node(store, "clm_1", claimant_id="agent_a")
+
+    second = claim_node(store, "clm_1", claimant_id="agent_b", reassign=True)
+
+    assert get_active_claim(store, "clm_1").id == second.id != first.id
+    assert get_active_claim(store, "clm_1").claimant_id == "agent_b"
+    assert any(event.kind == "proof_map_claim_reassigned" for event in list_events(store))
 
 
 def test_claiming_nonexistent_node_raises_node_not_found(tmp_path: Path):
@@ -222,59 +236,25 @@ def test_claiming_nonexistent_node_raises_node_not_found(tmp_path: Path):
 def test_owner_can_release_their_own_claim(tmp_path: Path):
     store = ensure_project(tmp_path)
     create_node(store, node_id="clm_1", kind="claim", statement="stmt")
-    _claim_token = claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1").claim_token
-
-    released = release_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1", claim_token=_claim_token)
+    claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
+    released = release_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
 
     assert released.released_by == "agent_a"
     assert get_active_claim(store, "clm_1") is None
 
     # released, so it can be claimed again by someone else
     claim = claim_node(store, "clm_1", claimant_id="agent_b", session_id="sess_2")
-    _claim_token = claim.claim_token
     assert claim.claimant_id == "agent_b"
 
 
-def test_non_owner_release_without_force_is_rejected(tmp_path: Path):
+def test_anyone_can_clear_a_stale_claim_and_it_is_recorded(tmp_path: Path):
     store = ensure_project(tmp_path)
     create_node(store, node_id="clm_1", kind="claim", statement="stmt")
     claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
 
-    with pytest.raises(ProofMapError) as exc_info:
-        release_node(store, "clm_1", claimant_id="agent_b", session_id="sess_2")
+    released = release_node(store, "clm_1", claimant_id="researcher", reason="agent went quiet")
 
-    assert exc_info.value.code == "NOT_CLAIMANT"
-    assert get_active_claim(store, "clm_1") is not None
-
-
-def test_force_release_without_a_signed_decision_or_reason_is_rejected(tmp_path: Path):
-    store = ensure_project(tmp_path)
-    create_node(store, node_id="clm_1", kind="claim", statement="stmt")
-    claim = claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
-
-
-    with pytest.raises(ProofMapError) as exc_info:
-        release_node(store, "clm_1", claimant_id="researcher", session_id="sess_r", force=True)
-    assert exc_info.value.code == "HUMAN_REVIEW_REQUIRED"
-
-    unreasoned = researcher(store).sign("force_release", claim.id, "force-release", rationale="  ")
-    with pytest.raises(ProofMapError) as exc_info:
-        release_node(store, "clm_1", claimant_id="researcher", session_id="sess_r", force=True, signed_decision=unreasoned)
-    assert exc_info.value.code == "FORCE_RELEASE_REQUIRES_REASON"
-
-    assert get_active_claim(store, "clm_1") is not None
-
-
-def test_force_release_records_audit_trail(tmp_path: Path):
-    store = ensure_project(tmp_path)
-    create_node(store, node_id="clm_1", kind="claim", statement="stmt")
-    claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
-
-    released = researcher(store).force_release("clm_1", reason="agent went unresponsive")
-
-    assert released.released_by == researcher(store).reviewer_id  # the passkey, not a self-declared name
-    assert released.release_reason == "agent went unresponsive"
-    assert released.claimant_id == "agent_a"  # original claimant is preserved for the audit trail
+    assert (released.claimant_id, released.released_by, released.release_reason) == ("agent_a", "researcher", "agent went quiet")
     assert get_active_claim(store, "clm_1") is None
 
 
@@ -351,66 +331,44 @@ def test_mark_claim_released_is_a_no_op_on_an_already_released_claim(tmp_path: P
     assert second is False  # the claim was already released; this write must not silently win
 
 
-def test_concurrent_release_and_force_release_only_one_wins(tmp_path: Path):
-    """Mirrors test_claim_concurrency_exactly_one_succeeds but for release:
-    the owner releasing and a researcher force-releasing at the same moment
-    must not both succeed and silently overwrite each other's audit trail."""
+def test_concurrent_releases_only_one_wins(tmp_path: Path):
+    """Two people clearing the same claim at once: one records the release, the other finds none."""
     store = ensure_project(tmp_path)
     create_node(store, node_id="clm_1", kind="claim", statement="stmt")
-    claim = claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
-    _claim_token = claim.claim_token
-    signed = researcher(store).sign("force_release", claim.id, "force-release", rationale="stuck")
+    claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
 
     barrier = threading.Barrier(2)
-    results: dict[str, tuple[str, str]] = {}
+    results: dict[str, str] = {}
 
-    def owner_release() -> None:
+    def release(who: str) -> None:
         barrier.wait()
         try:
-            released = release_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1", claim_token=_claim_token)
-            results["owner"] = ("ok", released.released_by)
+            release_node(store, "clm_1", claimant_id=who)
+            results[who] = "ok"
         except ProofMapError as exc:
-            results["owner"] = ("error", exc.code)
+            results[who] = exc.code
 
-    def force_release() -> None:
-        barrier.wait()
-        try:
-            released = release_node(
-                store,
-                "clm_1",
-                claimant_id="researcher",
-                session_id="sess_r",
-                force=True,
-                signed_decision=signed,
-            )
-            results["force"] = ("ok", released.released_by)
-        except ProofMapError as exc:
-            results["force"] = ("error", exc.code)
-
-    threads = [threading.Thread(target=owner_release), threading.Thread(target=force_release)]
+    threads = [threading.Thread(target=release, args=(who,)) for who in ("agent_a", "researcher")]
     for thread in threads:
         thread.start()
     for thread in threads:
         thread.join()
 
-    outcomes = [results["owner"][0], results["force"][0]]
-    assert outcomes.count("ok") == 1
-    assert outcomes.count("error") == 1
+    assert sorted(results.values()) == ["NO_ACTIVE_CLAIM", "ok"]
     assert get_active_claim(store, "clm_1") is None
 
 
 def test_submit_candidate_proof_writes_vault_file_and_index(tmp_path: Path):
     store = ensure_project(tmp_path)
     create_node(store, node_id="clm_1", kind="claim", statement="stmt")
-    _claim_token = claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1").claim_token
-
+    claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
     record = submit_candidate_proof(
         store,
         "clm_1",
         claimant_id="agent_a",
         session_id="sess_1",
         scoping_rationale="This claim is a single algebraic step, no further decomposition needed.",
-        content="## Proof\n\nBy direct computation, ...", claim_token=_claim_token)
+        content="## Proof\n\nBy direct computation, ...")
 
     assert record.node_id == "clm_1"
     assert record.version == 1
@@ -436,8 +394,7 @@ def test_submit_with_preexisting_vault_file_raises_proof_map_error_not_file_exis
 
     store = ensure_project(tmp_path)
     create_node(store, node_id="clm_1", kind="claim", statement="stmt")
-    _claim_token = claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1").claim_token
-
+    claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
     stray_path = candidate_proof_path(store.root, "clm_1", 1)
     stray_path.parent.mkdir(parents=True, exist_ok=True)
     stray_path.write_text("leftover file", encoding="utf-8")
@@ -445,15 +402,14 @@ def test_submit_with_preexisting_vault_file_raises_proof_map_error_not_file_exis
     with pytest.raises(ProofMapError) as exc_info:
         submit_candidate_proof(
             store, "clm_1", claimant_id="agent_a", session_id="sess_1",
-            scoping_rationale="scoped correctly", content="proof text", claim_token=_claim_token)
+            scoping_rationale="scoped correctly", content="proof text")
     assert exc_info.value.code == "CANDIDATE_PROOF_VERSION_CONFLICT"
 
 
 def test_submit_requires_scoping_rationale(tmp_path: Path):
     store = ensure_project(tmp_path)
     create_node(store, node_id="clm_1", kind="claim", statement="stmt")
-    _claim_token = claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1").claim_token
-
+    claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
     with pytest.raises(ProofMapError) as exc_info:
         submit_candidate_proof(
             store,
@@ -461,24 +417,20 @@ def test_submit_requires_scoping_rationale(tmp_path: Path):
             claimant_id="agent_a",
             session_id="sess_1",
             scoping_rationale="   ",
-            content="proof text", claim_token=_claim_token)
+            content="proof text")
     assert exc_info.value.code == "SCOPING_RATIONALE_REQUIRED"
 
 
-def test_submit_without_active_claim_raises_no_active_claim(tmp_path: Path):
+def test_submitting_needs_no_claim_but_a_claimed_node_is_its_holders(tmp_path: Path):
     store = ensure_project(tmp_path)
     create_node(store, node_id="clm_1", kind="claim", statement="stmt")
+    submit_candidate_proof(store, "clm_1", claimant_id="agent_a", session_id="", scoping_rationale="scoped correctly", content="v1")
 
+    create_node(store, node_id="clm_2", kind="claim", statement="stmt")
+    claim_node(store, "clm_2", claimant_id="agent_b")
     with pytest.raises(ProofMapError) as exc_info:
-        submit_candidate_proof(
-            store,
-            "clm_1",
-            claimant_id="agent_a",
-            session_id="sess_1",
-            scoping_rationale="scoped correctly",
-            content="proof text",
-        )
-    assert exc_info.value.code == "NO_ACTIVE_CLAIM"
+        submit_candidate_proof(store, "clm_2", claimant_id="agent_a", session_id="", scoping_rationale="scoped correctly", content="v1")
+    assert (exc_info.value.code, exc_info.value.details["assignee"]) == ("NOT_CLAIMANT", "agent_b")
 
 
 def test_submit_by_non_claimant_is_rejected(tmp_path: Path):
@@ -505,15 +457,14 @@ def test_submit_by_non_claimant_is_rejected(tmp_path: Path):
 def test_successful_submit_ends_the_claim(tmp_path: Path):
     store = ensure_project(tmp_path)
     create_node(store, node_id="clm_1", kind="claim", statement="stmt")
-    _claim_token = claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1").claim_token
-
+    claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
     submit_candidate_proof(
         store,
         "clm_1",
         claimant_id="agent_a",
         session_id="sess_1",
         scoping_rationale="scoped correctly",
-        content="proof text", claim_token=_claim_token)
+        content="proof text")
 
     # claim ends automatically; the node reads as review-needed via the
     # closest available signal (no active claim, a pending candidate proof) —
@@ -524,29 +475,27 @@ def test_successful_submit_ends_the_claim(tmp_path: Path):
     assert current.review_record_id is None
 
     # released, so someone else could claim it again
-    _claim_token = claim_node(store, "clm_1", claimant_id="agent_b", session_id="sess_2").claim_token
-
-
+    claim_node(store, "clm_1", claimant_id="agent_b", session_id="sess_2")
 def test_second_submission_creates_v2_alongside_untouched_v1(tmp_path: Path):
     store = ensure_project(tmp_path)
     create_node(store, node_id="clm_1", kind="claim", statement="stmt")
-    _claim_token = claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1").claim_token
+    claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
     first = submit_candidate_proof(
         store,
         "clm_1",
         claimant_id="agent_a",
         session_id="sess_1",
         scoping_rationale="first attempt",
-        content="v1 attempt", claim_token=_claim_token)
+        content="v1 attempt")
 
-    _claim_token = claim_node(store, "clm_1", claimant_id="agent_b", session_id="sess_2").claim_token
+    claim_node(store, "clm_1", claimant_id="agent_b", session_id="sess_2")
     second = submit_candidate_proof(
         store,
         "clm_1",
         claimant_id="agent_b",
         session_id="sess_2",
         scoping_rationale="second attempt",
-        content="v2 attempt", claim_token=_claim_token)
+        content="v2 attempt")
 
     assert first.version == 1
     assert second.version == 2
@@ -569,14 +518,14 @@ def test_second_submission_creates_v2_alongside_untouched_v1(tmp_path: Path):
 def test_renaming_vault_file_does_not_break_stable_id(tmp_path: Path):
     store = ensure_project(tmp_path)
     create_node(store, node_id="clm_1", kind="claim", statement="stmt")
-    _claim_token = claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1").claim_token
+    claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
     record = submit_candidate_proof(
         store,
         "clm_1",
         claimant_id="agent_a",
         session_id="sess_1",
         scoping_rationale="scoped correctly",
-        content="proof text", claim_token=_claim_token)
+        content="proof text")
 
     original_path = tmp_path / record.file_path
     moved_path = tmp_path / "proofs" / "clm_1" / "renamed-by-obsidian.md"
@@ -633,14 +582,14 @@ def test_submit_on_nonexistent_node_raises_node_not_found(tmp_path: Path):
 
 def _submitted_claim(store, node_id: str = "clm_1"):
     create_node(store, node_id=node_id, kind="claim", statement="stmt")
-    _claim_token = claim_node(store, node_id, claimant_id="agent_a", session_id="sess_1").claim_token
+    claim_node(store, node_id, claimant_id="agent_a", session_id="sess_1")
     return submit_candidate_proof(
         store,
         node_id,
         claimant_id="agent_a",
         session_id="sess_1",
         scoping_rationale="scoped correctly",
-        content="proof text", claim_token=_claim_token)
+        content="proof text")
 
 
 def test_new_node_starts_unreviewed(tmp_path: Path):
@@ -709,14 +658,14 @@ def test_revision_requested_keeps_node_open_for_a_fresh_claim_submit_cycle(tmp_p
 
     assert get_acceptance_state(store, "clm_1") == "unreviewed"
     # same node id, not a new one: a fresh claim/submit cycle is possible
-    _claim_token = claim_node(store, "clm_1", claimant_id="agent_b", session_id="sess_2").claim_token
+    claim_node(store, "clm_1", claimant_id="agent_b", session_id="sess_2")
     second = submit_candidate_proof(
         store,
         "clm_1",
         claimant_id="agent_b",
         session_id="sess_2",
         scoping_rationale="addressed the reviewer's feedback",
-        content="revised proof text", claim_token=_claim_token)
+        content="revised proof text")
     assert second.node_id == "clm_1"
     assert second.version == 2
 
@@ -749,7 +698,7 @@ def test_no_other_code_path_can_write_acceptance_state(tmp_path: Path):
     create_node(store, node_id="clm_1", kind="claim", statement="stmt")
     assert get_acceptance_state(store, "clm_1") == "unreviewed"
 
-    _claim_token = claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1").claim_token
+    claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
     assert get_acceptance_state(store, "clm_1") == "unreviewed"
 
     submit_candidate_proof(
@@ -758,7 +707,7 @@ def test_no_other_code_path_can_write_acceptance_state(tmp_path: Path):
         claimant_id="agent_a",
         session_id="sess_1",
         scoping_rationale="scoped correctly",
-        content="proof text", claim_token=_claim_token)
+        content="proof text")
     assert get_acceptance_state(store, "clm_1") == "unreviewed"
 
 
@@ -964,7 +913,7 @@ def test_workflow_state_is_recomputed_across_the_full_lifecycle_not_stored(tmp_p
     create_node(store, node_id="clm_1", kind="claim", statement="stmt")
     assert get_workflow_state(store, "clm_1") == "open"
 
-    _claim_token = claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1").claim_token
+    claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
     assert get_workflow_state(store, "clm_1") == "claimed"
 
     submit_candidate_proof(
@@ -973,13 +922,13 @@ def test_workflow_state_is_recomputed_across_the_full_lifecycle_not_stored(tmp_p
         claimant_id="agent_a",
         session_id="sess_1",
         scoping_rationale="scoped correctly",
-        content="proof text", claim_token=_claim_token)
+        content="proof text")
     assert get_workflow_state(store, "clm_1") == "review-needed"
 
     researcher(store).decide_acceptance("clm_1", "revision-requested")
     assert get_workflow_state(store, "clm_1") == "revision-requested"
 
-    _claim_token = claim_node(store, "clm_1", claimant_id="agent_b", session_id="sess_2").claim_token
+    claim_node(store, "clm_1", claimant_id="agent_b", session_id="sess_2")
     assert get_workflow_state(store, "clm_1") == "claimed"
 
     submit_candidate_proof(
@@ -988,7 +937,7 @@ def test_workflow_state_is_recomputed_across_the_full_lifecycle_not_stored(tmp_p
         claimant_id="agent_b",
         session_id="sess_2",
         scoping_rationale="addressed feedback",
-        content="revised proof text", claim_token=_claim_token)
+        content="revised proof text")
     assert get_workflow_state(store, "clm_1") == "review-needed"
 
     researcher(store).decide_acceptance("clm_1", "accept")
@@ -1003,14 +952,14 @@ def test_workflow_state_blocked_on_unaccepted_local_dependency(tmp_path: Path):
 
     assert get_workflow_state(store, "clm_1") == "blocked"
 
-    _claim_token = claim_node(store, "lem_base", claimant_id="agent_a", session_id="sess_1").claim_token
+    claim_node(store, "lem_base", claimant_id="agent_a", session_id="sess_1")
     submit_candidate_proof(
         store,
         "lem_base",
         claimant_id="agent_a",
         session_id="sess_1",
         scoping_rationale="scoped correctly",
-        content="proof text", claim_token=_claim_token)
+        content="proof text")
     researcher(store).decide_acceptance("lem_base", "accept")
 
     assert get_workflow_state(store, "clm_1") == "open"
@@ -1062,23 +1011,38 @@ def test_frontier_lists_only_unclaimed_unblocked_nodes(tmp_path: Path):
     create_node(store, node_id="clm_blocked", kind="claim", statement="Blocked claim", dependencies=["lem_base"])
     create_node(store, node_id="clm_open", kind="claim", statement="Open claim")
     create_node(store, node_id="clm_claimed", kind="claim", statement="Claimed claim")
-    _claim_token = claim_node(store, "clm_claimed", claimant_id="agent_a", session_id="sess_1").claim_token
-
+    claim_node(store, "clm_claimed", claimant_id="agent_a", session_id="sess_1")
     frontier_ids = {node.id for node in get_frontier(store)}
     assert frontier_ids == {"lem_base", "clm_open"}
 
-    _claim_token = claim_node(store, "lem_base", claimant_id="agent_b", session_id="sess_2").claim_token
+    claim_node(store, "lem_base", claimant_id="agent_b", session_id="sess_2")
     submit_candidate_proof(
         store,
         "lem_base",
         claimant_id="agent_b",
         session_id="sess_2",
         scoping_rationale="scoped correctly",
-        content="proof text", claim_token=_claim_token)
+        content="proof text")
     researcher(store).decide_acceptance("lem_base", "accept")
 
+    # Accepted leaves the frontier; what it unblocked joins it
     frontier_ids = {node.id for node in get_frontier(store)}
-    assert frontier_ids == {"lem_base", "clm_open", "clm_blocked"}
+    assert frontier_ids == {"clm_open", "clm_blocked"}
+
+    claim_node(store, "clm_open", claimant_id="agent_c")
+    submit_candidate_proof(store, "clm_open", claimant_id="agent_c", session_id="", scoping_rationale="r", content="p")
+    create_node(store, node_id="ref_1", kind="imported_result", statement="known", source_locator="doi:x", source_version="v1")
+    # awaiting review, and imported results, aren't there to pick up either
+    assert {node.id for node in get_frontier(store)} == {"clm_blocked"}
+
+
+def test_a_blocked_node_cant_be_claimed(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="lem_base", kind="lemma", statement="Base lemma")
+    create_node(store, node_id="clm_blocked", kind="claim", statement="Blocked", dependencies=["lem_base"])
+    with pytest.raises(ProofMapError) as exc_info:
+        claim_node(store, "clm_blocked", claimant_id="agent_a")
+    assert exc_info.value.code == "NODE_BLOCKED"
 
 
 def test_compute_interface_fingerprint_ignores_whitespace_differences(tmp_path: Path):
@@ -1097,28 +1061,28 @@ def test_compute_interface_fingerprint_differs_for_substantive_change(tmp_path: 
 
 
 def _accept_via_full_cycle(store, node_id: str, *, claimant: str = "agent_a", session: str = "sess_1") -> None:
-    _claim_token = claim_node(store, node_id, claimant_id=claimant, session_id=session).claim_token
+    claim_node(store, node_id, claimant_id=claimant, session_id=session)
     submit_candidate_proof(
         store,
         node_id,
         claimant_id=claimant,
         session_id=session,
         scoping_rationale="scoped correctly",
-        content="proof text", claim_token=_claim_token)
+        content="proof text")
     researcher(store).decide_acceptance(node_id, "accept")
 
 
 def test_interface_fingerprint_is_unset_before_acceptance(tmp_path: Path):
     store = ensure_project(tmp_path)
     create_node(store, node_id="clm_1", kind="claim", statement="A implies B", assumptions=["A"])
-    _claim_token = claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1").claim_token
+    claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
     submit_candidate_proof(
         store,
         "clm_1",
         claimant_id="agent_a",
         session_id="sess_1",
         scoping_rationale="scoped correctly",
-        content="proof text", claim_token=_claim_token)
+        content="proof text")
     assert get_accepted_interface_fingerprint(store, "clm_1") is None
 
 
@@ -1142,14 +1106,14 @@ def test_dependency_pin_for_local_target_records_pinned_version(tmp_path: Path):
     _accept_via_full_cycle(store, "lem_base")
     create_node(store, node_id="clm_1", kind="claim", statement="Depends on base", dependencies=["lem_base"])
 
-    _claim_token = claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1").claim_token
+    claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
     submit_candidate_proof(
         store,
         "clm_1",
         claimant_id="agent_a",
         session_id="sess_1",
         scoping_rationale="scoped correctly",
-        content="proof text", claim_token=_claim_token)
+        content="proof text")
 
     pin = get_dependency_pin(store, "clm_1", "lem_base")
     assert pin is not None
@@ -1169,14 +1133,13 @@ def test_dependency_pin_for_imported_result_target_has_no_version(tmp_path: Path
     )
     create_node(store, node_id="clm_1", kind="claim", statement="Depends on ref_1", dependencies=["ref_1"])
 
-    _claim_token = claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1").claim_token
     submit_candidate_proof(
         store,
         "clm_1",
         claimant_id="agent_a",
         session_id="sess_1",
         scoping_rationale="scoped correctly",
-        content="proof text", claim_token=_claim_token)
+        content="proof text")
 
     pin = get_dependency_pin(store, "clm_1", "ref_1")
     assert pin is not None
@@ -1189,28 +1152,26 @@ def test_dependency_pin_is_refreshed_not_accumulated_across_submissions(tmp_path
     create_node(store, node_id="lem_base", kind="lemma", statement="Base lemma")
     create_node(store, node_id="clm_1", kind="claim", statement="Depends on base", dependencies=["lem_base"])
 
-    _claim_token = claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1").claim_token
     submit_candidate_proof(
         store,
         "clm_1",
         claimant_id="agent_a",
         session_id="sess_1",
         scoping_rationale="first attempt",
-        content="v1 text", claim_token=_claim_token)
+        content="v1 text")
     first_pin = get_dependency_pin(store, "clm_1", "lem_base")
     assert first_pin.pinned_version is None  # lem_base isn't accepted yet
 
     _accept_via_full_cycle(store, "lem_base", claimant="agent_c", session="sess_3")
 
     researcher(store).decide_acceptance("clm_1", "revision-requested")
-    _claim_token = claim_node(store, "clm_1", claimant_id="agent_b", session_id="sess_2").claim_token
     submit_candidate_proof(
         store,
         "clm_1",
         claimant_id="agent_b",
         session_id="sess_2",
         scoping_rationale="second attempt",
-        content="v2 text", claim_token=_claim_token)
+        content="v2 text")
 
     second_pin = get_dependency_pin(store, "clm_1", "lem_base")
     assert second_pin.pinned_version == 1
@@ -1270,24 +1231,23 @@ def test_pin_dependencies_leaves_pinned_version_none_for_submitted_but_unaccepte
     a version that was current AND Accepted)."""
     store = ensure_project(tmp_path)
     create_node(store, node_id="lem_base", kind="lemma", statement="Base lemma")
-    _claim_token = claim_node(store, "lem_base", claimant_id="agent_a", session_id="sess_1").claim_token
+    claim_node(store, "lem_base", claimant_id="agent_a", session_id="sess_1")
     submit_candidate_proof(
         store,
         "lem_base",
         claimant_id="agent_a",
         session_id="sess_1",
         scoping_rationale="scoped correctly",
-        content="proof text", claim_token=_claim_token)
+        content="proof text")
     create_node(store, node_id="clm_1", kind="claim", statement="Depends on base", dependencies=["lem_base"])
 
-    _claim_token = claim_node(store, "clm_1", claimant_id="agent_b", session_id="sess_2").claim_token
     submit_candidate_proof(
         store,
         "clm_1",
         claimant_id="agent_b",
         session_id="sess_2",
         scoping_rationale="scoped correctly",
-        content="proof text", claim_token=_claim_token)
+        content="proof text")
 
     pin = get_dependency_pin(store, "clm_1", "lem_base")
     assert pin is not None
@@ -1326,19 +1286,19 @@ def test_workflow_state_review_needed_after_reclaim_is_not_masked_by_a_stale_rev
     timestamps."""
     store = ensure_project(tmp_path)
     create_node(store, node_id="clm_1", kind="claim", statement="stmt")
-    _claim_token = claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1").claim_token
+    claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
     submit_candidate_proof(
         store, "clm_1", claimant_id="agent_a", session_id="sess_1",
-        scoping_rationale="first attempt", content="v1 text", claim_token=_claim_token)
+        scoping_rationale="first attempt", content="v1 text")
     researcher(store).decide_acceptance("clm_1", "revision-requested")
 
     v1 = get_current_candidate_proof(store, "clm_1")
     assert v1.review_record_id is not None
 
-    _claim_token = claim_node(store, "clm_1", claimant_id="agent_b", session_id="sess_2").claim_token
+    claim_node(store, "clm_1", claimant_id="agent_b", session_id="sess_2")
     submit_candidate_proof(
         store, "clm_1", claimant_id="agent_b", session_id="sess_2",
-        scoping_rationale="second attempt", content="v2 text", claim_token=_claim_token)
+        scoping_rationale="second attempt", content="v2 text")
 
     v2 = get_current_candidate_proof(store, "clm_1")
     assert v2.review_record_id is None
@@ -1351,14 +1311,14 @@ def _dependent_with_accepted_dependency(store, dependent_id: str = "clm_1", targ
     create_node(store, node_id=target_id, kind="lemma", statement="Base lemma")
     _accept_via_full_cycle(store, target_id)
     create_node(store, node_id=dependent_id, kind="claim", statement="Depends on base", dependencies=[target_id])
-    _claim_token = claim_node(store, dependent_id, claimant_id="agent_a", session_id="sess_1").claim_token
+    claim_node(store, dependent_id, claimant_id="agent_a", session_id="sess_1")
     submit_candidate_proof(
         store,
         dependent_id,
         claimant_id="agent_a",
         session_id="sess_1",
         scoping_rationale="scoped correctly",
-        content="proof text", claim_token=_claim_token)
+        content="proof text")
     return get_dependency_pin(store, dependent_id, target_id)
 
 
@@ -1423,14 +1383,13 @@ def test_revalidate_dependency_target_not_accepted_is_rejected(tmp_path: Path):
     store = ensure_project(tmp_path)
     create_node(store, node_id="lem_base", kind="lemma", statement="Base lemma")
     create_node(store, node_id="clm_1", kind="claim", statement="Depends on base", dependencies=["lem_base"])
-    _claim_token = claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1").claim_token
     submit_candidate_proof(
         store,
         "clm_1",
         claimant_id="agent_a",
         session_id="sess_1",
         scoping_rationale="scoped correctly",
-        content="proof text", claim_token=_claim_token)
+        content="proof text")
 
     with pytest.raises(ProofMapError) as exc_info:
         researcher(store).revalidate_dependency("clm_1", "lem_base")
@@ -1470,14 +1429,13 @@ def test_revalidate_dependency_rejects_imported_result_target(tmp_path: Path):
         source_version="v1",
     )
     create_node(store, node_id="clm_1", kind="claim", statement="Depends on ref_1", dependencies=["ref_1"])
-    _claim_token = claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1").claim_token
     submit_candidate_proof(
         store,
         "clm_1",
         claimant_id="agent_a",
         session_id="sess_1",
         scoping_rationale="scoped correctly",
-        content="proof text", claim_token=_claim_token)
+        content="proof text")
 
     with pytest.raises(ProofMapError) as exc_info:
         researcher(store).revalidate_dependency("clm_1", "ref_1")
@@ -1732,10 +1690,10 @@ def test_reaccepting_a_challenged_node_resolves_the_challenge_by_revision(tmp_pa
     challenge = open_challenge(store, "lem_1", opened_by="agent_a", rationale="might be wrong")
     assert get_integrity_state(store, "lem_1") == "challenged"
 
-    _claim_token = claim_node(store, "lem_1", claimant_id="agent_b", session_id="sess_2").claim_token
+    claim_node(store, "lem_1", claimant_id="agent_b", session_id="sess_2")
     submit_candidate_proof(
         store, "lem_1", claimant_id="agent_b", session_id="sess_2",
-        scoping_rationale="addressed the concern", content="revised proof", claim_token=_claim_token)
+        scoping_rationale="addressed the concern", content="revised proof")
     researcher(store).decide_acceptance("lem_1", "accept")
 
     assert has_open_challenge(store, "lem_1") is False
@@ -1872,14 +1830,14 @@ def test_promote_leaves_the_interface_fingerprint_alone(tmp_path: Path):
     )
 
     create_node(store, node_id="clm_2", kind="claim", statement="Depends on the promoted lemma", dependencies=["clm_1"])
-    _claim_token = claim_node(store, "clm_2", claimant_id="agent_x", session_id="sess_x").claim_token
+    claim_node(store, "clm_2", claimant_id="agent_x", session_id="sess_x")
     submit_candidate_proof(
         store,
         "clm_2",
         claimant_id="agent_x",
         session_id="sess_x",
         scoping_rationale="scoped correctly",
-        content="proof text", claim_token=_claim_token)
+        content="proof text")
     pin = get_dependency_pin(store, "clm_2", "clm_1")
     assert dependency_pin_is_current(store, pin) is True
 
@@ -1917,9 +1875,9 @@ def test_pins_taken_before_22_stay_current(tmp_path: Path):
     create_node(store, node_id="clm_c", kind="claim", statement="c holds", assumptions=["h"])
     _accept_via_full_cycle(store, "clm_c")
     create_node(store, node_id="clm_b", kind="claim", statement="b holds", dependencies=["clm_c"])
-    _claim_token = claim_node(store, "clm_b", claimant_id="agent_b", session_id="sess_b").claim_token
+    claim_node(store, "clm_b", claimant_id="agent_b", session_id="sess_b")
     submit_candidate_proof(
-        store, "clm_b", claimant_id="agent_b", session_id="sess_b", scoping_rationale="scoped", content="proof", claim_token=_claim_token)
+        store, "clm_b", claimant_id="agent_b", session_id="sess_b", scoping_rationale="scoped", content="proof")
     pin = get_dependency_pin(store, "clm_b", "clm_c")
 
     for legacy_kind in ("claim", "lemma"):
@@ -2032,14 +1990,14 @@ def test_parent_blocked_until_children_accepted_then_still_needs_own_acceptance(
     assert get_acceptance_state(store, "clm_parent") == "unreviewed"
 
     # the parent still needs its own Candidate proof and Acceptance
-    _claim_token = claim_node(store, "clm_parent", claimant_id="agent_p", session_id="sess_p").claim_token
+    claim_node(store, "clm_parent", claimant_id="agent_p", session_id="sess_p")
     submit_candidate_proof(
         store,
         "clm_parent",
         claimant_id="agent_p",
         session_id="sess_p",
         scoping_rationale="the pieces combine",
-        content="proof combining the two sub-claims", claim_token=_claim_token)
+        content="proof combining the two sub-claims")
     researcher(store).decide_acceptance("clm_parent", "accept")
     assert get_acceptance_state(store, "clm_parent") == "accepted"
 
@@ -2226,3 +2184,21 @@ def test_decide_evidence_review_on_nonexistent_check_raises_not_found(tmp_path: 
     with pytest.raises(ProofMapError) as exc_info:
         researcher(store).decide_evidence_review("does_not_exist", "trusted")
     assert exc_info.value.code == "EVIDENCE_CHECK_NOT_FOUND"
+
+
+def test_an_old_claim_survives_the_token_columns_removal(tmp_path: Path):
+    """A pre-ADR-0010 database has `claims.token_hash`; it goes, the active claim stays."""
+    import sqlite3
+
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_1", kind="claim", statement="stmt")
+    claim_node(store, "clm_1", claimant_id="agent_a")
+    conn = sqlite3.connect(store.db_path)
+    conn.execute("ALTER TABLE claims ADD COLUMN token_hash TEXT")
+    conn.execute("UPDATE claims SET token_hash = 'old'")
+    conn.commit()
+    conn.close()
+
+    assert get_active_claim(store, "clm_1").claimant_id == "agent_a"
+    with store.connect() as conn:
+        assert "token_hash" not in {row["name"] for row in conn.execute("PRAGMA table_info(claims)")}

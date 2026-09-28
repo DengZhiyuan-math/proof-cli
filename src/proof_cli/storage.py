@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import secrets
 import sqlite3
 import threading
 import uuid
@@ -217,7 +216,7 @@ CREATE TABLE IF NOT EXISTS review_history (
 # reference `payload_hash`, are (re)created.
 _REVIEW_HISTORY_ADDED_COLUMNS = {"prev_row_hash": "TEXT", "signed_decision": "TEXT", "payload_hash": "TEXT"}
 _CHALLENGE_ADDED_COLUMNS = {"resolution_review_id": "TEXT"}
-_CLAIM_ADDED_COLUMNS = {"token_hash": "TEXT"}
+_CLAIM_DROPPED_COLUMNS = ("token_hash",)  # the #37 claim token, gone with ADR-0010
 
 REVIEW_HISTORY_TRIGGERS = """
 CREATE INDEX IF NOT EXISTS idx_review_history_object ON review_history(object_type, object_id, seq);
@@ -377,6 +376,13 @@ def _add_missing_columns(conn: sqlite3.Connection, table: str, columns: dict[str
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {column_type}")
 
 
+def _drop_columns(conn: sqlite3.Connection, table: str, columns: tuple[str, ...]) -> None:
+    existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    for name in columns:
+        if name in existing:
+            conn.execute(f"ALTER TABLE {table} DROP COLUMN {name}")
+
+
 def _last_row_hash(conn: sqlite3.Connection, table: str) -> str:
     last = conn.execute(f"SELECT * FROM {table} ORDER BY seq DESC LIMIT 1").fetchone()
     return chain_row_hash(dict(last)) if last is not None else genesis_row_hash(project_instance_id(conn))
@@ -418,7 +424,7 @@ class ProjectStore:
         conn.executescript(REVIEW_HISTORY_SCHEMA)
         _add_missing_columns(conn, "review_history", _REVIEW_HISTORY_ADDED_COLUMNS)
         _add_missing_columns(conn, "challenges", _CHALLENGE_ADDED_COLUMNS)
-        _add_missing_columns(conn, "claims", _CLAIM_ADDED_COLUMNS)
+        _drop_columns(conn, "claims", _CLAIM_DROPPED_COLUMNS)
         conn.executescript(REVIEW_HISTORY_TRIGGERS)
         conn.executescript(REVIEWER_KEYS_SCHEMA)
         conn.executescript(PROOF_LEDGER_SCHEMA)
@@ -1021,37 +1027,15 @@ def _row_to_claim(row: sqlite3.Row) -> ClaimRecord:
         released_at=row["released_at"],
         released_by=row["released_by"],
         release_reason=row["release_reason"],
-        has_token=row["token_hash"] is not None,
     )
-
-
-def claim_token_hash(token: str) -> str:
-    return hashlib.sha256(f"proof-cli claim {token}".encode("utf-8")).hexdigest()
-
-
-def claim_token_matches(store: ProjectStore, claim_id: str, token: str | None) -> bool:
-    """Whether `token` is the secret the claim was issued with (only its hash is stored)."""
-    with store.connect() as conn:
-        row = conn.execute("SELECT token_hash FROM claims WHERE id = ?", (claim_id,)).fetchone()
-    return row is not None and token is not None and row["token_hash"] == claim_token_hash(token)
-
-
-def _claim_token_hash_for(claim: ClaimRecord) -> str | None:
-    if claim.claim_token:
-        return claim_token_hash(claim.claim_token)
-    if claim.has_token:
-        # a token-bound claim arriving without its token (an imported bundle): it stays
-        # bound, to a token nobody holds, never falling back to a typed claimant name
-        return claim_token_hash(secrets.token_urlsafe(24))
-    return None
 
 
 def insert_claim(store: ProjectStore, claim: ClaimRecord) -> ClaimRecord:
     with store.connect() as conn:
         conn.execute(
             """
-            INSERT INTO claims(id, node_id, claimant_id, session_id, claimed_at, released_at, released_by, release_reason, token_hash)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO claims(id, node_id, claimant_id, session_id, claimed_at, released_at, released_by, release_reason)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 claim.id,
@@ -1062,7 +1046,6 @@ def insert_claim(store: ProjectStore, claim: ClaimRecord) -> ClaimRecord:
                 claim.released_at.isoformat() if claim.released_at else None,
                 claim.released_by,
                 claim.release_reason,
-                _claim_token_hash_for(claim),
             ),
         )
         conn.commit()

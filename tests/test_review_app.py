@@ -42,8 +42,8 @@ def app(tmp_path: Path):
 
 def _submitted(store, node_id="clm_1"):
     create_node(store, node_id=node_id, kind="claim", statement=f"stmt {node_id}")
-    _claim_token = claim_node(store, node_id, claimant_id="agent_a", session_id="s").claim_token
-    return submit_candidate_proof(store, node_id, claimant_id="agent_a", session_id="s", scoping_rationale="scoped", content=f"# Proof of {node_id}\n\nBy **induction**.", claim_token=_claim_token)
+    claim_node(store, node_id, claimant_id="agent_a", session_id="s")
+    return submit_candidate_proof(store, node_id, claimant_id="agent_a", session_id="s", scoping_rationale="scoped", content=f"# Proof of {node_id}\n\nBy **induction**.")
 
 
 def _enroll_over_http(client: Client, authenticator: SoftwareAuthenticator, *, signer: SoftwareAuthenticator | None = None):

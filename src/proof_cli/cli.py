@@ -216,11 +216,20 @@ def reason(theorem_id: str, root: str = ".", notes: str = "") -> None:
 
 @app.command()
 def frontier(root: str = ".", json_output: bool = typer.Option(False, "--json")) -> None:
-    """Nodes with no unresolved dependency and no active claim."""
+    """The open, unblocked, unclaimed nodes: what an agent could claim right now."""
     store = get_store(_root(root))
     nodes = get_frontier(store)
     if json_output:
-        typer.echo(dump_envelope(success_envelope("frontier", [node.model_dump(mode="json") for node in nodes])))
+        entries = [
+            {
+                **node.model_dump(mode="json"),
+                "workflow_state": get_workflow_state(store, node.id),
+                "acceptance_state": get_acceptance_state(store, node.id),
+                "integrity_state": get_integrity_state(store, node.id),
+            }
+            for node in nodes
+        ]
+        typer.echo(dump_envelope(success_envelope("frontier", entries)))
         return
     typer.echo(render_frontier(nodes))
 
@@ -366,44 +375,40 @@ def node_list(
 @node_app.command("claim")
 def node_claim(
     node_id: str,
+    assignee: str = typer.Option(..., "--assignee", "--claimant", help="Who is taking the node on (an agent or person name)"),
+    reassign: bool = typer.Option(False, "--reassign", help="Take the node over from its current assignee"),
     root: str = ".",
-    claimant: str = "human",
-    session: str = "default",
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
+    """Assign a frontier node to yourself before working on it: a planning signal, not a lock (ADR-0010)."""
     store = get_store(_root(root))
     try:
-        claim = claim_node(store, node_id, claimant_id=claimant, session_id=session)
+        claim = claim_node(store, node_id, claimant_id=assignee, reassign=reassign)
     except ProofMapError as exc:
         _emit_node_error(exc, json_output, command="node.claim")
         raise typer.Exit(code=1)
     _emit_claim(claim, json_output, command="node.claim")
 
 
-@node_app.command("release")
-def node_release(
+@node_app.command("unassign")
+def node_unassign(
     node_id: str,
+    by: str = typer.Option(..., "--by", "--claimant", help="Who is clearing the claim (its holder, the researcher, or by agreement)"),
+    reason: str = typer.Option("", "--reason"),
     root: str = ".",
-    claimant: str = "human",
-    session: str = "default",
-    claim_token: str = typer.Option("", "--claim-token", help="The secret `node claim` printed; only its holder can release"),
-    force: bool = typer.Option(
-        False, "--force", help="Ending someone else's claim is a Human Review decision, made in the review app"
-    ),
-    reason: str = typer.Option("", "--reason", help="Why you're releasing your own claim"),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
-    if force:
-        human_review_required(root, command="node.release", kind="force_release", target_id=node_id, node_id=node_id, json_output=json_output)
+    """End a node's claim, whoever holds it (ADR-0010)."""
     store = get_store(_root(root))
     try:
-        claim = release_node(
-            store, node_id, claimant_id=claimant, session_id=session, claim_token=claim_token or None, reason=reason or None
-        )
+        claim = release_node(store, node_id, claimant_id=by, reason=reason or None)
     except ProofMapError as exc:
-        _emit_node_error(exc, json_output, command="node.release")
+        _emit_node_error(exc, json_output, command="node.unassign")
         raise typer.Exit(code=1)
-    _emit_claim(claim, json_output, command="node.release")
+    _emit_claim(claim, json_output, command="node.unassign")
+
+
+node_app.command("release", hidden=True)(node_unassign)
 
 
 def _emit_candidate_proof(record, json_output: bool, *, command: str) -> None:
@@ -421,9 +426,7 @@ def node_submit(
         ..., "--rationale", help="Why this node is now appropriately scoped to prove directly"
     ),
     root: str = ".",
-    claimant: str = "human",
-    session: str = "default",
-    claim_token: str = typer.Option("", "--claim-token", help="The secret `node claim` printed; only its holder can submit"),
+    claimant: str = typer.Option(..., "--claimant", help="The node's assignee"),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     store = get_store(_root(root))
@@ -432,10 +435,9 @@ def node_submit(
             store,
             node_id,
             claimant_id=claimant,
-            session_id=session,
+            session_id="",
             scoping_rationale=rationale,
             content=content,
-            claim_token=claim_token or None,
         )
     except ProofMapError as exc:
         _emit_node_error(exc, json_output, command="node.submit")

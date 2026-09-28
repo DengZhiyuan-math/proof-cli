@@ -57,9 +57,9 @@ runner = CliRunner()
 def _submitted(store, node_id: str = "clm_1", *, session: str = "sess_1", **fields):
     if get_node(store, node_id) is None:
         create_node(store, node_id=node_id, kind=fields.pop("kind", "claim"), statement=f"stmt {node_id}", **fields)
-    _claim_token = claim_node(store, node_id, claimant_id="agent_a", session_id=session).claim_token
+    claim_node(store, node_id, claimant_id="agent_a", session_id=session)
     return submit_candidate_proof(
-        store, node_id, claimant_id="agent_a", session_id=session, scoping_rationale="scoped", content=f"proof of {node_id}", claim_token=_claim_token)
+        store, node_id, claimant_id="agent_a", session_id=session, scoping_rationale="scoped", content=f"proof of {node_id}")
 
 
 def _codes(store) -> list[str]:
@@ -109,13 +109,6 @@ def _setup_promote(store):
     return "promote", "clm_1", "promote", {}
 
 
-def _setup_force_release(store):
-    create_node(store, node_id="clm_1", kind="claim", statement="stmt")
-    claim = claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
-
-    return "force_release", claim.id, "force-release", {}
-
-
 _OPERATIONS = {
     "acceptance": _setup_acceptance,
     "reference_review": _setup_reference_review,
@@ -123,7 +116,6 @@ _OPERATIONS = {
     "dependency_revalidation": _setup_revalidation,
     "challenge_resolution": _setup_challenge_resolution,
     "promote": _setup_promote,
-    "force_release": _setup_force_release,
 }
 
 
@@ -140,8 +132,6 @@ def _perform(store, kind: str, target_id: str, decision: str, signed, **options)
         return proof_map.dismiss_challenge(store, target_id, signed_decision=signed)
     if kind == "promote":
         return proof_map.promote_to_lemma(store, target_id, signed_decision=signed)
-    if kind == "force_release":
-        return proof_map.release_node(store, "clm_1", claimant_id="x", session_id="y", force=True, signed_decision=signed)
     raise AssertionError(kind)
 
 
@@ -214,7 +204,6 @@ def test_no_service_function_accepts_confirmed():
         proof_map.revalidate_dependency,
         proof_map.dismiss_challenge,
         proof_map.promote_to_lemma,
-        proof_map.release_node,
     ]
     for function in human_only:
         parameters = inspect.signature(function).parameters

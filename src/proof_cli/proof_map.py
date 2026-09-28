@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import secrets
 import sqlite3
 import uuid
 from dataclasses import dataclass
@@ -51,10 +50,8 @@ from .domain import (
 )
 from .signing import DecisionKind, DecisionPayload, PinnedDependency, SignedDecision
 from .storage import (
-    get_claim,
     ProjectStore,
     append_ledger_row,
-    claim_token_matches,
     append_event,
     get_active_claim,
     get_candidate_proof as _get_candidate_proof,
@@ -339,32 +336,43 @@ def split_node(
 
 
 def _claim_conflict(existing: ClaimRecord) -> ProofMapError:
-    # never the holder's session id: nothing that proves ownership leaks out
     return ProofMapError(
         "CLAIM_CONFLICT",
-        f"node {existing.node_id} is already claimed by {existing.claimant_id}",
-        details={"claimant_id": existing.claimant_id, "claimed_at": existing.claimed_at.isoformat()},
+        f"node {existing.node_id} is already claimed by {existing.claimant_id}; pass --reassign to take it over",
+        details={"node_id": existing.node_id, "assignee": existing.claimant_id, "claimed_at": existing.claimed_at.isoformat()},
     )
-
-
-def _holds(store: ProjectStore, claim: ClaimRecord, claimant_id: str, session_id: str, claim_token: str | None) -> bool:
-    """Whether the caller owns `claim`: it presents the claim's secret token (#37).
-
-    Naming the claimant and session proves nothing — anyone can type them.
-    A claim made before tokens existed has none; for it, the old
-    (claimant_id, session_id) match still stands.
-    """
-    if claim.has_token:
-        return claim_token_matches(store, claim.id, claim_token)
-    return claim.claimant_id == claimant_id and claim.session_id == session_id
 
 
 def _not_claimant(node_id: str, claim: ClaimRecord) -> ProofMapError:
     return ProofMapError(
         "NOT_CLAIMANT",
-        f"the caller doesn't hold the active claim on {node_id} (its claim token is required)",
-        details={"claimant_id": claim.claimant_id, "claimed_at": claim.claimed_at.isoformat()},
+        f"{node_id} is claimed by {claim.claimant_id}",
+        details={"node_id": node_id, "assignee": claim.claimant_id, "claimed_at": claim.claimed_at.isoformat()},
     )
+
+
+def _not_pickable(store: ProjectStore, node: ProofMapNode) -> ProofMapError | None:
+    """Why `node` isn't on the frontier for anyone to claim, or None if it is.
+
+    The frontier and `claim_node` share this, so what the frontier offers is
+    exactly what can be claimed. Accepted nodes are off it unless an open
+    Challenge invites a revision (ADR-0005 Rule 4); Rejected ones for good.
+    """
+    if node.kind == ProofMapNodeKind.imported_result:
+        return ProofMapError("IMMUTABLE_NODE", f"imported_result node {node.id} has no proof to work on; use Reference review instead")
+    acceptance_state = get_acceptance_state(store, node.id)
+    if acceptance_state == "rejected":
+        return ProofMapError("NODE_REJECTED", f"node {node.id} was Rejected and should not be pursued further; create a new node instead")
+    if acceptance_state == "accepted" and not has_open_challenge(store, node.id):
+        return ProofMapError("NODE_ALREADY_ACCEPTED", f"node {node.id} is already Accepted; open a Challenge before reclaiming it to revise")
+    if acceptance_state == "unverifiable":
+        return ProofMapError(
+            "NODE_UNVERIFIABLE",
+            f"node {node.id}'s latest Human Review decision doesn't count; the researcher must decide it afresh before anyone picks it up",
+        )
+    if _has_unresolved_dependency(store, node):
+        return ProofMapError("NODE_BLOCKED", f"node {node.id} is Blocked: a dependency isn't Accepted (or Reference-reviewed) yet")
+    return None
 
 
 def claim_node(
@@ -372,69 +380,37 @@ def claim_node(
     node_id: str,
     *,
     claimant_id: str,
-    session_id: str,
+    session_id: str = "",
+    reassign: bool = False,
 ) -> ClaimRecord:
-    """Claim exclusive ownership of a node.
+    """Assign a node to `claimant_id` before working on it: a wayfinder-style claim (ADR-0010).
 
-    Idempotent for the same (claimant_id, session_id) re-claiming the node it
-    already holds. Exclusivity is guaranteed by the `claims` table's partial
-    unique index on `node_id WHERE released_at IS NULL` at INSERT time — the
-    lookup below is only an optimization, never the source of truth, so a
-    genuine race between two claimants is still resolved correctly (see
-    `tests/test_proof_map.py::test_claim_concurrency_...`).
-
-    Refuses a node that's Rejected (CONTEXT.md: "should not be pursued
-    further") — terminal for the Acceptance axis, reopening the claim/submit
-    cycle on it would let a fresh submission silently contradict a decision
-    Human Review already made. Also refuses an already-Accepted node,
-    *unless* it's the target of an open Challenge: that's the one sanctioned
-    way to revise and re-Accept an Accepted node (ADR-0005 Rule 4) — without
-    an open Challenge there is no supported path to reclaim and revise one.
+    Idempotent for the same assignee. A node someone else holds is refused
+    with CLAIM_CONFLICT naming the assignee, unless `reassign` takes it
+    over — a claim is a planning signal, not a lock, so a stale one is simply
+    reassigned. Only a node on the frontier can be claimed (see
+    `_not_pickable`). The one-active-claim-per-node rule is the `claims`
+    table's partial unique index, so a race between two claimants still
+    resolves to one.
     """
     node = require_node(store, node_id)
-    if node.kind == ProofMapNodeKind.imported_result:
-        raise ProofMapError(
-            "IMMUTABLE_NODE",
-            f"imported_result node {node_id} has no claim/submit workflow; use Reference review instead",
-        )
-
-    acceptance_state = get_acceptance_state(store, node_id)
-    if acceptance_state == "rejected":
-        raise ProofMapError(
-            "NODE_REJECTED",
-            f"node {node_id} was Rejected and should not be pursued further; create a new node instead",
-        )
-    if acceptance_state == "accepted" and not has_open_challenge(store, node_id):
-        raise ProofMapError(
-            "NODE_ALREADY_ACCEPTED",
-            f"node {node_id} is already Accepted; open a Challenge before reclaiming it to revise",
-        )
-    if acceptance_state == "unverifiable":
-        raise ProofMapError(
-            "NODE_UNVERIFIABLE",
-            f"node {node_id}'s latest Human Review decision doesn't verify (unsigned legacy, or tampered); "
-            "a researcher must re-sign or re-decide it before anyone reclaims it",
-        )
-
     existing = get_active_claim(store, node_id)
+    if existing is not None and existing.claimant_id == claimant_id:
+        return existing
+    problem = _not_pickable(store, node)
+    if problem is not None:
+        raise problem
     if existing is not None:
-        if existing.claimant_id == claimant_id and existing.session_id == session_id:
-            return existing  # idempotent — but without the token: only the original caller has that
-        raise _claim_conflict(existing)
+        if not reassign:
+            raise _claim_conflict(existing)
+        mark_claim_released(store, existing.id, released_by=claimant_id, reason=f"reassigned to {claimant_id}", released_at=utc_now())
 
-    claim = ClaimRecord(
-        id=str(uuid.uuid4()),
-        node_id=node_id,
-        claimant_id=claimant_id,
-        session_id=session_id,
-        claim_token=secrets.token_urlsafe(24),
-        has_token=True,
-    )
+    claim = ClaimRecord(id=str(uuid.uuid4()), node_id=node_id, claimant_id=claimant_id, session_id=session_id)
     try:
         insert_claim(store, claim)
     except sqlite3.IntegrityError as exc:
         existing = get_active_claim(store, node_id)
-        if existing is not None and existing.claimant_id == claimant_id and existing.session_id == session_id:
+        if existing is not None and existing.claimant_id == claimant_id:
             return existing
         if existing is not None:
             raise _claim_conflict(existing) from exc
@@ -443,17 +419,18 @@ def claim_node(
         # e.g. "database is locked" under heavy concurrent contention past
         # SQLite's busy_timeout — we don't know who, if anyone, won, so this
         # is honestly a contention error, not a confirmed conflict.
-        raise ProofMapError(
-            "CLAIM_CONTENDED",
-            f"could not claim node {node_id} due to database contention; retry",
-        ) from exc
+        raise ProofMapError("CLAIM_CONTENDED", f"could not claim node {node_id} due to database contention; retry") from exc
 
     append_event(
         store,
-        "proof_map_node_claimed",
+        "proof_map_claim_reassigned" if existing is not None else "proof_map_node_claimed",
         f"claimed node {node_id} by {claimant_id}",
         entity_id=node_id,
-        payload={"claim_id": claim.id, "claimant_id": claimant_id, "session_id": session_id},
+        payload={
+            "claim_id": claim.id,
+            "claimant_id": claimant_id,
+            "previous_claimant_id": existing.claimant_id if existing is not None else None,
+        },
     )
     return claim
 
@@ -463,109 +440,32 @@ def release_node(
     node_id: str,
     *,
     claimant_id: str,
-    session_id: str,
-    force: bool = False,
+    session_id: str = "",
     reason: str | None = None,
-    signed_decision: SignedDecision | None = None,
-    claim_token: str | None = None,
 ) -> ClaimRecord:
-    """Release the active claim on a node.
+    """Unassign a node: end its claim, whoever holds it (ADR-0010).
 
-    The claim's holder — whoever presents its claim token — can release it
-    at any time. Releasing someone else's claim (`force=True`) is a Human Review
-    decision: it needs a signed `force_release` decision naming that claim,
-    with a reason as its rationale (ADR-0009), recorded as its own review
-    row — an audit trail, never a hidden bypass. Claims never expire on
-    their own; this is the only way one ends besides a Candidate proof
-    submission.
+    A claim is a planning signal, so its holder, the researcher, or anyone
+    by agreement may clear it; `claimant_id` is who did, recorded with the
+    reason. Claims never expire on their own.
     """
     require_node(store, node_id)
     claim = get_active_claim(store, node_id)
     if claim is None:
         raise ProofMapError("NO_ACTIVE_CLAIM", f"proof map node {node_id} has no active claim")
-
-    is_owner = _holds(store, claim, claimant_id, session_id, claim_token)
-
-    if force:
-        signed = _require_signed(signed_decision, DecisionKind.force_release, claim.id)
-        if not signed.payload.rationale.strip():
-            raise ProofMapError("FORCE_RELEASE_REQUIRES_REASON", "force-release requires a reason, signed as its rationale")
-        return _force_release(store, node_id, claim, signed)
-    elif is_owner:
-        released_by = claimant_id
-        release_reason = reason or "released by claimant"
-        event_kind = "proof_map_claim_released"
-    else:
-        raise _not_claimant(node_id, claim)
-
+    release_reason = reason or ("released by claimant" if claim.claimant_id == claimant_id else f"unassigned by {claimant_id}")
     released_at = utc_now()
-    won_race = mark_claim_released(
-        store, claim.id, released_by=released_by, reason=release_reason, released_at=released_at
-    )
-    if not won_race:
-        # Someone else's concurrent release/force-release reached SQLite's
-        # write lock first; this claim is no longer active.
+    if not mark_claim_released(store, claim.id, released_by=claimant_id, reason=release_reason, released_at=released_at):
+        # someone else's concurrent release reached SQLite's write lock first
         raise ProofMapError("NO_ACTIVE_CLAIM", f"proof map node {node_id} has no active claim")
     append_event(
         store,
-        event_kind,
-        f"released claim on {node_id} by {released_by}",
+        "proof_map_claim_released",
+        f"released claim on {node_id} by {claimant_id}",
         entity_id=node_id,
-        payload={
-            "claim_id": claim.id,
-            "original_claimant_id": claim.claimant_id,
-            "original_session_id": claim.session_id,
-            "released_by": released_by,
-            "reason": release_reason,
-        },
+        payload={"claim_id": claim.id, "original_claimant_id": claim.claimant_id, "released_by": claimant_id, "reason": release_reason},
     )
-    return claim.model_copy(update={"released_by": released_by, "release_reason": release_reason, "released_at": released_at})
-
-
-def _force_release(store: ProjectStore, node_id: str, claim: ClaimRecord, signed: SignedDecision) -> ClaimRecord:
-    released_at = utc_now()
-    with store.transaction() as conn:
-        key = _authorize(
-            store, signed, kind=DecisionKind.force_release, target_id=claim.id, decision="force-release", conn=conn
-        )
-        record = record_decided_review(
-            store,
-            "claim",
-            claim.id,
-            ReviewGovernanceState.approved,
-            reviewer_id=key.reviewer_id,
-            rationale=signed.payload.rationale,
-            kind=ReviewRecordKind.force_release,
-            signed_decision=signed,
-            conn=conn,
-        )
-        if not mark_claim_released(
-            store,
-            claim.id,
-            released_by=key.reviewer_id,
-            reason=signed.payload.rationale,
-            released_at=released_at,
-            conn=conn,
-        ):
-            raise ProofMapError("NO_ACTIVE_CLAIM", f"proof map node {node_id} has no active claim")
-        append_event(
-            store,
-            "proof_map_claim_force_released",
-            f"released claim on {node_id} by {key.reviewer_id}",
-            entity_id=node_id,
-            payload={
-                "claim_id": claim.id,
-                "original_claimant_id": claim.claimant_id,
-                "original_session_id": claim.session_id,
-                "released_by": key.reviewer_id,
-                "reason": signed.payload.rationale,
-                "review_id": record.id,
-            },
-            conn=conn,
-        )
-    return claim.model_copy(
-        update={"released_by": key.reviewer_id, "release_reason": signed.payload.rationale, "released_at": released_at}
-    )
+    return claim.model_copy(update={"released_by": claimant_id, "release_reason": release_reason, "released_at": released_at})
 
 
 def submit_candidate_proof(
@@ -576,14 +476,13 @@ def submit_candidate_proof(
     session_id: str,
     scoping_rationale: str,
     content: str,
-    claim_token: str | None = None,
 ) -> CandidateProofRecord:
-    """Submit a Candidate proof for a claimed node.
+    """Submit a Candidate proof as an ADR-0003 Markdown file (superseded by `request_review`).
 
-    Only the node's current claimant may submit; a successful submission ends
-    that claim automatically (ownership passes from agent to researcher the
-    moment the work is done) and writes an immutable, versioned Markdown file
-    to the Proof vault, indexed by a stable id independent of its file path.
+    Needs no claim (ADR-0010); a node someone else has claimed is theirs to
+    submit, and a submission ends the submitter's own claim. Writes an
+    immutable, versioned Markdown file to the Proof vault, indexed by a
+    stable id independent of its file path.
     """
     node = require_node(store, node_id)
 
@@ -601,12 +500,9 @@ def submit_candidate_proof(
             "scoped to prove directly",
         )
 
+    # a claim never gates writing (ADR-0010); a node someone else holds is theirs to submit
     claim = get_active_claim(store, node_id)
-    if claim is None:
-        raise ProofMapError(
-            "NO_ACTIVE_CLAIM", f"proof map node {node_id} has no active claim; claim it before submitting"
-        )
-    if not _holds(store, claim, claimant_id, session_id, claim_token):
+    if claim is not None and claim.claimant_id != claimant_id:
         raise _not_claimant(node_id, claim)
 
     version = next_candidate_proof_version(store, node_id)
@@ -651,9 +547,8 @@ def submit_candidate_proof(
 
     pin_dependencies(store, node)
 
-    mark_claim_released(
-        store, claim.id, released_by=claimant_id, reason="candidate proof submitted", released_at=utc_now()
-    )
+    if claim is not None:
+        mark_claim_released(store, claim.id, released_by=claimant_id, reason="candidate proof submitted", released_at=utc_now())
 
     append_event(
         store,
@@ -1202,7 +1097,7 @@ def decision_binding(
     if kind == DecisionKind.challenge_resolution:
         challenge = require_challenge(store, target_id)
         return {**none, "interface_fingerprint": _interface_of(require_node(store, challenge.target_node_id))}
-    if kind in (DecisionKind.force_release, DecisionKind.legacy_decline):
+    if kind == DecisionKind.legacy_decline:
         return none
     raise ProofMapError("INVALID_DECISION_KIND", f"{kind.value} is not a proof-map decision")
 
@@ -2034,15 +1929,18 @@ def get_integrity_state(store: ProjectStore, node_id: str) -> str:
 
 
 def get_frontier(store: ProjectStore) -> list[ProofMapNode]:
-    """Nodes with no unresolved dependency and no active claim.
+    """The open, unblocked, unclaimed nodes: what an agent could claim right now (ADR-0010).
 
-    What an agent could pick up right now without inspecting the whole graph
-    by hand.
+    The nodes `claim_node` would accept from anyone — the same check,
+    `_not_pickable` — that nobody has claimed yet and that aren't already
+    awaiting the researcher's review.
     """
     return [
         node
         for node in list_nodes(store)
-        if get_active_claim(store, node.id) is None and not _has_unresolved_dependency(store, node)
+        if get_active_claim(store, node.id) is None
+        and _not_pickable(store, node) is None
+        and get_workflow_state(store, node.id) != "review-needed"
     ]
 
 
@@ -2376,12 +2274,6 @@ def apply_signed_decision(store: ProjectStore, signed: SignedDecision) -> Any:
         return dismiss_challenge(store, target, signed_decision=signed)
     if kind == DecisionKind.promote:
         return promote_to_lemma(store, target, signed_decision=signed)
-    if kind == DecisionKind.force_release:
-        claim = get_claim(store, target)
-        if claim is None:
-            raise ProofMapError("NO_ACTIVE_CLAIM", f"claim {target} not found")
-        # the signature names the claim: if another claim is active by now, it won't authorize that one
-        return release_node(store, claim.node_id, claimant_id="", session_id="", force=True, signed_decision=signed)
     raise ProofMapError("UNSUPPORTED_DECISION", f"{kind.value} decisions aren't applied here")
 
 
