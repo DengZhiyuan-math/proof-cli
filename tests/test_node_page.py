@@ -1,0 +1,163 @@
+"""The map page is the one human entry, and a local node's page is its studio (ADR-0011, #70)."""
+
+from pathlib import Path
+
+import pytest
+
+from _review_client import DirectClient
+from proof_cli.proof_map import claim_node, get_active_claim, get_node, get_workflow_state, list_nodes
+from proof_cli.storage import ensure_project
+
+WEBAPP = Path(__file__).resolve().parents[1] / "src" / "proof_cli" / "webapp"
+STUDIO_STATIC = Path(__file__).resolve().parents[1] / "src" / "proof_cli" / "studio" / "static"
+
+
+@pytest.fixture
+def page(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    client = DirectClient(store)
+    yield store, client
+    client.app.close()
+
+
+def _ok(response):
+    status, body = response
+    assert status == 200 and body["ok"], body
+    return body["data"]
+
+
+def _refused(response):
+    status, body = response
+    assert status >= 400 and not body["ok"], body
+    return body["error"]["code"]
+
+
+# -- creating nodes from the map ----------------------------------------------------
+
+
+def test_the_page_alone_builds_a_map_from_nothing(page):
+    store, client = page
+    theorem = _ok(client.post("/api/nodes", {"node_id": "thm", "kind": "theorem", "statement": "T"}))
+    claim = _ok(client.post("/api/nodes", {"node_id": "c1", "kind": "claim", "statement": "C", "assumptions": ["x > 0"], "dependencies": ["thm"]}))
+    ref = _ok(client.post("/api/nodes", {
+        "node_id": "ref", "kind": "imported_result", "statement": "K",
+        "source_locator": "doi:10.1/x", "source_version": "v2", "trust_level": "external_reference",
+    }))
+
+    assert {n.id for n in list_nodes(store)} == {"thm", "c1", "ref"}
+    assert get_node(store, "c1").dependencies == ["thm"] and get_node(store, "c1").assumptions == ["x > 0"]
+    assert (theorem["page"], claim["page"], ref["page"]) == ("/studio/thm/", "/studio/c1/", "/#/node/ref")
+    assert (store.root / "proofs" / "c1" / "proof.tex").is_file()
+    assert client.app.studios.request("GET", "/studio/c1/", "", None, cross_site=False).status == 200
+
+
+def test_creating_a_node_is_refused_the_way_the_cli_refuses_it(page):
+    store, client = page
+    _ok(client.post("/api/nodes", {"node_id": "a", "kind": "claim", "statement": "A"}))
+    assert _refused(client.post("/api/nodes", {"node_id": "a", "kind": "claim", "statement": "again"})) == "NODE_ALREADY_EXISTS"
+    assert _refused(client.post("/api/nodes", {"node_id": "r", "kind": "imported_result", "statement": "K"})) == "IMPORTED_RESULT_REQUIRES_SOURCE"
+    assert _refused(client.post("/api/nodes", {"node_id": "b", "kind": "claim", "statement": "B", "dependencies": ["nope"]})) == "DEPENDENCY_NOT_FOUND"
+    assert _refused(client.post("/api/nodes", {"kind": "claim", "statement": "no id"})) == "INVALID_REQUEST"
+
+
+def test_the_created_by_is_the_pages_git_identity(page):
+    store, client = page
+    _ok(client.post("/api/nodes", {"node_id": "a", "kind": "claim", "statement": "A"}))
+    assert get_node(store, "a").created_by == client.app.state()["reviewer"]
+
+
+# -- a local node's page is its studio; an imported result's is not -------------------
+
+
+def test_a_local_node_opens_its_studio_and_an_imported_result_its_own_page(page):
+    store, client = page
+    _ok(client.post("/api/nodes", {"node_id": "c1", "kind": "claim", "statement": "C"}))
+    _ok(client.post("/api/nodes", {"node_id": "ref", "kind": "imported_result", "statement": "K", "source_locator": "doi:k", "source_version": "v1"}))
+    _ok(client.post("/api/nodes", {"node_id": "c2", "kind": "claim", "statement": "uses ref", "dependencies": ["ref"]}))
+
+    local, imported = _ok(client.get("/api/node/c1")), _ok(client.get("/api/node/ref"))
+    assert local["studio"] == "/studio/c1/" and imported["studio"] is None
+    assert imported["source"] == {"locator": "doi:k", "version": "v1", "trust_level": None}
+    assert imported["dependents"] == ["c2"]
+    assert {d["kind"] for d in imported["decisions"]} == {"reference_review"}
+    assert client.app.studios.request("GET", "/studio/ref/", "", None, cross_site=False).status == 404
+
+
+# -- the node panel's actions: the CLI's effects and refusals ------------------------
+
+
+def test_claim_unassign_and_reassign_from_the_node_panel(page):
+    store, client = page
+    _ok(client.post("/api/nodes", {"node_id": "c1", "kind": "claim", "statement": "C"}))
+    me = client.app.state()["reviewer"]
+
+    _ok(client.post("/api/node/c1/claim", {}))
+    assert get_active_claim(store, "c1").claimant_id == me
+    _ok(client.post("/api/node/c1/unassign", {}))
+    assert get_active_claim(store, "c1") is None
+
+    claim_node(store, "c1", claimant_id="agent_b")
+    assert _refused(client.post("/api/node/c1/claim", {})) == "CLAIM_CONFLICT"
+    _ok(client.post("/api/node/c1/claim", {"reassign": True}))
+    assert get_active_claim(store, "c1").claimant_id == me
+
+
+def test_split_from_the_node_panel_is_all_or_nothing_and_moves_on_to_the_first_child(page):
+    store, client = page
+    _ok(client.post("/api/nodes", {"node_id": "p", "kind": "claim", "statement": "P"}))
+    _ok(client.post("/api/nodes", {"node_id": "taken", "kind": "claim", "statement": "exists"}))
+
+    assert _refused(client.post("/api/node/p/split", {"children": [{"id": "k1", "statement": "a"}, {"id": "taken", "statement": "b"}]})) == "NODE_ALREADY_EXISTS"
+    assert get_node(store, "k1") is None and get_node(store, "p").dependencies == []
+
+    result = _ok(client.post("/api/node/p/split", {"children": [{"id": "k1", "statement": "a"}, {"id": "k2", "statement": "b"}]}))
+    assert result["next"] == "/studio/k1/"
+    assert get_node(store, "p").dependencies == ["k1", "k2"]
+    assert (store.root / "proofs" / "k1" / "proof.tex").is_file()
+
+    _ok(client.post("/api/nodes", {"node_id": "q", "kind": "claim", "statement": "Q"}))
+    claim_node(store, "q", claimant_id="agent_b")
+    assert _refused(client.post("/api/node/q/split", {"children": [{"id": "k3", "statement": "c"}]})) == "NOT_CLAIMANT"
+    _ok(client.post("/api/node/q/split", {"children": [{"id": "k3", "statement": "c"}], "reassign": True}))
+
+
+def test_request_review_from_the_node_panel(page):
+    store, client = page
+    _ok(client.post("/api/nodes", {"node_id": "c1", "kind": "claim", "statement": "C"}))
+    assert _refused(client.post("/api/node/c1/request-review", {"rationale": "  "})) == "SCOPING_RATIONALE_REQUIRED"
+    snapshot = _ok(client.post("/api/node/c1/request-review", {"rationale": "a single computation"}))
+    assert snapshot["version"] == 1 and get_workflow_state(store, "c1") == "review-needed"
+    assert _refused(client.post("/api/node/c1/request-review", {"rationale": "again"})) == "WORKING_PROOF_UNCHANGED"
+
+    claim_node(store, "c1", claimant_id="agent_b")
+    (store.root / "proofs" / "c1" / "proof.tex").write_text("changed\n")
+    assert _refused(client.post("/api/node/c1/request-review", {"rationale": "mine now"})) == "NOT_CLAIMANT"
+
+
+def test_a_challenge_and_an_evidence_check_from_the_node_panel(page):
+    store, client = page
+    _ok(client.post("/api/nodes", {"node_id": "c1", "kind": "claim", "statement": "C"}))
+    assert _refused(client.post("/api/node/c1/challenge", {"rationale": "missing assumption"})) == "TARGET_NOT_ACCEPTED"
+    assert _refused(client.post("/api/node/c1/evidence", {"outcome": "passed"})) == "NO_CANDIDATE_PROOF"
+    _ok(client.post("/api/node/c1/request-review", {"rationale": "scoped"}))
+    check = _ok(client.post("/api/node/c1/evidence", {"outcome": "failed", "notes": "counterexample at n=3", "run_by": "sage"}))
+    assert (check["outcome"], check["run_by"]) == ("failed", "sage")
+    assert _refused(client.post("/api/node/c1/evidence", {"outcome": "maybe"})) == "INVALID_OUTCOME"
+    assert _refused(client.post("/api/node/c1/frobnicate", {})) == "NOT_FOUND"
+
+
+# -- no more launching prism-local --------------------------------------------------
+
+
+def test_no_page_offers_open_in_prism_local():
+    for path in [*WEBAPP.rglob("*.py"), *(WEBAPP / "static").iterdir()]:
+        text = path.read_text()
+        assert "prism-local" not in text.lower() and "PROOF_CLI_PRISM_LOCAL" not in text, path.name
+
+
+def test_the_studio_page_carries_the_node_panel():
+    index = (STUDIO_STATIC / "index.html").read_text()
+    assert 'src="static/node.js"' in index and 'id="node-panel"' in index
+    panel = (STUDIO_STATIC / "node.js").read_text()
+    for action in ("claim", "unassign", "split", "request-review", "challenge", "evidence"):
+        assert f"/{action}" in panel, action

@@ -71,7 +71,9 @@ def test_the_page_keys_its_browser_state_by_node_and_uses_relative_urls():
     assert "proof-studio-pdf:\" + NODE" in common
     for name in ("app.js", "common.js", "pdfview.js", "viewer.js", "index.html", "viewer.html"):
         text = (STATIC / name).read_text()
-        for absolute in ('"/static/', 'fetch("/', '"/pdf', '"/viewer', 'href="/', 'src="/'):
+        # the studio's own files and API are relative; a link to the map ("/") or the node panel's
+        # calls to the proof map's API (/api/node/…) are absolute by design
+        for absolute in ('"/static/', 'fetch("/api/file', '"/pdf', '"/viewer', 'href="/static', 'src="/'):
             assert absolute not in text, (name, absolute)
         assert '"prism-pdf' not in text and '"prism.' not in text, name
 
