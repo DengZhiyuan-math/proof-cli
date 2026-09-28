@@ -53,7 +53,7 @@ A proof of a proof map node, written by an agent or collaborator; a reviewable a
 _Avoid_: resolution, solution
 
 **Proof vault**:
-The repo's top-level `proofs/` directory. It holds a shared `preamble.tex`, and one folder per node with its working `proof.tex`, its Review snapshots (`snapshots/v<N>.tex`) and its Review decisions (`reviews.jsonl`), all tracked by git. Each node folder is an ordinary LaTeX project that prism-local (or any LaTeX editor) opens as is. Older `v<N>.md` files from ADR-0003 remain as read-only history. Distinct from `.proof/`, which holds internal, non-human-authored project state.
+The repo's top-level `proofs/` directory. It holds a shared `preamble.tex`, and one folder per node with its working `proof.tex`, its Review snapshots (`snapshots/v<N>.tex`) and its Review decisions (`reviews.jsonl`), all tracked by git. Each node folder is an ordinary LaTeX project: the node's studio edits it, and any LaTeX editor can open it as is. Older `v<N>.md` files from ADR-0003 remain as read-only history. Distinct from `.proof/`, which holds internal, non-human-authored project state.
 
 **Review snapshot**:
 A copy of a node's working `proof.tex`, taken when its author requests review. It is never overwritten, and its SHA-256 is recorded. A Review decision is always about one snapshot, named by that hash; a compiled PDF may be archived beside it, but the `.tex` and its hash are what count. See ADR-0010.
@@ -93,7 +93,7 @@ A Human Review decision (Acceptance, Reference review, Evidence review, Lightwei
 _Avoid_: signed decision, confirmation, `--confirm`, approval flag
 
 **Proof map page**:
-proof-cli's own local web page and the map's home: the DAG and tree, the frontier, each node's three state axes, and the one place Review decisions are made. A node's page shows the Review snapshot under review, with its PDF if one was built, and offers **Open in prism-local** for the node's folder. See ADR-0008, ADR-0010.
+proof-cli's own local web page, the map's home, and the researcher's one entry: the DAG and tree, the frontier, creating nodes, each node's three state axes, and the one place Review decisions are made. A theorem, lemma or claim opens in its **studio**, a LaTeX workspace built from prism-local's code with a node panel for claim, split, request review, Challenge and Evidence check. An imported result opens on its own page. See ADR-0008, ADR-0010, ADR-0011.
 _Avoid_: review app (its ADR-0009 name), dashboard, admin panel
 
 **No longer callable** (a Reference review outcome):

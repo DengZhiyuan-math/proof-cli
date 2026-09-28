@@ -1,10 +1,7 @@
 """The proof map page as the map's home, and prism-local coupled by files only (issue #55, ADR-0008, ADR-0010)."""
 
-import json
 import os
-import stat
 import subprocess
-import sys
 import time
 from pathlib import Path
 
@@ -16,7 +13,7 @@ from _review_client import DirectClient, decide
 from proof_cli.cli import app as cli_app
 from proof_cli.proof_map import claim_node, create_node, open_challenge, request_review
 from proof_cli.storage import ensure_project
-from proof_cli.webapp.server import PRISM_LOCAL_ENV_VAR, RequestError
+from proof_cli.webapp.server import RequestError
 
 
 def _write(store, node_id: str, body: str) -> Path:
@@ -165,64 +162,6 @@ def test_a_missing_pdf_or_unknown_node_is_an_error(tmp_path: Path):
 
 
 # -- prism-local: coupled by files only ---------------------------------------------------
-
-
-def test_open_in_prism_local_runs_the_configured_executable_on_the_node_folder(tmp_path: Path, monkeypatch):
-    store = ensure_project(tmp_path / "project")
-    create_node(store, node_id="lem", kind="lemma", statement="Base")
-    record = tmp_path / "argv.json"
-    fake = _fake_prism(
-        tmp_path,
-        f"json.dump(sys.argv[1:], open({str(record)!r}, 'w'))\n"
-        "ready = sys.argv[sys.argv.index('--ready-file') + 1]\n"
-        "json.dump({'pid': 1, 'port': 45678, 'url': 'http://127.0.0.1:45678/', 'root': sys.argv[1]}, open(ready, 'w'))\n",
-    )
-    monkeypatch.setenv(PRISM_LOCAL_ENV_VAR, str(fake))
-
-    status, result = DirectClient(store).post("/api/node/lem/open", {})
-
-    folder = str(store.root / "proofs" / "lem")
-    assert status == 200 and result["data"] == {"opened": True, "folder": folder, "command": str(fake), "url": "http://127.0.0.1:45678/"}
-    argv = json.loads(record.read_text())
-    # the node folder, on a free port (another node's prism-local may be running), gone when its page closes
-    assert argv[0] == folder and argv[argv.index("--port") + 1] == "0" and "--exit-when-idle" in argv
-
-
-def test_a_prism_local_that_fails_to_start_is_reported_not_claimed(tmp_path: Path, monkeypatch):
-    store = ensure_project(tmp_path / "project")
-    create_node(store, node_id="lem", kind="lemma", statement="Base")
-    fake = _fake_prism(tmp_path, "sys.stderr.write('OSError: [Errno 48] Address already in use')\nsys.exit(1)\n")
-    monkeypatch.setenv(PRISM_LOCAL_ENV_VAR, str(fake))
-
-    result = DirectClient(store).post("/api/node/lem/open", {})[1]["data"]
-
-    assert result["opened"] is False and "Address already in use" in result["error"]
-
-
-def _fake_prism(tmp_path: Path, body: str) -> Path:
-    fake = tmp_path / "prism-local"
-    fake.write_text(f"#!{sys.executable}\nimport json, sys\n{body}")
-    fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
-    return fake
-
-
-def test_without_prism_local_the_page_gives_the_folder(tmp_path: Path, monkeypatch):
-    store = ensure_project(tmp_path)
-    create_node(store, node_id="lem", kind="lemma", statement="Base")
-    monkeypatch.delenv(PRISM_LOCAL_ENV_VAR, raising=False)
-    monkeypatch.setenv("PATH", str(tmp_path / "empty-bin"))
-
-    status, result = DirectClient(store).post("/api/node/lem/open", {})
-
-    assert status == 200
-    assert (result["data"]["opened"], result["data"]["folder"]) == (False, str(tmp_path / "proofs" / "lem"))
-
-
-def test_an_imported_result_has_no_folder_to_open(tmp_path: Path):
-    store = ensure_project(tmp_path)
-    create_node(store, node_id="ref", kind="imported_result", statement="Known", source_locator="doi:x", source_version="v1")
-    status, result = DirectClient(store).post("/api/node/ref/open", {})
-    assert (status, result["error"]["code"]) == (404, "NO_PROOF_FOLDER")
 
 
 def test_the_map_commands_are_proof_map_serve_and_open():
