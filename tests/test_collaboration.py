@@ -21,10 +21,11 @@ import pytest
 from _researcher import researcher
 
 from proof_cli.domain import TheoremStatus, TrustLevel
-from proof_cli.proof_map import claim_node, create_node, decide_acceptance, submit_candidate_proof
+from proof_cli.proof_map import claim_node, create_node, decide_acceptance
 from proof_cli.reusable_assets import ReusableAsset, ReusableAssetKind, ReusableAssetPayload, ReusableAssetProvenance, ReusableAssetReuseStatus, ReusableAssetTrustLevel
 from proof_cli.storage import ensure_project
 from proof_cli.theorems import add_theorem
+from _proofs import submit_proof
 
 
 def test_collaboration_records_persist_authorship_review_comments_and_branches(tmp_path: Path) -> None:
@@ -121,7 +122,7 @@ def test_review_decide_on_proof_map_node_review_is_rejected(tmp_path: Path) -> N
     store = ensure_project(tmp_path)
     create_node(store, node_id="clm_1", kind="claim", statement="stmt")
     claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
-    submit_candidate_proof(
+    submit_proof(
         store, "clm_1", claimant_id="agent_a", session_id="sess_1",
         scoping_rationale="scoped correctly", content="proof text")
     record = researcher(store).decide_acceptance("clm_1", "accept")

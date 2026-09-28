@@ -117,7 +117,6 @@ from .proof_map import (
     request_review,
     require_node,
     split_node,
-    submit_candidate_proof,
 )
 from .vault import working_proof_path
 from .rendering import (
@@ -445,33 +444,6 @@ def node_request_review(
     _emit_candidate_proof(record, json_output, command="node.request_review")
 
 
-@node_app.command("submit")
-def node_submit(
-    node_id: str,
-    content: str = typer.Option(..., "--content", help="The candidate proof text"),
-    rationale: str = typer.Option(
-        ..., "--rationale", help="Why this node is now appropriately scoped to prove directly"
-    ),
-    root: str = ".",
-    claimant: str = typer.Option(..., "--claimant", help="The node's assignee"),
-    json_output: bool = typer.Option(False, "--json"),
-) -> None:
-    store = get_store(_root(root))
-    try:
-        record = submit_candidate_proof(
-            store,
-            node_id,
-            claimant_id=claimant,
-            session_id="",
-            scoping_rationale=rationale,
-            content=content,
-        )
-    except ProofMapError as exc:
-        _emit_node_error(exc, json_output, command="node.submit")
-        raise typer.Exit(code=1)
-    _emit_candidate_proof(record, json_output, command="node.submit")
-
-
 def _emit_review_record(record, json_output: bool, *, command: str) -> None:
     if json_output:
         typer.echo(dump_envelope(success_envelope(command, record.model_dump(mode="json"))))
@@ -626,7 +598,7 @@ def evidence_record(
     outcome: str,
     root: str = ".",
     notes: str = "",
-    run_by: str = "system",
+    run_by: str = typer.Option("system", "--run-by", help="The checker or backend that ran the check; the node page shows it"),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Record an Evidence check against a specific Candidate proof. Advisory, ungated."""
@@ -715,7 +687,7 @@ def review_open(node_id: str = typer.Argument("", help="Open this node's decisio
 
 @review_app.command("warnings")
 def review_warnings(root: str = ".", json_output: bool = typer.Option(False, "--json")) -> None:
-    """Everything about Human Review authority that doesn't verify: unsigned or forged decisions, broken chains."""
+    """Everything about Human Review authority that doesn't verify, and Review snapshots the index never recorded."""
     warnings = list_integrity_warnings(get_store(_root(root)))
     if json_output:
         typer.echo(dump_envelope(success_envelope("review.warnings", [warning.model_dump(mode="json") for warning in warnings])))
@@ -1492,11 +1464,12 @@ def verify_run(
     root: str = ".",
     backend_target: str = "",
     notes: str = "",
-    candidate_proof: str = typer.Option("", "--candidate-proof", help="Also record the outcome as an (advisory) Evidence check on this Candidate proof"),
 ) -> None:
-    """Run a machine check. Its result is advisory: it never closes, blocks or resolves anything."""
+    """Log a placeholder machine check: no backend runs yet. Advisory: it never closes, blocks or
+    resolves anything. A real checker records its outcome on a Candidate proof with
+    `proof node evidence record`."""
     try:
-        output = cmd_proof_verify_run(source_id, _root(root), backend_target=backend_target, notes=notes, candidate_proof_id=candidate_proof)
+        output = cmd_proof_verify_run(source_id, _root(root), backend_target=backend_target, notes=notes)
     except ValueError as exc:
         typer.echo(f"Error: {exc}")
         raise typer.Exit(code=1)

@@ -38,7 +38,6 @@ from proof_cli.proof_map import (
     list_challenges,
     list_nodes,
     open_challenge,
-    submit_candidate_proof,
 )
 from proof_cli.references import ReferenceRecord, ReferenceReviewStatus, ReferenceSourceType
 from proof_cli.storage import (
@@ -49,6 +48,7 @@ from proof_cli.storage import (
     list_references,
 )
 from proof_cli.theorems import add_theorem, list_theorems
+from _proofs import submit_proof
 
 runner = CliRunner()
 
@@ -59,7 +59,7 @@ PLUGIN_SERVER = Path(__file__).resolve().parents[1] / "plugins" / "proof-routing
 
 def _submit(store, node_id, claimant="agent_a", session="s"):
     claim_node(store, node_id, claimant_id=claimant, session_id=session)
-    submit_candidate_proof(
+    submit_proof(
         store, node_id, claimant_id=claimant, session_id=session, scoping_rationale="scoped", content=f"proof of {node_id}"
     )
 

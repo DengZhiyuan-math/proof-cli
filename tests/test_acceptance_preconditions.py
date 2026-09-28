@@ -20,16 +20,16 @@ from proof_cli.proof_map import (
     get_workflow_state,
     open_challenge,
     split_node,
-    submit_candidate_proof,
 )
 from proof_cli.storage import ensure_project, get_current_candidate_proof
 from proof_cli.theorems import add_theorem
+from _proofs import submit_proof
 
 
 
 def _submit(store, node_id: str, *, session: str = "sess_1") -> None:
-    submit_candidate_proof(  # needs no claim (ADR-0010)
-        store, node_id, claimant_id="agent_a", session_id=session, scoping_rationale="scoped", content="proof text")
+    submit_proof(  # needs no claim (ADR-0010)
+        store, node_id, claimant_id="agent_a", session_id=session, scoping_rationale="scoped", content=f"proof text ({session})")
 
 
 def _awaiting_review(store, node_id: str = "clm_1", **node_fields) -> None:
@@ -202,7 +202,7 @@ def test_split_promote_verify_and_exchange_import_never_write_acceptance_state(t
     # the legacy theorem-contract verify path, on a contract sharing the node's id (the trust
     # commands themselves are gone, #37)
     add_theorem(store, theorem_id="clm_child", kind="lemma", name="child", statement="child")
-    assert json.loads(cmd_proof_verify_run("clm_child", root=tmp_path / "local"))["machine_check_status"] == "machine_checked"
+    assert json.loads(cmd_proof_verify_run("clm_child", root=tmp_path / "local"))["machine_check_status"] == "queued_for_verification"
     assert get_acceptance_state(store, "clm_child") == "unreviewed"
 
     # exchange import of a project where the same node ids are Accepted

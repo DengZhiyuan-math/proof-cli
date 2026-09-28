@@ -9,8 +9,9 @@ from typer.testing import CliRunner
 
 from proof_cli.cli import app
 from proof_cli.memory import list_memory_artifacts, record_memory
-from proof_cli.proof_map import claim_node, create_node, decide_acceptance, submit_candidate_proof
+from proof_cli.proof_map import claim_node, create_node, decide_acceptance
 from proof_cli.storage import ensure_project
+from _proofs import submit_proof
 
 runner = CliRunner()
 
@@ -31,7 +32,7 @@ def test_record_memory_links_to_a_specific_candidate_proof_and_review(tmp_path: 
     store = ensure_project(tmp_path)
     create_node(store, node_id="clm_1", kind="claim", statement="stmt")
     claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
-    proof = submit_candidate_proof(
+    proof = submit_proof(
         store,
         "clm_1",
         claimant_id="agent_a",
