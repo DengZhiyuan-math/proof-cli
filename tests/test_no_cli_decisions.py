@@ -18,7 +18,6 @@ import sqlite3
 from pathlib import Path
 
 import click
-import pytest
 import typer
 from typer.testing import CliRunner
 
@@ -44,7 +43,6 @@ from proof_cli.proof_map import (
 from proof_cli.references import ReferenceRecord, ReferenceReviewStatus, ReferenceSourceType
 from proof_cli.storage import (
     ensure_project,
-    get_active_claim,
     import_reference,
     list_blockers,
     list_obligations,
@@ -60,9 +58,9 @@ PLUGIN_SERVER = Path(__file__).resolve().parents[1] / "plugins" / "proof-routing
 
 
 def _submit(store, node_id, claimant="agent_a", session="s"):
-    claim = claim_node(store, node_id, claimant_id=claimant, session_id=session)
+    claim_node(store, node_id, claimant_id=claimant, session_id=session)
     submit_candidate_proof(
-        store, node_id, claimant_id=claimant, session_id=session, scoping_rationale="scoped", content=f"proof of {node_id}", claim_token=claim.claim_token
+        store, node_id, claimant_id=claimant, session_id=session, scoping_rationale="scoped", content=f"proof of {node_id}"
     )
 
 
@@ -100,15 +98,10 @@ def _protected(store) -> dict:
     for node in list_nodes(store):
         judged = get_reference_review_state if node.kind.value == "imported_result" else get_acceptance_state
         nodes[node.id] = (get_node(store, node.id).kind.value, judged(store, node.id))
-    claims = {}
-    for node in list_nodes(store):
-        claim = get_active_claim(store, node.id)
-        if claim is not None:  # a new claim on a free node is ordinary agent work; a held one must stay held
-            claims[node.id] = (claim.id, claim.claimant_id)
+    # claims aren't protected: a claim is a planning signal anyone may reassign or clear (ADR-0010)
     return {
         "nodes": nodes,
         "challenges": {c.id: c.status.value for c in list_challenges(store)},
-        "claims": claims,
         "theorems": {t.id: (t.status.value, t.trust_level.value) for t in list_theorems(store)},
         "references": {r.id: (r.review_status.value, r.is_callable) for r in list_references(store)},
         "obligations": {o.id: o.status.value for o in list_obligations(store)},
@@ -261,24 +254,6 @@ def test_adding_a_theorem_that_exists_does_not_replace_its_trust(tmp_path: Path)
         runner.invoke(app, args)
         (theorem,) = list_theorems(store)
         assert (theorem.statement, theorem.status, theorem.trust_level) == ("T", TheoremStatus.verified, TrustLevel.project_verified)
-
-
-def test_an_imported_claim_stays_bound_to_a_token_nobody_here_holds(tmp_path: Path):
-    """Naming the claimant and session of an imported claim must not make you its holder."""
-    from proof_cli.exchange import bundle_from_json, import_exchange_bundle
-    from proof_cli.proof_map import ProofMapError, release_node
-
-    source = ensure_project(tmp_path / "source")
-    create_node(source, node_id="clm_c", kind="claim", statement="C")
-    claim_node(source, "clm_c", claimant_id="agent_owner", session_id="owner_session")
-    target = ensure_project(tmp_path / "target")
-    import_exchange_bundle(target, bundle_from_json(bundle_to_json(export_exchange_bundle(source))))
-
-    claim = get_active_claim(target, "clm_c")
-    assert claim is not None and claim.has_token
-    with pytest.raises(ProofMapError):
-        release_node(target, "clm_c", claimant_id="agent_owner", session_id="owner_session")
-    assert get_active_claim(target, "clm_c") is not None
 
 
 def test_a_refusal_outside_a_project_does_not_create_one(tmp_path: Path):

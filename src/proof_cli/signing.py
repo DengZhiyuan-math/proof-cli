@@ -42,7 +42,7 @@ class DecisionKind(str, Enum):
     dependency_revalidation = "dependency_revalidation"
     challenge_resolution = "challenge_resolution"
     promote = "promote"
-    force_release = "force_release"
+    force_release = "force_release"  # retired by ADR-0010 (a claim is a plain assignee); kept to read old rows
     reviewer_enrollment = "reviewer_enrollment"
     # the researcher declining to keep a pre-ADR-0009 decision (#42)
     legacy_decline = "legacy_decline"

@@ -276,7 +276,6 @@ const DECISION_LABELS = {
   "evidence_review:trusted": "Trust this Evidence check",
   "evidence_review:unusable": "Mark this Evidence check unusable",
   "challenge_resolution:dismissed": "Dismiss this Challenge (a false alarm)",
-  "force_release:force-release": "Force-release the claim (a reason is required)",
 };
 
 function signError(error) { say(error.code ? `${error.code}: ${error.message}` : error.message, "error"); }
@@ -284,7 +283,7 @@ function signError(error) { say(error.code ? `${error.code}: ${error.message}` :
 function decisionRow(decision, proof) {
   const label = DECISION_LABELS[`${decision.kind}:${decision.decision}`] || `${decision.kind}: ${decision.decision}`;
   const on = decision.dependency_id ? `dependency ${decision.dependency_id}` : decision.claimant_id ? `claim held by ${decision.claimant_id}` : decision.target_id;
-  const rationale = el("input", null, { placeholder: decision.kind === "force_release" ? "why (required)" : "why" });
+  const rationale = el("input", null, { placeholder: "why" });
   const button = el("button", "Sign");
   button.onclick = async () => {
     const { claimant_id, ...signed } = decision;

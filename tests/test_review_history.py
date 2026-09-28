@@ -54,9 +54,9 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 
 def _submitted_claim(store, node_id: str):
     create_node(store, node_id=node_id, kind="claim", statement=f"statement of {node_id}")
-    _claim_token = claim_node(store, node_id, claimant_id="agent_a", session_id="sess_1").claim_token
+    claim_node(store, node_id, claimant_id="agent_a", session_id="sess_1")
     return submit_candidate_proof(
-        store, node_id, claimant_id="agent_a", session_id="sess_1", scoping_rationale="scoped", content="proof text", claim_token=_claim_token)
+        store, node_id, claimant_id="agent_a", session_id="sess_1", scoping_rationale="scoped", content="proof text")
 
 
 def _accepted_then_resubmitted(store, node_id: str = "clm_1") -> None:
@@ -65,9 +65,9 @@ def _accepted_then_resubmitted(store, node_id: str = "clm_1") -> None:
     _submitted_claim(store, node_id)
     researcher(store).decide_acceptance(node_id, "accept")
     open_challenge(store, node_id, opened_by="agent_b", rationale="second look")
-    _claim_token = claim_node(store, node_id, claimant_id="agent_a", session_id="sess_2").claim_token
+    claim_node(store, node_id, claimant_id="agent_a", session_id="sess_2")
     submit_candidate_proof(
-        store, node_id, claimant_id="agent_a", session_id="sess_2", scoping_rationale="scoped", content="revised proof", claim_token=_claim_token)
+        store, node_id, claimant_id="agent_a", session_id="sess_2", scoping_rationale="scoped", content="revised proof")
     assert get_workflow_state(store, node_id) == "review-needed"
 
 
