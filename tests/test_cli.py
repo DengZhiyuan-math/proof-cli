@@ -635,7 +635,7 @@ def test_codex_surface_shows_guided_catalog_and_discovers_workspace_root(tmp_pat
     assert "proof codex snapshot" in result.stdout
     assert "proof codex doctor" in result.stdout
     assert "proof codex obligation resolve" not in result.stdout  # a Human Review decision, not an agent command
-    assert "review app" in result.stdout
+    assert "proof map page" in result.stdout
 
 
 def test_codex_surface_routes_real_read_only_commands(tmp_path: Path) -> None:

@@ -1,4 +1,4 @@
-from _authenticator import researcher
+from _researcher import researcher
 """Issue #30: publication tracks two orthogonal states for a ProofMapNode —
 the node's own acceptance_state/integrity_state, read live from the core
 model, and a separate editorial readiness track that only a human editor

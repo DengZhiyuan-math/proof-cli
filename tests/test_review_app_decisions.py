@@ -1,14 +1,14 @@
-"""The rest of the Human Review decisions, made in the review app (issue #38).
+"""Every Human Review decision, made on the proof map page (issue #38, ADR-0010).
 
-Each is driven over plain HTTP the way the page does it — prepare, one
-passkey tap, decide — with the software authenticator playing the browser.
+Each is driven through the page's own API — read the node, record the
+decision — without a socket (see `_review_client.DirectClient`).
 """
 
 from pathlib import Path
 
 import pytest
 
-from _authenticator import researcher
+from _researcher import researcher
 from proof_cli.proof_map import (
     ProofMapError,
     claim_node,
@@ -25,22 +25,14 @@ from proof_cli.proof_map import (
     submit_candidate_proof,
 )
 from proof_cli.collaboration import list_review_records
-from proof_cli.signing import b64url_decode, public_key_fingerprint
 from proof_cli.storage import ensure_project, get_active_claim, get_current_candidate_proof
-from _review_client import serving
-from test_review_app import _sign
+from _review_client import DirectClient, decide
 
 
 @pytest.fixture
 def app(tmp_path: Path):
     store = ensure_project(tmp_path)
-    with serving(store) as client:
-        yield store, client
-
-
-def _passkey(store):
-    """The researcher's enrolled passkey (enrolling over HTTP is covered by test_review_app)."""
-    return researcher(store).authenticator
+    yield store, DirectClient(store)
 
 
 # -- a claim is shown as its assignee; there is no force-release (ADR-0010) ----------
@@ -107,7 +99,6 @@ def test_no_longer_callable_is_terminal(tmp_path: Path):
 
 def test_the_app_offers_both_reference_decisions_and_stops_listing_a_withdrawn_one(app):
     store, client = app
-    passkey = _passkey(store)
     create_node(store, node_id="ref", kind="imported_result", statement="K", source_locator="doi:k", source_version="v1")
 
     view = client.get("/api/node/ref")[1]["data"]
@@ -115,7 +106,7 @@ def test_the_app_offers_both_reference_decisions_and_stops_listing_a_withdrawn_o
         {"kind": "reference_review", "target_id": "ref", "decision": "reference-review"},
         {"kind": "reference_review", "target_id": "ref", "decision": "no-longer-callable"},
     ]
-    _, outcome = _sign(client, passkey, [{"kind": "reference_review", "target_id": "ref", "decision": "no-longer-callable", "rationale": "gap"}])
+    _, outcome = decide(client, [{"kind": "reference_review", "target_id": "ref", "decision": "no-longer-callable", "rationale": "gap"}])
 
     assert outcome["data"]["results"][0]["ok"], outcome
     assert get_reference_review_state(store, "ref") == "no-longer-callable"
@@ -178,15 +169,13 @@ def _offered(client, node_id, kind):
     return [d for d in client.get(f"/api/node/{node_id}")[1]["data"]["decisions"] if d["kind"] == kind]
 
 
-def _sign_offered(client, passkey, offered, **extra):
-    decision = {key: value for key, value in offered.items() if key != "claimant_id"}
-    status, outcome = _sign(client, passkey, [{**decision, **extra}])
+def _record_offered(client, offered, **extra):
+    status, outcome = decide(client, [{**offered, **extra}])
     assert status == 200 and outcome["data"]["results"][0]["ok"], outcome
 
 
 def test_a_lagging_pin_is_shown_and_re_reviewed_from_the_page(app):
     store, client = app
-    passkey = _passkey(store)
     _accepted(store, "lem")
     _accepted(store, "uses", ["lem"])
     challenge = open_challenge(store, "lem", opened_by="agent_b", rationale="?")
@@ -198,7 +187,7 @@ def test_a_lagging_pin_is_shown_and_re_reviewed_from_the_page(app):
     (dependency,) = client.get("/api/node/uses")[1]["data"]["dependencies"]
     assert (dependency["pin"]["pinned_version"], dependency["accepted_version"], dependency["remedy"]) == (1, 2, "lightweight-re-review")
     (offered,) = _offered(client, "uses", "dependency_revalidation")
-    _sign_offered(client, passkey, offered, rationale="v2 only tidies the proof")
+    _record_offered(client, offered, rationale="v2 only tidies the proof")
 
     (dependency,) = client.get("/api/node/uses")[1]["data"]["dependencies"]
     assert dependency["pin"]["pinned_version"] == 2
@@ -207,13 +196,12 @@ def test_a_lagging_pin_is_shown_and_re_reviewed_from_the_page(app):
 
 def test_an_evidence_check_is_judged_from_the_page(app):
     store, client = app
-    passkey = _passkey(store)
     _accepted(store, "lem")
     check = record_evidence_check(store, get_current_candidate_proof(store, "lem").id, "passed", notes="all agree")
 
     offered = _offered(client, "lem", "evidence_review")
     assert {(d["target_id"], d["decision"]) for d in offered} == {(check.id, "trusted"), (check.id, "unusable")}
-    _sign_offered(client, passkey, next(d for d in offered if d["decision"] == "trusted"))
+    _record_offered(client, next(d for d in offered if d["decision"] == "trusted"))
 
     (record,) = [r for r in list_review_records(store, object_type="evidence_check", object_id=check.id) if r.kind]
     assert record.decision.value == "trusted"
@@ -221,11 +209,10 @@ def test_an_evidence_check_is_judged_from_the_page(app):
 
 def test_an_accepted_claim_is_promoted_from_the_page_and_not_offered_again(app):
     store, client = app
-    passkey = _passkey(store)
     _accepted(store, "clm")
 
     (offered,) = _offered(client, "clm", "promote")
-    _sign_offered(client, passkey, offered, rationale="reused in three places")
+    _record_offered(client, offered, rationale="reused in three places")
 
     assert get_node(store, "clm").kind.value == "lemma"
     assert _offered(client, "clm", "promote") == []
@@ -233,84 +220,11 @@ def test_an_accepted_claim_is_promoted_from_the_page_and_not_offered_again(app):
 
 def test_a_challenge_is_dismissed_from_the_page(app):
     store, client = app
-    passkey = _passkey(store)
     _accepted(store, "lem")
     challenge = open_challenge(store, "lem", opened_by="agent_b", rationale="?")
 
     (offered,) = _offered(client, "lem", "challenge_resolution")
     assert offered["target_id"] == challenge.id
-    _sign_offered(client, passkey, offered, rationale="false alarm")
+    _record_offered(client, offered, rationale="false alarm")
 
     assert get_challenge(store, challenge.id).status.value == "dismissed"
-
-
-# -- revoking a passkey: signed by a key that's already enrolled -----------------------
-
-
-def _second_key(store):
-    from _authenticator import SoftwareAuthenticator, enroll
-
-    second = SoftwareAuthenticator(display_name="old laptop")
-    enroll(store, second, signer=_passkey(store))
-    return second
-
-
-def _revoke(client, signer, fingerprint):
-    status, prepared = client.post("/api/keys/revoke/prepare", {"fingerprint": fingerprint})
-    if status != 200:
-        return status, prepared
-    to_sign = prepared["data"]
-    assertion = signer.assert_challenge(b64url_decode(to_sign["challenge"]), origin=client.origin)
-    return client.post("/api/keys/revoke", {"payloads": to_sign["payloads"], "batch": to_sign["batch"], "assertion": assertion.model_dump()})
-
-
-def test_a_lost_passkey_is_revoked_with_a_tap_from_another(app):
-    store, client = app
-    second = _second_key(store)
-    fingerprint = public_key_fingerprint(second.public_key_spki)
-
-    status, revoked = _revoke(client, _passkey(store), fingerprint)
-
-    assert status == 200, revoked
-    (key,) = [k for k in client.get("/api/state")[1]["data"]["keys"] if k["fingerprint"] == fingerprint]
-    assert key["revoked_seq"] is not None
-    # and it signs nothing any more
-    _accepted(store, "lem")
-    challenge = open_challenge(store, "lem", opened_by="agent_b", rationale="?")
-    _, outcome = _sign(client, second, [{"kind": "challenge_resolution", "target_id": challenge.id, "decision": "dismissed"}])
-    assert not outcome.get("data", {}).get("results", [{}])[0].get("ok")
-    assert get_challenge(store, challenge.id).status.value == "open"
-
-
-def test_the_last_passkey_is_never_revoked(app):
-    store, client = app
-    passkey = _passkey(store)
-
-    status, refused = _revoke(client, passkey, public_key_fingerprint(passkey.public_key_spki))
-
-    assert (status, refused["error"]["code"]) == (403, "LAST_REVIEWER_KEY")
-
-
-def test_a_revocation_without_a_valid_assertion_changes_nothing(app):
-    store, client = app
-    second = _second_key(store)
-    fingerprint = public_key_fingerprint(second.public_key_spki)
-    prepared = client.post("/api/keys/revoke/prepare", {"fingerprint": fingerprint})[1]["data"]
-
-    status, _ = client.post("/api/keys/revoke", {"payloads": prepared["payloads"], "batch": prepared["batch"], "assertion": {"credential_id": "x", "authenticator_data": "", "client_data_json": "", "signature": ""}})
-
-    assert status in (400, 403)
-    assert all(k["revoked_seq"] is None for k in client.get("/api/state")[1]["data"]["keys"])
-
-
-def test_only_a_revocation_is_accepted_on_the_revocation_endpoint(app):
-    store, client = app
-    _second_key(store)
-    _accepted(store, "lem")
-    challenge = open_challenge(store, "lem", opened_by="agent_b", rationale="?")
-    prepared = client.post("/api/prepare", {"decisions": [{"kind": "challenge_resolution", "target_id": challenge.id, "decision": "dismissed"}]})[1]["data"]
-    assertion = _passkey(store).assert_challenge(b64url_decode(prepared["challenge"]), origin=client.origin)
-
-    status, refused = client.post("/api/keys/revoke", {"payloads": prepared["payloads"], "batch": prepared["batch"], "assertion": assertion.model_dump()})
-
-    assert (status, refused["error"]["code"]) == (400, "NOT_A_REVOCATION")

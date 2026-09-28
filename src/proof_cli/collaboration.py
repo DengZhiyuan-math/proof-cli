@@ -11,9 +11,8 @@ from typing import Any, Iterable, Literal
 
 from pydantic import BaseModel, Field, ValidationError
 
-from .authority import human_review_required, signature_key
+from .authority import human_review_required
 from .domain import EventRecord, utc_now
-from .signing import SignedDecision, payload_hash
 from .storage import (
     ProjectStore,
     active_transaction,
@@ -510,7 +509,6 @@ def _decision_row(
     rationale: str,
     created_at: datetime,
     row_id: str | None = None,
-    signed_decision: SignedDecision | None = None,
 ) -> dict[str, Any]:
     row = _history_row(
         entry="decision",
@@ -526,9 +524,6 @@ def _decision_row(
         provenance_notes=record.provenance_notes,
         created_at=created_at,
     )
-    if signed_decision is not None:
-        row["signed_decision"] = signed_decision.model_dump_json()
-        row["payload_hash"] = payload_hash(signed_decision.payload)
     return row
 
 
@@ -664,6 +659,10 @@ def _run_review_history_migration(store: ProjectStore, conn: sqlite3.Connection,
     migrated = [record.id for record in legacy if _append_legacy_record(conn, record)]
     mark_review_history_migrated(conn)
     if migrated:
+        from .authority import review_history_changed
+
+        review_history_changed(store, conn)  # these decisions still have to reach reviews.jsonl
+    if migrated:
         append_event(
             store,
             "collaboration_review_history_migrated",
@@ -691,11 +690,10 @@ def record_review_request(
     authorship: list[str] | None = None,
     provenance_notes: str = "",
     kind: ReviewRecordKind | None = None,
-    signed_decision: SignedDecision | None = None,
     conn: sqlite3.Connection | None = None,
 ) -> ReviewRecord:
     _migrate_legacy_review_records(store, conn)
-    _require_signature_if_trust_bearing(store, object_type, kind, signed_decision)
+    _refuse_if_trust_bearing(object_type, kind)
     record = ReviewRecord(
         object_type=object_type,
         object_id=object_id,
@@ -726,7 +724,6 @@ def record_review_decision(
     *,
     reviewer_id: str,
     rationale: str = "",
-    signed_decision: SignedDecision | None = None,
     conn: sqlite3.Connection | None = None,
 ) -> ReviewRecord:
     """Append a decision on an existing review request. The request row is
@@ -749,7 +746,7 @@ def record_review_decision(
         record = _current(tx)
         if record is None:
             raise KeyError(review_id)
-        _require_signature_if_trust_bearing(store, record.object_type, record.kind, signed_decision)
+        _refuse_if_trust_bearing(record.object_type, record.kind)
         insert_review_history_row(
             tx,
             _decision_row(
@@ -758,7 +755,6 @@ def record_review_decision(
                 reviewer_id=reviewer_id,
                 rationale=rationale,
                 created_at=utc_now(),
-                signed_decision=signed_decision,
             ),
         )
         record = _current(tx)
@@ -784,7 +780,6 @@ def record_decided_review(
     authorship: list[str] | None = None,
     provenance_notes: str = "",
     kind: ReviewRecordKind | None = None,
-    signed_decision: SignedDecision | None = None,
     conn: sqlite3.Connection | None = None,
 ) -> ReviewRecord:
     """A review requested and decided in one step: both rows land in the same
@@ -800,7 +795,6 @@ def record_decided_review(
             authorship=authorship,
             provenance_notes=provenance_notes,
             kind=kind,
-            signed_decision=signed_decision,
             conn=tx,
         )
         return record_review_decision(
@@ -809,19 +803,19 @@ def record_decided_review(
             decision,
             reviewer_id=reviewer_id,
             rationale=rationale,
-            signed_decision=signed_decision,
             conn=tx,
         )
 
 
-def _require_signature_if_trust_bearing(
-    store: ProjectStore, object_type: str, kind: ReviewRecordKind | None, signed_decision: SignedDecision | None
-) -> None:
-    if kind is None and object_type not in TRUST_BEARING_OBJECT_TYPES:
-        return
-    if signed_decision is None:
+def _refuse_if_trust_bearing(object_type: str, kind: ReviewRecordKind | None) -> None:
+    """A review a derived Human Review axis would read is never recorded here (ADR-0010).
+
+    Those decisions are the proof map's, written to the git-tracked
+    reviews.jsonl by `authority.record_decision` from the proof map page;
+    this generic review history keeps only the untrusted, editorial kind.
+    """
+    if kind is not None or object_type in TRUST_BEARING_OBJECT_TYPES:
         raise human_review_required(kind or object_type, object_type)
-    signature_key(store, signed_decision)
 
 
 def import_review_records(store: ProjectStore, records: Iterable[ReviewRecord]) -> tuple[list[str], list[str]]:
@@ -869,12 +863,36 @@ def list_review_history(store: ProjectStore, *, object_type: str = "", object_id
 
 
 def list_review_records(store: ProjectStore, *, object_type: str = "", object_id: str = "") -> list[ReviewRecord]:
-    return _fold_review_history(list_review_history(store, object_type=object_type, object_id=object_id))
+    """Every review: the generic ones in review_history, then the proof map's Human Review
+    decisions from the git-tracked reviews.jsonl files (ADR-0010)."""
+    from .authority import list_decisions
+
+    records = _fold_review_history(list_review_history(store, object_type=object_type, object_id=object_id))
+    for row in list_decisions(store):
+        if (object_type and row["object_type"] != object_type) or (object_id and row["object_id"] != object_id):
+            continue
+        records.append(
+            ReviewRecord(
+                id=row["review_id"],
+                object_type=row["object_type"],
+                object_id=row["object_id"],
+                reviewer_id=row["reviewer_id"],
+                decision=ReviewGovernanceState(row["decision"]),
+                kind=ReviewRecordKind(row["kind"]),
+                rationale=row["rationale"],
+                created_at=row["created_at"],
+                updated_at=row["created_at"],
+                decision_row_id=row["id"],
+            )
+        )
+    return records
 
 
 def get_review_record(store: ProjectStore, review_id: str) -> ReviewRecord | None:
     folded = _fold_review_history(list_review_history(store, review_id=review_id))
-    return folded[0] if folded else None
+    if folded:
+        return folded[0]
+    return next((record for record in list_review_records(store) if record.id == review_id), None)
 
 
 def ensure_comment_thread(

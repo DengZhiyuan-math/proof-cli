@@ -1,4 +1,4 @@
-from _authenticator import researcher
+from _researcher import researcher
 """Issue #31: exchange carries the new ProofMapNode model, and none of its
 reads/writes bypass the storage layer with direct SQL anymore.
 """

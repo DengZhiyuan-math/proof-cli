@@ -1,4 +1,4 @@
-from _authenticator import researcher
+from _researcher import researcher
 """Issue #29: memory records can reference the unified ProofMapNode id,
 plus a specific Candidate proof or Human Review decision, without losing
 the older split id fields the frozen bug/debug system still relies on.

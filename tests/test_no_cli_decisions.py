@@ -21,7 +21,7 @@ import click
 import typer
 from typer.testing import CliRunner
 
-from _authenticator import researcher
+from _researcher import researcher
 from _legacy_seed import seed_reference_review
 from proof_cli.blockers import add_blocker
 from proof_cli.cli import app

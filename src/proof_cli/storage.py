@@ -10,7 +10,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable, Iterator, NamedTuple
+from typing import Iterator, NamedTuple
 
 from pydantic import TypeAdapter
 
@@ -19,7 +19,6 @@ from .domain import (
     BlockerRecord,
     CandidateProofRecord,
     Challenge,
-    ForeignAttestation,
     ClaimRecord,
     DependencyPin,
     EventRecord,
@@ -394,6 +393,7 @@ class _ActiveTransaction(NamedTuple):
     thread_id: int
     conn: sqlite3.Connection
     after_commit: list
+    before_commit: list
 
 
 # The write transaction this thread currently holds open. A nested
@@ -462,11 +462,13 @@ class ProjectStore:
             joined.execute(f"RELEASE {savepoint}")
             return
         conn = self.connect()
-        active = _ActiveTransaction(self.db_path.resolve(), threading.get_ident(), conn, [])
+        active = _ActiveTransaction(self.db_path.resolve(), threading.get_ident(), conn, [], [])
         token = _ACTIVE_TRANSACTION.set(active)
         try:
             conn.execute("BEGIN IMMEDIATE")
             yield conn
+            for callback in active.before_commit:  # still holding the write lock
+                callback()
             conn.commit()
         except BaseException:
             conn.rollback()
@@ -489,6 +491,17 @@ def after_commit(store: ProjectStore, callback) -> None:
     callback()
 
 
+def before_commit(store: ProjectStore, callback) -> None:
+    """Run `callback` just before this thread's open transaction on `store` commits,
+    still holding its write lock (an exception rolls the transaction back);
+    right away if none is open."""
+    active = _ACTIVE_TRANSACTION.get()
+    if active is not None and active.thread_id == threading.get_ident() and active.db_path == store.db_path.resolve():
+        active.before_commit.append(callback)
+        return
+    callback()
+
+
 def active_transaction(store: ProjectStore) -> sqlite3.Connection | None:
     """The `store.transaction()` connection this thread currently holds open, if any.
 
@@ -504,48 +517,6 @@ def active_transaction(store: ProjectStore) -> sqlite3.Connection | None:
 
 
 LEDGER_ADOPTED_KEY = "ledger_adopted"
-
-
-def adopt_legacy_into_ledger(store: ProjectStore) -> None:
-    """Record every pre-#35 node and Challenge in the chained ledger, once.
-
-    A project created before the ledger existed has nodes and Challenges
-    with no `proof_ledger` entry. They're adopted here as they stand —
-    a node's stored kind, a Challenge's stored status — so that afterwards
-    *every* node and Challenge has an entry, and one without is simply
-    flagged: "no ledger entry" never again means "trust the table" (#35 C).
-    Idempotent; a new project is marked adopted at creation.
-    """
-    with store.connect() as conn:
-        done = conn.execute("SELECT 1 FROM project_meta WHERE key = ?", (LEDGER_ADOPTED_KEY,)).fetchone()
-    if done is not None or active_transaction(store) is not None:
-        return
-    with store.transaction() as conn:
-        if conn.execute("SELECT 1 FROM project_meta WHERE key = ?", (LEDGER_ADOPTED_KEY,)).fetchone() is not None:
-            return
-        recorded = {
-            (row["entry"], row["object_id"]) for row in conn.execute("SELECT entry, object_id FROM proof_ledger").fetchall()
-        }
-        for row in conn.execute("SELECT id, kind FROM proof_map_nodes ORDER BY created_at, id").fetchall():
-            if ("node_created", row["id"]) not in recorded:
-                append_ledger_row(store, "node_created", row["id"], {"kind": row["kind"], "adopted": True}, conn=conn)
-        for row in conn.execute("SELECT * FROM challenges ORDER BY created_at, id").fetchall():
-            if ("challenge_opened", row["id"]) not in recorded:
-                append_ledger_row(
-                    store,
-                    "challenge_opened",
-                    row["id"],
-                    {
-                        "target_node_id": row["target_node_id"],
-                        "rationale": row["rationale"],
-                        "opened_by": row["opened_by"],
-                        "created_at": row["created_at"],
-                        "adopted": True,
-                        "adopted_status": row["status"],
-                    },
-                    conn=conn,
-                )
-        conn.execute("INSERT OR IGNORE INTO project_meta(key, value) VALUES (?, ?)", (LEDGER_ADOPTED_KEY, utc_now().isoformat()))
 
 
 @contextmanager
@@ -1063,12 +1034,6 @@ def get_active_claim(store: ProjectStore, node_id: str) -> ClaimRecord | None:
     return _row_to_claim(row) if row else None
 
 
-def get_claim(store: ProjectStore, claim_id: str) -> ClaimRecord | None:
-    with store.connect() as conn:
-        row = conn.execute("SELECT * FROM claims WHERE id = ? LIMIT 1", (claim_id,)).fetchone()
-    return _row_to_claim(row) if row else None
-
-
 def list_all_claims(store: ProjectStore) -> list[ClaimRecord]:
     """Every claim in the project — active and released — for a full-fidelity export (issue #31)."""
     with store.connect() as conn:
@@ -1557,30 +1522,6 @@ def insert_review_history_row(conn: sqlite3.Connection, row: dict) -> None:
     )
 
 
-def review_history_payload_recorded(conn: sqlite3.Connection, payload_hash: str) -> bool:
-    return (
-        conn.execute("SELECT 1 FROM review_history WHERE payload_hash = ? LIMIT 1", (payload_hash,)).fetchone()
-        is not None
-    )
-
-
-def review_history_head(conn: sqlite3.Connection) -> str:
-    """The hash of the latest review-history row: what a new signed payload commits to."""
-    return _last_row_hash(conn, "review_history")
-
-
-def chain_head(store: ProjectStore, table: str) -> str:
-    """The hash of a chained table's newest row (its instance genesis when empty).
-
-    Read-only: the instance id is created first, through `_writing`, so this
-    never takes the write lock on a plain reading connection."""
-    if table not in CHAINED_TABLES:
-        raise ValueError(f"{table} is not a hash-chained table")
-    read_project_instance_id(store)
-    with store.connect() as conn:
-        return _last_row_hash(conn, table)
-
-
 def read_project_instance_id(store: ProjectStore) -> str:
     """The instance id, created (once, on the caller's transaction if one is open) for a pre-#35 project."""
     with store.connect() as conn:
@@ -1589,15 +1530,6 @@ def read_project_instance_id(store: ProjectStore) -> str:
         return row["value"]
     with _writing(store, None) as conn:
         return project_instance_id(conn)
-
-
-def list_raw_chain_rows(store: ProjectStore, table: str) -> list[dict]:
-    """Every row of a hash-chained table, exactly as stored."""
-    if table not in CHAINED_TABLES:
-        raise ValueError(f"{table} is not a hash-chained table")
-    with store.connect() as conn:
-        rows = conn.execute(f"SELECT * FROM {table} ORDER BY seq").fetchall()
-    return [dict(row) for row in rows]
 
 
 _REVIEWER_KEY_COLUMNS = (
@@ -1612,44 +1544,6 @@ _REVIEWER_KEY_COLUMNS = (
     "signed_decision",
     "created_at",
 )
-
-
-def append_ledger_row(store: ProjectStore, entry: str, object_id: str, data: dict, *, conn: sqlite3.Connection | None = None) -> None:
-    """Append one hash-linked `proof_ledger` fact (a node created, a Challenge opened)."""
-    with _writing(store, conn) as conn:
-        conn.execute(
-            "INSERT INTO proof_ledger(id, entry, object_id, data, prev_row_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (
-                f"ledger_{uuid.uuid4().hex[:12]}",
-                entry,
-                object_id,
-                json.dumps(data, sort_keys=True, default=str),
-                _last_row_hash(conn, "proof_ledger"),
-                utc_now().isoformat(),
-            ),
-        )
-
-
-def chain_versions(store: ProjectStore) -> tuple:
-    """A cheap fingerprint of all three chains' current state: each table's
-    row count and the hash of its newest row."""
-    with store.connect() as conn:
-        version = []
-        for table in CHAINED_TABLES:
-            last = conn.execute(f"SELECT * FROM {table} ORDER BY seq DESC LIMIT 1").fetchone()
-            count = conn.execute(f"SELECT COUNT(*) AS n FROM {table}").fetchone()["n"]
-            version.append((count, chain_row_hash(dict(last)) if last is not None else None))
-    return tuple(version)
-
-
-def insert_reviewer_key_row(conn: sqlite3.Connection, row: dict) -> None:
-    """Append one enrollment/revocation row to the Reviewer key registry, hash-linked."""
-    columns = (*_REVIEWER_KEY_COLUMNS, "prev_row_hash")
-    values = [row.get(column) for column in _REVIEWER_KEY_COLUMNS] + [_last_row_hash(conn, "reviewer_keys")]
-    conn.execute(
-        f"INSERT INTO reviewer_keys({', '.join(columns)}) VALUES ({', '.join('?' for _ in columns)})",
-        values,
-    )
 
 
 def review_history_row_exists(conn: sqlite3.Connection, row_id: str) -> bool:
@@ -1695,22 +1589,3 @@ def list_review_history_rows(
     return [_row_to_review_history(row) for row in rows]
 
 
-def insert_foreign_attestation(store: ProjectStore, attestation: ForeignAttestation) -> bool:
-    """Keep another project's signed decision for display; False if it's already here."""
-    with store.connect() as conn:
-        cursor = conn.execute(
-            "INSERT OR IGNORE INTO foreign_attestations(id, object_id, data, imported_at) VALUES (?, ?, ?, ?)",
-            (attestation.id, attestation.object_id, attestation.model_dump_json(), attestation.imported_at.isoformat()),
-        )
-        conn.commit()
-    return cursor.rowcount == 1
-
-
-def list_foreign_attestations(store: ProjectStore, *, object_ids: Iterable[str] | None = None) -> list[ForeignAttestation]:
-    with store.connect() as conn:
-        rows = conn.execute("SELECT data FROM foreign_attestations ORDER BY imported_at, id").fetchall()
-    attestations = [ForeignAttestation.model_validate_json(row["data"]) for row in rows]
-    if object_ids is None:
-        return attestations
-    wanted = set(object_ids)
-    return [attestation for attestation in attestations if attestation.object_id in wanted]

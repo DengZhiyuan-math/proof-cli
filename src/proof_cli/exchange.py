@@ -8,14 +8,14 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from .attestations import exported_signatures, record_foreign_attestations
+from .authority import list_decisions
 from .collaboration import CollaborationState, import_review_records, load_collaboration, save_collaboration
 from .domain import (
-    ExportedReviewerKey,
     BlockerRecord,
     BlockerStatus,
     CandidateProofRecord,
     Challenge,
+    ChallengeStatus,
     ClaimRecord,
     DependencyPin,
     EvidenceCheck,
@@ -38,7 +38,7 @@ from .references import ReferenceRecord, ReferenceReviewRecord, ReferenceReviewS
 from .reusable_assets import ReusableAsset
 from .storage import (
     ProjectStore,
-    append_ledger_row,
+    append_event,
     create_project,
     import_reference_review,
     import_theorem_contract,
@@ -98,11 +98,10 @@ class ExchangeBundle(BaseModel):
     dependency_pins: list[DependencyPin] = Field(default_factory=list)
     challenges: list[Challenge] = Field(default_factory=list)
     evidence_checks: list[EvidenceCheck] = Field(default_factory=list)
-    # Signatures travel, authority doesn't (ADR-0009 point 6, #38): each
-    # review record's signed decision, and the public keys that signed them.
-    # On import they are foreign attestations, shown and never counted.
-    signed_decisions: dict[str, dict] = Field(default_factory=dict)
-    reviewer_keys: list[ExportedReviewerKey] = Field(default_factory=list)
+    # The source project's Human Review decisions (its reviews.jsonl lines),
+    # for reference only: they never count here (ADR-0010). A bundle from
+    # before ADR-0010 carried signatures instead; they're ignored.
+    review_decisions: list[dict] = Field(default_factory=list)
 
 
 class ExchangeImportReport(BaseModel):
@@ -154,7 +153,10 @@ def export_exchange_bundle(store: ProjectStore, *, note: str = "") -> ExchangeBu
         challenges=list_challenges(store),
         evidence_checks=list_all_evidence_checks(store),
     )
-    bundle.signed_decisions, bundle.reviewer_keys = exported_signatures(store, collaboration.review_records)
+    bundle.review_decisions = [
+        {key: (value.model_dump(mode="json") if hasattr(value, "model_dump") else value) for key, value in row.items()}
+        for row in list_decisions(store)
+    ]
     return bundle
 
 
@@ -259,15 +261,13 @@ def import_exchange_bundle(store: ProjectStore, bundle: ExchangeBundle | dict[st
     # Acceptance, Reference review, Evidence review or revalidation (#33).
     save_collaboration(store, bundle.collaboration)
     _, refused_review_ids = import_review_records(store, bundle.collaboration.review_records)
-    refused_ids = set(refused_review_ids)
-    attested = record_foreign_attestations(
-        store,
-        bundle_id=bundle.id,
-        source_project_id=bundle.project_id,
-        records=[record for record in bundle.collaboration.review_records if record.id in refused_ids],
-        signed_decisions=bundle.signed_decisions,
-        reviewer_keys=bundle.reviewer_keys,
-    )
+    if bundle.review_decisions:
+        append_event(
+            store,
+            "exchange_foreign_decisions",
+            f"{len(bundle.review_decisions)} Human Review decision(s) from {bundle.project_id}, kept for reference",
+            payload={"bundle_id": bundle.id, "source_project_id": bundle.project_id, "decisions": bundle.review_decisions},
+        )
     if bundle.publication_workspace is not None:
         save_publication_workspace(store, bundle.publication_workspace)
     imported_sections: list[str] = ["project_state", "memory", "collaboration"]
@@ -276,8 +276,8 @@ def import_exchange_bundle(store: ProjectStore, bundle: ExchangeBundle | dict[st
     if refused_review_ids:
         warnings.append(
             f"{len(refused_review_ids)} Human Review decision(s) not imported as decisions: they are only ever made "
-            f"locally. {attested} new one(s) kept as foreign attestations, shown in the review app, counting for "
-            "nothing until you make the same decision here yourself"
+            "locally, on the proof map page. The source's decisions are kept for reference in the event log, "
+            "counting for nothing here"
         )
 
     # Exchange carries records, never trust (ADR-0009 point 6, #37): whatever
@@ -340,9 +340,6 @@ def import_exchange_bundle(store: ProjectStore, bundle: ExchangeBundle | dict[st
         if node.id in local_node_ids:
             continue
         insert_proof_map_node(store, node)
-        # recorded in the local proof ledger as it arrives; its kind stands as
-        # created here, and nothing it was decided elsewhere counts locally
-        append_ledger_row(store, "node_created", node.id, {"kind": node.kind.value, "imported": True})
     if bundle.proof_map_nodes:
         imported_sections.append("proof_map_nodes")
 
@@ -383,19 +380,10 @@ def import_exchange_bundle(store: ProjectStore, bundle: ExchangeBundle | dict[st
         imported_sections.append("dependency_pins")
 
     for challenge in challenges:
-        insert_challenge(store, challenge)
         # an imported Challenge is open here: a foreign resolution resolves nothing locally
-        append_ledger_row(
+        insert_challenge(
             store,
-            "challenge_opened",
-            challenge.id,
-            {
-                "target_node_id": challenge.target_node_id,
-                "rationale": challenge.rationale,
-                "opened_by": challenge.opened_by,
-                "created_at": challenge.created_at.isoformat(),
-                "imported": True,
-            },
+            challenge.model_copy(update={"status": ChallengeStatus.open, "resolved_by": None, "resolved_at": None, "resolution_review_id": None}),
         )
     if challenges:
         imported_sections.append("challenges")

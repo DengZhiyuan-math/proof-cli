@@ -38,5 +38,5 @@ Use this plugin skill when the user wants Proof CLI to behave like a real Codex 
 - Use the selected root explicitly for stateful operations.
 - Keep theorem-state mutations small and auditable.
 - Do not silently decide mathematical truth.
-- Human Review decisions (accepting a proof, reviewing a reference, dismissing a Challenge, promoting, force-releasing a claim, resolving an obligation) are not tools: they need the researcher's passkey in the review app. A command that asks for one answers `HUMAN_REVIEW_REQUIRED` with the page's URL — pass that URL to the researcher rather than retrying.
+- Human Review decisions (accepting a proof, reviewing a reference, dismissing a Challenge, promoting) are not tools: the researcher makes them on the proof map page, and each is committed to git as their identity. A command that asks for one answers `HUMAN_REVIEW_REQUIRED` with the page's URL — pass that URL to the researcher rather than retrying.
 - Treat repo-local `.agents/skills/` entries as debugging helpers, not the canonical everyday interface.

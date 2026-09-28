@@ -5,7 +5,7 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from _authenticator import researcher
+from _researcher import researcher
 from proof_cli.storage import load_project
 
 from proof_cli.cli import app
@@ -745,7 +745,7 @@ def test_every_human_only_command_says_where_to_decide_and_changes_nothing(tmp_p
             error = json.loads(result.stdout)["error"]
             assert error["code"] == "HUMAN_REVIEW_REQUIRED" and error["url"].startswith("http://localhost:")
         elif result.exit_code == 1:
-            assert "review app" in result.output and "http://localhost:" in result.output
+            assert "proof map page" in result.output and "http://localhost:" in result.output
 
     assert runner.invoke(app, ["node", "show", "clm_1", "--root", str(tmp_path), "--json"]).stdout == before
     assert store  # (the project is untouched)

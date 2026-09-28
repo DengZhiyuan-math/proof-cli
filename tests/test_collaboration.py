@@ -18,7 +18,7 @@ from proof_cli.commands import (
 )
 import pytest
 
-from _authenticator import researcher
+from _researcher import researcher
 
 from proof_cli.domain import TheoremStatus, TrustLevel
 from proof_cli.proof_map import claim_node, create_node, decide_acceptance, submit_candidate_proof
@@ -113,7 +113,7 @@ def test_review_request_on_proof_map_node_is_rejected(tmp_path: Path) -> None:
     store = ensure_project(tmp_path)
     create_node(store, node_id="clm_1", kind="claim", statement="stmt")
 
-    with pytest.raises(ValueError, match="review app"):
+    with pytest.raises(ValueError, match="proof map page"):
         cmd_review_request("proof_map_node", "clm_1", root=tmp_path, reviewer_id="researcher")
 
 
@@ -126,7 +126,7 @@ def test_review_decide_on_proof_map_node_review_is_rejected(tmp_path: Path) -> N
         scoping_rationale="scoped correctly", content="proof text")
     record = researcher(store).decide_acceptance("clm_1", "accept")
 
-    with pytest.raises(ValueError, match="review app"):
+    with pytest.raises(ValueError, match="proof map page"):
         cmd_review_decide(record.id, "rejected", root=tmp_path, reviewer_id="researcher")
 
 

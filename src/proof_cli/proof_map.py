@@ -9,32 +9,21 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel
-
 from .authority import (
-    AuthorityError,
     AuthorityWarning,
-    ReviewerKey,
     RowVerdict,
-    authorize,
     build_decision_payload,
     candidate_proof_sha256,
     challenge_resolution,
-    decision_row_for,
     decision_rows,
-    human_review_required,
-    ledger_entries,
-    legacy_handled,
     list_authority_warnings,
-    schedule_history_pin_advance,
+    record_decision,
     verify_decision_row,
 )
 from .collaboration import (
     ReviewGovernanceState,
     ReviewRecord,
     ReviewRecordKind,
-    list_review_records,
-    record_decided_review,
 )
 from .domain import (
     CandidateProofRecord,
@@ -49,10 +38,9 @@ from .domain import (
     TrustLevel,
     utc_now,
 )
-from .signing import DecisionKind, DecisionPayload, PinnedDependency, SignedDecision
+from .reviews import DecisionKind, DecisionPayload, PinnedDependency, git_identity
 from .storage import (
     ProjectStore,
-    append_ledger_row,
     append_event,
     get_active_claim,
     get_candidate_proof as _get_candidate_proof,
@@ -96,41 +84,68 @@ class ProofMapError(Exception):
         self.details = details or {}
 
 
-def _require_signed(signed_decision: SignedDecision | None, kind: DecisionKind, target_id: str) -> SignedDecision:
-    """Fail fast, before any work, when a human-only operation has no signed decision at all."""
-    if signed_decision is None:
-        exc = human_review_required(kind, target_id)
-        raise ProofMapError(exc.code, exc.message, details=exc.details)
-    return signed_decision
+@dataclass
+class _Decision:
+    """A Human Review decision about to be recorded: what it's made on, and who makes it (ADR-0010)."""
+
+    payload: DecisionPayload
+    reviewer_id: str
 
 
-def _authorize(
+def _decide(
     store: ProjectStore,
-    signed_decision: SignedDecision,
     *,
     kind: DecisionKind,
     target_id: str,
     decision: str,
-    conn: sqlite3.Connection,
+    reviewer: str | None,
+    rationale: str,
     dependency_id: str | None = None,
-    resigns: str | None = None,
-) -> ReviewerKey:
-    """ADR-0009: the signed decision must authorize exactly this operation, bound
-    to what `decision_binding` says the reviewer must have seen. Checked on the
-    operation's own write transaction."""
-    try:
-        return authorize(
-            store,
-            signed_decision,
-            kind=kind,
-            target_id=target_id,
-            decision=decision,
-            conn=conn,
-            resigns=resigns,
-            **decision_binding(store, kind, target_id, dependency_id=dependency_id, resigns=resigns),
-        )
-    except AuthorityError as exc:
-        raise ProofMapError(exc.code, exc.message, details=exc.details) from exc
+) -> _Decision:
+    """Bind the decision to what it's made on as of now; called on the operation's write transaction."""
+    payload = build_decision_payload(
+        store, kind, target_id, decision, rationale=rationale, **decision_binding(store, kind, target_id, dependency_id=dependency_id)
+    )
+    return _Decision(payload=payload, reviewer_id=reviewer or git_identity(store.root))
+
+
+def _node_folder(store: ProjectStore, object_type: str, object_id: str) -> str:
+    """The node whose reviews.jsonl records a decision on this object."""
+    if object_type == "evidence_check":
+        return require_candidate_proof(store, require_evidence_check(store, object_id).candidate_proof_id).node_id
+    if object_type == "challenge":
+        return require_challenge(store, object_id).target_node_id
+    return object_id
+
+
+def _record(
+    store: ProjectStore, decided: _Decision, object_type: str, object_id: str, state: ReviewGovernanceState
+) -> ReviewRecord:
+    """Record `decided` in its node's reviews.jsonl (committed with its snapshot once the transaction commits)."""
+    payload = decided.payload
+    entry = record_decision(
+        store,
+        node_id=_node_folder(store, object_type, object_id),
+        object_type=object_type,
+        object_id=object_id,
+        kind=payload.kind,
+        decision=state.value,
+        reviewer=decided.reviewer_id,
+        rationale=payload.rationale,
+        payload=payload,
+    )
+    return ReviewRecord(
+        id=entry.id,
+        object_type=object_type,
+        object_id=object_id,
+        reviewer_id=entry.reviewer,
+        decision=state,
+        kind=ReviewRecordKind(payload.kind.value),
+        rationale=payload.rationale,
+        created_at=entry.decided_at,
+        updated_at=entry.decided_at,
+        decision_row_id=entry.id,
+    )
 
 
 _SAFE_NODE_ID = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9._-]*")
@@ -213,10 +228,6 @@ def create_node(
     try:
         with store.transaction() as conn:
             insert_proof_map_node(store, node, conn=conn)
-            # the chained record of what kind the node was created as: kind is
-            # read back as "created kind, plus signed promotes" (#35 C)
-            append_ledger_row(store, "node_created", node.id, {"kind": resolved_kind.value}, conn=conn)
-            schedule_history_pin_advance(store)
             append_event(
                 store,
                 "proof_map_node_created",
@@ -245,12 +256,8 @@ def _promoted(store: ProjectStore, node_id: str) -> bool:
 
 
 def _effective_kind(store: ProjectStore, node: ProofMapNode) -> ProofMapNodeKind:
-    """A node's kind as it counts: the kind the chained ledger says it was
-    created as, plus a verified signed Promote — never the `kind` column
-    alone, which a direct edit could flip (#35 C). A pre-#35 node has no
-    ledger entry; its stored kind stands."""
-    created = ledger_entries(store, "node_created").get(node.id)
-    kind = ProofMapNodeKind(created["kind"]) if created else node.kind
+    """A node's kind as it counts: its stored kind, plus a recorded Promote."""
+    kind = node.kind
     if kind == ProofMapNodeKind.claim and _promoted(store, node.id):
         kind = ProofMapNodeKind.lemma
     return kind
@@ -310,7 +317,7 @@ def split_node(
             "NODE_REJECTED", f"node {parent_id} was Rejected and should not be pursued further; split is unavailable"
         )
     if acceptance in ("accepted", "unverifiable"):
-        # new dependencies would change the interface the researcher signed, and
+        # new dependencies would change the interface the researcher accepted, and
         # silently void the acceptance: that's a decision, not a split (#37)
         raise ProofMapError(
             "NODE_ACCEPTED", f"node {parent_id} is {acceptance}; splitting it would void that decision, so split is unavailable"
@@ -732,12 +739,12 @@ def decide_evidence_review(
     evidence_check_id: str,
     decision: EvidenceTrustDecision | str,
     *,
-    signed_decision: SignedDecision | None = None,
+    reviewer: str | None = None, rationale: str = "",
 ) -> ReviewRecord:
     """Human Review's trust judgment on an Evidence check itself.
 
-    Needs a signed `evidence_review` decision bound to the checked
-    Candidate proof's text (ADR-0009).
+    Recorded in reviews.jsonl bound to the checked Candidate proof's
+    snapshot (ADR-0010).
 
     `trusted` or `unusable` — never `approved`/`rejected`, and never
     against `object_type=proof_map_node`, so this can't be confused with,
@@ -753,34 +760,16 @@ def decide_evidence_review(
             "INVALID_DECISION", f"'{decision}' is not a valid evidence trust judgment; expected one of: {valid}"
         ) from exc
 
-    signed = _require_signed(signed_decision, DecisionKind.evidence_review, evidence_check_id)
     governance_state = _EVIDENCE_DECISION_TO_GOVERNANCE_STATE[resolved_decision]
     with store.transaction() as conn:
-        key = _authorize(
-            store,
-            signed,
-            kind=DecisionKind.evidence_review,
-            target_id=evidence_check_id,
-            decision=resolved_decision.value,
-            conn=conn,
-        )
-        record = record_decided_review(
-            store,
-            _EVIDENCE_CHECK_OBJECT_TYPE,
-            evidence_check_id,
-            governance_state,
-            reviewer_id=key.reviewer_id,
-            rationale=signed.payload.rationale,
-            kind=ReviewRecordKind.evidence_review,
-            signed_decision=signed,
-            conn=conn,
-        )
+        decided = _decide(store, kind=DecisionKind.evidence_review, target_id=evidence_check_id, decision=resolved_decision.value, reviewer=reviewer, rationale=rationale)
+        record = _record(store, decided, _EVIDENCE_CHECK_OBJECT_TYPE, evidence_check_id, governance_state)
         append_event(
             store,
             "proof_map_evidence_review_decided",
             f"evidence review for {evidence_check_id}: {resolved_decision.value}",
             entity_id=check.candidate_proof_id,
-            payload={"decision": resolved_decision.value, "reviewer_id": key.reviewer_id, "review_id": record.id},
+            payload={"decision": resolved_decision.value, "reviewer_id": decided.reviewer_id, "review_id": record.id},
             conn=conn,
         )
     return record
@@ -857,7 +846,7 @@ def get_accepted_interface_fingerprint(store: ProjectStore, node_id: str) -> str
 
     Recomputed from the node itself, never read off a stored column: an
     Acceptance only counts while the node still asserts exactly the
-    interface that was signed, so the two can't disagree (#35 C).
+    interface that was accepted, so the two can't disagree (#35 C).
     """
     node = get_node(store, node_id)
     if node is None or get_acceptance_state(store, node_id) != "accepted":
@@ -898,7 +887,7 @@ def pin_dependencies(store: ProjectStore, node: ProofMapNode) -> list[Dependency
 
 
 def _signed_pins(store: ProjectStore, node_id: str) -> dict[str, PinnedDependency] | None:
-    """For an Accepted node: the pins its counted Acceptance was signed over,
+    """For an Accepted node: the pins its counted Acceptance was made on,
     as later refreshed by verified Lightweight re-reviews. `None` for a node
     that isn't Accepted, whose pins are just what its submission recorded."""
     node = get_node(store, node_id)
@@ -1003,15 +992,15 @@ def decide_acceptance(
     node_id: str,
     decision: AcceptanceDecision | str,
     *,
-    signed_decision: SignedDecision | None = None,
+    reviewer: str | None = None, rationale: str = "",
 ) -> ReviewRecord:
     """Record a Human Review acceptance decision for a local node.
 
     Only for a node in `review-needed`, and never once it's `rejected` (see
-    `_require_awaiting_acceptance_review`). Needs a signed `acceptance`
-    decision from an enrolled Reviewer passkey, bound to the current
-    Candidate proof's exact text and the node's dependency pins (ADR-0009);
-    the recorded decision counts only while that signature verifies.
+    `_require_awaiting_acceptance_review`). Recorded in the node's
+    reviews.jsonl, bound to the current snapshot's SHA-256 and the node's
+    dependency pins, and committed as the reviewer's git identity
+    (ADR-0010); it counts only while it still describes the node.
 
     `revision_requested` keeps the node open for another claim/submit cycle
     on the same node id, never a new node. `reject` is permanent: the node
@@ -1035,7 +1024,6 @@ def decide_acceptance(
             "INVALID_DECISION", f"'{decision}' is not a valid acceptance decision; expected one of: {valid}"
         ) from exc
 
-    signed = _require_signed(signed_decision, DecisionKind.acceptance, node_id)
     governance_state = _ACCEPTANCE_DECISION_TO_GOVERNANCE_STATE[resolved_decision]
     # the review rows, the candidate-proof link and fingerprint, the
     # Challenges it resolves and the events all commit together or not at
@@ -1044,21 +1032,9 @@ def decide_acceptance(
         # checked on the write lock, so no concurrent decision or submission
         # can land between the check and the write
         _require_awaiting_acceptance_review(store, node_id)
-        key = _authorize(
-            store, signed, kind=DecisionKind.acceptance, target_id=node_id, decision=resolved_decision.value, conn=conn
-        )
+        decided = _decide(store, kind=DecisionKind.acceptance, target_id=node_id, decision=resolved_decision.value, reviewer=reviewer, rationale=rationale)
         current_proof = get_current_candidate_proof(store, node_id)
-        record = record_decided_review(
-            store,
-            _ACCEPTANCE_OBJECT_TYPE,
-            node_id,
-            governance_state,
-            reviewer_id=key.reviewer_id,
-            rationale=signed.payload.rationale,
-            kind=ReviewRecordKind.acceptance,
-            signed_decision=signed,
-            conn=conn,
-        )
+        record = _record(store, decided, _ACCEPTANCE_OBJECT_TYPE, node_id, governance_state)
         if current_proof is not None:
             set_candidate_proof_review_record_id(store, current_proof.id, record.id, conn=conn)
             if resolved_decision == AcceptanceDecision.accept:
@@ -1068,9 +1044,9 @@ def decide_acceptance(
         _resolve_open_challenges(
             store,
             node_id,
-            resolved_by=key.reviewer_id,
+            resolved_by=decided.reviewer_id,
             review_id=record.id,
-            challenge_ids=signed.payload.resolves_challenges,
+            challenge_ids=decided.payload.resolves_challenges,
             conn=conn,
         )
 
@@ -1079,7 +1055,7 @@ def decide_acceptance(
             "proof_map_acceptance_decided",
             f"acceptance decision for {node_id}: {resolved_decision.value}",
             entity_id=node_id,
-            payload={"decision": resolved_decision.value, "reviewer_id": key.reviewer_id, "review_id": record.id},
+            payload={"decision": resolved_decision.value, "reviewer_id": decided.reviewer_id, "review_id": record.id},
             conn=conn,
         )
     return record
@@ -1116,48 +1092,26 @@ def decision_binding(
     target_id: str,
     *,
     dependency_id: str | None = None,
-    resigns: str | None = None,
 ) -> dict[str, Any]:
-    """What a decision of `kind` on `target_id` must be signed over, as of now.
+    """What a decision of `kind` on `target_id` is made on, as of now.
 
-    The Candidate proof (its id; `authority` adds the SHA-256 of its text),
-    the node's accepted mathematical interface, the dependency pins the
-    reviewer is deciding against, and the open Challenges an Acceptance or
-    Reference review resolves. The same function builds the payload to sign
-    (`prepare_decision`) and checks it at decision time (`_authorize`), so
-    the two can't drift apart.
-
-    A re-signed legacy decision (`resigns`, #42) binds the same things but
-    resolves no Challenges: it keeps what was decided, it doesn't decide
-    anything new.
+    The Candidate proof (its id; `authority` adds the SHA-256 of its
+    snapshot), the node's accepted mathematical interface, the dependency
+    pins the reviewer is deciding against, and the open Challenges an
+    Acceptance or Reference review resolves.
     """
     none = {"candidate_proof_id": None, "interface_fingerprint": None, "dependency_pins": [], "resolves_challenges": []}
-    resolving = resigns is None
     if kind in (DecisionKind.acceptance, DecisionKind.promote):
         node = require_node(store, target_id)
         return {
             "candidate_proof_id": _current_proof_id(store, target_id),
             "interface_fingerprint": _interface_of(node),
             "dependency_pins": _pins_of(store, target_id),
-            "resolves_challenges": _open_challenge_ids(store, target_id) if kind == DecisionKind.acceptance and resolving else [],
+            "resolves_challenges": _open_challenge_ids(store, target_id) if kind == DecisionKind.acceptance else [],
         }
     if kind == DecisionKind.reference_review:
         node = require_node(store, target_id)
-        return {
-            **none,
-            "interface_fingerprint": _interface_of(node),
-            "resolves_challenges": _open_challenge_ids(store, target_id) if resolving else [],
-        }
-    if kind == DecisionKind.dependency_revalidation and resigns is not None and dependency_id is None:
-        # a legacy revalidation doesn't record which dependency it re-pinned;
-        # re-signing reaffirms the node's pins as they stand
-        node = require_node(store, target_id)
-        return {
-            **none,
-            "candidate_proof_id": _current_proof_id(store, target_id),
-            "interface_fingerprint": _interface_of(node),
-            "dependency_pins": _pins_of(store, target_id),
-        }
+        return {**none, "interface_fingerprint": _interface_of(node), "resolves_challenges": _open_challenge_ids(store, target_id)}
     if kind == DecisionKind.dependency_revalidation:
         if dependency_id is None:
             raise ProofMapError("DEPENDENCY_REQUIRED", "a Lightweight re-review names the dependency it re-pins")
@@ -1175,8 +1129,6 @@ def decision_binding(
     if kind == DecisionKind.challenge_resolution:
         challenge = require_challenge(store, target_id)
         return {**none, "interface_fingerprint": _interface_of(require_node(store, challenge.target_node_id))}
-    if kind == DecisionKind.legacy_decline:
-        return none
     raise ProofMapError("INVALID_DECISION_KIND", f"{kind.value} is not a proof-map decision")
 
 
@@ -1188,27 +1140,46 @@ def prepare_decision(
     *,
     rationale: str = "",
     dependency_id: str | None = None,
-    resigns: str | None = None,
 ) -> DecisionPayload:
-    """The exact payload a Reviewer passkey must sign to make this decision now.
-
-    Agent-reachable and harmless: preparing a payload decides nothing. The
-    web app (#36) renders it and asks for the passkey tap; anything else
-    that can obtain a real assertion over it may submit the result.
-    """
+    """What a decision would be made on right now, for a page to show before the researcher decides. Decides nothing."""
     try:
         resolved_kind = DecisionKind(kind)
     except ValueError as exc:
         raise ProofMapError("INVALID_DECISION_KIND", f"'{kind}' is not a decision kind") from exc
     return build_decision_payload(
-        store,
-        resolved_kind,
-        target_id,
-        decision,
-        rationale=rationale,
-        resigns=resigns,
-        **decision_binding(store, resolved_kind, target_id, dependency_id=dependency_id, resigns=resigns),
+        store, resolved_kind, target_id, decision, rationale=rationale, **decision_binding(store, resolved_kind, target_id, dependency_id=dependency_id)
     )
+
+
+def apply_decision(
+    store: ProjectStore,
+    kind: DecisionKind | str,
+    target_id: str,
+    decision: str,
+    *,
+    reviewer: str | None = None,
+    rationale: str = "",
+    dependency_id: str | None = None,
+) -> Any:
+    """Make one Human Review decision by kind: the proof map page's single entry point (ADR-0010)."""
+    try:
+        resolved_kind = DecisionKind(kind)
+    except ValueError as exc:
+        raise ProofMapError("INVALID_DECISION_KIND", f"'{kind}' is not a decision kind") from exc
+    who = {"reviewer": reviewer, "rationale": rationale}
+    if resolved_kind == DecisionKind.acceptance:
+        return decide_acceptance(store, target_id, decision, **who)
+    if resolved_kind == DecisionKind.reference_review:
+        return decide_reference_review(store, target_id, decision, **who)
+    if resolved_kind == DecisionKind.evidence_review:
+        return decide_evidence_review(store, target_id, decision, **who)
+    if resolved_kind == DecisionKind.dependency_revalidation:
+        return revalidate_dependency(store, target_id, dependency_id or "", **who)
+    if resolved_kind == DecisionKind.challenge_resolution:
+        return dismiss_challenge(store, target_id, **who)
+    if resolved_kind == DecisionKind.promote:
+        return promote_to_lemma(store, target_id, **who)
+    raise ProofMapError("UNSUPPORTED_DECISION", f"{resolved_kind.value} decisions aren't applied here")
 
 
 @dataclass
@@ -1238,13 +1209,13 @@ def _binding_problem(store: ProjectStore, node: ProofMapNode, payload: DecisionP
     """Why a verified decision no longer applies to `node` as it stands, or None."""
     proof = _get_candidate_proof(store, payload.candidate_proof_id) if payload.candidate_proof_id else None
     if proof is None or proof.node_id != node.id:
-        return "it was signed for a Candidate proof that isn't this node's"
+        return "it was made on a Candidate proof that isn't this node's"
     if candidate_proof_sha256(store, proof.id) != payload.candidate_proof_sha256:
-        return "the Candidate proof text changed after it was signed"
+        return "the snapshot's text changed after it was decided on"
     if payload.interface_fingerprint != _interface_of(node):
-        return "the node's statement or assumptions changed after it was signed"
+        return "the node's statement or assumptions changed after it was decided on"
     if set(node.dependencies) != {pin.target_node_id for pin in payload.dependency_pins}:
-        return "the node's dependencies changed after it was signed"
+        return "the node's dependencies changed after it was decided on"
     return None
 
 
@@ -1253,9 +1224,8 @@ def _acceptance(store: ProjectStore, node: ProofMapNode) -> tuple[str, _Counted 
 
     Only the *newest* decision is ever read (B): if it doesn't verify, the
     node reads `unverifiable` — never an older decision it superseded. A
-    Reject is terminal however it's recorded, and bound to the node, not to
-    the proof text: a later edit, an unsigned legacy row, a signature that
-    no longer verifies — none of them reopen a Rejected node.
+    Reject is terminal, and bound to the node, not to the proof text: a
+    later edit never reopens a Rejected node.
     """
     rows = [
         row
@@ -1283,7 +1253,7 @@ def _acceptance(store: ProjectStore, node: ProofMapNode) -> tuple[str, _Counted 
 
 
 def _accepted_proof(store: ProjectStore, node_id: str) -> CandidateProofRecord | None:
-    """The Candidate proof an Accepted node's counted Acceptance was signed for."""
+    """The Candidate proof an Accepted node's counted Acceptance was made on."""
     node = get_node(store, node_id)
     if node is None:
         return None
@@ -1300,25 +1270,24 @@ def get_accepted_version(store: ProjectStore, node_id: str) -> int | None:
 
 
 def get_acceptance_state(store: ProjectStore, node_id: str) -> str:
-    """The node's acceptance_state, computed from its signed Human Review history.
+    """The node's acceptance_state, computed from its recorded Human Review decisions.
 
     One of `unreviewed`, `accepted`, `rejected`, `unverifiable` — never
     stored, always re-derived from the *newest* `kind=acceptance` decision
-    (see `_acceptance`). An Acceptance counts only while its signature
-    verifies and it still describes this node: the Candidate proof it was
-    signed for is this node's and its text is unchanged, and the node still
-    asserts the interface that was signed. That accepted proof may be an
+    (see `_acceptance`). An Acceptance counts only while it still describes
+    this node: the Candidate proof it was made on is this node's and its
+    text is unchanged, and the node still asserts the accepted interface. That accepted proof may be an
     earlier version while a newer one awaits review (the workflow axis then
     reads `review-needed`).
     """
     return _acceptance(store, require_node(store, node_id))[0]
 
 
-def promote_to_lemma(store: ProjectStore, node_id: str, *, signed_decision: SignedDecision | None = None) -> ProofMapNode:
+def promote_to_lemma(store: ProjectStore, node_id: str, *, reviewer: str | None = None, rationale: str = "") -> ProofMapNode:
     """Promote an Accepted Claim to a Lemma, marking it independently reusable.
 
-    The researcher's explicit decision, never automatic: it needs a signed
-    `promote` decision (ADR-0009), recorded as its own review row. Only
+    The researcher's explicit decision, never automatic, recorded as its
+    own review decision (ADR-0010). Only
     available for `kind=claim` nodes that are already Accepted and not under
     an open Challenge (a node whose soundness is in question isn't something
     to advertise as reusable); there is no demote. Every field but `kind` is
@@ -1339,22 +1308,11 @@ def promote_to_lemma(store: ProjectStore, node_id: str, *, signed_decision: Sign
             "NODE_CHALLENGED", f"node {node_id} is under an open Challenge; resolve it before promoting to Lemma"
         )
 
-    signed = _require_signed(signed_decision, DecisionKind.promote, node_id)
     with store.transaction() as conn:
-        key = _authorize(store, signed, kind=DecisionKind.promote, target_id=node_id, decision="promote", conn=conn)
-        record = record_decided_review(
-            store,
-            _ACCEPTANCE_OBJECT_TYPE,
-            node_id,
-            ReviewGovernanceState.approved,
-            reviewer_id=key.reviewer_id,
-            rationale=signed.payload.rationale,
-            kind=ReviewRecordKind.promote,
-            signed_decision=signed,
-            conn=conn,
-        )
+        decided = _decide(store, kind=DecisionKind.promote, target_id=node_id, decision="promote", reviewer=reviewer, rationale=rationale)
+        record = _record(store, decided, _ACCEPTANCE_OBJECT_TYPE, node_id, ReviewGovernanceState.approved)
         promoted = node.model_copy(
-            update={"kind": ProofMapNodeKind.lemma, "updated_by": key.reviewer_id, "updated_at": utc_now()}
+            update={"kind": ProofMapNodeKind.lemma, "updated_by": decided.reviewer_id, "updated_at": utc_now()}
         )
         update_proof_map_node(store, promoted, conn=conn)
         append_event(
@@ -1362,7 +1320,7 @@ def promote_to_lemma(store: ProjectStore, node_id: str, *, signed_decision: Sign
             "proof_map_node_promoted",
             f"promoted {node_id} from claim to lemma",
             entity_id=node_id,
-            payload={"promoted_by": key.reviewer_id, "review_id": record.id},
+            payload={"promoted_by": decided.reviewer_id, "review_id": record.id},
             conn=conn,
         )
     return promoted
@@ -1379,9 +1337,9 @@ def decide_reference_review(
     node_id: str,
     decision: str,
     *,
-    signed_decision: SignedDecision | None = None,
+    reviewer: str | None = None, rationale: str = "",
 ) -> ReviewRecord:
-    """Grant Reference review to an imported_result node (a signed `reference_review` decision, ADR-0009).
+    """Grant Reference review to an imported_result node (a `reference_review` decision, ADR-0010).
 
     Judges the trustworthiness of a citation — never the node's
     acceptance_state, which stays `unreviewed` for every imported_result
@@ -1408,28 +1366,15 @@ def decide_reference_review(
         )
     not_callable = decision == REFERENCE_NOT_CALLABLE_DECISION
 
-    signed = _require_signed(signed_decision, DecisionKind.reference_review, node_id)
     with store.transaction() as conn:
-        key = _authorize(
-            store, signed, kind=DecisionKind.reference_review, target_id=node_id, decision=decision, conn=conn
-        )
-        record = record_decided_review(
-            store,
-            _ACCEPTANCE_OBJECT_TYPE,
-            node_id,
-            ReviewGovernanceState.rejected if not_callable else ReviewGovernanceState.approved,
-            reviewer_id=key.reviewer_id,
-            rationale=signed.payload.rationale,
-            kind=ReviewRecordKind.reference_review,
-            signed_decision=signed,
-            conn=conn,
-        )
+        decided = _decide(store, kind=DecisionKind.reference_review, target_id=node_id, decision=decision, reviewer=reviewer, rationale=rationale)
+        record = _record(store, decided, _ACCEPTANCE_OBJECT_TYPE, node_id, ReviewGovernanceState.rejected if not_callable else ReviewGovernanceState.approved)
         _resolve_open_challenges(
             store,
             node_id,
-            resolved_by=key.reviewer_id,
+            resolved_by=decided.reviewer_id,
             review_id=record.id,
-            challenge_ids=signed.payload.resolves_challenges,
+            challenge_ids=decided.payload.resolves_challenges,
             conn=conn,
         )
         append_event(
@@ -1437,7 +1382,7 @@ def decide_reference_review(
             "proof_map_no_longer_callable" if not_callable else "proof_map_reference_review_granted",
             f"{node_id} is no longer callable" if not_callable else f"reference review granted for {node_id}",
             entity_id=node_id,
-            payload={"reviewer_id": key.reviewer_id, "review_id": record.id},
+            payload={"reviewer_id": decided.reviewer_id, "review_id": record.id},
             conn=conn,
         )
     return record
@@ -1454,8 +1399,8 @@ def _no_longer_callable(store: ProjectStore, node_id: str) -> bool:
 def get_reference_review_state(store: ProjectStore, node_id: str) -> str:
     """`unreviewed`, `reviewed`, `unverifiable` or `no-longer-callable`, from the newest `kind=reference_review` decision.
 
-    Counts only while it verifies and the imported result still cites what
-    was signed (statement and source) — never acceptance_state. Once found
+    Counts only while the imported result still cites what was reviewed
+    (statement and source) — never acceptance_state. Once found
     wanting, an imported result stays `no-longer-callable`.
     """
     node = require_node(store, node_id)
@@ -1474,12 +1419,12 @@ def revalidate_dependency(
     node_id: str,
     target_node_id: str,
     *,
-    signed_decision: SignedDecision | None = None,
+    reviewer: str | None = None, rationale: str = "",
 ) -> ReviewRecord:
     """Lightweight re-review: confirm an existing Candidate proof still holds after a dependency advanced.
 
-    Needs a signed `dependency_revalidation` decision whose pins are exactly
-    the refreshed pin this writes (ADR-0009).
+    Recorded as a `dependency_revalidation` decision whose pins are exactly
+    the refreshed pin this writes (ADR-0010).
 
     Only available when the target's interface fingerprint hasn't changed
     since it was last pinned — if it has, the old Candidate proof no longer
@@ -1527,7 +1472,6 @@ def revalidate_dependency(
             "a new Candidate proof is required, lightweight re-review is not available",
         )
 
-    signed = _require_signed(signed_decision, DecisionKind.dependency_revalidation, node_id)
     refreshed = _refreshed_pin(store, target_node_id)
     new_version = refreshed.pinned_version
     old_pin = pin
@@ -1540,27 +1484,9 @@ def revalidate_dependency(
         pinned_fingerprint=current_fingerprint,
     )
     with store.transaction() as conn:
-        key = _authorize(
-            store,
-            signed,
-            kind=DecisionKind.dependency_revalidation,
-            target_id=node_id,
-            decision="reaffirmed",
-            dependency_id=target_node_id,
-            conn=conn,
-        )
+        decided = _decide(store, kind=DecisionKind.dependency_revalidation, target_id=node_id, decision="reaffirmed", reviewer=reviewer, rationale=rationale, dependency_id=target_node_id)
         upsert_dependency_pin(store, refreshed_pin, conn=conn)
-        record = record_decided_review(
-            store,
-            _ACCEPTANCE_OBJECT_TYPE,
-            node_id,
-            ReviewGovernanceState.reaffirmed,
-            reviewer_id=key.reviewer_id,
-            rationale=signed.payload.rationale,
-            kind=ReviewRecordKind.dependency_revalidation,
-            signed_decision=signed,
-            conn=conn,
-        )
+        record = _record(store, decided, _ACCEPTANCE_OBJECT_TYPE, node_id, ReviewGovernanceState.reaffirmed)
         append_event(
             store,
             "proof_map_dependency_revalidated",
@@ -1607,21 +1533,6 @@ def open_challenge(store: ProjectStore, target_node_id: str, *, opened_by: str =
     )
     with store.transaction() as conn:
         insert_challenge(store, challenge, conn=conn)
-        # the chained trace that makes the Challenge exist: deleting its
-        # `challenges` row can't make it go away (#35 C)
-        append_ledger_row(
-            store,
-            "challenge_opened",
-            challenge.id,
-            {
-                "target_node_id": target_node_id,
-                "rationale": rationale,
-                "opened_by": opened_by,
-                "created_at": challenge.created_at.isoformat(),
-            },
-            conn=conn,
-        )
-        schedule_history_pin_advance(store)
         append_event(
             store,
             "proof_map_challenge_opened",
@@ -1638,39 +1549,14 @@ def open_challenge(store: ProjectStore, target_node_id: str, *, opened_by: str =
 def _derived_challenges(store: ProjectStore) -> list[Challenge]:
     """Every Challenge, with its status as it counts.
 
-    A Challenge exists because the chained ledger recorded its opening, and
-    it is resolved only by a verified signed decision that names it — the
-    `challenges` table is advisory for both (#35 C). A Challenge from before
-    the ledger was adopted into it with its stored status; if that was
-    "dismissed" with no signature behind it, it stays closed but is flagged
-    (#35 F). A `challenges` row the ledger never recorded counts as open:
-    raising a concern is ungated, so erring towards "challenged" is safe.
+    Resolved by a recorded decision that names it; one dismissed before
+    ADR-0010 with no such decision behind it keeps its stored status.
     """
-    stored = {challenge.id: challenge for challenge in _list_challenges(store)}
-    opened = ledger_entries(store, "challenge_opened")
-    derived: list[Challenge] = []
-    for challenge_id, data in sorted(opened.items(), key=lambda item: item[1]["_seq"]):
-        base = stored.get(challenge_id) or Challenge(
-            id=challenge_id,
-            target_node_id=data["target_node_id"],
-            rationale=data.get("rationale", ""),
-            opened_by=data.get("opened_by", ""),
-            created_at=data["created_at"],
-        )
-        base = base.model_copy(update={"target_node_id": data["target_node_id"]})
-        legacy_dismissed = (
-            data.get("adopted_status") == ChallengeStatus.dismissed.value
-            and legacy_handled(store).get(_legacy_challenge_item(challenge_id), ("",))[0] != "declined"
-        )
-        derived.append(_with_resolution(store, base, legacy_dismissed=legacy_dismissed))
-    for challenge_id, challenge in stored.items():
-        if challenge_id not in opened:
-            derived.append(_with_resolution(store, challenge))
-    return derived
+    return [_with_resolution(store, challenge) for challenge in _list_challenges(store)]
 
 
 def _challenge_outcome(row: dict) -> ChallengeStatus:
-    """How the signed decision `row` ended the Challenges it names (#25)."""
+    """How the decision `row` ended the Challenges it names (#25)."""
     if row["kind"] == ReviewRecordKind.challenge_resolution.value:
         return ChallengeStatus.dismissed
     approved = row["decision"] == ReviewGovernanceState.approved.value
@@ -1679,7 +1565,7 @@ def _challenge_outcome(row: dict) -> ChallengeStatus:
     return ChallengeStatus.resolved_by_revision if approved else ChallengeStatus.upheld
 
 
-def _with_resolution(store: ProjectStore, challenge: Challenge, *, legacy_dismissed: bool = False) -> Challenge:
+def _with_resolution(store: ProjectStore, challenge: Challenge) -> Challenge:
     row = challenge_resolution(store, challenge.id)
     if row is not None:
         return challenge.model_copy(
@@ -1691,8 +1577,8 @@ def _with_resolution(store: ProjectStore, challenge: Challenge, *, legacy_dismis
                 "resolution_rationale": verify_decision_row(store, row["id"]).payload.rationale,
             }
         )
-    if legacy_dismissed:
-        return challenge.model_copy(update={"status": ChallengeStatus.dismissed})
+    if challenge.status == ChallengeStatus.dismissed and challenge.resolution_review_id is None:
+        return challenge  # dismissed before ADR-0010, with nothing recorded behind it: it stays closed
     return challenge.model_copy(update={"status": ChallengeStatus.open, "resolved_by": None, "resolved_at": None, "resolution_review_id": None})
 
 
@@ -1745,7 +1631,7 @@ def _resolve_open_challenges(
     addressed.
 
     Runs on the deciding review's own transaction (`conn`). What resolves
-    them is the signed decision itself, which lists `challenge_ids` in its
+    them is the recorded decision itself, which lists `challenge_ids` in its
     payload; marking the `challenges` rows here only keeps that advisory
     table in step.
     """
@@ -1777,9 +1663,9 @@ def dismiss_challenge(
     store: ProjectStore,
     challenge_id: str,
     *,
-    signed_decision: SignedDecision | None = None,
+    reviewer: str | None = None, rationale: str = "",
 ) -> Challenge:
-    """Dismiss a Challenge — Human Review only: a signed `challenge_resolution` decision (ADR-0009).
+    """Dismiss a Challenge — Human Review only: a `challenge_resolution` decision (ADR-0010).
 
     Nothing un-sets `potentially-stale`/`challenged` by hand: both are
     computed fresh from the set of *open* Challenges (and stale pins) on
@@ -1790,30 +1676,17 @@ def dismiss_challenge(
     if challenge.status != ChallengeStatus.open:
         raise ProofMapError("CHALLENGE_NOT_OPEN", f"challenge {challenge_id} is already {challenge.status.value}")
 
-    signed = _require_signed(signed_decision, DecisionKind.challenge_resolution, challenge_id)
     resolved_at = utc_now()
     with store.transaction() as conn:
         # re-read on the write lock: a concurrent dismissal may have landed
         if require_challenge(store, challenge_id).status != ChallengeStatus.open:
             raise ProofMapError("CHALLENGE_NOT_OPEN", f"challenge {challenge_id} is already dismissed")
-        key = _authorize(
-            store, signed, kind=DecisionKind.challenge_resolution, target_id=challenge_id, decision="dismissed", conn=conn
-        )
-        record = record_decided_review(
-            store,
-            "challenge",
-            challenge_id,
-            ReviewGovernanceState.dismissed,
-            reviewer_id=key.reviewer_id,
-            rationale=signed.payload.rationale,
-            kind=ReviewRecordKind.challenge_resolution,
-            signed_decision=signed,
-            conn=conn,
-        )
+        decided = _decide(store, kind=DecisionKind.challenge_resolution, target_id=challenge_id, decision="dismissed", reviewer=reviewer, rationale=rationale)
+        record = _record(store, decided, "challenge", challenge_id, ReviewGovernanceState.dismissed)
         mark_challenge_dismissed(
             store,
             challenge_id,
-            resolved_by=key.reviewer_id,
+            resolved_by=decided.reviewer_id,
             resolved_at=resolved_at,
             resolution_review_id=record.id,
             reopened=True,
@@ -1822,12 +1695,12 @@ def dismiss_challenge(
         append_event(
             store,
             "proof_map_challenge_dismissed",
-            f"challenge {challenge_id} dismissed by {key.reviewer_id}",
+            f"challenge {challenge_id} dismissed by {decided.reviewer_id}",
             entity_id=challenge.target_node_id,
             payload={
                 "challenge_id": challenge_id,
-                "reviewer_id": key.reviewer_id,
-                "rationale": signed.payload.rationale,
+                "reviewer_id": decided.reviewer_id,
+                "rationale": decided.payload.rationale,
                 "review_id": record.id,
             },
             conn=conn,
@@ -1835,7 +1708,7 @@ def dismiss_challenge(
     return challenge.model_copy(
         update={
             "status": ChallengeStatus.dismissed,
-            "resolved_by": key.reviewer_id,
+            "resolved_by": decided.reviewer_id,
             "resolved_at": resolved_at,
             "resolution_review_id": record.id,
         }
@@ -1944,11 +1817,11 @@ def get_workflow_state(store: ProjectStore, node_id: str) -> str:
         return "open"  # terminal: nothing further happens on a Rejected node
 
     # Whether the newest Human Review decision already covers the current
-    # submission: the Candidate proof its *signed payload* names is the
+    # submission: the Candidate proof its *recorded payload* names is the
     # current one. Never the `review_record_id` column (advisory, and a
     # direct edit could point it anywhere), never timestamps. A decision
     # that doesn't count covers nothing, so the proof reads review-needed
-    # again — which is also how a legacy decision gets re-signed.
+    # again, for the researcher to decide afresh.
     review_is_current = (
         latest is not None
         and state != "unverifiable"
@@ -2023,338 +1896,24 @@ def get_frontier(store: ProjectStore) -> list[ProofMapNode]:
 
 
 def list_integrity_warnings(store: ProjectStore) -> list[AuthorityWarning]:
-    """Every Human Review authority problem in the project, node by node.
+    """What about the recorded Human Review decisions doesn't count, node by node.
 
-    The authority layer's own findings (registry, pin, chains, unsigned or
-    unverifiable decision rows) plus what only the proof map can see: a
-    verified decision that no longer describes its node, a `kind` column or
-    pin that disagrees with the signed record, a Challenge whose table row
-    disagrees with the ledger, and legacy Rejects and dismissals that stand
-    without a signature (#35 C, F).
+    The authority layer's own findings (unreadable lines, unconfirmed
+    pre-ADR-0010 decisions, decisions git doesn't have yet) plus what only
+    the proof map can see: a recorded Acceptance that no longer describes
+    its node.
     """
     warnings = list_authority_warnings(store)
-    created = ledger_entries(store, "node_created")
-    for stored in list_proof_map_nodes(store):
-        node = _as_counted(store, stored)
-        if stored.id not in created:
-            warnings.append(
-                AuthorityWarning(
-                    code="NODE_NOT_IN_LEDGER",
-                    message=f"{stored.id} has no creation entry in the proof ledger (inserted behind the service's back, or its entry was deleted)",
-                    details={"node_id": stored.id},
-                )
-            )
-        if node.kind != stored.kind:
-            warnings.append(
-                AuthorityWarning(
-                    code="KIND_MISMATCH",
-                    message=f"{node.id} is stored as {stored.kind.value} but counts as {node.kind.value} (created kind plus signed promotes)",
-                    details={"node_id": node.id},
-                )
-            )
+    for node in list_nodes(store):
         if node.kind == ProofMapNodeKind.imported_result:
             continue
         state, latest, problem = _acceptance(store, node)
-        if state == "rejected" and problem is not None and latest.row["review_id"] not in legacy_handled(store):
-            warnings.append(
-                AuthorityWarning(
-                    code="UNSIGNED_LEGACY_REJECT",
-                    message=f"{node.id}'s Reject isn't verifiably signed ({problem}); it stays terminal — re-sign to keep it",
-                    details={"node_id": node.id},
-                )
-            )
-        elif state == "unverifiable" and latest is not None and latest.verdict.status == "verified":
+        if state == "unverifiable" and latest is not None and latest.verdict.status == "verified":
             warnings.append(
                 AuthorityWarning(
                     code="DECISION_NO_LONGER_APPLIES",
-                    message=f"{node.id}'s signed acceptance decision no longer counts: {problem}",
+                    message=f"{node.id}'s acceptance decision no longer counts: {problem}",
                     details={"node_id": node.id, "review_id": latest.row["review_id"]},
                 )
             )
-        for target_id, signed_pin in (_signed_pins(store, node.id) or {}).items():
-            stored_pin = _get_dependency_pin(store, node.id, target_id)
-            if stored_pin is None or (stored_pin.pinned_version, stored_pin.pinned_fingerprint) != (
-                signed_pin.pinned_version,
-                signed_pin.pinned_fingerprint,
-            ):
-                warnings.append(
-                    AuthorityWarning(
-                        code="DEPENDENCY_PIN_MISMATCH",
-                        message=f"{node.id}'s stored pin on {target_id} isn't the one its Acceptance signed; the signed pin counts",
-                        details={"node_id": node.id, "target_node_id": target_id},
-                    )
-                )
-    stored_challenges = {challenge.id: challenge for challenge in _list_challenges(store)}
-    opened = ledger_entries(store, "challenge_opened")
-    for challenge in _derived_challenges(store):
-        stored = stored_challenges.get(challenge.id)
-        entry = opened.get(challenge.id)
-        if entry is None:
-            warnings.append(
-                AuthorityWarning(
-                    code="CHALLENGE_NOT_IN_LEDGER",
-                    message=f"Challenge {challenge.id} has no opening entry in the proof ledger; it counts as open",
-                    details={"challenge_id": challenge.id},
-                )
-            )
-        elif (
-            entry.get("adopted_status") == ChallengeStatus.dismissed.value
-            and challenge_resolution(store, challenge.id) is None
-            and _legacy_challenge_item(challenge.id) not in legacy_handled(store)
-        ):
-            warnings.append(
-                AuthorityWarning(
-                    code="UNSIGNED_LEGACY_DISMISSAL",
-                    message=f"Challenge {challenge.id} was dismissed without a signature (legacy); it stays closed — re-sign to keep it",
-                    details={"challenge_id": challenge.id},
-                )
-            )
-        elif stored is None or stored.status != challenge.status or stored.target_node_id != challenge.target_node_id:
-            warnings.append(
-                AuthorityWarning(
-                    code="CHALLENGE_TABLE_MISMATCH",
-                    message=f"Challenge {challenge.id}'s stored row disagrees with its signed history; the signed history counts",
-                    details={"challenge_id": challenge.id},
-                )
-            )
     return warnings
-
-
-# -- legacy decisions: re-sign or decline (#42) --------------------------------------
-
-_LEGACY_KINDS = {
-    ReviewRecordKind.acceptance.value: DecisionKind.acceptance,
-    ReviewRecordKind.reference_review.value: DecisionKind.reference_review,
-    ReviewRecordKind.evidence_review.value: DecisionKind.evidence_review,
-    ReviewRecordKind.promote.value: DecisionKind.promote,
-    ReviewRecordKind.dependency_revalidation.value: DecisionKind.dependency_revalidation,
-}
-# (kind, stored decision) -> the decision value a re-sign signs
-_LEGACY_PAYLOAD_DECISIONS = {
-    ("acceptance", "approved"): "accept",
-    ("acceptance", "rejected"): "reject",
-    ("acceptance", "revision_requested"): "revision-requested",
-    ("reference_review", "approved"): "reference-review",
-    ("evidence_review", "trusted"): "trusted",
-    ("evidence_review", "unusable"): "unusable",
-    ("promote", "approved"): "promote",
-    ("dependency_revalidation", "reaffirmed"): "reaffirmed",
-}
-
-
-def _legacy_challenge_item(challenge_id: str) -> str:
-    return f"challenge:{challenge_id}"
-
-
-class LegacyDecision(BaseModel):
-    """One pre-ADR-0009 decision awaiting the researcher: re-sign it, or decline it (#42)."""
-
-    item_id: str
-    kind: DecisionKind
-    target_id: str
-    decision: str  # what a re-sign signs
-    original_reviewer: str
-    original_time: str
-    original_rationale: str = ""
-    resignable: bool
-    why_not: str | None = None
-
-
-def list_legacy_decisions(store: ProjectStore) -> list[LegacyDecision]:
-    """Every unsigned pre-ADR-0009 decision not yet re-signed or declined.
-
-    Only the newest legacy decision on an object and kind can be re-signed
-    (an older one was already superseded; re-signing it would override a
-    later decision), and an Acceptance only while the node's current proof
-    is still the one that legacy decision covered. Anything else can only be
-    declined.
-    """
-    handled = legacy_handled(store)
-    items: list[LegacyDecision] = []
-    for record in list_review_records(store):
-        if record.signed or record.kind is None or record.id in handled:
-            continue
-        kind = _LEGACY_KINDS.get(record.kind.value)
-        decision = _LEGACY_PAYLOAD_DECISIONS.get((record.kind.value, record.decision.value))
-        if kind is None or decision is None:
-            continue
-        why_not = _legacy_resign_obstacle(store, record, kind)
-        items.append(
-            LegacyDecision(
-                item_id=record.id,
-                kind=kind,
-                target_id=record.object_id,
-                decision=decision,
-                original_reviewer=record.reviewer_id,
-                original_time=record.updated_at.isoformat(),
-                original_rationale=record.rationale,
-                resignable=why_not is None,
-                why_not=why_not,
-            )
-        )
-    for challenge_id, data in ledger_entries(store, "challenge_opened").items():
-        item = _legacy_challenge_item(challenge_id)
-        if data.get("adopted_status") != ChallengeStatus.dismissed.value or item in handled:
-            continue
-        if challenge_resolution(store, challenge_id) is not None:
-            continue
-        stored = _get_challenge(store, challenge_id)
-        items.append(
-            LegacyDecision(
-                item_id=item,
-                kind=DecisionKind.challenge_resolution,
-                target_id=challenge_id,
-                decision="dismissed",
-                original_reviewer=(stored.resolved_by if stored else None) or "unknown",
-                original_time=(stored.resolved_at.isoformat() if stored and stored.resolved_at else data.get("created_at", "")),
-                resignable=True,
-            )
-        )
-    return items
-
-
-def _legacy_resign_obstacle(store: ProjectStore, record: ReviewRecord, kind: DecisionKind) -> str | None:
-    rows = decision_rows(store, record.object_type, record.object_id, record.kind.value)
-    if rows and rows[-1]["review_id"] != record.id:
-        return "a later decision on the same node superseded it; decline it instead"
-    if kind == DecisionKind.acceptance:
-        current = get_current_candidate_proof(store, record.object_id)
-        if current is None or current.review_record_id != record.id:
-            return "the node's current Candidate proof isn't the one this decision covered; review it afresh instead"
-    return None
-
-
-def _require_legacy_item(store: ProjectStore, item_id: str) -> LegacyDecision:
-    item = next((item for item in list_legacy_decisions(store) if item.item_id == item_id), None)
-    if item is None:
-        raise ProofMapError("LEGACY_ITEM_NOT_FOUND", f"{item_id} is not a legacy decision awaiting re-sign or decline")
-    return item
-
-
-def resign_legacy_decision(store: ProjectStore, item_id: str, *, signed_decision: SignedDecision | None = None) -> ReviewRecord:
-    """Keep a pre-ADR-0009 decision by re-signing it (#42).
-
-    Records a *new* signed decision of the same kind and value on the same
-    target, whose payload names the legacy item it re-signs; the legacy
-    row is never edited. From then on the new row is what counts. No
-    workflow precondition applies — the decision was already made — but the
-    signature binds the node exactly as it stands now.
-    """
-    item = _require_legacy_item(store, item_id)
-    if not item.resignable:
-        raise ProofMapError("LEGACY_NOT_RESIGNABLE", item.why_not or "this legacy decision can't be re-signed")
-    signed = _require_signed(signed_decision, item.kind, item.target_id)
-    object_type, row_decision = decision_row_for(item.kind, item.decision)
-    with store.transaction() as conn:
-        key = _authorize(
-            store, signed, kind=item.kind, target_id=item.target_id, decision=item.decision, conn=conn, resigns=item_id
-        )
-        record = record_decided_review(
-            store,
-            object_type,
-            item.target_id,
-            ReviewGovernanceState(row_decision),
-            reviewer_id=key.reviewer_id,
-            rationale=signed.payload.rationale,
-            kind=ReviewRecordKind(item.kind.value),
-            provenance_notes=f"re-signs legacy decision {item_id}",
-            signed_decision=signed,
-            conn=conn,
-        )
-        if item.kind == DecisionKind.acceptance and item.decision == "accept" and signed.payload.candidate_proof_id:
-            node = require_node(store, item.target_id)
-            set_candidate_proof_review_record_id(store, signed.payload.candidate_proof_id, record.id, conn=conn)
-            set_candidate_proof_interface_fingerprint(
-                store, signed.payload.candidate_proof_id, compute_interface_fingerprint(node.statement, node.assumptions), conn=conn
-            )
-        if item.kind == DecisionKind.challenge_resolution:
-            mark_challenge_dismissed(
-                store, item.target_id, resolved_by=key.reviewer_id, resolved_at=utc_now(), resolution_review_id=record.id, reopened=True, conn=conn
-            )
-        append_event(
-            store,
-            "proof_map_legacy_decision_resigned",
-            f"re-signed legacy {item.kind.value} decision on {item.target_id}",
-            entity_id=item.target_id,
-            payload={"legacy_item": item_id, "review_id": record.id, "reviewer_id": key.reviewer_id},
-            conn=conn,
-        )
-    return record
-
-
-def decline_legacy_decision(store: ProjectStore, item_id: str, *, signed_decision: SignedDecision | None = None) -> ReviewRecord:
-    """Decline a pre-ADR-0009 decision (#42): it stays uncounted and leaves the list.
-
-    Signed, so an agent can't make legacy decisions disappear. Refused for
-    a legacy Reject or Challenge dismissal: those keep their node terminal
-    and their Challenge closed until re-signed, and declining must never
-    weaken that. Otherwise the declined decision reads as its earlier
-    (unsigned, uncounted) history leaves it — never an older signed one.
-    """
-    item = _require_legacy_item(store, item_id)
-    if item.kind == DecisionKind.challenge_resolution or (item.kind == DecisionKind.acceptance and item.decision == "reject"):
-        # a legacy Reject keeps its node terminal and a legacy dismissal keeps
-        # its Challenge closed until re-signed (#35 F); declining one would
-        # reopen what it closed, so the only way forward is to re-sign it
-        raise ProofMapError(
-            "LEGACY_DECLINE_REFUSED",
-            f"a legacy {'dismissal' if item.kind == DecisionKind.challenge_resolution else 'Reject'} can only be re-signed: "
-            "declining it would reopen what it closed",
-        )
-    signed = _require_signed(signed_decision, DecisionKind.legacy_decline, item_id)
-    with store.transaction() as conn:
-        key = _authorize(store, signed, kind=DecisionKind.legacy_decline, target_id=item_id, decision="decline", conn=conn)
-        record = record_decided_review(
-            store,
-            "legacy_item",
-            item_id,
-            ReviewGovernanceState.superseded,
-            reviewer_id=key.reviewer_id,
-            rationale=signed.payload.rationale,
-            kind=ReviewRecordKind.legacy_decline,
-            signed_decision=signed,
-            conn=conn,
-        )
-        append_event(
-            store,
-            "proof_map_legacy_decision_declined",
-            f"declined legacy decision {item_id}",
-            entity_id=item_id,
-            payload={"legacy_item": item_id, "review_id": record.id, "reviewer_id": key.reviewer_id},
-            conn=conn,
-        )
-    return record
-
-
-def apply_signed_decision(store: ProjectStore, signed: SignedDecision) -> Any:
-    """Carry out whatever human-only operation `signed` is for, via its own service function.
-
-    The one dispatcher for surfaces that receive signed payloads (the review
-    app): the payload says what was decided, and the service function it
-    lands on verifies the signature binds exactly that, like any caller.
-    """
-    payload = signed.payload
-    kind, target, decision = payload.kind, payload.target_id, payload.decision
-    if payload.resigns is not None:
-        return resign_legacy_decision(store, payload.resigns, signed_decision=signed)
-    if kind == DecisionKind.legacy_decline:
-        return decline_legacy_decision(store, target, signed_decision=signed)
-    if kind == DecisionKind.acceptance:
-        return decide_acceptance(store, target, decision, signed_decision=signed)
-    if kind == DecisionKind.reference_review:
-        return decide_reference_review(store, target, decision, signed_decision=signed)
-    if kind == DecisionKind.evidence_review:
-        return decide_evidence_review(store, target, decision, signed_decision=signed)
-    if kind == DecisionKind.dependency_revalidation:
-        dependency = payload.dependency_pins[0].target_node_id if len(payload.dependency_pins) == 1 else ""
-        return revalidate_dependency(store, target, dependency, signed_decision=signed)
-    if kind == DecisionKind.challenge_resolution:
-        return dismiss_challenge(store, target, signed_decision=signed)
-    if kind == DecisionKind.promote:
-        return promote_to_lemma(store, target, signed_decision=signed)
-    raise ProofMapError("UNSUPPORTED_DECISION", f"{kind.value} decisions aren't applied here")
-
-
-def legacy_targets(store: ProjectStore) -> set[str]:
-    """Nodes and Challenges with a legacy decision still awaiting re-sign or decline."""
-    return {item.target_id for item in list_legacy_decisions(store)}

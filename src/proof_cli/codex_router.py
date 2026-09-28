@@ -222,7 +222,7 @@ def _catalog(root: ResolvedRoot) -> str:
             "  - Mutation commands always show the selected root before or after state changes.",
             "  - The global ~/.codex/skills/proof/ skill is the canonical entry path.",
             "  - Human Review decisions (accept, reject, resolve, promote, ...) are never made here:",
-            "    they need the researcher's passkey in the review app (`proof review open`).",
+            "    the researcher makes them on the proof map page (`proof review open`).",
             "  - Project-local proof skills are for repository debugging and development work.",
         ]
     )
@@ -412,8 +412,8 @@ def obligation_add(
 
 @obligation_app.command("resolve")
 def obligation_resolve(obligation_id: str | None = typer.Argument(None), root: str = "", rationale: str = "") -> None:  # rationale: old callers get the refusal, not a usage error
-    """Retired (ADR-0001, ADR-0009, #37): an obligation is discharged by an Accepted proof-map node,
-    and acceptance is the researcher's passkey decision in the review app — never an agent command."""
+    """Retired (ADR-0001, #37): an obligation is discharged by an Accepted proof-map node,
+    and acceptance is the researcher's decision on the proof map page — never an agent command."""
     from .cli import human_review_required
 
     human_review_required(root or ".", command="obligation.resolve", kind="obligation_resolution", target_id=obligation_id or "", node_id=None, json_output=True)
