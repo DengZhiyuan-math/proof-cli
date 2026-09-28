@@ -394,6 +394,7 @@ class _ActiveTransaction(NamedTuple):
     conn: sqlite3.Connection
     after_commit: list
     before_commit: list
+    on_rollback: list
 
 
 # The write transaction this thread currently holds open. A nested
@@ -451,18 +452,23 @@ class ProjectStore:
         """
         joined = active_transaction(self)
         if joined is not None:
+            outer = _ACTIVE_TRANSACTION.get()
+            own_from = len(outer.on_rollback)  # this block's on_rollback callbacks: those after these
             savepoint = f"nested_{uuid.uuid4().hex}"
             joined.execute(f"SAVEPOINT {savepoint}")
             try:
                 yield joined
             except BaseException:
-                joined.execute(f"ROLLBACK TO {savepoint}")
-                joined.execute(f"RELEASE {savepoint}")
+                try:
+                    _run_rollback_callbacks(outer.on_rollback, own_from)
+                finally:
+                    joined.execute(f"ROLLBACK TO {savepoint}")
+                    joined.execute(f"RELEASE {savepoint}")
                 raise
             joined.execute(f"RELEASE {savepoint}")
             return
         conn = self.connect()
-        active = _ActiveTransaction(self.db_path.resolve(), threading.get_ident(), conn, [], [])
+        active = _ActiveTransaction(self.db_path.resolve(), threading.get_ident(), conn, [], [], [])
         token = _ACTIVE_TRANSACTION.set(active)
         try:
             conn.execute("BEGIN IMMEDIATE")
@@ -471,7 +477,11 @@ class ProjectStore:
                 callback()
             conn.commit()
         except BaseException:
-            conn.rollback()
+            try:
+                # a failed commit (a reader it waited on, say) still holds the write lock too
+                _run_rollback_callbacks(active.on_rollback, 0)
+            finally:
+                conn.rollback()
             raise
         finally:
             _ACTIVE_TRANSACTION.reset(token)
@@ -500,6 +510,32 @@ def before_commit(store: ProjectStore, callback) -> None:
         active.before_commit.append(callback)
         return
     callback()
+
+
+def on_rollback(store: ProjectStore, callback) -> None:
+    """Run `callback` if this thread's open transaction on `store` rolls back — the block
+    raising, a `before_commit` callback raising, or the commit itself failing — while it still
+    holds the write lock, so no other writer has run in between. Inside a nested
+    `transaction()`, when that block's SAVEPOINT rolls back. Never after a commit; nothing to
+    do when no transaction is open. For undoing a side effect outside SQLite, such as a file
+    the transaction wrote."""
+    active = _ACTIVE_TRANSACTION.get()
+    if active is not None and active.thread_id == threading.get_ident() and active.db_path == store.db_path.resolve():
+        active.on_rollback.append(callback)
+
+
+def _run_rollback_callbacks(callbacks: list, start: int) -> None:
+    """Run `callbacks[start:]`, latest first, and drop them; each runs even if one before it raised."""
+    pending = callbacks[start:]
+    del callbacks[start:]
+    errors: list[BaseException] = []
+    for callback in reversed(pending):
+        try:
+            callback()
+        except BaseException as exc:
+            errors.append(exc)
+    if errors:
+        raise errors[0]
 
 
 def active_transaction(store: ProjectStore) -> sqlite3.Connection | None:
