@@ -210,6 +210,42 @@ def test_an_orphan_snapshot_is_skipped_and_reported_not_a_permanent_block(tmp_pa
     assert "ORPHAN_SNAPSHOT" in result.output
 
 
+def test_a_pdf_copy_that_fails_partway_leaves_no_pdf_behind(tmp_path: Path, monkeypatch):
+    # PR #61 review: the PDF only counted as written once the copy finished
+    from proof_cli import proof_map
+
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_1", kind="claim", statement="s")
+    _write_proof(store, "clm_1", "work")
+
+    def partial_copy(_src, dst):
+        Path(dst).write_bytes(b"%PDF half")
+        raise OSError("no space left on device")
+
+    monkeypatch.setattr(proof_map, "build_is_current", lambda *_: True)
+    monkeypatch.setattr(proof_map.shutil, "copyfile", partial_copy)
+    with pytest.raises(OSError):
+        request_review(store, "clm_1", requested_by="agent_a", rationale="r")
+
+    assert list((store.root / "proofs" / "clm_1" / "snapshots").iterdir()) == []
+
+
+def test_a_stray_pdf_is_never_adopted_by_a_new_snapshot(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_1", kind="claim", statement="s")
+    stray = store.root / "proofs" / "clm_1" / "snapshots" / "v1.pdf"
+    stray.parent.mkdir(parents=True)
+    stray.write_bytes(b"%PDF of some other text")
+    _write_proof(store, "clm_1", "work")  # and no current build
+
+    record = request_review(store, "clm_1", requested_by="agent_a", rationale="r")
+
+    assert record.version == 2
+    assert not (store.root / record.file_path).with_suffix(".pdf").exists()
+    (warning,) = [w for w in list_integrity_warnings(store) if w.code == "ORPHAN_SNAPSHOT"]
+    assert warning.details == {"node_id": "clm_1", "file_path": "proofs/clm_1/snapshots/v1.pdf"}
+
+
 def test_an_imported_result_has_nothing_to_review_this_way(tmp_path: Path):
     store = ensure_project(tmp_path)
     create_node(store, node_id="ref_1", kind="imported_result", statement="known", source_locator="doi:x", source_version="v1")

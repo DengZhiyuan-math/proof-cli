@@ -532,12 +532,13 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
             # by list_integrity_warnings, and never overwritten
             version = max([next_candidate_proof_version(store, node_id, conn=conn), *(n + 1 for n in snapshots_on_disk(store.root, node_id))])
             path = snapshot_path(store.root, node_id, version)
+            # listed before writing, so a write that fails partway still goes; and only if absent
+            # now, so a rollback never removes a file this request didn't write
+            written.extend(p for p in (path, path.with_suffix(".pdf")) if not p.exists())
             write_snapshot(path, content)
-            written.append(path)
             if build_is_current(store.root, node_id):
                 # a PDF compiled from this very text, preamble included (prism-local's build): archived beside the snapshot
                 shutil.copyfile(build_pdf_path(store.root, node_id), path.with_suffix(".pdf"))
-                written.append(path.with_suffix(".pdf"))
             record = CandidateProofRecord(
                 id=str(uuid.uuid4()),
                 node_id=node_id,
