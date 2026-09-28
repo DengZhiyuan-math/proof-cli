@@ -713,7 +713,7 @@ def review_open(node_id: str = typer.Argument("", help="Open this node's decisio
 
 @review_app.command("warnings")
 def review_warnings(root: str = ".", json_output: bool = typer.Option(False, "--json")) -> None:
-    """Everything about Human Review authority that doesn't verify: unsigned or forged decisions, broken chains."""
+    """Everything about Human Review authority that doesn't verify, and Review snapshots the index never recorded."""
     warnings = list_integrity_warnings(get_store(_root(root)))
     if json_output:
         typer.echo(dump_envelope(success_envelope("review.warnings", [warning.model_dump(mode="json") for warning in warnings])))
