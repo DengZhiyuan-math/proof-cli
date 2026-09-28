@@ -17,9 +17,10 @@ from proof_cli.proof_map import (
     get_active_claim,
     get_workflow_state,
     list_candidate_proofs,
+    list_integrity_warnings,
     request_review,
 )
-from proof_cli.storage import ensure_project
+from proof_cli.storage import ensure_project, list_all_claims
 
 runner = CliRunner()
 
@@ -135,6 +136,78 @@ def test_writing_and_requesting_review_need_no_claim_and_end_one(tmp_path: Path)
         request_review(store, "clm_3", requested_by="agent_c", rationale="r")
     assert exc_info.value.code == "NOT_CLAIMANT"  # a node someone holds is theirs to hand over
     assert get_active_claim(store, "clm_3").claimant_id == "agent_b"
+
+
+def test_a_reassignment_racing_a_request_waits_for_it_rather_than_being_overridden(tmp_path: Path, monkeypatch):
+    # issue #18: A passes the holder check, the node is reassigned to B, and A's request must not
+    # go on to snapshot and hand over a node B now holds. The check and the writes are one
+    # transaction, so B's reassignment waits until A's request has committed.
+    import threading
+
+    from proof_cli import proof_map
+
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_1", kind="claim", statement="s")
+    claim_node(store, "clm_1", claimant_id="agent_a", session_id="s")
+    _write_proof(store, "clm_1", "A's work")
+
+    original = proof_map.write_snapshot
+    reassigner = threading.Thread(target=lambda: claim_node(store, "clm_1", claimant_id="agent_b", session_id="s", reassign=True))
+
+    def write_after_a_reassignment(path, content):
+        reassigner.start()
+        reassigner.join(timeout=0.5)  # never finishes while A holds the write lock
+        original(path, content)
+
+    monkeypatch.setattr(proof_map, "write_snapshot", write_after_a_reassignment)
+    request_review(store, "clm_1", requested_by="agent_a", rationale="r")
+    reassigner.join()
+
+    a_claim, b_claim = sorted(list_all_claims(store), key=lambda claim: claim.claimed_at)
+    assert (a_claim.claimant_id, a_claim.released_by, a_claim.release_reason) == ("agent_a", "agent_a", "review requested")
+    assert b_claim.claimant_id == "agent_b" and b_claim.released_at is None  # B's claim came after A's hand-over
+    assert get_workflow_state(store, "clm_1") == "claimed"
+    assert len(list_candidate_proofs(store, "clm_1")) == 1
+
+
+def test_a_failed_request_leaves_no_snapshot_and_no_row(tmp_path: Path, monkeypatch):
+    from proof_cli import proof_map
+
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_1", kind="claim", statement="s")
+    claim_node(store, "clm_1", claimant_id="agent_a", session_id="s")
+    _write_proof(store, "clm_1", "work")
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError("crash after the snapshot was written")
+
+    monkeypatch.setattr(proof_map, "pin_dependencies", fail)
+    with pytest.raises(RuntimeError):
+        request_review(store, "clm_1", requested_by="agent_a", rationale="r")
+
+    assert not (store.root / "proofs" / "clm_1" / "snapshots" / "v1.tex").exists()
+    assert list_candidate_proofs(store, "clm_1") == []
+    assert get_active_claim(store, "clm_1").claimant_id == "agent_a"
+
+
+def test_an_orphan_snapshot_is_skipped_and_reported_not_a_permanent_block(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_1", kind="claim", statement="s")
+    orphan = store.root / "proofs" / "clm_1" / "snapshots" / "v1.tex"
+    orphan.parent.mkdir(parents=True)
+    orphan.write_text("left behind by a crash")  # between the file write and the index insert
+    _write_proof(store, "clm_1", "work")
+
+    record = request_review(store, "clm_1", requested_by="agent_a", rationale="r")
+
+    assert record.version == 2
+    assert record.file_path == "proofs/clm_1/snapshots/v2.tex"
+    assert orphan.read_text() == "left behind by a crash"  # never overwritten or adopted
+    (warning,) = [w for w in list_integrity_warnings(store) if w.code == "ORPHAN_SNAPSHOT"]
+    assert warning.details == {"node_id": "clm_1", "file_path": "proofs/clm_1/snapshots/v1.tex"}
+
+    result = runner.invoke(app, ["review", "warnings", "--root", str(tmp_path)])
+    assert "ORPHAN_SNAPSHOT" in result.output
 
 
 def test_an_imported_result_has_nothing_to_review_this_way(tmp_path: Path):

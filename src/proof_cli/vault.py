@@ -38,6 +38,17 @@ def snapshot_path(root: Path, node_id: str, version: int) -> Path:
     return vault_dir(root) / node_id / "snapshots" / f"v{version}.tex"
 
 
+def snapshots_on_disk(root: Path, node_id: str) -> dict[int, Path]:
+    """Every `snapshots/v<N>.tex` actually present, by version, indexed or not."""
+    folder = snapshot_path(root, node_id, 1).parent
+    found: dict[int, Path] = {}
+    for path in folder.glob("v*.tex") if folder.is_dir() else ():
+        number = path.stem[1:]
+        if number.isdigit():
+            found[int(number)] = path
+    return found
+
+
 def build_pdf_path(root: Path, node_id: str) -> Path:
     """Where prism-local (default `outdir: build`) compiles the working proof.tex."""
     return vault_dir(root) / node_id / "build" / "proof.pdf"
