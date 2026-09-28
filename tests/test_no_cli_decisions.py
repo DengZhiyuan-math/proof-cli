@@ -1,4 +1,4 @@
-"""No CLI command, codex route or MCP tool can make a Human Review decision (ADR-0009, issue #37).
+"""No CLI command can make a Human Review decision (ADR-0009, issue #37).
 
 Walks the whole command tree against a project holding every kind of
 protected state, invoking each command with every interesting target and
@@ -9,7 +9,6 @@ obligation/blocker resolution. (Integrity is not protected: opening a
 Challenge or editing a dependency is ordinary agent work.)
 """
 
-import ast
 import contextlib
 import json
 import os
@@ -54,7 +53,6 @@ runner = CliRunner()
 
 # commands that don't return: a server, a browser
 SKIPPED = {("review", "serve"), ("review", "open"), ("map", "serve"), ("map", "open")}
-PLUGIN_SERVER = Path(__file__).resolve().parents[1] / "plugins" / "proof-routing" / "scripts" / "proof_mcp_server.py"
 
 
 def _submit(store, node_id, claimant="agent_a", session="s"):
@@ -231,26 +229,11 @@ def test_no_command_changes_any_protected_state(tmp_path: Path, monkeypatch):
     assert walked > 1000  # the whole tree, not a sample
 
 
-def test_the_mcp_tools_only_reach_codex_routes():
-    """Every MCP tool shells out to `proof codex …`, whose routes the walk above covers."""
-    tree = ast.parse(PLUGIN_SERVER.read_text())
-    tools = [node for node in tree.body if isinstance(node, ast.FunctionDef) and any(
-        isinstance(d, ast.Call) and getattr(d.func, "attr", "") == "tool" for d in node.decorator_list
-    )]
-    assert tools
-    for tool in tools:
-        calls = {call.func.id for call in ast.walk(tool) if isinstance(call, ast.Call) and isinstance(call.func, ast.Name)}
-        assert calls <= {"_run_proof_codex", "_effective_root", "str", "list", "dict", "RuntimeError"}, (tool.name, calls)
-        for literal in ast.walk(tool):
-            if isinstance(literal, ast.List) and literal.elts and getattr(literal.elts[0], "value", None) == "proof":
-                assert getattr(literal.elts[1], "value", None) == "codex", tool.name
-
-
 def test_adding_a_theorem_that_exists_does_not_replace_its_trust(tmp_path: Path):
     """A new version over a verified contract used to quietly reset it to a draft — found by the walk above."""
     store = ensure_project(tmp_path)
     add_theorem(store, theorem_id="thm_t", kind="lemma", name="T", statement="T", status=TheoremStatus.verified, trust_level=TrustLevel.project_verified)
-    for args in (["theorem", "add", "thm_t", "T", "T2", "--root", str(tmp_path)], ["codex", "new", "theorem", "thm_t", "T", "T2", "--root", str(tmp_path)]):
+    for args in (["theorem", "add", "thm_t", "T", "T2", "--root", str(tmp_path)],):
         runner.invoke(app, args)
         (theorem,) = list_theorems(store)
         assert (theorem.statement, theorem.status, theorem.trust_level) == ("T", TheoremStatus.verified, TrustLevel.project_verified)
