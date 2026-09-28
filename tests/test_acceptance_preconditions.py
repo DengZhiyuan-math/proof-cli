@@ -202,7 +202,7 @@ def test_split_promote_verify_and_exchange_import_never_write_acceptance_state(t
     # the legacy theorem-contract verify path, on a contract sharing the node's id (the trust
     # commands themselves are gone, #37)
     add_theorem(store, theorem_id="clm_child", kind="lemma", name="child", statement="child")
-    assert json.loads(cmd_proof_verify_run("clm_child", root=tmp_path / "local"))["machine_check_status"] == "machine_checked"
+    assert json.loads(cmd_proof_verify_run("clm_child", root=tmp_path / "local"))["machine_check_status"] == "queued_for_verification"
     assert get_acceptance_state(store, "clm_child") == "unreviewed"
 
     # exchange import of a project where the same node ids are Accepted

@@ -238,3 +238,23 @@ def test_verify_run_records_no_evidence_check_on_any_candidate_proof(tmp_path: P
     assert result.exit_code == 0, result.output
     assert list_evidence_checks(store, proof.id) == []
     assert list_obligations(store)[0].status == ProofObligationStatus.open
+
+
+# -- verify run reports that no backend ran (#27) ----------------------------------------
+
+
+def test_verify_run_never_reports_a_machine_check_no_backend_ran(tmp_path: Path) -> None:
+    store = ensure_project(tmp_path)
+    add_obligation(store, _obligation())
+
+    result = CliRunner().invoke(app, ["verify", "run", "obl_bridge", "--backend-target", "lean4", "--root", str(tmp_path)])
+
+    assert result.exit_code == 0, result.output
+    assert "machine_checked" not in result.output
+    (record,) = list_verification_results(store)
+    assert record.result_status == VerificationFragmentStatus.queued_for_verification
+    assert record.result.metadata["backend_ran"] is False
+    assert "no backend ran" in record.result.summary
+    assert record.result.artifacts == []
+    assert record.review_status == VerificationReviewStatus.pending_review
+    assert record.effect == "neutral"
