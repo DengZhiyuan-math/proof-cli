@@ -1,5 +1,6 @@
 """The proof map page as the map's home, and prism-local coupled by files only (issue #55, ADR-0008, ADR-0010)."""
 
+import json
 import os
 import stat
 import subprocess
@@ -120,6 +121,21 @@ def test_a_stale_build_is_not_archived(tmp_path: Path):
     assert DirectClient(store).get("/api/node/lem")[1]["data"]["pdfs"] == {"snapshot": False, "build": True}
 
 
+def test_a_build_older_than_the_shared_preamble_is_not_archived(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="lem", kind="lemma", statement="Base")
+    _write(store, "lem", "Direct.")
+    pdf = _build_pdf(store, "lem")
+    past = time.time() - 60
+    os.utime(pdf, (past, past))
+    os.utime(store.root / "proofs" / "lem" / "proof.tex", (past - 10, past - 10))
+    (store.root / "proofs" / "preamble.tex").write_text("% a macro changed after the build\n")
+
+    snapshot = request_review(store, "lem", requested_by="agent_a", rationale="scoped")
+
+    assert not (tmp_path / snapshot.file_path).with_suffix(".pdf").exists()
+
+
 def test_an_archived_pdf_is_committed_with_the_decision(tmp_path: Path):
     for args in (["init", "--quiet"], ["config", "user.name", "Ada"], ["config", "user.email", "ada@example.org"]):
         subprocess.run(["git", "-C", str(tmp_path), *args], check=True)
@@ -154,21 +170,40 @@ def test_a_missing_pdf_or_unknown_node_is_an_error(tmp_path: Path):
 def test_open_in_prism_local_runs_the_configured_executable_on_the_node_folder(tmp_path: Path, monkeypatch):
     store = ensure_project(tmp_path / "project")
     create_node(store, node_id="lem", kind="lemma", statement="Base")
-    record = tmp_path / "opened.txt"
-    fake = tmp_path / "prism-local"
-    fake.write_text(f"#!{sys.executable}\nimport sys\nopen({str(record)!r}, 'w').write(sys.argv[1])\n")
-    fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+    record = tmp_path / "argv.json"
+    fake = _fake_prism(
+        tmp_path,
+        f"json.dump(sys.argv[1:], open({str(record)!r}, 'w'))\n"
+        "ready = sys.argv[sys.argv.index('--ready-file') + 1]\n"
+        "json.dump({'pid': 1, 'port': 45678, 'url': 'http://127.0.0.1:45678/', 'root': sys.argv[1]}, open(ready, 'w'))\n",
+    )
     monkeypatch.setenv(PRISM_LOCAL_ENV_VAR, str(fake))
 
     status, result = DirectClient(store).post("/api/node/lem/open", {})
 
     folder = str(store.root / "proofs" / "lem")
-    assert status == 200 and result["data"] == {"opened": True, "folder": folder, "command": str(fake)}
-    for _ in range(100):
-        if record.exists():
-            break
-        time.sleep(0.05)
-    assert record.read_text() == folder
+    assert status == 200 and result["data"] == {"opened": True, "folder": folder, "command": str(fake), "url": "http://127.0.0.1:45678/"}
+    argv = json.loads(record.read_text())
+    # the node folder, on a free port (another node's prism-local may be running), gone when its page closes
+    assert argv[0] == folder and argv[argv.index("--port") + 1] == "0" and "--exit-when-idle" in argv
+
+
+def test_a_prism_local_that_fails_to_start_is_reported_not_claimed(tmp_path: Path, monkeypatch):
+    store = ensure_project(tmp_path / "project")
+    create_node(store, node_id="lem", kind="lemma", statement="Base")
+    fake = _fake_prism(tmp_path, "sys.stderr.write('OSError: [Errno 48] Address already in use')\nsys.exit(1)\n")
+    monkeypatch.setenv(PRISM_LOCAL_ENV_VAR, str(fake))
+
+    result = DirectClient(store).post("/api/node/lem/open", {})[1]["data"]
+
+    assert result["opened"] is False and "Address already in use" in result["error"]
+
+
+def _fake_prism(tmp_path: Path, body: str) -> Path:
+    fake = tmp_path / "prism-local"
+    fake.write_text(f"#!{sys.executable}\nimport json, sys\n{body}")
+    fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+    return fake
 
 
 def test_without_prism_local_the_page_gives_the_folder(tmp_path: Path, monkeypatch):

@@ -139,7 +139,13 @@ function toneOf(n) {
   return "none";
 }
 
-function warnsOf(n) { return n.acceptance_state === "unverifiable" || n.integrity_state !== "current"; }
+// which warning a node carries, each drawn differently: challenged, potentially stale, or a decision that no longer applies
+function warningOf(n) {
+  if (n.integrity_state === "challenged") return "challenged";
+  if (n.integrity_state === "potentially-stale") return "stale";
+  if (n.acceptance_state === "unverifiable") return "unverifiable";
+  return "";
+}
 
 function short(text, length) { return text.length > length ? text.slice(0, length - 1) + "…" : text; }
 
@@ -212,8 +218,8 @@ function drawDag(nodes) {
   }
   for (const n of nodes) {
     const { x, y } = at.get(n.id);
-    const classes = ["node", n.frontier ? "frontier" : "", warnsOf(n) ? "warn" : ""].filter(Boolean).join(" ");
-    const g = svg("g", { class: classes, tabindex: 0, role: "link", "aria-label": `${n.kind} ${n.id}: ${n.acceptance_state}, ${n.workflow_state}${n.frontier ? ", on the frontier" : ""}` });
+    const classes = ["node", n.frontier ? "frontier" : "", warningOf(n)].filter(Boolean).join(" ");
+    const g = svg("g", { class: classes, tabindex: 0, role: "link", "aria-label": `${n.kind} ${n.id}: ${n.acceptance_state}, ${n.workflow_state}, ${n.integrity_state}${n.assignee ? `, claimed by ${n.assignee}` : ""}${n.frontier ? ", on the frontier" : ""}` });
     g.append(svg("rect", { class: "box", x: x - BOX.w / 2, y: y - BOX.h / 2, width: BOX.w, height: BOX.h, rx: 8 }));
     g.append(svg("rect", { class: `bar ${toneOf(n)}`, x: x - BOX.w / 2, y: y - BOX.h / 2, width: 5, height: BOX.h, rx: 2 }));
     const kind = svg("text", { class: "kind", x: x - BOX.w / 2 + 12, y: y - BOX.h / 2 + 15 });
@@ -221,7 +227,7 @@ function drawDag(nodes) {
     const label = svg("text", { x: x - BOX.w / 2 + 12, y: y + 3 });
     label.textContent = short(n.display_label || n.statement, 24);
     const meta = svg("text", { class: "meta", x: x - BOX.w / 2 + 12, y: y + BOX.h / 2 - 9 });
-    meta.textContent = [n.acceptance_state, n.workflow_state, n.assignee ? `@${n.assignee}` : ""].filter(Boolean).join(" · ");
+    meta.textContent = [n.acceptance_state, n.workflow_state, n.integrity_state !== "current" ? n.integrity_state : "", n.assignee ? `@${n.assignee}` : ""].filter(Boolean).join(" · ");
     g.append(kind, label, meta);
     if (n.frontier) {
       const tag = svg("text", { class: "tag", x: x, y: y + BOX.h / 2 + 13, "text-anchor": "middle" });
@@ -238,30 +244,38 @@ function drawDag(nodes) {
   }
 }
 
-// The tree answers "how is this proved?": a shared dependency appears under each of its parents, marked as shared.
+// The tree answers "how is this proved?": a shared dependency is expanded in full under each of its
+// parents, marked as shared (ADR-0008), so every branch reads to the bottom. Only a cycle is cut.
 function drawTree(nodes) {
   const byId = new Map(nodes.map((n) => [n.id, n]));
-  const dependedOn = new Set(nodes.flatMap((n) => n.dependencies));
+  const parents = new Map();
+  for (const n of nodes) for (const d of n.dependencies) parents.set(d, (parents.get(d) || 0) + 1);
   const select = $("tree-root");
-  const roots = [...nodes.filter((n) => !dependedOn.has(n.id)), ...nodes.filter((n) => dependedOn.has(n.id))];
+  const roots = [...nodes.filter((n) => !parents.has(n.id)), ...nodes.filter((n) => parents.has(n.id))];
   const chosen = select.value && byId.has(select.value) ? select.value : (roots[0] || {}).id;
   select.replaceChildren(...roots.map((n) => el("option", `${n.id} (${n.kind})`, { value: n.id })));
   if (chosen) select.value = chosen;
-  const seen = new Set();
-  const item = (id) => {
+  const item = (id, ancestors) => {
     const n = byId.get(id);
     const li = el("li");
     if (!n) { li.append(el("span", `${id} (missing)`, { class: "warning" })); return li; }
     li.append(el("a", n.id, { href: `#/node/${encodeURIComponent(n.id)}` }), ` — ${short(n.display_label || n.statement, 60)}`);
     li.append(el("span", n.acceptance_state, { class: "state-chip" }), el("span", n.workflow_state, { class: "state-chip" }));
+    li.append(el("span", n.integrity_state, { class: `state-chip${n.integrity_state === "current" ? "" : " warn-chip"}` }));
+    if (n.assignee) li.append(el("span", `@${n.assignee}`, { class: "state-chip" }));
     if (n.frontier) li.append(el("span", "ready to claim", { class: "state-chip" }));
-    if (seen.has(id)) { li.classList.add("shared"); li.append(" (shared: expanded above)"); return li; }
-    seen.add(id);
-    if (n.dependencies.length) { const ul = el("ul"); n.dependencies.forEach((d) => ul.append(item(d))); li.append(ul); }
+    if ((parents.get(id) || 0) > 1) li.append(el("span", "shared", { class: "state-chip shared-chip", title: `used by ${parents.get(id)} nodes; see the DAG` }));
+    if (ancestors.has(id)) { li.append(" (cycle: not expanded again)"); return li; }
+    if (n.dependencies.length) {
+      const below = new Set(ancestors).add(id);
+      const ul = el("ul");
+      n.dependencies.forEach((d) => ul.append(item(d, below)));
+      li.append(ul);
+    }
     return li;
   };
   const tree = el("ul");
-  if (chosen) tree.append(item(chosen));
+  if (chosen) tree.append(item(chosen, new Set()));
   $("map-tree").replaceChildren(tree);
 }
 
@@ -280,7 +294,9 @@ function showMap() {
 async function openInPrism(nodeId) {
   try {
     const result = await api(`/api/node/${encodeURIComponent(nodeId)}/open`, {});
-    say(result.opened ? `Opened ${result.folder} in prism-local.` : `prism-local isn't configured (${result.hint}). The node's folder: ${result.folder}`, result.opened ? "ok" : "");
+    if (result.opened) say(`Opened ${result.folder} in prism-local${result.url ? ` at ${result.url}` : ""}.`, "ok");
+    else if (result.error) say(`prism-local didn't start: ${result.error}. The node's folder: ${result.folder}`, "error");
+    else say(`prism-local isn't configured (${result.hint}). The node's folder: ${result.folder}`);
   } catch (error) { showError(error); }
 }
 

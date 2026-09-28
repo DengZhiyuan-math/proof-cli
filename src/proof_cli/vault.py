@@ -47,6 +47,25 @@ def node_folder(root: Path, node_id: str) -> Path:
     return vault_dir(root) / node_id
 
 
+_NOT_SOURCES = {"build", "snapshots"}
+
+
+def build_is_current(root: Path, node_id: str) -> bool:
+    """Whether prism-local's build/proof.pdf is at least as new as every source it may be built from:
+    the node folder's files (not its build output, snapshots or reviews) and the shared preamble."""
+    pdf = build_pdf_path(root, node_id)
+    if not pdf.is_file():
+        return False
+    folder = node_folder(root, node_id)
+    sources = [preamble_path(root)] + [
+        path
+        for path in folder.rglob("*")
+        if path.is_file() and path.relative_to(folder).parts[0] not in _NOT_SOURCES and path.name != "reviews.jsonl"
+    ]
+    built = pdf.stat().st_mtime
+    return all(source.stat().st_mtime <= built for source in sources if source.exists())
+
+
 def write_working_proof(root: Path, *, node_id: str, kind: str, statement: str) -> None:
     """Create the project preamble and a node's working `proof.tex`, if missing. Never overwrites."""
     preamble = preamble_path(root)
