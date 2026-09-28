@@ -1,13 +1,20 @@
 from __future__ import annotations
 
+import io
+
 from rich.console import Console
 from rich.table import Table
 
 from .domain import CandidateProofRecord, Challenge, ClaimRecord, ProjectSnapshot, ProofMapNode
 
 
+def _console() -> Console:
+    """A console that only records: each renderer returns its text, and the caller prints it once (#34)."""
+    return Console(record=True, width=100, file=io.StringIO())
+
+
 def render_status(data: dict[str, object]) -> str:
-    console = Console(record=True, width=100)
+    console = _console()
     console.rule("Proof Status")
 
     table = Table(show_header=False, box=None, pad_edge=False)
@@ -34,7 +41,7 @@ def render_status(data: dict[str, object]) -> str:
 
 
 def render_export(data: dict[str, object]) -> str:
-    console = Console(record=True, width=100)
+    console = _console()
     console.rule("Proof Export")
     console.print(f"Project: {data.get('project_id')}")
     console.print(f"Current theorem: {data.get('current_theorem') or 'none'}")
@@ -59,7 +66,7 @@ def render_proof_map_node(
     working_proof: str | None = None,
     snapshots: list[dict] | None = None,
 ) -> str:
-    console = Console(record=True, width=100)
+    console = _console()
     console.rule(f"Proof Map Node: {node.id}")
     table = Table(show_header=False, box=None, pad_edge=False)
     table.add_column("key", style="bold")
@@ -99,7 +106,7 @@ def render_proof_map_node(
 
 
 def render_frontier(nodes: list[ProofMapNode]) -> str:
-    console = Console(record=True, width=100)
+    console = _console()
     console.rule("Proof Frontier")
     if not nodes:
         console.print("No frontier nodes")
@@ -115,7 +122,7 @@ def render_frontier(nodes: list[ProofMapNode]) -> str:
 
 
 def render_claim(claim: ClaimRecord) -> str:
-    console = Console(record=True, width=100)
+    console = _console()
     console.rule(f"Claim on {claim.node_id}")
     table = Table(show_header=False, box=None, pad_edge=False)
     table.add_column("key", style="bold")
@@ -133,7 +140,7 @@ def render_claim(claim: ClaimRecord) -> str:
 
 
 def render_candidate_proof(record: CandidateProofRecord) -> str:
-    console = Console(record=True, width=100)
+    console = _console()
     console.rule(f"Candidate Proof {record.node_id} v{record.version}")
     table = Table(show_header=False, box=None, pad_edge=False)
     table.add_column("key", style="bold")
@@ -151,7 +158,7 @@ def render_candidate_proof(record: CandidateProofRecord) -> str:
 
 
 def render_proof_map_node_list(nodes: list[ProofMapNode]) -> str:
-    console = Console(record=True, width=100)
+    console = _console()
     console.rule("Proof Map Nodes")
     if not nodes:
         console.print("No proof map nodes")
@@ -167,7 +174,7 @@ def render_proof_map_node_list(nodes: list[ProofMapNode]) -> str:
 
 
 def render_challenge(challenge: Challenge) -> str:
-    console = Console(record=True, width=100)
+    console = _console()
     console.rule(f"Challenge {challenge.id}")
     table = Table(show_header=False, box=None, pad_edge=False)
     table.add_column("key", style="bold")
@@ -186,7 +193,7 @@ def render_challenge(challenge: Challenge) -> str:
 
 
 def render_challenge_list(challenges: list[Challenge]) -> str:
-    console = Console(record=True, width=100)
+    console = _console()
     console.rule("Challenges")
     if not challenges:
         console.print("No challenges")

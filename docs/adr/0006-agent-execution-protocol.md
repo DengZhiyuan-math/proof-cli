@@ -45,3 +45,9 @@ This is hard to reverse the way a public API always is: once the Codex plugin, a
   - **upheld** when the revision is rejected or sent back, or the Imported result is found no longer callable.
 
   "Upheld" is never recorded on its own for a local node: the Challenge stays open until a decision on a revision closes it.
+
+**Update (#34): the error-code vocabulary is written down in `src/proof_cli/errors.py`.** That module is the one list of codes an agent may branch on. A test fails if the code raises one it doesn't list. Where it differs from the examples above, it wins:
+- §8's `CLAIM_OWNERSHIP_MISMATCH` is `NOT_CLAIMANT` (someone else holds the node) or `NO_ACTIVE_CLAIM` (nothing to release).
+- §7's `CLAIM_CONFLICT` carries `node_id`, `assignee` and `claimed_at` rather than `active_claim_id`: a claim is an assignee, not a token (ADR-0010).
+- **Every `--json` invocation writes exactly one envelope to stdout, a failure included**, on both entry points, `proof` and `proof-codex` (`src/proof_cli/contract.py`). A command line that doesn't parse is `USAGE_ERROR` (exit 2). An unexpected failure is `INTERNAL_ERROR` (exit 1), never a traceback. The one exception is `--help`, which prints help.
+- **Only a command that creates content may start a project** (`STARTS_A_PROJECT`: `init`, `node create`, `theorem add`, `reference import`, `exchange import` and the like). Any other command pointed at a folder with no project fails with `PROJECT_NOT_FOUND` and creates nothing. A command missing from that list fails safe: it refuses, rather than silently starting a project in a mistyped `--root`.

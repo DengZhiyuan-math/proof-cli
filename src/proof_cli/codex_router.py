@@ -8,6 +8,8 @@ from pathlib import Path
 
 import typer
 
+from .contract import CodexGroup
+
 from .commands import (
     cmd_init,
     cmd_blocker_add,
@@ -52,6 +54,7 @@ app = typer.Typer(
     help="Guided Codex-facing Proof CLI wrapper",
     invoke_without_command=True,
     no_args_is_help=False,
+    cls=CodexGroup,  # `proof-codex` keeps the same contract as `proof` (#34): see contract.py
 )
 theorem_app = typer.Typer(help="Theorem discovery and guided theorem actions")
 obligation_app = typer.Typer(help="Obligation discovery")
