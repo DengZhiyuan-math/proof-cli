@@ -512,9 +512,11 @@ def node_split(
     ),
     root: str = ".",
     created_by: str = "human",
+    reassign: bool = typer.Option(False, "--reassign", help="Take the node over from whoever holds it, as `claim --reassign` does"),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
-    """Decompose parent_id into new claim-kind children. Ungated — no researcher approval needed."""
+    """Decompose parent_id into new claim-kind children. Ungated — no researcher approval needed.
+    All or nothing; a node someone else holds is theirs to split unless --reassign."""
     store = get_store(_root(root))
     try:
         specs = []
@@ -525,7 +527,7 @@ def node_split(
                 )
             child_id, statement = entry.split("=", 1)
             specs.append({"id": child_id, "statement": statement})
-        children = split_node(store, parent_id, specs, created_by=created_by)
+        children = split_node(store, parent_id, specs, created_by=created_by, reassign=reassign)
     except ProofMapError as exc:
         _emit_node_error(exc, json_output, command="node.split")
         raise typer.Exit(code=1)

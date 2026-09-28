@@ -596,6 +596,26 @@ def test_node_split_creates_children_json_envelope(tmp_path: Path):
     assert parent_deps == {"clm_child_1", "clm_child_2"}
 
 
+@pytest.mark.parametrize("json_output", [True, False])
+def test_node_split_of_a_node_someone_else_holds_needs_reassign(tmp_path: Path, json_output: bool):
+    runner.invoke(app, ["node", "create", "clm_parent", "claim", "A big claim", "--root", str(tmp_path)])
+    _claim_via_cli(tmp_path, "clm_parent", "agent_b")
+    split = ["node", "split", "clm_parent", "--root", str(tmp_path), "--created-by", "agent_a", "--child", "c1=First"]
+    flags = ["--json"] if json_output else []
+
+    refused = runner.invoke(app, split + flags)
+    assert refused.exit_code == 1
+    if json_output:
+        assert json.loads(refused.stdout)["error"]["code"] == "NOT_CLAIMANT"
+    else:
+        assert "claimed by agent_b" in refused.output
+
+    taken_over = runner.invoke(app, split + ["--reassign"] + flags)
+    assert taken_over.exit_code == 0, taken_over.output
+    show = json.loads(runner.invoke(app, ["node", "show", "clm_parent", "--root", str(tmp_path), "--json"]).stdout)
+    assert show["data"]["dependencies"] == ["c1"]
+
+
 def test_node_split_human_readable(tmp_path: Path):
     runner.invoke(app, ["node", "create", "clm_parent", "claim", "A big claim", "--root", str(tmp_path)])
 

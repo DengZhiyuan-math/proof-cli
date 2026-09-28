@@ -68,7 +68,7 @@ from .storage import (
     update_proof_map_node,
     upsert_dependency_pin,
 )
-from .vault import build_is_current, build_pdf_path, candidate_proof_path, snapshot_path, working_proof_path, write_candidate_proof_file, write_snapshot, write_working_proof
+from .vault import build_is_current, build_pdf_path, candidate_proof_path, node_folder, snapshot_path, working_proof_path, write_candidate_proof_file, write_snapshot, write_working_proof
 
 
 class ProofMapError(Exception):
@@ -292,6 +292,7 @@ def split_node(
     child_specs: list[dict[str, Any]],
     *,
     created_by: str = "human",
+    reassign: bool = False,
 ) -> list[ProofMapNode]:
     """Decompose `parent_id` into one or more new `claim`-kind children.
 
@@ -304,9 +305,40 @@ def split_node(
     own Candidate proof and Acceptance like any other node ("how the pieces
     combine" is never assumed true without a human looking at it).
 
+    A node someone else has claimed is theirs to split (NOT_CLAIMANT), unless
+    `reassign` takes it over for `created_by`, as `claim --reassign` does.
+    All or nothing (#26): the checks, every child and the parent's new
+    dependencies are one write transaction, and a failed split leaves no
+    child, no child folder, and the parent as it was.
+
     Each spec in `child_specs` is `{"id": str, "statement": str,
     "assumptions": list[str] (optional), "display_label": str (optional)}`.
     """
+    if not child_specs:
+        require_node(store, parent_id)
+        raise ProofMapError("SPLIT_REQUIRES_CHILDREN", "split requires at least one child claim")
+    # the folders a child's create_node may write; any already there are someone else's
+    folders = [node_folder(store.root, spec["id"]) for spec in child_specs if _SAFE_NODE_ID.fullmatch(spec["id"])]
+    already_there = {folder for folder in folders if folder.exists()}
+    try:
+        with store.transaction() as conn:
+            return _split(store, conn, parent_id, child_specs, created_by=created_by, reassign=reassign)
+    except BaseException:
+        for folder in folders:
+            if folder not in already_there:
+                shutil.rmtree(folder, ignore_errors=True)
+        raise
+
+
+def _split(
+    store: ProjectStore,
+    conn: sqlite3.Connection,
+    parent_id: str,
+    child_specs: list[dict[str, Any]],
+    *,
+    created_by: str,
+    reassign: bool,
+) -> list[ProofMapNode]:
     parent = require_node(store, parent_id)
 
     if parent.kind == ProofMapNodeKind.imported_result:
@@ -324,8 +356,21 @@ def split_node(
             "NODE_ACCEPTED", f"node {parent_id} is {acceptance}; splitting it would void that decision, so split is unavailable"
         )
 
-    if not child_specs:
-        raise ProofMapError("SPLIT_REQUIRES_CHILDREN", "split requires at least one child claim")
+    claim = get_active_claim(store, parent_id, conn=conn)
+    if claim is not None and claim.claimant_id != created_by:
+        if not reassign:
+            raise _not_claimant(parent_id, claim)
+        mark_claim_released(store, claim.id, released_by=created_by, reason=f"reassigned to {created_by}", released_at=utc_now(), conn=conn)
+        taken = ClaimRecord(id=str(uuid.uuid4()), node_id=parent_id, claimant_id=created_by, session_id="")
+        insert_claim(store, taken, conn=conn)
+        append_event(
+            store,
+            "proof_map_claim_reassigned",
+            f"claimed node {parent_id} by {created_by}",
+            entity_id=parent_id,
+            payload={"claim_id": taken.id, "claimant_id": created_by, "previous_claimant_id": claim.claimant_id},
+            conn=conn,
+        )
 
     children: list[ProofMapNode] = []
     for spec in child_specs:
@@ -342,7 +387,7 @@ def split_node(
         children.append(child)
 
     updated_parent = parent.model_copy(update={"dependencies": [*parent.dependencies, *(c.id for c in children)]})
-    update_proof_map_node(store, updated_parent)
+    update_proof_map_node(store, updated_parent, conn=conn)
 
     append_event(
         store,
@@ -350,6 +395,7 @@ def split_node(
         f"split {parent_id} into {len(children)} claim(s)",
         entity_id=parent_id,
         payload={"child_ids": [c.id for c in children], "created_by": created_by},
+        conn=conn,
     )
     return children
 
