@@ -226,15 +226,32 @@ def test_proof_codex_and_the_mcp_plugin_are_gone():
 
 
 def test_nothing_still_points_at_the_retired_entries():
-    """Outside the archived plans and the ADRs' history, nothing names them."""
-    retired = ("proof codex", "proof-codex", "codex_router", "proof-routing", "proof_mcp_server")
-    skip = {".planning", ".git", "adr", "__pycache__", "node_modules"}
+    """Outside the archived plans and the ADRs' history, no tracked file names them: the
+    repository's sources and shipped files, never a local cache (PR #77 review)."""
+    import subprocess
+
+    listed = subprocess.run(["git", "ls-files", "-z"], cwd=REPO, capture_output=True, text=True)
+    if listed.returncode != 0:
+        pytest.skip("not a git checkout")
+    retired = ("proof codex", "proof-codex", "codex_router", "proof-routing", "proof routing", "proof_mcp_server")
     this = Path(__file__).resolve()
-    for path in REPO.rglob("*"):
-        if not path.is_file() or skip & set(path.relative_to(REPO).parts) or path == this or path.suffix in (".pyc", ".sqlite3", ".png", ".ico", ".pdf"):
+    for rel in filter(None, listed.stdout.split("\0")):
+        path = REPO / rel
+        if rel.startswith(".planning/") or rel.startswith("docs/adr/") or path == this or not path.is_file():
             continue
-        text = path.read_text(errors="ignore")
-        assert not [name for name in retired if name in text], path.relative_to(REPO)
+        text = path.read_text(errors="ignore").lower()
+        assert not [name for name in retired if name in text], rel
+
+
+def test_every_command_with_a_root_reads_proof_root():
+    """The one root convention holds for every command, including ones added on other branches (PR #77 review)."""
+    import click
+    import typer
+
+    for path, command in _leaves(typer.main.get_command(app)):
+        for option in command.params:
+            if isinstance(option, click.Option) and "--root" in option.opts:
+                assert option.envvar == "PROOF_ROOT", " ".join(path)
 
 
 def test_proof_root_roots_every_call_made_inside_a_node_folder(tmp_path: Path, monkeypatch):
