@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import secrets
 import sqlite3
 import uuid
@@ -81,7 +82,7 @@ from .storage import (
     update_proof_map_node,
     upsert_dependency_pin,
 )
-from .vault import candidate_proof_path, write_candidate_proof_file
+from .vault import candidate_proof_path, snapshot_path, working_proof_path, write_candidate_proof_file, write_snapshot, write_working_proof
 
 
 class ProofMapError(Exception):
@@ -135,6 +136,9 @@ def _authorize(
         raise ProofMapError(exc.code, exc.message, details=exc.details) from exc
 
 
+_SAFE_NODE_ID = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9._-]*")
+
+
 def create_node(
     store: ProjectStore,
     *,
@@ -150,6 +154,11 @@ def create_node(
     trust_level: TrustLevel | str | None = None,
     derived_from: str | None = None,
 ) -> ProofMapNode:
+    if not _SAFE_NODE_ID.fullmatch(node_id):
+        # the id names the node's folder under proofs/ (ADR-0010), so it must be a plain folder name
+        raise ProofMapError(
+            "INVALID_NODE_ID", f"node id {node_id!r} must be letters, digits, '.', '_' or '-', not starting with '.'"
+        )
     if get_proof_map_node(store, node_id) is not None:
         raise ProofMapError("NODE_ALREADY_EXISTS", f"proof map node {node_id} already exists")
 
@@ -226,6 +235,8 @@ def create_node(
                 "a theorem-kind node already exists for this project; only one is allowed",
             ) from exc
         raise ProofMapError("NODE_ALREADY_EXISTS", f"proof map node {node_id} already exists") from exc
+    if resolved_kind != ProofMapNodeKind.imported_result:
+        write_working_proof(store.root, node_id=node.id, kind=resolved_kind.value, statement=statement)
     return node
 
 
@@ -666,6 +677,71 @@ def submit_candidate_proof(
             "file_path": record.file_path,
             "submitted_by": claimant_id,
         },
+    )
+    return record
+
+
+def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rationale: str) -> CandidateProofRecord:
+    """Snapshot a node's working `proof.tex` for review (ADR-0010).
+
+    The working file is edited freely — by agents, the researcher, prism-local
+    — and never reviewed directly: this copies it, byte for byte, to a new
+    `snapshots/v<N>.tex` that is never overwritten, and records its SHA-256.
+    Needs no claim; the node's claim ends here when its holder is the one
+    requesting, as a wayfinder ticket's does when its work is handed over.
+    """
+    node = require_node(store, node_id)
+    if node.kind == ProofMapNodeKind.imported_result:
+        raise ProofMapError(
+            "IMMUTABLE_NODE", f"imported_result node {node_id} has no proof to review; use Reference review instead"
+        )
+    if not rationale.strip():
+        raise ProofMapError(
+            "SCOPING_RATIONALE_REQUIRED",
+            "requesting review requires stating why this node is now appropriately scoped to prove directly",
+        )
+    working = working_proof_path(store.root, node_id)
+    if not working.is_file():
+        raise ProofMapError("WORKING_PROOF_MISSING", f"{working.relative_to(store.root).as_posix()} doesn't exist")
+    content = working.read_bytes()
+    sha256 = hashlib.sha256(content).hexdigest()
+    current = get_current_candidate_proof(store, node_id)
+    if current is not None and current.sha256 == sha256:
+        raise ProofMapError(
+            "WORKING_PROOF_UNCHANGED",
+            f"{node_id}'s working proof is unchanged since snapshot v{current.version}, which is already the one under review",
+        )
+
+    version = next_candidate_proof_version(store, node_id)
+    path = snapshot_path(store.root, node_id, version)
+    try:
+        write_snapshot(path, content)
+    except FileExistsError as exc:
+        raise ProofMapError("CANDIDATE_PROOF_VERSION_CONFLICT", f"snapshot v{version} of node {node_id} already exists") from exc
+    record = CandidateProofRecord(
+        id=str(uuid.uuid4()),
+        node_id=node_id,
+        version=version,
+        file_path=path.relative_to(store.root).as_posix(),
+        submitted_by=requested_by,
+        scoping_rationale=rationale,
+        sha256=sha256,
+    )
+    try:
+        insert_candidate_proof(store, record)
+    except sqlite3.IntegrityError as exc:
+        raise ProofMapError("CANDIDATE_PROOF_VERSION_CONFLICT", f"version {version} of node {node_id} is already indexed") from exc
+
+    pin_dependencies(store, node)
+    claim = get_active_claim(store, node_id)
+    if claim is not None and claim.claimant_id == requested_by:  # only its holder's hand-over ends a claim
+        mark_claim_released(store, claim.id, released_by=requested_by, reason="review requested", released_at=utc_now())
+    append_event(
+        store,
+        "proof_map_review_requested",
+        f"snapshot v{version} of {node_id} requested for review",
+        entity_id=node_id,
+        payload={"candidate_proof_id": record.id, "version": version, "file_path": record.file_path, "sha256": sha256, "requested_by": requested_by},
     )
     return record
 

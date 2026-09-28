@@ -188,8 +188,11 @@ class ClaimRecord(BaseModel):
 class CandidateProofRecord(BaseModel):
     """One immutable, versioned proof attempt for a ProofMapNode.
 
-    The Markdown file under `proofs/<node_id>/v<version>.md` is the source of
-    truth for the proof text; this record is the SQLite index over it. `id`
+    Its file is the source of truth for the proof text; this record is the
+    SQLite index over it. Since ADR-0010 that file is a Review snapshot,
+    `proofs/<node_id>/snapshots/v<version>.tex`, a copy of the node's working
+    `proof.tex`, with its SHA-256 recorded in `sha256`; older attempts are
+    ADR-0003 Markdown files, `proofs/<node_id>/v<version>.md`, with none. `id`
     is stable and independent of `file_path` — a review record references a
     submission by `id`, never by where its file happens to live. See ADR
     (candidate proof storage) and ProofMapNode.
@@ -210,6 +213,7 @@ class CandidateProofRecord(BaseModel):
     submitted_by: str = "human"
     scoping_rationale: str
     interface_fingerprint: str | None = None
+    sha256: str | None = None
     created_at: datetime = Field(default_factory=utc_now)
 
 

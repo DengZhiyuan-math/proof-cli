@@ -23,6 +23,16 @@ proof-codex status
 proof codex doctor
 ```
 
+## Writing a proof
+
+Each local proof map node has a standalone LaTeX document, `proofs/<id>/proof.tex`, created with the node. It `\input`s the project's shared `proofs/preamble.tex` and compiles on its own. Agents and the researcher edit it directly. The folder `proofs/<id>/` is an ordinary LaTeX project, which [prism-local](https://github.com/DengZhiyuan-math/Local-Ai-agent-for-latex) or any editor can open. When the proof is ready:
+
+```bash
+proof node request-review <id> --rationale "why it is scoped to prove directly"
+```
+
+This copies the working file to an immutable snapshot, `proofs/<id>/snapshots/v<N>.tex`, and records its SHA-256. Review is always of a snapshot, never of the working file (ADR-0010).
+
 ## Human Review
 
 Decisions that change what the project trusts (accepting a Candidate proof, Reference review, dismissing a Challenge, promoting, force-releasing a claim) are made only in the local review app, signed with the researcher's passkey (ADR-0009):

@@ -218,6 +218,7 @@ CREATE TABLE IF NOT EXISTS review_history (
 _REVIEW_HISTORY_ADDED_COLUMNS = {"prev_row_hash": "TEXT", "signed_decision": "TEXT", "payload_hash": "TEXT"}
 _CHALLENGE_ADDED_COLUMNS = {"resolution_review_id": "TEXT"}
 _CLAIM_ADDED_COLUMNS = {"token_hash": "TEXT"}
+_CANDIDATE_PROOF_ADDED_COLUMNS = {"sha256": "TEXT"}  # a Review snapshot's hash (ADR-0010)
 
 REVIEW_HISTORY_TRIGGERS = """
 CREATE INDEX IF NOT EXISTS idx_review_history_object ON review_history(object_type, object_id, seq);
@@ -419,6 +420,7 @@ class ProjectStore:
         _add_missing_columns(conn, "review_history", _REVIEW_HISTORY_ADDED_COLUMNS)
         _add_missing_columns(conn, "challenges", _CHALLENGE_ADDED_COLUMNS)
         _add_missing_columns(conn, "claims", _CLAIM_ADDED_COLUMNS)
+        _add_missing_columns(conn, "candidate_proofs", _CANDIDATE_PROOF_ADDED_COLUMNS)
         conn.executescript(REVIEW_HISTORY_TRIGGERS)
         conn.executescript(REVIEWER_KEYS_SCHEMA)
         conn.executescript(PROOF_LEDGER_SCHEMA)
@@ -1128,6 +1130,7 @@ def _row_to_candidate_proof(row: sqlite3.Row) -> CandidateProofRecord:
         submitted_by=row["submitted_by"],
         scoping_rationale=row["scoping_rationale"],
         interface_fingerprint=row["interface_fingerprint"],
+        sha256=row["sha256"],
         created_at=row["created_at"],
     )
 
@@ -1154,8 +1157,8 @@ def insert_candidate_proof(store: ProjectStore, record: CandidateProofRecord) ->
         conn.execute("UPDATE candidate_proofs SET is_current = 0 WHERE node_id = ?", (record.node_id,))
         conn.execute(
             """
-            INSERT INTO candidate_proofs(id, node_id, version, file_path, is_current, review_record_id, submitted_by, scoping_rationale, interface_fingerprint, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO candidate_proofs(id, node_id, version, file_path, is_current, review_record_id, submitted_by, scoping_rationale, interface_fingerprint, sha256, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record.id,
@@ -1167,6 +1170,7 @@ def insert_candidate_proof(store: ProjectStore, record: CandidateProofRecord) ->
                 record.submitted_by,
                 record.scoping_rationale,
                 record.interface_fingerprint,
+                record.sha256,
                 record.created_at.isoformat(),
             ),
         )
