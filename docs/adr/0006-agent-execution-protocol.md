@@ -1,6 +1,6 @@
 # Agent execution protocol: exclusive claims, a unified command surface, a JSON contract
 
-**Status**: accepted
+**Status**: accepted; amended by ADR-0010 (submit is "request review" on a snapshot; a claim is a plain assignee, no token)
 
 Every prior decision in this map (ADR-0001 through ADR-0005) fixed the domain model. This one (issue #13) fixes how an agent is allowed to touch it: what a claim actually guards against, what commands exist and how they're grouped, what "the JSON output" concretely looks like, and how "split before you hallucinate a proof" is enforced given the system cannot itself judge whether a proof is too large or too weak. Twelve invariants:
 

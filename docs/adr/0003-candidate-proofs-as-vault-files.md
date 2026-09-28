@@ -1,6 +1,6 @@
 # Store candidate proof text as files in a Markdown proof vault
 
-**Status**: accepted
+**Status**: superseded by ADR-0010
 
 Every other piece of proof-cli state — theorem contracts, obligations, blockers, collaboration records — lives in SQLite or a JSON side file under `.proof/`, per the project's local-state-first convention. A Candidate proof's actual text is different in kind: it is long-form mathematical writing that a researcher wants to read, edit, and diff with their own tools, and the project explicitly asked for it to be usable as an Obsidian vault. Storing it as a string field in a SQLite row (the pattern used for `MemoryArtifact.content`, say) would work for the system but would hide the content from every editor, diff tool, and note-taking workflow a mathematician already uses.
 
