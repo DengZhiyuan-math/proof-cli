@@ -14,7 +14,9 @@ import pytest
 from typer.testing import CliRunner
 
 from proof_cli import errors
-from proof_cli.cli import READ_ONLY_COMMANDS, app
+from proof_cli.cli import app
+from proof_cli.codex_router import app as codex_app
+from proof_cli.contract import STARTS_A_PROJECT
 
 runner = CliRunner()
 SRC = Path(__file__).resolve().parents[1] / "src" / "proof_cli"
@@ -90,36 +92,82 @@ def test_a_read_on_a_mistyped_root_fails_and_creates_nothing(tmp_path: Path, jso
         assert "no proof project" in result.output and "proof init" in result.output
 
 
-def test_no_read_only_command_creates_a_project(tmp_path: Path):
-    """Every command listed read-only, run against a folder with no project, leaves it without one."""
+def _leaves(command, path=()):
+    import click
+
+    if isinstance(command, click.Group):
+        for name, sub in command.commands.items():
+            yield from _leaves(sub, (*path, name))
+    else:
+        yield path, command
+
+
+def _placeholder_args(command) -> list[str]:
+    """Something for every required argument and option: enough to reach the command's body."""
+    import click
+
+    args = ["X" for p in command.params if isinstance(p, click.Argument) and p.required]
+    for option in command.params:
+        if isinstance(option, click.Option) and option.required:
+            args += [option.opts[0], "X"]
+    return args
+
+
+@pytest.mark.parametrize("entry, prefix", [(app, ()), (codex_app, ("codex",))], ids=["proof", "proof-codex"])
+def test_only_the_commands_that_start_a_project_create_one(tmp_path: Path, entry, prefix):
+    """The whole command tree, not a list checked against itself: every command but the few that
+    create content, pointed at a folder with no project, leaves it without one (#34)."""
     import click
     import typer
 
-    tree = typer.main.get_command(app)
-    for path in sorted(READ_ONLY_COMMANDS):
-        command = tree
-        for name in path.split():
-            command = command.commands[name]
-        root = tmp_path / path.replace(" ", "_")
-        args = [*path.split(), *("X" for p in command.params if isinstance(p, click.Argument) and p.required)]
-        if any("--root" in p.opts for p in command.params if isinstance(p, click.Option)):
-            args += ["--root", str(root)]
-        else:
-            continue  # a read that takes no root (codex catalog, …) touches no project
-        runner.invoke(app, args)
-        assert not (root / ".proof").exists(), path
+    walked = 0
+    for path, command in _leaves(typer.main.get_command(entry)):
+        full = " ".join((*prefix, *path))
+        if full in STARTS_A_PROJECT:
+            continue
+        if not any("--root" in p.opts for p in command.params if isinstance(p, click.Option)):
+            continue  # takes no root (codex catalog, where, doctor): touches no project
+        root = tmp_path / full.replace(" ", "_") / "missing"
+        runner.invoke(entry, [*path, *_placeholder_args(command), "--root", str(root)])
+        walked += 1
+        assert not root.exists(), full
+    assert walked > (10 if prefix else 80)
 
 
-def test_the_read_only_list_names_real_commands():
-    import click
+def test_the_starting_list_names_real_commands():
     import typer
 
-    tree = typer.main.get_command(app)
-    for path in READ_ONLY_COMMANDS:
-        command = tree
-        for name in path.split():
-            assert isinstance(command, click.Group) and name in command.commands, path
-            command = command.commands[name]
+    known = {" ".join(path) for path, _ in _leaves(typer.main.get_command(app))}
+    assert STARTS_A_PROJECT <= known, STARTS_A_PROJECT - known
+
+
+@pytest.mark.parametrize(
+    "args",
+    [["--", "node", "list"], ["node", "--", "list"], ["node", "list", "--"]],
+    ids=["before-group", "inside-group", "after-command"],
+)
+def test_a_double_dash_cannot_slip_a_read_past_the_check(tmp_path: Path, args):
+    """PR #64 audit: `proof -- node list` is a valid click invocation of `node list`."""
+    missing = tmp_path / "missing"
+    result = runner.invoke(app, [*args, "--root", str(missing), "--json"])
+    assert not missing.exists()
+    assert result.exit_code != 0
+
+
+def test_proof_codex_keeps_the_contract(tmp_path: Path):
+    missing = tmp_path / "missing"
+    result = runner.invoke(codex_app, ["status", "--root", str(missing), "--json"])
+    assert not missing.exists()
+    assert result.exit_code == 1 or _envelope(result)["ok"] is False
+
+    usage = runner.invoke(codex_app, ["nope", "--json"])
+    assert usage.exit_code == 2
+    envelope = _envelope(usage)
+    assert (envelope["command"], envelope["error"]["code"]) == ("codex", "USAGE_ERROR")
+
+    started = runner.invoke(codex_app, ["init", "--root", str(tmp_path / "fresh")])
+    assert started.exit_code == 0, started.output
+    assert (tmp_path / "fresh" / ".proof").is_dir()
 
 
 def test_a_write_still_starts_a_project(tmp_path: Path):

@@ -2,12 +2,9 @@ from __future__ import annotations
 
 import json
 import sys
-from contextlib import nullcontext
 from pathlib import Path
 
-import click
 import typer
-from typer.core import TyperGroup
 
 from .codex_router import app as codex_app
 from .commands import (
@@ -99,7 +96,7 @@ from .commands import (
     get_store,
 )
 from .envelope import dump_envelope, error_envelope, success_envelope
-from .storage import ProjectNotFoundError, read_only
+from .contract import ProofGroup
 from .collaboration import summarize_review_record
 from .proof_map import (
     ProofMapError,
@@ -134,93 +131,11 @@ from .rendering import (
 )
 from .review import render_verification_output
 
-# Commands that only read a project. Pointed at a folder with no project they fail with
-# PROJECT_NOT_FOUND instead of creating one (#34); every other command may start a project.
-READ_ONLY_COMMANDS = frozenset(
-    {
-        "status", "history", "search", "retrieve", "frontier", "goal list",
-        "codex status", "codex search", "codex retrieve", "codex theorem list", "codex theorem show",
-        "codex obligation list", "codex blocker list",
-        "asset list", "asset show", "pack list", "pack show", "policy list", "reuse show",
-        "theorem list", "theorem show",
-        "node show", "node list", "challenge list", "challenge show",
-        "obligation list", "blocker list", "reference list", "reference show", "memory list", "memory show",
-        "publication list", "publication show", "publication view", "provenance show",
-        "bug list", "bug show", "debug list", "review warnings", "review list",
-        "contributor list", "role show", "comment list", "branch list", "branch compare",
-        "exchange export", "handoff inspect", "evidence show", "formalize show", "verify status", "verify result",
-    }
-)
-
-
-def _command_path(group: click.Group, args: list[str]) -> list[str]:
-    """The subcommand names `args` start with: ["node", "show"] for `node show C1 --json`."""
-    path, command = [], group
-    for token in args:
-        if not isinstance(command, click.Group) or token not in command.commands:
-            break
-        path.append(token)
-        command = command.commands[token]
-    return path
-
-
-class ProofGroup(TyperGroup):
-    """The root command: the agent-facing contract every subcommand shares (ADR-0006, #34).
-
-    - Under `--json`, exactly one envelope on stdout whatever happens: a usage
-      error (USAGE_ERROR, exit 2), a missing project (PROJECT_NOT_FOUND) or an
-      unexpected exception (INTERNAL_ERROR, never a traceback), exit 1.
-    - A read-only command never creates a project (see READ_ONLY_COMMANDS).
-    """
-
-    def main(self, args=None, prog_name=None, complete_var=None, standalone_mode=True, **extra):
-        argv = list(args) if args is not None else sys.argv[1:]
-        path = _command_path(self, argv)
-        json_output = "--json" in argv
-        command = ".".join(path) or "proof"
-        try:
-            with read_only() if " ".join(path) in READ_ONLY_COMMANDS else nullcontext():
-                outcome = super().main(argv, prog_name, complete_var, standalone_mode=False, **extra)
-            code = outcome if isinstance(outcome, int) else 0
-        except click.exceptions.Exit as exc:
-            code = exc.exit_code
-        except click.ClickException as exc:
-            if not json_output:
-                if not standalone_mode:
-                    raise
-                from typer import rich_utils
-
-                rich_utils.rich_format_error(exc)
-                sys.exit(exc.exit_code)
-            typer.echo(dump_envelope(error_envelope(command, "USAGE_ERROR", exc.format_message())))
-            code = exc.exit_code
-        except click.Abort:
-            if json_output:
-                typer.echo(dump_envelope(error_envelope(command, "INTERNAL_ERROR", "aborted")))
-            else:
-                typer.echo("Aborted!", err=True)
-            code = 1
-        except ProjectNotFoundError as exc:
-            if json_output:
-                typer.echo(dump_envelope(error_envelope(command, exc.code, str(exc), details={"root": str(exc.root)})))
-            else:
-                typer.echo(f"Error: {exc}")
-            code = 1
-        except Exception as exc:  # noqa: BLE001 — the contract: an envelope, not a traceback
-            if not json_output:
-                raise
-            typer.echo(dump_envelope(error_envelope(command, "INTERNAL_ERROR", f"{type(exc).__name__}: {exc}")))
-            code = 1
-        if standalone_mode:
-            sys.exit(code)
-        return code
-
-
 app = typer.Typer(
     add_completion=False,
     help="Mathematical Proof CLI: a proof map of nodes (theorems, lemmas, claims, imported results), each with its own LaTeX proof, "
     "reviewed by the researcher on the proof map page. Start with `proof node --help` and `proof frontier`.",
-    cls=ProofGroup,
+    cls=ProofGroup,  # the agent-facing contract: see contract.py
 )
 PROOF_MAP_PANEL = "Proof map"
 LEGACY_PANEL = "Legacy (before the proof map; kept for old projects)"
