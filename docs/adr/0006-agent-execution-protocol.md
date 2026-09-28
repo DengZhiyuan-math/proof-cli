@@ -35,3 +35,13 @@ Every prior decision in this map (ADR-0001 through ADR-0005) fixed the domain mo
 This is hard to reverse the way a public API always is: once the Codex plugin, any MCP tools, and a future web app are all built against this envelope shape and error-code vocabulary, changing it becomes a compatibility break across every adapter at once, not a local edit.
 
 **Update (ADR-0007):** point 11 is restated more precisely: the CLI isn't the reference implementation adapters defer to, it's one of three equally thin callers (CLI, web app, agent adapter) of one authoritative application/service layer. The invariant that matters — no caller can reach the domain model without going through that layer, and none can bypass Human Acceptance Authority — is unchanged; only the CLI's assumed centrality in the wording is corrected.
+
+**Update (ADR-0010, #25):**
+- **Command names.** A Challenge is opened with `proof challenge open <node-id>`, not `proof node challenge`, and read with `proof challenge list|show`. A Challenge is an object of its own, so it gets its own group; `proof challenge dismiss` only answers `HUMAN_REVIEW_REQUIRED`. Claims are `proof node claim --assignee` and `proof node unassign` (#52). A proof is handed over with `proof node request-review` (#51).
+- **Human Review decisions** are made on the proof map page (`proof map open`), not through `proof review ...`.
+- **How a Challenge ends** is read off the decision that closed it:
+  - **dismissed** by a dismissal, or by reaffirming an Imported result's Reference review;
+  - **resolved-by-revision** when a revised proof is Accepted;
+  - **upheld** when the revision is rejected or sent back, or the Imported result is found no longer callable.
+
+  "Upheld" is never recorded on its own for a local node: the Challenge stays open until a decision on a revision closes it.
