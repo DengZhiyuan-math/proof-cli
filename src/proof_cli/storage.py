@@ -410,6 +410,31 @@ class _ActiveTransaction(NamedTuple):
 _ACTIVE_TRANSACTION: ContextVar[_ActiveTransaction | None] = ContextVar("proof_cli_active_transaction", default=None)
 
 
+class ProjectNotFoundError(Exception):
+    """A read was pointed at a folder with no proof project (PROJECT_NOT_FOUND, #34)."""
+
+    code = "PROJECT_NOT_FOUND"
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        super().__init__(f"no proof project at {root} (run `proof init` there, or check --root)")
+
+
+# Set while a read-only CLI command runs: opening a project that doesn't exist
+# is then an error, never a silent `proof init` of a mistyped --root.
+_READ_ONLY: ContextVar[bool] = ContextVar("proof_cli_read_only", default=False)
+
+
+@contextmanager
+def read_only() -> Iterator[None]:
+    """Refuse to create a project for the duration: a read of a missing one raises ProjectNotFoundError."""
+    token = _READ_ONLY.set(True)
+    try:
+        yield
+    finally:
+        _READ_ONLY.reset(token)
+
+
 @dataclass
 class ProjectStore:
     root: Path
@@ -419,6 +444,8 @@ class ProjectStore:
         return self.root / ".proof" / "project.sqlite3"
 
     def connect(self) -> sqlite3.Connection:
+        if _READ_ONLY.get() and not self.db_path.exists():
+            raise ProjectNotFoundError(self.root)
         conn = connect(self.db_path)
         initialize(conn)
         conn.executescript(REFERENCE_SCHEMA)
@@ -1532,6 +1559,8 @@ def store_state(store: ProjectStore, state: ProjectState) -> ProjectState:
 
 def ensure_project(root: str | Path, project_id: str = "proj_alpha") -> ProjectStore:
     path = Path(root)
+    if _READ_ONLY.get() and not ProjectStore(path).db_path.exists():
+        raise ProjectNotFoundError(path)  # before the mkdir: a mistyped --root is left as it was
     path.mkdir(parents=True, exist_ok=True)
     return create_project(path, project_id)
 

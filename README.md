@@ -1,6 +1,6 @@
 # Mathematical Proof CLI
 
-Mathematical Proof CLI is a local-first research proof operating system for human–machine collaboration. It keeps theorem contracts, proof state, dependencies, blockers, imported results, and outstanding proof obligations explicit and auditable.
+Mathematical Proof CLI is a local-first research proof operating system for human–machine collaboration. A project is a proof map: nodes (theorems, lemmas, claims, and imported results) joined by their dependencies. Each local node has its own LaTeX proof, and the researcher accepts or rejects it on the proof map page. Agents claim nodes from the frontier, split nodes that are too large, and request review. Every decision stays explicit and auditable in git. The `theorem`, `obligation`, `blocker`, `goal` and `verify` command groups come from the model before the proof map, and `proof --help` lists them under Legacy.
 
 The project is designed to support rigorous research workflows without replacing the mathematician or attempting to provide a full formal kernel. Final acceptance remains with the researcher.
 

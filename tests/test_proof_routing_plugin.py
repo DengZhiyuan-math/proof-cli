@@ -4,6 +4,10 @@ import importlib.util
 import json
 from pathlib import Path
 
+from typer.testing import CliRunner
+
+from proof_cli.cli import app
+
 
 PLUGIN_SERVER = Path(__file__).resolve().parent.parent / "plugins" / "proof-routing" / "scripts" / "proof_mcp_server.py"
 HOME_INSTALLER = Path(__file__).resolve().parent.parent / "plugins" / "proof-routing" / "scripts" / "install_home_plugin.py"
@@ -168,7 +172,26 @@ def test_plugin_readme_documents_entry_hierarchy():
     assert "`$proof ...`" in readme
 
 
-def test_installed_plugin_copy_supports_e2e_status_flow(tmp_path):
+def _proof_on_path_is_this_checkout(tmp_path, monkeypatch) -> None:
+    """The plugin shells out to whatever `proof` is first on PATH: make that this checkout (#34),
+    not a stale install that happens to be on the machine."""
+    import os
+    import sys
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    shim = bin_dir / "proof"
+    shim.write_text(f'#!/bin/sh\nexec "{sys.executable}" -m proof_cli.cli "$@"\n')
+    shim.chmod(0o755)
+    src = Path(__file__).resolve().parent.parent / "src"
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("PYTHONPATH", f"{src}{os.pathsep}{os.environ.get('PYTHONPATH', '')}")
+
+
+def test_installed_plugin_copy_supports_e2e_status_flow(tmp_path, monkeypatch):
+    _proof_on_path_is_this_checkout(tmp_path, monkeypatch)
+    project = tmp_path / "project"
+    CliRunner().invoke(app, ["init", "--root", str(project)])
     installer = _load_home_installer_module()
     plugin_destination, _marketplace_path = installer.install_home_plugin(tmp_path)
 
@@ -181,7 +204,7 @@ def test_installed_plugin_copy_supports_e2e_status_flow(tmp_path):
     spec.loader.exec_module(module)
 
     doctor_output = module.doctor()
-    status_output = module.status(root=str(Path(__file__).resolve().parent.parent))
+    status_output = module.status(root=str(project))
 
     assert "Proof Codex Diagnostics" in doctor_output
     assert "Status: ready" in doctor_output

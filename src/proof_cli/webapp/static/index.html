@@ -8,72 +8,144 @@
   <script src="/static/app.js" defer></script>
 </head>
 <body>
-  <header>
-    <h1><a href="#/">Proof map</a> <span id="project"></span></h1>
-    <p id="reviewer" class="hint"></p>
+  <header class="appbar">
+    <div class="appbar-inner">
+      <h1><a href="#/">Proof map</a></h1>
+      <span id="project" class="project"></span>
+      <span class="spacer"></span>
+      <span id="reviewer" class="reviewer" title="Every decision you record here is committed to git as this identity"></span>
+      <button id="refresh" type="button" class="ghost" title="Reload the project state (r)">Refresh</button>
+    </div>
   </header>
+
+  <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+
   <main>
-    <div id="message" role="status"></div>
     <section id="home">
-      <div class="map-head">
-        <h2>Map</h2>
-        <div class="view-switch" role="group" aria-label="View">
-          <button id="view-dag" type="button" aria-pressed="true">DAG</button>
-          <button id="view-tree" type="button" aria-pressed="false">Tree</button>
+      <nav class="stats" aria-label="Summary">
+        <a class="stat" href="#map"><span class="stat-value" id="stat-nodes">–</span><span class="stat-label">nodes</span></a>
+        <a class="stat frontier" href="#map" id="stat-frontier-link"><span class="stat-value" id="stat-frontier">–</span><span class="stat-label">ready to claim</span></a>
+        <a class="stat review" href="#review"><span class="stat-value" id="stat-pending">–</span><span class="stat-label">awaiting review</span></a>
+        <a class="stat warn" href="#warnings-card"><span class="stat-value" id="stat-warnings">–</span><span class="stat-label">warnings</span></a>
+      </nav>
+
+      <section class="card" id="map" aria-labelledby="map-heading">
+        <div class="card-head">
+          <h2 id="map-heading">Map</h2>
+          <div class="segmented" role="group" aria-label="View">
+            <button id="view-dag" type="button" aria-pressed="true">DAG</button>
+            <button id="view-tree" type="button" aria-pressed="false">Tree</button>
+          </div>
+          <label id="tree-root-label" class="inline-field" hidden>rooted at <select id="tree-root"></select></label>
+          <span class="spacer"></span>
+          <input id="map-filter" type="search" placeholder="Find a node…  ( / )" aria-label="Find a node by id, label or statement">
+          <label class="inline-field check"><input id="frontier-only" type="checkbox"> frontier only</label>
+          <div class="segmented zoom" role="group" aria-label="Zoom" id="zoom-controls">
+            <button id="zoom-out" type="button" title="Zoom out" aria-label="Zoom out">−</button>
+            <button id="zoom-fit" type="button" title="Fit to width">Fit</button>
+            <button id="zoom-in" type="button" title="Zoom in" aria-label="Zoom in">+</button>
+          </div>
         </div>
-        <label id="tree-root-label" hidden>rooted at <select id="tree-root"></select></label>
-      </div>
-      <p class="hint" id="map-caption"></p>
-      <ul class="legend">
-        <li><span class="swatch frontier"></span>on the frontier: open, unblocked, unclaimed</li>
-        <li><span class="swatch accepted"></span>accepted / reviewed</li>
-        <li><span class="swatch review"></span>awaiting review</li>
-        <li><span class="swatch rejected"></span>rejected / no longer callable</li>
-        <li><span class="swatch challenged"></span>challenged</li>
-        <li><span class="swatch stale"></span>potentially stale (a dependency moved)</li>
-        <li><span class="swatch unverifiable"></span>unverifiable (a decision no longer applies)</li>
-      </ul>
-      <div id="map-dag" class="map-scroll"><svg id="dag-svg" role="img" aria-label="Dependency graph of the proof map"></svg></div>
-      <div id="map-tree" hidden></div>
-      <h2>Awaiting review</h2>
-      <p class="hint">Tick the decisions to make, choose each outcome and rationale, then record them. Each decision is committed to git with its snapshot, as the identity shown above.</p>
-      <table id="pending"><thead><tr><th></th><th>Node</th><th>Statement and snapshot</th><th>Decision</th><th>Rationale</th></tr></thead><tbody></tbody></table>
-      <button id="decide-batch" type="button">Record selected decisions</button>
-      <h2>Warnings</h2>
-      <ul id="warnings"></ul>
+        <p class="hint" id="map-caption"></p>
+        <div id="map-dag" class="map-scroll"><svg id="dag-svg" role="img" aria-label="Dependency graph of the proof map"></svg></div>
+        <div id="map-tree" class="map-tree" hidden></div>
+        <details class="legend-box">
+          <summary>Legend</summary>
+          <ul class="legend">
+            <li><span class="swatch frontier"></span>on the frontier: open, unblocked, unclaimed</li>
+            <li><span class="swatch accepted"></span>accepted / reviewed</li>
+            <li><span class="swatch review"></span>awaiting review</li>
+            <li><span class="swatch rejected"></span>rejected / no longer callable</li>
+            <li><span class="swatch challenged"></span>challenged</li>
+            <li><span class="swatch stale"></span>potentially stale (a dependency moved)</li>
+            <li><span class="swatch unverifiable"></span>unverifiable (a decision no longer applies)</li>
+            <li class="hint">Arrows point from a node to what it depends on. Hover a node to trace its neighbours.</li>
+          </ul>
+        </details>
+      </section>
+
+      <section class="card" id="review" aria-labelledby="review-heading">
+        <div class="card-head">
+          <h2 id="review-heading">Awaiting review <span class="count" id="pending-count"></span></h2>
+        </div>
+        <p class="hint">Tick the decisions to make, choose each outcome and rationale, then record them. Each decision is committed to git with its snapshot, as the identity shown above.</p>
+        <div id="pending" class="pending-list"></div>
+        <div class="batch-bar" id="batch-bar">
+          <label class="inline-field check"><input id="select-all" type="checkbox"> select all</label>
+          <span class="hint" id="selected-count">0 selected</span>
+          <span class="spacer"></span>
+          <button id="decide-batch" type="button" class="primary" disabled>Record selected decisions</button>
+        </div>
+      </section>
+
+      <section class="card" id="warnings-card" aria-labelledby="warnings-heading">
+        <div class="card-head"><h2 id="warnings-heading">Warnings</h2></div>
+        <ul id="warnings" class="warning-list"></ul>
+      </section>
     </section>
+
     <section id="node-page" hidden>
-      <h2 id="node-title"></h2>
-      <p id="node-axes"></p>
+      <a href="#/" class="back">← Back to the map</a>
+      <div class="node-hero card">
+        <div class="node-hero-top">
+          <span id="node-kind" class="kind-badge"></span>
+          <h2 id="node-title"></h2>
+        </div>
+        <p id="node-label" class="node-label"></p>
+        <div id="node-axes" class="badges"></div>
+        <div id="node-statement" class="statement"></div>
+        <div id="node-assumptions"></div>
+        <p id="node-claim" class="hint"></p>
+        <div id="node-folder" class="folder-row"></div>
+      </div>
       <div id="node-warnings"></div>
-      <h3>Statement</h3>
-      <div id="node-statement" class="statement"></div>
-      <div id="node-assumptions"></div>
-      <p id="node-claim"></p>
-      <div id="node-folder"></div>
-      <h3>Dependencies and pins</h3>
-      <table id="node-deps"><thead><tr><th>Dependency</th><th>Pinned version</th><th>Accepted version now</th><th>Pinned interface</th><th>Current?</th></tr></thead><tbody></tbody></table>
-      <h3>Challenges</h3>
-      <ul id="node-challenges"></ul>
-      <h3>Review snapshot</h3>
-      <p id="node-proof-meta"></p>
-      <p class="hint">Exactly the LaTeX being decided on; its SHA-256 is recorded with the decision. Open the node's folder in prism-local (or any LaTeX editor) to read the compiled PDF.</p>
-      <p id="node-pdfs"></p>
-      <pre id="node-proof-exact"></pre>
-      <h3>Evidence checks</h3>
-      <ul id="node-evidence"></ul>
-      <h3>Decisions you can make here</h3>
-      <table id="node-decisions"><thead><tr><th>Decision</th><th>On</th><th>Rationale</th><th></th></tr></thead><tbody></tbody></table>
-      <h3>Review history</h3>
-      <ul id="node-history"></ul>
-    </section>
-    <section id="confirm" hidden>
-      <h2>You are about to record</h2>
-      <p class="hint">Each of these is written to the node's reviews.jsonl and committed with its snapshot, as the identity shown above.</p>
-      <ul id="confirm-decisions"></ul>
-      <button id="confirm-record" type="button">Record</button>
-      <button id="confirm-cancel" type="button">Cancel</button>
+
+      <section class="card">
+        <div class="card-head"><h3>Decisions you can make here</h3></div>
+        <div id="node-decisions" class="decision-list"></div>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h3>Review snapshot</h3></div>
+        <p id="node-proof-meta" class="meta-line"></p>
+        <p class="hint">Exactly the LaTeX being decided on; its SHA-256 is recorded with the decision. Open the node's folder in prism-local (or any LaTeX editor) to read the compiled PDF.</p>
+        <p id="node-pdfs" class="link-row"></p>
+        <pre id="node-proof-exact" class="proof-text"></pre>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h3>Dependencies and pins</h3></div>
+        <div class="table-scroll">
+          <table id="node-deps"><thead><tr><th>Dependency</th><th>Pinned version</th><th>Accepted version now</th><th>Pinned interface</th><th>Current?</th></tr></thead><tbody></tbody></table>
+        </div>
+      </section>
+
+      <div class="two-col">
+        <section class="card">
+          <div class="card-head"><h3>Challenges</h3></div>
+          <ul id="node-challenges" class="plain-list"></ul>
+        </section>
+        <section class="card">
+          <div class="card-head"><h3>Evidence checks</h3></div>
+          <ul id="node-evidence" class="plain-list"></ul>
+        </section>
+      </div>
+
+      <section class="card">
+        <div class="card-head"><h3>Review history</h3></div>
+        <ol id="node-history" class="timeline"></ol>
+      </section>
     </section>
   </main>
+
+  <dialog id="confirm" aria-labelledby="confirm-heading">
+    <h2 id="confirm-heading">You are about to record</h2>
+    <p class="hint">Each of these is written to the node's reviews.jsonl and committed with its snapshot, as <strong id="confirm-reviewer"></strong>.</p>
+    <ul id="confirm-decisions" class="confirm-list"></ul>
+    <div class="dialog-actions">
+      <button id="confirm-cancel" type="button">Cancel</button>
+      <button id="confirm-record" type="button" class="primary">Record</button>
+    </div>
+  </dialog>
 </body>
 </html>

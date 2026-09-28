@@ -574,6 +574,7 @@ def test_phase_five_cli_surface_routes_to_governance_workflows(tmp_path: Path) -
     assert "automate" not in help_result.stdout
     assert "benchmark" not in help_result.stdout
 
+    runner.invoke(app, ["init", "--root", str(tmp_path)])  # a read never starts a project (#34)
     asset_result = runner.invoke(app, ["asset", "list", "--root", str(tmp_path)])
     assert asset_result.exit_code == 0
     assert "No reusable assets" in asset_result.stdout
@@ -601,6 +602,7 @@ def test_phase_six_cli_surface_routes_to_collaboration_workflows(tmp_path: Path)
     assert "exchange" in help_result.stdout
     assert "handoff" in help_result.stdout
 
+    runner.invoke(app, ["init", "--root", str(tmp_path)])  # a read never starts a project (#34)
     contributor_result = runner.invoke(app, ["contributor", "list", "--root", str(tmp_path)])
     assert contributor_result.exit_code == 0
     assert "No contributors" in contributor_result.stdout or "human" in contributor_result.stdout
