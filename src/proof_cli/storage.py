@@ -548,6 +548,20 @@ def _writing(store: ProjectStore, conn: sqlite3.Connection | None) -> Iterator[s
         own.close()
 
 
+@contextmanager
+def _reading(store: ProjectStore, conn: sqlite3.Connection | None) -> Iterator[sqlite3.Connection]:
+    """The connection a read helper should use: the caller's, which sees its own uncommitted
+    writes and holds its write lock, or else a fresh one, closed afterwards."""
+    if conn is not None:
+        yield conn
+        return
+    own = store.connect()
+    try:
+        yield own
+    finally:
+        own.close()
+
+
 def project_proof_dir(store: ProjectStore) -> Path:
     return store.root / ".proof"
 
@@ -1003,8 +1017,8 @@ def _row_to_claim(row: sqlite3.Row) -> ClaimRecord:
     )
 
 
-def insert_claim(store: ProjectStore, claim: ClaimRecord) -> ClaimRecord:
-    with store.connect() as conn:
+def insert_claim(store: ProjectStore, claim: ClaimRecord, *, conn: sqlite3.Connection | None = None) -> ClaimRecord:
+    with _writing(store, conn) as conn:
         conn.execute(
             """
             INSERT INTO claims(id, node_id, claimant_id, session_id, claimed_at, released_at, released_by, release_reason)
@@ -1021,12 +1035,12 @@ def insert_claim(store: ProjectStore, claim: ClaimRecord) -> ClaimRecord:
                 claim.release_reason,
             ),
         )
-        conn.commit()
     return claim
 
 
-def get_active_claim(store: ProjectStore, node_id: str) -> ClaimRecord | None:
-    with store.connect() as conn:
+def get_active_claim(store: ProjectStore, node_id: str, *, conn: sqlite3.Connection | None = None) -> ClaimRecord | None:
+    """`conn`: read inside the caller's `store.transaction()`, so the answer holds until it commits."""
+    with _reading(store, conn) as conn:
         row = conn.execute(
             "SELECT * FROM claims WHERE node_id = ? AND released_at IS NULL LIMIT 1",
             (node_id,),
