@@ -287,3 +287,15 @@ pre.panel-view { font: 12px/1.45 var(--mono); white-space: pre-wrap; }
   #sidebar { display: none; } .gutter[data-resize="sidebar"] { display: none; }
   #toolbar .hint, .toggle { display: none; }
 }
+
+/* the node panel (#70) */
+#node-section { max-height: 55%; overflow: auto; border-bottom: 1px solid var(--border, #ddd); }
+#node-panel { padding: 0 10px 10px; font-size: 13px; }
+#node-panel .node-statement { font-weight: 600; white-space: pre-wrap; }
+#node-panel .node-axes, #node-panel .node-assumption { color: var(--muted, #6f6a60); }
+#node-panel h4 { margin: 10px 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+#node-panel .node-deps { margin: 0; padding-left: 16px; }
+#node-panel .node-action { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }
+#node-panel .node-action button { align-self: flex-start; }
+#node-panel textarea, #node-panel input:not([type=checkbox]), #node-panel select { width: 100%; box-sizing: border-box; font: inherit; }
+#node-panel .node-note.bad { color: var(--error, #b3261e); }

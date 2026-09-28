@@ -95,9 +95,11 @@ class DirectClient:
     def post(self, path, body=None, **kwargs):
         if path == "/api/decide":
             return self._call(lambda: self.app.decide(body or {}))
-        if path.startswith("/api/node/") and path.endswith("/open"):
-            node_id = path.removeprefix("/api/node/").removesuffix("/open")
-            return self._call(lambda: self.app.open_in_prism(node_id))
+        if path == "/api/nodes":
+            return self._call(lambda: self.app.create_node(body or {}))
+        if path.startswith("/api/node/"):
+            node_id, _, action = path.removeprefix("/api/node/").rpartition("/")
+            return self._call(lambda: self.app.node_action(node_id, action, body or {}))
         raise AssertionError(f"DirectClient doesn't route POST {path}")
 
 
