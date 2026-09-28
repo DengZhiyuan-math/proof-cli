@@ -40,6 +40,7 @@ class AgentManager:
         self.ids = itertools.count(1)
         self.lock = threading.Lock()
         self.active: Job | None = None
+        self.closed = False        # set by shutdown(): no turn starts after it
 
     def backend(self, provider: str | None) -> Backend | None:
         return self.backends.get(provider or self.default)
@@ -88,6 +89,8 @@ class AgentManager:
               scope: list[str] | None = None, provider: str | None = None) -> dict:
         """Run one turn. `scope` (project-relative files) limits which files the agent may
         change in edit mode; None lets it change any file and create new ones."""
+        if self.closed:
+            return {"error": "The studio is closed."}
         backend = self.backend(provider)
         if backend is None:
             return {"error": f"Unknown provider: {provider}"}
@@ -100,6 +103,8 @@ class AgentManager:
         if bad:
             return {"error": bad}
         with self.lock:
+            if self.closed:
+                return {"error": "The studio is closed."}
             if self.active and not self.active.done:
                 return {"error": "The agent is still working on the previous message."}
             job = Job(next(self.ids))
@@ -208,8 +213,10 @@ class AgentManager:
         return bool(job and not job.done)
 
     def shutdown(self) -> None:
-        """Stop a turn that is still running when the server exits."""
-        job = self.active
+        """Stop a turn that is still running when the server exits, and start no other."""
+        with self.lock:
+            self.closed = True
+            job = self.active
         if job and not job.done:
             self.stop(job.id)
 
