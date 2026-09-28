@@ -1907,6 +1907,33 @@ def test_a_split_repeating_a_child_id_leaves_nothing(tmp_path: Path):
     assert get_node(store, "clm_parent").dependencies == []
 
 
+def test_a_failed_split_leaves_a_folder_another_writer_created_meanwhile(tmp_path: Path, monkeypatch):
+    # PR #62 review: another writer's create_node commits "child" and only then writes its
+    # proof.tex, so the folder can appear after the split looked. Only what the split wrote may go.
+    import proof_cli.proof_map as proof_map_module
+
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_parent", kind="claim", statement="parent")
+    create_node(store, node_id="child", kind="claim", statement="another worker's")
+    theirs = tmp_path / "proofs" / "child"
+    pending = tmp_path / "pending_child"
+    theirs.rename(pending)  # their row is committed, their folder not yet written
+    real_create_node = proof_map_module.create_node
+
+    def create_node_as_their_folder_lands(store, **kwargs):
+        if kwargs["node_id"] == "child":
+            pending.rename(theirs)
+        return real_create_node(store, **kwargs)
+
+    monkeypatch.setattr(proof_map_module, "create_node", create_node_as_their_folder_lands)
+
+    with pytest.raises(ProofMapError) as exc_info:
+        split_node(store, "clm_parent", [{"id": "child", "statement": "mine"}], created_by="agent_a")
+
+    assert exc_info.value.code == "NODE_ALREADY_EXISTS"
+    assert (theirs / "proof.tex").exists()
+
+
 def test_splitting_a_node_someone_else_holds_is_refused_unless_reassigned(tmp_path: Path):
     store = ensure_project(tmp_path)
     create_node(store, node_id="clm_parent", kind="claim", statement="parent")
