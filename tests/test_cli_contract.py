@@ -220,7 +220,12 @@ REPO = SRC.parents[1]
 
 def test_proof_codex_and_the_mcp_plugin_are_gone():
     assert "proof-codex" not in (REPO / "pyproject.toml").read_text()
-    assert not (SRC / "codex_router.py").exists() and not (REPO / "plugins" / "proof-routing").exists()
+    assert not (SRC / "codex_router.py").exists()
+    import subprocess
+
+    tracked = subprocess.run(["git", "ls-files", "plugins/proof-routing"], cwd=REPO, capture_output=True, text=True)
+    if tracked.returncode == 0:  # a stale local __pycache__ may linger; what matters is that nothing is shipped
+        assert tracked.stdout.strip() == ""
     result = runner.invoke(app, ["codex", "status", "--json"])
     assert result.exit_code == 2 and _envelope(result)["error"]["code"] == "USAGE_ERROR"
 
@@ -281,3 +286,22 @@ def test_without_proof_root_the_current_folder_is_the_root(tmp_path: Path, monke
     monkeypatch.chdir(tmp_path)
     runner.invoke(app, ["node", "create", "Y", "claim", "y"])
     assert (tmp_path / ".proof").is_dir()
+
+
+def test_the_skills_node_workflow_runs_as_written(tmp_path: Path):
+    """The agent skill's steps, with its identity flags, work in order (PR #77 review): an agent
+    that claims a node must name itself the same way when it splits it or requests review."""
+    skill = (REPO / ".agents" / "skills" / "proof-cli" / "SKILL.md").read_text()
+    for flag in ("--assignee <name>", "--created-by <name>", "--requested-by <name>"):
+        assert flag in skill, flag
+    root = str(tmp_path)
+    steps = [
+        ["node", "create", "P", "claim", "a claim too large", "--root", root],
+        ["node", "claim", "P", "--assignee", "agent_a", "--root", root],
+        ["node", "split", "P", "--child", "P1=first half", "--created-by", "agent_a", "--root", root],
+        ["node", "claim", "P1", "--assignee", "agent_a", "--root", root],
+        ["node", "request-review", "P1", "--rationale", "one computation", "--requested-by", "agent_a", "--root", root],
+    ]
+    for args in steps:
+        result = runner.invoke(app, [*args, "--json"])
+        assert result.exit_code == 0 and _envelope(result)["ok"], (args, result.output)

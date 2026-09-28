@@ -16,9 +16,9 @@ Every command acts on `--root`, else `$PROOF_ROOT`, else the current folder. Ins
 ## Working a node
 
 1. **Retrieval first.** Before any new proof search, read what the project already holds: `proof search`, `proof retrieve`, `proof node show <id>`, the node's dependencies, `proof reference list`, `proof memory list`.
-2. **Pick up work.** `proof frontier` lists the open, unblocked, unclaimed nodes; `proof node claim <id> --assignee <name>` takes one.
-3. **Prove or split.** Write the proof in `proofs/<id>/proof.tex`. A node too large to prove directly is split into Claims instead: `proof node split <id> --child <child-id>=<statement> …`.
-4. **Hand over.** `proof node request-review <id> --rationale "<why this node is scoped to prove directly>"` snapshots the proof for the researcher. An Evidence check records only what a real checker reported: `proof node evidence record <candidate-proof-id> <outcome> --run-by <checker>`.
+2. **Pick up work.** `proof frontier` lists the open, unblocked, unclaimed nodes; `proof node claim <id> --assignee <name>` takes one. Use that same `<name>` in every later call on the node: a claimed node is its assignee's (`NOT_CLAIMANT` otherwise).
+3. **Prove or split.** Write the proof in `proofs/<id>/proof.tex`. A node too large to prove directly is split into Claims instead: `proof node split <id> --child <child-id>=<statement> … --created-by <name>`.
+4. **Hand over.** `proof node request-review <id> --rationale "<why this node is scoped to prove directly>" --requested-by <name>` snapshots the proof for the researcher. An Evidence check records only what a real checker reported: `proof node evidence record <candidate-proof-id> <outcome> --run-by <checker>`.
 
 Human Review decisions (accept, reject, Reference review, dismissing a Challenge, …) belong to the researcher on the page; their commands answer `HUMAN_REVIEW_REQUIRED` with the page's URL.
 
