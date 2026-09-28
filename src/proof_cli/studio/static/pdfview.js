@@ -2,7 +2,7 @@
    Expects #pdf-scroll > #pdf-pages, #pdf-empty, #zoom-in/-out/-fit, #zoom-label, #page-label. */
 "use strict";
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = "/static/vendor/pdf.worker.js";
+pdfjsLib.GlobalWorkerOptions.workerSrc = "static/vendor/pdf.worker.js";
 
 // Pages within RENDER_PX of the visible area are drawn ahead of scrolling. Pages farther
 // than KEEP_PX give up their canvas, so a long paper does not hold hundreds of MB of them.
@@ -35,7 +35,7 @@ const PV = {
     const seq = ++this.seq;
     let data;
     try {
-      const res = await fetch("/pdf?t=" + mtime);
+      const res = await fetch("pdf?t=" + mtime);
       if (!res.ok) return;
       data = new Uint8Array(await res.arrayBuffer());
     } catch { return; }
