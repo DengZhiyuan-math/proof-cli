@@ -226,8 +226,8 @@ def test_every_machine_check_status_maps_to_an_evidence_outcome(status, outcome)
 def test_verify_run_records_its_outcome_as_an_evidence_check_and_decides_nothing(tmp_path: Path) -> None:
     store = ensure_project(tmp_path)
     create_node(store, node_id="lem", kind="lemma", statement="show the bridge condition")
-    token = claim_node(store, "lem", claimant_id="agent_a", session_id="s").claim_token
-    proof = submit_candidate_proof(store, "lem", claimant_id="agent_a", session_id="s", scoping_rationale="scoped", content="proof", claim_token=token)
+    claim_node(store, "lem", claimant_id="agent_a", session_id="s")
+    proof = submit_candidate_proof(store, "lem", claimant_id="agent_a", session_id="s", scoping_rationale="scoped", content="proof")
     add_obligation(store, _obligation())
 
     result = CliRunner().invoke(app, ["verify", "run", "obl_bridge", "--candidate-proof", proof.id, "--root", str(tmp_path)])

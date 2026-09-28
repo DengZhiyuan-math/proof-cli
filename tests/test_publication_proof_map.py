@@ -26,10 +26,10 @@ runner = CliRunner()
 
 
 def _accept(store, node_id, *, claimant="agent_a", session="sess_1"):
-    _claim_token = claim_node(store, node_id, claimant_id=claimant, session_id=session).claim_token
+    claim_node(store, node_id, claimant_id=claimant, session_id=session)
     submit_candidate_proof(
         store, node_id, claimant_id=claimant, session_id=session,
-        scoping_rationale="scoped correctly", content="proof text", claim_token=_claim_token)
+        scoping_rationale="scoped correctly", content="proof text")
     return researcher(store).decide_acceptance(node_id, "accept")
 
 
@@ -125,12 +125,11 @@ def test_cli_publication_set_and_show_for_a_proof_map_node(tmp_path: Path):
 
 def test_cli_publication_export_bundle_carries_live_acceptance_state(tmp_path: Path):
     runner.invoke(app, ["node", "create", "clm_1", "claim", "A claim", "--root", str(tmp_path)])
-    claim = json.loads(runner.invoke(app, ["node", "claim", "clm_1", "--root", str(tmp_path), "--claimant", "agent_a", "--json"]).stdout)
+    runner.invoke(app, ["node", "claim", "clm_1", "--root", str(tmp_path), "--claimant", "agent_a", "--json"])
     runner.invoke(
         app,
         [
-            "node", "submit", "clm_1", "--root", str(tmp_path), "--claimant", "agent_a",
-            "--claim-token", claim["data"]["claim_token"], "--content", "proof text", "--rationale", "scoped correctly",
+            "node", "submit", "clm_1", "--root", str(tmp_path), "--claimant", "agent_a", "--content", "proof text", "--rationale", "scoped correctly",
         ],
     )
     researcher(load_project(tmp_path)).decide_acceptance("clm_1", "accept")  # in the review app

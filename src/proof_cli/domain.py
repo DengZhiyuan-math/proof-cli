@@ -162,11 +162,13 @@ class ProofMapNode(BaseModel):
 
 
 class ClaimRecord(BaseModel):
-    """Exclusive ownership of a ProofMapNode while an agent works on it.
+    """A node's assignee while someone works on it: a wayfinder-style claim (ADR-0010).
 
-    At most one active (unreleased) claim exists per node at a time — enforced
-    by a SQLite partial unique index, not an application-level check. See
-    ADR-0006.
+    A planning signal that tells concurrent agents to skip the node, never a
+    lock: it doesn't gate editing the node's working proof, and anyone may
+    reassign or clear a stale one. At most one active (unreleased) claim per
+    node, enforced by a SQLite partial unique index. `session_id` is kept
+    for the record only; it proves nothing. See ADR-0006, ADR-0010.
     """
 
     id: str
@@ -177,12 +179,6 @@ class ClaimRecord(BaseModel):
     released_at: datetime | None = None
     released_by: str | None = None
     release_reason: str | None = None
-    # The secret that proves ownership, returned once by `claim_node` and
-    # never stored (only its SHA-256 is): submitting or releasing as the
-    # owner needs it, so no agent can pass itself off as another session
-    # by naming its claimant and session ids (#37).
-    claim_token: str | None = None
-    has_token: bool = False
 
 
 class CandidateProofRecord(BaseModel):

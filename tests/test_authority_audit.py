@@ -52,9 +52,9 @@ from proof_cli.storage import (
 
 
 def _submit(store, node_id: str, *, session: str = "sess_1", content: str | None = None):
-    _claim_token = claim_node(store, node_id, claimant_id="agent_a", session_id=session).claim_token
+    claim_node(store, node_id, claimant_id="agent_a", session_id=session)
     return submit_candidate_proof(
-        store, node_id, claimant_id="agent_a", session_id=session, scoping_rationale="scoped", content=content or f"proof of {node_id}", claim_token=_claim_token)
+        store, node_id, claimant_id="agent_a", session_id=session, scoping_rationale="scoped", content=content or f"proof of {node_id}")
 
 
 def _node(store, node_id: str = "clm_1", **fields):

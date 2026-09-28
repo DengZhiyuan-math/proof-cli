@@ -26,8 +26,8 @@ from test_review_app import _sign
 def _source_with_an_accepted_lemma(root: Path):
     store = ensure_project(root)
     create_node(store, node_id="lem", kind="lemma", statement="A holds")
-    token = claim_node(store, "lem", claimant_id="agent_a", session_id="s").claim_token
-    submit_candidate_proof(store, "lem", claimant_id="agent_a", session_id="s", scoping_rationale="scoped", content="# Proof\n\nBy induction.", claim_token=token)
+    claim_node(store, "lem", claimant_id="agent_a", session_id="s")
+    submit_candidate_proof(store, "lem", claimant_id="agent_a", session_id="s", scoping_rationale="scoped", content="# Proof\n\nBy induction.")
     researcher(store).decide_acceptance("lem", "accept", rationale="checked every step")
     return store
 
