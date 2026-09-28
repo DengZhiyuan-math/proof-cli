@@ -150,7 +150,6 @@ from .collaboration import (
 )
 from .memory import MemoryArtifact, MemoryLayer, list_memory_artifacts, record_memory
 from .recommendations import recommend_cross_project_assets
-from .proof_map import get_candidate_proof, record_evidence_check
 from .proof_state import (
     add_blocker,
     add_goal,
@@ -190,7 +189,7 @@ from .verification_ir import (
     VerificationScope,
     VerificationSourceKind,
 )
-from .verification_results import VERIFY_RUN_CHECKER, evidence_outcome_for, list_verification_results, record_verification_result
+from .verification_results import list_verification_results, record_verification_result
 from .theorems import (
     add_theorem,
     apply_theorem,
@@ -1266,13 +1265,11 @@ def cmd_proof_verify_run(
     *,
     backend_target: str = "",
     notes: str = "",
-    candidate_proof_id: str = "",
 ) -> str:
-    """Run the machine check for `source_id`, recording its result — and, given a Candidate proof,
-    an Evidence check on it. Advisory either way: nothing here decides anything (#27)."""
+    """Run the machine check for `source_id` and log its result. Advisory: nothing here decides
+    anything, and it records no Evidence check — no backend runs, and no legacy source belongs
+    to a Candidate proof (#27)."""
     store = get_store(root)
-    if candidate_proof_id and get_candidate_proof(store, candidate_proof_id) is None:
-        raise ValueError(f"candidate proof {candidate_proof_id} not found")
     fragment = _latest_verification_fragment(store, source_id)
     if fragment is None:
         queued = cmd_proof_verify_queue(source_id, root=root, backend_target=backend_target, notes=notes)
@@ -1307,15 +1304,6 @@ def cmd_proof_verify_run(
         "verification_record": scoped_result.model_dump(mode="json"),
         "trace": machine_check_trace(run_fragment, backend=result.backend, summary=result.summary).model_dump(mode="json"),
     }
-    if candidate_proof_id:
-        check = record_evidence_check(
-            store,
-            candidate_proof_id,
-            evidence_outcome_for(run_fragment.status),
-            notes=f"{source_id}: {result.summary}" + (f" ({notes})" if notes else ""),
-            run_by=VERIFY_RUN_CHECKER,
-        )
-        payload["evidence_check"] = check.model_dump(mode="json")
     return json.dumps(payload, indent=2)
 
 

@@ -25,7 +25,7 @@ from proof_cli.verification_ir import (
     VerificationTheoremApplication,
     VerificationTranslationStatus,
 )
-from proof_cli.verification_results import VERIFY_RUN_CHECKER, VerificationResultRecord, evidence_outcome_for, list_verification_results, record_verification_result
+from proof_cli.verification_results import VerificationResultRecord, list_verification_results, record_verification_result
 from _proofs import submit_proof
 
 
@@ -205,26 +205,12 @@ def test_a_verification_never_reopens_what_a_researcher_resolved(tmp_path: Path)
     assert list_blockers(store)[0].status == BlockerStatus.resolved
 
 
-# -- a checker's output goes into the advisory Evidence path (#27) ----------------------
-
-@pytest.mark.parametrize(
-    "status, outcome",
-    [
-        (VerificationFragmentStatus.machine_checked, "passed"),
-        (VerificationFragmentStatus.backend_failed, "failed"),
-        (VerificationFragmentStatus.translation_failed, "error"),
-        (VerificationFragmentStatus.stale_after_change, "stale"),
-        (VerificationFragmentStatus.queued_for_verification, "inconclusive"),
-        # someone's judgment, not the machine's: never a pass or a fail here
-        (VerificationFragmentStatus.accepted_after_review, "inconclusive"),
-        (VerificationFragmentStatus.rejected_by_human, "inconclusive"),
-    ],
-)
-def test_every_machine_check_status_maps_to_an_evidence_outcome(status, outcome) -> None:
-    assert evidence_outcome_for(status).value == outcome
+# -- verify run records no Evidence check (#27) -----------------------------------------
+# No backend runs, and no legacy source belongs to a Candidate proof, so a "passed"
+# from it would be one nobody ran. A real checker uses `proof node evidence record`.
 
 
-def test_verify_run_records_its_outcome_as_an_evidence_check_and_decides_nothing(tmp_path: Path) -> None:
+def test_verify_run_no_longer_takes_a_candidate_proof(tmp_path: Path) -> None:
     store = ensure_project(tmp_path)
     create_node(store, node_id="lem", kind="lemma", statement="show the bridge condition")
     claim_node(store, "lem", claimant_id="agent_a", session_id="s")
@@ -233,19 +219,22 @@ def test_verify_run_records_its_outcome_as_an_evidence_check_and_decides_nothing
 
     result = CliRunner().invoke(app, ["verify", "run", "obl_bridge", "--candidate-proof", proof.id, "--root", str(tmp_path)])
 
-    assert result.exit_code == 0, result.output
-    (check,) = list_evidence_checks(store, proof.id)
-    assert check.run_by == VERIFY_RUN_CHECKER
+    assert result.exit_code == 2
+    assert "No such option" in result.output
+    assert list_evidence_checks(store, proof.id) == []
+    assert list_verification_results(store) == []
     assert get_acceptance_state(store, "lem") == "unreviewed"
-    assert list_obligations(store)[0].status == ProofObligationStatus.open
 
 
-def test_verify_run_refuses_an_unknown_candidate_proof_before_running(tmp_path: Path) -> None:
+def test_verify_run_records_no_evidence_check_on_any_candidate_proof(tmp_path: Path) -> None:
     store = ensure_project(tmp_path)
+    create_node(store, node_id="lem", kind="lemma", statement="show the bridge condition")
+    claim_node(store, "lem", claimant_id="agent_a", session_id="s")
+    proof = submit_proof(store, "lem", claimant_id="agent_a", session_id="s", scoping_rationale="scoped", content="proof")
     add_obligation(store, _obligation())
 
-    result = CliRunner().invoke(app, ["verify", "run", "obl_bridge", "--candidate-proof", "nope", "--root", str(tmp_path)])
+    result = CliRunner().invoke(app, ["verify", "run", "obl_bridge", "--root", str(tmp_path)])
 
-    assert result.exit_code == 1
-    assert "nope" in result.output
-    assert list_verification_results(store) == []
+    assert result.exit_code == 0, result.output
+    assert list_evidence_checks(store, proof.id) == []
+    assert list_obligations(store)[0].status == ProofObligationStatus.open

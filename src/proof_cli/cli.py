@@ -596,7 +596,7 @@ def evidence_record(
     outcome: str,
     root: str = ".",
     notes: str = "",
-    run_by: str = "system",
+    run_by: str = typer.Option("system", "--run-by", help="The checker or backend that ran the check; the node page shows it"),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Record an Evidence check against a specific Candidate proof. Advisory, ungated."""
@@ -1462,11 +1462,12 @@ def verify_run(
     root: str = ".",
     backend_target: str = "",
     notes: str = "",
-    candidate_proof: str = typer.Option("", "--candidate-proof", help="Also record the outcome as an (advisory) Evidence check on this Candidate proof"),
 ) -> None:
-    """Run a machine check. Its result is advisory: it never closes, blocks or resolves anything."""
+    """Log a placeholder machine check: no backend runs yet. Advisory: it never closes, blocks or
+    resolves anything. A real checker records its outcome on a Candidate proof with
+    `proof node evidence record`."""
     try:
-        output = cmd_proof_verify_run(source_id, _root(root), backend_target=backend_target, notes=notes, candidate_proof_id=candidate_proof)
+        output = cmd_proof_verify_run(source_id, _root(root), backend_target=backend_target, notes=notes)
     except ValueError as exc:
         typer.echo(f"Error: {exc}")
         raise typer.Exit(code=1)
