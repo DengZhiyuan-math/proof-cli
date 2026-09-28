@@ -181,6 +181,8 @@ class CliBackend(Backend):
         raise NotImplementedError
 
     def run(self, job: Job) -> dict:
+        if job.cancel.is_set():         # stopped (or the studio closed) before it started
+            return {"is_error": True, "subtype": "stopped"}
         cmd, stdin = self.command(job)
         st: dict = {}
         stderr_lines: list[str] = []
@@ -190,6 +192,8 @@ class CliBackend(Backend):
                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                     text=True, encoding="utf-8", errors="replace", bufsize=1,
                                     **TREE)
+        if job.cancel.is_set():         # stop() came between the check above and the start:
+            kill_tree(job.proc)         # it couldn't see this process, so end it here
         job.proc.stdin.write(stdin)
         job.proc.stdin.close()
         threading.Thread(target=lambda: stderr_lines.extend(job.proc.stderr), daemon=True).start()

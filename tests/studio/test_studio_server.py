@@ -1,4 +1,4 @@
-"""Tests for the editor server's own logic (proof_cli/studio/server.py): saving and project
+"""Tests for the studio's own logic (proof_cli/studio/server.py): saving and project
 files, git state, symbols."""
 import os
 import shutil
@@ -17,68 +17,76 @@ def project(files: dict) -> Path:
     for rel, text in files.items():
         (root / rel).parent.mkdir(parents=True, exist_ok=True)
         (root / rel).write_text(text, encoding="utf-8")
-    server.set_root(root)
-    return server.ROOT
+    return open_studio(root).root
+
+
+S: server.Studio = None  # type: ignore[assignment]  # the studio the current test opened
+
+
+def open_studio(root: Path) -> server.Studio:
+    global S
+    S = server.Studio(root)
+    return S
 
 
 class Config(unittest.TestCase):
     def test_a_bad_prism_json_is_reported_and_the_defaults_apply(self):
         project({"main.tex": "", "prism.json": '{"engine": "xetex2", "outdir": "../x", '
                                                '"build": ["pdflatex", "{main}"]}'})
-        self.assertIsNone(server.CFG.engine)
-        self.assertEqual(server.CFG.outdir, "build")
+        self.assertIsNone(S.cfg.engine)
+        self.assertEqual(S.cfg.outdir, "build")
         for part in ("outdir", "unknown engine 'xetex2'", "build must map"):
-            self.assertIn(part, server.CFG.error, "every problem is reported")
+            self.assertIn(part, S.cfg.error, "every problem is reported")
         project({"main.tex": "", "prism.json": "{not json"})
-        self.assertIn("cannot be used", server.CFG.error)
-        self.assertEqual((server.CFG.main, server.CFG.modes), ("main.tex", ["draft", "strict"]))
+        self.assertIn("cannot be used", S.cfg.error)
+        self.assertEqual((S.cfg.main, S.cfg.modes), ("main.tex", ["draft", "strict"]))
 
     def test_the_main_file_when_it_is_not_main_tex(self):
         # The editor opens CFG.main (via /api/config) on a first visit.
         project({"proof.tex": "\\documentclass{article}", "notes.tex": "no class here"})
-        self.assertEqual(server.CFG.main, "proof.tex", "guessed from \\documentclass")
+        self.assertEqual(S.cfg.main, "proof.tex", "guessed from \\documentclass")
         project({"a.tex": "\\documentclass{article}", "paper.tex": "\\documentclass{article}",
                  "prism.json": '{"main": "paper.tex"}'})
-        self.assertEqual(server.CFG.main, "paper.tex", "prism.json wins over the guess")
+        self.assertEqual(S.cfg.main, "paper.tex", "prism.json wins over the guess")
         project({"main.tex": "\\documentclass{article}", "a.tex": "\\documentclass{article}"})
-        self.assertEqual(server.CFG.main, "main.tex")
+        self.assertEqual(S.cfg.main, "main.tex")
 
     def test_changes_apply_without_a_restart(self):
         root = project({"main.tex": "", "prism.json": '{"engine": "pdflatex"}'})
-        self.assertEqual(server.CFG.engine, "pdflatex")
+        self.assertEqual(S.cfg.engine, "pdflatex")
         time.sleep(0.02)
         (root / "prism.json").write_text('{"engine": "lualatex"}', encoding="utf-8")
-        server.refresh_config()
-        self.assertEqual(server.CFG.engine, "lualatex")
+        S.refresh_config()
+        self.assertEqual(S.cfg.engine, "lualatex")
 
 
 class Files(unittest.TestCase):
     def test_only_editable_files_inside_the_project(self):
         root = project({"main.tex": "", "fig.tikz": "", "build/main.log": "", "build/x.tex": "",
                         ".git/config": "", "notes/.hidden/x.tex": "", "img.png": ""})
-        self.assertEqual(server.resolve("fig.tikz"), root / "fig.tikz")
+        self.assertEqual(S.resolve("fig.tikz"), root / "fig.tikz")
         for bad in ("../main.tex", "/etc/passwd", "sub\\main.tex", "build/main.log", "build/x.tex",
                     ".git/config", "notes/.hidden/x.tex", "img.png", ""):
             with self.assertRaises(ValueError, msg=bad):
-                server.resolve(bad)
+                S.resolve(bad)
 
     def test_save_keeps_the_files_line_ends(self):
         root = project({})
         (root / "crlf.tex").write_bytes(b"a\r\nb\r\n")
         (root / "lf.tex").write_bytes(b"a\nb\n")
         for name in ("crlf.tex", "lf.tex"):
-            r, code = server.save_file(name, "a\nb\nc\n", server.mtime(root / name), False)
+            r, code = S.save_file(name, "a\nb\nc\n", server.mtime(root / name), False)
             self.assertEqual(code, 200, r)
         self.assertEqual((root / "crlf.tex").read_bytes(), b"a\r\nb\r\nc\r\n")
         self.assertEqual((root / "lf.tex").read_bytes(), b"a\nb\nc\n")
-        server.save_file("new.tex", "x\ny\n", None, False)
+        S.save_file("new.tex", "x\ny\n", None, False)
         self.assertEqual((root / "new.tex").read_bytes(), b"x\ny\n")
 
     @unittest.skipIf(os.name == "nt", "file modes: Linux and macOS")
     def test_save_keeps_the_files_permissions(self):
         root = project({"main.tex": "old\n"})
         (root / "main.tex").chmod(0o640)
-        server.save_file("main.tex", "new\n", server.mtime(root / "main.tex"), False)
+        S.save_file("main.tex", "new\n", server.mtime(root / "main.tex"), False)
         self.assertEqual((root / "main.tex").stat().st_mode & 0o777, 0o640)
 
     def test_save_refuses_to_overwrite_a_newer_file(self):
@@ -86,10 +94,10 @@ class Files(unittest.TestCase):
         loaded = server.mtime(root / "main.tex")
         time.sleep(0.02)
         (root / "main.tex").write_text("changed on disk\n", encoding="utf-8")
-        r, code = server.save_file("main.tex", "mine\n", loaded, False)
+        r, code = S.save_file("main.tex", "mine\n", loaded, False)
         self.assertEqual((code, r["conflict"]), (409, True))
         self.assertEqual((root / "main.tex").read_text(encoding="utf-8"), "changed on disk\n")
-        r, code = server.save_file("main.tex", "mine\n", loaded, True)
+        r, code = S.save_file("main.tex", "mine\n", loaded, True)
         self.assertEqual((root / "main.tex").read_text(encoding="utf-8"), "mine\n")
 
     @unittest.skipUnless(os.name == "nt", "Windows file sharing")
@@ -101,7 +109,7 @@ class Files(unittest.TestCase):
         self.addCleanup(reader.stdout.close)
         self.addCleanup(reader.wait)
         reader.stdout.readline()               # the file is open now, as during a TeX run
-        r, code = server.save_file("main.tex", "new\n", server.mtime(root / "main.tex"), False)
+        r, code = S.save_file("main.tex", "new\n", server.mtime(root / "main.tex"), False)
         self.assertEqual(code, 200)
         self.assertEqual((root / "main.tex").read_text(encoding="utf-8"), "new\n")
 
@@ -124,9 +132,9 @@ class GitState(unittest.TestCase):
         (paper / "main.tex").write_text("b\n", encoding="utf-8")
         (paper / "new file.tex").write_text("n\n", encoding="utf-8")
         (top / "README.md").write_text("changed\n", encoding="utf-8")
-        server.set_root(paper)
-        self.assertEqual(server.git_status(), {"main.tex": "M", "new file.tex": "??"})
-        diff = server.git("diff", "--no-color", "--relative", "--", ".").stdout
+        open_studio(paper)
+        self.assertEqual(S.git_status(), {"main.tex": "M", "new file.tex": "??"})
+        diff = S.git("diff", "--no-color", "--relative", "--", ".").stdout
         self.assertIn("a/main.tex", diff)
         self.assertNotIn("README", diff)
 
@@ -148,7 +156,7 @@ class Symbols(unittest.TestCase):
 \end{thm}
 \end{document}
 """})
-        s = server.symbols()
+        s = S.symbols()
         self.assertEqual(s["env_titles"], {"thm": "Theorem", "lem": "Lemma", "rem*": "Remark",
                                            "assump": "Assumption", "claim": "Claim"})
         self.assertEqual([(o["kind"], o["title"]) for o in s["outline"]],
@@ -158,14 +166,14 @@ class Symbols(unittest.TestCase):
 
     def test_standard_names_without_newtheorem(self):
         project({"main.tex": "\\documentclass{article}\\begin{document}\\end{document}\n"})
-        self.assertEqual(server.symbols()["env_titles"]["lemma"], "Lemma")
+        self.assertEqual(S.symbols()["env_titles"]["lemma"], "Lemma")
 
     def test_section_titles(self):
         project({"main.tex": "\\begin{document}\n\\chapter{One}\n"
                              "\\section[Short]{Long $\\frac{a}{b^{2}}$}\n"
                              "\\subsection*{\\texorpdfstring{$\\mathbb{R}^d$}{Rd} and $\\SO(n)$}\n"
                              "\\end{document}\n"})
-        self.assertEqual([(o["kind"], o["title"]) for o in server.symbols()["outline"]],
+        self.assertEqual([(o["kind"], o["title"]) for o in S.symbols()["outline"]],
                          [("chapter", "One"), ("section", "Long a/b^2"),
                           ("subsection", "Rd and SO(n)")])
 
@@ -187,9 +195,9 @@ This paragraph exercises source navigation in an included file.
 The PDF should map back to the same source line after a forward lookup.
 """,
         })
-        r = build.Build(root, server.CFG.main, server.CFG.outdir).run()
+        r = build.Build(root, S.cfg.main, S.cfg.outdir).run()
         self.assertEqual(r["exit"], 0, r["output"][-2000:])
-        sync = server.SyncTex()
+        sync = server.SyncTex(S)
         self.assertTrue(sync.load())
         line = next(n for n, t in enumerate((root / "sections/intro.tex").read_text(
             encoding="utf-8").splitlines(), 1) if len(t) > 40 and not t.startswith(("\\", "%")))
