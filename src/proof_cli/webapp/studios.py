@@ -76,6 +76,7 @@ class StudioHub:
         self.store = store
         self._studios: dict[str, Studio] = {}
         self._lock = threading.Lock()
+        self._closed = False
 
     def studio(self, node_id: str) -> Studio:
         node = proof_map.get_node(self.store, node_id)
@@ -87,12 +88,15 @@ class StudioHub:
         if not folder.is_dir():
             raise NoStudio("NO_PROOF_FOLDER", f"{node_id} has no proof folder")
         with self._lock:
+            if self._closed:
+                raise NoStudio("STUDIO_CLOSED", "the proof map's server is shutting down")
             if node.id not in self._studios:
-                self._studios[node.id] = Studio(folder, fixed_build=NODE_BUILD, hidden=NODE_HIDDEN)
+                self._studios[node.id] = Studio(folder, fixed_build=NODE_BUILD, hidden=NODE_HIDDEN, agent_scratch="scratch")
             return self._studios[node.id]
 
     def close(self) -> None:
         with self._lock:
+            self._closed = True
             studios, self._studios = list(self._studios.values()), {}
         for studio in studios:
             studio.close()
@@ -108,7 +112,7 @@ class StudioHub:
             studio = self.studio(node_id)
         except NoStudio as exc:
             code, message = exc.args
-            return _error(HTTPStatus.NOT_FOUND, code, message)
+            return _error(HTTPStatus.SERVICE_UNAVAILABLE if code == "STUDIO_CLOSED" else HTTPStatus.NOT_FOUND, code, message)
         if method == "GET" and rest in _PAGES:
             return self._static(_PAGES[rest])
         if method == "GET" and rest.startswith("static/"):

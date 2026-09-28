@@ -278,12 +278,19 @@ class Studio:
     one Studio per node folder in its own server (ADR-0011): a build or an agent turn is
     limited per folder, never per process. `fixed_build` pins the main file and output
     (proof.tex → build/proof.pdf) whatever a prism.json says, and `hidden` names top-level
-    folders the editor neither lists nor writes (a node's snapshots and scratch)."""
+    folders the editor neither lists nor writes (a node's snapshots and scratch).
+    `agent_scratch` is the one hidden folder the agent may write anything in (ADR-0011).
+
+    Once closed, a studio starts no build and no agent turn, even for a request that got
+    hold of it before: admitting work and closing take the same lock."""
 
     def __init__(self, root: Path, *, fixed_build: tuple[str, str] | None = None,
-                 hidden: tuple[str, ...] = ()) -> None:
+                 hidden: tuple[str, ...] = (), agent_scratch: str | None = None) -> None:
         self.fixed_build = fixed_build
         self.hidden = hidden
+        self.agent_scratch = agent_scratch
+        self.closed = False
+        self._admit = threading.Lock()
         self.root = root.resolve()
         self.cfg = Config(self.root, fixed_build=fixed_build)
         self.save_lock = threading.Lock()
@@ -292,7 +299,7 @@ class Studio:
         self.running_build = None           # the build in progress, for /api/build/stop
         self._git_prefix: str | None = None
         self.sync = SyncTex(self)
-        self.agent = AgentManager(lambda: self.root, lambda: self.list_files(), self.resolve)
+        self.agent = AgentManager(lambda: self.root, self.agent_files, self.agent_writable)
 
     def refresh_config(self) -> None:
         """Load prism.json again when it changed, so a new engine or outdir applies at once."""
@@ -304,8 +311,39 @@ class Studio:
             self.cfg = Config(self.root, fixed_build=self.fixed_build)
 
     def close(self) -> None:
-        self.stop_build()
+        with self._admit:
+            self.closed = True
+            running = self.running_build
+        if running is not None:
+            running.stop()      # registered before it runs anything, so nothing starts
         self.agent.shutdown()
+
+    # ------------------------------------------------------------ the agent's files
+    def agent_writable(self, rel: str) -> Path:
+        """What the agent may write: the editor's sources, plus anything in its scratch folder
+        (a script, its output). Raises ValueError otherwise."""
+        try:
+            return self.resolve(rel)
+        except ValueError:
+            if not self.agent_scratch or not rel or rel.startswith("/") or "\\" in rel:
+                raise
+        scratch = (self.root / self.agent_scratch).resolve()
+        p = (self.root / rel).resolve()
+        if scratch not in p.parents or any(part.startswith(".") for part in p.relative_to(scratch).parts):
+            raise ValueError("not a file the agent may write")
+        return p
+
+    def agent_files(self) -> list[str]:
+        """The files an agent turn snapshots, diffs and can undo: the sources and its scratch."""
+        files = self.list_files()
+        scratch = self.root / self.agent_scratch if self.agent_scratch else None
+        if scratch is not None and scratch.is_dir():
+            for dirpath, dirnames, filenames in os.walk(scratch):
+                dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
+                files += [(Path(dirpath) / f).relative_to(self.root).as_posix() for f in sorted(filenames) if not f.startswith(".")]
+                if len(files) > MAX_FILES:
+                    break
+        return files
 
     def _excluded(self, rel: str) -> bool:
         parts = rel.split("/")
@@ -492,10 +530,14 @@ class Studio:
             t0 = time.time()
             before = mtime(self.cfg.pdf) if self.cfg.pdf.exists() else None
             cmd = self.cfg.custom.get(mode)
-            b = build.Build(self.root, self.cfg.main, self.cfg.outdir, mode, builder=self.cfg.builder, engine=self.cfg.engine,
-                            command=self.cfg.expand(cmd) if cmd else None, clean=clean,
-                            shell_escape=self.cfg.shell_escape)
-            self.running_build = b
+            with self._admit:   # registered before it runs, so close() can always stop it
+                if self.closed:
+                    return {"busy": False, "closed": True, "exit": 1, "mode": mode, "seconds": 0,
+                            "diagnostics": [], "output": "The studio is closed.", "pdf_mtime": None}
+                b = build.Build(self.root, self.cfg.main, self.cfg.outdir, mode, builder=self.cfg.builder, engine=self.cfg.engine,
+                                command=self.cfg.expand(cmd) if cmd else None, clean=clean,
+                                shell_escape=self.cfg.shell_escape)
+                self.running_build = b
             r = b.run()
             if self.cfg.error:
                 r["output"] = f"prism-local: {self.cfg.error}\n" + r["output"]

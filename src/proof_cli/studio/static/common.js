@@ -7,7 +7,9 @@ const $ = (s) => document.querySelector(s);
    browser is keyed by node, so two nodes never share open tabs, chat or an agent session.
    Only the theme is shared: a preference, not a node's state. */
 const NODE = decodeURIComponent((location.pathname.match(/\/studio\/([^/]+)\//) || [])[1] || "");
-const storeKey = (k) => k === "theme" ? "proof.studio.theme" : `proof.studio.${NODE}.${k}`;
+// [node, key] as JSON: unambiguous whatever the node id holds (node "A" key "chat.session"
+// and node "A.chat" key "session" must not meet)
+const storeKey = (k) => k === "theme" ? "proof.studio.theme" : "proof.studio:" + JSON.stringify([NODE, k]);
 const store = {
   get(k, d) { try { const v = localStorage.getItem(storeKey(k)); return v === null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem(storeKey(k), JSON.stringify(v)); } catch { /* ignore */ } },

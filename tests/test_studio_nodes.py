@@ -68,7 +68,7 @@ def test_two_nodes_keep_separate_files_builds_and_agents(hub):
 
 def test_the_page_keys_its_browser_state_by_node_and_uses_relative_urls():
     common = (STATIC / "common.js").read_text()
-    assert "proof.studio.${NODE}." in common and "proof-studio-pdf:\" + NODE" in common
+    assert "proof-studio-pdf:\" + NODE" in common
     for name in ("app.js", "common.js", "pdfview.js", "viewer.js", "index.html", "viewer.html"):
         text = (STATIC / name).read_text()
         for absolute in ('"/static/', 'fetch("/', '"/pdf', '"/viewer', 'href="/', 'src="/'):
@@ -179,3 +179,66 @@ def test_the_studio_page_and_its_api_carry_a_content_security_policy(hub):
     page = hub.request("GET", "/studio/A/", "", None, cross_site=False)
     assert "script-src 'self'" in page.policy and "frame-ancestors 'none'" in page.policy
     assert hub.request("GET", "/studio/A/static/../server.py", "", None, cross_site=False).status == 404
+
+
+# -- PR #75 review: closing, the agent's scratch folder, collision-free browser keys ----
+
+
+def test_after_close_no_studio_starts_a_build_or_an_agent_turn(hub):
+    store, hub = hub
+    studio = hub.studio("A")  # a request that got its studio before the server closed
+    hub.close()
+
+    with mock.patch("proof_cli.studio.build.Build.run") as run:
+        result = studio.run_build("draft")
+    run.assert_not_called()
+    assert result["closed"] is True
+    assert "closed" in studio.agent.start("prove it", None, "edit")["error"]
+    assert hub.request("GET", "/studio/A/api/tree", "", None, cross_site=False).status == 503
+
+
+def test_a_turn_stopped_before_its_cli_starts_never_runs_it(tmp_path):
+    import sys
+
+    from proof_cli.studio.backends import CliBackend, Job
+
+    class Sleeper(CliBackend):
+        def command(self, job):
+            return [sys.executable, "-c", "import time; time.sleep(3)"], ""
+
+        def handle(self, d, job, st):
+            pass
+
+    job = Job(1)
+    job.root = tmp_path
+    job.cancel.set()  # the studio closed between admitting the turn and starting it
+    Sleeper("sleeper").run(job)
+    assert job.proc is None  # never started, not started and waited for
+
+
+@pytest.mark.parametrize("rel", ["scratch/check.py", "scratch/check.tex", "scratch/out/result.txt", "proof.tex"])
+def test_the_agent_may_write_the_nodes_scratch_folder(hub, rel):
+    store, hub = hub
+    assert hub.studio("A").agent_writable(rel) == (store.root / "proofs" / "A" / rel).resolve()
+
+
+@pytest.mark.parametrize("rel", ["snapshots/v1.tex", "build/proof.pdf", "reviews.jsonl", "../B/proof.tex", "scratch/../../B/proof.tex", "/etc/passwd", "scratch/.git/config"])
+def test_the_agent_still_may_not_write_protected_paths(hub, rel):
+    store, hub = hub
+    with pytest.raises(ValueError):
+        hub.studio("A").agent_writable(rel)
+
+
+def test_the_agents_turns_see_and_can_undo_scratch_files(hub):
+    store, hub = hub
+    scratch = store.root / "proofs" / "A" / "scratch"
+    scratch.mkdir()
+    (scratch / "check.py").write_text("print(1)\n")
+    assert "scratch/check.py" in hub.studio("A").agent_files()
+    assert "scratch/check.py" not in hub.studio("A").list_files()  # still hidden from the editor
+
+
+def test_browser_keys_cannot_collide_between_node_ids_with_dots():
+    """PR #75 review: node `A` key `chat.session` and node `A.chat` key `session` were one key."""
+    common = (STATIC / "common.js").read_text()
+    assert "JSON.stringify([NODE, k])" in common
