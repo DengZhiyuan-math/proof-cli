@@ -194,7 +194,7 @@ function drawDag(nodes) {
   box.replaceChildren();
   if (!nodes.length) {
     box.setAttribute("width", 400); box.setAttribute("height", 60);
-    box.append(Object.assign(svg("text", { x: 16, y: 34 }), { textContent: "No nodes yet: create one with `proof node create`." }));
+    box.append(Object.assign(svg("text", { x: 16, y: 34 }), { textContent: "No nodes yet: create the first one below." }));
     return;
   }
   const rows = layers(nodes);
@@ -240,7 +240,7 @@ function drawDag(nodes) {
     const title = svg("title");
     title.textContent = n.statement;
     g.append(title);
-    const open = () => { location.hash = `#/node/${encodeURIComponent(n.id)}`; };
+    const open = () => { location.href = pageOf(n); };
     g.addEventListener("click", open);
     g.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); } });
     box.append(g);
@@ -262,7 +262,7 @@ function drawTree(nodes) {
     const n = byId.get(id);
     const li = el("li");
     if (!n) { li.append(el("span", `${id} (missing)`, { class: "warning" })); return li; }
-    li.append(el("a", n.id, { href: `#/node/${encodeURIComponent(n.id)}` }), ` — ${short(n.display_label || n.statement, 60)}`);
+    li.append(el("a", n.id, { href: pageOf(n) }), ` — ${short(n.display_label || n.statement, 60)}`);
     li.append(el("span", n.acceptance_state, { class: "state-chip" }), el("span", n.workflow_state, { class: "state-chip" }));
     li.append(el("span", n.integrity_state, { class: `state-chip${n.integrity_state === "current" ? "" : " warn-chip"}` }));
     if (n.assignee) li.append(el("span", `@${n.assignee}`, { class: "state-chip" }));
@@ -294,13 +294,34 @@ function showMap() {
   if (mapView === "dag") drawDag(nodes); else drawTree(nodes);
 }
 
-async function openInPrism(nodeId) {
+// Where a node opens (ADR-0011): a theorem, lemma or claim in its studio, an imported result on its own page.
+function pageOf(n) {
+  return n.kind === "imported_result" ? `#/node/${encodeURIComponent(n.id)}` : `/studio/${encodeURIComponent(n.id)}/`;
+}
+
+async function createNode(event) {
+  event.preventDefault();
+  const kind = $("new-kind").value;
+  const body = {
+    node_id: $("new-id").value.trim(), kind, statement: $("new-statement").value,
+    assumptions: $("new-assumptions").value.split("\n").map((a) => a.trim()).filter(Boolean),
+    dependencies: [...$("new-dependencies").selectedOptions].map((o) => o.value),
+  };
+  if (kind === "imported_result") Object.assign(body, { source_locator: $("new-locator").value, source_version: $("new-version").value, trust_level: $("new-trust").value });
   try {
-    const result = await api(`/api/node/${encodeURIComponent(nodeId)}/open`, {});
-    if (result.opened) say(`Opened ${result.folder} in prism-local${result.url ? ` at ${result.url}` : ""}.`, "ok");
-    else if (result.error) say(`prism-local didn't start: ${result.error}. The node's folder: ${result.folder}`, "error");
-    else say(`prism-local isn't configured (${result.hint}). The node's folder: ${result.folder}`);
+    const node = await api("/api/nodes", body);
+    say(`Created ${node.kind} ${node.id}.`, "ok");
+    $("new-node").reset();
+    showNewNodeKind();
+    location.href = node.page;
+    if (node.page.startsWith("/#")) await refresh();
   } catch (error) { showError(error); }
+}
+
+function showNewNodeKind() {
+  const imported = $("new-kind").value === "imported_result";
+  $("new-source").hidden = !imported;
+  $("new-dependencies").disabled = imported;  // an imported result is established elsewhere: no dependencies
 }
 
 async function showNode(nodeId) {
@@ -315,14 +336,12 @@ async function showNode(nodeId) {
   $("node-assumptions").replaceChildren(...(node.assumptions.length ? [el("h3", "Assumptions"), ...node.assumptions.map((a) => el("p", a))] : []));
   $("node-claim").textContent = view.claim ? `Claimed by ${view.claim.claimant_id} since ${view.claim.claimed_at} (claim ${view.claim.id}).` : "";
   $("node-folder").replaceChildren();
-  if (view.folder) {
-    const button = el("button", "Open in prism-local", { type: "button" });
-    button.onclick = () => openInPrism(node.id);
-    $("node-folder").append(el("span", "Proof folder: "), el("code", view.folder), " ", button);
-  }
+  if (view.studio) $("node-folder").append(el("a", "Open the node's studio", { href: view.studio }), " · proof folder ", el("code", view.folder));
+  $("node-source").replaceChildren(...(view.source ? [el("h3", "Source"), el("p", `${view.source.locator} · ${view.source.version}${view.source.trust_level ? ` · ${view.source.trust_level}` : ""}`)] : []));
+  $("node-dependents").textContent = view.dependents.length ? `Used by: ${view.dependents.join(", ")}` : "Nothing depends on this node yet.";
   const pdfs = [];
   if (view.pdfs.snapshot) pdfs.push(el("a", "PDF archived with this snapshot", { href: `/api/node/${encodeURIComponent(node.id)}/pdf/snapshot`, target: "_blank", rel: "noopener" }));
-  if (view.pdfs.build) pdfs.push(el("a", "prism-local's current build (of the working file, which may be newer than the snapshot)", { href: `/api/node/${encodeURIComponent(node.id)}/pdf/build`, target: "_blank", rel: "noopener" }));
+  if (view.pdfs.build) pdfs.push(el("a", "the studio's current build (of the working file, which may be newer than the snapshot)", { href: `/api/node/${encodeURIComponent(node.id)}/pdf/build`, target: "_blank", rel: "noopener" }));
   $("node-pdfs").replaceChildren(...pdfs.flatMap((link, i) => (i ? [" · ", link] : [link])));
   $("node-deps").querySelector("tbody").replaceChildren(...view.dependencies.map((d) => {
     const lags = d.pin && d.accepted_version !== null && d.pin.pinned_version !== d.accepted_version;
@@ -362,6 +381,7 @@ async function refresh() {
   state = await api("/api/state");
   mapData = await api("/api/map");
   $("project").textContent = `· ${state.project_id} · ${state.origin}`;
+  $("new-dependencies").replaceChildren(...mapData.nodes.map((n) => el("option", `${n.id} (${n.kind})`, { value: n.id })));
   $("reviewer").textContent = `Decisions are recorded as ${state.reviewer}.`;
   showHome();
   showMap();
@@ -386,6 +406,8 @@ document.addEventListener("DOMContentLoaded", () => {
   $("view-dag").addEventListener("click", () => { mapView = "dag"; showMap(); });
   $("view-tree").addEventListener("click", () => { mapView = "tree"; showMap(); });
   $("tree-root").addEventListener("change", showMap);
+  $("new-node").addEventListener("submit", createNode);
+  $("new-kind").addEventListener("change", showNewNodeKind);
   window.addEventListener("hashchange", route);
   refresh().catch((error) => say(error.message, "error"));
 });
