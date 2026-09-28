@@ -76,6 +76,7 @@ def test_a_local_node_opens_its_studio_and_an_imported_result_its_own_page(page)
     _ok(client.post("/api/nodes", {"node_id": "c2", "kind": "claim", "statement": "uses ref", "dependencies": ["ref"]}))
 
     local, imported = _ok(client.get("/api/node/c1")), _ok(client.get("/api/node/ref"))
+    assert [(d["node_id"], d["kind"]) for d in _ok(client.get("/api/node/c2"))["dependencies"]] == [("ref", "imported_result")]
     assert local["studio"] == "/studio/c1/" and imported["studio"] is None
     assert imported["source"] == {"locator": "doi:k", "version": "v1", "trust_level": None}
     assert imported["dependents"] == ["c2"]
@@ -138,11 +139,17 @@ def test_a_challenge_and_an_evidence_check_from_the_node_panel(page):
     store, client = page
     _ok(client.post("/api/nodes", {"node_id": "c1", "kind": "claim", "statement": "C"}))
     assert _refused(client.post("/api/node/c1/challenge", {"rationale": "missing assumption"})) == "TARGET_NOT_ACCEPTED"
-    assert _refused(client.post("/api/node/c1/evidence", {"outcome": "passed"})) == "NO_CANDIDATE_PROOF"
-    _ok(client.post("/api/node/c1/request-review", {"rationale": "scoped"}))
-    check = _ok(client.post("/api/node/c1/evidence", {"outcome": "failed", "notes": "counterexample at n=3", "run_by": "sage"}))
-    assert (check["outcome"], check["run_by"]) == ("failed", "sage")
-    assert _refused(client.post("/api/node/c1/evidence", {"outcome": "maybe"})) == "INVALID_OUTCOME"
+    assert _refused(client.post("/api/node/c1/evidence", {"outcome": "passed"})) == "INVALID_REQUEST"  # which snapshot?
+    v1 = _ok(client.post("/api/node/c1/request-review", {"rationale": "scoped"}))
+    (store.root / "proofs" / "c1" / "proof.tex").write_text("a second version\n")
+    v2 = _ok(client.post("/api/node/c1/request-review", {"rationale": "scoped"}))
+    # PR #76 audit: a check made on v1 is recorded on v1, never silently on the newer v2
+    check = _ok(client.post("/api/node/c1/evidence", {"candidate_proof_id": v1["id"], "outcome": "failed", "notes": "counterexample at n=3", "run_by": "sage"}))
+    assert (check["candidate_proof_id"], check["outcome"], check["run_by"]) == (v1["id"], "failed", "sage")
+    assert _refused(client.post("/api/node/c1/evidence", {"candidate_proof_id": v2["id"], "outcome": "maybe"})) == "INVALID_OUTCOME"
+    assert _refused(client.post("/api/node/c1/evidence", {"candidate_proof_id": "nope", "outcome": "passed"})) == "CANDIDATE_PROOF_NOT_FOUND"
+    _ok(client.post("/api/nodes", {"node_id": "c2", "kind": "claim", "statement": "other"}))
+    assert _refused(client.post("/api/node/c2/evidence", {"candidate_proof_id": v1["id"], "outcome": "passed"})) == "NOT_THIS_NODE"
     assert _refused(client.post("/api/node/c1/frobnicate", {})) == "NOT_FOUND"
 
 
@@ -161,3 +168,49 @@ def test_the_studio_page_carries_the_node_panel():
     panel = (STUDIO_STATIC / "node.js").read_text()
     for action in ("claim", "unassign", "split", "request-review", "challenge", "evidence"):
         assert f"/{action}" in panel, action
+
+
+# -- the panel in the browser (PR #76 audit), run for real under node ------------------
+
+import json as _json
+import shutil as _shutil
+import subprocess as _subprocess
+
+HARNESS = Path(__file__).resolve().parent / "js" / "node_panel_harness.js"
+VIEW = {
+    "node": {"id": "A", "kind": "claim", "statement": "A", "assumptions": []},
+    "workflow_state": "open", "acceptance_state": "unreviewed", "integrity_state": "current", "claim": None,
+    "candidate_proof": {"id": "cp-v1", "version": 1, "sha256": "abc"},
+    "dependencies": [
+        {"node_id": "lem", "kind": "lemma", "pin": {"pinned_version": 3, "pinned_fingerprint": "fp"}, "accepted_version": 4, "current": True, "remedy": "lightweight-re-review"},
+        {"node_id": "ref", "kind": "imported_result", "pin": {"pinned_version": None, "pinned_fingerprint": None}, "accepted_version": None, "current": True, "remedy": None},
+    ],
+}
+
+
+def _panel(**scenario):
+    if _shutil.which("node") is None:
+        pytest.skip("needs node")
+    done = _subprocess.run(["node", str(HARNESS), _json.dumps({"view": VIEW, "saveAll": True, **scenario})], capture_output=True, text=True, timeout=30)
+    assert done.returncode == 0, done.stderr
+    return _json.loads(done.stdout)
+
+
+def test_request_review_saves_the_editor_first_and_stops_if_it_cannot():
+    refused = _panel(saveAll=False, click={"label": "Request review", "values": {"rationale": "one argument"}})
+    assert refused["events"] == ["saveAll"]  # nothing requested from stale text on disk
+    assert "saved" in refused["note"]
+
+    saved = _panel(click={"label": "Request review", "values": {"rationale": "one argument"}})
+    assert saved["events"][0] == "saveAll" and saved["events"][1]["post"] == "/api/node/A/request-review"
+
+
+def test_the_dependency_list_shows_pins_and_opens_each_dependency_where_it_lives():
+    shown = _panel()
+    assert shown["links"] == ["/studio/lem/", "/#/node/ref"]
+    assert "pinned v3" in shown["deps"] and "accepted v4" in shown["deps"]
+
+
+def test_an_evidence_check_names_the_snapshot_it_checked():
+    sent = _panel(answer={"outcome": "passed"}, click={"label": "Record an Evidence check on snapshot v1", "values": {"outcome": "passed", "run_by": "lean"}})
+    assert sent["events"][-1]["body"]["candidate_proof_id"] == "cp-v1"

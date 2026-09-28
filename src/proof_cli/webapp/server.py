@@ -242,10 +242,14 @@ class ReviewApp:
         if action == "challenge":
             return proof_map.open_challenge(self.store, node_id, opened_by=actor, rationale=str(body.get("rationale") or "")).model_dump(mode="json")
         if action == "evidence":
+            # recorded on the snapshot the check was run on, named by the page, never the newest by default (PR #76 audit)
             proof_map.require_node(self.store, node_id)
-            proof = get_current_candidate_proof(self.store, node_id)
-            if proof is None:
-                raise RequestError(HTTPStatus.CONFLICT, "NO_CANDIDATE_PROOF", f"{node_id} has no Review snapshot to check yet")
+            proof_id = body.get("candidate_proof_id")
+            if not isinstance(proof_id, str) or not proof_id:
+                raise RequestError(HTTPStatus.BAD_REQUEST, "INVALID_REQUEST", "an Evidence check names the snapshot it checked (candidate_proof_id)")
+            proof = proof_map.require_candidate_proof(self.store, proof_id)
+            if proof.node_id != node_id:
+                raise RequestError(HTTPStatus.BAD_REQUEST, "NOT_THIS_NODE", f"snapshot {proof_id} is a Candidate proof of {proof.node_id}, not of {node_id}")
             check = proof_map.record_evidence_check(
                 self.store, proof.id, str(body.get("outcome") or ""), notes=str(body.get("notes") or ""), run_by=str(body.get("run_by") or actor)
             )
@@ -288,6 +292,8 @@ class ReviewApp:
                 {
                     "node_id": dependency_id,
                     "statement": dependency.statement if dependency else None,
+                    # where the dependency opens: a studio, or an imported result's own page
+                    "kind": dependency.kind.value if dependency else None,
                     "pin": pin.model_dump(mode="json") if pin else None,
                     # the pin lag a Lightweight re-review is about (#23/#24)
                     "accepted_version": proof_map.get_accepted_version(store, dependency_id),
