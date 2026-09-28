@@ -20,12 +20,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
-import shutil
-import subprocess
-import tempfile
-import time
-from pathlib import Path
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
@@ -38,14 +32,8 @@ from ..domain import ProofMapNodeKind
 from ..reviews import git_identity
 from ..storage import ProjectStore, get_active_claim, get_current_candidate_proof, read_project_instance_id, read_state
 from ..vault import build_pdf_path, node_folder
+from .studios import StudioHub
 
-PRISM_LOCAL_ENV_VAR = "PROOF_CLI_PRISM_LOCAL"
-_PRISM_START_SECONDS = 10
-
-
-def prism_local_command() -> str | None:
-    """The prism-local executable: `$PROOF_CLI_PRISM_LOCAL`, else `prism-local` on PATH (ADR-0010 point 5)."""
-    return os.environ.get(PRISM_LOCAL_ENV_VAR) or shutil.which("prism-local")
 
 RP_ID = "localhost"
 _ORIGIN_PORT_BASE = 20000
@@ -136,6 +124,11 @@ class ReviewApp:
     def __init__(self, store: ProjectStore) -> None:
         self.store = store
         self.origin = project_origin(store)
+        self.studios = StudioHub(store)  # each local node's LaTeX studio (ADR-0011)
+
+    def close(self) -> None:
+        """Stop what the node studios still run: a build, an agent turn."""
+        self.studios.close()
 
     # -- reads -------------------------------------------------------------------
 
@@ -179,7 +172,7 @@ class ReviewApp:
         return {"nodes": nodes}
 
     def _pdfs(self, node_id: str, proof) -> dict:
-        """The compiled PDFs a reader can open: the one archived with the snapshot, and prism-local's current build."""
+        """The compiled PDFs a reader can open: the one archived with the snapshot, and the studio's current build."""
         snapshot_pdf = (self.store.root / proof.file_path).with_suffix(".pdf") if proof is not None else None
         return {
             "snapshot": snapshot_pdf is not None and snapshot_pdf.is_file(),
@@ -197,40 +190,71 @@ class ReviewApp:
             raise RequestError(HTTPStatus.NOT_FOUND, "NO_PDF", f"no {which} PDF for {node_id}")
         return path.read_bytes()
 
-    def open_in_prism(self, node_id: str) -> dict:
-        """Open the node's folder in prism-local, if it's configured; always say which folder it is."""
-        node = proof_map.require_node(self.store, node_id)
-        folder = node_folder(self.store.root, node.id)
-        command = prism_local_command()
-        if node.kind == ProofMapNodeKind.imported_result or not folder.is_dir():
-            raise RequestError(HTTPStatus.NOT_FOUND, "NO_PROOF_FOLDER", f"{node_id} has no proof folder to open")
-        if command is None:
-            return {"opened": False, "folder": str(folder), "hint": f"set {PRISM_LOCAL_ENV_VAR} or put prism-local on PATH"}
-        # a free port, so a prism-local already running for another node never collides; it
-        # exits a little after its last page closes, and says where it listens once it does
-        with tempfile.TemporaryDirectory() as scratch:
-            ready = Path(scratch) / "ready.json"
-            process = subprocess.Popen(
-                [command, str(folder), "--port", "0", "--exit-when-idle", "--ready-file", str(ready)],
-                cwd=str(folder),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-                start_new_session=True,
+    # -- the node panel and the map's own writes (ADR-0011, #70) -----------------------
+    # The agent-reachable operations of ADR-0006, from the page, as its git identity: the
+    # same service functions the CLI calls, with the same effects and refusals.
+
+    def _actor(self) -> str:
+        return git_identity(self.store.root)
+
+    @staticmethod
+    def page_of(node) -> str:
+        """Where a node opens: a local node's studio, an imported result's own page."""
+        if node.kind == ProofMapNodeKind.imported_result:
+            return f"/#/node/{node.id}"
+        return f"/studio/{node.id}/"
+
+    def create_node(self, body: dict) -> dict:
+        """A node from the map: the first of an empty map, a local node, an imported result or the corrected source replacing one."""
+        node_id, kind, statement = body.get("node_id"), body.get("kind"), body.get("statement")
+        if not all(isinstance(value, str) and value.strip() for value in (node_id, kind, statement)):
+            raise RequestError(HTTPStatus.BAD_REQUEST, "INVALID_REQUEST", "a node needs node_id, kind and statement")
+        texts = lambda key: [str(item) for item in body.get(key) or [] if str(item).strip()]  # noqa: E731
+        node = proof_map.create_node(
+            self.store,
+            node_id=node_id.strip(),
+            kind=kind,
+            statement=statement,
+            display_label=str(body.get("display_label") or ""),
+            assumptions=texts("assumptions"),
+            dependencies=texts("dependencies"),
+            created_by=self._actor(),
+            source_locator=body.get("source_locator") or None,
+            source_version=body.get("source_version") or None,
+            trust_level=body.get("trust_level") or None,
+        )
+        return {**node.model_dump(mode="json"), "page": self.page_of(node)}
+
+    def node_action(self, node_id: str, action: str, body: dict) -> dict:
+        actor = self._actor()
+        if action == "claim":
+            return proof_map.claim_node(self.store, node_id, claimant_id=actor, reassign=bool(body.get("reassign"))).model_dump(mode="json")
+        if action == "unassign":
+            return proof_map.release_node(self.store, node_id, claimant_id=actor, reason=body.get("reason") or None).model_dump(mode="json")
+        if action == "split":
+            children = body.get("children")
+            if not isinstance(children, list) or not all(isinstance(c, dict) and c.get("id") and c.get("statement") for c in children):
+                raise RequestError(HTTPStatus.BAD_REQUEST, "INVALID_CHILD_SPEC", "each child needs an id and a statement")
+            made = proof_map.split_node(self.store, node_id, children, created_by=actor, reassign=bool(body.get("reassign")))
+            return {"children": [child.model_dump(mode="json") for child in made], "next": self.page_of(made[0]) if made else None}
+        if action == "request-review":
+            return proof_map.request_review(self.store, node_id, requested_by=actor, rationale=str(body.get("rationale") or "")).model_dump(mode="json")
+        if action == "challenge":
+            return proof_map.open_challenge(self.store, node_id, opened_by=actor, rationale=str(body.get("rationale") or "")).model_dump(mode="json")
+        if action == "evidence":
+            # recorded on the snapshot the check was run on, named by the page, never the newest by default (PR #76 audit)
+            proof_map.require_node(self.store, node_id)
+            proof_id = body.get("candidate_proof_id")
+            if not isinstance(proof_id, str) or not proof_id:
+                raise RequestError(HTTPStatus.BAD_REQUEST, "INVALID_REQUEST", "an Evidence check names the snapshot it checked (candidate_proof_id)")
+            proof = proof_map.require_candidate_proof(self.store, proof_id)
+            if proof.node_id != node_id:
+                raise RequestError(HTTPStatus.BAD_REQUEST, "NOT_THIS_NODE", f"snapshot {proof_id} is a Candidate proof of {proof.node_id}, not of {node_id}")
+            check = proof_map.record_evidence_check(
+                self.store, proof.id, str(body.get("outcome") or ""), notes=str(body.get("notes") or ""), run_by=str(body.get("run_by") or actor)
             )
-            deadline = time.monotonic() + _PRISM_START_SECONDS
-            while time.monotonic() < deadline:
-                if ready.is_file():
-                    try:
-                        started = json.loads(ready.read_text())
-                    except ValueError:
-                        started = None
-                    if isinstance(started, dict):
-                        return {"opened": True, "folder": str(folder), "command": command, "url": started.get("url")}
-                if process.poll() is not None:
-                    error = (process.stderr.read() or b"").decode("utf-8", errors="replace").strip()
-                    return {"opened": False, "folder": str(folder), "command": command, "error": error or f"prism-local exited with code {process.returncode}"}
-                time.sleep(0.05)
-        return {"opened": False, "folder": str(folder), "command": command, "error": "prism-local didn't report ready in time"}
+            return check.model_dump(mode="json")
+        raise RequestError(HTTPStatus.NOT_FOUND, "NOT_FOUND", f"no node action {action!r}")
 
     def _pending(self) -> list[dict]:
         pending = []
@@ -268,6 +292,8 @@ class ReviewApp:
                 {
                     "node_id": dependency_id,
                     "statement": dependency.statement if dependency else None,
+                    # where the dependency opens: a studio, or an imported result's own page
+                    "kind": dependency.kind.value if dependency else None,
                     "pin": pin.model_dump(mode="json") if pin else None,
                     # the pin lag a Lightweight re-review is about (#23/#24)
                     "accepted_version": proof_map.get_accepted_version(store, dependency_id),
@@ -291,6 +317,13 @@ class ReviewApp:
             "integrity_state": proof_map.get_integrity_state(store, node_id),
             "candidate_proof": _proof_view(store, proof),
             "folder": str(node_folder(store.root, node_id)) if node.kind != ProofMapNodeKind.imported_result else None,
+            # where the node is worked on: a local node's studio (ADR-0011), or nothing for an imported result
+            "studio": self.page_of(node) if node.kind != ProofMapNodeKind.imported_result else None,
+            "source": (
+                {"locator": node.source_locator, "version": node.source_version, "trust_level": node.trust_level.value if node.trust_level else None}
+                if node.kind == ProofMapNodeKind.imported_result else None
+            ),
+            "dependents": sorted(other.id for other in proof_map.list_nodes(store) if node_id in other.dependencies),
             "pdfs": self._pdfs(node_id, proof),
             "evidence_checks": checks,
             "dependencies": dependencies,
@@ -350,8 +383,10 @@ class _Handler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: Any) -> None:  # keep the terminal quiet
         return
 
-    def _send(self, status: HTTPStatus, body: bytes, content_type: str, *, policy: bool = True) -> None:
+    def _send(self, status: HTTPStatus, body: bytes, content_type: str, *, policy: bool | str = True, location: str | None = None) -> None:
         self.send_response(status)
+        if location is not None:
+            self.send_header("Location", location)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
@@ -360,7 +395,8 @@ class _Handler(BaseHTTPRequestHandler):
         if policy:  # a PDF goes to the browser's own viewer, which a page policy can break
             self.send_header(
                 "Content-Security-Policy",
-                "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-ancestors 'none'",
+                policy if isinstance(policy, str)
+                else "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-ancestors 'none'",
             )
         self.end_headers()
         self.wfile.write(body)
@@ -376,6 +412,17 @@ class _Handler(BaseHTTPRequestHandler):
         # won't match; this also refuses DNS-rebinding hosts
         return self.headers.get("Host") == urlsplit(self.app.origin).netloc
 
+    def _cross_site(self) -> bool:
+        """The browser says another site sent this: a fetch metadata header, or a foreign Origin."""
+        site = self.headers.get("Sec-Fetch-Site")
+        origin = self.headers.get("Origin")
+        return (site is not None and site not in ("same-origin", "none")) or (origin is not None and origin != self.app.origin)
+
+    def _studio(self, method: str, body: dict | None = None) -> None:
+        parts = urlsplit(self.path)
+        answer = self.app.studios.request(method, parts.path, parts.query, body, cross_site=self._cross_site())
+        self._send(HTTPStatus(answer.status), answer.body, answer.content_type, policy=answer.policy or False, location=answer.location)
+
     def _guarded(self, action: Callable[[], Any]) -> None:
         try:
             self._json(HTTPStatus.OK, {"ok": True, "data": action()})
@@ -390,6 +437,8 @@ class _Handler(BaseHTTPRequestHandler):
         if not self._host_ok():
             return self._error(HTTPStatus.MISDIRECTED_REQUEST, "WRONG_HOST", f"open this app at {self.app.origin}")
         path = urlsplit(self.path).path
+        if path.startswith("/studio/"):
+            return self._studio("GET")
         if path in ("/", "/index.html"):
             return self._static("index.html")
         if path.startswith("/static/"):
@@ -435,14 +484,17 @@ class _Handler(BaseHTTPRequestHandler):
             return self._error(HTTPStatus.BAD_REQUEST, "MALFORMED_JSON", "the request body isn't JSON")
         if not isinstance(body, dict):
             return self._error(HTTPStatus.BAD_REQUEST, "MALFORMED_JSON", "the request body must be a JSON object")
+        path = urlsplit(self.path).path
+        if path.startswith("/studio/"):
+            return self._studio("POST", body)
         routes: dict[str, Callable[[], Any]] = {
             "/api/decide": lambda: self.app.decide(body),
+            "/api/nodes": lambda: self.app.create_node(body),
         }
-        path = urlsplit(self.path).path
         route = routes.get(path)
-        if route is None and path.startswith("/api/node/") and path.endswith("/open"):
-            node_id = unquote(path.removeprefix("/api/node/").removesuffix("/open"))
-            route = lambda: self.app.open_in_prism(node_id)
+        if route is None and path.startswith("/api/node/"):  # the node panel: /api/node/<id>/<action>
+            node_id, _, action = path.removeprefix("/api/node/").rpartition("/")
+            route = lambda: self.app.node_action(unquote(node_id), action, body)
         if route is None:
             return self._error(HTTPStatus.NOT_FOUND, "NOT_FOUND", self.path)
         self._guarded(route)
@@ -469,6 +521,10 @@ class ReviewServer(ThreadingHTTPServer):
     @property
     def url(self) -> str:
         return self.app.origin
+
+    def server_close(self) -> None:
+        super().server_close()
+        self.app.close()
 
 
 def serve(store: ProjectStore) -> ReviewServer:
