@@ -76,4 +76,7 @@ ERROR_CODES: dict[str, str] = {
     "MALFORMED_DECISION": "a decision in the request isn't a well-formed object",
     "NO_PDF": "that PDF doesn't exist",
     "NO_PROOF_FOLDER": "the node has no proof folder",
+    "INVALID_REQUEST": "the page's request is missing what the action needs (a node id, which snapshot, …)",
+    "NOT_FOUND": "no such page route or node action",
+    "NOT_THIS_NODE": "the snapshot named belongs to another node",
 }
