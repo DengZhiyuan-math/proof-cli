@@ -26,6 +26,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError
 
+from .vault import SNAPSHOT_MANIFEST, archived_pdf_path, snapshot_folder_digest
 from .reviews import (
     DECISION_ROWS,
     DecisionKind,
@@ -91,11 +92,15 @@ def human_review_required(kind: DecisionKind | str, target_id: str) -> Authority
 
 
 def candidate_proof_sha256(store: ProjectStore, candidate_proof_id: str) -> str | None:
-    """SHA-256 of a Candidate proof's file (a Review snapshot) as it is on disk now, or None if it's missing."""
+    """SHA-256 of a Candidate proof (a Review snapshot) as it is on disk now, or None if it's missing:
+    a folder snapshot's manifest digest recomputed from its stored files (ADR-0011), an old
+    single-file snapshot's file."""
     record = get_candidate_proof(store, candidate_proof_id)
     if record is None:
         return None
     path = store.root / record.file_path
+    if path.name == SNAPSHOT_MANIFEST:
+        return snapshot_folder_digest(path.parent)
     return hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else None
 
 
@@ -265,7 +270,8 @@ def record_decision(
         proof = get_candidate_proof(store, payload.candidate_proof_id)
         if proof is not None:
             snapshot = store.root / proof.file_path
-            paths += [snapshot, snapshot.with_suffix(".pdf")]  # the PDF only if one was archived
+            frozen = snapshot.parent if snapshot.name == SNAPSHOT_MANIFEST else snapshot  # a folder snapshot, or an old file
+            paths += [frozen, archived_pdf_path(store.root, proof.node_id, proof.version)]  # the PDF only if one was archived
     message = f"review: {kind.value} {payload.decision} on {object_id}\n\n{rationale}".rstrip()
 
     def _write() -> None:

@@ -444,8 +444,8 @@ def test_second_submission_creates_v2_alongside_untouched_v1(tmp_path: Path):
     assert first.version == 1
     assert second.version == 2
 
-    v1_path = tmp_path / first.file_path
-    v2_path = tmp_path / second.file_path
+    v1_path = (tmp_path / first.file_path).parent / "proof.tex"  # a folder snapshot's proof.tex (ADR-0011)
+    v2_path = (tmp_path / second.file_path).parent / "proof.tex"
     assert v1_path.exists() and v2_path.exists()
     assert "v1 attempt" in v1_path.read_text(encoding="utf-8")
     assert "v2 attempt" in v2_path.read_text(encoding="utf-8")
