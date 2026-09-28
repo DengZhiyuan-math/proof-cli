@@ -105,12 +105,29 @@ def _decide(
     reviewer: str | None,
     rationale: str,
     dependency_id: str | None = None,
+    viewed_binding: str | None = None,
 ) -> _Decision:
-    """Bind the decision to what it's made on as of now; called on the operation's write transaction."""
+    """Bind the decision to what it's made on as of now; called on the operation's write transaction.
+
+    `viewed_binding`: the `binding_digest` of what the page showed. If the
+    decision would now bind anything else — another snapshot, interface,
+    dependency pins, Challenges, dependents — it is refused (STALE_VIEW),
+    still inside the transaction, so nothing can change in between.
+    """
     payload = build_decision_payload(
         store, kind, target_id, decision, rationale=rationale, **decision_binding(store, kind, target_id, dependency_id=dependency_id)
     )
+    if viewed_binding is not None and viewed_binding != binding_digest(payload):
+        raise ProofMapError(
+            "STALE_VIEW", f"what this decision on {target_id} is made on changed since you viewed it; reload and read it again"
+        )
     return _Decision(payload=payload, reviewer_id=reviewer or git_identity(store.root))
+
+
+def binding_digest(payload: DecisionPayload) -> str:
+    """A digest of everything a decision is bound to (never its rationale): what a page shows, and sends back."""
+    bound = payload.model_dump(mode="json", exclude={"rationale"})
+    return hashlib.sha256(json.dumps(bound, sort_keys=True).encode("utf-8")).hexdigest()
 
 
 def _node_folder(store: ProjectStore, object_type: str, object_id: str) -> str:
@@ -725,7 +742,7 @@ def decide_evidence_review(
     evidence_check_id: str,
     decision: EvidenceTrustDecision | str,
     *,
-    reviewer: str | None = None, rationale: str = "",
+    reviewer: str | None = None, rationale: str = "", viewed_binding: str | None = None,
 ) -> ReviewRecord:
     """Human Review's trust judgment on an Evidence check itself.
 
@@ -748,7 +765,7 @@ def decide_evidence_review(
 
     governance_state = _EVIDENCE_DECISION_TO_GOVERNANCE_STATE[resolved_decision]
     with store.transaction() as conn:
-        decided = _decide(store, kind=DecisionKind.evidence_review, target_id=evidence_check_id, decision=resolved_decision.value, reviewer=reviewer, rationale=rationale)
+        decided = _decide(store, kind=DecisionKind.evidence_review, target_id=evidence_check_id, decision=resolved_decision.value, reviewer=reviewer, rationale=rationale, viewed_binding=viewed_binding)
         record = _record(store, decided, _EVIDENCE_CHECK_OBJECT_TYPE, evidence_check_id, governance_state)
         append_event(
             store,
@@ -978,7 +995,7 @@ def decide_acceptance(
     node_id: str,
     decision: AcceptanceDecision | str,
     *,
-    reviewer: str | None = None, rationale: str = "",
+    reviewer: str | None = None, rationale: str = "", viewed_binding: str | None = None,
 ) -> ReviewRecord:
     """Record a Human Review acceptance decision for a local node.
 
@@ -1018,7 +1035,7 @@ def decide_acceptance(
         # checked on the write lock, so no concurrent decision or submission
         # can land between the check and the write
         _require_awaiting_acceptance_review(store, node_id)
-        decided = _decide(store, kind=DecisionKind.acceptance, target_id=node_id, decision=resolved_decision.value, reviewer=reviewer, rationale=rationale)
+        decided = _decide(store, kind=DecisionKind.acceptance, target_id=node_id, decision=resolved_decision.value, reviewer=reviewer, rationale=rationale, viewed_binding=viewed_binding)
         current_proof = get_current_candidate_proof(store, node_id)
         record = _record(store, decided, _ACCEPTANCE_OBJECT_TYPE, node_id, governance_state)
         if current_proof is not None:
@@ -1157,13 +1174,16 @@ def apply_decision(
     reviewer: str | None = None,
     rationale: str = "",
     dependency_id: str | None = None,
+    viewed_binding: str | None = None,
 ) -> Any:
-    """Make one Human Review decision by kind: the proof map page's single entry point (ADR-0010)."""
+    """Make one Human Review decision by kind: the proof map page's single entry point (ADR-0010).
+
+    `viewed_binding`: what the page showed (`binding_digest`); see `_decide`."""
     try:
         resolved_kind = DecisionKind(kind)
     except ValueError as exc:
         raise ProofMapError("INVALID_DECISION_KIND", f"'{kind}' is not a decision kind") from exc
-    who = {"reviewer": reviewer, "rationale": rationale}
+    who = {"reviewer": reviewer, "rationale": rationale, "viewed_binding": viewed_binding}
     if resolved_kind == DecisionKind.acceptance:
         return decide_acceptance(store, target_id, decision, **who)
     if resolved_kind == DecisionKind.reference_review:
@@ -1282,7 +1302,9 @@ def get_acceptance_state(store: ProjectStore, node_id: str) -> str:
     return _acceptance(store, require_node(store, node_id))[0]
 
 
-def promote_to_lemma(store: ProjectStore, node_id: str, *, reviewer: str | None = None, rationale: str = "") -> ProofMapNode:
+def promote_to_lemma(
+    store: ProjectStore, node_id: str, *, reviewer: str | None = None, rationale: str = "", viewed_binding: str | None = None
+) -> ProofMapNode:
     """Promote an Accepted Claim to a Lemma, marking it independently reusable.
 
     The researcher's explicit decision, never automatic, recorded as its
@@ -1308,7 +1330,7 @@ def promote_to_lemma(store: ProjectStore, node_id: str, *, reviewer: str | None 
         )
 
     with store.transaction() as conn:
-        decided = _decide(store, kind=DecisionKind.promote, target_id=node_id, decision="promote", reviewer=reviewer, rationale=rationale)
+        decided = _decide(store, kind=DecisionKind.promote, target_id=node_id, decision="promote", reviewer=reviewer, rationale=rationale, viewed_binding=viewed_binding)
         record = _record(store, decided, _ACCEPTANCE_OBJECT_TYPE, node_id, ReviewGovernanceState.approved)
         promoted = node.model_copy(
             update={"kind": ProofMapNodeKind.lemma, "updated_by": decided.reviewer_id, "updated_at": utc_now()}
@@ -1336,7 +1358,7 @@ def decide_reference_review(
     node_id: str,
     decision: str,
     *,
-    reviewer: str | None = None, rationale: str = "",
+    reviewer: str | None = None, rationale: str = "", viewed_binding: str | None = None,
 ) -> ReviewRecord:
     """Grant Reference review to an imported_result node (a `reference_review` decision, ADR-0010).
 
@@ -1366,7 +1388,7 @@ def decide_reference_review(
     not_callable = decision == REFERENCE_NOT_CALLABLE_DECISION
 
     with store.transaction() as conn:
-        decided = _decide(store, kind=DecisionKind.reference_review, target_id=node_id, decision=decision, reviewer=reviewer, rationale=rationale)
+        decided = _decide(store, kind=DecisionKind.reference_review, target_id=node_id, decision=decision, reviewer=reviewer, rationale=rationale, viewed_binding=viewed_binding)
         record = _record(store, decided, _ACCEPTANCE_OBJECT_TYPE, node_id, ReviewGovernanceState.rejected if not_callable else ReviewGovernanceState.approved)
         _resolve_open_challenges(
             store,
@@ -1401,7 +1423,7 @@ def migrate_dependents(
     node_id: str,
     replacement_id: str,
     *,
-    reviewer: str | None = None, rationale: str = "",
+    reviewer: str | None = None, rationale: str = "", viewed_binding: str | None = None,
 ) -> ReviewRecord:
     """Move the dependents of a no-longer-callable imported result onto its correction (#20, ADR-0005 Rule 1).
 
@@ -1415,31 +1437,33 @@ def migrate_dependents(
     (`unverifiable`, DECISION_NO_LONGER_APPLIES) and the node reads
     review-needed until the researcher re-Accepts it against the correction.
     """
-    node = require_node(store, node_id)
-    replacement = require_node(store, replacement_id)
-    if node.kind != ProofMapNodeKind.imported_result:
-        raise ProofMapError("NOT_IMPORTED_RESULT", f"{node_id} is not an imported_result; only a withdrawn citation's dependents move")
-    if replacement.kind != ProofMapNodeKind.imported_result:
-        raise ProofMapError(
-            "REPLACEMENT_NOT_IMPORTED_RESULT", f"{replacement_id} is not an imported_result; a corrected source is cited as a new one"
-        )
-    if replacement_id == node_id:
-        raise ProofMapError("SAME_NODE", f"{node_id} can't replace itself")
-    if not _no_longer_callable(store, node_id):
-        raise ProofMapError(
-            "REFERENCE_STILL_CALLABLE", f"{node_id} is still callable; its dependents move only once it is found no longer callable"
-        )
-    if _no_longer_callable(store, replacement_id):
-        raise ProofMapError("REPLACEMENT_NOT_CALLABLE", f"{replacement_id} is itself no longer callable")
-    dependents = list_migratable_dependents(store, node_id)
-    if not dependents:
-        raise ProofMapError("NO_DEPENDENTS", f"nothing that can move rests on {node_id}")
-
+    # everything — the checks, which dependents, the payload naming them, the writes — under one
+    # write lock, so a concurrent split or new dependent is neither overwritten nor misrecorded
     with store.transaction() as conn:
+        node = require_node(store, node_id)
+        replacement = require_node(store, replacement_id)
+        if node.kind != ProofMapNodeKind.imported_result:
+            raise ProofMapError("NOT_IMPORTED_RESULT", f"{node_id} is not an imported_result; only a withdrawn citation's dependents move")
+        if replacement.kind != ProofMapNodeKind.imported_result:
+            raise ProofMapError(
+                "REPLACEMENT_NOT_IMPORTED_RESULT", f"{replacement_id} is not an imported_result; a corrected source is cited as a new one"
+            )
+        if replacement_id == node_id:
+            raise ProofMapError("SAME_NODE", f"{node_id} can't replace itself")
+        if not _no_longer_callable(store, node_id):
+            raise ProofMapError(
+                "REFERENCE_STILL_CALLABLE", f"{node_id} is still callable; its dependents move only once it is found no longer callable"
+            )
+        if _no_longer_callable(store, replacement_id):
+            raise ProofMapError("REPLACEMENT_NOT_CALLABLE", f"{replacement_id} is itself no longer callable")
+        dependents = list_migratable_dependents(store, node_id)
+        if not dependents:
+            raise ProofMapError("NO_DEPENDENTS", f"nothing that can move rests on {node_id}")
+
         decided = _decide(
             store, kind=DecisionKind.dependent_migration, target_id=node_id, decision="superseded",
-            reviewer=reviewer, rationale=rationale, dependency_id=replacement_id,
-        )
+            reviewer=reviewer, rationale=rationale, dependency_id=replacement_id, viewed_binding=viewed_binding)
+        decided.payload.migrated_dependents = [dependent.id for dependent in dependents]  # the very nodes moved below
         for dependent in dependents:
             moved = list(dict.fromkeys(replacement_id if dependency == node_id else dependency for dependency in dependent.dependencies))
             update_proof_map_node(
@@ -1492,7 +1516,7 @@ def revalidate_dependency(
     node_id: str,
     target_node_id: str,
     *,
-    reviewer: str | None = None, rationale: str = "",
+    reviewer: str | None = None, rationale: str = "", viewed_binding: str | None = None,
 ) -> ReviewRecord:
     """Lightweight re-review: confirm an existing Candidate proof still holds after a dependency advanced.
 
@@ -1557,7 +1581,7 @@ def revalidate_dependency(
         pinned_fingerprint=current_fingerprint,
     )
     with store.transaction() as conn:
-        decided = _decide(store, kind=DecisionKind.dependency_revalidation, target_id=node_id, decision="reaffirmed", reviewer=reviewer, rationale=rationale, dependency_id=target_node_id)
+        decided = _decide(store, kind=DecisionKind.dependency_revalidation, target_id=node_id, decision="reaffirmed", reviewer=reviewer, rationale=rationale, dependency_id=target_node_id, viewed_binding=viewed_binding)
         upsert_dependency_pin(store, refreshed_pin, conn=conn)
         record = _record(store, decided, _ACCEPTANCE_OBJECT_TYPE, node_id, ReviewGovernanceState.reaffirmed)
         append_event(
@@ -1736,7 +1760,7 @@ def dismiss_challenge(
     store: ProjectStore,
     challenge_id: str,
     *,
-    reviewer: str | None = None, rationale: str = "",
+    reviewer: str | None = None, rationale: str = "", viewed_binding: str | None = None,
 ) -> Challenge:
     """Dismiss a Challenge — Human Review only: a `challenge_resolution` decision (ADR-0010).
 
@@ -1754,7 +1778,7 @@ def dismiss_challenge(
         # re-read on the write lock: a concurrent dismissal may have landed
         if require_challenge(store, challenge_id).status != ChallengeStatus.open:
             raise ProofMapError("CHALLENGE_NOT_OPEN", f"challenge {challenge_id} is already dismissed")
-        decided = _decide(store, kind=DecisionKind.challenge_resolution, target_id=challenge_id, decision="dismissed", reviewer=reviewer, rationale=rationale)
+        decided = _decide(store, kind=DecisionKind.challenge_resolution, target_id=challenge_id, decision="dismissed", reviewer=reviewer, rationale=rationale, viewed_binding=viewed_binding)
         record = _record(store, decided, "challenge", challenge_id, ReviewGovernanceState.dismissed)
         mark_challenge_dismissed(
             store,

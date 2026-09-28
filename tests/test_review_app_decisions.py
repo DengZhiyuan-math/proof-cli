@@ -190,7 +190,9 @@ def test_the_page_offers_moving_dependents_onto_each_usable_correction(app):
     _withdrawn_with_a_correction(store)
 
     offered = [d for d in client.get("/api/node/ref")[1]["data"]["decisions"] if d["kind"] == "dependent_migration"]
-    assert offered == [{"kind": "dependent_migration", "target_id": "ref", "decision": "superseded", "dependency_id": "ref_v2"}]
+    assert [{k: v for k, v in d.items() if k != "binding"} for d in offered] == [
+        {"kind": "dependent_migration", "target_id": "ref", "decision": "superseded", "dependency_id": "ref_v2"}
+    ]
 
     status, body = decide(client, [{**offered[0], "rationale": "erratum"}])
     assert status == 200, body
@@ -198,11 +200,107 @@ def test_the_page_offers_moving_dependents_onto_each_usable_correction(app):
     assert not [d for d in client.get("/api/node/ref")[1]["data"]["decisions"] if d["kind"] == "dependent_migration"]
 
 
+def _another_writer_first(store, monkeypatch, write):
+    """Run `write` from a second store just before `store`'s next write transaction takes the lock:
+    the window between reading the project and writing it (PR #63 audit)."""
+    from contextlib import contextmanager
+
+    from proof_cli.storage import ProjectStore
+
+    original = store.transaction
+    pending = [write]
+
+    @contextmanager
+    def interleaved():
+        if pending:
+            pending.pop()(ProjectStore(store.root))
+        with original() as conn:
+            yield conn
+
+    monkeypatch.setattr(store, "transaction", interleaved)
+
+
+def test_a_split_just_before_migration_keeps_its_new_edge(tmp_path: Path, monkeypatch):
+    from proof_cli.proof_map import split_node
+
+    store = ensure_project(tmp_path)
+    _withdrawn_with_a_correction(store)
+    _another_writer_first(store, monkeypatch, lambda other: split_node(other, "new_dep", [{"id": "child", "statement": "c"}]))
+
+    researcher(store).migrate_dependents("ref", "ref_v2")
+
+    assert get_node(store, "new_dep").dependencies == ["ref_v2", "child"]
+
+
+def test_a_dependent_added_just_before_migration_is_moved_and_recorded(tmp_path: Path, monkeypatch):
+    from proof_cli.authority import verify_decision_row
+
+    store = ensure_project(tmp_path)
+    _withdrawn_with_a_correction(store)
+    _another_writer_first(store, monkeypatch, lambda other: create_node(other, node_id="late", kind="claim", statement="l", dependencies=["ref"]))
+
+    record = researcher(store).migrate_dependents("ref", "ref_v2")
+
+    assert get_node(store, "late").dependencies == ["ref_v2"]
+    assert verify_decision_row(store, record.decision_row_id).payload.migrated_dependents == ["late", "new_dep", "uses_ref"]
+
+
+def test_a_replacement_withdrawn_just_before_migration_is_refused(tmp_path: Path, monkeypatch):
+    store = ensure_project(tmp_path)
+    _withdrawn_with_a_correction(store)
+    _another_writer_first(store, monkeypatch, lambda other: researcher(other).decide_reference_review("ref_v2", "no-longer-callable"))
+
+    with pytest.raises(ProofMapError) as refused:
+        researcher(store).migrate_dependents("ref", "ref_v2")
+
+    assert refused.value.code == "REPLACEMENT_NOT_CALLABLE"
+    assert get_node(store, "uses_ref").dependencies == ["ref"]
+
+
+def test_a_page_that_showed_the_old_dependencies_cannot_accept_the_new_ones(app):
+    """PR #63 audit: an Accept from a page opened before a migration would bind a citation it never showed."""
+    store, client = app
+    _reviewed_reference(store)
+    _accepted(store, "uses_ref", ["ref"])
+    submit_proof(store, "uses_ref", claimant_id="agent_a", scoping_rationale="revision", content="revised proof")
+    view = client.get("/api/node/uses_ref")[1]["data"]
+    accept = next(d for d in view["decisions"] if d["kind"] == "acceptance" and d["decision"] == "accept")
+    stale = {**accept, "viewed_candidate_proof_sha256": view["candidate_proof"]["sha256"], "rationale": "read against ref"}
+
+    researcher(store).decide_reference_review("ref", "no-longer-callable")
+    _reviewed_reference(store, "ref_v2")
+    researcher(store).migrate_dependents("ref", "ref_v2")
+
+    status, body = decide(client, [stale])
+    assert body["data"]["results"][0]["error"]["code"] == "STALE_VIEW", body
+    assert get_acceptance_state(store, "uses_ref") == "unverifiable"
+
+    reloaded = client.get("/api/node/uses_ref")[1]["data"]
+    fresh = next(d for d in reloaded["decisions"] if d["kind"] == "acceptance" and d["decision"] == "accept")
+    status, body = decide(client, [{**fresh, "viewed_candidate_proof_sha256": reloaded["candidate_proof"]["sha256"]}])
+    assert body["data"]["results"][0]["ok"], body
+    assert get_acceptance_state(store, "uses_ref") == "accepted"
+
+
+def test_the_pending_list_binds_each_decision_to_what_it_showed(app):
+    store, client = app
+    _reviewed_reference(store)
+    create_node(store, node_id="uses_ref", kind="claim", statement="s", dependencies=["ref"])
+    submit_proof(store, "uses_ref", claimant_id="agent_a", scoping_rationale="scoped", content="proof")
+    (item,) = [p for p in client.get("/api/state")[1]["data"]["pending"] if p["node_id"] == "uses_ref"]
+    assert set(item["bindings"]) == {"accept", "revision-requested", "reject"}
+
+    submit_proof(store, "uses_ref", claimant_id="agent_a", scoping_rationale="scoped", content="a newer proof")  # not what the row showed
+    status, body = decide(client, [{"kind": "acceptance", "target_id": "uses_ref", "decision": "accept", "binding": item["bindings"]["accept"]}])
+    assert body["data"]["results"][0]["error"]["code"] == "STALE_VIEW", body
+
+
 def test_the_app_offers_both_reference_decisions_and_stops_listing_a_withdrawn_one(app):
     store, client = app
     create_node(store, node_id="ref", kind="imported_result", statement="K", source_locator="doi:k", source_version="v1")
 
     view = client.get("/api/node/ref")[1]["data"]
+    assert all(d.pop("binding") for d in view["decisions"])  # each bound to what the page shows
     assert view["decisions"] == [
         {"kind": "reference_review", "target_id": "ref", "decision": "reference-review"},
         {"kind": "reference_review", "target_id": "ref", "decision": "no-longer-callable"},

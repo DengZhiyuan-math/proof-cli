@@ -136,7 +136,16 @@ def _available_decisions(store: ProjectStore, node, *, claim, proof, dependencie
     for challenge in challenges:
         if challenge.status.value == "open":
             offered.append({"kind": "challenge_resolution", "target_id": challenge.id, "decision": "dismissed"})
-    return offered
+    return [{**item, "binding": _binding(store, item["kind"], item["target_id"], item["decision"], item.get("dependency_id"))} for item in offered]
+
+
+def _binding(store: ProjectStore, kind: str, target_id: str, decision: str, dependency_id: str | None = None) -> str | None:
+    """What a decision offered on this page would be made on, as a digest the page sends back with it:
+    the decision is refused (STALE_VIEW) if that changed before it is recorded."""
+    try:
+        return proof_map.binding_digest(proof_map.prepare_decision(store, kind, target_id, decision, dependency_id=dependency_id))
+    except proof_map.ProofMapError:
+        return None
 
 
 class ReviewApp:
@@ -246,7 +255,16 @@ class ReviewApp:
         for node in proof_map.list_nodes(self.store):
             if node.kind == ProofMapNodeKind.imported_result:
                 if proof_map.get_reference_review_state(self.store, node.id) in ("unreviewed", "unverifiable"):
-                    pending.append({"node_id": node.id, "kind": "reference_review", "decisions": list(proof_map.REFERENCE_REVIEW_DECISIONS), "statement": node.statement})
+                    decisions = list(proof_map.REFERENCE_REVIEW_DECISIONS)
+                    pending.append(
+                        {
+                            "node_id": node.id,
+                            "kind": "reference_review",
+                            "decisions": decisions,
+                            "bindings": {d: _binding(self.store, "reference_review", node.id, d) for d in decisions},
+                            "statement": node.statement,
+                        }
+                    )
                 continue
             if proof_map.get_workflow_state(self.store, node.id) == "review-needed":
                 proof = get_current_candidate_proof(self.store, node.id)
@@ -255,6 +273,7 @@ class ReviewApp:
                         "node_id": node.id,
                         "kind": "acceptance",
                         "decisions": [decision.value for decision in proof_map.AcceptanceDecision],
+                        "bindings": {d.value: _binding(self.store, "acceptance", node.id, d.value) for d in proof_map.AcceptanceDecision},
                         "statement": node.statement,
                         "acceptance_state": proof_map.get_acceptance_state(self.store, node.id),
                         "candidate_proof": _proof_view(self.store, proof) or {"id": None, "text": "", "sha256": None},
@@ -340,6 +359,8 @@ class ReviewApp:
                     decision,
                     rationale=str(item.get("rationale") or ""),
                     dependency_id=item.get("dependency_id"),
+                    # what the page showed this decision is made on: checked on the decision's own write transaction
+                    viewed_binding=item.get("binding"),
                 )
                 results.append({"target_id": target_id, "ok": True, "result": record.model_dump(mode="json")})
             except KeyError as exc:
