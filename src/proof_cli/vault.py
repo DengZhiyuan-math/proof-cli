@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import shutil
 from pathlib import Path
 
 
@@ -33,16 +36,99 @@ def snapshot_path(root: Path, node_id: str, version: int) -> Path:
     return vault_dir(root) / node_id / "snapshots" / f"v{version}.tex"
 
 
+def snapshot_dir(root: Path, node_id: str, version: int) -> Path:
+    """A Review snapshot since ADR-0011: every input of the proof, frozen together (see `write_snapshot_folder`)."""
+    return vault_dir(root) / node_id / "snapshots" / f"v{version}"
+
+
+def archived_pdf_path(root: Path, node_id: str, version: int) -> Path:
+    """The PDF archived with snapshot v<N>, beside it, for a folder snapshot and an old single-file one alike."""
+    return vault_dir(root) / node_id / "snapshots" / f"v{version}.pdf"
+
+
 def snapshots_on_disk(root: Path, node_id: str) -> dict[int, Path]:
-    """Every version present in `snapshots/`, indexed or not: its `v<N>.tex`, or else a lone
-    `v<N>.pdf` — whose number is taken too, so no new snapshot adopts a PDF of other text."""
+    """Every version present in `snapshots/`, indexed or not: its `v<N>/` folder or `v<N>.tex`, or
+    else a lone `v<N>.pdf` — whose number is taken too, so no new snapshot adopts a PDF of other text."""
     folder = snapshot_path(root, node_id, 1).parent
     found: dict[int, Path] = {}
-    for path in sorted(folder.iterdir(), key=lambda p: p.suffix != ".tex") if folder.is_dir() else ():
+    for path in sorted(folder.iterdir(), key=lambda p: p.suffix == ".pdf") if folder.is_dir() else ():
         number = path.stem[1:]
-        if path.suffix in (".tex", ".pdf") and path.stem.startswith("v") and number.isdigit():
+        if path.stem.startswith("v") and number.isdigit() and (path.is_dir() or path.suffix in (".tex", ".pdf")):
             found.setdefault(int(number), path)
     return found
+
+
+# -- what a Review snapshot freezes (ADR-0011 point 5) --------------------------------------
+
+SNAPSHOT_MANIFEST = "manifest.json"
+# a snapshot keeps the shared preamble here: "../preamble.tex" from the node folder
+_SHARED = "_shared"
+# a node folder's own folders that are not inputs of its proof: output, frozen snapshots, the agent's scratch
+_NOT_INPUTS = {"build", "snapshots", "scratch"}
+
+
+def working_inputs(root: Path, node_id: str) -> dict[str, Path]:
+    """Every input of a node's proof, by its path from the node folder: the node's working sources
+    (not its build output, snapshots, scratch folder, reviews or hidden files) and the shared
+    preamble, as "../preamble.tex". What a snapshot freezes and what a build must be newer than."""
+    folder = node_folder(root, node_id)
+    inputs: dict[str, Path] = {}
+    for path in sorted(folder.rglob("*")) if folder.is_dir() else ():
+        rel = path.relative_to(folder)
+        if not path.is_file() or rel.parts[0] in _NOT_INPUTS or rel.name == "reviews.jsonl" or any(part.startswith(".") for part in rel.parts):
+            continue
+        inputs[rel.as_posix()] = path
+    if preamble_path(root).is_file():
+        inputs["../preamble.tex"] = preamble_path(root)
+    return inputs
+
+
+def manifest_digest(entries: dict[str, str]) -> str:
+    """The SHA-256 a snapshot is known by: of its {path: SHA-256} entries, canonically serialised."""
+    return hashlib.sha256(json.dumps(entries, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _stored(rel: str) -> str:
+    return f"{_SHARED}/{rel[3:]}" if rel.startswith("../") else rel
+
+
+def write_snapshot_folder(folder: Path, contents: dict[str, bytes]) -> dict[str, str]:
+    """Freeze `contents` ({path from the node folder: bytes}) as one Review snapshot, with its
+    manifest; the entries it records. Refuses to overwrite: a revision is a new version."""
+    if folder.exists():
+        raise FileExistsError(f"review snapshot already exists: {folder}")
+    entries = {rel: hashlib.sha256(data).hexdigest() for rel, data in contents.items()}
+    for rel, data in contents.items():
+        target = folder / _stored(rel)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+    (folder / SNAPSHOT_MANIFEST).write_text(json.dumps({"format": 1, "files": entries}, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+    return entries
+
+
+def snapshot_folder_files(folder: Path) -> dict[str, bytes]:
+    """The files a snapshot folder froze, by their path from the node folder, as stored now."""
+    manifest = json.loads((folder / SNAPSHOT_MANIFEST).read_text(encoding="utf-8"))
+    return {rel: (folder / _stored(rel)).read_bytes() for rel in manifest["files"] if (folder / _stored(rel)).is_file()}
+
+
+def snapshot_folder_digest(folder: Path) -> str | None:
+    """The snapshot's SHA-256 recomputed from the files stored now, not read from its manifest:
+    an edit to any frozen file changes it. None if the snapshot is gone or unreadable."""
+    try:
+        manifest = json.loads((folder / SNAPSHOT_MANIFEST).read_text(encoding="utf-8"))
+        entries = {rel: hashlib.sha256((folder / _stored(rel)).read_bytes()).hexdigest() for rel in manifest["files"]}
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return manifest_digest(entries)
+
+
+def remove_snapshot(path: Path) -> None:
+    """Undo a snapshot this request wrote (a folder or a file), when its transaction rolls back."""
+    if path.is_dir():
+        shutil.rmtree(path, ignore_errors=True)
+    else:
+        path.unlink(missing_ok=True)
 
 
 def build_pdf_path(root: Path, node_id: str) -> Path:
@@ -54,23 +140,14 @@ def node_folder(root: Path, node_id: str) -> Path:
     return vault_dir(root) / node_id
 
 
-_NOT_SOURCES = {"build", "snapshots"}
-
-
 def build_is_current(root: Path, node_id: str) -> bool:
-    """Whether prism-local's build/proof.pdf is at least as new as every source it may be built from:
-    the node folder's files (not its build output, snapshots or reviews) and the shared preamble."""
+    """Whether the studio's build/proof.pdf is at least as new as every input a snapshot freezes
+    (`working_inputs`): the node's working sources and the shared preamble."""
     pdf = build_pdf_path(root, node_id)
     if not pdf.is_file():
         return False
-    folder = node_folder(root, node_id)
-    sources = [preamble_path(root)] + [
-        path
-        for path in folder.rglob("*")
-        if path.is_file() and path.relative_to(folder).parts[0] not in _NOT_SOURCES and path.name != "reviews.jsonl"
-    ]
     built = pdf.stat().st_mtime
-    return all(source.stat().st_mtime <= built for source in sources if source.exists())
+    return all(source.stat().st_mtime <= built for source in working_inputs(root, node_id).values() if source.exists())
 
 
 def write_working_proof(root: Path, *, node_id: str, kind: str, statement: str) -> None:

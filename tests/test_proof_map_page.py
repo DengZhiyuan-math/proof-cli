@@ -97,7 +97,7 @@ def test_a_pdf_built_from_the_requested_text_is_archived_with_its_snapshot(tmp_p
 
     snapshot = request_review(store, "lem", requested_by="agent_a", rationale="scoped")
 
-    archived = (tmp_path / snapshot.file_path).with_suffix(".pdf")
+    archived = tmp_path / "proofs" / "lem" / "snapshots" / f"v{snapshot.version}.pdf"  # beside the frozen folder
     assert archived.read_bytes() == b"%PDF-1.5 compiled\n"
     client = DirectClient(store)
     assert client.get("/api/node/lem")[1]["data"]["pdfs"] == {"snapshot": True, "build": True}
@@ -145,7 +145,8 @@ def test_an_archived_pdf_is_committed_with_the_decision(tmp_path: Path):
     researcher(store).decide_acceptance("lem", "accept")
 
     committed = subprocess.run(["git", "-C", str(tmp_path), "show", "--name-only", "--format=", "HEAD"], capture_output=True, text=True).stdout.split()
-    assert set(committed) == {"proofs/lem/reviews.jsonl", "proofs/lem/snapshots/v1.tex", "proofs/lem/snapshots/v1.pdf"}
+    # the whole frozen snapshot (ADR-0011) and its archived PDF
+    assert set(committed) == {"proofs/lem/reviews.jsonl", "proofs/lem/snapshots/v1/manifest.json", "proofs/lem/snapshots/v1/proof.tex", "proofs/lem/snapshots/v1/_shared/preamble.tex", "proofs/lem/snapshots/v1.pdf"}
     assert (tmp_path / "proofs" / ".gitignore").read_text() == "*/build/\n"  # prism-local's build output stays out of git
 
 
