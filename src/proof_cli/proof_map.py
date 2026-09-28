@@ -70,7 +70,7 @@ from .storage import (
     update_proof_map_node,
     upsert_dependency_pin,
 )
-from .vault import build_is_current, build_pdf_path, candidate_proof_path, node_folder, snapshot_path, working_proof_path, write_candidate_proof_file, write_snapshot, write_working_proof
+from .vault import build_is_current, build_pdf_path, node_folder, snapshot_path, snapshots_on_disk, working_proof_path, write_snapshot, write_working_proof
 
 
 class ProofMapError(Exception):
@@ -545,103 +545,6 @@ def release_node(
     return claim.model_copy(update={"released_by": claimant_id, "release_reason": release_reason, "released_at": released_at})
 
 
-def submit_candidate_proof(
-    store: ProjectStore,
-    node_id: str,
-    *,
-    claimant_id: str,
-    session_id: str,
-    scoping_rationale: str,
-    content: str,
-) -> CandidateProofRecord:
-    """Submit a Candidate proof as an ADR-0003 Markdown file (superseded by `request_review`).
-
-    Needs no claim (ADR-0010); a node someone else has claimed is theirs to
-    submit, and a submission ends the submitter's own claim. Writes an
-    immutable, versioned Markdown file to the Proof vault, indexed by a
-    stable id independent of its file path.
-    """
-    node = require_node(store, node_id)
-
-    if node.kind == ProofMapNodeKind.imported_result:
-        raise ProofMapError(
-            "IMMUTABLE_NODE",
-            f"imported_result node {node_id} is immutable and has no candidate proof to submit; "
-            "use Reference review instead",
-        )
-
-    if not scoping_rationale.strip():
-        raise ProofMapError(
-            "SCOPING_RATIONALE_REQUIRED",
-            "submitting a candidate proof requires stating why this node is now appropriately "
-            "scoped to prove directly",
-        )
-
-    # a claim never gates writing (ADR-0010); a node someone else holds is theirs to submit
-    claim = get_active_claim(store, node_id)
-    if claim is not None and claim.claimant_id != claimant_id:
-        raise _not_claimant(node_id, claim)
-
-    version = next_candidate_proof_version(store, node_id)
-    proof_id = str(uuid.uuid4())
-    submitted_at = utc_now()
-    file_path = candidate_proof_path(store.root, node_id, version)
-
-    try:
-        write_candidate_proof_file(
-            file_path,
-            id=proof_id,
-            node_id=node_id,
-            version=version,
-            submitted_by=claimant_id,
-            created_at=submitted_at.isoformat(),
-            scoping_rationale=scoping_rationale,
-            content=content,
-        )
-    except FileExistsError as exc:
-        raise ProofMapError(
-            "CANDIDATE_PROOF_VERSION_CONFLICT",
-            f"version {version} of node {node_id} is already indexed",
-        ) from exc
-
-    record = CandidateProofRecord(
-        id=proof_id,
-        node_id=node_id,
-        version=version,
-        file_path=file_path.relative_to(store.root).as_posix(),
-        is_current=True,
-        submitted_by=claimant_id,
-        scoping_rationale=scoping_rationale,
-        created_at=submitted_at,
-    )
-    try:
-        insert_candidate_proof(store, record)
-    except sqlite3.IntegrityError as exc:
-        raise ProofMapError(
-            "CANDIDATE_PROOF_VERSION_CONFLICT",
-            f"version {version} of node {node_id} is already indexed",
-        ) from exc
-
-    pin_dependencies(store, node)
-
-    if claim is not None:
-        mark_claim_released(store, claim.id, released_by=claimant_id, reason="candidate proof submitted", released_at=utc_now())
-
-    append_event(
-        store,
-        "proof_map_candidate_proof_submitted",
-        f"submitted candidate proof v{version} for {node_id}",
-        entity_id=node_id,
-        payload={
-            "candidate_proof_id": proof_id,
-            "version": version,
-            "file_path": record.file_path,
-            "submitted_by": claimant_id,
-        },
-    )
-    return record
-
-
 def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rationale: str) -> CandidateProofRecord:
     """Snapshot a node's working `proof.tex` for review (ADR-0010).
 
@@ -661,55 +564,69 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
             "SCOPING_RATIONALE_REQUIRED",
             "requesting review requires stating why this node is now appropriately scoped to prove directly",
         )
-    claim = get_active_claim(store, node_id)
-    if claim is not None and claim.claimant_id != requested_by:  # as for submit: a node someone holds is theirs to hand over
-        raise _not_claimant(node_id, claim)
     working = working_proof_path(store.root, node_id)
     if not working.is_file():
         raise ProofMapError("WORKING_PROOF_MISSING", f"{working.relative_to(store.root).as_posix()} doesn't exist")
     content = working.read_bytes()
     sha256 = hashlib.sha256(content).hexdigest()
-    current = get_current_candidate_proof(store, node_id)
-    if current is not None and current.sha256 == sha256:
-        raise ProofMapError(
-            "WORKING_PROOF_UNCHANGED",
-            f"{node_id}'s working proof is unchanged since snapshot v{current.version}, which is already the one under review",
-        )
 
-    version = next_candidate_proof_version(store, node_id)
-    path = snapshot_path(store.root, node_id, version)
-    try:
+    # The holder check and every write are one SQLite write transaction (#18): a reassignment
+    # can't slip in between them, it waits for this to commit. The files written go if it rolls
+    # back, before its write lock does, so no later request can have taken their version yet.
+    with store.transaction() as conn:
+        claim = get_active_claim(store, node_id, conn=conn)
+        if claim is not None and claim.claimant_id != requested_by:  # a node someone holds is theirs to hand over
+            raise _not_claimant(node_id, claim)
+        current = get_current_candidate_proof(store, node_id, conn=conn)
+        if current is not None and current.sha256 == sha256:
+            raise ProofMapError(
+                "WORKING_PROOF_UNCHANGED",
+                f"{node_id}'s working proof is unchanged since snapshot v{current.version}, which is already the one under review",
+            )
+
+        # past any snapshot already on disk too: one the index never got is an orphan, reported
+        # by list_integrity_warnings, and never overwritten
+        version = max([next_candidate_proof_version(store, node_id, conn=conn), *(n + 1 for n in snapshots_on_disk(store.root, node_id))])
+        path = snapshot_path(store.root, node_id, version)
+        # listed before writing, so a write that fails partway still goes; and only if absent
+        # now, under the write lock, so a rollback never removes a file this request didn't write
+        ours = [p for p in (path, path.with_suffix(".pdf")) if not p.exists()]
+        on_rollback(store, lambda: _remove_files(ours))
         write_snapshot(path, content)
-    except FileExistsError as exc:
-        raise ProofMapError("CANDIDATE_PROOF_VERSION_CONFLICT", f"snapshot v{version} of node {node_id} already exists") from exc
-    if build_is_current(store.root, node_id):
-        # a PDF compiled from this very text, preamble included (prism-local's build): archived beside the snapshot
-        shutil.copyfile(build_pdf_path(store.root, node_id), path.with_suffix(".pdf"))
-    record = CandidateProofRecord(
-        id=str(uuid.uuid4()),
-        node_id=node_id,
-        version=version,
-        file_path=path.relative_to(store.root).as_posix(),
-        submitted_by=requested_by,
-        scoping_rationale=rationale,
-        sha256=sha256,
-    )
-    try:
-        insert_candidate_proof(store, record)
-    except sqlite3.IntegrityError as exc:
-        raise ProofMapError("CANDIDATE_PROOF_VERSION_CONFLICT", f"version {version} of node {node_id} is already indexed") from exc
+        if build_is_current(store.root, node_id):
+            # a PDF compiled from this very text, preamble included (prism-local's build): archived beside the snapshot
+            shutil.copyfile(build_pdf_path(store.root, node_id), path.with_suffix(".pdf"))
+        record = CandidateProofRecord(
+            id=str(uuid.uuid4()),
+            node_id=node_id,
+            version=version,
+            file_path=path.relative_to(store.root).as_posix(),
+            submitted_by=requested_by,
+            scoping_rationale=rationale,
+            sha256=sha256,
+        )
+        try:
+            insert_candidate_proof(store, record, conn=conn)
+        except sqlite3.IntegrityError as exc:
+            raise ProofMapError("CANDIDATE_PROOF_VERSION_CONFLICT", f"version {version} of node {node_id} is already indexed") from exc
 
-    pin_dependencies(store, node)
-    if claim is not None:
-        mark_claim_released(store, claim.id, released_by=requested_by, reason="review requested", released_at=utc_now())
-    append_event(
-        store,
-        "proof_map_review_requested",
-        f"snapshot v{version} of {node_id} requested for review",
-        entity_id=node_id,
-        payload={"candidate_proof_id": record.id, "version": version, "file_path": record.file_path, "sha256": sha256, "requested_by": requested_by},
-    )
+        pin_dependencies(store, node)
+        if claim is not None:
+            mark_claim_released(store, claim.id, released_by=requested_by, reason="review requested", released_at=utc_now(), conn=conn)
+        append_event(
+            store,
+            "proof_map_review_requested",
+            f"snapshot v{version} of {node_id} requested for review",
+            entity_id=node_id,
+            payload={"candidate_proof_id": record.id, "version": version, "file_path": record.file_path, "sha256": sha256, "requested_by": requested_by},
+            conn=conn,
+        )
     return record
+
+
+def _remove_files(paths: list[Path]) -> None:
+    for path in paths:
+        path.unlink(missing_ok=True)
 
 
 def get_candidate_proof(store: ProjectStore, candidate_proof_id: str) -> CandidateProofRecord | None:
@@ -1963,12 +1880,24 @@ def list_integrity_warnings(store: ProjectStore) -> list[AuthorityWarning]:
     The authority layer's own findings (unreadable lines, unconfirmed
     pre-ADR-0010 decisions, decisions git doesn't have yet) plus what only
     the proof map can see: a recorded Acceptance that no longer describes
-    its node.
+    its node, and a Review snapshot on disk the index never recorded (an orphan
+    of a crashed `request_review`, #18).
     """
     warnings = list_authority_warnings(store)
     for node in list_nodes(store):
         if node.kind == ProofMapNodeKind.imported_result:
             continue
+        indexed = {proof.file_path for proof in list_candidate_proofs_for_node(store, node.id)}
+        for _, path in sorted(snapshots_on_disk(store.root, node.id).items()):
+            file_path = path.relative_to(store.root).as_posix()
+            if file_path not in indexed:
+                warnings.append(
+                    AuthorityWarning(
+                        code="ORPHAN_SNAPSHOT",
+                        message=f"{file_path} was never indexed as a Candidate proof of {node.id}; review skips past it",
+                        details={"node_id": node.id, "file_path": file_path},
+                    )
+                )
         state, latest, problem = _acceptance(store, node)
         if state == "unverifiable" and latest is not None and latest.verdict.status == "verified":
             warnings.append(

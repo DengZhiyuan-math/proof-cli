@@ -515,7 +515,8 @@ def test_phase_four_cli_paths_cover_formal_bridge_workflows(tmp_path: Path):
     )
     assert result.exit_code == 0
     assert "Result:" in result.stdout
-    assert "machine_checked" in result.stdout
+    assert "machine_checked" not in result.stdout  # no backend ran (#27)
+    assert "no backend ran" in result.stdout
 
     # `verify accept`/`verify reject` were removed (issue #27): an Evidence
     # check outcome must never be able to flip acceptance state, and these
@@ -528,7 +529,7 @@ def test_phase_four_cli_paths_cover_formal_bridge_workflows(tmp_path: Path):
 
     result = runner.invoke(app, ["verify", "result", theorem_id, "--root", str(tmp_path)])
     assert result.exit_code == 0
-    assert "machine_checked" in result.stdout
+    assert "queued_for_verification" in result.stdout
 
     result = runner.invoke(app, ["trace", "machine-check", theorem_id, "--root", str(tmp_path)])
     assert result.exit_code == 0

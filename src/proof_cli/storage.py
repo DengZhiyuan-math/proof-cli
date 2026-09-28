@@ -1133,8 +1133,9 @@ def _row_to_candidate_proof(row: sqlite3.Row) -> CandidateProofRecord:
     )
 
 
-def next_candidate_proof_version(store: ProjectStore, node_id: str) -> int:
-    with store.connect() as conn:
+def next_candidate_proof_version(store: ProjectStore, node_id: str, *, conn: sqlite3.Connection | None = None) -> int:
+    """One past the highest indexed version; see `request_review` for files on disk the index doesn't know."""
+    with _reading(store, conn) as conn:
         row = conn.execute(
             "SELECT COALESCE(MAX(version), 0) AS max_version FROM candidate_proofs WHERE node_id = ?",
             (node_id,),
@@ -1142,16 +1143,17 @@ def next_candidate_proof_version(store: ProjectStore, node_id: str) -> int:
     return int(row["max_version"]) + 1
 
 
-def insert_candidate_proof(store: ProjectStore, record: CandidateProofRecord) -> CandidateProofRecord:
+def insert_candidate_proof(
+    store: ProjectStore, record: CandidateProofRecord, *, conn: sqlite3.Connection | None = None
+) -> CandidateProofRecord:
     """Index a new candidate proof, marking every prior version of this node not-current.
 
     The unique index on (node_id, version) is the real guarantee against two
-    submissions racing onto the same version number; `submit_candidate_proof`
-    is the only caller, and it's already gated by claim exclusivity, but the
-    constraint means a double-submit fails loudly instead of corrupting the
-    index.
+    requests racing onto the same version number; `request_review` already
+    takes the version inside its own write transaction, but the constraint
+    means a double insert fails loudly instead of corrupting the index.
     """
-    with store.connect() as conn:
+    with _writing(store, conn) as conn:
         conn.execute("UPDATE candidate_proofs SET is_current = 0 WHERE node_id = ?", (record.node_id,))
         conn.execute(
             """
@@ -1172,7 +1174,6 @@ def insert_candidate_proof(store: ProjectStore, record: CandidateProofRecord) ->
                 record.created_at.isoformat(),
             ),
         )
-        conn.commit()
     return record
 
 
@@ -1214,8 +1215,10 @@ def list_candidate_proofs_for_node(store: ProjectStore, node_id: str) -> list[Ca
     return [_row_to_candidate_proof(row) for row in rows]
 
 
-def get_current_candidate_proof(store: ProjectStore, node_id: str) -> CandidateProofRecord | None:
-    with store.connect() as conn:
+def get_current_candidate_proof(
+    store: ProjectStore, node_id: str, *, conn: sqlite3.Connection | None = None
+) -> CandidateProofRecord | None:
+    with _reading(store, conn) as conn:
         row = conn.execute(
             "SELECT * FROM candidate_proofs WHERE node_id = ? AND is_current = 1 LIMIT 1",
             (node_id,),
