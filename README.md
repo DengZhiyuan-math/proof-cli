@@ -25,7 +25,7 @@ proof codex doctor
 
 ## Writing a proof
 
-Each local proof map node has a standalone LaTeX document, `proofs/<id>/proof.tex`, created with the node. It `\input`s the project's shared `proofs/preamble.tex` and compiles on its own. Agents and the researcher edit it directly. The folder `proofs/<id>/` is an ordinary LaTeX project, which [prism-local](https://github.com/DengZhiyuan-math/Local-Ai-agent-for-latex) or any editor can open. When the proof is ready:
+Each local proof map node has a standalone LaTeX document, `proofs/<id>/proof.tex`, created with the node. It `\input`s the project's shared `proofs/preamble.tex` and compiles on its own. The researcher edits it in the node's studio on the proof map page (below); agents edit it directly. The folder `proofs/<id>/` is still an ordinary LaTeX project that any editor can open. When the proof is ready, request review from the studio's node panel, or:
 
 ```bash
 proof node request-review <id> --rationale "why it is scoped to prove directly"
@@ -37,10 +37,12 @@ This copies the working file to an immutable snapshot, `proofs/<id>/snapshots/v<
 
 `proof map open` starts the project's local page, bound to 127.0.0.1, and opens it:
 - **The map** is a DAG of every node, with a tree view rooted at any node. Frontier nodes (open, unblocked, unclaimed) are outlined as *ready to claim*. Each node shows its acceptance, workflow and integrity state, and its assignee.
-- **A node's page** shows the exact LaTeX of the snapshot under review, with its dependencies and pins, Challenges, Evidence checks and history. It links the compiled PDF when there is one: the PDF archived with the snapshot, or prism-local's current `build/proof.pdf`.
-- **Open in prism-local** opens the node's folder in [prism-local](https://github.com/DengZhiyuan-math/Local-Ai-agent-for-latex). The page runs `$PROOF_CLI_PRISM_LOCAL`, or `prism-local` if it's on your `PATH`; with neither, it shows the folder to open yourself. The two tools share only files.
+- **New node** creates a theorem, lemma or claim (with its assumptions and dependencies), or an imported result with its source. That covers the first node of an empty map, and a corrected source that replaces a withdrawn one.
+- **A theorem, lemma or claim opens in its studio** (ADR-0011), a LaTeX workspace built from prism-local's code: editor, compile, PDF with SyncTeX both ways, and the agent panel. Beside them, the **node panel** shows the node's statement, state axes, assignee and dependencies, and offers claim or unassign, split into Claims, request review, open a Challenge, and record an Evidence check, as the page's git identity.
+- **A node's review page** shows the exact LaTeX of the snapshot under review, with its dependencies and pins, Challenges, Evidence checks and history, and the decisions to make. It links the compiled PDF when there is one: the PDF archived with the snapshot, or the studio's current `build/proof.pdf`.
+- **An imported result's page** shows its source, trust level and dependents, and its Reference review.
 
-When you request review after compiling in prism-local, the fresh `build/proof.pdf` is archived as `snapshots/v<N>.pdf` next to the snapshot and committed with the decision. `proofs/.gitignore` keeps `build/` out of git.
+When you request review after compiling in the studio, the fresh `build/proof.pdf` is archived as `snapshots/v<N>.pdf` next to the snapshot and committed with the decision. `proofs/.gitignore` keeps `build/` out of git. Compiling needs a TeX distribution or Tectonic; without one, the studio still edits and requests review.
 
 ## Human Review
 

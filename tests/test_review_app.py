@@ -16,7 +16,7 @@ import pytest
 from _researcher import researcher
 from _review_client import DirectClient, decide, serving
 from proof_cli.proof_map import create_node, get_acceptance_state, request_review
-from proof_cli.storage import ensure_project
+from proof_cli.storage import ensure_project, get_active_claim
 
 
 @pytest.fixture
@@ -226,12 +226,14 @@ def test_a_pdf_is_served_as_a_pdf_for_the_browsers_own_viewer(http_app):
     assert client.get("/api/node/lem/pdf/snapshot")[0] == 404
 
 
-def test_opening_prism_local_is_refused_from_another_origin(http_app, monkeypatch):
+def test_the_node_panel_and_node_creation_are_refused_from_another_origin(http_app):
     store, client = http_app
     create_node(store, node_id="lem", kind="lemma", statement="Base")
-    monkeypatch.setenv("PROOF_CLI_PRISM_LOCAL", "/nonexistent/should-never-run")
-    assert client.post("/api/node/lem/open", {}, origin="http://evil.example")[0] == 403
-    assert client.post("/api/node/lem/open", {}, origin=None)[0] == 403
+    assert client.post("/api/node/lem/claim", {}, origin="http://evil.example")[0] == 403
+    assert client.post("/api/node/lem/claim", {}, origin=None)[0] == 403
+    assert client.post("/api/nodes", {"node_id": "x", "kind": "claim", "statement": "X"}, origin="http://evil.example")[0] == 403
+    assert get_active_claim(store, "lem") is None
+    assert client.post("/api/node/lem/claim", {})[0] == 200  # from the page itself
 
 
 # -- a node's studio sits behind the same checks (ADR-0011, #69) ---------------------
