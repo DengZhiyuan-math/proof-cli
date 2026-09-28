@@ -6,7 +6,6 @@ from pathlib import Path
 
 import typer
 
-from .codex_router import app as codex_app
 from .commands import (
     cmd_blocker_add,
     cmd_blocker_list,
@@ -137,6 +136,10 @@ app = typer.Typer(
     "reviewed by the researcher on the proof map page. Start with `proof node --help` and `proof frontier`.",
     cls=ProofGroup,  # the agent-facing contract: see contract.py
 )
+# Every command's project: --root, else $PROOF_ROOT, else the current folder. The one root
+# convention (ADR-0011 point 8): a studio's agent runs in its node's folder with PROOF_ROOT
+# set to the project, so a `proof` call from there never starts a nested project.
+ROOT_OPTION = typer.Option(".", "--root", envvar="PROOF_ROOT", help="The proof project (default: $PROOF_ROOT, then the current folder)")
 PROOF_MAP_PANEL = "Proof map"
 LEGACY_PANEL = "Legacy (before the proof map; kept for old projects)"
 asset_app = typer.Typer(help="Reusable asset workflows")
@@ -181,48 +184,48 @@ def _root(path: str | None) -> Path:
 
 
 @app.command(rich_help_panel=PROOF_MAP_PANEL)
-def init(root: str = ".") -> None:
+def init(root: str = ROOT_OPTION) -> None:
     """Start a proof project in ROOT."""
     typer.echo(cmd_init(_root(root)))
 
 
 @app.command()
-def status(root: str = ".") -> None:
+def status(root: str = ROOT_OPTION) -> None:
     typer.echo(cmd_status(_root(root)))
 
 
 @app.command()
-def snapshot(root: str = ".", note: str = "") -> None:
+def snapshot(root: str = ROOT_OPTION, note: str = "") -> None:
     typer.echo(cmd_snapshot(_root(root), handoff_note=note))
 
 
 @app.command()
-def history(root: str = ".") -> None:
+def history(root: str = ROOT_OPTION) -> None:
     typer.echo(cmd_history(_root(root)))
 
 
 @app.command()
-def export(root: str = ".") -> None:
+def export(root: str = ROOT_OPTION) -> None:
     typer.echo(cmd_export(_root(root)))
 
 
 @app.command()
-def search(query: str, root: str = ".", limit: int = 10) -> None:
+def search(query: str, root: str = ROOT_OPTION, limit: int = 10) -> None:
     typer.echo(cmd_search(query, _root(root), limit=limit))
 
 
 @app.command()
-def retrieve(query: str, root: str = ".", limit: int = 10) -> None:
+def retrieve(query: str, root: str = ROOT_OPTION, limit: int = 10) -> None:
     typer.echo(cmd_proof_retrieve(query, _root(root), limit=limit))
 
 
 @app.command()
-def reason(theorem_id: str, root: str = ".", notes: str = "") -> None:
+def reason(theorem_id: str, root: str = ROOT_OPTION, notes: str = "") -> None:
     typer.echo(cmd_proof_reason(theorem_id, _root(root), notes=notes))
 
 
 @app.command(rich_help_panel=PROOF_MAP_PANEL)
-def frontier(root: str = ".", json_output: bool = typer.Option(False, "--json")) -> None:
+def frontier(root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
     """The open, unblocked, unclaimed nodes: what an agent could claim right now."""
     store = get_store(_root(root))
     nodes = get_frontier(store)
@@ -242,7 +245,7 @@ def frontier(root: str = ".", json_output: bool = typer.Option(False, "--json"))
 
 
 @app.command(rich_help_panel=LEGACY_PANEL)
-def revalidate(source_id: str, root: str = ".", backend_target: str = "", notes: str = "") -> None:
+def revalidate(source_id: str, root: str = ROOT_OPTION, backend_target: str = "", notes: str = "") -> None:
     """(legacy) Re-queue a stale verification fragment. A node's dependency is re-reviewed on the proof map page instead."""
     typer.echo(
         render_verification_output(
@@ -300,7 +303,7 @@ def node_create(
     node_id: str,
     kind: str,
     statement: str,
-    root: str = ".",
+    root: str = ROOT_OPTION,
     display_label: str = "",
     assumption: list[str] = typer.Option(None, "--assumption"),
     dependency: list[str] = typer.Option(None, "--dependency"),
@@ -334,7 +337,7 @@ def node_create(
 @node_app.command("show")
 def node_show(
     node_id: str,
-    root: str = ".",
+    root: str = ROOT_OPTION,
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     store = get_store(_root(root))
@@ -379,7 +382,7 @@ def node_show(
 
 @node_app.command("list")
 def node_list(
-    root: str = ".",
+    root: str = ROOT_OPTION,
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     store = get_store(_root(root))
@@ -395,7 +398,7 @@ def node_claim(
     node_id: str,
     assignee: str = typer.Option(..., "--assignee", "--claimant", help="Who is taking the node on (an agent or person name)"),
     reassign: bool = typer.Option(False, "--reassign", help="Take the node over from its current assignee"),
-    root: str = ".",
+    root: str = ROOT_OPTION,
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Assign a frontier node to yourself before working on it: a planning signal, not a lock (ADR-0010)."""
@@ -413,7 +416,7 @@ def node_unassign(
     node_id: str,
     by: str = typer.Option(..., "--by", "--claimant", help="Who is clearing the claim (its holder, the researcher, or by agreement)"),
     reason: str = typer.Option("", "--reason"),
-    root: str = ".",
+    root: str = ROOT_OPTION,
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """End a node's claim, whoever holds it (ADR-0010)."""
@@ -441,7 +444,7 @@ def node_request_review(
     node_id: str,
     rationale: str = typer.Option(..., "--rationale", help="Why this node is now appropriately scoped to prove directly"),
     requested_by: str = typer.Option("human", "--requested-by"),
-    root: str = ".",
+    root: str = ROOT_OPTION,
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Snapshot the node's working proof.tex for review (ADR-0010). Needs no claim."""
@@ -462,7 +465,7 @@ def _emit_review_record(record, json_output: bool, *, command: str) -> None:
 
 
 @node_app.command("review")
-def node_review(node_id: str, decision: str = typer.Argument(""), root: str = ".", json_output: bool = typer.Option(False, "--json")) -> None:
+def node_review(node_id: str, decision: str = typer.Argument(""), root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
     """Accept / revision-requested / reject a node, or Reference-review an imported result — on the proof map page.
 
     A Human Review decision is the researcher's, made on the proof map page
@@ -473,7 +476,7 @@ def node_review(node_id: str, decision: str = typer.Argument(""), root: str = ".
 
 
 @node_app.command("revalidate")
-def node_revalidate(node_id: str, target_node_id: str = typer.Argument(""), root: str = ".", json_output: bool = typer.Option(False, "--json")) -> None:
+def node_revalidate(node_id: str, target_node_id: str = typer.Argument(""), root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
     """Lightweight re-review of node_id's dependency on target_node_id — on the proof map page (ADR-0010)."""
     human_review_required(
         root, command="node.revalidate", kind="dependency_revalidation", target_id=node_id, node_id=node_id, json_output=json_output
@@ -481,7 +484,7 @@ def node_revalidate(node_id: str, target_node_id: str = typer.Argument(""), root
 
 
 @node_app.command("promote")
-def node_promote(node_id: str, root: str = ".", json_output: bool = typer.Option(False, "--json")) -> None:
+def node_promote(node_id: str, root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
     """Promote an Accepted Claim to a Lemma — on the proof map page (ADR-0010)."""
     human_review_required(root, command="node.promote", kind="promote", target_id=node_id, node_id=node_id, json_output=json_output)
 
@@ -492,7 +495,7 @@ def node_split(
     child: list[str] = typer.Option(
         ..., "--child", help="Repeatable, one per child: <child-id>=<statement>"
     ),
-    root: str = ".",
+    root: str = ROOT_OPTION,
     created_by: str = "human",
     reassign: bool = typer.Option(False, "--reassign", help="Take the claim over from whoever holds it (recorded as `claim --reassign` records it); the node need not be on the frontier"),
     json_output: bool = typer.Option(False, "--json"),
@@ -532,7 +535,7 @@ def _emit_challenge(challenge, json_output: bool, *, command: str) -> None:
 @challenge_app.command("open")
 def challenge_open(
     target_id: str,
-    root: str = ".",
+    root: str = ROOT_OPTION,
     opened_by: str = "human",
     rationale: str = "",
     json_output: bool = typer.Option(False, "--json"),
@@ -549,7 +552,7 @@ def challenge_open(
 
 @challenge_app.command("list")
 def challenge_list(
-    root: str = ".",
+    root: str = ROOT_OPTION,
     target_id: str = "",
     status: str = "",
     json_output: bool = typer.Option(False, "--json"),
@@ -567,7 +570,7 @@ def challenge_list(
 @challenge_app.command("show")
 def challenge_show(
     challenge_id: str,
-    root: str = ".",
+    root: str = ROOT_OPTION,
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     store = get_store(_root(root))
@@ -580,7 +583,7 @@ def challenge_show(
 
 
 @challenge_app.command("dismiss")
-def challenge_dismiss(challenge_id: str, root: str = ".", json_output: bool = typer.Option(False, "--json")) -> None:
+def challenge_dismiss(challenge_id: str, root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
     """Resolve a Challenge — on the proof map page (ADR-0010)."""
     store = get_store(_root(root))
     try:
@@ -606,7 +609,7 @@ def _emit_evidence_check(check, json_output: bool, *, command: str) -> None:
 def evidence_record(
     candidate_proof_id: str,
     outcome: str,
-    root: str = ".",
+    root: str = ROOT_OPTION,
     notes: str = "",
     run_by: str = typer.Option("system", "--run-by", help="The checker or backend that ran the check; the node page shows it"),
     json_output: bool = typer.Option(False, "--json"),
@@ -622,7 +625,7 @@ def evidence_record(
 
 
 @node_evidence_app.command("review")
-def evidence_review(check_id: str, decision: str = typer.Argument(""), root: str = ".", json_output: bool = typer.Option(False, "--json")) -> None:
+def evidence_review(check_id: str, decision: str = typer.Argument(""), root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
     """Judge an Evidence check trusted/unusable — on the proof map page (ADR-0010)."""
     human_review_required(root, command="node.evidence.review", kind="evidence_review", target_id=check_id, node_id=None, json_output=json_output)
 
@@ -645,7 +648,7 @@ def _running_review_app(store) -> bool:
 
 
 @map_app.command("serve")
-def review_serve(root: str = ".") -> None:
+def review_serve(root: str = ROOT_OPTION) -> None:
     """Run this project's proof map page on its own localhost origin — the only place Human Review decisions are made (ADR-0010).
 
     Runs in the foreground until interrupted. Bound to 127.0.0.1. Decisions
@@ -670,7 +673,7 @@ def review_serve(root: str = ".") -> None:
 
 
 @map_app.command("open")
-def review_open(node_id: str = typer.Argument("", help="Open this node's decision page"), root: str = ".") -> None:
+def review_open(node_id: str = typer.Argument("", help="Open this node's decision page"), root: str = ROOT_OPTION) -> None:
     """Open this project's proof map page (starting it in the background if needed), optionally at a node."""
     import subprocess
     import time
@@ -696,7 +699,7 @@ def review_open(node_id: str = typer.Argument("", help="Open this node's decisio
 
 
 @review_app.command("warnings")
-def review_warnings(root: str = ".", json_output: bool = typer.Option(False, "--json")) -> None:
+def review_warnings(root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
     """Everything about Human Review authority that doesn't verify, and Review snapshots the index never recorded."""
     warnings = list_integrity_warnings(get_store(_root(root)))
     if json_output:
@@ -708,7 +711,6 @@ def review_warnings(root: str = ".", json_output: bool = typer.Option(False, "--
 
 
 app.add_typer(goal_app, name="goal", rich_help_panel=LEGACY_PANEL)
-app.add_typer(codex_app, name="codex")
 # Frozen peripheral modules (issue #28): reachable, but no longer advertised
 # in default `proof --help` discoverability — the new proof-map node model
 # is the primary surface now.
@@ -751,19 +753,19 @@ app.add_typer(verify_app, name="verify", rich_help_panel=LEGACY_PANEL)
 
 
 @asset_app.command("list")
-def asset_list(root: str = ".", project_id: str = "", kind: str = "", status: str = "") -> None:
+def asset_list(root: str = ROOT_OPTION, project_id: str = "", kind: str = "", status: str = "") -> None:
     typer.echo(cmd_proof_asset_list(_root(root), project_id=project_id, kind=kind, status=status))
 
 
 @asset_app.command("show")
-def asset_show(asset_id: str, root: str = ".") -> None:
+def asset_show(asset_id: str, root: str = ROOT_OPTION) -> None:
     typer.echo(cmd_proof_asset_show(asset_id, _root(root)))
 
 
 @asset_app.command("publish")
 def asset_publish(
     asset_json: str,
-    root: str = ".",
+    root: str = ROOT_OPTION,
     review_action: str = "publish",
     reviewer: str = "human",
     notes: str = "",
@@ -775,7 +777,7 @@ def asset_publish(
 def asset_review(
     asset_id: str,
     action: str,
-    root: str = ".",
+    root: str = ROOT_OPTION,
     reviewer: str = "human",
     notes: str = "",
 ) -> None:
@@ -783,19 +785,19 @@ def asset_review(
 
 
 @pack_app.command("list")
-def pack_list(root: str = ".", project_id: str = "") -> None:
+def pack_list(root: str = ROOT_OPTION, project_id: str = "") -> None:
     typer.echo(cmd_proof_pack_list(_root(root), project_id=project_id))
 
 
 @pack_app.command("show")
-def pack_show(pack_id: str, root: str = ".") -> None:
+def pack_show(pack_id: str, root: str = ROOT_OPTION) -> None:
     typer.echo(cmd_proof_pack_show(pack_id, _root(root)))
 
 
 @pack_app.command("install")
 def pack_install(
     pack_json: str,
-    root: str = ".",
+    root: str = ROOT_OPTION,
     installed_by: str = "human",
     notation_profile: str = "",
     notes: str = "",
@@ -818,24 +820,24 @@ def pack_install(
 
 
 @pack_app.command("update")
-def pack_update(pack_json: str, root: str = ".", reviewer: str = "human", notes: str = "") -> None:
+def pack_update(pack_json: str, root: str = ROOT_OPTION, reviewer: str = "human", notes: str = "") -> None:
     typer.echo(cmd_proof_pack_update(pack_json, _root(root), reviewer=reviewer, notes=notes))
 
 
 @policy_app.command("list")
-def policy_list(root: str = ".", project_id: str = "") -> None:
+def policy_list(root: str = ROOT_OPTION, project_id: str = "") -> None:
     typer.echo(cmd_proof_policy_list(_root(root), project_id=project_id))
 
 
 @policy_app.command("set")
-def policy_set(profile_json: str, root: str = ".", reviewer: str = "human", notes: str = "") -> None:
+def policy_set(profile_json: str, root: str = ROOT_OPTION, reviewer: str = "human", notes: str = "") -> None:
     typer.echo(cmd_proof_policy_set(profile_json, _root(root), reviewer=reviewer, notes=notes))
 
 
 @recommend_app.callback(invoke_without_command=True)
 def recommend(
     ctx: typer.Context,
-    root: str = ".",
+    root: str = ROOT_OPTION,
     query: str = "",
     current_project_id: str = "",
     prior_usefulness_json: str = "",
@@ -863,7 +865,7 @@ def recommend(
 
 
 @reuse_app.command("show")
-def reuse_show(root: str = ".", asset_id: str = "", project_id: str = "") -> None:
+def reuse_show(root: str = ROOT_OPTION, asset_id: str = "", project_id: str = "") -> None:
     typer.echo(cmd_proof_reuse_show(_root(root), asset_id=asset_id, project_id=project_id))
 
 
@@ -871,7 +873,7 @@ def reuse_show(root: str = ".", asset_id: str = "", project_id: str = "") -> Non
 def automate_plan(
     scope: str,
     task_type: str,
-    root: str = ".",
+    root: str = ROOT_OPTION,
     execution_mode: str = "supervised",
     notes: str = "",
     dry_run: bool = False,
@@ -895,12 +897,12 @@ def automate_plan(
 
 
 @automate_app.command("run")
-def automate_run(run_id: str, root: str = ".", approvals_json: str = "", interrupt_after: int | None = None, notes: str = "") -> None:
+def automate_run(run_id: str, root: str = ROOT_OPTION, approvals_json: str = "", interrupt_after: int | None = None, notes: str = "") -> None:
     typer.echo(cmd_proof_automate_run(run_id, _root(root), approvals_json=approvals_json, interrupt_after=interrupt_after, notes=notes))
 
 
 @automate_app.command("trace")
-def automate_trace(run_id: str, root: str = ".") -> None:
+def automate_trace(run_id: str, root: str = ROOT_OPTION) -> None:
     typer.echo(cmd_proof_automate_trace(run_id, _root(root)))
 
 
@@ -908,7 +910,7 @@ def automate_trace(run_id: str, root: str = ".") -> None:
 def automate_review(
     run_id: str,
     action_id: str,
-    root: str = ".",
+    root: str = ROOT_OPTION,
     decision: str = "approve",
     reviewer: str = "human",
     rationale: str = "",
@@ -918,7 +920,7 @@ def automate_review(
 
 @benchmark_app.command("run")
 def benchmark_run(
-    root: str = ".",
+    root: str = ROOT_OPTION,
     benchmark_name: str = "",
     scenario_id: str = "",
     notes: str = "",
@@ -928,17 +930,17 @@ def benchmark_run(
 
 
 @project_app.command("analyze")
-def project_analyze(root: str = ".", query: str = "", limit: int = 5) -> None:
+def project_analyze(root: str = ROOT_OPTION, query: str = "", limit: int = 5) -> None:
     typer.echo(cmd_project_analyze(_root(root), query=query, limit=limit))
 
 
 @goal_app.command("set")
-def goal_set(goal: str, root: str = ".") -> None:
+def goal_set(goal: str, root: str = ROOT_OPTION) -> None:
     typer.echo(cmd_goal_set(goal, root=_root(root)))
 
 
 @goal_app.command("list")
-def goal_list(root: str = ".") -> None:
+def goal_list(root: str = ROOT_OPTION) -> None:
     typer.echo(cmd_goal_list(_root(root)))
 
 
@@ -947,7 +949,7 @@ def theorem_add(
     theorem_id: str,
     name: str,
     statement: str,
-    root: str = ".",
+    root: str = ROOT_OPTION,
     kind: str = "theorem",
     assumption: list[str] = typer.Option(None, "--assumption"),
     export: list[str] = typer.Option(None, "--export"),
@@ -980,32 +982,32 @@ def theorem_add(
 
 
 @theorem_app.command("show")
-def theorem_show(theorem_id: str, root: str = ".") -> None:
+def theorem_show(theorem_id: str, root: str = ROOT_OPTION) -> None:
     typer.echo(cmd_theorem_show(theorem_id, root=_root(root)))
 
 
 @theorem_app.command("extract")
-def theorem_extract(theorem_id: str, root: str = ".") -> None:
+def theorem_extract(theorem_id: str, root: str = ROOT_OPTION) -> None:
     typer.echo(cmd_theorem_extract(theorem_id, root=_root(root)))
 
 
 @theorem_app.command("list")
-def theorem_list(root: str = ".") -> None:
+def theorem_list(root: str = ROOT_OPTION) -> None:
     typer.echo(cmd_theorem_list(_root(root)))
 
 
 @theorem_app.command("apply")
-def theorem_apply(theorem_id: str, root: str = ".") -> None:
+def theorem_apply(theorem_id: str, root: str = ROOT_OPTION) -> None:
     typer.echo(cmd_theorem_apply(theorem_id, root=_root(root)))
 
 
 @theorem_app.command("ground")
-def theorem_ground(theorem_id: str, reference_id: list[str] = typer.Option(..., "--reference-id"), root: str = ".", notes: str = "") -> None:
+def theorem_ground(theorem_id: str, reference_id: list[str] = typer.Option(..., "--reference-id"), root: str = ROOT_OPTION, notes: str = "") -> None:
     typer.echo(cmd_theorem_ground(theorem_id, reference_id, root=_root(root), notes=notes))
 
 
 @obligation_app.command("add")
-def obligation_add(goal_statement: str, root: str = ".", source_step_id: str = "", required_for: str = "") -> None:
+def obligation_add(goal_statement: str, root: str = ROOT_OPTION, source_step_id: str = "", required_for: str = "") -> None:
     typer.echo(
         cmd_obligation_add(
             goal_statement=goal_statement,
@@ -1017,38 +1019,38 @@ def obligation_add(goal_statement: str, root: str = ".", source_step_id: str = "
 
 
 @obligation_app.command("list")
-def obligation_list(root: str = ".") -> None:
+def obligation_list(root: str = ROOT_OPTION) -> None:
     typer.echo(cmd_obligation_list(_root(root)))
 
 
 @obligation_app.command("resolve")
-def obligation_resolve(obligation_id: str, root: str = ".", json_output: bool = typer.Option(False, "--json")) -> None:
+def obligation_resolve(obligation_id: str, root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
     """Retired (ADR-0001, #37): a proof obligation is discharged by an Accepted proof-map node, not by a command."""
     human_review_required(root, command="obligation.resolve", kind="obligation_resolution", target_id=obligation_id, node_id=None, json_output=json_output)
 
 
 @obligation_app.command("derive")
-def obligation_derive(theorem_id: str, root: str = ".", notes: str = "") -> None:
+def obligation_derive(theorem_id: str, root: str = ROOT_OPTION, notes: str = "") -> None:
     typer.echo(cmd_proof_obligation_derive(theorem_id, _root(root), notes=notes))
 
 
 @blocker_app.command("add")
-def blocker_add(description: str, root: str = ".", scope: str = "global", failure_type: str = "unknown") -> None:
+def blocker_add(description: str, root: str = ROOT_OPTION, scope: str = "global", failure_type: str = "unknown") -> None:
     typer.echo(cmd_blocker_add(description, root=_root(root), scope=scope, failure_type=failure_type))
 
 
 @blocker_app.command("list")
-def blocker_list(root: str = ".") -> None:
+def blocker_list(root: str = ROOT_OPTION) -> None:
     typer.echo(cmd_blocker_list(_root(root)))
 
 
 @reference_app.command("list")
-def reference_list(root: str = ".") -> None:
+def reference_list(root: str = ROOT_OPTION) -> None:
     typer.echo(cmd_reference_list(_root(root)))
 
 
 @reference_app.command("show")
-def reference_show(reference_id: str, root: str = ".") -> None:
+def reference_show(reference_id: str, root: str = ROOT_OPTION) -> None:
     typer.echo(cmd_reference_show(reference_id, root=_root(root)))
 
 
@@ -1057,7 +1059,7 @@ def reference_import(
     reference_id: str,
     title: str,
     year: int,
-    root: str = ".",
+    root: str = ROOT_OPTION,
     author: list[str] = typer.Option(None, "--author"),
     source_type: str = "other",
     origin: str = "",
@@ -1088,25 +1090,25 @@ def reference_import(
 
 
 @reference_app.command("review")
-def reference_review(reference_id: str, action: str = typer.Argument(""), root: str = ".", json_output: bool = typer.Option(False, "--json")) -> None:
+def reference_review(reference_id: str, action: str = typer.Argument(""), root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
     """Retired (ADR-0001, #37): a reference is trusted by Reference-reviewing its imported_result node, on the proof map page."""
     human_review_required(root, command="reference.review", kind="reference_review", target_id=reference_id, node_id=None, json_output=json_output)
 
 
 @memory_app.command("list")
-def memory_list(root: str = ".", layer: str = "", node_id: str = "", theorem_id: str = "", goal_id: str = "") -> None:
+def memory_list(root: str = ROOT_OPTION, layer: str = "", node_id: str = "", theorem_id: str = "", goal_id: str = "") -> None:
     typer.echo(cmd_memory_list(_root(root), layer=layer, node_id=node_id, theorem_id=theorem_id, goal_id=goal_id))
 
 
 @memory_app.command("show")
-def memory_show(artifact_id: str, root: str = ".") -> None:
+def memory_show(artifact_id: str, root: str = ROOT_OPTION) -> None:
     typer.echo(cmd_memory_show(artifact_id, root=_root(root)))
 
 
 @memory_app.command("add")
 def memory_add(
     content: str,
-    root: str = ".",
+    root: str = ROOT_OPTION,
     layer: str = "working",
     node_id: str = "",
     candidate_proof_id: str = "",
@@ -1145,12 +1147,12 @@ def memory_add(
 
 
 @publication_app.command("list")
-def publication_list(root: str = ".", object_type: str = "") -> None:
+def publication_list(root: str = ROOT_OPTION, object_type: str = "") -> None:
     typer.echo(cmd_publication_list(_root(root), object_type=object_type))
 
 
 @publication_app.command("show")
-def publication_show(object_id: str, root: str = ".") -> None:
+def publication_show(object_id: str, root: str = ROOT_OPTION) -> None:
     typer.echo(cmd_publication_show(object_id, _root(root)))
 
 
@@ -1158,7 +1160,7 @@ def publication_show(object_id: str, root: str = ".") -> None:
 def publication_set(
     object_id: str,
     readiness: str,
-    root: str = ".",
+    root: str = ROOT_OPTION,
     object_type: str = "theorem_contract",
     display_name: str = "",
     title: str = "",
@@ -1194,18 +1196,18 @@ def publication_set(
 
 
 @publication_app.command("view")
-def publication_view(root: str = ".", audience: str = "paper") -> None:
+def publication_view(root: str = ROOT_OPTION, audience: str = "paper") -> None:
     typer.echo(cmd_publication_view(_root(root), audience=audience))
 
 
 @publication_app.command("export")
-def publication_export(root: str = ".", audience: str = "paper", format: str = "paper") -> None:
+def publication_export(root: str = ROOT_OPTION, audience: str = "paper", format: str = "paper") -> None:
     typer.echo(cmd_publication_export(_root(root), audience=audience, format=format))
 
 
 @publication_app.command("release")
 def publication_release(
-    root: str = ".",
+    root: str = ROOT_OPTION,
     audience: str = "paper",
     status: str = "approved",
     approved_by: list[str] = typer.Option(None, "--approved-by"),
@@ -1227,7 +1229,7 @@ def publication_release(
 @publication_app.command("withdraw")
 def publication_withdraw(
     release_id: str,
-    root: str = ".",
+    root: str = ROOT_OPTION,
     approved_by: list[str] = typer.Option(None, "--approved-by"),
     rationale: str = "",
 ) -> None:
@@ -1235,37 +1237,37 @@ def publication_withdraw(
 
 
 @provenance_app.command("show")
-def provenance_show(target_id: str, root: str = ".") -> None:
+def provenance_show(target_id: str, root: str = ROOT_OPTION) -> None:
     typer.echo(cmd_proof_provenance_show(target_id, root=_root(root)))
 
 
 @bug_app.command("scan")
-def bug_scan(theorem_id: str, root: str = ".") -> None:
+def bug_scan(theorem_id: str, root: str = ROOT_OPTION) -> None:
     typer.echo(cmd_proof_bug_scan(theorem_id, _root(root)))
 
 
 @bug_app.command("list")
-def bug_list(root: str = ".", theorem_id: str = typer.Option("", "--theorem-id")) -> None:
+def bug_list(root: str = ROOT_OPTION, theorem_id: str = typer.Option("", "--theorem-id")) -> None:
     typer.echo(cmd_proof_bug_list(_root(root), theorem_id=theorem_id))
 
 
 @bug_app.command("show")
-def bug_show(bug_id: str, root: str = ".") -> None:
+def bug_show(bug_id: str, root: str = ROOT_OPTION) -> None:
     typer.echo(cmd_proof_bug_show(bug_id, _root(root)))
 
 
 @evidence_app.command("show")
-def evidence_show(bug_id: str, root: str = ".") -> None:
+def evidence_show(bug_id: str, root: str = ROOT_OPTION) -> None:
     typer.echo(cmd_proof_evidence_show(bug_id, _root(root)))
 
 
 @debug_app.command("generate")
-def debug_generate(theorem_id: str, root: str = ".") -> None:
+def debug_generate(theorem_id: str, root: str = ROOT_OPTION) -> None:
     typer.echo(cmd_proof_debug_generate(theorem_id, _root(root)))
 
 
 @debug_app.command("list")
-def debug_list(root: str = ".", theorem_id: str = typer.Option("", "--theorem-id")) -> None:
+def debug_list(root: str = ROOT_OPTION, theorem_id: str = typer.Option("", "--theorem-id")) -> None:
     typer.echo(cmd_proof_debug_list(_root(root), theorem_id=theorem_id))
 
 
@@ -1274,7 +1276,7 @@ def repair_mark(
     bug_id: str,
     status: str = typer.Argument("repaired"),
     status_override: str | None = typer.Option(None, "--status"),
-    root: str = ".",
+    root: str = ROOT_OPTION,
     note: str = "",
 ) -> None:
     typer.echo(cmd_proof_repair_mark(bug_id, status_override or status, _root(root), note=note))
@@ -1285,7 +1287,7 @@ def review_suspicion(
     bug_id: str,
     status: str = typer.Argument("under_review"),
     status_override: str | None = typer.Option(None, "--status"),
-    root: str = ".",
+    root: str = ROOT_OPTION,
     rationale: str = "",
 ) -> None:
     typer.echo(cmd_proof_review_suspicion(bug_id, status_override or status, _root(root), rationale=rationale))
@@ -1295,7 +1297,7 @@ def review_suspicion(
 def review_request(
     object_type: str,
     object_id: str,
-    root: str = ".",
+    root: str = ROOT_OPTION,
     reviewer_id: str = "human",
     rationale: str = "",
 ) -> None:
@@ -1307,7 +1309,7 @@ def review_request(
 
 
 @review_app.command("list")
-def review_list(root: str = ".", object_type: str = "", object_id: str = "") -> None:
+def review_list(root: str = ROOT_OPTION, object_type: str = "", object_id: str = "") -> None:
     typer.echo(cmd_review_list(_root(root), object_type=object_type, object_id=object_id))
 
 
@@ -1315,7 +1317,7 @@ def review_list(root: str = ".", object_type: str = "", object_id: str = "") -> 
 def review_decide(
     review_id: str,
     decision: str,
-    root: str = ".",
+    root: str = ROOT_OPTION,
     reviewer_id: str = "human",
     rationale: str = "",
 ) -> None:
@@ -1327,12 +1329,12 @@ def review_decide(
 
 
 @contributor_app.command("list")
-def contributor_list(root: str = ".", team_id: str = "", status: str = "") -> None:
+def contributor_list(root: str = ROOT_OPTION, team_id: str = "", status: str = "") -> None:
     typer.echo(cmd_contributor_list(_root(root), team_id=team_id, status=status))
 
 
 @role_app.command("show")
-def role_show(contributor_id: str, root: str = ".") -> None:
+def role_show(contributor_id: str, root: str = ROOT_OPTION) -> None:
     typer.echo(cmd_role_show(contributor_id, _root(root)))
 
 
@@ -1341,7 +1343,7 @@ def comment_add(
     object_type: str,
     object_id: str,
     content: str,
-    root: str = ".",
+    root: str = ROOT_OPTION,
     author_id: str = "human",
     thread_id: str = "",
     status: str = "open",
@@ -1350,7 +1352,7 @@ def comment_add(
 
 
 @comment_app.command("list")
-def comment_list(root: str = ".", thread_id: str = "", object_type: str = "", object_id: str = "") -> None:
+def comment_list(root: str = ROOT_OPTION, thread_id: str = "", object_type: str = "", object_id: str = "") -> None:
     typer.echo(cmd_comment_list(_root(root), thread_id=thread_id, object_type=object_type, object_id=object_id))
 
 
@@ -1358,7 +1360,7 @@ def comment_list(root: str = ".", thread_id: str = "", object_type: str = "", ob
 def branch_create(
     scope: str,
     name: str,
-    root: str = ".",
+    root: str = ROOT_OPTION,
     created_by: str = "human",
     derived_from: str = "",
     notes: str = "",
@@ -1378,19 +1380,19 @@ def branch_create(
 
 
 @branch_app.command("list")
-def branch_list(root: str = ".", scope: str = "", status: str = "") -> None:
+def branch_list(root: str = ROOT_OPTION, scope: str = "", status: str = "") -> None:
     typer.echo(cmd_branch_list(_root(root), scope=scope, status=status))
 
 
 @branch_app.command("compare")
-def branch_compare(left_branch_id: str, right_branch_id: str, root: str = ".") -> None:
+def branch_compare(left_branch_id: str, right_branch_id: str, root: str = ROOT_OPTION) -> None:
     typer.echo(cmd_branch_compare(left_branch_id, right_branch_id, _root(root)))
 
 
 @branch_app.command("merge")
 def branch_merge(
     branch_id: str,
-    root: str = ".",
+    root: str = ROOT_OPTION,
     into_branch_id: str = "",
     reviewer_id: str = "human",
     rationale: str = "",
@@ -1399,42 +1401,42 @@ def branch_merge(
 
 
 @exchange_app.command("export")
-def exchange_export(root: str = ".", note: str = "") -> None:
+def exchange_export(root: str = ROOT_OPTION, note: str = "") -> None:
     typer.echo(cmd_exchange_export(_root(root), note=note))
 
 
 @exchange_app.command("import")
-def exchange_import(bundle_json: str, root: str = ".") -> None:
+def exchange_import(bundle_json: str, root: str = ROOT_OPTION) -> None:
     typer.echo(cmd_exchange_import(bundle_json, _root(root)))
 
 
 @handoff_app.command("create")
-def handoff_create(root: str = ".", note: str = "") -> None:
+def handoff_create(root: str = ROOT_OPTION, note: str = "") -> None:
     typer.echo(cmd_handoff_create(_root(root), note=note))
 
 
 @handoff_app.command("inspect")
-def handoff_inspect(bundle_json: str = "", root: str = ".") -> None:
+def handoff_inspect(bundle_json: str = "", root: str = ROOT_OPTION) -> None:
     typer.echo(cmd_handoff_inspect(bundle_json, _root(root)))
 
 
 @trace_app.command("dependency")
-def trace_dependency(target_id: str, root: str = ".") -> None:
+def trace_dependency(target_id: str, root: str = ROOT_OPTION) -> None:
     typer.echo(cmd_proof_trace_dependency(target_id, _root(root)))
 
 
 @trace_app.command("machine-check")
-def trace_machine_check(source_id: str, root: str = ".") -> None:
+def trace_machine_check(source_id: str, root: str = ROOT_OPTION) -> None:
     typer.echo(render_verification_output(f"trace machine-check {source_id}", cmd_proof_trace_machine_check(source_id, _root(root))))
 
 
 @explain_app.command("apply")
-def explain_apply(theorem_id: str, root: str = ".") -> None:
+def explain_apply(theorem_id: str, root: str = ROOT_OPTION) -> None:
     typer.echo(cmd_proof_explain_apply(theorem_id, _root(root)))
 
 
 @formalize_app.command("recommend")
-def formalize_recommend(source_id: str, root: str = ".", backend_target: str = "", notes: str = "") -> None:
+def formalize_recommend(source_id: str, root: str = ROOT_OPTION, backend_target: str = "", notes: str = "") -> None:
     typer.echo(
         render_verification_output(
             f"formalize recommend {source_id}",
@@ -1444,12 +1446,12 @@ def formalize_recommend(source_id: str, root: str = ".", backend_target: str = "
 
 
 @formalize_app.command("show")
-def formalize_show(source_id: str, root: str = ".") -> None:
+def formalize_show(source_id: str, root: str = ROOT_OPTION) -> None:
     typer.echo(render_verification_output(f"formalize show {source_id}", cmd_proof_formalize_show(source_id, _root(root))))
 
 
 @formalize_app.command("edit")
-def formalize_edit(source_id: str, root: str = ".", backend_target: str = "", notes: str = "") -> None:
+def formalize_edit(source_id: str, root: str = ROOT_OPTION, backend_target: str = "", notes: str = "") -> None:
     typer.echo(
         render_verification_output(
             f"formalize edit {source_id}",
@@ -1459,7 +1461,7 @@ def formalize_edit(source_id: str, root: str = ".", backend_target: str = "", no
 
 
 @verify_app.command("queue")
-def verify_queue(source_id: str, root: str = ".", backend_target: str = "", route_id: str = "", notes: str = "") -> None:
+def verify_queue(source_id: str, root: str = ROOT_OPTION, backend_target: str = "", route_id: str = "", notes: str = "") -> None:
     typer.echo(
         render_verification_output(
             f"verify queue {source_id}",
@@ -1471,7 +1473,7 @@ def verify_queue(source_id: str, root: str = ".", backend_target: str = "", rout
 @verify_app.command("run")
 def verify_run(
     source_id: str,
-    root: str = ".",
+    root: str = ROOT_OPTION,
     backend_target: str = "",
     notes: str = "",
 ) -> None:
@@ -1487,19 +1489,19 @@ def verify_run(
 
 
 @verify_app.command("status")
-def verify_status(source_id: str, root: str = ".") -> None:
+def verify_status(source_id: str, root: str = ROOT_OPTION) -> None:
     typer.echo(render_verification_output(f"verify status {source_id}", cmd_proof_verify_status(source_id, _root(root))))
 
 
 @verify_app.command("result")
-def verify_result(source_id: str, root: str = ".") -> None:
+def verify_result(source_id: str, root: str = ROOT_OPTION) -> None:
     typer.echo(render_verification_output(f"verify result {source_id}", cmd_proof_verify_result(source_id, _root(root))))
 
 
 @verify_app.command("stale")
 def verify_stale(
     source_id: str,
-    root: str = ".",
+    root: str = ROOT_OPTION,
     reason: str = "",
     dependency: list[str] = typer.Option(None, "--dependency"),
 ) -> None:

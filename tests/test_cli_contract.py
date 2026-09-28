@@ -15,7 +15,6 @@ from typer.testing import CliRunner
 
 from proof_cli import errors
 from proof_cli.cli import app
-from proof_cli.codex_router import app as codex_app
 from proof_cli.contract import STARTS_A_PROJECT
 
 runner = CliRunner()
@@ -113,25 +112,24 @@ def _placeholder_args(command) -> list[str]:
     return args
 
 
-@pytest.mark.parametrize("entry, prefix", [(app, ()), (codex_app, ("codex",))], ids=["proof", "proof-codex"])
-def test_only_the_commands_that_start_a_project_create_one(tmp_path: Path, entry, prefix):
+def test_only_the_commands_that_start_a_project_create_one(tmp_path: Path):
     """The whole command tree, not a list checked against itself: every command but the few that
     create content, pointed at a folder with no project, leaves it without one (#34)."""
     import click
     import typer
 
     walked = 0
-    for path, command in _leaves(typer.main.get_command(entry)):
-        full = " ".join((*prefix, *path))
+    for path, command in _leaves(typer.main.get_command(app)):
+        full = " ".join(path)
         if full in STARTS_A_PROJECT:
             continue
         if not any("--root" in p.opts for p in command.params if isinstance(p, click.Option)):
-            continue  # takes no root (codex catalog, where, doctor): touches no project
+            continue  # takes no root: touches no project
         root = tmp_path / full.replace(" ", "_") / "missing"
-        runner.invoke(entry, [*path, *_placeholder_args(command), "--root", str(root)])
+        runner.invoke(app, [*path, *_placeholder_args(command), "--root", str(root)])
         walked += 1
         assert not root.exists(), full
-    assert walked > (10 if prefix else 80)
+    assert walked > 80
 
 
 def test_the_starting_list_names_real_commands():
@@ -152,22 +150,6 @@ def test_a_double_dash_cannot_slip_a_read_past_the_check(tmp_path: Path, args):
     result = runner.invoke(app, [*args, "--root", str(missing), "--json"])
     assert not missing.exists()
     assert result.exit_code != 0
-
-
-def test_proof_codex_keeps_the_contract(tmp_path: Path):
-    missing = tmp_path / "missing"
-    result = runner.invoke(codex_app, ["status", "--root", str(missing), "--json"])
-    assert not missing.exists()
-    assert result.exit_code == 1 or _envelope(result)["ok"] is False
-
-    usage = runner.invoke(codex_app, ["nope", "--json"])
-    assert usage.exit_code == 2
-    envelope = _envelope(usage)
-    assert (envelope["command"], envelope["error"]["code"]) == ("codex", "USAGE_ERROR")
-
-    started = runner.invoke(codex_app, ["init", "--root", str(tmp_path / "fresh")])
-    assert started.exit_code == 0, started.output
-    assert (tmp_path / "fresh" / ".proof").is_dir()
 
 
 def test_a_write_still_starts_a_project(tmp_path: Path):
@@ -229,3 +211,56 @@ def test_no_module_defines_a_function_twice():
             node.name for node in ast.parse(path.read_text()).body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
         )
         assert not [name for name, count in names.items() if count > 1], path.name
+
+
+# -- one agent entry: `proof`, rooted by PROOF_ROOT (ADR-0011, #67) ---------------------
+
+REPO = SRC.parents[1]
+
+
+def test_proof_codex_and_the_mcp_plugin_are_gone():
+    assert "proof-codex" not in (REPO / "pyproject.toml").read_text()
+    assert not (SRC / "codex_router.py").exists() and not (REPO / "plugins" / "proof-routing").exists()
+    result = runner.invoke(app, ["codex", "status", "--json"])
+    assert result.exit_code == 2 and _envelope(result)["error"]["code"] == "USAGE_ERROR"
+
+
+def test_nothing_still_points_at_the_retired_entries():
+    """Outside the archived plans and the ADRs' history, nothing names them."""
+    retired = ("proof codex", "proof-codex", "codex_router", "proof-routing", "proof_mcp_server")
+    skip = {".planning", ".git", "adr", "__pycache__", "node_modules"}
+    this = Path(__file__).resolve()
+    for path in REPO.rglob("*"):
+        if not path.is_file() or skip & set(path.relative_to(REPO).parts) or path == this or path.suffix in (".pyc", ".sqlite3", ".png", ".ico", ".pdf"):
+            continue
+        text = path.read_text(errors="ignore")
+        assert not [name for name in retired if name in text], path.relative_to(REPO)
+
+
+def test_proof_root_roots_every_call_made_inside_a_node_folder(tmp_path: Path, monkeypatch):
+    project = tmp_path / "project"
+    runner.invoke(app, ["node", "create", "C1", "claim", "stmt", "--root", str(project)])
+    node_folder = project / "proofs" / "C1"
+    monkeypatch.chdir(node_folder)
+    monkeypatch.setenv("PROOF_ROOT", str(project))
+
+    result = runner.invoke(app, ["node", "claim", "C1", "--assignee", "agent_a", "--json"])
+
+    assert result.exit_code == 0, result.output
+    assert _envelope(result)["data"]["claimant_id"] == "agent_a"
+    assert not (node_folder / ".proof").exists()  # never a nested project
+
+
+def test_an_explicit_root_wins_over_proof_root(tmp_path: Path, monkeypatch):
+    other = tmp_path / "other"
+    runner.invoke(app, ["node", "create", "X", "claim", "x", "--root", str(other)])
+    monkeypatch.setenv("PROOF_ROOT", str(tmp_path / "elsewhere"))
+    result = runner.invoke(app, ["node", "show", "X", "--root", str(other), "--json"])
+    assert result.exit_code == 0 and _envelope(result)["data"]["id"] == "X"
+
+
+def test_without_proof_root_the_current_folder_is_the_root(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("PROOF_ROOT", raising=False)
+    monkeypatch.chdir(tmp_path)
+    runner.invoke(app, ["node", "create", "Y", "claim", "y"])
+    assert (tmp_path / ".proof").is_dir()
