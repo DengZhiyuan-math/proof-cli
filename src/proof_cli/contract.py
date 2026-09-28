@@ -1,6 +1,6 @@
 """The agent-facing CLI contract every entry point shares (ADR-0006, issue #34).
 
-`proof` and `proof-codex` both build their root command from `ProofGroup`:
+`proof`, the one agent entry (ADR-0011), builds its root command from `ProofGroup`:
 
 - Under `--json`, exactly one envelope on stdout whatever happens: a usage
   error (USAGE_ERROR, exit 2), a missing project (PROJECT_NOT_FOUND) or an
@@ -29,15 +29,10 @@ from .storage import ProjectNotFoundError, read_only
 STARTS_A_PROJECT = frozenset(
     {
         "init",
-        "codex init",
         "node create",
         "theorem add",
-        "codex theorem add",
-        "codex new theorem",
         "obligation add",
-        "codex obligation add",
         "blocker add",
-        "codex blocker add",
         "goal set",
         "reference import",
         "memory add",
@@ -75,7 +70,7 @@ def command_path(group: click.Group, args: list[str], prog_name: str) -> list[st
 
 
 class ProofGroup(TyperGroup):
-    """A root command bound to the contract; `prefix` is its path from `proof` ("codex" for `proof-codex`)."""
+    """A root command bound to the contract; `prefix` is its path from `proof`."""
 
     prefix: tuple[str, ...] = ()
 
@@ -124,8 +119,3 @@ class ProofGroup(TyperGroup):
             sys.exit(code)
         return code
 
-
-class CodexGroup(ProofGroup):
-    """`proof-codex`: the same contract, its commands named by their path under `proof codex`."""
-
-    prefix = ("codex",)

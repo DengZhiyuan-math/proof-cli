@@ -1,10 +1,8 @@
 import json
 from pathlib import Path
 
-from typer.testing import CliRunner
 
 from proof_cli.blockers import add_blocker, record_failed_route
-from proof_cli.cli import app
 from proof_cli.commands import cmd_exchange_export, cmd_exchange_import, cmd_project_analyze, cmd_proof_retrieve
 from proof_cli.domain import BlockerRecord, ProofObligation, TheoremStatus, TrustLevel
 from proof_cli.memory import record_memory
@@ -15,7 +13,6 @@ from proof_cli.snapshot import create_snapshot, restore_snapshot
 from proof_cli.storage import ensure_project
 from proof_cli.theorems import add_theorem
 
-runner = CliRunner()
 
 
 def _seed_radial_cluster(tmp_path: Path):
@@ -193,105 +190,3 @@ def test_radial_cluster_snapshot_and_exchange_round_trip_preserve_diagnostics(tm
     assert round_tripped["latest_snapshot"]["latest_diagnostic_report"] is not None
     assert round_tripped["handoff_snapshot"]["latest_diagnostic_report"] is not None
     assert round_tripped["project_state"]["current_theorem"] == "thm_radial_main"
-
-
-def test_codex_e2e_workflow_on_radial_style_cluster(tmp_path: Path):
-    root = tmp_path / "radial-codex"
-
-    init_result = runner.invoke(app, ["codex", "init", "--root", str(root)])
-    assert init_result.exit_code == 0
-    assert "Initialization root:" in init_result.stdout
-    assert "Persisted proof state: changed" in init_result.stdout
-    assert "Initialized proof project" in init_result.stdout
-
-    doctor = runner.invoke(app, ["codex", "doctor"])
-    assert doctor.exit_code == 0
-    assert "Proof Codex Diagnostics" in doctor.stdout
-    assert "Canonical skill: ~/.codex/skills/proof/SKILL.md" in doctor.stdout
-
-    initial_status = runner.invoke(app, ["codex", "status", "--root", str(root)])
-    assert initial_status.exit_code == 0
-    assert "Project" in initial_status.stdout
-
-    theorem_result = runner.invoke(
-        app,
-        [
-            "codex",
-            "theorem",
-            "add",
-            "thm_radial_cluster",
-            "Radial Cluster Main Step",
-            "The local radial cluster closes once the Jacquet bridge and scalar lift are tracked explicitly.",
-            "--root",
-            str(root),
-            "--assumption",
-            "Jacquet bridge",
-            "--assumption",
-            "scalar lift",
-            "--export",
-            "radial closure",
-            "--notes",
-            "Codex validation theorem cluster",
-        ],
-    )
-    assert theorem_result.exit_code == 0
-    assert "Mutation: theorem add" in theorem_result.stdout
-    assert "Persisted proof state: changed" in theorem_result.stdout
-    theorem_payload = json.loads(theorem_result.stdout.split("Result:\n", 1)[1])
-    assert theorem_payload["id"] == "thm_radial_cluster"
-    assert theorem_payload["exports"] == ["radial closure"]
-
-    obligation_result = runner.invoke(
-        app,
-        [
-            "codex",
-            "obligation",
-            "add",
-            "make the Jacquet bridge explicit before the scalar lift",
-            "--root",
-            str(root),
-            "--required-for",
-            "thm_radial_cluster",
-        ],
-    )
-    assert obligation_result.exit_code == 0
-    assert "Root source: explicit --root" in obligation_result.stdout
-    obligation_payload = json.loads(obligation_result.stdout.split("Result:\n", 1)[1])
-    assert obligation_payload["required_for"] == "thm_radial_cluster"
-
-    blocker_result = runner.invoke(
-        app,
-        [
-            "codex",
-            "blocker",
-            "add",
-            "scalar-to-vector lift is ambiguous until the Jacquet bridge is named",
-            "--root",
-            str(root),
-            "--scope",
-            "thm_radial_cluster",
-            "--failure-type",
-            "missing_bridge",
-        ],
-    )
-    assert blocker_result.exit_code == 0
-    blocker_payload = json.loads(blocker_result.stdout.split("Result:\n", 1)[1])
-    assert blocker_payload["scope"] == "thm_radial_cluster"
-
-    retrieve_result = runner.invoke(app, ["codex", "retrieve", "Jacquet bridge scalar lift", "--root", str(root)])
-    assert retrieve_result.exit_code == 0
-    retrieve_payload = json.loads(retrieve_result.stdout)
-    assert retrieve_payload["project_context"]["open_obligations"]
-    assert retrieve_payload["project_context"]["blockers"]
-
-    snapshot_result = runner.invoke(app, ["codex", "snapshot", "--root", str(root), "--note", "radial codex checkpoint"])
-    assert snapshot_result.exit_code == 0
-    assert "Mutation: snapshot" in snapshot_result.stdout
-    snapshot_payload = json.loads(snapshot_result.stdout.split("Result:\n", 1)[1])
-    assert snapshot_payload["handoff_note"] == "radial codex checkpoint"
-    assert snapshot_payload["open_obligations"]
-    assert snapshot_payload["active_blockers"]
-
-    final_status = runner.invoke(app, ["codex", "status", "--root", str(root)])
-    assert final_status.exit_code == 0
-    assert "thm_radial_cluster" in final_status.stdout

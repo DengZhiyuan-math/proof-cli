@@ -19,7 +19,7 @@ The CLI should help a researcher manage theorem contracts, proof state, dependen
 ## Technology Stack
 
 - **Python 3.11+**, packaged with setuptools (`pyproject.toml`), source under `src/proof_cli/`
-- **Typer** for the CLI (`proof`, `proof-codex` entry points), **Rich** for terminal output, **Pydantic v2** for domain models
+- **Typer** for the CLI (the `proof` entry point, rooted by `--root` or `$PROOF_ROOT`), **Rich** for terminal output, **Pydantic v2** for domain models
 - **SQLite** project state at `.proof/project.sqlite3` (plus JSON side files under `.proof/`)
 - **pytest** for tests (`tests/`)
 
