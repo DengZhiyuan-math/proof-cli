@@ -482,7 +482,10 @@ def node_revalidate(node_id: str, target_node_id: str = typer.Argument(""), root
 
 @node_app.command("migrate-dependents")
 def node_migrate_dependents(
-    node_id: str, replacement_id: str = typer.Argument(""), root: str = ".", json_output: bool = typer.Option(False, "--json")
+    node_id: str,
+    replacement_id: str = typer.Argument(""),
+    root: str = typer.Option(".", "--root", envvar="PROOF_ROOT"),  # the root convention of ADR-0011 (#67)
+    json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Move a no-longer-callable imported result's dependents onto its correction — on the proof map page (#20)."""
     human_review_required(
