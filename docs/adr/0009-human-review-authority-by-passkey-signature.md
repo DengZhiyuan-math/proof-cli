@@ -109,6 +109,7 @@ Nothing automates these steps. They are what re-anchors trust, so they must stay
 **Known limits.**
 - A compromised but not yet revoked key can sign whatever it likes. After revocation, it can still date a decision to before the revocation.
 - Deleting the newest rows is detected only as far as this machine's pin has advanced. Rows appended by a process that couldn't write the pin file, and not yet covered by a later signed decision, can be removed without trace.
+- The legacy cutoff is anchored only from the first enrollment on. Before it, someone editing the database can move the cutoff and so put a forged row into the re-sign queue, where the researcher still sees and decides it. Enroll right after upgrading.
 - A copy of a project shares its instance id, so decisions carry over to the copy. That is intended.
 - Claim ownership rests on a bearer token (#37): `claim` returns it once, only its hash is stored, and `submit` and `release` require it. It proves the caller holds the claim, not who the caller is — anyone who reads the token can use it. Claims made before #37 carry no token and still match on `claimant_id`/`session_id`.
 - Integrity warnings are surfaced by `proof review warnings`, and next to each node in the review app (#36).
@@ -133,7 +134,7 @@ Nothing automates these steps. They are what re-anchors trust, so they must stay
 
 - **Every decision kind is made in the app.** A node's page lists each decision it could sign right now, and each one signs on its own. The list covers Acceptance, Reference review, Evidence review, Lightweight re-review (showing the pinned version against the dependency's accepted version now), Challenge dismissal, Promote, and force-release. Force-release shows who holds the claim but never the session id, which a pre-token claim still accepts, and requires a reason. The list only says what to offer. Each decision is checked again, with its signature, by the service function it lands on.
 - **Key revocation** is a tap from any active key (`/api/keys/revoke`). The last active key is never revoked.
-- **No longer callable.** A Reference review decision of value `no-longer-callable` says an Imported result can't be relied on after all. It is terminal, like a Reject: any row saying it keeps the node there, and a corrected source is a new Imported result node (#20). Accepted dependents read `potentially-stale`. New dependents read `blocked`, with reason `dependency-not-callable`.
+- **No longer callable.** A Reference review decision of value `no-longer-callable` says an Imported result can't be relied on after all. It is terminal, like a Reject: a verified or legacy row saying it keeps the node there (see "A Reject that counts is terminal"), and a corrected source is a new Imported result node (#20). Accepted dependents read `potentially-stale`. New dependents read `blocked`, with reason `dependency-not-callable`.
 - **Challenge outcomes** (#25) are read off the signed decision that closed the Challenge, never off a column:
 
   | Closing decision | Outcome |

@@ -243,7 +243,7 @@ def _write_pin(store: ProjectStore, **fields: Any) -> None:
     projects = data.setdefault("projects", {})
     entry = dict(projects.get(_project_key(store)) or {})
     for once in ("first_key_fingerprint", "project_instance", "legacy_cutoff"):
-        if once in entry:
+        if once in entry or fields.get(once) is None:  # an unknown value is left for a later write
             fields.pop(once, None)
     entry.update({"project_id": read_state(store).project_id, **fields})
     projects[_project_key(store)] = entry
@@ -266,6 +266,7 @@ def _advance_history_pins(store: ProjectStore) -> None:
     """
     if _project_pin(store)[1] is None:
         return
+    adopt_legacy_review_cutoff(store)  # so the pin records the cutoff, not its absence
     try:
         _write_pin(
             store,
@@ -709,10 +710,9 @@ def is_legacy_row(store: ProjectStore, row: dict) -> bool:
     return not row["signed_decision"] and row["seq"] <= _snapshot(store).legacy_seq
 
 
-def is_legacy_review(store: ProjectStore, review_id: str) -> bool:
-    """Whether every decision row of this review is legacy (and there is one)."""
-    rows = [row for row in _snapshot(store).history_rows.values() if row["review_id"] == review_id and row["entry"] == "decision"]
-    return bool(rows) and all(is_legacy_row(store, row) for row in rows)
+def legacy_cutoff_seq(store: ProjectStore) -> int:
+    """The seq of the last legacy review-history row; 0 when there are none."""
+    return _snapshot(store).legacy_seq
 
 
 def ledger_entries(store: ProjectStore, entry: str) -> dict[str, dict]:
@@ -1305,8 +1305,8 @@ __all__ = [
     "decision_rows",
     "enroll_reviewer_key",
     "human_review_required",
-    "is_legacy_review",
     "is_legacy_row",
+    "legacy_cutoff_seq",
     "ledger_entries",
     "legacy_handled",
     "list_authority_warnings",
