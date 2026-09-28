@@ -34,13 +34,14 @@ def snapshot_path(root: Path, node_id: str, version: int) -> Path:
 
 
 def snapshots_on_disk(root: Path, node_id: str) -> dict[int, Path]:
-    """Every `snapshots/v<N>.tex` actually present, by version, indexed or not."""
+    """Every version present in `snapshots/`, indexed or not: its `v<N>.tex`, or else a lone
+    `v<N>.pdf` — whose number is taken too, so no new snapshot adopts a PDF of other text."""
     folder = snapshot_path(root, node_id, 1).parent
     found: dict[int, Path] = {}
-    for path in folder.glob("v*.tex") if folder.is_dir() else ():
+    for path in sorted(folder.iterdir(), key=lambda p: p.suffix != ".tex") if folder.is_dir() else ():
         number = path.stem[1:]
-        if number.isdigit():
-            found[int(number)] = path
+        if path.suffix in (".tex", ".pdf") and path.stem.startswith("v") and number.isdigit():
+            found.setdefault(int(number), path)
     return found
 
 
