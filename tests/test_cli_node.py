@@ -77,6 +77,7 @@ def test_node_create_and_show_json_envelope(tmp_path: Path):
 
 
 def test_node_show_missing_fails_with_json_error_envelope(tmp_path: Path):
+    runner.invoke(app, ["init", "--root", str(tmp_path)])
     result = runner.invoke(app, ["node", "show", "does_not_exist", "--root", str(tmp_path), "--json"])
     assert result.exit_code != 0
     payload = json.loads(result.stdout)
@@ -86,6 +87,7 @@ def test_node_show_missing_fails_with_json_error_envelope(tmp_path: Path):
 
 
 def test_node_show_missing_fails_human_readable(tmp_path: Path):
+    runner.invoke(app, ["init", "--root", str(tmp_path)])
     result = runner.invoke(app, ["node", "show", "does_not_exist", "--root", str(tmp_path)])
     assert result.exit_code != 0
     assert "does_not_exist" in result.stdout

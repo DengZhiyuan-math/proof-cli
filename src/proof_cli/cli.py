@@ -96,6 +96,7 @@ from .commands import (
     get_store,
 )
 from .envelope import dump_envelope, error_envelope, success_envelope
+from .contract import ProofGroup
 from .collaboration import summarize_review_record
 from .proof_map import (
     ProofMapError,
@@ -130,7 +131,14 @@ from .rendering import (
 )
 from .review import render_verification_output
 
-app = typer.Typer(add_completion=False, help="Mathematical Proof CLI")
+app = typer.Typer(
+    add_completion=False,
+    help="Mathematical Proof CLI: a proof map of nodes (theorems, lemmas, claims, imported results), each with its own LaTeX proof, "
+    "reviewed by the researcher on the proof map page. Start with `proof node --help` and `proof frontier`.",
+    cls=ProofGroup,  # the agent-facing contract: see contract.py
+)
+PROOF_MAP_PANEL = "Proof map"
+LEGACY_PANEL = "Legacy (before the proof map; kept for old projects)"
 asset_app = typer.Typer(help="Reusable asset workflows")
 pack_app = typer.Typer(help="Domain pack workflows")
 policy_app = typer.Typer(help="Automation policy workflows")
@@ -139,13 +147,13 @@ reuse_app = typer.Typer(help="Reuse outcome workflows")
 automate_app = typer.Typer(help="Supervised automation workflows")
 benchmark_app = typer.Typer(help="Automation evaluation workflows")
 project_app = typer.Typer(help="Project diagnostics workflows")
-goal_app = typer.Typer(help="Goal operations")
-theorem_app = typer.Typer(help="Theorem registry")
+goal_app = typer.Typer(help="(legacy) Goal operations; a goal becomes a Claim node")
+theorem_app = typer.Typer(help="(legacy) Theorem-contract registry; the proof map's nodes replace it")
 node_app = typer.Typer(help="Proof map node operations")
 node_evidence_app = typer.Typer(help="Evidence check workflows")
 challenge_app = typer.Typer(help="Challenge workflows")
-obligation_app = typer.Typer(help="Obligation queue")
-blocker_app = typer.Typer(help="Blocker tracking")
+obligation_app = typer.Typer(help="(legacy) Proof-obligation queue; an obligation is a Claim node now")
+blocker_app = typer.Typer(help="(legacy) Blocker tracking")
 reference_app = typer.Typer(help="Reference workflows")
 memory_app = typer.Typer(help="Memory workflows")
 publication_app = typer.Typer(help="Publication workflows")
@@ -165,15 +173,16 @@ trace_app = typer.Typer(help="Dependency tracing workflows")
 evidence_app = typer.Typer(help="Evidence inspection workflows")
 explain_app = typer.Typer(help="Theorem explanation workflows")
 formalize_app = typer.Typer(help="Formal bridge workflows")
-verify_app = typer.Typer(help="Verification workflows")
+verify_app = typer.Typer(help="(legacy) Machine-check log; advisory, and no backend runs (#27)")
 
 
 def _root(path: str | None) -> Path:
     return Path(path or ".")
 
 
-@app.command()
+@app.command(rich_help_panel=PROOF_MAP_PANEL)
 def init(root: str = ".") -> None:
+    """Start a proof project in ROOT."""
     typer.echo(cmd_init(_root(root)))
 
 
@@ -212,7 +221,7 @@ def reason(theorem_id: str, root: str = ".", notes: str = "") -> None:
     typer.echo(cmd_proof_reason(theorem_id, _root(root), notes=notes))
 
 
-@app.command()
+@app.command(rich_help_panel=PROOF_MAP_PANEL)
 def frontier(root: str = ".", json_output: bool = typer.Option(False, "--json")) -> None:
     """The open, unblocked, unclaimed nodes: what an agent could claim right now."""
     store = get_store(_root(root))
@@ -232,8 +241,9 @@ def frontier(root: str = ".", json_output: bool = typer.Option(False, "--json"))
     typer.echo(render_frontier(nodes))
 
 
-@app.command()
+@app.command(rich_help_panel=LEGACY_PANEL)
 def revalidate(source_id: str, root: str = ".", backend_target: str = "", notes: str = "") -> None:
+    """(legacy) Re-queue a stale verification fragment. A node's dependency is re-reviewed on the proof map page instead."""
     typer.echo(
         render_verification_output(
             f"revalidate {source_id}",
@@ -697,7 +707,7 @@ def review_warnings(root: str = ".", json_output: bool = typer.Option(False, "--
         typer.echo("\n".join(f"{warning.code}: {warning.message}" for warning in warnings))
 
 
-app.add_typer(goal_app, name="goal")
+app.add_typer(goal_app, name="goal", rich_help_panel=LEGACY_PANEL)
 app.add_typer(codex_app, name="codex")
 # Frozen peripheral modules (issue #28): reachable, but no longer advertised
 # in default `proof --help` discoverability — the new proof-map node model
@@ -710,11 +720,11 @@ app.add_typer(reuse_app, name="reuse", hidden=True)
 app.add_typer(automate_app, name="automate", hidden=True)
 app.add_typer(benchmark_app, name="benchmark", hidden=True)
 app.add_typer(project_app, name="project")
-app.add_typer(theorem_app, name="theorem")
-app.add_typer(node_app, name="node")
-app.add_typer(challenge_app, name="challenge")
-app.add_typer(obligation_app, name="obligation")
-app.add_typer(blocker_app, name="blocker")
+app.add_typer(theorem_app, name="theorem", rich_help_panel=LEGACY_PANEL)
+app.add_typer(node_app, name="node", rich_help_panel=PROOF_MAP_PANEL)
+app.add_typer(challenge_app, name="challenge", rich_help_panel=PROOF_MAP_PANEL)
+app.add_typer(obligation_app, name="obligation", rich_help_panel=LEGACY_PANEL)
+app.add_typer(blocker_app, name="blocker", rich_help_panel=LEGACY_PANEL)
 app.add_typer(reference_app, name="reference")
 app.add_typer(memory_app, name="memory")
 app.add_typer(publication_app, name="publication")
@@ -722,7 +732,7 @@ app.add_typer(provenance_app, name="provenance")
 app.add_typer(bug_app, name="bug")
 app.add_typer(debug_app, name="debug")
 app.add_typer(review_app, name="review")
-app.add_typer(map_app, name="map")
+app.add_typer(map_app, name="map", rich_help_panel=PROOF_MAP_PANEL)
 # the page's commands before it was the map's home (ADR-0010): kept, out of sight
 review_app.command("serve", hidden=True)(review_serve)
 review_app.command("open", hidden=True)(review_open)
@@ -737,7 +747,7 @@ app.add_typer(trace_app, name="trace")
 app.add_typer(evidence_app, name="evidence")
 app.add_typer(explain_app, name="explain")
 app.add_typer(formalize_app, name="formalize")
-app.add_typer(verify_app, name="verify")
+app.add_typer(verify_app, name="verify", rich_help_panel=LEGACY_PANEL)
 
 
 @asset_app.command("list")
