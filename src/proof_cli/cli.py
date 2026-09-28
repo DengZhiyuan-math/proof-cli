@@ -110,6 +110,7 @@ from .proof_map import (
     get_frontier,
     get_integrity_state,
     get_workflow_state,
+    list_candidate_proofs,
     list_challenges,
     list_integrity_warnings,
     list_nodes,
@@ -117,10 +118,12 @@ from .proof_map import (
     record_evidence_check,
     release_node,
     require_challenge,
+    request_review,
     require_node,
     split_node,
     submit_candidate_proof,
 )
+from .vault import working_proof_path
 from .rendering import (
     render_candidate_proof,
     render_challenge,
@@ -330,6 +333,12 @@ def node_show(
     except ProofMapError as exc:
         _emit_node_error(exc, json_output, command="node.show")
         raise typer.Exit(code=1)
+    working = working_proof_path(store.root, node_id)
+    working_proof = working.relative_to(store.root).as_posix() if working.is_file() else None
+    snapshots = [
+        {"version": proof.version, "file_path": proof.file_path, "sha256": proof.sha256, "is_current": proof.is_current}
+        for proof in list_candidate_proofs(store, node_id)
+    ]
 
     if json_output:
         payload = node.model_dump(mode="json")
@@ -337,6 +346,8 @@ def node_show(
         payload["acceptance_state"] = acceptance_state
         payload["integrity_state"] = integrity_state
         payload["blocked_reason"] = blocked_reason
+        payload["working_proof"] = working_proof
+        payload["snapshots"] = snapshots
         typer.echo(dump_envelope(success_envelope("node.show", payload)))
     else:
         typer.echo(
@@ -346,6 +357,8 @@ def node_show(
                 acceptance_state=acceptance_state,
                 integrity_state=integrity_state,
                 blocked_reason=blocked_reason,
+                working_proof=working_proof,
+                snapshots=snapshots,
             )
         )
 
@@ -411,6 +424,24 @@ def _emit_candidate_proof(record, json_output: bool, *, command: str) -> None:
         typer.echo(dump_envelope(success_envelope(command, record.model_dump(mode="json"))))
     else:
         typer.echo(render_candidate_proof(record))
+
+
+@node_app.command("request-review")
+def node_request_review(
+    node_id: str,
+    rationale: str = typer.Option(..., "--rationale", help="Why this node is now appropriately scoped to prove directly"),
+    requested_by: str = typer.Option("human", "--requested-by"),
+    root: str = ".",
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Snapshot the node's working proof.tex for review (ADR-0010). Needs no claim."""
+    store = get_store(_root(root))
+    try:
+        record = request_review(store, node_id, requested_by=requested_by, rationale=rationale)
+    except ProofMapError as exc:
+        _emit_node_error(exc, json_output, command="node.request_review")
+        raise typer.Exit(code=1)
+    _emit_candidate_proof(record, json_output, command="node.request_review")
 
 
 @node_app.command("submit")

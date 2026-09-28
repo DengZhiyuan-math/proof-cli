@@ -56,6 +56,8 @@ def render_proof_map_node(
     acceptance_state: str | None = None,
     integrity_state: str | None = None,
     blocked_reason: str | None = None,
+    working_proof: str | None = None,
+    snapshots: list[dict] | None = None,
 ) -> str:
     console = Console(record=True, width=100)
     console.rule(f"Proof Map Node: {node.id}")
@@ -85,6 +87,11 @@ def render_proof_map_node(
         table.add_row("Acceptance state", acceptance_state)
     if integrity_state is not None:
         table.add_row("Integrity state", integrity_state)
+    if working_proof is not None:
+        table.add_row("Working proof", working_proof)
+    for snapshot in snapshots or []:
+        current = " (current)" if snapshot["is_current"] else ""
+        table.add_row(f"Snapshot v{snapshot['version']}", f"{snapshot['file_path']}{current} sha256={snapshot['sha256'] or '—'}")
     table.add_row("Created by", node.created_by)
     table.add_row("Created at", node.created_at.isoformat())
     console.print(table)
