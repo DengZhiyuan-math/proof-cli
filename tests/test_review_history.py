@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from _authenticator import researcher
+from _researcher import researcher
 
 import proof_cli.collaboration as collaboration_module
 from proof_cli.collaboration import (
@@ -28,7 +28,7 @@ from proof_cli.collaboration import (
     save_collaboration,
     upsert_contributor,
 )
-from proof_cli.authority import list_authority_warnings
+from proof_cli.authority import list_authority_warnings, list_decisions
 from proof_cli.commands import cmd_review_decide, cmd_review_request
 from proof_cli.exchange import export_exchange_bundle, import_exchange_bundle
 from proof_cli.proof_map import (
@@ -81,18 +81,17 @@ def _run_python(code: str, *args: str) -> subprocess.CompletedProcess:
 # -- concurrency -------------------------------------------------------------
 
 
-# The parent process holds the passkey and signs; each child only submits
-# already-signed decisions, the way an agent or the web app's server would.
+# Each child makes its share of the decisions, as several proof map pages or
+# processes would; they all land in reviews.jsonl, in one order.
 _DECIDER = """
 import json, sys
 from proof_cli.collaboration import Contributor, upsert_contributor
 from proof_cli.proof_map import decide_acceptance
-from proof_cli.signing import SignedDecision
 from proof_cli.storage import load_project
 
 store = load_project(sys.argv[1])
-for node_id, raw in json.loads(open(sys.argv[2]).read()).items():
-    decide_acceptance(store, node_id, "accept", signed_decision=SignedDecision.model_validate_json(raw))
+for node_id in json.loads(open(sys.argv[2]).read()):
+    decide_acceptance(store, node_id, "accept", reviewer="Researcher <r@example.org>")
     # interleave a JSON-backed collaboration write: it used to rewrite the
     # whole file, review records included, and erase other processes' decisions
     upsert_contributor(store, Contributor(display_name=f"reviewer for {node_id}"))
@@ -104,11 +103,10 @@ def test_concurrent_decisions_from_several_processes_are_all_kept(tmp_path: Path
     node_ids = [f"clm_{index}" for index in range(30)]
     for node_id in node_ids:
         _submitted_claim(store, node_id)
-    signed = {node_id: researcher(store).sign("acceptance", node_id, "accept").model_dump_json() for node_id in node_ids}
     batch_files = []
     for offset in range(3):
         batch_file = tmp_path / f"batch_{offset}.json"
-        batch_file.write_text(json.dumps({node_id: signed[node_id] for node_id in node_ids[offset::3]}))
+        batch_file.write_text(json.dumps(node_ids[offset::3]))
         batch_files.append(batch_file)
 
     env = {**os.environ, "PYTHONPATH": str(SRC)}
@@ -127,59 +125,56 @@ def test_concurrent_decisions_from_several_processes_are_all_kept(tmp_path: Path
         assert process.returncode == 0, stderr
 
     assert [get_acceptance_state(store, node_id) for node_id in node_ids] == ["accepted"] * 30
-    acceptance_records = [record for record in list_review_records(store) if record.kind == ReviewRecordKind.acceptance]
-    assert len(acceptance_records) == 30
-    assert all(record.decision == ReviewGovernanceState.approved for record in acceptance_records)
+    decisions = [row for row in list_decisions(store) if row["kind"] == "acceptance"]
+    assert len(decisions) == 30
+    assert all(row["decision"] == "approved" for row in decisions)
+    assert sorted(row["seq"] for row in list_decisions(store)) == list(range(1, 31))  # one order, no collisions
 
 
 # -- interrupted decisions ----------------------------------------------------
 
 
-def test_a_decision_failing_after_its_request_leaves_prior_acceptance_unchanged(tmp_path: Path, monkeypatch):
+def test_a_decision_failing_as_it_is_written_leaves_prior_acceptance_unchanged(tmp_path: Path, monkeypatch):
+    import proof_cli.authority as authority_module
+
     store = ensure_project(tmp_path)
     _accepted_then_resubmitted(store)
-    rows_before = list_review_history(store)
+    before = list_decisions(store)
 
     def _boom(*args, **kwargs):
-        raise RuntimeError("simulated crash between request and decision")
+        raise RuntimeError("simulated crash writing the decision")
 
-    monkeypatch.setattr(collaboration_module, "record_review_decision", _boom)
+    monkeypatch.setattr(authority_module, "append_entry", _boom)
     with pytest.raises(RuntimeError):
         researcher(store).decide_acceptance("clm_1", "reject")
 
     assert get_acceptance_state(store, "clm_1") == "accepted"
     assert get_workflow_state(store, "clm_1") == "review-needed"
-    assert list_review_history(store) == rows_before
+    assert list_decisions(store) == before
 
 
 def test_a_process_killed_between_request_and_decision_leaves_prior_acceptance_unchanged(tmp_path: Path):
     store = ensure_project(tmp_path)
     _accepted_then_resubmitted(store)
-    rows_before = list_review_history(store)
-    signed_file = tmp_path / "reject.json"
-    signed_file.write_text(researcher(store).sign("acceptance", "clm_1", "reject").model_dump_json())
+    before = list_decisions(store)
 
     result = _run_python(
         """
         import os, sys
-        from pathlib import Path
-        import proof_cli.collaboration as collaboration
+        import proof_cli.authority as authority
         from proof_cli.proof_map import decide_acceptance
-        from proof_cli.signing import SignedDecision
         from proof_cli.storage import load_project
 
-        # die hard, mid-transaction, the instant the request row is written
-        collaboration.record_review_decision = lambda *args, **kwargs: os._exit(17)
-        signed = SignedDecision.model_validate_json(Path(sys.argv[2]).read_text())
-        decide_acceptance(load_project(sys.argv[1]), "clm_1", "reject", signed_decision=signed)
+        # die hard, mid-transaction, the instant the decision would be written
+        authority.append_entry = lambda *args, **kwargs: os._exit(17)
+        decide_acceptance(load_project(sys.argv[1]), "clm_1", "reject", reviewer="r")
         """,
         str(tmp_path),
-        str(signed_file),
     )
     assert result.returncode == 17, result.stderr
 
     assert get_acceptance_state(store, "clm_1") == "accepted"
-    assert list_review_history(store) == rows_before
+    assert list_decisions(store) == before
 
 
 def test_a_pending_request_never_counts_as_the_latest_decision(tmp_path: Path):
@@ -213,6 +208,15 @@ def _history_conn(store) -> sqlite3.Connection:
     return store.connect()
 
 
+def _generic_review(store):
+    """A decided generic review — the kind review_history still holds (ADR-0010)."""
+    from proof_cli.theorems import add_theorem
+
+    add_theorem(store, theorem_id="thm_1", kind="theorem", name="T", statement="A implies B")
+    request = record_review_request(store, "theorem_contract", "thm_1", reviewer_id="advisor")
+    return record_review_decision(store, request.id, ReviewGovernanceState.approved, reviewer_id="advisor")
+
+
 @pytest.mark.parametrize(
     "statement",
     [
@@ -224,8 +228,7 @@ def _history_conn(store) -> sqlite3.Connection:
 )
 def test_review_history_rows_can_never_be_updated_or_deleted(tmp_path: Path, statement: str):
     store = ensure_project(tmp_path)
-    _submitted_claim(store, "clm_1")
-    researcher(store).decide_acceptance("clm_1", "accept")
+    _generic_review(store)
     rows_before = list_review_history(store)
 
     conn = _history_conn(store)
@@ -235,16 +238,15 @@ def test_review_history_rows_can_never_be_updated_or_deleted(tmp_path: Path, sta
     conn.close()
 
     assert list_review_history(store) == rows_before
-    assert get_acceptance_state(store, "clm_1") == "accepted"
 
 
 def test_insert_or_replace_cannot_overwrite_a_review_history_row(tmp_path: Path):
     """`INSERT OR REPLACE` resolves a conflict by deleting the old row, which
     wouldn't fire the DELETE trigger — so a colliding insert is refused too."""
     store = ensure_project(tmp_path)
-    _submitted_claim(store, "clm_1")
-    record = researcher(store).decide_acceptance("clm_1", "accept")
+    record = _generic_review(store)
     decision_row = next(row for row in list_review_history(store) if row.review_id == record.id and row.entry == "decision")
+    rows_before = list_review_history(store)
 
     conn = _history_conn(store)
     for column, value in (("id", decision_row.id), ("seq", decision_row.seq)):
@@ -253,7 +255,7 @@ def test_insert_or_replace_cannot_overwrite_a_review_history_row(tmp_path: Path)
                 f"""
                 INSERT OR REPLACE INTO review_history({'seq, ' if column == 'seq' else ''}id, review_id, entry,
                   object_type, object_id, kind, decision, reviewer_id, rationale, authorship, provenance_notes, created_at)
-                VALUES ({'?, ' if column == 'seq' else ''}?, ?, 'decision', 'proof_map_node', 'clm_1', 'acceptance',
+                VALUES ({'?, ' if column == 'seq' else ''}?, ?, 'decision', 'theorem_contract', 'thm_1', NULL,
                   'rejected', 'forger', '', '[]', '', '2030-01-01T00:00:00+00:00')
                 """,
                 ([value] if column == "seq" else []) + [decision_row.id if column == "id" else "decision_forged", record.id],
@@ -261,7 +263,7 @@ def test_insert_or_replace_cannot_overwrite_a_review_history_row(tmp_path: Path)
     conn.rollback()
     conn.close()
 
-    assert get_acceptance_state(store, "clm_1") == "accepted"
+    assert list_review_history(store) == rows_before
 
 
 def test_a_decision_row_must_reference_an_existing_request_for_the_same_object(tmp_path: Path):
@@ -328,36 +330,21 @@ def test_saving_collaboration_state_cannot_touch_review_history(tmp_path: Path):
 
 
 def test_generic_review_decide_refuses_evidence_and_revalidation_records(tmp_path: Path):
+    from proof_cli.authority import AuthorityError
+
     store = ensure_project(tmp_path)
     proof = _submitted_claim(store, "clm_1")
     check = record_evidence_check(store, proof.id, "passed")
     evidence_review = researcher(store).decide_evidence_review(check.id, "trusted")
-    # any genuine signature gets past the service-layer guard; the point here
-    # is only that the generic command can't touch the record afterwards
-    signature = researcher(store).sign("evidence_review", check.id, "unusable")
-    revalidation = collaboration_module.record_decided_review(
-        store,
-        "proof_map_node",
-        "clm_1",
-        ReviewGovernanceState.reaffirmed,
-        reviewer_id="researcher",
-        kind=ReviewRecordKind.dependency_revalidation,
-        signed_decision=signature,
-    )
 
-    for record in (evidence_review, revalidation):
-        with pytest.raises(ValueError, match="can't be re-decided"):
-            cmd_review_decide(record.id, "unusable", root=tmp_path)
-    assert [row.decision.value for row in list_review_history(store, review_id=evidence_review.id)] == [
-        "proposed_for_review",
-        "trusted",
-    ]
-
-    with pytest.raises(ValueError, match="review app"):
-        cmd_review_request("evidence_check", check.id, root=tmp_path)
-
-
-# -- exchange -----------------------------------------------------------------
+    with pytest.raises(ValueError, match="can't be re-decided"):
+        cmd_review_decide(evidence_review.id, "unusable", root=tmp_path)
+    # and nothing trust-bearing enters the generic history in the first place
+    with pytest.raises(AuthorityError):
+        collaboration_module.record_decided_review(
+            store, "proof_map_node", "clm_1", ReviewGovernanceState.reaffirmed, reviewer_id="agent", kind=ReviewRecordKind.dependency_revalidation
+        )
+    assert [row["decision"] for row in list_decisions(store) if row["id"] == evidence_review.id] == ["trusted"]
 
 
 def test_exchange_import_never_revokes_or_forges_a_local_decision(tmp_path: Path):
@@ -395,18 +382,15 @@ def test_exchange_import_never_revokes_or_forges_a_local_decision(tmp_path: Path
 
 
 def _migrated_but_unsigned(store, node_id: str, review_id: str, decision: ReviewGovernanceState) -> None:
-    """A JSON-era decision survives the migration intact. Unsigned, an
-    approval no longer counts (ADR-0009 point 7) — the node reads
-    `unverifiable`, not reopened — while a legacy Reject keeps the node
-    terminal (#35 F). Either way it's surfaced to be re-signed."""
+    """A JSON-era decision survives both migrations intact, into reviews.jsonl
+    (ADR-0010). A legacy Reject keeps the node terminal; an approval of a node
+    that never had a Candidate proof describes nothing, so it reads
+    `unverifiable` rather than accepted."""
     record = next(record for record in list_review_records(store) if record.id == review_id)
-    assert (record.object_id, record.decision, record.signed) == (node_id, decision, False)
+    assert (record.object_id, record.decision) == (node_id, decision)
     expected = "rejected" if decision == ReviewGovernanceState.rejected else "unverifiable"
     assert get_acceptance_state(store, node_id) == expected
-    assert any(
-        warning.code == "UNSIGNED_DECISION" and warning.details["review_id"] == review_id
-        for warning in list_authority_warnings(store)
-    )
+    assert any(row["id"] == review_id and row["migrated"] for row in list_decisions(store))
 
 
 def _as_pre_review_history_project(store) -> None:

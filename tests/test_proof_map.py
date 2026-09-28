@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from _authenticator import researcher
+from _researcher import researcher
 
 from proof_cli.domain import ProofMapNodeKind, utc_now
 from proof_cli.domain import DependencyPin
@@ -14,17 +14,12 @@ from proof_cli.proof_map import (
     claim_node,
     compute_interface_fingerprint,
     create_node,
-    decide_acceptance,
-    decide_evidence_review,
-    decide_reference_review,
     dependency_pin_is_current,
-    dismiss_challenge,
     get_acceptance_state,
     get_accepted_interface_fingerprint,
     get_blocked_reason,
     get_challenge,
     get_dependency_pin,
-    get_evidence_check,
     get_frontier,
     get_integrity_state,
     get_node,
@@ -37,11 +32,9 @@ from proof_cli.proof_map import (
     list_evidence_checks,
     list_nodes,
     open_challenge,
-    promote_to_lemma,
     record_evidence_check,
     release_node,
     require_node,
-    revalidate_dependency,
     split_node,
     submit_candidate_proof,
 )
@@ -598,16 +591,6 @@ def test_new_node_starts_unreviewed(tmp_path: Path):
     assert get_acceptance_state(store, "clm_1") == "unreviewed"
 
 
-def test_decide_acceptance_requires_a_signed_decision(tmp_path: Path):
-    store = ensure_project(tmp_path)
-    _submitted_claim(store)
-
-    with pytest.raises(ProofMapError) as exc_info:
-        decide_acceptance(store, "clm_1", "accept")
-    assert exc_info.value.code == "HUMAN_REVIEW_REQUIRED"
-    assert get_acceptance_state(store, "clm_1") == "unreviewed"
-
-
 def test_decide_acceptance_invalid_decision_rejected(tmp_path: Path):
     store = ensure_project(tmp_path)
     _submitted_claim(store)
@@ -855,22 +838,6 @@ def test_decide_reference_review_grants_review_independent_of_acceptance_state(t
     assert get_reference_review_state(store, "ref_1") == "reviewed"
     # acceptance_state is untouched by a Reference review decision
     assert get_acceptance_state(store, "ref_1") == "unreviewed"
-
-
-def test_decide_reference_review_requires_a_signed_decision(tmp_path: Path):
-    store = ensure_project(tmp_path)
-    create_node(
-        store,
-        node_id="ref_1",
-        kind="imported_result",
-        statement="An external theorem",
-        source_locator="doi:10.1234/example",
-        source_version="v1",
-    )
-    with pytest.raises(ProofMapError) as exc_info:
-        decide_reference_review(store, "ref_1", "reference-review")
-    assert exc_info.value.code == "HUMAN_REVIEW_REQUIRED"
-    assert get_reference_review_state(store, "ref_1") == "unreviewed"
 
 
 def test_decide_reference_review_on_non_imported_result_is_rejected(tmp_path: Path):
@@ -1370,15 +1337,6 @@ def test_revalidate_dependency_rejected_when_fingerprint_changed(tmp_path: Path)
     assert exc_info.value.code == "INTERFACE_CHANGED"
 
 
-def test_revalidate_dependency_requires_a_signed_decision(tmp_path: Path):
-    store = ensure_project(tmp_path)
-    _dependent_with_accepted_dependency(store)
-
-    with pytest.raises(ProofMapError) as exc_info:
-        revalidate_dependency(store, "clm_1", "lem_base")
-    assert exc_info.value.code == "HUMAN_REVIEW_REQUIRED"
-
-
 def test_revalidate_dependency_target_not_accepted_is_rejected(tmp_path: Path):
     store = ensure_project(tmp_path)
     create_node(store, node_id="lem_base", kind="lemma", statement="Base lemma")
@@ -1472,14 +1430,14 @@ def test_revalidate_dependency_review_write_failure_rolls_back_the_pin(tmp_path:
     aged_pin = pin.model_copy(update={"pinned_version": 0})
     upsert_dependency_pin(store, aged_pin)
 
-    import proof_cli.collaboration as collaboration_module
+    import proof_cli.authority as authority_module
 
     def _boom(*args, **kwargs):
         raise RuntimeError("simulated review-write failure")
 
-    # fails after the pin and the review request are already written on the
-    # transaction — the decision step is the last write before commit
-    monkeypatch.setattr(collaboration_module, "record_review_decision", _boom)
+    # fails after the pin is already written on the transaction: the
+    # decision's reviews.jsonl line is the last write before commit
+    monkeypatch.setattr(authority_module, "append_entry", _boom)
 
     with pytest.raises(RuntimeError):
         researcher(store).revalidate_dependency("clm_1", "lem_base")
@@ -1544,18 +1502,6 @@ def test_open_challenge_against_imported_result_requires_reference_review(tmp_pa
     researcher(store).decide_reference_review("ref_1", "reference-review")
     challenge = open_challenge(store, "ref_1", opened_by="agent_a")
     assert challenge.target_node_id == "ref_1"
-
-
-def test_dismiss_challenge_requires_a_signed_decision(tmp_path: Path):
-    store = ensure_project(tmp_path)
-    create_node(store, node_id="lem_1", kind="lemma", statement="Base lemma")
-    _accept_via_full_cycle(store, "lem_1")
-    challenge = open_challenge(store, "lem_1", opened_by="agent_a")
-
-    with pytest.raises(ProofMapError) as exc_info:
-        dismiss_challenge(store, challenge.id)
-    assert exc_info.value.code == "HUMAN_REVIEW_REQUIRED"
-    assert get_challenge(store, challenge.id).status.value == "open"
 
 
 def test_dismiss_challenge_on_already_dismissed_is_rejected(tmp_path: Path):
@@ -1765,17 +1711,6 @@ def test_promote_requires_claim_and_accepted(tmp_path: Path):
     with pytest.raises(ProofMapError) as exc_info:
         researcher(store).promote_to_lemma("clm_1")
     assert exc_info.value.code == "NOT_ACCEPTED"
-
-
-def test_promote_requires_a_signed_decision(tmp_path: Path):
-    store = ensure_project(tmp_path)
-    create_node(store, node_id="clm_1", kind="claim", statement="A promotable claim")
-    _accept_via_full_cycle(store, "clm_1")
-
-    with pytest.raises(ProofMapError) as exc_info:
-        promote_to_lemma(store, "clm_1")
-    assert exc_info.value.code == "HUMAN_REVIEW_REQUIRED"
-    assert get_node(store, "clm_1").kind == ProofMapNodeKind.claim
 
 
 def test_promote_changes_only_kind(tmp_path: Path):
@@ -2103,16 +2038,6 @@ def test_record_evidence_check_requires_no_confirmation(tmp_path: Path):
     import inspect
 
     assert "confirmed" not in inspect.signature(record_evidence_check).parameters
-
-
-def test_decide_evidence_review_requires_a_signed_decision(tmp_path: Path):
-    store = ensure_project(tmp_path)
-    proof = _submitted_claim(store, "clm_1")
-    check = record_evidence_check(store, proof.id, "passed")
-
-    with pytest.raises(ProofMapError) as exc_info:
-        decide_evidence_review(store, check.id, "trusted")
-    assert exc_info.value.code == "HUMAN_REVIEW_REQUIRED"
 
 
 def test_decide_evidence_review_invalid_decision_is_rejected(tmp_path: Path):

@@ -97,10 +97,6 @@ from .commands import (
 )
 from .envelope import dump_envelope, error_envelope, success_envelope
 from .collaboration import summarize_review_record
-from .authority import (
-    AuthorityError,
-    list_reviewer_keys,
-)
 from .proof_map import (
     ProofMapError,
     claim_node,
@@ -158,7 +154,6 @@ provenance_app = typer.Typer(help="Provenance workflows")
 bug_app = typer.Typer(help="Proof bug workflows")
 debug_app = typer.Typer(help="Proof debug workflows")
 review_app = typer.Typer(help="Proof review workflows")
-reviewer_app = typer.Typer(help="Reviewer passkey registry (ADR-0009); keys are enrolled only in the web app")
 contributor_app = typer.Typer(help="Contributor workflows")
 role_app = typer.Typer(help="Role workflows")
 comment_app = typer.Typer(help="Comment workflows")
@@ -255,7 +250,7 @@ def _emit_node(node, json_output: bool, *, command: str) -> None:
 
 
 def human_review_required(root: str, *, command: str, kind: str, target_id: str, node_id: str | None, json_output: bool) -> None:
-    """Every human-only operation is made in the review app, never here (ADR-0009, #37): say where, and fail."""
+    """Every Human Review decision is made on the proof map page, never here (ADR-0010): say where, and fail."""
     from .webapp.server import project_url
 
     # not a project yet: nothing to decide, and a refusal shouldn't create one
@@ -263,7 +258,7 @@ def human_review_required(root: str, *, command: str, kind: str, target_id: str,
     _emit_node_error(
         ProofMapError(
             "HUMAN_REVIEW_REQUIRED",
-            f"{kind} on {target_id} is a Human Review decision: make it with your passkey in the review app"
+            f"{kind} on {target_id} is a Human Review decision: the researcher makes it on the proof map page"
             f"{f', at {url}' if url else ''} (run `{('proof review open ' + node_id) if node_id else 'proof review open'}`)",
             details={"kind": kind, "target_id": target_id, "url": url},
         ),
@@ -485,17 +480,18 @@ def _emit_review_record(record, json_output: bool, *, command: str) -> None:
 
 @node_app.command("review")
 def node_review(node_id: str, decision: str = typer.Argument(""), root: str = ".", json_output: bool = typer.Option(False, "--json")) -> None:
-    """Accept / revision-requested / reject a node, or Reference-review an imported result — in the review app.
+    """Accept / revision-requested / reject a node, or Reference-review an imported result — on the proof map page.
 
-    A Human Review decision needs the researcher's passkey (ADR-0009): this
-    command never makes one, whatever flags it's given. It prints where to.
+    A Human Review decision is the researcher's, made on the proof map page
+    (ADR-0010): this command never makes one, whatever flags it's given. It
+    prints where to.
     """
     human_review_required(root, command="node.review", kind="acceptance", target_id=node_id, node_id=node_id, json_output=json_output)
 
 
 @node_app.command("revalidate")
 def node_revalidate(node_id: str, target_node_id: str = typer.Argument(""), root: str = ".", json_output: bool = typer.Option(False, "--json")) -> None:
-    """Lightweight re-review of node_id's dependency on target_node_id — in the review app (ADR-0009)."""
+    """Lightweight re-review of node_id's dependency on target_node_id — on the proof map page (ADR-0010)."""
     human_review_required(
         root, command="node.revalidate", kind="dependency_revalidation", target_id=node_id, node_id=node_id, json_output=json_output
     )
@@ -503,7 +499,7 @@ def node_revalidate(node_id: str, target_node_id: str = typer.Argument(""), root
 
 @node_app.command("promote")
 def node_promote(node_id: str, root: str = ".", json_output: bool = typer.Option(False, "--json")) -> None:
-    """Promote an Accepted Claim to a Lemma — in the review app (ADR-0009)."""
+    """Promote an Accepted Claim to a Lemma — on the proof map page (ADR-0010)."""
     human_review_required(root, command="node.promote", kind="promote", target_id=node_id, node_id=node_id, json_output=json_output)
 
 
@@ -600,7 +596,7 @@ def challenge_show(
 
 @challenge_app.command("dismiss")
 def challenge_dismiss(challenge_id: str, root: str = ".", json_output: bool = typer.Option(False, "--json")) -> None:
-    """Resolve a Challenge — in the review app (ADR-0009)."""
+    """Resolve a Challenge — on the proof map page (ADR-0010)."""
     store = get_store(_root(root))
     try:
         target = require_challenge(store, challenge_id).target_node_id
@@ -642,7 +638,7 @@ def evidence_record(
 
 @node_evidence_app.command("review")
 def evidence_review(check_id: str, decision: str = typer.Argument(""), root: str = ".", json_output: bool = typer.Option(False, "--json")) -> None:
-    """Judge an Evidence check trusted/unusable — in the review app (ADR-0009)."""
+    """Judge an Evidence check trusted/unusable — on the proof map page (ADR-0010)."""
     human_review_required(root, command="node.evidence.review", kind="evidence_review", target_id=check_id, node_id=None, json_output=json_output)
 
 
@@ -650,7 +646,7 @@ node_app.add_typer(node_evidence_app, name="evidence")
 
 
 def _running_review_app(store) -> bool:
-    """Whether this project's review app already answers on its pinned origin."""
+    """Whether this project's proof map page already answers on its origin."""
     import urllib.request
 
     from .storage import read_project_instance_id
@@ -665,10 +661,11 @@ def _running_review_app(store) -> bool:
 
 @review_app.command("serve")
 def review_serve(root: str = ".") -> None:
-    """Run this project's review app on its own localhost origin — the only place decisions are signed (ADR-0009).
+    """Run this project's proof map page on its own localhost origin — the only place Human Review decisions are made (ADR-0010).
 
-    Runs in the foreground until interrupted. Bound to 127.0.0.1; it holds
-    no authority itself: every decision needs a passkey tap in the page.
+    Runs in the foreground until interrupted. Bound to 127.0.0.1. Decisions
+    are recorded as this process's git identity and committed with their
+    snapshots.
     """
     from .webapp.server import ReviewServer
 
@@ -678,7 +675,7 @@ def review_serve(root: str = ".") -> None:
     except OSError as exc:
         typer.echo(f"Error: can't bind this project's review port ({exc}); is it already running? Try `proof review open`.")
         raise typer.Exit(code=1)
-    typer.echo(f"Review app for this project: {server.url}  (Ctrl-C to stop)")
+    typer.echo(f"Proof map page for this project: {server.url}  (Ctrl-C to stop)")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -689,7 +686,7 @@ def review_serve(root: str = ".") -> None:
 
 @review_app.command("open")
 def review_open(node_id: str = typer.Argument("", help="Open this node's decision page"), root: str = ".") -> None:
-    """Open this project's review app (starting it in the background if needed), optionally at a node."""
+    """Open this project's proof map page (starting it in the background if needed), optionally at a node."""
     import subprocess
     import time
     import webbrowser
@@ -725,23 +722,6 @@ def review_warnings(root: str = ".", json_output: bool = typer.Option(False, "--
         typer.echo("\n".join(f"{warning.code}: {warning.message}" for warning in warnings))
 
 
-def _emit_authority_error(exc: AuthorityError, json_output: bool, *, command: str) -> None:
-    _emit_node_error(ProofMapError(exc.code, exc.message, details=exc.details), json_output, command=command)
-
-
-@reviewer_app.command("list")
-def reviewer_list(root: str = ".", json_output: bool = typer.Option(False, "--json")) -> None:
-    """Enrolled Reviewer passkeys, with fingerprints — check the first one against the one you enrolled."""
-    keys = list_reviewer_keys(get_store(_root(root)))
-    if json_output:
-        typer.echo(dump_envelope(success_envelope("reviewer.list", [key.model_dump(mode="json") for key in keys])))
-    elif not keys:
-        typer.echo("No Reviewer keys enrolled")
-    else:
-        for key in keys:
-            status = f"revoked {key.revoked_at.isoformat()}" if key.revoked_at else "active"
-            typer.echo(f"{key.fingerprint} {key.display_name} [{status}]")
-
 app.add_typer(goal_app, name="goal")
 app.add_typer(codex_app, name="codex")
 # Frozen peripheral modules (issue #28): reachable, but no longer advertised
@@ -767,7 +747,6 @@ app.add_typer(provenance_app, name="provenance")
 app.add_typer(bug_app, name="bug")
 app.add_typer(debug_app, name="debug")
 app.add_typer(review_app, name="review")
-app.add_typer(reviewer_app, name="reviewer")
 app.add_typer(contributor_app, name="contributor")
 app.add_typer(role_app, name="role")
 app.add_typer(comment_app, name="comment")
@@ -1121,7 +1100,7 @@ def reference_import(
 
 @reference_app.command("review")
 def reference_review(reference_id: str, action: str = typer.Argument(""), root: str = ".", json_output: bool = typer.Option(False, "--json")) -> None:
-    """Retired (ADR-0001, #37): a reference is trusted by Reference-reviewing its imported_result node, in the review app."""
+    """Retired (ADR-0001, #37): a reference is trusted by Reference-reviewing its imported_result node, on the proof map page."""
     human_review_required(root, command="reference.review", kind="reference_review", target_id=reference_id, node_id=None, json_output=json_output)
 
 

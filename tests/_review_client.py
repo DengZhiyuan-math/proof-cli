@@ -53,3 +53,49 @@ class Client:
 
     def post(self, path, body=None, **kwargs):
         return self.request("POST", path, {} if body is None else body, **kwargs)
+
+
+class DirectClient:
+    """The same calls as `Client`, straight into `ReviewApp` — no socket, so it runs anywhere.
+
+    Only the routes the page's logic uses; the HTTP checks themselves (Host,
+    Origin, content type, headers) are covered over a real socket in
+    test_review_app.py.
+    """
+
+    def __init__(self, store) -> None:
+        from proof_cli.webapp.server import ReviewApp
+
+        self.app = ReviewApp(store)
+        self.origin = self.app.origin
+
+    def _call(self, action):
+        from proof_cli.proof_map import ProofMapError
+        from proof_cli.webapp.server import RequestError
+
+        try:
+            return 200, json.loads(json.dumps({"ok": True, "data": action()}, default=str))
+        except RequestError as exc:
+            return int(exc.status), {"ok": False, "error": {"code": exc.code, "message": exc.message, **exc.details}}
+        except ProofMapError as exc:
+            return 400, {"ok": False, "error": {"code": exc.code, "message": exc.message, **exc.details}}
+
+    def get(self, path, **kwargs):
+        if path == "/api/state":
+            return self._call(self.app.state)
+        if path == "/api/health":
+            return self._call(self.app.health)
+        if path.startswith("/api/node/"):
+            node_id = path.removeprefix("/api/node/")
+            return self._call(lambda: self.app.node(node_id))
+        raise AssertionError(f"DirectClient doesn't route GET {path}")
+
+    def post(self, path, body=None, **kwargs):
+        if path == "/api/decide":
+            return self._call(lambda: self.app.decide(body or {}))
+        raise AssertionError(f"DirectClient doesn't route POST {path}")
+
+
+def decide(client, decisions):
+    """What the page's Record button sends."""
+    return client.post("/api/decide", {"decisions": decisions})

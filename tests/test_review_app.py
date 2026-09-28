@@ -1,308 +1,186 @@
-"""The local review web app (issue #36), driven over plain HTTP.
+"""The proof map page (issues #36, #55, ADR-0010): what it shows, and how decisions are recorded from it.
 
-The browser's part (navigator.credentials.create/get) is played by the
-software authenticator; everything else is the real server, reached the way
-a browser — or an agent `curl`ing it — would.
+The page's logic is driven through `ReviewApp` directly (`DirectClient`, no
+socket). The HTTP layer itself — Host/Origin/content-type checks, error
+responses, headers — is driven over a real socket, as a browser or an agent
+`curl`ing it would.
 """
 
 import http.client
 import json
-import sqlite3
 from pathlib import Path
 from urllib.parse import urlsplit
 
 import pytest
 
-from _authenticator import Researcher, SoftwareAuthenticator, researcher
-from _review_client import Client, serving
-from proof_cli.authority import list_reviewer_keys, pinned_first_fingerprint, project_origin
-from proof_cli.collaboration import list_review_records
-from proof_cli.proof_map import (
-    claim_node,
-    create_node,
-    get_acceptance_state,
-    list_integrity_warnings,
-    submit_candidate_proof,
-)
-from proof_cli.signing import (
-    SignatureError,
-    b64url_decode,
-    public_key_fingerprint,
-    verify_registration,
-)
+from _researcher import researcher
+from _review_client import DirectClient, decide, serving
+from proof_cli.proof_map import create_node, get_acceptance_state, request_review
 from proof_cli.storage import ensure_project
 
 
 @pytest.fixture
-def app(tmp_path: Path):
+def page(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    yield store, DirectClient(store)
+
+
+@pytest.fixture
+def http_app(tmp_path: Path):
     store = ensure_project(tmp_path)
     with serving(store) as client:
         yield store, client
 
 
-def _submitted(store, node_id="clm_1"):
-    create_node(store, node_id=node_id, kind="claim", statement=f"stmt {node_id}")
-    claim_node(store, node_id, claimant_id="agent_a", session_id="s")
-    return submit_candidate_proof(store, node_id, claimant_id="agent_a", session_id="s", scoping_rationale="scoped", content=f"# Proof of {node_id}\n\nBy **induction**.")
+def _awaiting(store, node_id="clm_1"):
+    create_node(store, node_id=node_id, kind="claim", statement=r"$(f * g) * h = f * (g * h)$")
+    working = store.root / "proofs" / node_id / "proof.tex"
+    working.write_text(working.read_text().replace("% Write the proof here.", "- x^2 \\le 0 fails; take $(f * g) * h$."))
+    return request_review(store, node_id, requested_by="agent_a", rationale="scoped")
 
 
-def _enroll_over_http(client: Client, authenticator: SoftwareAuthenticator, *, signer: SoftwareAuthenticator | None = None):
-    status, begin = client.post("/api/enroll/begin", {"display_name": authenticator.display_name})
-    assert status == 200, begin
-    registration = authenticator.register(b64url_decode(begin["data"]["public_key"]["challenge"]), origin=client.origin)
-    status, registered = client.post("/api/enroll/register", {"token": begin["data"]["token"], **registration})
-    assert status == 200, registered
-    to_sign = registered["data"]
-    assertion = (signer or authenticator).assert_challenge(b64url_decode(to_sign["challenge"]), origin=client.origin)
-    return client.post("/api/enroll/complete", {"token": to_sign["token"], "assertion": assertion.model_dump()})
+# -- what the page shows -----------------------------------------------------------------
 
 
-def _sign(client: Client, authenticator: SoftwareAuthenticator, decisions: list[dict]):
-    status, prepared = client.post("/api/prepare", {"decisions": decisions})
-    assert status == 200, prepared
-    to_sign = prepared["data"]
-    assertion = authenticator.assert_challenge(b64url_decode(to_sign["challenge"]), origin=client.origin)
-    return client.post("/api/decide", {"payloads": to_sign["payloads"], "batch": to_sign["batch"], "assertion": assertion.model_dump()})
+def test_the_home_page_lists_what_awaits_review_with_its_exact_snapshot(page):
+    store, client = page
+    snapshot = _awaiting(store)
 
-
-# -- enrollment: only here, a real registration ceremony ------------------------------
-
-
-def test_a_researcher_enrolls_a_passkey_and_accepts_a_node(app):
-    store, client = app
-    _submitted(store)
-    passkey = SoftwareAuthenticator(display_name="MacBook Touch ID")
-
-    status, enrolled = _enroll_over_http(client, passkey)
-
-    assert status == 200, enrolled
-    assert enrolled["data"]["fingerprint"] == public_key_fingerprint(passkey.public_key_spki)
-    assert pinned_first_fingerprint(store) == enrolled["data"]["fingerprint"]
     state = client.get("/api/state")[1]["data"]
-    assert [key["display_name"] for key in state["keys"]] == ["MacBook Touch ID"]
-    assert [item["node_id"] for item in state["pending"]] == ["clm_1"]
 
-    status, outcome = _sign(client, passkey, [{"kind": "acceptance", "target_id": "clm_1", "decision": "accept", "rationale": "checked"}])
-
-    assert status == 200 and outcome["data"]["results"][0]["ok"], outcome
-    assert get_acceptance_state(store, "clm_1") == "accepted"
-
-
-def test_a_second_passkey_is_enrolled_only_with_a_tap_from_the_first(app):
-    store, client = app
-    first, second = SoftwareAuthenticator(display_name="Touch ID"), SoftwareAuthenticator(display_name="YubiKey")
-    _enroll_over_http(client, first)
-
-    status, refused = _enroll_over_http(client, second)  # the new key vouching for itself
-    assert status == 403 and refused["error"]["code"] == "ENROLLMENT_REFUSED"
-    status, enrolled = _enroll_over_http(client, second, signer=first)
-    assert status == 200, enrolled
-    assert {key.display_name for key in list_reviewer_keys(store)} == {"Touch ID", "YubiKey"}
+    (pending,) = state["pending"]
+    assert pending["node_id"] == "clm_1"
+    assert pending["candidate_proof"]["text"] == (store.root / snapshot.file_path).read_text()
+    assert pending["candidate_proof"]["sha256"] == snapshot.sha256
+    assert state["reviewer"]  # whose decisions these will be
 
 
-def test_the_registry_banner_can_only_be_cleared_with_a_tap(app):
-    store, client = app
-    first, second = SoftwareAuthenticator(display_name="Touch ID"), SoftwareAuthenticator(display_name="YubiKey")
-    _enroll_over_http(client, first)
-    _enroll_over_http(client, second, signer=first)
-    assert client.get("/api/state")[1]["data"]["registry"]["acknowledged"] is False
+def test_the_node_page_shows_the_exact_latex_never_a_rendering(page):
+    store, client = page
+    snapshot = _awaiting(store)
 
-    to_sign = client.post("/api/acknowledge/prepare")[1]["data"]
-    status, refused = client.post("/api/acknowledge", {"payloads": to_sign["payloads"], "batch": to_sign["batch"]})
-    assert status != 200 and client.get("/api/state")[1]["data"]["registry"]["acknowledged"] is False
+    view = client.get("/api/node/clm_1")[1]["data"]
 
-    assertion = first.assert_challenge(b64url_decode(to_sign["challenge"]), origin=client.origin)
-    status, acknowledged = client.post("/api/acknowledge", {"payloads": to_sign["payloads"], "batch": to_sign["batch"], "assertion": assertion.model_dump()})
-    assert status == 200 and acknowledged["data"]["acknowledged"] is True
+    assert view["candidate_proof"]["text"] == (store.root / snapshot.file_path).read_text()
+    assert "(f * g) * h" in view["candidate_proof"]["text"] and "- x^2" in view["candidate_proof"]["text"]
+    static = Path(__file__).parent.parent / "src" / "proof_cli" / "webapp" / "static" / "app.js"
+    assert "renderMarkdown" not in static.read_text()
 
 
-# -- one tap, N decisions -----------------------------------------------------------
-
-
-def test_a_batch_of_decisions_needs_exactly_one_tap(app):
-    store, client = app
-    for node_id in ("clm_1", "clm_2", "clm_3"):
-        _submitted(store, node_id)
-    passkey = SoftwareAuthenticator(counter=True)
-    _enroll_over_http(client, passkey)
-    taps_before = passkey.sign_count
-
-    status, outcome = _sign(
-        client,
-        passkey,
-        [{"kind": "acceptance", "target_id": node_id, "decision": "accept"} for node_id in ("clm_1", "clm_2", "clm_3")],
-    )
-
-    assert status == 200 and all(result["ok"] for result in outcome["data"]["results"])
-    assert passkey.sign_count - taps_before == 1
-    assert {get_acceptance_state(store, node_id) for node_id in ("clm_1", "clm_2", "clm_3")} == {"accepted"}
-    assert list_integrity_warnings(store) == []
-
-
-# -- an agent with plain HTTP gets nowhere ---------------------------------------------
-
-
-def _observable(store):
-    return (
-        [(r.id, r.decision.value) for r in list_review_records(store) if r.kind is not None],
-        [key.fingerprint for key in list_reviewer_keys(store)],
-        get_acceptance_state(store, "clm_1"),
-    )
-
-
-@pytest.mark.parametrize(
-    "path, body",
-    [
-        ("/api/decide", {}),
-        ("/api/decide", {"payloads": [], "batch": [], "assertion": {}}),
-        ("/api/enroll/complete", {"token": "made-up", "assertion": {}}),
-        ("/api/enroll/register", {"token": "made-up", "client_data_json": "", "attestation_object": ""}),
-        ("/api/acknowledge", {}),
-    ],
-)
-def test_a_write_without_a_valid_assertion_changes_nothing(app, path, body):
-    store, client = app
-    _submitted(store)
-    researcher_key = SoftwareAuthenticator()
-    _enroll_over_http(client, researcher_key)
-    before = _observable(store)
-
-    status, response = client.post(path, body)
-
-    assert status >= 400 and response["ok"] is False
-    assert _observable(store) == before
-
-
-def test_an_agents_own_key_or_a_replayed_assertion_changes_nothing(app):
-    store, client = app
-    _submitted(store)
-    researcher_key = SoftwareAuthenticator()
-    _enroll_over_http(client, researcher_key)
-    before = _observable(store)
-
-    agent = SoftwareAuthenticator(display_name="agent")
-    status, outcome = _sign(client, agent, [{"kind": "acceptance", "target_id": "clm_1", "decision": "accept"}])
-    assert status == 200 and outcome["data"]["results"][0]["error"]["code"] == "UNKNOWN_REVIEWER_KEY"
-
-    # a genuine assertion over a *different* decision, submitted for this one
-    other = client.post("/api/prepare", {"decisions": [{"kind": "acceptance", "target_id": "clm_1", "decision": "reject"}]})[1]["data"]
-    assertion = researcher_key.assert_challenge(b64url_decode(other["challenge"]), origin=client.origin)
-    accept = client.post("/api/prepare", {"decisions": [{"kind": "acceptance", "target_id": "clm_1", "decision": "accept"}]})[1]["data"]
-    status, outcome = client.post("/api/decide", {"payloads": accept["payloads"], "batch": accept["batch"], "assertion": assertion.model_dump()})
-    assert not outcome["data"]["results"][0]["ok"]
-
-    assert _observable(store) == before
-
-
-def test_an_assertion_from_another_origin_is_refused(app):
-    store, client = app
-    _submitted(store)
-    researcher_key = SoftwareAuthenticator()
-    _enroll_over_http(client, researcher_key)
-    prepared = client.post("/api/prepare", {"decisions": [{"kind": "acceptance", "target_id": "clm_1", "decision": "accept"}]})[1]["data"]
-    assertion = researcher_key.assert_challenge(b64url_decode(prepared["challenge"]), origin="http://localhost:1")
-
-    outcome = client.post("/api/decide", {"payloads": prepared["payloads"], "batch": prepared["batch"], "assertion": assertion.model_dump()})[1]
-    assert outcome["data"]["results"][0]["error"]["code"] == "ORIGIN_MISMATCH"
-    assert get_acceptance_state(store, "clm_1") == "unreviewed"
-
-
-def test_host_origin_and_content_type_are_checked(app):
-    store, client = app
-    assert client.get("/api/state", host="attacker.example:80")[0] == 421  # DNS rebinding
-    assert client.post("/api/prepare", {}, origin=None)[0] == 403
-    assert client.post("/api/prepare", {}, origin="http://evil.example")[0] == 403
-    assert client.post("/api/prepare", b"decisions=x", content_type="application/x-www-form-urlencoded")[0] == 415
-
-
-# -- the page shows exactly what's signed ----------------------------------------------
-
-
-def test_the_node_page_shows_the_exact_text_whose_hash_is_signed(app):
-    store, client = app
-    proof = _submitted(store)
-    status, view = client.get("/api/node/clm_1")
-    assert status == 200
-    shown = view["data"]["candidate_proof"]
-    assert shown["text"] == (store.root / proof.file_path).read_text()
-    prepared = client.post("/api/prepare", {"decisions": [{"kind": "acceptance", "target_id": "clm_1", "decision": "accept"}]})[1]["data"]
-    assert prepared["payloads"][0]["candidate_proof_sha256"] == shown["sha256"]
-
-
-def test_integrity_warnings_show_next_to_their_node(app):
-    store, client = app
-    proof = _submitted(store)
+def test_integrity_warnings_show_next_to_their_node(page):
+    store, client = page
+    snapshot = _awaiting(store)
     researcher(store).decide_acceptance("clm_1", "accept")
-    path = store.root / proof.file_path
-    path.write_text(path.read_text() + "\nedited after acceptance\n")
+    path = store.root / snapshot.file_path
+    path.write_text(path.read_text() + "\n% edited after acceptance\n")
 
     view = client.get("/api/node/clm_1")[1]["data"]
     assert view["acceptance_state"] == "unverifiable"
     assert "DECISION_NO_LONGER_APPLIES" in [warning["code"] for warning in view["warnings"]]
 
 
-def _tamper_rationale(store, value: str) -> None:
-    """An in-place edit with every trigger dropped and put back: the row counts never change."""
-    conn = sqlite3.connect(store.db_path)
-    triggers = conn.execute("SELECT name, sql FROM sqlite_master WHERE type = 'trigger'").fetchall()
-    for name, _ in triggers:
-        conn.execute(f"DROP TRIGGER {name}")
-    conn.execute("UPDATE review_history SET rationale = ? WHERE kind = 'acceptance' AND entry = 'decision'", (value,))
-    for _, sql in triggers:
-        conn.execute(sql)
-    conn.commit()
-    conn.close()
+# -- recording decisions -----------------------------------------------------------------
 
 
-def test_a_long_running_app_never_serves_stale_trust_state(app):
-    """Every request runs on a fresh thread; an edit made under the app is seen on the very next one (#36)."""
-    store, client = app
-    _submitted(store)
-    passkey = SoftwareAuthenticator()
-    _enroll_over_http(client, passkey)
-    _sign(client, passkey, [{"kind": "acceptance", "target_id": "clm_1", "decision": "accept", "rationale": "ok"}])
+def test_a_decision_recorded_from_the_page_counts(page):
+    store, client = page
+    snapshot = _awaiting(store)
 
-    for _ in range(25):
-        assert client.get("/api/node/clm_1")[1]["data"]["acceptance_state"] == "accepted"
-        _tamper_rationale(store, "tampered")
-        assert client.get("/api/node/clm_1")[1]["data"]["acceptance_state"] == "unverifiable"
-        _tamper_rationale(store, "ok")
-
-
-def test_signing_refuses_a_proof_that_changed_since_it_was_viewed(app):
-    store, client = app
-    proof = _submitted(store)
-    passkey = SoftwareAuthenticator()
-    _enroll_over_http(client, passkey)
-    viewed = client.get("/api/node/clm_1")[1]["data"]["candidate_proof"]["sha256"]
-
-    path = store.root / proof.file_path
-    path.write_text(path.read_text() + "\nslipped in after the researcher read it\n")
-
-    status, refused = client.post(
-        "/api/prepare",
-        {"decisions": [{"kind": "acceptance", "target_id": "clm_1", "decision": "accept", "viewed_candidate_proof_sha256": viewed}]},
+    status, outcome = decide(
+        client, [{"kind": "acceptance", "target_id": "clm_1", "decision": "accept", "rationale": "checked", "viewed_candidate_proof_sha256": snapshot.sha256}]
     )
-    assert status == 409 and refused["error"]["code"] == "STALE_VIEW"
+
+    assert status == 200 and outcome["data"]["results"][0]["ok"], outcome
+    assert get_acceptance_state(store, "clm_1") == "accepted"
+    assert not client.get("/api/state")[1]["data"]["pending"]
 
 
-def test_editing_the_pin_file_cant_clear_the_registry_banner(app):
-    import json as _json
+def test_several_decisions_are_recorded_in_one_request(page):
+    store, client = page
+    _awaiting(store, "clm_1")
+    _awaiting(store, "clm_2")
 
-    from proof_cli.authority import user_config_dir
+    _, outcome = decide(
+        client,
+        [
+            {"kind": "acceptance", "target_id": "clm_1", "decision": "accept"},
+            {"kind": "acceptance", "target_id": "clm_2", "decision": "revision-requested", "rationale": "step 3?"},
+        ],
+    )
 
-    store, client = app
-    first, second = SoftwareAuthenticator(display_name="Touch ID"), SoftwareAuthenticator(display_name="YubiKey")
-    _enroll_over_http(client, first)
-    _enroll_over_http(client, second, signer=first)
-    pins_path = user_config_dir() / "reviewer-pins.json"
-    pins = _json.loads(pins_path.read_text())
-    entry = pins["projects"][str(store.root.resolve())]
-    entry["acknowledgement"] = "forged"
-    entry["acknowledged_registry_head"] = client.get("/api/state")[1]["data"]["registry"]["registry_head"]
-    pins_path.write_text(_json.dumps(pins))
+    assert [result["ok"] for result in outcome["data"]["results"]] == [True, True]
+    assert (get_acceptance_state(store, "clm_1"), get_acceptance_state(store, "clm_2")) == ("accepted", "unreviewed")
 
-    assert client.get("/api/state")[1]["data"]["registry"]["acknowledged"] is False
+
+def test_a_snapshot_changed_since_it_was_viewed_is_refused(page):
+    store, client = page
+    snapshot = _awaiting(store)
+    viewed = client.get("/api/node/clm_1")[1]["data"]["candidate_proof"]["sha256"]
+    path = store.root / snapshot.file_path
+    path.write_text(path.read_text() + "\n% slipped in after the researcher read it\n")
+
+    _, outcome = decide(client, [{"kind": "acceptance", "target_id": "clm_1", "decision": "accept", "viewed_candidate_proof_sha256": viewed}])
+
+    assert outcome["data"]["results"][0]["error"]["code"] == "STALE_VIEW"
+    assert get_acceptance_state(store, "clm_1") == "unreviewed"
+
+
+@pytest.mark.parametrize(
+    "body, code",
+    [({}, "NO_DECISIONS"), ({"decisions": []}, "NO_DECISIONS"), ({"decisions": [42]}, "MALFORMED_DECISION"), ({"decisions": [{"kind": "acceptance"}]}, "MALFORMED_DECISION")],
+)
+def test_a_malformed_decision_is_refused(page, body, code):
+    _, client = page
+    status, refused = client.post("/api/decide", body)
+    assert (status, refused["error"]["code"]) == (400, code)
+
+
+def test_a_long_running_page_never_serves_stale_state(page):
+    """Nothing is cached across requests: an edit made under the page shows on the next one."""
+    store, client = page
+    snapshot = _awaiting(store)
+    researcher(store).decide_acceptance("clm_1", "accept")
+    path = store.root / snapshot.file_path
+    original = path.read_text()
+
+    for _ in range(5):
+        assert client.get("/api/node/clm_1")[1]["data"]["acceptance_state"] == "accepted"
+        path.write_text(original + "% tampered\n")
+        assert client.get("/api/node/clm_1")[1]["data"]["acceptance_state"] == "unverifiable"
+        path.write_text(original)
+
+
+# -- the HTTP layer, over a real socket ---------------------------------------------------
+
+
+def test_host_origin_and_content_type_are_checked(http_app):
+    _, client = http_app
+    assert client.get("/api/state", host="attacker.example:80")[0] == 421  # DNS rebinding
+    assert client.post("/api/decide", {}, origin=None)[0] == 403
+    assert client.post("/api/decide", {}, origin="http://evil.example")[0] == 403
+    assert client.post("/api/decide", b"decisions=x", content_type="application/x-www-form-urlencoded")[0] == 415
+
+
+def test_a_decision_over_http_counts(http_app):
+    store, client = http_app
+    _awaiting(store)
+    status, outcome = decide(client, [{"kind": "acceptance", "target_id": "clm_1", "decision": "accept"}])
+    assert status == 200 and outcome["data"]["results"][0]["ok"], outcome
+    assert get_acceptance_state(store, "clm_1") == "accepted"
+
+
+def test_the_page_and_its_script_are_served_with_a_strict_policy(http_app):
+    _, client = http_app
+    port = urlsplit(client.origin).port
+    for path in ("/", "/static/app.js"):
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", path, headers={"Host": client.netloc})
+        response = conn.getresponse()
+        response.read()
+        assert response.status == 200
+        assert "default-src 'self'" in response.getheader("Content-Security-Policy")
+        assert response.getheader("X-Content-Type-Options") == "nosniff"
+        conn.close()
 
 
 @pytest.mark.parametrize(
@@ -314,11 +192,11 @@ def test_editing_the_pin_file_cant_clear_the_registry_banner(app):
         ({}, b'{"decisions": [42]}', 400),
     ],
 )
-def test_malformed_requests_get_an_error_response_not_a_dropped_connection(app, headers, body, status):
-    _, client = app
+def test_malformed_requests_get_an_error_response_not_a_dropped_connection(http_app, headers, body, status):
+    _, client = http_app
     port = urlsplit(client.origin).port
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
-    conn.putrequest("POST", "/api/prepare", skip_host=True)
+    conn.putrequest("POST", "/api/decide", skip_host=True)
     conn.putheader("Host", client.netloc)
     conn.putheader("Origin", client.origin)
     conn.putheader("Content-Type", "application/json")
@@ -330,63 +208,3 @@ def test_malformed_requests_get_an_error_response_not_a_dropped_connection(app, 
     assert response.status == status
     assert json.loads(response.read())["ok"] is False
     conn.close()
-
-
-@pytest.mark.parametrize(
-    "attestation_object",
-    [
-        "gYGBgYGBgYGBgYGBgYGBgQ",  # arrays nested 17 deep
-        "oYEBAQ",  # a map keyed by an array
-        "o2NmbXRkbm9uZWdhdHRTdG10oGhhdXRoRGF0YQE",  # authData isn't bytes
-    ],
-)
-def test_a_hostile_registration_is_refused_not_crashed_on(tmp_path: Path, attestation_object):
-    store = ensure_project(tmp_path)
-    origin = project_origin(store)
-    registration = SoftwareAuthenticator().register(b"c" * 32, origin=origin)
-    with pytest.raises(SignatureError) as exc_info:
-        verify_registration(registration["client_data_json"], attestation_object, challenge=b"c" * 32, expected_origin=origin)
-    assert exc_info.value.code == "MALFORMED_ASSERTION"
-
-
-# -- WebAuthn details ------------------------------------------------------------------
-
-
-def test_a_cloned_credential_shows_up_as_a_sign_count_regression(tmp_path: Path):
-    store = ensure_project(tmp_path)
-    for node_id in ("clm_1", "clm_2"):
-        _submitted(store, node_id)
-    passkey = SoftwareAuthenticator(counter=True)
-    reviewer = Researcher(store, passkey)
-    reviewer.decide_acceptance("clm_1", "accept")
-    passkey.sign_count = 0  # a clone starts counting from an old value
-    reviewer.decide_acceptance("clm_2", "accept")
-
-    assert "SIGN_COUNT_REGRESSION" in [warning.code for warning in list_integrity_warnings(store)]
-
-
-@pytest.mark.parametrize(
-    "options, code",
-    [
-        ({"origin": "http://localhost:1"}, "ORIGIN_MISMATCH"),
-        ({"flags": 0x41}, "USER_NOT_VERIFIED"),
-        ({"rp_id": "evil.example"}, "RP_ID_MISMATCH"),
-    ],
-)
-def test_a_registration_violating_the_relying_party_rules_is_refused(tmp_path: Path, options, code):
-    store = ensure_project(tmp_path)
-    origin = project_origin(store)
-    challenge = b"c" * 32
-    registration = SoftwareAuthenticator().register(challenge, **{"origin": origin, **options})
-    with pytest.raises(SignatureError) as exc_info:
-        verify_registration(**registration, challenge=challenge, expected_origin=origin)
-    assert exc_info.value.code == code
-
-
-def test_a_registration_yields_the_credentials_public_key(tmp_path: Path):
-    for alg in (-7, -8):
-        passkey = SoftwareAuthenticator(alg)
-        registration = passkey.register(b"c" * 32, origin="http://localhost:20001")
-        credential = verify_registration(**registration, challenge=b"c" * 32, expected_origin="http://localhost:20001")
-        assert credential.public_key_spki == passkey.public_key_spki
-        assert credential.credential_id == passkey.credential_id and credential.alg == alg

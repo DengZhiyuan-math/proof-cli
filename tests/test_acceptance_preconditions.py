@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from _authenticator import researcher
+from _researcher import researcher
 
 from proof_cli.collaboration import ReviewRecordKind, list_review_records
 from proof_cli.commands import cmd_proof_verify_run
@@ -156,19 +156,15 @@ def test_concurrent_decisions_on_one_submission_let_exactly_one_through(tmp_path
     transaction, so two reviewers racing on one submission can't both win."""
     store = ensure_project(tmp_path)
     _awaiting_review(store)
-    # all four signed up front, against the same history: only the submissions race
-    signed = [
-        (decision, researcher(store).sign("acceptance", "clm_1", decision))
-        for decision in ("accept", "reject", "accept", "revision-requested")
-    ]
+    signed = [(decision, None) for decision in ("accept", "reject", "accept", "revision-requested")]
     barrier = threading.Barrier(len(signed))
     outcomes: list[str] = []
     lock = threading.Lock()
 
-    def _race(decision: str, signed_decision) -> None:
+    def _race(decision: str, _unused) -> None:
         barrier.wait()
         try:
-            decide_acceptance(store, "clm_1", decision, signed_decision=signed_decision)
+            decide_acceptance(store, "clm_1", decision, reviewer=f"reviewer {decision}")
             outcome = "ok"
         except ProofMapError as exc:
             outcome = exc.code
