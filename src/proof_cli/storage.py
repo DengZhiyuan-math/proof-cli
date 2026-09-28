@@ -1053,8 +1053,8 @@ def _row_to_claim(row: sqlite3.Row) -> ClaimRecord:
     )
 
 
-def insert_claim(store: ProjectStore, claim: ClaimRecord) -> ClaimRecord:
-    with store.connect() as conn:
+def insert_claim(store: ProjectStore, claim: ClaimRecord, *, conn: sqlite3.Connection | None = None) -> ClaimRecord:
+    with _writing(store, conn) as conn:
         conn.execute(
             """
             INSERT INTO claims(id, node_id, claimant_id, session_id, claimed_at, released_at, released_by, release_reason)
@@ -1071,7 +1071,6 @@ def insert_claim(store: ProjectStore, claim: ClaimRecord) -> ClaimRecord:
                 claim.release_reason,
             ),
         )
-        conn.commit()
     return claim
 
 

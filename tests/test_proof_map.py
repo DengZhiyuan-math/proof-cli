@@ -1801,6 +1801,111 @@ def test_split_creates_claim_children_with_derived_from(tmp_path: Path):
     assert set(parent.dependencies) == {"clm_child_1", "clm_child_2"}
 
 
+def test_a_failed_split_leaves_no_child_and_does_not_touch_the_parent(tmp_path: Path):
+    # issue #26: an ordinary input conflict partway through used to leave the earlier children behind
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_parent", kind="claim", statement="parent")
+    create_node(store, node_id="existing", kind="claim", statement="already here")
+
+    with pytest.raises(ProofMapError) as exc_info:
+        split_node(store, "clm_parent", [{"id": "first", "statement": "a"}, {"id": "existing", "statement": "b"}], created_by="agent_a")
+
+    assert exc_info.value.code == "NODE_ALREADY_EXISTS"
+    assert get_node(store, "first") is None
+    assert not (tmp_path / "proofs" / "first").exists()
+    assert get_node(store, "clm_parent").dependencies == []
+    assert (tmp_path / "proofs" / "existing" / "proof.tex").exists()  # someone else's folder is left alone
+
+
+def test_a_split_repeating_a_child_id_leaves_nothing(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_parent", kind="claim", statement="parent")
+
+    with pytest.raises(ProofMapError) as exc_info:
+        split_node(store, "clm_parent", [{"id": "twin", "statement": "a"}, {"id": "twin", "statement": "b"}], created_by="agent_a")
+
+    assert exc_info.value.code == "NODE_ALREADY_EXISTS"
+    assert get_node(store, "twin") is None
+    assert not (tmp_path / "proofs" / "twin").exists()
+    assert get_node(store, "clm_parent").dependencies == []
+
+
+def test_a_failed_split_leaves_a_folder_another_writer_created_meanwhile(tmp_path: Path, monkeypatch):
+    # PR #62 review: another writer's create_node commits "child" and only then writes its
+    # proof.tex, so the folder can appear after the split looked. Only what the split wrote may go.
+    import proof_cli.proof_map as proof_map_module
+
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_parent", kind="claim", statement="parent")
+    create_node(store, node_id="child", kind="claim", statement="another worker's")
+    theirs = tmp_path / "proofs" / "child"
+    pending = tmp_path / "pending_child"
+    theirs.rename(pending)  # their row is committed, their folder not yet written
+    real_create_node = proof_map_module.create_node
+
+    def create_node_as_their_folder_lands(store, **kwargs):
+        if kwargs["node_id"] == "child":
+            pending.rename(theirs)
+        return real_create_node(store, **kwargs)
+
+    monkeypatch.setattr(proof_map_module, "create_node", create_node_as_their_folder_lands)
+
+    with pytest.raises(ProofMapError) as exc_info:
+        split_node(store, "clm_parent", [{"id": "child", "statement": "mine"}], created_by="agent_a")
+
+    assert exc_info.value.code == "NODE_ALREADY_EXISTS"
+    assert (theirs / "proof.tex").exists()
+
+
+def test_a_split_whose_commit_fails_leaves_no_child_folder(tmp_path: Path, monkeypatch):
+    # PR #62 review: the cleanup covered only the split's own body, so a failed commit left
+    # the child's proof.tex, which a retry with a new statement then kept (never overwritten)
+    import sqlite3
+
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_parent", kind="claim", statement="parent")
+    real_connect = store.connect
+
+    def quick_connect():
+        conn = real_connect()
+        conn.execute("PRAGMA busy_timeout=20")  # a real "database is locked", just sooner
+        return conn
+
+    monkeypatch.setattr(store, "connect", quick_connect)
+    reader = sqlite3.connect(store.db_path)
+    reader.execute("BEGIN")
+    reader.execute("SELECT * FROM proof_map_nodes").fetchall()  # a read lock the commit must wait on
+    try:
+        with pytest.raises(sqlite3.OperationalError):
+            split_node(store, "clm_parent", [{"id": "child", "statement": "mine"}], created_by="agent_a")
+    finally:
+        reader.rollback()
+        reader.close()
+
+    assert get_node(store, "child") is None
+    assert not (tmp_path / "proofs" / "child").exists()
+
+
+def test_splitting_a_node_someone_else_holds_is_refused_unless_reassigned(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_parent", kind="claim", statement="parent")
+    claim_node(store, "clm_parent", claimant_id="agent_b")
+
+    with pytest.raises(ProofMapError) as exc_info:
+        split_node(store, "clm_parent", [{"id": "c1", "statement": "a"}], created_by="agent_a")
+    assert (exc_info.value.code, exc_info.value.details["assignee"]) == ("NOT_CLAIMANT", "agent_b")
+    assert get_node(store, "c1") is None
+    assert get_node(store, "clm_parent").dependencies == []
+
+    split_node(store, "clm_parent", [{"id": "c2", "statement": "b"}], created_by="agent_b")  # the holder may
+    split_node(store, "clm_parent", [{"id": "c3", "statement": "c"}], created_by="agent_a", reassign=True)
+
+    assert get_node(store, "clm_parent").dependencies == ["c2", "c3"]
+    assert get_active_claim(store, "clm_parent").claimant_id == "agent_a"  # taken over though Blocked on c2, which `claim` would refuse
+    (event,) = [e for e in list_events(store) if e.kind == "proof_map_claim_reassigned" and e.entity_id == "clm_parent"]
+    assert event.payload["previous_claimant_id"] == "agent_b"
+
+
 def test_split_requires_no_confirmation_argument(tmp_path: Path):
     """Split is ungated — unlike Accept/reject/dismiss/promote, there is no
     `confirmed` parameter to pass at all."""
