@@ -23,6 +23,9 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
+import time
+from pathlib import Path
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
@@ -37,6 +40,7 @@ from ..storage import ProjectStore, get_active_claim, get_current_candidate_proo
 from ..vault import build_pdf_path, node_folder
 
 PRISM_LOCAL_ENV_VAR = "PROOF_CLI_PRISM_LOCAL"
+_PRISM_START_SECONDS = 10
 
 
 def prism_local_command() -> str | None:
@@ -202,8 +206,31 @@ class ReviewApp:
             raise RequestError(HTTPStatus.NOT_FOUND, "NO_PROOF_FOLDER", f"{node_id} has no proof folder to open")
         if command is None:
             return {"opened": False, "folder": str(folder), "hint": f"set {PRISM_LOCAL_ENV_VAR} or put prism-local on PATH"}
-        subprocess.Popen([command, str(folder)], cwd=str(folder), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
-        return {"opened": True, "folder": str(folder), "command": command}
+        # a free port, so a prism-local already running for another node never collides; it
+        # exits a little after its last page closes, and says where it listens once it does
+        with tempfile.TemporaryDirectory() as scratch:
+            ready = Path(scratch) / "ready.json"
+            process = subprocess.Popen(
+                [command, str(folder), "--port", "0", "--exit-when-idle", "--ready-file", str(ready)],
+                cwd=str(folder),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                start_new_session=True,
+            )
+            deadline = time.monotonic() + _PRISM_START_SECONDS
+            while time.monotonic() < deadline:
+                if ready.is_file():
+                    try:
+                        started = json.loads(ready.read_text())
+                    except ValueError:
+                        started = None
+                    if isinstance(started, dict):
+                        return {"opened": True, "folder": str(folder), "command": command, "url": started.get("url")}
+                if process.poll() is not None:
+                    error = (process.stderr.read() or b"").decode("utf-8", errors="replace").strip()
+                    return {"opened": False, "folder": str(folder), "command": command, "error": error or f"prism-local exited with code {process.returncode}"}
+                time.sleep(0.05)
+        return {"opened": False, "folder": str(folder), "command": command, "error": "prism-local didn't report ready in time"}
 
     def _pending(self) -> list[dict]:
         pending = []
