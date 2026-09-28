@@ -31,6 +31,8 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "proof_cli.webapp" = ["static/*"]
+# the studio (ADR-0011, #68): its page, the vendored CodeMirror and PDF.js, and the licences
+"proof_cli.studio" = ["static/*", "static/vendor/*", "LICENSE", "README.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
