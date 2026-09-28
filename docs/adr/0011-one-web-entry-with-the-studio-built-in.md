@@ -25,6 +25,8 @@ The researcher also had two command-line entry points that humans never needed: 
 
    Splitting creates each child's folder, and the page moves straight on to the child.
 
+   The agent panel is not a LaTeX assistant. It is the node's **proof agent** (point 8), which researches, reasons and proves, and writes its result into the node.
+
    **An imported result's page is not a studio.** It has no proof to write. Its page shows its source (locator, version, trust level), its dependents, Reference review, and, once it is no longer callable, moving its dependents onto a corrected source (#20).
 
 3. **The studio is prism-local's code, taken into proof-cli and then changed freely.** The code is copied, not merged: prism-local at commit `6512eb8` goes into `src/proof_cli/studio/`, with its MIT licence and the licences of the vendored CodeMirror (MIT) and PDF.js (Apache-2.0). The two projects stay independent. Nothing is synced either way, and proof-cli owes prism-local no compatibility.
@@ -44,21 +46,38 @@ The researcher also had two command-line entry points that humans never needed: 
    - Older single-file snapshots (`snapshots/v<N>.tex`) stay readable as they are.
    - The TeX distribution itself is out of scope: a snapshot freezes the project's own files, not the installed packages.
 
-6. **What the editor and the agent may write directly.** Direct file edits, from the editor or from an agent's file tools, reach only the node's working sources. Review snapshots, `reviews.jsonl` and `build/` are never directly writable, and neither is another node's folder. The shared `preamble.tex` is edited from its own entry on the map page.
+6. **What the editor and the agent may write directly.**
+   - Direct file edits, from the editor or from an agent's file tools, reach only the node's working sources, plus, for the agent, the node's scratch folder.
+   - **The scratch folder** is `proofs/<id>/scratch/`, where the agent keeps its computation scripts and their output. Snapshots don't include it, builds ignore it, and it stays out of git by default, like `build/`.
+   - Review snapshots, `reviews.jsonl`, `build/` and other nodes' folders are never directly writable.
+   - The shared `preamble.tex` is edited from its own entry on the map page.
+   - **Reading is not confined** (point 8).
 
    Domain operations are a different path. Claim, split, request review, open a Challenge and compile have their documented wider effects: the project database, a child's new folder, a snapshot, build output. They go through the service layer, as every caller's do (ADR-0007). This boundary is about correctness for cooperative local agents. It isn't a security boundary against a hostile one (ADR-0010).
 
 7. **A node's snapshot PDF follows ADR-0010's freshness rule.** The PDF archived beside a snapshot is `build/proof.pdf`, and only when it is at least as new as every input the snapshot freezes (`vault.build_is_current`). A PDF left over from an earlier successful build, when the latest build failed, is shown as stale and never archived. The working build and the snapshot's archived PDF are shown as two different things.
 
-8. **Agents keep the `proof` CLI, bound to the project, not the node.**
-   - The `proof` CLI stays the agent interface of ADR-0006, and its JSON contract (#34) is unchanged.
-   - The CLI's `--root` defaults to the `PROOF_ROOT` environment variable, then to the current folder. That is the one root convention, taken over from the retired `proof codex` group.
-   - The studio starts its agent in the node's folder with `PROOF_ROOT` set to the project root, so a `proof` call from inside `proofs/<id>/` acts on the project and never starts a nested one.
-   - **What each backend can do in v1:**
-     - Claude Code and Codex, which run commands, may call `proof` for the agent-reachable actions. Their command permissions are node-scoped and explicit, not inherited from the repository's own CLAUDE.md, settings or Bash allowlist, which Claude Code would otherwise load from the parent folders.
-     - API models have only file tools, so in v1 they edit sources and nothing more. A small `proof` tool for them is future work.
+8. **The agent panel is an autonomous proof agent, rooted at the project.** This is an automated proof system: the agent on a node researches, reasons and proves, and editing the LaTeX is only how it writes the result down. Only a Human Review decision is beyond it.
+   - **What it may read:**
+     - the whole project: every node's proof, snapshots, reviews, references, memory and handoffs;
+     - the read-only library folders listed in the project's configuration, such as the researcher's papers and notes;
+     - the web: search and fetch, to find and read the literature.
+   - **What it may run:** `proof`, for everything agent-reachable (ADR-0006): retrieving project results and references, claiming, splitting, creating nodes, requesting review, opening a Challenge and recording an Evidence check. It may also run computation to support its reasoning: Python, SageMath, a proof assistant such as Lean, numerical checks and counterexample searches.
+   - **What it may change:** files only as point 6 says (the node's working sources and scratch folder), and project state only through `proof`.
+   - **How it is asked to work.** Its standing brief follows the project's constraints:
+     - retrieval first: check project results and trusted references before a new proof search;
+     - reason independently and write the proof in `proof.tex`;
+     - split a node too large to prove directly rather than force a proof;
+     - request review with a scoping rationale;
+     - record what a real checker it ran said as an Evidence check, and never claim a check nobody ran (#27).
+   - **Rooted at the project.**
+     - The `proof` CLI stays the agent interface of ADR-0006, and its JSON contract (#34) is unchanged.
+     - The CLI's `--root` defaults to the `PROOF_ROOT` environment variable, then to the current folder. That is the one root convention, taken over from the retired `proof codex` group.
+     - The studio starts the agent in the node's folder with `PROOF_ROOT` set to the project root, so every `proof` call acts on the project and never starts a nested one.
+   - **Its permissions are explicit, not inherited.** They are the set above: reads over the project and the library folders, web search and fetch, `proof` and computation commands, and writes confined to the node's sources and scratch folder. They aren't the repository's own CLAUDE.md, settings or Bash allowlist, which Claude Code would otherwise load from the parent folders. This is a contract for cooperative local agents, enforced where the backend supports it (ADR-0010's threat model), not a sandbox against a hostile one.
+   - **Backends in v1.** Claude Code and Codex, which search the web and run commands, are the full proof agent. API models, which have only file tools, are offered as a limited assistant (project-wide reading, node-only writing), and the panel says so. Web search, `proof` and computation tools for them are future work.
    - Human Review decisions stay unreachable from the agent panel exactly as from the CLI.
-   - The panel's **per-turn Undo restores working source files only.** It doesn't undo a claim, a split, a snapshot, anything in the project database, or any decision, and its label says so.
+   - The panel's **per-turn Undo restores working source and scratch files only.** It doesn't undo a claim, a split, a new node, a snapshot, anything in the project database, or any decision, and its label says so.
 
 9. **Removed:** the `proof-codex` entry point, the `proof codex …` group, and the proof-routing MCP plugin, which only wrapped that group. Agents use `proof` directly, guided by `.agents/skills/proof-cli/SKILL.md`.
 
@@ -70,5 +89,5 @@ The researcher also had two command-line entry points that humans never needed: 
 - proof-cli takes on prism-local's code, about 300 KB of Python and JavaScript plus vendored libraries, and with it prism-local's tests and packaging. The wheel must carry the nested static and vendor files and the three licences. Fixes made in one project don't reach the other. That is accepted.
 - The snapshot changes shape, from one file to a frozen folder with a manifest, and its SHA-256 now covers every input. Decisions, bindings and the archived PDF follow it. Old single-file snapshots and the decisions made on them stay valid.
 - The page's security model extends to the studio's routes: the pinned origin and host checks, a same-origin requirement for writes, and a CSP. prism-local's `X-Prism-Local` header and `X-Frame-Options: DENY` are folded into it.
-- The agent panel becomes a second way for an agent to act on the project, next to a terminal. It goes through the same `proof` CLI and the same service layer, so there is still one write path, and Human Acceptance Authority (ADR-0004) is unchanged.
+- The agent panel becomes a second way for an agent to act on the project, next to a terminal, and a capable one: it reads the whole project and the web and runs computation. It still changes project state only through the same `proof` CLI and service layer, so there is still one write path, and Human Acceptance Authority (ADR-0004) is unchanged. Everything it proves reaches the map as a Review snapshot for the researcher to decide on.
 - Users of `proof codex …` or the MCP plugin move to `proof node …`.
