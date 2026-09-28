@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from _proofs import submit_proof
 from _researcher import researcher
 
 import proof_cli.collaboration as collaboration_module
@@ -38,7 +39,6 @@ from proof_cli.proof_map import (
     get_workflow_state,
     open_challenge,
     record_evidence_check,
-    submit_candidate_proof,
 )
 from proof_cli.storage import (
     REVIEW_HISTORY_MIGRATED_KEY,
@@ -47,6 +47,7 @@ from proof_cli.storage import (
     collaboration_state_path,
     ensure_project,
     list_events,
+    on_rollback,
 )
 
 SRC = Path(__file__).resolve().parents[1] / "src"
@@ -55,7 +56,7 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 def _submitted_claim(store, node_id: str):
     create_node(store, node_id=node_id, kind="claim", statement=f"statement of {node_id}")
     claim_node(store, node_id, claimant_id="agent_a", session_id="sess_1")
-    return submit_candidate_proof(
+    return submit_proof(
         store, node_id, claimant_id="agent_a", session_id="sess_1", scoping_rationale="scoped", content="proof text")
 
 
@@ -66,7 +67,7 @@ def _accepted_then_resubmitted(store, node_id: str = "clm_1") -> None:
     researcher(store).decide_acceptance(node_id, "accept")
     open_challenge(store, node_id, opened_by="agent_b", rationale="second look")
     claim_node(store, node_id, claimant_id="agent_a", session_id="sess_2")
-    submit_candidate_proof(
+    submit_proof(
         store, node_id, claimant_id="agent_a", session_id="sess_2", scoping_rationale="scoped", content="revised proof")
     assert get_workflow_state(store, node_id) == "review-needed"
 
@@ -637,6 +638,65 @@ def test_a_nested_transaction_that_raises_undoes_only_its_own_writes(tmp_path: P
                 raise RuntimeError("inner block fails, caller carries on")
 
     assert [row.object_id for row in list_review_history(store)] == ["thm_kept"]
+
+
+def _write_lock_is_held(store: ProjectStore) -> bool:
+    other = sqlite3.connect(store.db_path, timeout=0)
+    try:
+        other.execute("BEGIN IMMEDIATE")
+    except sqlite3.OperationalError:
+        return True
+    finally:
+        other.close()
+    return False
+
+
+def test_on_rollback_runs_before_the_write_lock_goes_when_the_block_raises(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    ran: list[bool] = []
+    with pytest.raises(RuntimeError):
+        with store.transaction():
+            on_rollback(store, lambda: ran.append(_write_lock_is_held(store)))
+            raise RuntimeError("abort")
+    assert ran == [True]
+
+
+def test_on_rollback_runs_before_the_write_lock_goes_when_the_commit_fails(tmp_path: Path, monkeypatch):
+    store = ensure_project(tmp_path)
+    real_connect = store.connect
+
+    def quick_connect():
+        conn = real_connect()
+        conn.execute("PRAGMA busy_timeout=20")  # a real "database is locked", just sooner
+        return conn
+
+    monkeypatch.setattr(store, "connect", quick_connect)
+    reader = sqlite3.connect(store.db_path)
+    reader.execute("BEGIN")
+    reader.execute("SELECT * FROM review_history").fetchall()  # a read lock the commit must wait on
+    ran: list[bool] = []
+    try:
+        with pytest.raises(sqlite3.OperationalError):
+            with store.transaction() as conn:
+                record_review_request(store, "theorem_contract", "thm_main", reviewer_id="advisor", conn=conn)
+                on_rollback(store, lambda: ran.append(_write_lock_is_held(store)))
+    finally:
+        reader.rollback()
+        reader.close()
+    assert ran == [True]
+    assert list_review_history(store) == []
+
+
+def test_on_rollback_never_runs_on_commit_and_a_nested_failure_runs_only_its_own(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    ran: list[str] = []
+    with store.transaction():
+        on_rollback(store, lambda: ran.append("outer"))
+        with pytest.raises(RuntimeError):
+            with store.transaction():
+                on_rollback(store, lambda: ran.append("inner"))
+                raise RuntimeError("inner block fails, caller carries on")
+    assert ran == ["inner"]
 
 
 def test_a_differently_spelled_root_joins_the_same_transaction(tmp_path: Path, monkeypatch):
