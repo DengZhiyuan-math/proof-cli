@@ -43,8 +43,7 @@ function confirmDecisions(decisions) {
     $("confirm-decisions").replaceChildren(...decisions.map((d) => el("li",
       `${DECISION_LABELS[`${d.kind}:${d.decision}`] || `${d.kind}: ${d.decision}`} — ${d.target_id}${d.dependency_id ? ` (${d.kind === "dependent_migration" ? "onto" : "dependency"} ${d.dependency_id})` : ""}` +
       `${d.viewed_candidate_proof_sha256 ? ` · snapshot SHA-256 ${d.viewed_candidate_proof_sha256}` : ""} · rationale: ${d.rationale || "none"}`)));
-    for (const id of ["home", "node-page"]) $(id).hidden = true;
-    $("confirm").hidden = false;
+    $("confirm").hidden = false;  // a sheet over the page, which stays where it was
     const done = () => { $("confirm").hidden = true; route(); };
     $("confirm-cancel").onclick = () => { done(); reject(new Error("cancelled")); };
     $("confirm-record").onclick = () => { done(); resolve(); };
@@ -134,7 +133,7 @@ function decisionRow(decision, proof) {
 let mapData = null;
 let mapView = "dag";
 const SVG_NS = "http://www.w3.org/2000/svg";
-const BOX = { w: 190, h: 76, gapX: 40, gapY: 110, pad: 24, chamfer: 8 };
+const BOX = { w: 208, h: 92, gapX: 44, gapY: 104, pad: 24, radius: 14 };
 
 function svg(tag, attrs) {
   const node = document.createElementNS(SVG_NS, tag);
@@ -171,14 +170,12 @@ function tagOf(n) {
   if (n.workflow_state === "revision-requested") return ["revision requested", "warn"];
   if (["rejected", "no-longer-callable"].includes(n.acceptance_state)) return ["rejected", "crit"];
   if (n.workflow_state === "blocked") return ["blocked", "muted"];
-  if (["accepted", "reviewed"].includes(n.acceptance_state)) return [n.acceptance_state, ""];
-  return ["", ""];
+  if (["accepted", "reviewed"].includes(n.acceptance_state)) return [n.acceptance_state, "ok"];
+  return ["open", "muted"];
 }
 
-// a card with chamfered corners, the page's one shape
-function chamfered(x, y, w, h, c) {
-  return `M${x + c},${y} H${x + w} V${y + h - c} L${x + w - c},${y + h} H${x} V${y + c} Z`;
-}
+const KIND_LABEL = { theorem: "Theorem", lemma: "Lemma", claim: "Claim", imported_result: "Imported result" };
+const capitalised = (text) => text.charAt(0).toUpperCase() + text.slice(1);
 
 // Layers by longest path from the top (a node sits below everything that depends on it),
 // then a few barycenter sweeps to cut crossings. Enough for tens to hundreds of nodes.
@@ -233,10 +230,10 @@ function applyView() {
 function fitView() {
   const canvas = $("map-dag");
   if (!view.content || !canvas || !canvas.clientWidth) return;
-  const pad = 40, top = 44;
-  view.k = Math.max(0.15, Math.min(1.2, (canvas.clientWidth - pad * 2) / view.content.width, (canvas.clientHeight - top - pad) / view.content.height));
+  const pad = 40, top = 24, bottom = 80;  // the legend and zoom controls float along the bottom
+  view.k = Math.max(0.15, Math.min(1.1, (canvas.clientWidth - pad * 2) / view.content.width, (canvas.clientHeight - top - bottom) / view.content.height));
   view.tx = (canvas.clientWidth - view.content.width * view.k) / 2;
-  view.ty = top + (canvas.clientHeight - top - pad - view.content.height * view.k) / 2;
+  view.ty = top + (canvas.clientHeight - top - bottom - view.content.height * view.k) / 2;
   view.fitted = true;
   applyView();
 }
@@ -332,7 +329,7 @@ function drawDag(nodes) {
   const rejected = (n) => ["rejected", "no-longer-callable"].includes(n.acceptance_state);
   const defs = svg("defs");
   const marker = svg("marker", { id: "arrow", viewBox: "0 0 10 10", refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: "auto-start-reverse" });
-  marker.append(svg("path", { d: "M0,1 L9,5 L0,9 z", fill: "var(--line-2)" }));
+  marker.append(svg("path", { d: "M1,1.5 L9,5 L1,8.5 z", class: "arrowhead" }));
   defs.append(marker);
   box.append(defs, scene);
   for (const n of nodes) for (const d of n.dependencies) {
@@ -350,23 +347,27 @@ function drawDag(nodes) {
     const place = () => { const p = at.get(n.id); g.setAttribute("transform", `translate(${p.x},${p.y})`); };
     const g = svg("g", { class: classes, tabindex: 0, role: "link", "aria-label": `${n.kind} ${n.id}: ${n.acceptance_state}, ${n.workflow_state}, ${n.integrity_state}${n.assignee ? `, claimed by ${n.assignee}` : ""}${n.frontier ? ", on the frontier" : ""}` });
     place();
-    g.append(svg("path", { class: "box", d: chamfered(left, top, BOX.w, BOX.h, BOX.chamfer) }));
-    g.append(svg("rect", { class: `bar ${toneOf(n)}`, x: left, y: top + BOX.chamfer, width: 5, height: BOX.h - BOX.chamfer }));
-    const kind = svg("text", { class: "kind", x: left + 12, y: top + 16 });
-    kind.textContent = n.kind.replace("_", " ").toUpperCase();
-    const id = svg("text", { class: "id", x: left + BOX.w - 8, y: top + 16, "text-anchor": "end" });
-    id.textContent = short(n.id, 22);
-    const label = svg("text", { x: left + 12, y: top + 35 });
+    g.append(svg("rect", { class: "box", x: left, y: top, width: BOX.w, height: BOX.h, rx: BOX.radius }));
+    const kind = svg("text", { class: "kind", x: left + 14, y: top + 21 });
+    kind.textContent = KIND_LABEL[n.kind] || capitalised(n.kind.replace("_", " "));
+    const id = svg("text", { class: "id", x: left + BOX.w - 14, y: top + 21, "text-anchor": "end" });
+    id.textContent = short(n.id, 18);
+    const label = svg("text", { x: left + 14, y: top + 41 });
     label.textContent = short(n.display_label || n.statement, 22);
-    const meta = svg("text", { class: "meta", x: left + 12, y: top + 51 });
-    meta.textContent = n.display_label ? short(n.statement, 32) : "";
+    const meta = svg("text", { class: "meta", x: left + 14, y: top + 58 });
+    meta.textContent = n.display_label ? short(n.statement, 30) : "";
     g.append(kind, id, label, meta);
+    // the node's one state, as a capsule along the bottom
     const [tagText, tone] = tagOf(n);
-    if (tagText) {
-      const tag = svg("text", { class: `tag ${tone}`.trim(), x: left + BOX.w - 8, y: top + BOX.h - 8, "text-anchor": "end" });
-      tag.textContent = short(tagText, 28).toUpperCase();
-      g.append(tag);
-    }
+    const status = svg("g", { class: `status ${tone}`.trim() });
+    const text = capitalised(short(tagText, 26));
+    const pillWidth = Math.min(BOX.w - 28, 24 + text.length * 6.3);
+    status.append(svg("rect", { class: "pill", x: left + 12, y: top + BOX.h - 26, width: pillWidth, height: 18, rx: 9 }));
+    status.append(svg("circle", { class: "pill-dot", cx: left + 22, cy: top + BOX.h - 17, r: 3 }));
+    const tag = svg("text", { class: "tag", x: left + 30, y: top + BOX.h - 13 });
+    tag.textContent = text;
+    status.append(tag);
+    g.append(status);
     const title = svg("title");
     title.textContent = n.statement;
     g.append(title);
@@ -440,7 +441,7 @@ function drawTree(nodes) {
 function showMap() {
   const nodes = mapData.nodes;
   const frontier = nodes.filter((n) => n.frontier).length;
-  $("map-caption").textContent = `${nodes.length} node(s) · ${frontier} on the frontier · drag to pan · pinch or ⌘/ctrl + scroll to zoom · F fits`;
+  $("map-caption").textContent = `${nodes.length} ${nodes.length === 1 ? "node" : "nodes"} · ${frontier} on the frontier`;
   $("stat-frontier").textContent = String(frontier);
   $("map-dag").hidden = mapView !== "dag";
   $("map-tree").hidden = mapView !== "tree";
@@ -540,6 +541,15 @@ document.addEventListener("DOMContentLoaded", () => {
     try { await decide(decisions); } catch (error) { showError(error); }
   });
   wireCanvas();
+  // the sidebar hides (remembered in this browser); on a narrow window it slides over the map
+  const narrow = () => matchMedia("(max-width: 760px)").matches;
+  try { if (localStorage.getItem("proof.map.sidebar") === "hidden") document.body.classList.add("sidebar-hidden"); } catch { /* ignore */ }
+  $("sidebar-toggle").addEventListener("click", () => {
+    if (narrow()) { document.body.classList.toggle("sidebar-shown"); return; }
+    const hidden = document.body.classList.toggle("sidebar-hidden");
+    try { localStorage.setItem("proof.map.sidebar", hidden ? "hidden" : "shown"); } catch { /* ignore */ }
+    if (view.fitted) setTimeout(fitView, 240);
+  });
   $("view-dag").addEventListener("click", () => { mapView = "dag"; showMap(); });
   $("view-tree").addEventListener("click", () => { mapView = "tree"; showMap(); });
   $("tree-root").addEventListener("change", showMap);
