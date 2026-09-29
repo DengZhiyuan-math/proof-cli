@@ -1254,6 +1254,9 @@ def test_revalidate_dependency_never_touches_the_reviewing_nodes_own_acceptance_
     store = ensure_project(tmp_path)
     _dependent_with_accepted_dependency(store)
     before = get_acceptance_state(store, "clm_1")
+    # a pin behind the accepted version: a re-review is only for a lag (#24)
+    aged = get_dependency_pin(store, "clm_1", "lem_base").model_copy(update={"pinned_version": 0})
+    upsert_dependency_pin(store, aged)
 
     researcher(store).revalidate_dependency("clm_1", "lem_base")
 

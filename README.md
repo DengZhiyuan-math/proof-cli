@@ -1,6 +1,6 @@
 # Mathematical Proof CLI
 
-Mathematical Proof CLI is a local-first research proof operating system for human–machine collaboration. A project is a proof map: nodes (theorems, lemmas, claims, and imported results) joined by their dependencies. Each local node has its own LaTeX proof, and the researcher accepts or rejects it on the proof map page. Agents claim nodes from the frontier, split nodes that are too large, and request review. Every decision stays explicit and auditable in git. The `theorem`, `obligation`, `blocker`, `goal` and `verify` command groups come from the model before the proof map, and `proof --help` lists them under Legacy.
+Mathematical Proof CLI is a local-first research proof operating system for human–machine collaboration. A project is a proof map: nodes (theorems, lemmas, claims, and imported results) joined by their dependencies. Each local node has its own LaTeX proof, and the researcher accepts or rejects it on the proof map page. Agents claim nodes from the frontier, split nodes that are too large, and request review. Every decision stays explicit and auditable in git. What can be called is answered only by the proof map's nodes: an Accepted theorem, lemma or claim, or an imported result with a Reference review (ADR-0012). The `theorem`, `obligation`, `blocker`, `goal` and `verify` command groups come from the model before the proof map, and `proof --help` lists them under Legacy. Their callable, trust and review states are marked as legacy, not a trust source; a reference is only a citation.
 
 The project is designed to support rigorous research workflows without replacing the mathematician or attempting to provide a full formal kernel. Final acceptance remains with the researcher.
 
@@ -40,8 +40,8 @@ This freezes every input of the proof into an immutable snapshot, `proofs/<id>/s
 
 `proof map open` starts the project's local page, bound to 127.0.0.1, and opens it:
 - **The map** is a DAG of every node, with a tree view rooted at any node. Frontier nodes (open, unblocked, unclaimed) are outlined as *ready to claim*. Each node shows its acceptance, workflow and integrity state, and its assignee.
-- **New node** creates a theorem, lemma or claim (with its assumptions and dependencies), or an imported result with its source. That covers the first node of an empty map, and a corrected source that replaces a withdrawn one.
-- **A theorem, lemma or claim opens in its studio** (ADR-0011), a LaTeX workspace built from prism-local's code: editor, compile, PDF with SyncTeX both ways, and the agent panel. Beside them, the **node panel** shows the node's statement, state axes, assignee and dependencies, and offers claim or unassign, split into Claims, request review, open a Challenge, and record an Evidence check, as the page's git identity.
+- **Nodes are created from the CLI** (`proof node create`): a theorem, lemma or claim with its assumptions and dependencies, or an imported result with its source. That covers the first node of an empty map, and a corrected source that replaces a withdrawn one.
+- **A theorem, lemma or claim opens in its studio** (ADR-0011), a LaTeX workspace built from prism-local's code: editor, compile, PDF with SyncTeX both ways, and the agent panel. Beside them, the **node panel** shows the node's statement, state axes, assignee and dependencies, and offers claim or unassign, split into Claims, edit its dependencies (add, remove, or move one onto a child, as `proof node depend` does), request review, open a Challenge, and record an Evidence check, as the page's git identity.
 - **A node's review page** shows the exact LaTeX of the snapshot under review, with its dependencies and pins, Challenges, Evidence checks and history, and the decisions to make. It links the compiled PDF when there is one: the PDF archived with the snapshot, or the studio's current `build/proof.pdf`.
 - **The agent panel is the node's proof agent** (ADR-0011): it researches, reasons and proves, and writes the result into the node.
   - **It reads** the whole project, the library folders listed in `proof.toml`, and the web.
@@ -80,7 +80,7 @@ Proof state is persisted locally. Generated workspace state under `.proof/` is i
 ## Project principles
 
 - Human-in-the-loop: the system suggests and checks; researchers make final trust decisions.
-- Retrieval-first: existing project results and trusted references are checked before new proof search.
+- Retrieval-first: the proof map's Accepted nodes and Reference-reviewed imported results are checked before new proof search.
 - Local-state-first: long-running work survives context loss through persisted project state.
 - CLI-first: the initial workflow is terminal-native.
 - No full kernel in v1: explicit contracts, checks, and review boundaries come first.

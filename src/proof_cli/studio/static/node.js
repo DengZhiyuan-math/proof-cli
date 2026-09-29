@@ -144,6 +144,17 @@
     return { id: id.trim(), statement: rest.join("=").trim() };
   });
 
+  // the node's three state axes, one chip each (never folded into one status), plus its claim
+  function axes(view, claimed) {
+    const box = h("div", null, { class: "node-axes" });
+    const chip = (text, tone) => box.append(h("span", text, { class: tone || "", title: text }));
+    chip(view.workflow_state, ["review-needed", "revision-requested", "blocked"].includes(view.workflow_state) ? "warn" : "");
+    chip(view.acceptance_state, ["rejected", "no-longer-callable"].includes(view.acceptance_state) ? "err" : view.acceptance_state === "unverifiable" ? "warn" : ["accepted", "reviewed"].includes(view.acceptance_state) ? "ok" : "");
+    chip(view.integrity_state, view.integrity_state === "current" ? "" : "warn");
+    chip(claimed, "");
+    return box;
+  }
+
   async function render() {
     let view;
     try { view = await call(base); } catch (error) { panel.replaceChildren(h("p", `${error.code || "error"}: ${error.message}`)); return; }
@@ -167,7 +178,7 @@
     panel.replaceChildren(
       h("p", node.statement, { class: "node-statement" }),
       ...node.assumptions.map((a) => h("p", `assuming ${a}`, { class: "node-assumption" })),
-      h("p", `${view.workflow_state} · ${view.acceptance_state} · ${view.integrity_state} · ${claimed}`, { class: "node-axes" }),
+      axes(view, claimed),
       h("h4", "Depends on"), deps,
       h("h4", "Actions"),
       action("Claim", "/claim", [["reassign", "checkbox", "take it over"]], (v) => ({ reassign: v.reassign }), () => { tell("Claimed."); return render(); }),
@@ -177,6 +188,11 @@
           ` A re-snapshot after loss of v${snapshot.resnapshot_after_loss}: it needs its own review.`)); return render(); }, savedFirst),
       action("Split", "/split", [["children", "textarea", "one child per line: id = statement"], ["reassign", "checkbox", "take it over"]],
         (v) => ({ children: children(v.children), reassign: v.reassign }), (result) => { location.href = result.next; }),
+      // one dependency edge at a time (#96): a Lemma the proof came to use, or a dependency handed down to a child
+      action("Edit dependencies", "/depend",
+        [["op", "select", "", ["add", "remove", "move"]], ["dependency", "input", "dependency id"], ["to", "input", "move onto (one of this node's dependencies)"], ["reassign", "checkbox", "take it over"]],
+        (v) => ({ op: v.op, dependency: v.dependency.trim(), to: v.op === "move" ? v.to.trim() : "", reassign: v.reassign }),
+        (edit) => { tell(`Dependencies of ${edit.node.id} edited (${edit.op} ${edit.dependency_id}); pins are taken at the next review request.`); return render(); }),
       action("Open a Challenge", "/challenge", [["rationale", "textarea", "what may no longer hold"]], (v) => ({ rationale: v.rationale }),
         () => { tell("Challenge opened."); return render(); }),
       // on the snapshot this page shows: the server records it there, even if a newer one has come since

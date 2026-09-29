@@ -210,6 +210,9 @@ class CandidateProofRecord(BaseModel):
     scoping_rationale: str
     interface_fingerprint: str | None = None
     sha256: str | None = None
+    # the node's dependencies when this snapshot was requested for review (#96): a decision on the
+    # snapshot applies only while they still stand. None for a snapshot recorded before they were kept.
+    dependencies: list[str] | None = None
     created_at: datetime = Field(default_factory=utc_now)
     # set only on the record `request_review` returns, never indexed: the version whose lost
     # (missing or unreadable) snapshot this one re-takes from an unchanged working proof (#99).

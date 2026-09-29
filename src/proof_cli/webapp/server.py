@@ -20,17 +20,26 @@ from __future__ import annotations
 
 import hashlib
 import json
+from contextlib import contextmanager
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 from urllib.parse import unquote, urlsplit
 
 from .. import proof_map
 from ..collaboration import list_review_records
 from ..domain import ProofMapNodeKind
 from ..reviews import git_identity
-from ..storage import ProjectStore, get_active_claim, get_current_candidate_proof, read_project_instance_id, read_state
+from ..storage import (
+    ProjectStore,
+    get_active_claim,
+    get_current_candidate_proof,
+    read_project_instance_id,
+    read_scope,
+    read_scoped,
+    read_state,
+)
 from ..authority import candidate_proof_sha256
 from ..vault import SNAPSHOT_MANIFEST, archived_pdf_path, build_pdf_path, node_folder, snapshot_folder_files
 from .studios import StudioHub
@@ -185,11 +194,14 @@ class ReviewApp:
     def health(self) -> dict:
         return {"project_id": read_state(self.store).project_id, "instance": read_project_instance_id(self.store), "origin": self.origin}
 
-    def _one_state(self):
+    @contextmanager
+    def _one_state(self) -> Iterator[None]:
         """Hold the project's write lock while a page is read (PR #63 audit): no decision or other
         write can land between reading what the page shows and computing the bindings it sends
-        back, so both describe one state. Writers wait for the read; it takes milliseconds."""
-        return self.store.transaction()
+        back, so both describe one state. Writers wait for the read; it takes milliseconds.
+        One read scope (#43): each node's axes are worked out once for the whole page."""
+        with self.store.transaction(), read_scope():
+            yield
 
     def state(self) -> dict:
         with self._one_state():
@@ -206,6 +218,7 @@ class ReviewApp:
             "pending": self._pending(),
         }
 
+    @read_scoped
     def map(self) -> dict:
         """The whole proof map: every node with its three axes, its assignee, and whether it's on the frontier (ADR-0008)."""
         frontier = {node.id for node in proof_map.get_frontier(self.store)}
@@ -297,6 +310,18 @@ class ReviewApp:
                 raise RequestError(HTTPStatus.BAD_REQUEST, "INVALID_CHILD_SPEC", "each child needs an id and a statement")
             made = proof_map.split_node(self.store, node_id, children, created_by=actor, reassign=bool(body.get("reassign")))
             return {"children": [child.model_dump(mode="json") for child in made], "next": self.page_of(made[0]) if made else None}
+        if action == "depend":
+            op, dependency, to = body.get("op"), str(body.get("dependency") or "").strip(), str(body.get("to") or "").strip()
+            if op not in ("add", "remove", "move") or not dependency or (op == "move") != bool(to):
+                raise RequestError(
+                    HTTPStatus.BAD_REQUEST, "INVALID_REQUEST", "a dependency edit is op add, remove or move, a dependency, and for a move where to (to)"
+                )
+            who = {"edited_by": actor, "reassign": bool(body.get("reassign"))}
+            if op == "add":
+                return proof_map.add_dependency(self.store, node_id, dependency, **who).as_json()
+            if op == "remove":
+                return proof_map.remove_dependency(self.store, node_id, dependency, **who).as_json()
+            return proof_map.move_dependency(self.store, node_id, dependency, to=to, **who).as_json()
         if action == "request-review":
             return proof_map.request_review(self.store, node_id, requested_by=actor, rationale=str(body.get("rationale") or "")).model_dump(mode="json")
         if action == "challenge":
