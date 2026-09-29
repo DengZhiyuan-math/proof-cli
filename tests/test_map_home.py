@@ -40,10 +40,10 @@ def _state(pending=(), warnings=()):
     return {"project_id": "p", "reviewer": "Researcher <r@example.org>", "pending": list(pending), "warnings": list(warnings)}
 
 
-def _home(state=None, steps=(), map_=None):
+def _home(state=None, steps=(), map_=None, nodes=None):
     if shutil.which("node") is None:
         pytest.skip("needs node")
-    scenario = {"state": state or _state(PENDING), "map": map_ or MAP, "steps": list(steps)}
+    scenario = {"state": state or _state(PENDING), "map": map_ or MAP, "steps": list(steps), "nodes": nodes or {}}
     done = subprocess.run(["node", str(HARNESS), json.dumps(scenario)], capture_output=True, text=True, timeout=30)
     assert done.returncode == 0, done.stderr
     return json.loads(done.stdout)
@@ -140,6 +140,57 @@ def test_empty_review_and_warnings_sections_say_so():
     (full,) = _home(state=_state(PENDING, [warning]))
     assert len(full["pendingRows"]) == 2 and full["pendingCount"] == "2"
     assert full["warnings"] == ["STALE a dependency moved"]
+
+
+# -- the linked citation (issue #91) -----------------------------------------------------
+
+CITATION = {"reference_id": "rudin", "missing": False, "title": "Principles of Mathematical Analysis", "authors": ["Walter Rudin"],
+            "year": 1976, "identifier": "isbn:0-07-054235-X", "url": "", "locator": "Theorem 3.6", "version": "3rd edition"}
+MISSING = {**CITATION, "missing": True, "title": None, "authors": [], "year": None, "identifier": None, "url": None}
+
+
+def _imported_page(citation):
+    return {"node": {"id": "ref_bw", "kind": "imported_result", "statement": "Bolzano-Weierstrass", "assumptions": [], "reference_id": "rudin" if citation else None},
+            "workflow_state": "open", "acceptance_state": "unreviewed", "integrity_state": "current", "claim": None, "studio": None, "folder": None,
+            "source": {"locator": "Theorem 3.6", "version": "3rd edition", "trust_level": None}, "citation": citation,
+            "dependents": [], "pdfs": {}, "dependencies": [], "challenges": [], "candidate_proof": None, "evidence_checks": [],
+            "decisions": [], "history": [], "warnings": []}
+
+
+def _open(citation):
+    """The home with the imported result's review card, then its own page."""
+    cards = [{**PENDING[0], "citation": None}, {**PENDING[1], "citation": citation}]
+    return _home(state=_state(cards), steps=[{"open": "ref_bw"}], nodes={"ref_bw": _imported_page(citation)})
+
+
+def test_the_review_card_shows_the_linked_citation():
+    home, _ = _open(CITATION)
+    card = home["pendingCitations"][1]
+    for text in ("Principles of Mathematical Analysis", "Walter Rudin", "Theorem 3.6", "3rd edition", "rudin"):
+        assert text in card
+    assert home["pendingCitations"][0] == ""  # a local node's card cites nothing
+    assert home["pendingCitationMissing"] == [False, False]
+
+
+def test_the_imported_results_page_shows_the_linked_citation():
+    _, page = _open(CITATION)
+    assert page["nodePageShown"]
+    for text in ("Principles of Mathematical Analysis", "Walter Rudin", "1976", "Theorem 3.6", "3rd edition", "rudin"):
+        assert text in page["nodeSource"]
+    assert page["nodeSourceWarnings"] == []
+
+
+def test_a_missing_citation_is_marked_on_the_page_and_the_card():
+    home, page = _open(MISSING)
+    assert home["pendingCitationMissing"] == [False, True] and "citation missing" in home["pendingCitations"][1]
+    (warning,) = page["nodeSourceWarnings"]
+    assert "citation missing" in warning and "rudin" in warning
+
+
+def test_an_imported_result_without_a_link_shows_its_source_as_before():
+    home, page = _open(None)
+    assert home["pendingCitations"] == ["", ""]
+    assert "Theorem 3.6 · 3rd edition" in page["nodeSource"] and "Citation" not in page["nodeSource"]
 
 
 # -- the search box (issue #116) ---------------------------------------------------------
