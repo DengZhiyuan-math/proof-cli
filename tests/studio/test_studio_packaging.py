@@ -34,11 +34,12 @@ def test_the_wheel_carries_every_studio_static_and_vendor_file(wheel_files):
     assert shipped and shipped <= wheel_files, sorted(shipped - wheel_files)
 
 
-def test_the_wheel_carries_the_three_licences(wheel_files):
+def test_the_wheel_carries_the_licences(wheel_files):
     assert {
         "proof_cli/studio/LICENSE",
         "proof_cli/studio/static/vendor/LICENSE-codemirror",
         "proof_cli/studio/static/vendor/LICENSE-pdfjs",
+        "proof_cli/studio/static/vendor/LICENSE-katex",  # ADR-0013
     } <= wheel_files
 
 

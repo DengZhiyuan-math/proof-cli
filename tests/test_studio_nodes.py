@@ -109,7 +109,7 @@ def test_snapshots_and_scratch_are_not_listed(hub):
     (store.root / "proofs" / "A" / "scratch" / "check.tex").write_text("x\n")
 
     files = {f["path"] for f in _get(hub, "/studio/A/api/tree")[1]["files"]}
-    assert files == {"proof.tex"}
+    assert files == {"proof.tex", "key-ideas.md"}  # the summary is a working source the author edits (ADR-0013)
 
 
 def test_a_nodes_build_is_fixed_whatever_prism_json_says(hub):

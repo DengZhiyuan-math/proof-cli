@@ -90,9 +90,12 @@ class AgentManager:
     # ------------------------------------------------------------ run
     def start(self, prompt: str, session_id: str | None, mode: str,
               model: str | None = None, effort: str | None = None,
-              scope: list[str] | None = None, provider: str | None = None) -> dict:
+              scope: list[str] | None = None, provider: str | None = None,
+              finish: Callable[[], None] | None = None) -> dict:
         """Run one turn. `scope` (project-relative files) limits which files the agent may
-        change in edit mode; None lets it change any file and create new ones."""
+        change in edit mode; None lets it change any file and create new ones. `finish` runs
+        once the backend is done, before the turn's changes are read, so its own changes are
+        part of the turn (and of its Undo)."""
         if self.closed:
             return {"error": "The studio is closed."}
         backend = self.backend(provider)
@@ -135,6 +138,7 @@ class AgentManager:
         job.root, job.files = self.root_fn(), self.files_fn
         job.context = self.context_fn() if self.context_fn else None
         job.writable = lambda rel: self._writable(job, rel)
+        job.finish = finish
         job.before = self._snapshot()
         threading.Thread(target=self._run, args=(job, backend), daemon=True).start()
         return {"job": job.id, "provider": backend.id}
@@ -148,6 +152,11 @@ class AgentManager:
             res = {"is_error": True}
         finally:
             time.sleep(0.2)
+            if job.finish is not None:
+                try:
+                    job.finish()
+                except Exception as e:  # noqa: BLE001 — report it; the turn still ends
+                    job.emit({"t": "error", "message": f"{type(e).__name__}: {e}"})
             job.after = self._snapshot()
             out_of_scope = [rel for rel in sorted(set(job.before) | set(job.after))
                             if job.scope and rel not in job.scope

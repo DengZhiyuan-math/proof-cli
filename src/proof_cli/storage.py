@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import sqlite3
@@ -14,7 +15,7 @@ from typing import Iterator, NamedTuple
 
 from pydantic import TypeAdapter
 
-from .db import connect, initialize
+from .db import SCHEMA, connect, initialize
 from .domain import (
     BlockerRecord,
     CandidateProofRecord,
@@ -33,8 +34,6 @@ from .references import (
     ReferenceRecord,
     ReferenceReviewRecord,
     ReferenceReviewStatus,
-    ReferenceSourceType,
-    ReferenceTrustLevel,
     utc_now,
 )
 
@@ -216,7 +215,8 @@ CREATE TABLE IF NOT EXISTS review_history (
 _REVIEW_HISTORY_ADDED_COLUMNS = {"prev_row_hash": "TEXT", "signed_decision": "TEXT", "payload_hash": "TEXT"}
 _CHALLENGE_ADDED_COLUMNS = {"resolution_review_id": "TEXT"}
 _CLAIM_DROPPED_COLUMNS = ("token_hash",)  # the #37 claim token, gone with ADR-0010
-_CANDIDATE_PROOF_ADDED_COLUMNS = {"sha256": "TEXT"}  # a Review snapshot's hash (ADR-0010)
+# a Review snapshot's hash (ADR-0010), and the node's dependencies as the snapshot was requested (#96, JSON)
+_CANDIDATE_PROOF_ADDED_COLUMNS = {"sha256": "TEXT", "dependencies": "TEXT", "key_ideas_drafted_by": "TEXT"}
 
 REVIEW_HISTORY_TRIGGERS = """
 CREATE INDEX IF NOT EXISTS idx_review_history_object ON review_history(object_type, object_id, seq);
@@ -294,6 +294,19 @@ WHEN EXISTS (SELECT 1 FROM reviewer_keys WHERE id = NEW.id OR seq = NEW.seq)
 BEGIN
   SELECT RAISE(ABORT, 'reviewer_keys is append-only');
 END;
+"""
+
+# Whole-document state that used to be a JSON side file under `.proof/`
+# (collaboration.json, memory.json; issue #39). Each document is one row,
+# read, changed and written back inside one `store.transaction()`, so
+# concurrent processes take turns on the SQLite write lock instead of
+# overwriting each other's writes.
+SIDE_DOCUMENTS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS side_documents (
+  name TEXT PRIMARY KEY,
+  data TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 """
 
 # Unsigned but chained facts an agent may legitimately record — a node's
@@ -435,6 +448,59 @@ def read_only() -> Iterator[None]:
         _READ_ONLY.reset(token)
 
 
+# Schema DDL, as one fingerprint: a release that changes any of it re-runs it on every project.
+_SCHEMA_DDL_DIGEST = int.from_bytes(
+    hashlib.sha256(
+        json.dumps(
+            [
+                SCHEMA,
+                REFERENCE_SCHEMA,
+                PROOF_MAP_SCHEMA,
+                REVIEW_HISTORY_SCHEMA,
+                REVIEW_HISTORY_TRIGGERS,
+                REVIEWER_KEYS_SCHEMA,
+                PROOF_LEDGER_SCHEMA,
+                SIDE_DOCUMENTS_SCHEMA,
+                _REVIEW_HISTORY_ADDED_COLUMNS,
+                _CHALLENGE_ADDED_COLUMNS,
+                _CLAIM_DROPPED_COLUMNS,
+                _CANDIDATE_PROOF_ADDED_COLUMNS,
+            ]
+        ).encode("utf-8")
+    ).digest()[:4],
+    "big",
+)
+
+
+def _schema_stamp(conn: sqlite3.Connection) -> int:
+    """What `PRAGMA user_version` holds once this release's schema is applied (#43).
+
+    It mixes the DDL fingerprint with SQLite's schema cookie, which moves on
+    any DDL at all: a project another release migrated, or one whose trigger
+    or column someone dropped or added by hand, no longer matches, so the
+    next connect re-runs the (idempotent) DDL instead of trusting it."""
+    cookie = conn.execute("PRAGMA schema_version").fetchone()[0]
+    return (_SCHEMA_DDL_DIGEST ^ cookie) & 0x7FFFFFFF
+
+
+def _apply_schema(conn: sqlite3.Connection) -> None:
+    initialize(conn)
+    conn.executescript(REFERENCE_SCHEMA)
+    conn.executescript(PROOF_MAP_SCHEMA)
+    conn.executescript(REVIEW_HISTORY_SCHEMA)
+    _add_missing_columns(conn, "review_history", _REVIEW_HISTORY_ADDED_COLUMNS)
+    _add_missing_columns(conn, "challenges", _CHALLENGE_ADDED_COLUMNS)
+    _drop_columns(conn, "claims", _CLAIM_DROPPED_COLUMNS)
+    _add_missing_columns(conn, "candidate_proofs", _CANDIDATE_PROOF_ADDED_COLUMNS)
+    conn.executescript(REVIEW_HISTORY_TRIGGERS)
+    conn.executescript(REVIEWER_KEYS_SCHEMA)
+    conn.executescript(PROOF_LEDGER_SCHEMA)
+    conn.executescript(SIDE_DOCUMENTS_SCHEMA)
+    conn.commit()
+    conn.execute(f"PRAGMA user_version = {_schema_stamp(conn)}")  # leaves the schema cookie alone
+    conn.commit()
+
+
 @dataclass
 class ProjectStore:
     root: Path
@@ -447,18 +513,8 @@ class ProjectStore:
         if _READ_ONLY.get() and not self.db_path.exists():
             raise ProjectNotFoundError(self.root)
         conn = connect(self.db_path)
-        initialize(conn)
-        conn.executescript(REFERENCE_SCHEMA)
-        conn.executescript(PROOF_MAP_SCHEMA)
-        conn.executescript(REVIEW_HISTORY_SCHEMA)
-        _add_missing_columns(conn, "review_history", _REVIEW_HISTORY_ADDED_COLUMNS)
-        _add_missing_columns(conn, "challenges", _CHALLENGE_ADDED_COLUMNS)
-        _drop_columns(conn, "claims", _CLAIM_DROPPED_COLUMNS)
-        _add_missing_columns(conn, "candidate_proofs", _CANDIDATE_PROOF_ADDED_COLUMNS)
-        conn.executescript(REVIEW_HISTORY_TRIGGERS)
-        conn.executescript(REVIEWER_KEYS_SCHEMA)
-        conn.executescript(PROOF_LEDGER_SCHEMA)
-        conn.commit()
+        if conn.execute("PRAGMA user_version").fetchone()[0] != _schema_stamp(conn):
+            _apply_schema(conn)
         return conn
 
     @contextmanager
@@ -494,6 +550,7 @@ class ProjectStore:
                 raise
             joined.execute(f"RELEASE {savepoint}")
             return
+        forget_reads()
         conn = self.connect()
         active = _ActiveTransaction(self.db_path.resolve(), threading.get_ident(), conn, [], [], [])
         token = _ACTIVE_TRANSACTION.set(active)
@@ -513,8 +570,25 @@ class ProjectStore:
         finally:
             _ACTIVE_TRANSACTION.reset(token)
             conn.close()
+            forget_reads()
         for callback in active.after_commit:
             callback()
+
+
+def one_transaction(func):
+    """Run `func(store, ...)` inside one `store.transaction()` on its store.
+
+    For a read-modify-write of whole-document state (`side_documents`,
+    #39): its load and its save both join the transaction, so a concurrent
+    writer waits on the write lock instead of landing in between.
+    """
+
+    @functools.wraps(func)
+    def wrapper(store: ProjectStore, *args, **kwargs):
+        with store.transaction():
+            return func(store, *args, **kwargs)
+
+    return wrapper
 
 
 def after_commit(store: ProjectStore, callback) -> None:
@@ -579,6 +653,99 @@ def active_transaction(store: ProjectStore) -> sqlite3.Connection | None:
     return None
 
 
+# -- one read, one pass (#43) --------------------------------------------------------
+
+# The read scope this thread is in, if any: its memo {(function, root, args): result},
+# and the write transaction it was opened in (None outside one).
+class _ReadScope(NamedTuple):
+    memo: dict
+    transaction: _ActiveTransaction | None
+
+
+_READ_SCOPE: ContextVar[_ReadScope | None] = ContextVar("proof_cli_read_scope", default=None)
+
+
+@contextmanager
+def read_scope() -> Iterator[None]:
+    """Answer each `memoized_read` once for the duration, however many nodes ask.
+
+    For one read of the project (the frontier, a node's axes, the map, a
+    decision's precondition check): nothing is written during it, so a
+    dependency walk or a review lookup asked for every node is computed
+    once. A scope belongs to the write transaction it was opened in: one
+    opened outside a transaction does nothing inside a later one, which
+    sees what it writes. Any write inside the scope drops what was
+    remembered. A nested scope in the same transaction joins the outer one.
+    """
+    transaction = _ACTIVE_TRANSACTION.get()
+    current = _READ_SCOPE.get()
+    if current is not None and current.transaction is transaction:
+        yield
+        return
+    token = _READ_SCOPE.set(_ReadScope({}, transaction))
+    try:
+        yield
+    finally:
+        _READ_SCOPE.reset(token)
+
+
+def forget_reads() -> None:
+    """Drop what the current read scope remembered: something was just written."""
+    scope = _READ_SCOPE.get()
+    if scope is not None:
+        scope.memo.clear()
+
+
+def memoized_read(func):
+    """Remember `func(store_or_root, *args)` inside a `read_scope`; outside one, just call it.
+
+    For pure reads only. Callers treat the result as read-only: it is shared
+    with every other caller in the scope."""
+
+    @functools.wraps(func)
+    def wrapper(store_or_root, /, *args, **kwargs):  # positional-only: a read may take its own `first=`
+        scope = _READ_SCOPE.get()
+        if scope is None or kwargs or scope.transaction is not _ACTIVE_TRANSACTION.get():
+            return func(store_or_root, *args, **kwargs)
+        root = store_or_root.root if isinstance(store_or_root, ProjectStore) else store_or_root
+        try:
+            key = (func, root, args)
+            hash(key)
+        except TypeError:
+            return func(store_or_root, *args)
+        if key not in scope.memo:
+            scope.memo[key] = func(store_or_root, *args)
+        return scope.memo[key]
+
+    return wrapper
+
+
+def scoped_memo(store: ProjectStore, name: str) -> dict:
+    """A table one derivation fills in as it goes, shared by every caller in the current read scope (#108).
+
+    Unlike `memoized_read`, which remembers whole answers, this lets a walk
+    over the map record each node's result as it reaches it, so the next
+    question reuses what the last one worked out. It is dropped exactly when
+    the scope's other memos are, on any write, and a scope from outside the
+    current transaction doesn't count; outside a scope it is a fresh table
+    for one call."""
+    scope = _READ_SCOPE.get()
+    if scope is None or scope.transaction is not _ACTIVE_TRANSACTION.get():
+        return {}
+    return scope.memo.setdefault((scoped_memo, store.root, name), {})
+
+
+def read_scoped(func):
+    """Run the whole of `func` inside one `read_scope`."""
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        with read_scope():
+            return func(*args, **kwargs)
+
+    return wrapper
+
+
 LEDGER_ADOPTED_KEY = "ledger_adopted"
 
 
@@ -603,12 +770,14 @@ def _writing(store: ProjectStore, conn: sqlite3.Connection | None) -> Iterator[s
     if conn is not None:
         yield conn
         return
+    forget_reads()
     own = store.connect()
     try:
         yield own
         own.commit()
     finally:
         own.close()
+        forget_reads()
 
 
 @contextmanager
@@ -650,6 +819,108 @@ def mark_review_history_migrated(conn: sqlite3.Connection) -> None:
     )
 
 
+# The JSON side files moved into `side_documents` (issue #39), by document name.
+SIDE_DOCUMENT_FILES = {"collaboration": "collaboration.json", "memory": "memory.json"}
+# Top-level keys a side file may hold that are never carried into its
+# document: `collaboration.json`'s review records are Human Review history,
+# which the #33 migration reads from the file itself.
+_SIDE_DOCUMENT_EXCLUDED_KEYS = {"collaboration": ("review_records",), "memory": ()}
+
+
+def _side_document_migrated_key(name: str) -> str:
+    return f"{name}_json_migrated"
+
+
+def _is_side_document_migrated(conn: sqlite3.Connection, name: str) -> bool:
+    key = _side_document_migrated_key(name)
+    return conn.execute("SELECT 1 FROM project_meta WHERE key = ? LIMIT 1", (key,)).fetchone() is not None
+
+
+def _mark_side_document_migrated(conn: sqlite3.Connection, name: str) -> None:
+    conn.execute(
+        "INSERT OR IGNORE INTO project_meta(key, value) VALUES (?, ?)",
+        (_side_document_migrated_key(name), utc_now().isoformat()),
+    )
+
+
+def _migrate_side_document(store: ProjectStore, conn: sqlite3.Connection, name: str) -> None:
+    """Move `.proof/<name>.json` into `side_documents` — once, on `conn`'s transaction.
+
+    The file's JSON is stored as it stands (bar the excluded keys), so the
+    loader's handling of older layouts still applies to it and nothing is
+    lost. The file itself is left where it is, unchanged: it is never read
+    for this document again. A file that isn't valid JSON (a half-written
+    `memory.json` from the old non-atomic save, say) is refused rather than
+    replaced by an empty document; the migration stays pending until the
+    file is fixed or removed.
+    """
+    if _is_side_document_migrated(conn, name):
+        return
+    path = project_proof_dir(store) / SIDE_DOCUMENT_FILES[name]
+    if path.exists():
+        try:
+            data = json.loads(path.read_text())
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"{path} is not valid JSON ({exc}); it moves into the project database once, "
+                "so fix or remove it to continue"
+            ) from exc
+        if not isinstance(data, dict):
+            raise ValueError(f"{path} does not hold a JSON object; fix or remove it to continue")
+        for key in _SIDE_DOCUMENT_EXCLUDED_KEYS[name]:
+            data.pop(key, None)
+        conn.execute(
+            "INSERT OR IGNORE INTO side_documents(name, data, updated_at) VALUES (?, ?, ?)",
+            (name, json.dumps(data), utc_now().isoformat()),
+        )
+        append_event(
+            store,
+            f"{name}_json_migrated",
+            f"moved {path.name} into the project database",
+            payload={"path": str(path)},
+            conn=conn,
+        )
+    _mark_side_document_migrated(conn, name)
+
+
+def _select_side_document(conn: sqlite3.Connection, name: str) -> dict | None:
+    row = conn.execute("SELECT data FROM side_documents WHERE name = ?", (name,)).fetchone()
+    return json.loads(row["data"]) if row is not None else None
+
+
+def read_side_document(store: ProjectStore, name: str, conn: sqlite3.Connection | None = None) -> dict | None:
+    """The stored document `name` (see `SIDE_DOCUMENT_FILES`), or None if none was ever saved.
+
+    Reads on the caller's transaction (`conn`, or the one this thread holds
+    open), so a read-modify-write inside `store.transaction()` sees its own
+    writes and no other process's in between. The first read of a project
+    that still has the JSON side file migrates it.
+    """
+    if conn is None:
+        conn = active_transaction(store)
+    with _reading(store, conn) as reader:
+        if _is_side_document_migrated(reader, name):
+            return _select_side_document(reader, name)
+    with in_transaction(store, conn) as tx:
+        _migrate_side_document(store, tx, name)
+        return _select_side_document(tx, name)
+
+
+def write_side_document(store: ProjectStore, name: str, data: str, conn: sqlite3.Connection | None = None) -> None:
+    """Replace the stored document `name` with `data` (JSON text).
+
+    Joins the caller's transaction if there is one. A read-modify-write must
+    run inside one `store.transaction()` for concurrent writers not to
+    overwrite each other; this call on its own is only atomic.
+    """
+    with _writing(store, conn) as writer:
+        _migrate_side_document(store, writer, name)  # a pending file is never overwritten unread
+        writer.execute(
+            "INSERT OR REPLACE INTO side_documents(name, data, updated_at) VALUES (?, ?, ?)",
+            (name, data, utc_now().isoformat()),
+        )
+
+
 def create_project(root: str | Path, project_id: str) -> ProjectStore:
     store = ProjectStore(Path(root))
     with store.connect() as conn:
@@ -666,7 +937,11 @@ def create_project(root: str | Path, project_id: str) -> ProjectStore:
                 # a brand-new project has no JSON-era review records, so its
                 # one-shot migration is done before it ever starts
                 mark_review_history_migrated(conn)
-        state_row = conn.execute("SELECT data FROM state WHERE project_id = ?", (project_id,)).fetchone()
+            for name, file_name in SIDE_DOCUMENT_FILES.items():
+                if not (project_proof_dir(store) / file_name).exists():
+                    _mark_side_document_migrated(conn, name)  # nothing to move, so it's done
+        # a project has one state row: opening one under another id (a default, say) adds none
+        state_row = conn.execute("SELECT data FROM state LIMIT 1").fetchone()
         if state_row is None:
             state = ProjectState(project_id=project_id)
             conn.execute(
@@ -675,18 +950,6 @@ def create_project(root: str | Path, project_id: str) -> ProjectStore:
             )
         conn.commit()
     return store
-
-
-def set_project_id(store: ProjectStore, project_id: str) -> None:
-    """Force the project's own id in `project_meta`, overwriting whatever was there.
-
-    Unlike `create_project`'s `INSERT`-if-absent, this always overwrites —
-    exchange import (issue #31) uses it to retarget a project onto an
-    imported bundle's project id even when the target already has one.
-    """
-    with store.connect() as conn:
-        conn.execute("INSERT OR REPLACE INTO project_meta(key, value) VALUES (?, ?)", ("project_id", project_id))
-        conn.commit()
 
 
 def load_project(root: str | Path) -> ProjectStore:
@@ -705,12 +968,11 @@ def read_state(store: ProjectStore) -> ProjectState:
 
 
 def write_state(store: ProjectStore, state: ProjectState) -> None:
-    with store.connect() as conn:
+    with _writing(store, None) as conn:
         conn.execute(
             "INSERT OR REPLACE INTO state(project_id, data) VALUES (?, ?)",
             (state.project_id, state.model_dump_json()),
         )
-        conn.commit()
 
 
 def append_event(
@@ -783,7 +1045,7 @@ def import_theorem_contract(store: ProjectStore, contract: TheoremContract) -> T
     on `(id, version)`, so re-importing the same bundle twice updates the
     same row rather than erroring or duplicating.
     """
-    with store.connect() as conn:
+    with _writing(store, None) as conn:
         conn.execute("UPDATE theorem_contracts SET is_current = 0 WHERE id = ?", (contract.id,))
         conn.execute(
             """
@@ -804,7 +1066,6 @@ def import_theorem_contract(store: ProjectStore, contract: TheoremContract) -> T
                 contract.updated_at.isoformat(),
             ),
         )
-        conn.commit()
     return contract
 
 
@@ -838,6 +1099,22 @@ def get_contract(store: ProjectStore, contract_id: str) -> TheoremContract | Non
     return THEOREM_ADAPTER.validate_json(row["data"]) if row else None
 
 
+def latest_event(store: ProjectStore, kind: str, entity_id: str, *, conn: sqlite3.Connection | None = None) -> EventRecord | None:
+    """The newest event of `kind` about `entity_id`, or None."""
+    with _reading(store, conn) as conn:
+        row = conn.execute(
+            "SELECT id, kind, entity_id, message, payload, created_at FROM events WHERE kind = ? AND entity_id = ? "
+            "ORDER BY created_at DESC, rowid DESC LIMIT 1",
+            (kind, entity_id),
+        ).fetchone()
+    if row is None:
+        return None
+    return EventRecord(
+        id=row["id"], kind=row["kind"], entity_id=row["entity_id"], message=row["message"],
+        payload=json.loads(row["payload"]), created_at=row["created_at"],
+    )
+
+
 def list_events(store: ProjectStore) -> list[EventRecord]:
     with store.connect() as conn:
         rows = conn.execute("SELECT id, kind, entity_id, message, payload, created_at FROM events ORDER BY created_at").fetchall()
@@ -857,7 +1134,7 @@ def list_events(store: ProjectStore) -> list[EventRecord]:
 
 
 def _upsert_reference(store: ProjectStore, reference: ReferenceRecord) -> ReferenceRecord:
-    with store.connect() as conn:
+    with _writing(store, None) as conn:
         conn.execute(
             """
             INSERT INTO reference_records(id, data, review_status, trust_level, is_callable, created_at, updated_at)
@@ -879,7 +1156,6 @@ def _upsert_reference(store: ProjectStore, reference: ReferenceRecord) -> Refere
                 reference.updated_at.isoformat(),
             ),
         )
-        conn.commit()
     return reference
 
 
@@ -906,7 +1182,7 @@ def import_reference_review(store: ProjectStore, review: ReferenceReviewRecord) 
     and timestamp instead, so `id` upserts rather than erroring on a
     re-import of the same bundle.
     """
-    with store.connect() as conn:
+    with _writing(store, None) as conn:
         conn.execute(
             """
             INSERT INTO reference_reviews(id, reference_id, data, created_at) VALUES (?, ?, ?, ?)
@@ -917,18 +1193,7 @@ def import_reference_review(store: ProjectStore, review: ReferenceReviewRecord) 
             """,
             (review.id, review.reference_id, review.model_dump_json(), review.created_at.isoformat()),
         )
-        conn.commit()
     return review
-
-
-def _reference_trust_level(reference: ReferenceRecord, review_status: ReferenceReviewStatus) -> ReferenceTrustLevel:
-    if review_status != ReferenceReviewStatus.approved:
-        return reference.trust_level
-    if reference.trust_level == ReferenceTrustLevel.foundational:
-        return reference.trust_level
-    if reference.source_type == ReferenceSourceType.standard_reference:
-        return ReferenceTrustLevel.standard_reference
-    return ReferenceTrustLevel.external_research_source
 
 
 def store_reference(store: ProjectStore, reference: ReferenceRecord) -> ReferenceRecord:
@@ -990,12 +1255,11 @@ def list_reference_reviews(store: ProjectStore) -> list[ReferenceReviewRecord]:
 
 
 def store_obligation(store: ProjectStore, obligation: ProofObligation) -> ProofObligation:
-    with store.connect() as conn:
+    with _writing(store, None) as conn:
         conn.execute(
             "INSERT OR REPLACE INTO obligations(id, data) VALUES (?, ?)",
             (obligation.id, obligation.model_dump_json()),
         )
-        conn.commit()
     return obligation
 
 
@@ -1006,12 +1270,11 @@ def list_obligations(store: ProjectStore) -> list[ProofObligation]:
 
 
 def store_blocker(store: ProjectStore, blocker: BlockerRecord) -> BlockerRecord:
-    with store.connect() as conn:
+    with _writing(store, None) as conn:
         conn.execute(
             "INSERT OR REPLACE INTO blockers(id, data) VALUES (?, ?)",
             (blocker.id, blocker.model_dump_json()),
         )
-        conn.commit()
     return blocker
 
 
@@ -1041,8 +1304,9 @@ def update_proof_map_node(store: ProjectStore, node: ProofMapNode, *, conn: sqli
 
     Its callers are the node's sanctioned edits: Promote (issue #22)
     changing `kind` from `claim` to `lemma`, Split (issue #26) appending
-    children to `dependencies`, and moving dependents off a withdrawn
-    imported result (issue #20) swapping one dependency for its correction.
+    children to `dependencies`, moving dependents off a withdrawn
+    imported result (issue #20) swapping one dependency for its correction,
+    and adding, removing or moving one dependency edge (issue #96).
     """
     with _writing(store, conn) as conn:
         conn.execute(
@@ -1101,6 +1365,7 @@ def insert_claim(store: ProjectStore, claim: ClaimRecord, *, conn: sqlite3.Conne
     return claim
 
 
+@memoized_read
 def get_active_claim(store: ProjectStore, node_id: str, *, conn: sqlite3.Connection | None = None) -> ClaimRecord | None:
     """`conn`: read inside the caller's `store.transaction()`, so the answer holds until it commits."""
     with _reading(store, conn) as conn:
@@ -1156,6 +1421,8 @@ def _row_to_candidate_proof(row: sqlite3.Row) -> CandidateProofRecord:
         scoping_rationale=row["scoping_rationale"],
         interface_fingerprint=row["interface_fingerprint"],
         sha256=row["sha256"],
+        dependencies=json.loads(row["dependencies"]) if row["dependencies"] is not None else None,
+        key_ideas_drafted_by=row["key_ideas_drafted_by"],
         created_at=row["created_at"],
     )
 
@@ -1184,8 +1451,8 @@ def insert_candidate_proof(
         conn.execute("UPDATE candidate_proofs SET is_current = 0 WHERE node_id = ?", (record.node_id,))
         conn.execute(
             """
-            INSERT INTO candidate_proofs(id, node_id, version, file_path, is_current, review_record_id, submitted_by, scoping_rationale, interface_fingerprint, sha256, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO candidate_proofs(id, node_id, version, file_path, is_current, review_record_id, submitted_by, scoping_rationale, interface_fingerprint, sha256, dependencies, key_ideas_drafted_by, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record.id,
@@ -1198,6 +1465,8 @@ def insert_candidate_proof(
                 record.scoping_rationale,
                 record.interface_fingerprint,
                 record.sha256,
+                json.dumps(record.dependencies) if record.dependencies is not None else None,
+                record.key_ideas_drafted_by,
                 record.created_at.isoformat(),
             ),
         )
@@ -1224,6 +1493,7 @@ def set_candidate_proof_review_record_id(
         )
 
 
+@memoized_read
 def get_candidate_proof(store: ProjectStore, candidate_proof_id: str) -> CandidateProofRecord | None:
     with store.connect() as conn:
         row = conn.execute(
@@ -1242,6 +1512,7 @@ def list_candidate_proofs_for_node(store: ProjectStore, node_id: str) -> list[Ca
     return [_row_to_candidate_proof(row) for row in rows]
 
 
+@memoized_read
 def get_current_candidate_proof(
     store: ProjectStore, node_id: str, *, conn: sqlite3.Connection | None = None
 ) -> CandidateProofRecord | None:
@@ -1256,10 +1527,9 @@ def get_current_candidate_proof(
 def list_all_candidate_proofs(store: ProjectStore) -> list[CandidateProofRecord]:
     """Every candidate proof's index row across the whole project (issue #31).
 
-    Only the index — id, version, file_path, fingerprint, etc. The proof
-    text itself lives in the git-tracked Proof vault, not here; exchange
-    carries this index for fidelity, and relies on git for the vault files
-    themselves, same as it always has for the rest of the working tree.
+    Only the index: id, version, file_path, sha256, etc. The snapshot files
+    themselves live in the Proof vault (`proofs/<node-id>/snapshots/`); an
+    exchange bundle carries them beside this index (`ExchangeBundle.vault_files`).
     """
     with store.connect() as conn:
         rows = conn.execute("SELECT * FROM candidate_proofs ORDER BY node_id, version").fetchall()
@@ -1440,12 +1710,11 @@ def _row_to_evidence_check(row: sqlite3.Row) -> EvidenceCheck:
 
 
 def insert_evidence_check(store: ProjectStore, check: EvidenceCheck) -> EvidenceCheck:
-    with store.connect() as conn:
+    with _writing(store, None) as conn:
         conn.execute(
             "INSERT INTO evidence_checks(id, candidate_proof_id, outcome, notes, run_by, created_at) VALUES (?, ?, ?, ?, ?, ?)",
             (check.id, check.candidate_proof_id, check.outcome.value, check.notes, check.run_by, check.created_at.isoformat()),
         )
-        conn.commit()
     return check
 
 
@@ -1479,12 +1748,11 @@ def insert_governance_record(store: ProjectStore, *, kind: str, data: str) -> No
     their history-prefix constants; behavior is otherwise unchanged from
     before this table existed.
     """
-    with store.connect() as conn:
+    with _writing(store, None) as conn:
         conn.execute(
             "INSERT INTO governance_records(id, kind, data, created_at) VALUES (?, ?, ?, ?)",
             (str(uuid.uuid4()), kind, data, utc_now().isoformat()),
         )
-        conn.commit()
 
 
 def list_governance_records(store: ProjectStore, *, kind: str) -> list[str]:
@@ -1496,13 +1764,13 @@ def list_governance_records(store: ProjectStore, *, kind: str) -> list[str]:
     return [row["data"] for row in rows]
 
 
-def store_snapshot(store: ProjectStore, snapshot: ProjectSnapshot) -> ProjectSnapshot:
-    with store.connect() as conn:
+def store_snapshot(store: ProjectStore, snapshot: ProjectSnapshot, *, replace: bool = True) -> ProjectSnapshot:
+    """`replace=False` keeps a row already stored under the snapshot's id (exchange import: local wins, #31)."""
+    with _writing(store, None) as conn:
         conn.execute(
-            "INSERT OR REPLACE INTO snapshots(id, data, created_at) VALUES (?, ?, ?)",
+            f"INSERT OR {'REPLACE' if replace else 'IGNORE'} INTO snapshots(id, data, created_at) VALUES (?, ?, ?)",
             (snapshot.project_id, snapshot.model_dump_json(), snapshot.created_at.isoformat()),
         )
-        conn.commit()
     return snapshot
 
 
@@ -1514,12 +1782,11 @@ def read_latest_snapshot(store: ProjectStore) -> ProjectSnapshot | None:
 
 def store_publication_state(store: ProjectStore, project_id: str, data: str, *, updated_at: datetime | None = None) -> None:
     timestamp = (updated_at or utc_now()).isoformat()
-    with store.connect() as conn:
+    with _writing(store, None) as conn:
         conn.execute(
             "INSERT OR REPLACE INTO publication_state(project_id, data, updated_at) VALUES (?, ?, ?)",
             (project_id, data, timestamp),
         )
-        conn.commit()
 
 
 def read_publication_state(store: ProjectStore) -> str | None:
@@ -1674,5 +1941,3 @@ def list_review_history_rows(
         with store.connect() as own:
             rows = own.execute(query, params).fetchall()
     return [_row_to_review_history(row) for row in rows]
-
-

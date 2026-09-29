@@ -5,13 +5,12 @@ import json
 import uuid
 from datetime import datetime
 from enum import Enum
-from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field
 
 from .domain import ProjectSnapshot, utc_now
-from .storage import ProjectStore, read_state
+from .storage import ProjectStore, one_transaction, read_side_document, read_state, write_side_document
 from .verification_ir import (
     VerificationDependencyVersion,
     VerificationFragment,
@@ -21,6 +20,11 @@ from .verification_ir import (
     VerificationScope,
 )
 from .verification_results import VerificationResultRecord
+
+if TYPE_CHECKING:  # annotations only: a runtime import would cycle (bugs -> checks -> memory)
+    from .bugs import ProofBugReport
+    from .debug_tasks import ProofDebugTask
+    from .evidence import EvidenceChain
 
 
 class MemoryLayer(str, Enum):
@@ -45,16 +49,19 @@ class MemoryStatus(str, Enum):
 
 
 class MemoryScope(BaseModel):
-    """`node_id`/`candidate_proof_id`/`review_id` reference the unified
-    ProofMapNode model (issue #29): `node_id` for a memory about a Theorem/
-    Lemma/Claim/Imported result, `candidate_proof_id`/`review_id` for one
-    about a specific submission or Human Review decision. The four older
-    fields stay: they're still load-bearing for the frozen bug/debug/
-    verification-lifecycle system, whose reports genuinely cross-reference
-    several of `theorem_id`/`obligation_id`/`blocker_id` at once (e.g. a bug
-    report linked to both an obligation and a blocker) — collapsing them
-    into one slot would silently lose real, currently-populated data, not
-    just rename a field.
+    """What a memory entry is about, on the proof map (#29, #45).
+
+    `node_id` names a proof-map node; `candidate_proof_id` and `review_id`
+    narrow it to one of that node's Candidate proofs or Human Review
+    decisions. All three are checked against the map when the entry is
+    written (`append_memory_artifact`), and a node's recovery reads them all
+    (`node_scope_memory`).
+
+    `theorem_id`, `goal_id`, `obligation_id` and `blocker_id` are legacy
+    scope (ADR-0012): kept, and still filtered on, so older entries and the
+    frozen bug/debug system read as they did, but `proof memory add` no
+    longer writes them, and nothing migrates them — no link runs from a
+    legacy object to a node.
     """
 
     project_id: str
@@ -135,6 +142,7 @@ class ProofDebugMemoryKind(str, Enum):
 
 class ProofDebugScope(BaseModel):
     project_id: str
+    node_id: str | None = None
     theorem_id: str | None = None
     obligation_id: str | None = None
     method_id: str | None = None
@@ -169,12 +177,47 @@ class ProofDebugMemoryRecord(BaseModel):
     updated_at: datetime = Field(default_factory=utc_now)
 
 
+LEGACY_TRUST_NOTICE = "legacy — not a trust source; what can be called is answered by the proof map"
+
+HANDOFF_LEGACY_NOTICE = (
+    "accepted_verification_results and project_snapshot.validated_results are "
+    f"{LEGACY_TRUST_NOTICE}: read proof_map.accepted (ADR-0012)"
+)
+
+
+class ProofMapHandoffNode(BaseModel):
+    node_id: str
+    kind: str
+    statement: str
+    # why its newest acceptance decision no longer counts (unverifiable nodes only)
+    reason: str | None = None
+
+
+class ProofMapHandoff(BaseModel):
+    """The proof map as a handoff reads it (#45).
+
+    `accepted` is exactly the nodes whose `get_acceptance_state` is
+    `accepted`; `unverifiable` the nodes whose newest acceptance decision no
+    longer describes them, with why.
+    """
+
+    accepted: list[ProofMapHandoffNode] = Field(default_factory=list)
+    unverifiable: list[ProofMapHandoffNode] = Field(default_factory=list)
+
+
 class HandoffSnapshot(BaseModel):
     project_id: str
     project_snapshot: ProjectSnapshot
+    # set for a node-scoped handoff: the node, and every memory entry in its scope (`node_scope_memory`)
+    node_id: str | None = None
+    node_memory: list[MemoryArtifact] = Field(default_factory=list)
+    # None only on a handoff recorded before #45
+    proof_map: ProofMapHandoff | None = None
+    legacy_notice: str = HANDOFF_LEGACY_NOTICE
     latest_diagnostic_report: dict[str, Any] | None = None
     verification_history: list[VerificationLifecycleRecord] = Field(default_factory=list)
     queued_verification_fragments: list[VerificationFragment] = Field(default_factory=list)
+    # legacy (ADR-0012): see `legacy_notice`
     accepted_verification_results: list[VerificationResultRecord] = Field(default_factory=list)
     stale_verification_fragments: list[VerificationFragment] = Field(default_factory=list)
     revalidation_requirements: list[VerificationLifecycleRecord] = Field(default_factory=list)
@@ -217,6 +260,9 @@ _LAYER_DEFAULT_STATUS: dict[MemoryLayer, MemoryStatus] = {
     MemoryLayer.procedural: MemoryStatus.tactic,
 }
 
+# its `side_documents` row: formerly `.proof/memory.json` (#39)
+MEMORY_DOCUMENT = "memory"
+
 _BUG_SCAN_HISTORY_PREFIX = "proof_bug_scan:"
 _BUG_REVIEW_HISTORY_PREFIX = "proof_bug_review:"
 _BUG_REPAIR_HISTORY_PREFIX = "proof_bug_repair:"
@@ -228,10 +274,6 @@ _VERIFICATION_RESULT_HISTORY_PREFIX = "verification_result:"
 
 def _project_id(store: ProjectStore) -> str:
     return read_state(store).project_id
-
-
-def _memory_path(store: ProjectStore) -> Path:
-    return store.root / ".proof" / "memory.json"
 
 
 def _coerce_layer(layer: str | MemoryLayer) -> MemoryLayer:
@@ -403,11 +445,13 @@ def _coerce_handoff_snapshot(item: Any, project_id: str) -> HandoffSnapshot:
 
 
 def load_memory(store: ProjectStore) -> LayeredMemory:
-    path = _memory_path(store)
+    """The layered memory, read on this thread's open transaction if there
+    is one — so a `load_memory` → change → `save_memory` inside one
+    `store.transaction()` is a single critical section (#39)."""
     project_id = _project_id(store)
-    if not path.exists():
+    data = read_side_document(store, MEMORY_DOCUMENT)
+    if data is None:
         return LayeredMemory(project_id=project_id)
-    data = json.loads(path.read_text())
     layer_memory = LayeredMemory(project_id=data.get("project_id", project_id), version=int(data.get("version", 4)))
     for layer in (MemoryLayer.working, MemoryLayer.semantic, MemoryLayer.episodic, MemoryLayer.procedural):
         raw_entries = data.get(layer.value, [])
@@ -428,11 +472,10 @@ def load_memory(store: ProjectStore) -> LayeredMemory:
 
 
 def save_memory(store: ProjectStore, memory: LayeredMemory) -> LayeredMemory:
-    path = _memory_path(store)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    """Persist the whole layered memory to SQLite, atomically."""
     memory.project_id = _project_id(store)
     memory.version = 4
-    path.write_text(memory.model_dump_json(indent=2))
+    write_side_document(store, MEMORY_DOCUMENT, memory.model_dump_json())
     return memory
 
 
@@ -491,6 +534,7 @@ def _verification_records_from_state(store: ProjectStore) -> list[VerificationLi
     return records
 
 
+@one_transaction
 def synchronize_verification_history(store: ProjectStore) -> LayeredMemory:
     memory = load_memory(store)
     records = _verification_records_from_state(store)
@@ -512,6 +556,7 @@ def synchronize_verification_history(store: ProjectStore) -> LayeredMemory:
 def _debug_scope_from_ids(
     project_id: str,
     *,
+    node_id: str | None = None,
     theorem_id: str | None = None,
     obligation_id: str | None = None,
     method_id: str | None = None,
@@ -521,6 +566,7 @@ def _debug_scope_from_ids(
 ) -> ProofDebugScope:
     return ProofDebugScope(
         project_id=project_id,
+        node_id=node_id,
         theorem_id=theorem_id,
         obligation_id=obligation_id,
         method_id=method_id,
@@ -539,11 +585,13 @@ def _append_debug_record(memory: LayeredMemory, record: ProofDebugMemoryRecord) 
     return True
 
 
+@one_transaction
 def record_proof_debug_record(
     store: ProjectStore,
     kind: ProofDebugMemoryKind | str,
     summary: str,
     *,
+    node_id: str | None = None,
     theorem_id: str | None = None,
     obligation_id: str | None = None,
     method_id: str | None = None,
@@ -561,6 +609,8 @@ def record_proof_debug_record(
     source: Literal["manual", "snapshot", "recovery", "migration", "scan", "review", "repair", "debug_batch"] = "manual",
     source_key: str = "",
 ) -> ProofDebugMemoryRecord:
+    if node_id is not None:
+        _require_node(store, node_id)
     memory = load_memory(store)
     record_kind = kind if isinstance(kind, ProofDebugMemoryKind) else ProofDebugMemoryKind(kind)
     record = ProofDebugMemoryRecord(
@@ -573,10 +623,13 @@ def record_proof_debug_record(
             blocker_id or "",
             route_id or "",
             source_key or summary,
+            # appended only when set, so a record without a node keeps the id it always had
+            *([f"node:{node_id}"] if node_id else []),
         ),
         kind=record_kind,
         scope=_debug_scope_from_ids(
             memory.project_id,
+            node_id=node_id,
             theorem_id=theorem_id,
             obligation_id=obligation_id,
             method_id=method_id,
@@ -944,6 +997,7 @@ def _proof_debug_records_from_state(store: ProjectStore) -> list[ProofDebugMemor
     return records
 
 
+@one_transaction
 def synchronize_proof_debug_history(store: ProjectStore) -> LayeredMemory:
     memory = load_memory(store)
     records = _proof_debug_records_from_state(store)
@@ -963,6 +1017,7 @@ def synchronize_proof_debug_history(store: ProjectStore) -> LayeredMemory:
     return memory
 
 
+@one_transaction
 def record_verification_lifecycle(
     store: ProjectStore,
     fragment: VerificationFragment,
@@ -1042,6 +1097,58 @@ def record_verification_revalidation(
     )
 
 
+def _require_node(store: ProjectStore, node_id: str):
+    from .proof_map import require_node
+
+    return require_node(store, node_id)
+
+
+def _resolve_node_scope(
+    store: ProjectStore,
+    node_id: str | None,
+    candidate_proof_id: str | None,
+    review_id: str | None,
+) -> str | None:
+    """The node a memory entry is scoped to, checked against the proof map (#45).
+
+    The node must exist; a Candidate proof must be one of its own, and a
+    review one of the Human Review decisions recorded on it. A Candidate
+    proof or review named without a node scopes the entry to the node it
+    belongs to. Raises `ProofMapError` (NODE_NOT_FOUND,
+    CANDIDATE_PROOF_NOT_FOUND, REVIEW_NOT_FOUND, NOT_THIS_NODE).
+    """
+    from .proof_map import ProofMapError, decision_node_id, get_candidate_proof
+
+    proof_node = review_node = None
+    if candidate_proof_id is not None:
+        proof = get_candidate_proof(store, candidate_proof_id)
+        if proof is None:
+            raise ProofMapError("CANDIDATE_PROOF_NOT_FOUND", f"candidate proof {candidate_proof_id} not found")
+        proof_node = proof.node_id
+    if review_id is not None:
+        review_node = decision_node_id(store, review_id)
+        if review_node is None:
+            raise ProofMapError("REVIEW_NOT_FOUND", f"no Human Review decision has id {review_id}")
+    node_id = node_id or proof_node or review_node
+    if node_id is None:
+        return None
+    _require_node(store, node_id)
+    if proof_node is not None and proof_node != node_id:
+        raise ProofMapError(
+            "NOT_THIS_NODE",
+            f"candidate proof {candidate_proof_id} belongs to node {proof_node}, not {node_id}",
+            details={"candidate_proof_id": candidate_proof_id, "node_id": proof_node},
+        )
+    if review_node is not None and review_node != node_id:
+        raise ProofMapError(
+            "NOT_THIS_NODE",
+            f"review {review_id} is a decision on node {review_node}, not {node_id}",
+            details={"review_id": review_id, "node_id": review_node},
+        )
+    return node_id
+
+
+@one_transaction
 def append_memory_artifact(
     store: ProjectStore,
     layer: str | MemoryLayer,
@@ -1063,8 +1170,15 @@ def append_memory_artifact(
     tags: list[str] | None = None,
     notes: str = "",
 ) -> MemoryArtifact:
-    memory = load_memory(store)
+    """Append one memory entry, scoped and validated against the proof map (see `_resolve_node_scope`).
+
+    Nothing is written if the scope doesn't check out. The legacy scope ids
+    (`theorem_id`, ...) are still accepted here, for the frozen legacy
+    subsystems and older fixtures; the CLI no longer writes them (ADR-0012).
+    """
     layer_enum = _coerce_layer(layer)
+    node_id = _resolve_node_scope(store, node_id, candidate_proof_id, review_id)
+    memory = load_memory(store)
     artifact = MemoryArtifact(
         layer=layer_enum,
         status=MemoryStatus(status) if isinstance(status, str) else (status or _LAYER_DEFAULT_STATUS[layer_enum]),
@@ -1154,13 +1268,18 @@ def _matching_artifacts(
     layer: str | MemoryLayer | None = None,
     status: MemoryStatus | str | None = None,
     node_id: str | None = None,
+    candidate_proof_id: str | None = None,
+    review_id: str | None = None,
     theorem_id: str | None = None,
     goal_id: str | None = None,
     minimum_importance: str | MemoryImportance | None = None,
+    artifacts: list[MemoryArtifact] | None = None,
 ) -> list[MemoryArtifact]:
     memory = load_memory(store)
-    if layer is None:
-        candidates = [artifact for bucket in (memory.working, memory.semantic, memory.episodic, memory.procedural) for artifact in bucket]
+    if artifacts is not None:
+        candidates = [artifact for artifact in artifacts if layer is None or artifact.layer == _coerce_layer(layer)]
+    elif layer is None:
+        candidates = _all_artifacts(memory)
     else:
         candidates = list(getattr(memory, _coerce_layer(layer).value))
     if status is not None:
@@ -1168,6 +1287,14 @@ def _matching_artifacts(
         candidates = [artifact for artifact in candidates if artifact.status == status_enum]
     if node_id is not None:
         candidates = [artifact for artifact in candidates if artifact.scope.node_id == node_id or artifact.linked_proof_state.node_id == node_id]
+    if candidate_proof_id is not None:
+        candidates = [
+            artifact
+            for artifact in candidates
+            if candidate_proof_id in (artifact.scope.candidate_proof_id, artifact.linked_proof_state.candidate_proof_id)
+        ]
+    if review_id is not None:
+        candidates = [artifact for artifact in candidates if review_id in (artifact.scope.review_id, artifact.linked_proof_state.review_id)]
     if theorem_id is not None:
         candidates = [artifact for artifact in candidates if artifact.scope.theorem_id == theorem_id or artifact.linked_proof_state.theorem_id == theorem_id]
     if goal_id is not None:
@@ -1185,31 +1312,97 @@ def list_memory_artifacts(
     layer: str | MemoryLayer | None = None,
     status: MemoryStatus | str | None = None,
     node_id: str | None = None,
+    candidate_proof_id: str | None = None,
+    review_id: str | None = None,
     theorem_id: str | None = None,
     goal_id: str | None = None,
     minimum_importance: str | MemoryImportance | None = None,
 ) -> list[MemoryArtifact]:
+    """Entries matching every filter given; `node_id` matches the entry's own node exactly (see `node_scope_memory` for a node's whole scope)."""
     return _matching_artifacts(
         store,
         layer=layer,
         status=status,
         node_id=node_id,
+        candidate_proof_id=candidate_proof_id,
+        review_id=review_id,
         theorem_id=theorem_id,
         goal_id=goal_id,
         minimum_importance=minimum_importance,
     )
 
 
-def stable_memory(store: ProjectStore, *, theorem_id: str | None = None) -> list[MemoryArtifact]:
-    return _matching_artifacts(store, status=MemoryStatus.stable, theorem_id=theorem_id)
+def _all_artifacts(memory: LayeredMemory) -> list[MemoryArtifact]:
+    return [artifact for bucket in (memory.working, memory.semantic, memory.episodic, memory.procedural) for artifact in bucket]
 
 
-def failed_routes(store: ProjectStore, *, theorem_id: str | None = None) -> list[MemoryArtifact]:
-    return _matching_artifacts(store, layer=MemoryLayer.episodic, status=MemoryStatus.failed, theorem_id=theorem_id)
+def _node_lineage(store: ProjectStore, node_id: str) -> list[str]:
+    """`node_id`, then the node it was split from, and so on up its derived_from chain."""
+    from .proof_map import get_node
+
+    node = _require_node(store, node_id)
+    lineage = [node.id]
+    while node is not None and node.derived_from and node.derived_from not in lineage:
+        lineage.append(node.derived_from)
+        node = get_node(store, node.derived_from)
+    return lineage
 
 
-def procedural_tactics(store: ProjectStore, *, theorem_id: str | None = None) -> list[MemoryArtifact]:
-    return _matching_artifacts(store, layer=MemoryLayer.procedural, status=MemoryStatus.tactic, theorem_id=theorem_id)
+def node_scope_memory(store: ProjectStore, node_id: str) -> list[MemoryArtifact]:
+    """Every memory entry a node's recovery carries (#45), oldest first.
+
+    The entries scoped to the node itself, to any of its Candidate proofs or
+    to any Human Review decision on it, and the same for the node it was
+    split from (`derived_from`), up the chain. A parent doesn't inherit its
+    children's entries. Raises NODE_NOT_FOUND for an unknown node.
+    """
+    from .proof_map import decision_node_id, get_candidate_proof
+
+    lineage = set(_node_lineage(store, node_id))
+    proof_nodes: dict[str, str | None] = {}
+    review_nodes: dict[str, str | None] = {}
+
+    def in_scope(artifact: MemoryArtifact) -> bool:
+        scope, linked = artifact.scope, artifact.linked_proof_state
+        if scope.node_id in lineage or linked.node_id in lineage:
+            return True
+        for proof_id in {scope.candidate_proof_id, linked.candidate_proof_id} - {None}:
+            if proof_id not in proof_nodes:
+                proof = get_candidate_proof(store, proof_id)
+                proof_nodes[proof_id] = proof.node_id if proof is not None else None
+            if proof_nodes[proof_id] in lineage:
+                return True
+        for review_id in {scope.review_id, linked.review_id} - {None}:
+            if review_id not in review_nodes:
+                review_nodes[review_id] = decision_node_id(store, review_id)
+            if review_nodes[review_id] in lineage:
+                return True
+        return False
+
+    return sorted(
+        (artifact for artifact in _all_artifacts(load_memory(store)) if in_scope(artifact)),
+        key=lambda artifact: (artifact.created_at, artifact.id),
+    )
+
+
+def _scoped(store: ProjectStore, node_id: str | None) -> list[MemoryArtifact] | None:
+    return node_scope_memory(store, node_id) if node_id is not None else None
+
+
+def stable_memory(store: ProjectStore, *, theorem_id: str | None = None, node_id: str | None = None) -> list[MemoryArtifact]:
+    return _matching_artifacts(store, status=MemoryStatus.stable, theorem_id=theorem_id, artifacts=_scoped(store, node_id))
+
+
+def failed_routes(store: ProjectStore, *, theorem_id: str | None = None, node_id: str | None = None) -> list[MemoryArtifact]:
+    return _matching_artifacts(
+        store, layer=MemoryLayer.episodic, status=MemoryStatus.failed, theorem_id=theorem_id, artifacts=_scoped(store, node_id)
+    )
+
+
+def procedural_tactics(store: ProjectStore, *, theorem_id: str | None = None, node_id: str | None = None) -> list[MemoryArtifact]:
+    return _matching_artifacts(
+        store, layer=MemoryLayer.procedural, status=MemoryStatus.tactic, theorem_id=theorem_id, artifacts=_scoped(store, node_id)
+    )
 
 
 def _matches_verification_scope(
@@ -1391,12 +1584,15 @@ def revalidation_history(
 def _matches_debug_scope(
     record: ProofDebugMemoryRecord,
     *,
+    node_id: str | None = None,
     theorem_id: str | None = None,
     obligation_id: str | None = None,
     method_id: str | None = None,
     blocker_id: str | None = None,
     route_id: str | None = None,
 ) -> bool:
+    if node_id is not None and record.scope.node_id != node_id:
+        return False
     if theorem_id is not None and record.scope.theorem_id != theorem_id:
         return False
     if obligation_id is not None and record.scope.obligation_id != obligation_id:
@@ -1413,6 +1609,7 @@ def _matches_debug_scope(
 def proof_debug_records(
     store: ProjectStore,
     *,
+    node_id: str | None = None,
     theorem_id: str | None = None,
     obligation_id: str | None = None,
     method_id: str | None = None,
@@ -1430,6 +1627,7 @@ def proof_debug_records(
         for record in candidates
         if _matches_debug_scope(
             record,
+            node_id=node_id,
             theorem_id=theorem_id,
             obligation_id=obligation_id,
             method_id=method_id,
@@ -1443,6 +1641,7 @@ def proof_debug_records(
 def proof_debug_history(
     store: ProjectStore,
     *,
+    node_id: str | None = None,
     theorem_id: str | None = None,
     obligation_id: str | None = None,
     method_id: str | None = None,
@@ -1451,6 +1650,7 @@ def proof_debug_history(
 ) -> list[ProofDebugMemoryRecord]:
     return proof_debug_records(
         store,
+        node_id=node_id,
         theorem_id=theorem_id,
         obligation_id=obligation_id,
         method_id=method_id,
@@ -1481,21 +1681,24 @@ def proof_debug_patterns(
     )
 
 
-def latest_proof_debug_snapshot(store: ProjectStore, *, theorem_id: str | None = None) -> HandoffSnapshot | None:
-    memory = load_memory(store)
-    snapshots = memory.handoff_snapshots
-    if theorem_id is None:
-        return snapshots[-1] if snapshots else None
-    for snapshot in reversed(snapshots):
-        if snapshot.project_snapshot.active_theorem == theorem_id:
-            return snapshot
+def latest_proof_debug_snapshot(
+    store: ProjectStore, *, theorem_id: str | None = None, node_id: str | None = None
+) -> HandoffSnapshot | None:
+    """The newest recorded handoff, or the newest for this node (or, legacy, this active theorem)."""
+    for snapshot in reversed(load_memory(store).handoff_snapshots):
+        if node_id is not None and snapshot.node_id != node_id:
+            continue
+        if theorem_id is not None and snapshot.project_snapshot.active_theorem != theorem_id:
+            continue
+        return snapshot
     return None
 
 
-def working_memory(store: ProjectStore, *, theorem_id: str | None = None) -> list[MemoryArtifact]:
-    return _matching_artifacts(store, layer=MemoryLayer.working, theorem_id=theorem_id)
+def working_memory(store: ProjectStore, *, theorem_id: str | None = None, node_id: str | None = None) -> list[MemoryArtifact]:
+    return _matching_artifacts(store, layer=MemoryLayer.working, theorem_id=theorem_id, artifacts=_scoped(store, node_id))
 
 
+@one_transaction
 def record_handoff_snapshot(
     store: ProjectStore,
     handoff_snapshot: HandoffSnapshot,
@@ -1513,15 +1716,46 @@ def latest_handoff_snapshot(store: ProjectStore) -> HandoffSnapshot | None:
     return memory.handoff_snapshots[-1]
 
 
+def proof_map_handoff(store: ProjectStore) -> ProofMapHandoff:
+    """The handoff's proof map section: accepted exactly where `get_acceptance_state` says so."""
+    from .proof_map import acceptance_overview
+
+    section = ProofMapHandoff()
+    for node, state, reason in acceptance_overview(store):
+        entry = ProofMapHandoffNode(node_id=node.id, kind=getattr(node.kind, "value", str(node.kind)), statement=node.statement)
+        if state == "accepted":
+            section.accepted.append(entry)
+        elif state == "unverifiable":
+            entry.reason = reason
+            section.unverifiable.append(entry)
+    return section
+
+
 def build_handoff_snapshot(
     store: ProjectStore,
     project_snapshot: ProjectSnapshot,
     *,
     handoff_note: str = "",
+    node_id: str | None = None,
 ) -> HandoffSnapshot:
+    """What an agent resumes from: the project snapshot, memory, and the proof map's accepted nodes.
+
+    With `node_id`, the memory lists come from that node's whole scope
+    (`node_scope_memory`: its own entries, its Candidate proofs' and reviews',
+    its derived_from parent's) rather than the project's most recent entries,
+    and the proof-debug history from debug records on those nodes. The
+    verification lists stay legacy (ADR-0012), scoped by the active theorem.
+    """
+    node_memory = node_scope_memory(store, node_id) if node_id is not None else []
     memory = synchronize_verification_history(store)
     theorem_id = project_snapshot.active_theorem
-    debug_records = proof_debug_history(store, theorem_id=theorem_id) if theorem_id is not None else proof_debug_history(store)
+    if node_id is not None:
+        lineage = set(_node_lineage(store, node_id))
+        debug_records = [record for record in proof_debug_history(store) if record.scope.node_id in lineage]
+    elif theorem_id is not None:
+        debug_records = proof_debug_history(store, theorem_id=theorem_id)
+    else:
+        debug_records = proof_debug_history(store)
     verification_history = verification_records(store, theorem_id=theorem_id) if theorem_id is not None else verification_records(store)
     suspicion_reports = [
         record.bug_report
@@ -1538,11 +1772,26 @@ def build_handoff_snapshot(
     repair_decisions = [record.repair_decision for record in debug_records if record.repair_decision is not None]
     repair_patterns = [record.pattern or record.summary for record in debug_records if record.kind == ProofDebugMemoryKind.repair_pattern]
     failure_motifs = [record.motif or record.summary for record in debug_records if record.kind == ProofDebugMemoryKind.failure_motif]
-    working_context = [artifact.content for artifact in memory.working[-3:]]
-    stable_facts = [artifact.content for artifact in stable_memory(store)][-5:]
-    failed_route_text = [artifact.content for artifact in failed_routes(store)][-5:]
-    tactic_text = [artifact.content for artifact in procedural_tactics(store)][-5:]
-    recent_attempts = [artifact.content for artifact in (memory.episodic[-2:] + memory.procedural[-2:])]
+    if node_id is not None:
+        def layer_of(layer: MemoryLayer) -> list[MemoryArtifact]:
+            return [artifact for artifact in node_memory if artifact.layer == layer]
+
+        working, episodic, procedural = layer_of(MemoryLayer.working), layer_of(MemoryLayer.episodic), layer_of(MemoryLayer.procedural)
+        scoped = node_memory
+    else:
+        working, episodic, procedural = memory.working, memory.episodic, memory.procedural
+        scoped = None
+    working_context = [artifact.content for artifact in working[-3:]]
+    stable_facts = [artifact.content for artifact in _matching_artifacts(store, status=MemoryStatus.stable, artifacts=scoped)][-5:]
+    failed_route_text = [
+        artifact.content
+        for artifact in _matching_artifacts(store, layer=MemoryLayer.episodic, status=MemoryStatus.failed, artifacts=scoped)
+    ][-5:]
+    tactic_text = [
+        artifact.content
+        for artifact in _matching_artifacts(store, layer=MemoryLayer.procedural, status=MemoryStatus.tactic, artifacts=scoped)
+    ][-5:]
+    recent_attempts = [artifact.content for artifact in (episodic[-2:] + procedural[-2:])]
     unresolved_debts = list(project_snapshot.unresolved_trust_sensitive_calls)
     blocker_ids = list(project_snapshot.active_blockers)
     queued_fragments = [
@@ -1573,6 +1822,9 @@ def build_handoff_snapshot(
     return HandoffSnapshot(
         project_id=memory.project_id,
         project_snapshot=project_snapshot,
+        node_id=node_id,
+        node_memory=node_memory,
+        proof_map=proof_map_handoff(store),
         latest_diagnostic_report=project_snapshot.latest_diagnostic_report,
         verification_history=verification_history,
         queued_verification_fragments=queued_fragments,
@@ -1598,6 +1850,7 @@ def build_handoff_snapshot(
     )
 
 
+@one_transaction
 def track_symbol(store: ProjectStore, symbol: str) -> LayeredMemory:
     memory = load_memory(store)
     if symbol not in memory.tracked_symbols:

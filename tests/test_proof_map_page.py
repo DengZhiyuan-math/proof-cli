@@ -6,6 +6,8 @@ import time
 from pathlib import Path
 
 import pytest
+
+from _proofs import ensure_key_ideas
 from typer.testing import CliRunner
 
 from _researcher import researcher
@@ -19,6 +21,7 @@ from proof_cli.webapp.server import RequestError
 def _write(store, node_id: str, body: str) -> Path:
     working = store.root / "proofs" / node_id / "proof.tex"
     working.write_text(working.read_text().replace("% Write the proof here.", body))
+    ensure_key_ideas(store, node_id)
     return working
 
 
@@ -146,7 +149,7 @@ def test_an_archived_pdf_is_committed_with_the_decision(tmp_path: Path):
 
     committed = subprocess.run(["git", "-C", str(tmp_path), "show", "--name-only", "--format=", "HEAD"], capture_output=True, text=True).stdout.split()
     # the whole frozen snapshot (ADR-0011) and its archived PDF
-    assert set(committed) == {"proofs/lem/reviews.jsonl", "proofs/lem/snapshots/v1/manifest.json", "proofs/lem/snapshots/v1/node/proof.tex", "proofs/lem/snapshots/v1/shared/preamble.tex", "proofs/lem/snapshots/v1.pdf"}
+    assert set(committed) == {"proofs/lem/reviews.jsonl", "proofs/lem/snapshots/v1/manifest.json", "proofs/lem/snapshots/v1/node/proof.tex", "proofs/lem/snapshots/v1/node/key-ideas.md", "proofs/lem/snapshots/v1/shared/preamble.tex", "proofs/lem/snapshots/v1.pdf"}
     assert (tmp_path / "proofs" / ".gitignore").read_text() == "*/build/\n"  # prism-local's build output stays out of git
 
 

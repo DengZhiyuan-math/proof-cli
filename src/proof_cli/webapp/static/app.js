@@ -89,15 +89,14 @@ function showHome() {
     chevron.append(svg("path", { d: "m9.5 6 6 6-6 6" }));
     link.append(glass, el("span", item.node_id), chevron);
     const statement = el("div", item.statement);
+    if (item.citation) statement.append(citationLine(item.citation));
     if (item.candidate_proof && item.candidate_proof.id) {
-      // the decision is about exactly this text: the hash is shortened (in full on hover) and the
-      // LaTeX folded under one click, never left out
-      const proof = item.candidate_proof, lines = (proof.text || "").split("\n").length;
+      // review starts from the key ideas (ADR-0013): the card shows the snapshot's 核心思路 and 难点;
+      // the whole summary and the decision are in the studio's review view, the frozen LaTeX on the
+      // node's page. The hash is shortened here, in full on hover.
+      const proof = item.candidate_proof;
       const hash = proof.sha256 ? ` · ${proof.sha256.slice(0, 12)}…` : "";
-      statement.append(el("p", `Snapshot v${proof.version}${hash}`, { class: "hint snap-meta", title: proof.sha256 ? `SHA-256 ${proof.sha256}` : "" }));
-      const text = el("details", null, { class: "snap-text" });
-      text.append(el("summary", `Show the LaTeX · ${lines} ${lines === 1 ? "line" : "lines"}`), el("pre", proof.text));
-      statement.append(text);
+      statement.append(el("p", `Snapshot v${proof.version}${hash}`, { class: "hint snap-meta", title: proof.sha256 ? `SHA-256 ${proof.sha256}` : "" }), keyIdeasCard(proof.key_ideas));
     }
     const tr = row([box, link, statement, choice, rationale]);
     tr.dataset.kind = item.kind; tr.dataset.target = item.node_id;
@@ -113,6 +112,56 @@ function showHome() {
   $("rail-review").textContent = state.pending.length ? pending : "";
   $("rail-review").className = state.pending.length ? "n hot" : "n";
   $("records-count").textContent = state.warnings.length ? String(state.warnings.length) : "";
+}
+
+// who wrote a snapshot's key ideas, as its record says (ADR-0013): recorded by the studio, never read from the file
+const KEY_IDEAS_BY = {
+  "agent (confirmed by author at request-review)": "由 agent 起草、作者确认 · drafted by the proof agent, confirmed by the author",
+  "agent draft, edited by author": "由 agent 起草、作者修改 · the proof agent's draft, edited by the author",
+  "author": "作者撰写 · written by the author",
+};
+
+// a field's text with its $…$ and $$…$$ typeset (static/mathtext.js, KaTeX); plain text without it
+const withMath = (node, text) => {
+  if (typeof renderMathText === "function") return renderMathText(node, text);
+  node.textContent = String(text);
+  return node;
+};
+
+// A review card's key ideas (ADR-0013): 核心思路 and 难点 only, as text (`$…$` stays as written).
+function keyIdeasCard(summary) {
+  const block = el("div", null, { class: "key-ideas" });
+  if (!summary) { block.append(el("p", "这个 snapshot 没有关键思路摘要 · no key-ideas summary: read it in the studio", { class: "hint" })); return block; }
+  for (const [key, title] of [["core_idea", "核心思路"], ["difficulties", "难点"]]) {
+    const text = (summary.fields || {})[key];
+    if (text) block.append(el("span", title, { class: "lbl" }), withMath(el("p", null, { class: `key-idea ${key}` }), text));
+  }
+  if (summary.drafted_by) block.append(el("p", KEY_IDEAS_BY[summary.drafted_by] || summary.drafted_by, { class: "hint" }));
+  return block;
+}
+
+// The ReferenceRecord an imported result links (issue #91): what a Reference review is about.
+// Its text may be edited later without touching the review; a missing one is marked, never hidden.
+function citationMissing(c) {
+  return el("p", `citation missing: reference ${c.reference_id} doesn't exist in this project`, { class: "citation warning" });
+}
+
+function citationLine(c) {
+  if (c.missing) return citationMissing(c);
+  const who = c.authors.length ? ` — ${c.authors.join(", ")}` : "";
+  return el("p", `cites ${c.reference_id}: ${c.title}${who}${c.year ? ` (${c.year})` : ""} · ${c.locator} · ${c.version}`, { class: "hint citation" });
+}
+
+function citationBlock(c) {
+  const block = el("div", null, { class: "citation-block" });
+  block.append(el("h3", "Citation"));
+  if (c.missing) { block.append(citationMissing(c)); return block; }
+  block.append(el("p", c.title, { class: "citation title" }));
+  block.append(el("p", `${c.authors.join(", ") || "no authors listed"}${c.year ? ` · ${c.year}` : ""}`, { class: "citation" }));
+  const where = [c.identifier, c.url].filter(Boolean).join(" · ");
+  if (where) block.append(el("p", where, { class: "citation mono" }));
+  block.append(el("p", `reference ${c.reference_id} · cited at ${c.locator} · ${c.version}`, { class: "hint citation" }));
+  return block;
 }
 
 // what each decision means, in the researcher's words
@@ -172,11 +221,12 @@ function short(text, length) { return text.length > length ? text.slice(0, lengt
 // A node card's one state: an icon anyone reads at a glance, and a word. What needs the
 // researcher comes first (a Challenge, a moved dependency, a decision that no longer applies:
 // one "attention" icon, the word saying which), then the frontier, a claim, a review request,
-// a rejected route, blocked, accepted.
+// a rejected route, blocked, accepted. A frontier node with a warning keeps its frontier mark too,
+// a small blue badge beside the warning's (ADR-0008): see drawDag.
 function tagOf(n) {
   if (n.integrity_state === "challenged") return ["challenged", "attention"];
   if (n.integrity_state === "potentially-stale") return ["dependency changed", "attention"];
-  if (n.acceptance_state === "unverifiable") return ["decision no longer applies", "attention"];
+  if (n.acceptance_state === "unverifiable") return ["decision outdated", "attention"];
   if (["rejected", "no-longer-callable"].includes(n.acceptance_state)) return [n.acceptance_state === "rejected" ? "rejected" : "no longer callable", "rejected"];
   if (n.frontier) return ["ready", "ready"];
   if (n.assignee) return [n.assignee, "claimed"];
@@ -365,6 +415,7 @@ function drawDag(nodes) {
   view.content = { width, height };
   const scene = svg("g", { id: "dag-view" });
   const at = new Map();
+  view.at = at;  // each node's centre on the scene, for the search box to bring one into view
   const saved = positions.load();
   rows.forEach((row, r) => row.forEach((id, i) => {
     const rowWidth = row.length * BOX.w + (row.length - 1) * BOX.gapX;
@@ -393,7 +444,7 @@ function drawDag(nodes) {
     const left = -BOX.w / 2, top = -BOX.h / 2;
     const classes = ["node", `state-${tagOf(n)[1]}`, n.frontier ? "frontier" : "", rejected(n) ? "rejected" : ""].filter(Boolean).join(" ");
     const place = () => { const p = at.get(n.id); g.setAttribute("transform", `translate(${p.x},${p.y})`); };
-    const g = svg("g", { class: classes, tabindex: 0, role: "link", "aria-label": `${n.kind} ${n.id}: ${n.acceptance_state}, ${n.workflow_state}, ${n.integrity_state}${n.assignee ? `, claimed by ${n.assignee}` : ""}${n.frontier ? ", on the frontier" : ""}` });
+    const g = svg("g", { class: classes, "data-node-id": n.id, tabindex: 0, role: "link", "aria-label": `${n.kind} ${n.id}: ${n.acceptance_state}, ${n.workflow_state}, ${n.integrity_state}${n.assignee ? `, claimed by ${n.assignee}` : ""}${n.frontier ? ", on the frontier" : ""}` });
     place();
     g.append(svg("rect", { class: "box", x: left, y: top, width: BOX.w, height: BOX.h, rx: BOX.radius }));
     const kind = svg("text", { class: "kind", x: left + 14, y: top + 21 });
@@ -406,7 +457,7 @@ function drawDag(nodes) {
     const meta = svg("text", { class: "meta", x: left + 14, y: top + 58 });
     meta.textContent = n.display_label ? short(n.statement, 30) : "";
     g.append(kind, label, meta);
-    // the node's one state, as a capsule along the bottom
+    // the node's one state, as a word along the bottom
     const [tagText, statusKind] = tagOf(n);
     const status = svg("g", { class: `status ${statusKind}` });
     const tag = svg("text", { class: "tag", x: left + 14, y: top + BOX.h - 13 });
@@ -414,8 +465,11 @@ function drawDag(nodes) {
     status.append(tag);
     // the state's icon, large, as a badge on the card's top-right corner
     g.append(status, statusIcon(statusKind, left + BOX.w - 6, top + 6, 30));
+    // the frontier is its own, strongest signal (ADR-0008): a warning is shown beside it, never in its place
+    if (n.frontier && warningOf(n)) g.append(statusIcon("ready", left + BOX.w - 36, top + 6, 22));
+    // hovering shows the current snapshot's 核心思路 (ADR-0013), under the statement it proves
     const title = svg("title");
-    title.textContent = n.statement;
+    title.textContent = n.core_idea ? `${n.statement}\n核心思路：${n.core_idea}` : n.statement;
     g.append(title);
     // drag a node to move it (its edges follow); a click without a drag opens it
     let drag = null;
@@ -462,13 +516,16 @@ function drawTree(nodes) {
   if (chosen) select.value = chosen;
   const item = (id, ancestors) => {
     const n = byId.get(id);
+    // each line names its node; a node used by more than one parent also says how many share it
     const li = el("li");
+    li.setAttribute("data-node-id", id);
+    if ((parents.get(id) || 0) > 1) li.setAttribute("data-shared-by", String(parents.get(id)));
     if (!n) { li.append(el("span", `${id} (missing)`, { class: "warning" })); return li; }
-    li.append(el("a", n.id, { href: pageOf(n) }), ` — ${short(n.display_label || n.statement, 60)}`);
+    li.append(el("a", n.id, { href: pageOf(n), ...(n.core_idea ? { title: `核心思路：${n.core_idea}` } : {}) }), ` — ${short(n.display_label || n.statement, 60)}`);
     const small = (chip) => { chip.classList.add("state-chip"); return chip; };
     li.append(small(stateChip(n.acceptance_state)), small(stateChip(n.workflow_state)), small(stateChip(n.integrity_state)));
     if (n.assignee) li.append(small(stateChip("claimed", n.assignee, `claimed by ${n.assignee}`)));
-    if (n.frontier) li.append(small(stateChip("frontier", "ready to start")));
+    if (n.frontier) li.append(small(stateChip("frontier", "frontier", "on the frontier: ready to start")));
     if ((parents.get(id) || 0) > 1) li.append(el("span", "shared", { class: "state-chip shared-chip", title: `used by ${parents.get(id)} nodes; see the DAG` }));
     if (ancestors.has(id)) { li.append(" (cycle: not expanded again)"); return li; }
     if (n.dependencies.length) {
@@ -495,6 +552,82 @@ function showMap() {
   $("view-dag").setAttribute("aria-pressed", String(mapView === "dag"));
   $("view-tree").setAttribute("aria-pressed", String(mapView === "tree"));
   if (mapView === "dag") drawDag(nodes); else drawTree(nodes);
+  applyFind();
+}
+
+// -- the search box (issue #116): pick nodes out by id, label or statement, on the canvas and the tree ----
+const finding = { shown: null };  // the match the first Enter brought into view; a second Enter opens it
+
+function findMatcher() {
+  const query = $("map-find").value.trim().toLowerCase();
+  if (!query) return null;
+  return (n) => [n.id, n.display_label || "", n.statement || ""].some((field) => field.toLowerCase().includes(query));
+}
+
+// dim what the search doesn't match, on whichever view is drawn, and say how many it does
+function applyFind() {
+  if (!mapData) return;
+  const matches = findMatcher();
+  const byId = new Map(mapData.nodes.map((n) => [n.id, n]));
+  const mark = (item) => {
+    const id = item.getAttribute("data-node-id");
+    item.classList.toggle("dim", !!matches && !matches(byId.get(id) || { id }));  // a missing dependency matches by id
+    item.classList.toggle("found", !!matches && id === finding.shown);
+  };
+  $("dag-svg").classList.toggle("filtering", !!matches);
+  for (const g of $("dag-svg").querySelectorAll("g.node")) mark(g);
+  for (const li of $("map-tree").querySelectorAll("li")) mark(li);
+  const count = $("map-find-count");
+  if (!matches) { count.textContent = ""; return; }
+  const found = mapData.nodes.filter(matches).length;
+  const next = !found ? "No node has that id, label or statement" : finding.shown ? "Enter again opens it" : "Enter shows the first";
+  count.textContent = `${found} of ${mapData.nodes.length} match · ${next}`;
+}
+
+// pan (and zoom to at least life size) so the node sits in the middle of the canvas (the toolbar
+// sits above it, not over it)
+function showOnCanvas(id) {
+  const canvas = $("map-dag"), p = view.at && view.at.get(id);
+  if (!p || !canvas.clientWidth) return;
+  view.k = Math.min(4, Math.max(view.k, 1));
+  view.tx = canvas.clientWidth / 2 - p.x * view.k;
+  view.ty = canvas.clientHeight / 2 - p.y * view.k;
+  applyView();
+}
+
+function wireFind() {
+  const box = $("map-find");
+  box.addEventListener("input", () => { finding.shown = null; applyFind(); });
+  box.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      if (!box.value) { box.blur(); return; }  // a second Escape hands the keys back to the map
+      box.value = "";
+      finding.shown = null;
+      applyFind();
+      return;
+    }
+    if (event.key !== "Enter" || !mapData) return;
+    event.preventDefault();
+    const matches = findMatcher();
+    const first = matches && mapData.nodes.find(matches);
+    if (!first) return;
+    if (finding.shown === first.id) { location.href = pageOf(first); return; }  // where it lives (ADR-0011)
+    finding.shown = first.id;
+    if (mapView === "dag") showOnCanvas(first.id);
+    else [...$("map-tree").querySelectorAll("li")].find((li) => li.getAttribute("data-node-id") === first.id)?.scrollIntoView?.({ block: "center" });
+    applyFind();
+  });
+  // "/" finds, as on most sites; the map's own keys (F fits) are untouched, and typing anywhere is never taken over
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) return;
+    const active = document.activeElement;
+    if (active && (["INPUT", "TEXTAREA", "SELECT"].includes(active.tagName) || active.isContentEditable)) return;
+    if ($("home").hidden) return;
+    event.preventDefault();
+    box.focus();
+    box.select();
+  });
 }
 
 // Where a node opens (ADR-0011): a theorem, lemma or claim in its studio, an imported result on its own page.
@@ -517,6 +650,7 @@ async function showNode(nodeId) {
   $("node-folder").replaceChildren();
   if (view.studio) $("node-folder").append(el("a", "Open the node's studio", { href: view.studio }), " · proof folder ", el("code", view.folder));
   $("node-source").replaceChildren(...(view.source ? [el("h3", "Source"), el("p", `${view.source.locator} · ${view.source.version}${view.source.trust_level ? ` · ${view.source.trust_level}` : ""}`)] : []));
+  if (view.citation) $("node-source").append(citationBlock(view.citation));
   $("node-dependents").textContent = view.dependents.length ? `Used by: ${view.dependents.join(", ")}` : "Nothing depends on this node yet.";
   const pdfs = [];
   if (view.pdfs.snapshot) pdfs.push(el("a", "PDF archived with this snapshot", { href: `/api/node/${encodeURIComponent(node.id)}/pdf/snapshot`, target: "_blank", rel: "noopener" }));
@@ -546,7 +680,7 @@ async function showNode(nodeId) {
   const decisions = $("node-decisions").querySelector("tbody");
   decisions.replaceChildren(...view.decisions.map((d) => decisionRow(d, proof)));
   if (!view.decisions.length) decisions.append(row(["No decision to make on this node right now.", "", "", ""]));
-  $("node-history").replaceChildren(...view.history.filter((r) => r.kind).map((r) => el("li", `${r.updated_at} · ${r.kind} · ${r.decision} · ${r.reviewer_id}${r.rationale ? ` — ${r.rationale}` : ""}`)));
+  $("node-history").replaceChildren(...view.history.filter((r) => r.kind).map((r) => el("li", `${r.updated_at} · ${r.kind} · ${r.decision} · ${r.reviewer_id}${r.key_ideas_drafted_by ? ` · key ideas: ${KEY_IDEAS_BY[r.key_ideas_drafted_by] || r.key_ideas_drafted_by}` : ""}${r.rationale ? ` — ${r.rationale}` : ""}`)));
 }
 
 async function route() {
@@ -619,6 +753,7 @@ document.addEventListener("DOMContentLoaded", () => {
     try { await decide(decisions); } catch (error) { showError(error); }
   });
   wireCanvas();
+  wireFind();
   // the sidebar hides (remembered in this browser); on a narrow window it slides over the map
   const narrow = () => matchMedia("(max-width: 760px)").matches;
   try { if (localStorage.getItem("proof.map.sidebar") === "hidden") document.body.classList.add("sidebar-hidden"); } catch { /* ignore */ }

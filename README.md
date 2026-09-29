@@ -1,6 +1,6 @@
 # Mathematical Proof CLI
 
-Mathematical Proof CLI is a local-first research proof operating system for human–machine collaboration. A project is a proof map: nodes (theorems, lemmas, claims, and imported results) joined by their dependencies. Each local node has its own LaTeX proof, and the researcher accepts or rejects it on the proof map page. Agents claim nodes from the frontier, split nodes that are too large, and request review. Every decision stays explicit and auditable in git. The `theorem`, `obligation`, `blocker`, `goal` and `verify` command groups come from the model before the proof map, and `proof --help` lists them under Legacy.
+Mathematical Proof CLI is a local-first research proof operating system for human–machine collaboration. A project is a proof map: nodes (theorems, lemmas, claims, and imported results) joined by their dependencies. Each local node has its own LaTeX proof, and the researcher accepts or rejects it on the proof map page. Agents claim nodes from the frontier, split nodes that are too large, and request review. Every decision stays explicit and auditable in git. What can be called is answered only by the proof map's nodes: an Accepted theorem, lemma or claim, or an imported result with a Reference review (ADR-0012). The `theorem`, `obligation`, `blocker`, `goal` and `verify` command groups come from the model before the proof map, and `proof --help` lists them under Legacy. Their callable, trust and review states are marked as legacy, not a trust source; a reference is only a citation.
 
 The project is designed to support rigorous research workflows without replacing the mathematician or attempting to provide a full formal kernel. Final acceptance remains with the researcher.
 
@@ -28,20 +28,25 @@ Every command acts on `--root`, else `$PROOF_ROOT`, else the current folder. An 
 
 ## Writing a proof
 
-Each local proof map node has a standalone LaTeX document, `proofs/<id>/proof.tex`, created with the node. It `\input`s the project's shared `proofs/preamble.tex` and compiles on its own. The researcher edits it in the node's studio on the proof map page (below); agents edit it directly. The folder `proofs/<id>/` is still an ordinary LaTeX project that any editor can open. When the proof is ready, request review from the studio's node panel, or:
+Each local proof map node has a standalone LaTeX document, `proofs/<id>/proof.tex`, created with the node. It `\input`s the project's shared `proofs/preamble.tex` and compiles on its own. The researcher edits it in the node's studio on the proof map page (below); agents edit it directly. The folder `proofs/<id>/` is still an ordinary LaTeX project that any editor can open.
+
+Beside it sits the proof's key-ideas summary, `proofs/<id>/key-ideas.md` (ADR-0013). It is Markdown, with maths as `$…$`, under four headings: **核心思路** (why it holds) and **主要步骤** (3–7 steps, each naming the dependency it uses) are required; **难点** (where it is most likely wrong) and **未覆盖** (what it leaves out) may be 「无」. Review starts from it. When it is missing, the node panel's *Draft key ideas with the proof agent* has the agent draft it from `proof.tex` and the dependencies; you edit the draft, and requesting review confirms it.
+
+When the proof and its summary are ready, request review from the studio's node panel, or:
 
 ```bash
 proof node request-review <id> --rationale "why it is scoped to prove directly"
 ```
 
-This freezes every input of the proof into an immutable snapshot, `proofs/<id>/snapshots/v<N>/`: the node's working sources (not `build/`, `scratch/` or older snapshots) and the shared preamble, with a `manifest.json` of each file's SHA-256. The snapshot's SHA-256, which decisions bind, is that of the manifest, so a change to any input, an `\input` file or a preamble macro included, is a new version to review. Review is always of a snapshot, never of the working files (ADR-0010, ADR-0011). The researcher reviews it in the node's studio: the node panel opens each frozen file read-only, with the snapshot's archived PDF, and records the decisions.
+A request without `key-ideas.md`, or with 核心思路 or 主要步骤 empty, is refused with `KEY_IDEAS_REQUIRED`. Otherwise it freezes every input of the proof into an immutable snapshot, `proofs/<id>/snapshots/v<N>/`: the node's working sources (not `build/`, `scratch/` or older snapshots), its key-ideas summary and the shared preamble, with a `manifest.json` of each file's SHA-256. The snapshot's SHA-256, which decisions bind, is that of the manifest, so a change to any input, an `\input` file, a preamble macro or the summary alone included, is a new version to review. Review is always of a snapshot, never of the working files (ADR-0010, ADR-0011). The researcher reviews it in the node's studio: the review view shows the snapshot's key ideas and records the decisions, and links to the node's page for the frozen LaTeX and the archived PDF (ADR-0013). A snapshot from before summaries existed is reviewed as before, and says it has none.
 
 ## The proof map page
 
 `proof map open` starts the project's local page, bound to 127.0.0.1, and opens it:
-- **The map** is a DAG of every node, with a tree view rooted at any node. Frontier nodes (open, unblocked, unclaimed) are outlined as *ready to claim*. Each node shows its acceptance, workflow and integrity state, and its assignee.
+- **The map** is a DAG of every node, with a tree view rooted at any node. Frontier nodes (open, unblocked, unclaimed) are outlined as *ready to claim*. Each node shows its acceptance, workflow and integrity state, and its assignee; hovering it shows its snapshot's 核心思路.
+- **Awaiting review** lists each snapshot to decide on, with its 核心思路 and 难点.
 - **Nodes are created from the CLI** (`proof node create`): a theorem, lemma or claim with its assumptions and dependencies, or an imported result with its source. That covers the first node of an empty map, and a corrected source that replaces a withdrawn one.
-- **A theorem, lemma or claim opens in its studio** (ADR-0011), a LaTeX workspace built from prism-local's code: editor, compile, PDF with SyncTeX both ways, and the agent panel. Beside them, the **node panel** shows the node's statement, state axes, assignee and dependencies, and offers claim or unassign, split into Claims, request review, open a Challenge, and record an Evidence check, as the page's git identity.
+- **A theorem, lemma or claim opens in its studio** (ADR-0011), a LaTeX workspace built from prism-local's code: editor, compile, PDF with SyncTeX both ways, and the agent panel. Beside them, the **node panel** shows the node's statement, state axes, assignee and dependencies, and offers claim or unassign, split into Claims, edit its dependencies (add, remove, or move one onto a child, as `proof node depend` does), request review, open a Challenge, and record an Evidence check, as the page's git identity.
 - **A node's review page** shows the exact LaTeX of the snapshot under review, with its dependencies and pins, Challenges, Evidence checks and history, and the decisions to make. It links the compiled PDF when there is one: the PDF archived with the snapshot, or the studio's current `build/proof.pdf`.
 - **The agent panel is the node's proof agent** (ADR-0011): it researches, reasons and proves, and writes the result into the node.
   - **It reads** the whole project, the library folders listed in `proof.toml`, and the web.
@@ -80,7 +85,7 @@ Proof state is persisted locally. Generated workspace state under `.proof/` is i
 ## Project principles
 
 - Human-in-the-loop: the system suggests and checks; researchers make final trust decisions.
-- Retrieval-first: existing project results and trusted references are checked before new proof search.
+- Retrieval-first: the proof map's Accepted nodes and Reference-reviewed imported results are checked before new proof search.
 - Local-state-first: long-running work survives context loss through persisted project state.
 - CLI-first: the initial workflow is terminal-native.
 - No full kernel in v1: explicit contracts, checks, and review boundaries come first.

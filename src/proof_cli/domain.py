@@ -143,6 +143,11 @@ class ProofMapNode(BaseModel):
     `derived_from` is set by Split: which node a purpose-built subclaim was
     split from, distinguishing it from a coincidentally-shared Lemma. `None`
     for a node that wasn't produced by a split.
+
+    `reference_id` links an `imported_result` to the `ReferenceRecord` it
+    cites (issue #91, ADR-0012): set only at creation, to a reference that
+    exists then, and immutable like the rest of an imported result. `None`
+    for every other node, and for an imported result that links none.
     """
 
     id: str
@@ -154,6 +159,7 @@ class ProofMapNode(BaseModel):
     source_locator: str | None = None
     source_version: str | None = None
     trust_level: TrustLevel | None = None
+    reference_id: str | None = None
     derived_from: str | None = None
     created_by: str = "human"
     updated_by: str = "human"
@@ -185,10 +191,11 @@ class CandidateProofRecord(BaseModel):
     """One immutable, versioned proof attempt for a ProofMapNode.
 
     Its file is the source of truth for the proof text; this record is the
-    SQLite index over it. Since ADR-0010 that file is a Review snapshot,
-    `proofs/<node_id>/snapshots/v<version>.tex`, a copy of the node's working
-    `proof.tex`, with its SHA-256 recorded in `sha256`; older attempts are
-    ADR-0003 Markdown files, `proofs/<node_id>/v<version>.md`, with none. `id`
+    SQLite index over it. That file is a Review snapshot: since ADR-0011 a
+    folder, `proofs/<node_id>/snapshots/v<version>/`, whose `manifest.json`
+    is `file_path` and whose manifest digest is `sha256`; before it (ADR-0010)
+    a single `snapshots/v<version>.tex`, with its SHA-256. Attempts from before
+    ADR-0010 are read-only history files with no `sha256`. `id`
     is stable and independent of `file_path` — a review record references a
     submission by `id`, never by where its file happens to live. See ADR
     (candidate proof storage) and ProofMapNode.
@@ -210,7 +217,18 @@ class CandidateProofRecord(BaseModel):
     scoping_rationale: str
     interface_fingerprint: str | None = None
     sha256: str | None = None
+    # the node's dependencies when this snapshot was requested for review (#96): a decision on the
+    # snapshot applies only while they still stand. None for a snapshot recorded before they were kept.
+    dependencies: list[str] | None = None
     created_at: datetime = Field(default_factory=utc_now)
+    # set only on the record `request_review` returns, never indexed: the version whose lost
+    # (missing or unreadable) snapshot this one re-takes from an unchanged working proof (#99).
+    # The `proof_map_review_requested` event is its lasting record.
+    resnapshot_after_loss: int | None = None
+    # who wrote the key-ideas summary this snapshot froze (ADR-0013), derived at request-review
+    # from the drafts the studio recorded: key_ideas.AUTHOR, AGENT_CONFIRMED or AGENT_EDITED.
+    # Every decision on the snapshot carries it in its bound payload. None for an older snapshot.
+    key_ideas_drafted_by: str | None = None
 
 
 class DependencyPin(BaseModel):
@@ -301,6 +319,8 @@ class ProjectSnapshot(BaseModel):
     project_id: str
     active_theorem: str | None = None
     current_goals: list[str] = Field(default_factory=list)
+    # legacy (ADR-0012): verify and theorem-usage history, not a trust source;
+    # a handoff's `proof_map.accepted` is what can be called
     validated_results: list[str] = Field(default_factory=list)
     open_obligations: list[str] = Field(default_factory=list)
     active_blockers: list[str] = Field(default_factory=list)

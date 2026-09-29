@@ -1,10 +1,10 @@
 # Pin dependency edges to accepted versions; gate revalidation on interface, not text
 
-**Status**: accepted
+**Status**: accepted. Rule 1 is amended by ADR-0012: a `ReferenceRecord` is a citation, trusted only through its Imported result's Reference review.
 
 ADR-0004 established that `potentially-stale` propagates through the dependency graph whenever an ancestor's accepted version moves on, but left open how a dependency edge knows which version it was checked against, and what a downstream node must do once it has. Answering that (issue #12) fixes four rules.
 
-**Rule 1 — Imported result nodes are immutable.** The `ReferenceRecord` a node cites (a paper, book, arXiv entry) can still be freely re-reviewed — its `review_status`/`trust_level` change over time, that's ordinary Reference review. But the Imported result node itself — the specific mathematical claim pulled in from that source (its statement, `source_locator`, `source_version`) — never changes in place. If the cited source is corrected, retracted, or reinterpreted, that produces a *new* Imported result node; dependents migrate to it deliberately, they don't inherit the correction silently.
+**Rule 1 — Imported result nodes are immutable.** The `ReferenceRecord` a node cites (a paper, book, arXiv entry) is only a citation. It isn't reviewed on its own, and its legacy `review_status`/`trust_level` decide nothing: it is relied on through the Reference review of the Imported result node that links it (*amended by ADR-0012*). The Imported result node itself — the specific mathematical claim pulled in from that source (its statement, `source_locator`, `source_version`) — never changes in place. If the cited source is corrected, retracted, or reinterpreted, that produces a *new* Imported result node; dependents migrate to it deliberately, they don't inherit the correction silently.
 
 **Rule 2 — dependency edges pin an accepted version.** For a local node (Theorem/Lemma/Claim), a dependency edge pins the specific Candidate-proof version that was current and Accepted when the edge was checked: `M → L7@v3`, reusing the Candidate-proof version numbers from ADR-0003 rather than inventing a second counter. For an Imported result, the edge just pins the node's id (`M → IR17`) — no version needed, because Rule 1 already makes the node itself the immutable identity.
 

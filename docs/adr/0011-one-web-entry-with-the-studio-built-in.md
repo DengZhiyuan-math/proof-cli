@@ -4,6 +4,7 @@
 - **Supersedes** ADR-0010 point 5 ("prism-local is coupled only through files") and its note that proof-cli needs no TeX.
 - **Supersedes** ADR-0007's "Start agent is not the web app spawning or supervising an agent process": the node page now runs an agent.
 - **Amends** ADR-0006 (the command surface), ADR-0008 (the node page) and ADR-0010's snapshot (point 5 below).
+- **Amended by** ADR-0013: the snapshot of point 5 also freezes the node's key-ideas summary, and the review of point 2 shows that summary and the decisions, not the frozen LaTeX or PDF.
 
 ## Context
 
@@ -22,6 +23,7 @@ The researcher also had two command-line entry points that humans never needed: 
    - the node's statement and three state axes, its assignee, and its dependencies with their pins;
    - the agent-reachable actions of ADR-0006: claim or unassign, split into Claims, request review, open a Challenge, record an Evidence check;
    - review: the Review snapshot under review, read-only, with its archived PDF, and the Human Review decisions this node offers, with the bindings of PR #63 (a decision is refused if what the page showed changed).
+     - *Amended by ADR-0013:* the review shows the snapshot's key-ideas summary and the decisions only. The frozen LaTeX sources and the archived PDF are a link away, on the node's page. A snapshot without a summary says so and links there too.
 
    Splitting creates each child's folder, and the page moves straight on to the child.
 
@@ -44,6 +46,7 @@ The researcher also had two command-line entry points that humans never needed: 
    - It is stored as `snapshots/v<N>/`, with a manifest of each file's SHA-256. The snapshot's SHA-256, which decisions bind, is the SHA-256 of that manifest.
    - A change to any input is a new version to review.
    - Older single-file snapshots (`snapshots/v<N>.tex`) stay readable as they are.
+   - *Amended by ADR-0013:* the node's working sources include its key-ideas summary, `key-ideas.md`, so it is frozen, listed and hashed with the rest, and requesting review needs one.
    - The TeX distribution itself is out of scope: a snapshot freezes the project's own files, not the installed packages.
 
 6. **What the editor and the agent may write directly.**

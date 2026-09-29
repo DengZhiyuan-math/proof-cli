@@ -426,19 +426,12 @@ pre.panel-view { font: 12px/1.5 var(--mono); white-space: pre-wrap; color: var(-
 .menu-item.decide { font-weight: 500; }
 .menu-item.decide::before { content: ""; width: 7px; height: 7px; margin-right: 8px; border-radius: 50%; background: var(--warn); }
 
-/* the review sheet: title and Done, the files folded away, one choice, one rationale, Record */
+/* the review sheet: title and Done, the key ideas, a link to the frozen files, one choice, one rationale, Record */
 #review-card { padding: 12px; max-height: 70vh; overflow: auto; }
 #review-card .node-review { display: flex; flex-direction: column; gap: 10px; }
 #review-card .review-head { display: flex; align-items: center; gap: 8px; }
 #review-card .review-head h4 { margin: 0; font-size: 13px; font-weight: 600; }
 #review-card .review-done { margin-left: auto; height: 24px; padding: 0 10px; border: 0; box-shadow: none; background: transparent; color: var(--accent); }
-#review-card .review-files summary { cursor: pointer; font-size: 12px; color: var(--muted); list-style: none; }
-#review-card .review-files summary::-webkit-details-marker { display: none; }
-#review-card .review-files summary::before { content: "›"; display: inline-block; width: 12px; transition: transform .15s ease; }
-#review-card .review-files[open] summary::before { transform: rotate(90deg); }
-#review-card .node-files { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0 4px; }
-#review-card .node-files button { height: 22px; padding: 0 8px; font-family: var(--mono); font-size: 11px; font-weight: 400; border-radius: 6px; }
-#review-card .review-files a { font-size: 12px; }
 #review-card .node-hint { margin: 0; color: var(--muted); font-size: 11.5px; line-height: 1.4; }
 #review-card .review-choices { display: flex; flex-direction: column; border-radius: 9px; background: var(--fill); overflow: hidden; }
 #review-card .review-choice {
@@ -454,3 +447,13 @@ pre.panel-view { font: 12px/1.5 var(--mono); white-space: pre-wrap; color: var(-
 #review-card .node-note { margin: 8px 0 0; font-size: 12px; color: var(--ok); }
 #review-card .node-note:empty { display: none; }
 #review-card .node-note.bad { color: var(--err); }
+/* the review reads the snapshot's key ideas (ADR-0013); its frozen LaTeX and PDF are on the node's page */
+#review-card .review-snap { margin: 0; font-family: var(--mono); font-size: 11px; color: var(--muted); cursor: help; }
+#review-card .key-ideas { border-left: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); padding: 2px 0 2px 10px; }
+#review-card .key-ideas h5 { margin: 8px 0 2px; font-size: 11px; font-weight: 600; color: var(--muted); }
+#review-card .key-ideas h5:first-child { margin-top: 0; }
+#review-card .key-ideas .key-idea { margin: 0; font-family: var(--serif); font-size: 14px; line-height: 1.5; white-space: pre-wrap; color: var(--text); }
+#review-card .key-ideas .key-idea.difficulties { color: var(--warn); }
+#review-card .key-ideas .drafted { margin-top: 6px; }
+#review-card .node-note.no-key-ideas { color: var(--warn); margin: 0; }
+#review-card .node-review-links { margin: 0; font-size: 12px; }
