@@ -286,6 +286,7 @@ function wireCanvas() {
   $("zoom-in").addEventListener("click", () => zoomAt(1.25, canvas.clientWidth / 2, canvas.clientHeight / 2));
   $("zoom-out").addEventListener("click", () => zoomAt(0.8, canvas.clientWidth / 2, canvas.clientHeight / 2));
   $("zoom-fit").addEventListener("click", fitView);
+  $("zoom-tidy").addEventListener("click", () => { positions.clear(); view.fitted = false; if (mapData) drawDag(mapData.nodes); });
   document.addEventListener("keydown", (event) => {
     if (event.key !== "f" || event.metaKey || event.ctrlKey || event.altKey) return;
     if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)) return;
@@ -294,6 +295,14 @@ function wireCanvas() {
   });
   window.addEventListener("resize", () => { if (view.fitted) fitView(); });
 }
+
+// Where the researcher dragged each node, kept in this browser only; "Tidy" forgets it.
+const positions = {
+  key() { return `proof.map.positions:${state ? state.project_id : ""}`; },
+  load() { try { return JSON.parse(localStorage.getItem(this.key()) || "{}"); } catch { return {}; } },
+  save(map) { try { localStorage.setItem(this.key(), JSON.stringify(map)); } catch { /* a private window: positions just don't persist */ } },
+  clear() { try { localStorage.removeItem(this.key()); } catch { /* ignore */ } },
+};
 
 function drawDag(nodes) {
   const box = $("dag-svg");
@@ -311,10 +320,14 @@ function drawDag(nodes) {
   view.content = { width, height };
   const scene = svg("g", { id: "dag-view" });
   const at = new Map();
+  const saved = positions.load();
   rows.forEach((row, r) => row.forEach((id, i) => {
     const rowWidth = row.length * BOX.w + (row.length - 1) * BOX.gapX;
-    at.set(id, { x: (width - rowWidth) / 2 + i * (BOX.w + BOX.gapX) + BOX.w / 2, y: BOX.pad + r * (BOX.h + BOX.gapY) + BOX.h / 2 });
+    const own = saved[id] && Number.isFinite(saved[id].x) && Number.isFinite(saved[id].y) ? saved[id] : null;
+    at.set(id, own ? { x: own.x, y: own.y } : { x: (width - rowWidth) / 2 + i * (BOX.w + BOX.gapX) + BOX.w / 2, y: BOX.pad + r * (BOX.h + BOX.gapY) + BOX.h / 2 });
   }));
+  const edgeD = (from, to) => { const y1 = from.y + BOX.h / 2, y2 = to.y - BOX.h / 2; return `M${from.x},${y1} C${from.x},${y1 + 50} ${to.x},${y2 - 50} ${to.x},${y2}`; };
+  const edgesOf = new Map(nodes.map((n) => [n.id, []]));
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const rejected = (n) => ["rejected", "no-longer-callable"].includes(n.acceptance_state);
   const defs = svg("defs");
@@ -325,17 +338,20 @@ function drawDag(nodes) {
   for (const n of nodes) for (const d of n.dependencies) {
     const from = at.get(n.id), to = at.get(d);
     if (!from || !to) continue;
-    const y1 = from.y + BOX.h / 2, y2 = to.y - BOX.h / 2;
     const dim = rejected(n) || (byId.has(d) && rejected(byId.get(d)));
-    scene.append(svg("path", { class: dim ? "edge rejected" : "edge", "marker-end": "url(#arrow)", d: `M${from.x},${y1} C${from.x},${y1 + 50} ${to.x},${y2 - 50} ${to.x},${y2}` }));
+    const edge = svg("path", { class: dim ? "edge rejected" : "edge", "marker-end": "url(#arrow)", d: edgeD(from, to) });
+    const link = { edge, from: n.id, to: d };
+    edgesOf.get(n.id).push(link); edgesOf.get(d).push(link);
+    scene.append(edge);
   }
   for (const n of nodes) {
-    const { x, y } = at.get(n.id);
-    const left = x - BOX.w / 2, top = y - BOX.h / 2;
-    const classes = ["node", n.frontier ? "frontier" : "", n.assignee ? "claimed" : "", rejected(n) ? "rejected" : "", warningOf(n)].filter(Boolean).join(" ");
+    const left = -BOX.w / 2, top = -BOX.h / 2;
+    const classes = ["node", `tone-${toneOf(n)}`, n.frontier ? "frontier" : "", n.assignee ? "claimed" : "", rejected(n) ? "rejected" : "", warningOf(n)].filter(Boolean).join(" ");
+    const place = () => { const p = at.get(n.id); g.setAttribute("transform", `translate(${p.x},${p.y})`); };
     const g = svg("g", { class: classes, tabindex: 0, role: "link", "aria-label": `${n.kind} ${n.id}: ${n.acceptance_state}, ${n.workflow_state}, ${n.integrity_state}${n.assignee ? `, claimed by ${n.assignee}` : ""}${n.frontier ? ", on the frontier" : ""}` });
+    place();
     g.append(svg("path", { class: "box", d: chamfered(left, top, BOX.w, BOX.h, BOX.chamfer) }));
-    g.append(svg("rect", { class: `bar ${toneOf(n)}`, x: left, y: top + BOX.chamfer, width: 3, height: BOX.h - BOX.chamfer }));
+    g.append(svg("rect", { class: `bar ${toneOf(n)}`, x: left, y: top + BOX.chamfer, width: 5, height: BOX.h - BOX.chamfer }));
     const kind = svg("text", { class: "kind", x: left + 12, y: top + 16 });
     kind.textContent = n.kind.replace("_", " ").toUpperCase();
     const id = svg("text", { class: "id", x: left + BOX.w - 8, y: top + 16, "text-anchor": "end" });
@@ -354,7 +370,30 @@ function drawDag(nodes) {
     const title = svg("title");
     title.textContent = n.statement;
     g.append(title);
-    const open = () => { location.href = pageOf(n); };
+    // drag a node to move it (its edges follow); a click without a drag opens it
+    let drag = null;
+    const move = (event) => {
+      if (!drag) return;
+      const dx = (event.clientX - drag.x) / view.k, dy = (event.clientY - drag.y) / view.k;
+      if (!drag.moved && Math.hypot(dx, dy) * view.k > 3) { drag.moved = true; g.classList.add("moving"); }
+      if (!drag.moved) return;
+      at.set(n.id, { x: drag.px + dx, y: drag.py + dy });
+      place();
+      for (const link of edgesOf.get(n.id)) link.edge.setAttribute("d", edgeD(at.get(link.from), at.get(link.to)));
+    };
+    const end = () => {
+      window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", end); window.removeEventListener("pointercancel", end);
+      if (drag && drag.moved) { const saved = positions.load(); saved[n.id] = at.get(n.id); positions.save(saved); setTimeout(() => g.classList.remove("moving"), 0); }
+      drag = null;
+    };
+    g.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      event.stopPropagation();  // the canvas doesn't pan under a node drag
+      const p = at.get(n.id);
+      drag = { x: event.clientX, y: event.clientY, px: p.x, py: p.y, moved: false };
+      window.addEventListener("pointermove", move); window.addEventListener("pointerup", end); window.addEventListener("pointercancel", end);
+    });
+    const open = () => { if (g.classList.contains("moving")) return; location.href = pageOf(n); };
     g.addEventListener("click", open);
     g.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); } });
     scene.append(g);

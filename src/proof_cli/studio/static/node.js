@@ -149,7 +149,7 @@
     const box = h("div", null, { class: "node-axes" });
     const chip = (text, tone) => box.append(h("span", text, { class: tone || "", title: text }));
     chip(view.workflow_state, ["review-needed", "revision-requested", "blocked"].includes(view.workflow_state) ? "warn" : "");
-    chip(view.acceptance_state, ["rejected", "no-longer-callable"].includes(view.acceptance_state) ? "err" : view.acceptance_state === "unverifiable" ? "warn" : "");
+    chip(view.acceptance_state, ["rejected", "no-longer-callable"].includes(view.acceptance_state) ? "err" : view.acceptance_state === "unverifiable" ? "warn" : ["accepted", "reviewed"].includes(view.acceptance_state) ? "ok" : "");
     chip(view.integrity_state, view.integrity_state === "current" ? "" : "warn");
     chip(claimed, "");
     return box;
