@@ -12,6 +12,7 @@
   --fill: rgba(120, 120, 128, .12); --fill2: rgba(120, 120, 128, .2);
   --accent: #0071e3; --accent-text: #ffffff; --accent-dim: rgba(0, 113, 227, .1);
   --err: #d70015; --warn: #c25e00; --ok: #248a3d; --hl: rgba(0, 113, 227, .22);
+  --indigo: #5856d6; --gray: #8e8e93; --yellow: #f2b600; --yellow-text: #8a6a00;
   --sel: rgba(0, 113, 227, .18); --cm-bg: #ffffff; --pdf-bg: #e8e8ed;
   --shadow-pop: 0 0 0 .5px rgba(0, 0, 0, .08), 0 10px 30px rgba(0, 0, 0, .14);
   --shadow-card: 0 1px 2px rgba(0, 0, 0, .06), 0 3px 10px rgba(0, 0, 0, .05);
@@ -35,6 +36,7 @@
     --fill: rgba(120, 120, 128, .22); --fill2: rgba(120, 120, 128, .32);
     --accent: #0a84ff; --accent-text: #ffffff; --accent-dim: rgba(10, 132, 255, .16);
     --err: #ff453a; --warn: #ff9f0a; --ok: #30d158; --hl: rgba(10, 132, 255, .3);
+    --indigo: #7d7aff; --gray: #98989d; --yellow: #ffd60a; --yellow-text: #ffd60a;
     --sel: rgba(10, 132, 255, .3); --cm-bg: #1e1e1e; --pdf-bg: #161618;
     --shadow-pop: 0 0 0 .5px rgba(255, 255, 255, .1), 0 12px 34px rgba(0, 0, 0, .55);
     --shadow-card: 0 1px 2px rgba(0, 0, 0, .4), 0 4px 12px rgba(0, 0, 0, .3);
@@ -51,6 +53,7 @@
   --fill: rgba(120, 120, 128, .22); --fill2: rgba(120, 120, 128, .32);
   --accent: #0a84ff; --accent-text: #ffffff; --accent-dim: rgba(10, 132, 255, .16);
   --err: #ff453a; --warn: #ff9f0a; --ok: #30d158; --hl: rgba(10, 132, 255, .3);
+  --indigo: #7d7aff; --gray: #98989d; --yellow: #ffd60a; --yellow-text: #ffd60a;
   --sel: rgba(10, 132, 255, .3); --cm-bg: #1e1e1e; --pdf-bg: #161618;
   --shadow-pop: 0 0 0 .5px rgba(255, 255, 255, .1), 0 12px 34px rgba(0, 0, 0, .55);
   --shadow-card: 0 1px 2px rgba(0, 0, 0, .4), 0 4px 12px rgba(0, 0, 0, .3);
@@ -359,12 +362,28 @@ pre.panel-view { font: 12px/1.5 var(--mono); white-space: pre-wrap; color: var(-
 #node-panel .node-statement { font-family: var(--serif); font-size: 14.5px; line-height: 1.5; white-space: pre-wrap; margin: 4px 0 8px; padding: 10px 12px; background: var(--panel2); border-radius: 10px; box-shadow: var(--shadow-card); }
 #node-panel .node-assumption { color: var(--text2); font-family: var(--serif); margin: 2px 4px; }
 #node-panel .node-axes { display: flex; flex-wrap: wrap; gap: 5px; margin: 8px 0; }
-#node-panel .node-axes span { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 8px; border-radius: 10px; font-size: 11px; font-weight: 500; color: var(--text2); background: var(--fill); }
-#node-panel .node-axes span::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .85; }
-#node-panel .node-axes span.frontier { color: var(--accent); background: var(--accent-dim); }
-#node-panel .node-axes span.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 13%, transparent); }
-#node-panel .node-axes span.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
-#node-panel .node-axes span.err { color: var(--err); background: color-mix(in srgb, var(--err) 12%, transparent); }
+#node-panel .node-axes span { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 9px 0 4px; border-radius: 11px; font-size: 11.5px; font-weight: 600; color: var(--c-text); background: color-mix(in srgb, var(--c) 13%, transparent); }
+#node-panel .node-axes span.state-open, #node-panel .node-axes span.state-blocked { background: var(--fill); font-weight: 500; }
+/* the proof map's state icons and colours */
+.state-claimed { --c: var(--indigo); --c-text: var(--indigo); }
+.state-blocked { --c: var(--gray); --c-text: var(--text2); }
+.state-review { --c: var(--warn); --c-text: var(--warn); }
+.state-accepted { --c: var(--ok); --c-text: var(--ok); }
+.state-rejected { --c: var(--err); --c-text: var(--err); }
+.state-attention { --c: var(--yellow); --c-text: var(--yellow-text); }
+.state-open { --c: var(--faint); --c-text: var(--muted); }
+.status-icon { width: 15px; height: 15px; flex: none; }
+.status-icon .disc { fill: var(--faint); }
+.status-icon .glyph { fill: none; stroke: #fff; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.status-icon .glyph-fill { fill: #fff; stroke: none; }
+.status-icon.claimed .disc { fill: var(--indigo); }
+.status-icon.blocked .disc { fill: var(--gray); }
+.status-icon.review .disc { fill: var(--warn); }
+.status-icon.accepted .disc { fill: var(--ok); }
+.status-icon.rejected .disc { fill: var(--err); }
+.status-icon.attention .disc { fill: var(--yellow); }
+.status-icon.attention .glyph { stroke: #1d1d1f; stroke-width: 1.9; }
+.status-icon.attention .glyph-fill { fill: #1d1d1f; }
 #node-panel h4 { margin: 12px 0 5px; font-size: 11px; font-weight: 600; color: var(--muted); }
 #node-panel .node-deps { margin: 0; padding: 4px 10px; list-style: none; font-size: 12px; color: var(--text2); background: var(--panel2); border-radius: 10px; box-shadow: var(--shadow-card); }
 #node-panel .node-deps li { padding: 5px 0; border-bottom: .5px solid var(--border2); }

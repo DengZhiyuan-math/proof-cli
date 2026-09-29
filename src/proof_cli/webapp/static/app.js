@@ -180,6 +180,22 @@ const STATUS_GLYPHS = {
   attention: [["path", { d: "M8 5.6v3.9", class: "glyph" }], ["circle", { cx: 8, cy: 12, r: 1, class: "glyph-fill" }]],
   open: [],
 };
+// A state value on the node page, the tree or anywhere else, as the map's icon for it plus its
+// word: every axis value lands on one of the seven states (neutral ones get a plain grey disc).
+const VALUE_STATE = {
+  frontier: "ready", claimed: "claimed", "review-needed": "review", "revision-requested": "review", blocked: "blocked",
+  accepted: "accepted", reviewed: "accepted", rejected: "rejected", "no-longer-callable": "rejected",
+  unverifiable: "attention", "potentially-stale": "attention", challenged: "attention",
+};
+function stateChip(value, text, title) {
+  const kind = VALUE_STATE[value] || "open";
+  const chip = el("span", null, { class: `chip state-${kind}`, title: title || text || value });
+  const icon = svg("svg", { viewBox: "-1 -1 18 18", class: "chip-icon", "aria-hidden": "true" });
+  icon.append(statusIcon(kind, 8, 8, 16));
+  chip.append(icon, text || value);
+  return chip;
+}
+
 function statusIcon(kind, x, y, size = 16) {
   const icon = svg("g", { class: `status-icon ${kind}`, transform: `translate(${x - size / 2},${y - size / 2}) scale(${size / 16})` });
   // a warning is a triangle, like the system's; every other state a disc
@@ -431,10 +447,10 @@ function drawTree(nodes) {
     const li = el("li");
     if (!n) { li.append(el("span", `${id} (missing)`, { class: "warning" })); return li; }
     li.append(el("a", n.id, { href: pageOf(n) }), ` — ${short(n.display_label || n.statement, 60)}`);
-    li.append(el("span", n.acceptance_state, { class: `state-chip chip ${n.acceptance_state}` }), el("span", n.workflow_state, { class: `state-chip chip ${n.workflow_state}` }));
-    li.append(el("span", n.integrity_state, { class: `state-chip chip ${n.integrity_state}${n.integrity_state === "current" ? "" : " warn-chip"}` }));
-    if (n.assignee) li.append(el("span", `@${n.assignee}`, { class: "state-chip chip claimed" }));
-    if (n.frontier) li.append(el("span", "frontier", { class: "state-chip chip frontier" }));
+    const small = (chip) => { chip.classList.add("state-chip"); return chip; };
+    li.append(small(stateChip(n.acceptance_state)), small(stateChip(n.workflow_state)), small(stateChip(n.integrity_state)));
+    if (n.assignee) li.append(small(stateChip("claimed", n.assignee, `claimed by ${n.assignee}`)));
+    if (n.frontier) li.append(small(stateChip("frontier", "ready to start")));
     if ((parents.get(id) || 0) > 1) li.append(el("span", "shared", { class: "state-chip shared-chip", title: `used by ${parents.get(id)} nodes; see the DAG` }));
     if (ancestors.has(id)) { li.append(" (cycle: not expanded again)"); return li; }
     if (n.dependencies.length) {
@@ -472,7 +488,7 @@ async function showNode(nodeId) {
   const view = await api(`/api/node/${encodeURIComponent(nodeId)}`);
   const node = view.node;
   $("node-title").replaceChildren(node.id, el("small", node.kind.replace("_", " ")));
-  const axis = (name, value) => { const cell = el("div"); cell.append(el("span", name, { class: "lbl" }), el("span", value, { class: `chip ${value}`, title: `${name}: ${value}` })); return cell; };
+  const axis = (name, value) => { const cell = el("div"); cell.append(el("span", name, { class: "lbl" }), stateChip(value, value, `${name}: ${value}`)); return cell; };
   $("node-axes").replaceChildren(axis("workflow", view.workflow_state), axis("acceptance", view.acceptance_state), axis("integrity", view.integrity_state));
   const nodeWarnings = el("ul");
   showWarnings(view.warnings, nodeWarnings);
