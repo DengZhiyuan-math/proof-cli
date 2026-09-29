@@ -33,8 +33,6 @@ from .references import (
     ReferenceRecord,
     ReferenceReviewRecord,
     ReferenceReviewStatus,
-    ReferenceSourceType,
-    ReferenceTrustLevel,
     utc_now,
 )
 
@@ -921,16 +919,6 @@ def import_reference_review(store: ProjectStore, review: ReferenceReviewRecord) 
     return review
 
 
-def _reference_trust_level(reference: ReferenceRecord, review_status: ReferenceReviewStatus) -> ReferenceTrustLevel:
-    if review_status != ReferenceReviewStatus.approved:
-        return reference.trust_level
-    if reference.trust_level == ReferenceTrustLevel.foundational:
-        return reference.trust_level
-    if reference.source_type == ReferenceSourceType.standard_reference:
-        return ReferenceTrustLevel.standard_reference
-    return ReferenceTrustLevel.external_research_source
-
-
 def store_reference(store: ProjectStore, reference: ReferenceRecord) -> ReferenceRecord:
     return _upsert_reference(store, reference)
 
@@ -1674,5 +1662,3 @@ def list_review_history_rows(
         with store.connect() as own:
             rows = own.execute(query, params).fetchall()
     return [_row_to_review_history(row) for row in rows]
-
-

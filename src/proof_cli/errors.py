@@ -11,6 +11,7 @@ ERROR_CODES: dict[str, str] = {
     # -- the CLI itself ----------------------------------------------------------------
     "USAGE_ERROR": "the command line didn't parse: a missing argument, an unknown option or command (exit 2)",
     "INTERNAL_ERROR": "an unexpected failure inside proof-cli; the message names it",
+    "INVALID_INPUT": "a legacy command (`theorem add`, `reference import`) refused its input under --json; the message says why",
     "PROJECT_NOT_FOUND": "a read was pointed at a folder with no proof project; nothing was created",
     "HUMAN_REVIEW_REQUIRED": "a Human Review decision, made only by the researcher on the proof map page; the error carries its URL",
     # -- nodes -------------------------------------------------------------------------
@@ -79,6 +80,6 @@ ERROR_CODES: dict[str, str] = {
     "NO_PDF": "that PDF doesn't exist",
     "NO_PROOF_FOLDER": "the node has no proof folder",
     "INVALID_REQUEST": "the page's request is missing what the action needs (a node id, which snapshot, …)",
-    "NOT_FOUND": "no such page route or node action",
+    "NOT_FOUND": "no such page route or node action, or (a legacy command under --json) no such contract, reference or target",
     "NOT_THIS_NODE": "the snapshot named belongs to another node",
 }
