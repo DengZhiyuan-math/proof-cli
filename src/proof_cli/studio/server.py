@@ -7,7 +7,7 @@ one per node, and `main` below runs a single one for developing the studio itsel
 
 Besides the builds (build.py) it runs only read-only `git status` / `git diff`
 and, for the agent panel, the chosen AI backend (agent.py, backends.py): the
-Claude Code or Codex CLI, or calls to an OpenAI-compatible API such as DeepSeek.
+Claude Code or Codex CLI.
 Optional per-project settings live in PROJECT_DIR/prism.json (see README).
 """
 from __future__ import annotations
@@ -24,6 +24,7 @@ import threading
 import time
 import webbrowser
 from pathlib import Path
+from typing import Callable
 
 from . import build, httpbase
 from .agent import NO_WINDOW, AgentManager
@@ -285,7 +286,8 @@ class Studio:
     hold of it before: admitting work and closing take the same lock."""
 
     def __init__(self, root: Path, *, fixed_build: tuple[str, str] | None = None,
-                 hidden: tuple[str, ...] = (), agent_scratch: str | None = None) -> None:
+                 hidden: tuple[str, ...] = (), agent_scratch: str | None = None,
+                 agent_context: Callable[[], object] | None = None) -> None:
         self.fixed_build = fixed_build
         self.hidden = hidden
         self.agent_scratch = agent_scratch
@@ -299,7 +301,8 @@ class Studio:
         self.running_build = None           # the build in progress, for /api/build/stop
         self._git_prefix: str | None = None
         self.sync = SyncTex(self)
-        self.agent = AgentManager(lambda: self.root, self.agent_files, self.agent_writable)
+        # agent_context: a node's proof agent (proof_agent.py), made fresh for each turn
+        self.agent = AgentManager(lambda: self.root, self.agent_files, self.agent_writable, context_fn=agent_context)
 
     def refresh_config(self) -> None:
         """Load prism.json again when it changed, so a new engine or outdir applies at once."""

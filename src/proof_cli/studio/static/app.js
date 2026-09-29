@@ -622,9 +622,8 @@ document.addEventListener("keydown", (e) => {
 window.addEventListener("beforeunload", (e) => { if (S.tabs.some(isDirty)) { e.preventDefault(); e.returnValue = ""; } });
 
 /* ------------------------------------------------------------------ agent panel */
-// The agent runs on one provider at a time (Claude Code, Codex CLI, DeepSeek or another
-// OpenAI-compatible API; see backends.py). Conversation, model and effort are kept per
-// provider. P holds what /api/agent/info reports about each provider.
+// The agent runs on one provider at a time, the Claude Code or the Codex CLI (backends.py).
+// Conversation, model and effort are kept per provider. P holds what /api/agent/info reports about each provider.
 const P = { list: [], byId: {} };
 const C = { provider: store.get("chat.provider", null), job: null, cur: null };
 const prov = () => P.byId[C.provider] || { id: C.provider, label: "Agent", models: [], efforts: [] };
@@ -688,8 +687,8 @@ function chatAppend(html, cls) {
 }
 function saveChatLog() { store.set("chat.log", $("#chat-log").innerHTML.slice(-400000)); }
 function chatIntro() {
-  chatAppend(`The agent works in this repository and follows the project's CLAUDE.md / AGENTS.md.
-Pick who runs it in the menu above: Claude Code, Codex CLI, or an API model such as DeepSeek.
+  chatAppend(`This is the node's proof agent: it reads the project, its library and the web, runs
+<code>proof</code> and computations, and writes this node's proof. Pick Claude Code or Codex CLI above.
 <b>Edit</b> mode may change files — every turn ends with a diff and an Undo button.
 <b>Ask</b> mode is read-only. Type <code>@</code> to point the agent at a file or the selection
 (or select text and press <code>${keys("⌘L")}</code>): it may then change only those files.
@@ -934,7 +933,7 @@ function renderTurnCard(e) {
   let h = "";
   if (e.changed && e.changed.length) {
     h += `<div class="row"><b>Changed ${e.changed.length} file${e.changed.length > 1 ? "s" : ""}</b>
-      <button class="tiny sp" data-undo="${e.turn}">Undo this turn</button>
+      <button class="tiny sp" data-undo="${e.turn}" title="Restores the files this turn changed. It does not undo a claim, a split, a new node, a snapshot, anything in the project database, or a decision.">Undo this turn's file changes</button>
       <button class="tiny" data-compile="1">Compile</button></div>`;
     for (const c of e.changed) {
       const add = (c.diff.match(/^\+(?!\+\+)/gm) || []).length, del = (c.diff.match(/^-(?!--)/gm) || []).length;
@@ -955,7 +954,7 @@ function renderTurnCard(e) {
   if (other.length)
     h += `<div class="warn">Not permitted here: ${esc(other.join(", "))}. Run that step from the terminal session if it is needed.</div>`;
   if (e.out_of_scope && e.out_of_scope.length)
-    h += `<div class="warn">Changed outside the @-mentioned files: ${esc(e.out_of_scope.join(", "))}. Use Undo this turn if that was not wanted.</div>`;
+    h += `<div class="warn">Changed outside the @-mentioned files: ${esc(e.out_of_scope.join(", "))}. Use "Undo this turn's file changes" if that was not wanted.</div>`;
   if (e.exit !== 0 || e.is_error)
     h += `<div class="err">${esc((P.byId[e.provider] || {}).label || "The agent")}: ${esc(e.subtype || "exit " + e.exit)}.${e.stderr ? "\n" + esc(e.stderr) : ""}</div>`;
   const tokens = e.usage && (e.usage.in || e.usage.out) ? `${e.usage.in || 0} in / ${e.usage.out || 0} out tokens` : "";
@@ -1084,8 +1083,10 @@ function renderProviders(info) {
       Prism page for this project, wait about 10 seconds, and open it again to restart it.</div>`, "card");
     return;
   }
+  // On a proof map node the agent is the node's proof agent (#72), on either CLI
+  const CAPABILITY = info.proof_agent ? "proof agent: reads the project, its library and the web; runs proof and computation; edits this node" : "";
   $("#chat-provider").innerHTML = P.list.map((p) =>
-    `<option value="${esc(p.id)}"${p.available ? "" : " disabled"} title="${esc(p.reason || "")}">${esc(p.label)}${p.available ? "" : " (not set up)"}</option>`).join("");
+    `<option value="${esc(p.id)}"${p.available ? "" : " disabled"} title="${esc(p.reason || CAPABILITY)}">${esc(p.label)}${p.available ? "" : " (not set up)"}</option>`).join("");
   let id = C.provider;
   if (!P.byId[id] || !P.byId[id].available) id = info.default;
   if (!P.byId[id] || !P.byId[id].available) id = (P.list.find((p) => p.available) || P.list[0] || {}).id;
