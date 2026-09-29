@@ -75,7 +75,19 @@ function showHome() {
     for (const decision of item.decisions) choice.append(el("option", decision));
     const rationale = el("input", null, { placeholder: "why" });
     // a local node is reviewed in its studio (#71); an imported result on its own page
-    const link = el("a", item.node_id, { href: item.kind === "reference_review" ? `#/node/${encodeURIComponent(item.node_id)}` : `/studio/${encodeURIComponent(item.node_id)}/#review` });
+    const inStudio = item.kind !== "reference_review";
+    const link = el("a", null, {
+      class: "review-link",
+      href: item.kind === "reference_review" ? `#/node/${encodeURIComponent(item.node_id)}` : `/studio/${encodeURIComponent(item.node_id)}/#review`,
+      title: inStudio ? "Review it in the node's studio" : "Review the source on the node's page",
+    });
+    // a page under a magnifier: "go and review this", then the node, then a chevron
+    const glass = svg("svg", { viewBox: "0 0 24 24", class: "review-link-icon", "aria-hidden": "true" });
+    glass.append(svg("path", { d: "M13 20H6.5A1.5 1.5 0 0 1 5 18.5v-13A1.5 1.5 0 0 1 6.5 4h7L18 8.5v2.5" }), svg("path", { d: "M13.5 4v4.5H18" }),
+      svg("circle", { cx: 16, cy: 16, r: 3 }), svg("path", { d: "m18.2 18.2 2.3 2.3" }));
+    const chevron = svg("svg", { viewBox: "0 0 24 24", class: "review-link-chevron", "aria-hidden": "true" });
+    chevron.append(svg("path", { d: "m9.5 6 6 6-6 6" }));
+    link.append(glass, el("span", item.node_id), chevron);
     const statement = el("div", item.statement);
     if (item.candidate_proof && item.candidate_proof.id) {
       // shown in full: recording the decision is about exactly this text
