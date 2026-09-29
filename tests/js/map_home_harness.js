@@ -96,6 +96,9 @@ class FakeElement {
     tree: Object.fromEntries(elements["map-tree"].querySelectorAll("li").filter((li) => li.attributes["data-node-id"]).map((li) => [
       li.attributes["data-node-id"], li.querySelector(".line").querySelectorAll(".status").map((s) => s.textContent),
     ])),
+    // each tree line in drawing order: its data-node-id and data-shared-by
+    treeLines: elements["map-tree"].querySelectorAll("li").filter((li) => li.attributes["data-node-id"])
+      .map((li) => [li.attributes["data-node-id"], li.attributes["data-shared-by"] ?? null]),
     href: location.href,
     reviewHidden: elements.review.hidden, warningsHidden: elements["warnings-block"].hidden,
     pendingCount: elements["pending-count"].textContent,

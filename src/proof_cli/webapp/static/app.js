@@ -390,8 +390,9 @@ function drawTree(nodes) {
   const matches = mapMatcher();
   const item = (id, ancestors) => {
     const n = byId.get(id);
-    // each line names its node in data-node-id; a node used by more than one parent carries a .shared-chip
+    // each line names its node in data-node-id; a node used by more than one parent carries data-shared-by and a .shared-chip
     const li = el("li", null, { "data-node-id": id });
+    if ((parents.get(id) || 0) > 1) li.setAttribute("data-shared-by", parents.get(id));
     if (!n) { li.append(el("span", `${id} (missing)`, { class: "bad" })); return li; }
     if (matches && !matches(n)) li.classList.add("dim");
     const line = el("div", null, { class: "line" });
