@@ -137,6 +137,7 @@ from .proof_map import (
     list_challenges,
     list_integrity_warnings,
     list_nodes,
+    node_citation,
     open_challenge,
     record_evidence_check,
     release_node,
@@ -378,6 +379,9 @@ def node_create(
     source_locator: str = typer.Option("", "--source-locator", help="Required for imported_result nodes"),
     source_version: str = typer.Option("", "--source-version", help="Required for imported_result nodes"),
     trust_level: str = typer.Option("", "--trust-level"),
+    reference_id: str = typer.Option(
+        "", "--reference-id", help="imported_result only: the `reference list` entry it cites; fixed once the node exists"
+    ),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     store = get_store(_root(root))
@@ -393,6 +397,7 @@ def node_create(
             source_locator=source_locator or None,
             source_version=source_version or None,
             trust_level=trust_level or None,
+            reference_id=reference_id or None,
             created_by=created_by,
         )
     except ProofMapError as exc:
@@ -424,9 +429,11 @@ def node_show(
         {"version": proof.version, "file_path": proof.file_path, "sha256": proof.sha256, "is_current": proof.is_current}
         for proof in list_candidate_proofs(store, node_id)
     ]
+    citation = node_citation(store, node)
 
     if json_output:
         payload = node.model_dump(mode="json")
+        payload["citation"] = citation
         payload["workflow_state"] = workflow_state
         payload["acceptance_state"] = acceptance_state
         payload["integrity_state"] = integrity_state
@@ -446,6 +453,7 @@ def node_show(
                 blocked_reason=blocked_reason,
                 working_proof=working_proof,
                 snapshots=snapshots,
+                citation=citation,
             )
         )
 

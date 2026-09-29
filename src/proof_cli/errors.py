@@ -27,6 +27,8 @@ ERROR_CODES: dict[str, str] = {
     "IMPORTED_RESULT_REQUIRES_SOURCE": "an imported result needs a source locator and a source version",
     "IMPORTED_RESULT_HAS_NO_DEPENDENCIES": "an imported result is established elsewhere and takes no dependencies",
     "NOT_IMPORTED_RESULT": "the operation applies only to an imported result",
+    "REFERENCE_ID_NOT_IMPORTED_RESULT": "only an imported result links a reference (--reference-id)",
+    "REFERENCE_NOT_FOUND": "no reference has this id: the linked citation doesn't exist here",
     "NOT_A_CLAIM": "only a Claim can be promoted",
     # -- claims (a planning signal, ADR-0010) --------------------------------------------
     "CLAIM_CONFLICT": "someone else holds the claim; the error names them (pass --reassign to take it over)",
