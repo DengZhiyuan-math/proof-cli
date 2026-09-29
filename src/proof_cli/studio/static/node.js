@@ -144,6 +144,17 @@
     return { id: id.trim(), statement: rest.join("=").trim() };
   });
 
+  // the node's three state axes, one chip each (never folded into one status), plus its claim
+  function axes(view, claimed) {
+    const box = h("div", null, { class: "node-axes" });
+    const chip = (text, tone) => box.append(h("span", text, { class: tone || "", title: text }));
+    chip(view.workflow_state, ["review-needed", "revision-requested", "blocked"].includes(view.workflow_state) ? "warn" : "");
+    chip(view.acceptance_state, ["rejected", "no-longer-callable"].includes(view.acceptance_state) ? "err" : view.acceptance_state === "unverifiable" ? "warn" : ["accepted", "reviewed"].includes(view.acceptance_state) ? "ok" : "");
+    chip(view.integrity_state, view.integrity_state === "current" ? "" : "warn");
+    chip(claimed, "");
+    return box;
+  }
+
   async function render() {
     let view;
     try { view = await call(base); } catch (error) { panel.replaceChildren(h("p", `${error.code || "error"}: ${error.message}`)); return; }
@@ -167,7 +178,7 @@
     panel.replaceChildren(
       h("p", node.statement, { class: "node-statement" }),
       ...node.assumptions.map((a) => h("p", `assuming ${a}`, { class: "node-assumption" })),
-      h("p", `${view.workflow_state} · ${view.acceptance_state} · ${view.integrity_state} · ${claimed}`, { class: "node-axes" }),
+      axes(view, claimed),
       h("h4", "Depends on"), deps,
       h("h4", "Actions"),
       action("Claim", "/claim", [["reassign", "checkbox", "take it over"]], (v) => ({ reassign: v.reassign }), () => { tell("Claimed."); return render(); }),
