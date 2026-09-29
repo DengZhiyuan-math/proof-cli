@@ -40,7 +40,7 @@ This freezes every input of the proof into an immutable snapshot, `proofs/<id>/s
 
 `proof map open` starts the project's local page, bound to 127.0.0.1, and opens it:
 - **The map** is a DAG of every node, with a tree view rooted at any node. Frontier nodes (open, unblocked, unclaimed) are outlined as *ready to claim*. Each node shows its acceptance, workflow and integrity state, and its assignee.
-- **New node** creates a theorem, lemma or claim (with its assumptions and dependencies), or an imported result with its source. That covers the first node of an empty map, and a corrected source that replaces a withdrawn one.
+- **Nodes are created from the CLI** (`proof node create`): a theorem, lemma or claim with its assumptions and dependencies, or an imported result with its source. That covers the first node of an empty map, and a corrected source that replaces a withdrawn one.
 - **A theorem, lemma or claim opens in its studio** (ADR-0011), a LaTeX workspace built from prism-local's code: editor, compile, PDF with SyncTeX both ways, and the agent panel. Beside them, the **node panel** shows the node's statement, state axes, assignee and dependencies, and offers claim or unassign, split into Claims, request review, open a Challenge, and record an Evidence check, as the page's git identity.
 - **A node's review page** shows the exact LaTeX of the snapshot under review, with its dependencies and pins, Challenges, Evidence checks and history, and the decisions to make. It links the compiled PDF when there is one: the PDF archived with the snapshot, or the studio's current `build/proof.pdf`.
 - **The agent panel is the node's proof agent** (ADR-0011): it researches, reasons and proves, and writes the result into the node.
