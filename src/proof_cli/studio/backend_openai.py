@@ -65,6 +65,13 @@ WRITE_TOOLS = [
         {"path": _PATH, "old_string": {"type": "string"}, "new_string": {"type": "string"},
          "replace_all": {"type": "boolean"}}, ["path", "old_string", "new_string"]),
 ]
+# An API model has file tools only: it can't run `proof`, a computation or a web search.
+LIMITED_NOTE = """\
+Here you have file tools only: you can read the whole project (other nodes are ../<id>/) and
+change this node's sources and scratch/, but you cannot run `proof`, a computation, or a web
+search. Say what should be run, claimed, split or requested, and the researcher will do it.
+"""
+
 TOOL_LABELS = {"list_files": "Glob", "read_file": "Read", "search": "Grep",
                "write_file": "Write", "edit_file": "Edit"}
 
@@ -117,7 +124,7 @@ class OpenAICompat(Backend):
                 job.emit({"t": "error", "message": "The earlier conversation ended when the "
                           "server restarted; this message starts a new one."})
             sid = uuid.uuid4().hex
-            msgs = [{"role": "system", "content": self.system_prompt(job.root)}]
+            msgs = [{"role": "system", "content": self.system_prompt(job.root, job.context)}]
         else:
             sid, msgs = job.session_id, list(saved)
         job.emit({"t": "init", "session_id": sid, "model": model})
@@ -167,8 +174,10 @@ class OpenAICompat(Backend):
                 self.sessions.pop(next(iter(self.sessions)))
         return res
 
-    def system_prompt(self, root: Path) -> str:
+    def system_prompt(self, root: Path, context=None) -> str:
         parts = [SYSTEM_APPEND, TOOL_PROMPT]
+        if context is not None:  # a node's proof agent, limited to file tools here (ADR-0011 point 8)
+            parts += [context.brief(), LIMITED_NOTE]
         for name in PROJECT_RULES:
             p = root / name
             if p.is_file():
@@ -267,15 +276,18 @@ class OpenAICompat(Backend):
         return out
 
     @staticmethod
-    def _path(job: Job, rel: str) -> tuple[str, Path]:
+    def _path(job: Job, rel: str, reading: bool = False) -> tuple[str, Path]:
         rel = str(rel).replace("\\", "/")
         if rel.startswith("/") or re.match(r"[A-Za-z]:", rel):
             raise ToolError("give a path relative to the project root")
         root = job.root.resolve()
         p = (root / rel).resolve()
-        if p != root and root not in p.parents:
+        # a node's proof agent reads the whole proof project (../<id>/ from its node), and
+        # writes only its node (job.writable decides which files there)
+        bound = job.context.project_root.resolve() if reading and job.context else root
+        if p != bound and bound not in p.parents:
             raise ToolError("the path is outside the project")
-        r = p.relative_to(root).as_posix()
+        r = p.relative_to(root).as_posix() if root in p.parents or p == root else os.path.relpath(p, root)
         if r == ".git" or r.startswith(".git/"):
             raise ToolError("the .git directory is off limits")
         return r, p
@@ -284,7 +296,7 @@ class OpenAICompat(Backend):
         if name == "list_files":
             return "\n".join(job.files()) or "(no editable files)"
         if name == "read_file":
-            rel, p = self._path(job, args["path"])
+            rel, p = self._path(job, args["path"], reading=True)
             if not p.is_file():
                 raise ToolError(f"no such file: {rel}")
             lines = p.read_text(encoding="utf-8", errors="replace").splitlines()

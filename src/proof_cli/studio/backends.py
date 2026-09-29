@@ -90,6 +90,7 @@ class Job:
         self.root = Path(".")
         self.files: Callable[[], list[str]] = lambda: []    # editable files
         self.writable: Callable[[str], bool] = lambda rel: False
+        self.context = None     # a node's ProofAgentContext (proof_agent.py), or None outside a proof map
         self.before: dict[str, bytes | None] = {}     # file contents around the turn
         self.after: dict[str, bytes | None] = {}
 
@@ -189,6 +190,7 @@ class CliBackend(Backend):
         # The prompt goes through stdin so it can never be parsed as a flag. TREE: Stop
         # also ends the commands the CLI started.
         job.proc = subprocess.Popen(cmd, cwd=job.root, stdin=subprocess.PIPE,
+                                    env=job.context.env() if job.context else None,   # PROOF_ROOT, `proof` on PATH
                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                     text=True, encoding="utf-8", errors="replace", bufsize=1,
                                     **TREE)
