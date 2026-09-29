@@ -4,6 +4,7 @@ import json
 import sys
 from pathlib import Path
 
+import click
 import typer
 
 from .commands import (
@@ -61,6 +62,10 @@ from .commands import (
     cmd_proof_verify_run,
     cmd_proof_verify_stale,
     cmd_proof_verify_status,
+    cmd_proof_pack_install,
+    cmd_proof_pack_list,
+    cmd_proof_pack_show,
+    cmd_proof_pack_update,
     cmd_proof_policy_list,
     cmd_proof_policy_set,
     cmd_proof_recommend,
@@ -89,6 +94,13 @@ from .commands import (
     cmd_publication_show,
     cmd_publication_view,
     cmd_publication_withdraw,
+    publication_export_json,
+    publication_list_data,
+    publication_release_data,
+    publication_set_data,
+    publication_show_data,
+    publication_view_data,
+    publication_withdraw_data,
     cmd_proof_provenance_show,
     cmd_reference_import,
     cmd_reference_list,
@@ -107,11 +119,15 @@ from .commands import (
 from .envelope import dump_envelope, error_envelope, success_envelope
 from .contract import ProofGroup
 from .collaboration import summarize_review_record
+from .storage import read_scoped
 from .proof_map import (
     ProofMapError,
+    add_dependency,
     claim_node,
     create_node,
     dependency_details,
+    move_dependency,
+    remove_dependency,
     get_acceptance_state,
     get_blocked_reason,
     get_frontier,
@@ -253,6 +269,7 @@ def _with_state_axes(store, node) -> dict:
 
 
 @app.command(rich_help_panel=PROOF_MAP_PANEL)
+@read_scoped
 def frontier(root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
     """The open, unblocked, unclaimed nodes: what an agent could claim right now."""
     store = get_store(_root(root))
@@ -385,6 +402,7 @@ def node_create(
 
 
 @node_app.command("show")
+@read_scoped
 def node_show(
     node_id: str,
     root: str = ROOT_OPTION,
@@ -588,6 +606,52 @@ def node_split(
         )
     else:
         typer.echo(render_proof_map_node_list(children))
+
+
+@node_app.command("depend")
+def node_depend(
+    node_id: str,
+    add: str = typer.Option("", "--add", help="Make the node rest on this node too"),
+    remove: str = typer.Option("", "--remove", help="Stop the node resting on this dependency"),
+    move: str = typer.Option("", "--move", help="Move this dependency down onto the node given by --to"),
+    to: str = typer.Option("", "--to", help="With --move: one of the node's own dependencies, e.g. a split child"),
+    by: str = typer.Option("human", "--by", help="Who is editing (an agent or person name)"),
+    reassign: bool = typer.Option(False, "--reassign", help="Take the claim over from whoever holds it (recorded as `claim --reassign` records it)"),
+    root: str = ROOT_OPTION,
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Add, remove or move one of node_id's dependencies. Ungated, like split (#96).
+
+    A node someone else holds is theirs to edit unless --reassign; an Accepted
+    node only under an open Challenge. Pins are taken at the next request-review."""
+    named = [flag for flag, value in (("--add", add), ("--remove", remove), ("--move", move)) if value]
+    if len(named) != 1:
+        raise click.UsageError("name exactly one of --add, --remove or --move")
+    if bool(to) != bool(move):
+        raise click.UsageError("--move and --to go together: --move <dependency> --to <child>")
+    store = get_store(_root(root))
+    try:
+        if add:
+            edit = add_dependency(store, node_id, add, edited_by=by, reassign=reassign)
+        elif remove:
+            edit = remove_dependency(store, node_id, remove, edited_by=by, reassign=reassign)
+        else:
+            edit = move_dependency(store, node_id, move, to=to, edited_by=by, reassign=reassign)
+    except ProofMapError as exc:
+        _emit_node_error(exc, json_output, command="node.depend")
+        raise typer.Exit(code=1)
+    if json_output:
+        typer.echo(dump_envelope(success_envelope("node.depend", edit.as_json())))
+        return
+    summary = {
+        "add": f"{node_id} now rests on {edit.dependency_id}",
+        "remove": f"{node_id} no longer rests on {edit.dependency_id}",
+        "move": f"moved dependency {edit.dependency_id} of {node_id} onto {to}",
+    }[edit.op]
+    typer.echo(summary + "; pins are taken at the next request-review")
+    typer.echo(render_proof_map_node(edit.node))
+    if edit.to is not None:
+        typer.echo(render_proof_map_node(edit.to))
 
 
 def _emit_challenge(challenge, json_output: bool, *, command: str) -> None:
@@ -1238,14 +1302,44 @@ def memory_add(
     )
 
 
+def _publication(command: str, json_output: bool, data, human) -> None:
+    """Run one publication command: an ADR-0006 envelope under --json, text otherwise.
+
+    Publication is editorial (issue #30): agents may run these, and none is a
+    Human Review decision. A refused write is a stable error code, exit 1.
+    """
+    try:
+        if json_output:
+            typer.echo(dump_envelope(success_envelope(command, data())))
+        else:
+            typer.echo(human())
+    except ProofMapError as exc:
+        _emit_node_error(exc, json_output, command=command)
+        raise typer.Exit(code=1)
+
+
 @publication_app.command("list")
-def publication_list(root: str = ROOT_OPTION, object_type: str = "") -> None:
-    typer.echo(cmd_publication_list(_root(root), object_type=object_type))
+def publication_list(root: str = ROOT_OPTION, object_type: str = "", json_output: bool = typer.Option(False, "--json")) -> None:
+    """List publication claims: editorial readiness beside each node's live acceptance and integrity."""
+    _publication(
+        "publication.list",
+        json_output,
+        lambda: publication_list_data(_root(root), object_type=object_type),
+        lambda: cmd_publication_list(_root(root), object_type=object_type),
+    )
 
 
 @publication_app.command("show")
-def publication_show(object_id: str, root: str = ROOT_OPTION) -> None:
-    typer.echo(cmd_publication_show(object_id, _root(root)))
+def publication_show(
+    object_id: str, root: str = ROOT_OPTION, object_type: str = "", json_output: bool = typer.Option(False, "--json")
+) -> None:
+    """Show a claim's editorial record and its node's live acceptance and integrity."""
+    _publication(
+        "publication.show",
+        json_output,
+        lambda: publication_show_data(object_id, _root(root), object_type=object_type),
+        lambda: cmd_publication_show(object_id, _root(root), object_type=object_type),
+    )
 
 
 @publication_app.command("set")
@@ -1253,7 +1347,7 @@ def publication_set(
     object_id: str,
     readiness: str,
     root: str = ROOT_OPTION,
-    object_type: str = "theorem_contract",
+    object_type: str = "proof_map_node",
     display_name: str = "",
     title: str = "",
     section_placement: str = "",
@@ -1263,38 +1357,59 @@ def publication_set(
     editorial_note: list[str] = typer.Option(None, "--editorial-note"),
     supporting_reference_id: list[str] = typer.Option(None, "--supporting-reference-id"),
     supporting_theorem_id: list[str] = typer.Option(None, "--supporting-theorem-id"),
-    release_status: str = "draft",
+    release_status: str = typer.Option("", help="approved, corrected or withdrawn; left unset, no release is recorded"),
     release_notes: str = "",
+    json_output: bool = typer.Option(False, "--json"),
 ) -> None:
-    typer.echo(
-        cmd_publication_set(
-            object_id,
-            readiness,
-            _root(root),
-            object_type=object_type,
-            display_name=display_name,
-            title=title,
-            section_placement=section_placement,
-            reason=reason,
-            citation_kind=citation_kind,
-            internal_only=internal_only,
-            editorial_note=editorial_note,
-            supporting_reference_id=supporting_reference_id,
-            supporting_theorem_id=supporting_theorem_id,
-            release_status=release_status,
-            release_notes=release_notes,
-        )
+    """Set a claim's editorial readiness (editorial, not a Human Review decision).
+
+    internal_draft -> collaborator_ready -> supplement_ready -> paper_ready, one
+    step at a time, and withdrawn from anywhere; supplement_ready and paper_ready
+    need a node that is accepted · current.
+    """
+    options = dict(
+        object_type=object_type,
+        display_name=display_name,
+        title=title,
+        section_placement=section_placement,
+        reason=reason,
+        citation_kind=citation_kind,
+        internal_only=internal_only,
+        editorial_note=editorial_note,
+        supporting_reference_id=supporting_reference_id,
+        supporting_theorem_id=supporting_theorem_id,
+        release_status=release_status,
+        release_notes=release_notes,
+    )
+    _publication(
+        "publication.set",
+        json_output,
+        lambda: publication_set_data(object_id, readiness, _root(root), **options),
+        lambda: cmd_publication_set(object_id, readiness, _root(root), **options),
     )
 
 
 @publication_app.command("view")
-def publication_view(root: str = ROOT_OPTION, audience: str = "paper") -> None:
-    typer.echo(cmd_publication_view(_root(root), audience=audience))
+def publication_view(root: str = ROOT_OPTION, audience: str = "paper", json_output: bool = typer.Option(False, "--json")) -> None:
+    _publication(
+        "publication.view",
+        json_output,
+        lambda: publication_view_data(_root(root), audience=audience),
+        lambda: cmd_publication_view(_root(root), audience=audience),
+    )
 
 
 @publication_app.command("export")
-def publication_export(root: str = ROOT_OPTION, audience: str = "paper", format: str = "paper") -> None:
-    typer.echo(cmd_publication_export(_root(root), audience=audience, format=format))
+def publication_export(
+    root: str = ROOT_OPTION, audience: str = "paper", format: str = "paper", json_output: bool = typer.Option(False, "--json")
+) -> None:
+    """Export for an audience. A ready claim whose node is no longer accepted · current is withheld and flagged."""
+    _publication(
+        "publication.export",
+        json_output,
+        lambda: publication_export_json(_root(root), audience=audience, format=format),
+        lambda: cmd_publication_export(_root(root), audience=audience, format=format),
+    )
 
 
 @publication_app.command("release")
@@ -1305,16 +1420,15 @@ def publication_release(
     approved_by: list[str] = typer.Option(None, "--approved-by"),
     rationale: str = "",
     note: str = "",
+    json_output: bool = typer.Option(False, "--json"),
 ) -> None:
-    typer.echo(
-        cmd_publication_release(
-            _root(root),
-            audience=audience,
-            status=status,
-            approved_by=approved_by,
-            rationale=rationale,
-            note=note,
-        )
+    """Record a release (editorial; the sign-off on record is the release commit's git author)."""
+    options = dict(audience=audience, status=status, approved_by=approved_by, rationale=rationale, note=note)
+    _publication(
+        "publication.release",
+        json_output,
+        lambda: publication_release_data(_root(root), **options),
+        lambda: cmd_publication_release(_root(root), **options),
     )
 
 
@@ -1324,8 +1438,16 @@ def publication_withdraw(
     root: str = ROOT_OPTION,
     approved_by: list[str] = typer.Option(None, "--approved-by"),
     rationale: str = "",
+    json_output: bool = typer.Option(False, "--json"),
 ) -> None:
-    typer.echo(cmd_publication_withdraw(release_id, _root(root), rationale=rationale, approved_by=approved_by))
+    """Withdraw a release, named by its release id or bundle id (editorial)."""
+    options = dict(rationale=rationale, approved_by=approved_by)
+    _publication(
+        "publication.withdraw",
+        json_output,
+        lambda: publication_withdraw_data(release_id, _root(root), **options),
+        lambda: cmd_publication_withdraw(release_id, _root(root), **options),
+    )
 
 
 @provenance_app.command("show")
