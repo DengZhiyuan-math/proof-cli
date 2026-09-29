@@ -166,7 +166,7 @@ def test_the_studio_page_carries_the_node_panel():
     index = (STUDIO_STATIC / "index.html").read_text()
     assert 'src="static/node.js"' in index and 'id="node-panel"' in index
     panel = (STUDIO_STATIC / "node.js").read_text()
-    for action in ("claim", "unassign", "split", "request-review", "challenge", "evidence"):
+    for action in ("claim", "unassign", "split", "depend", "request-review", "challenge", "evidence"):
         assert f"/{action}" in panel, action
 
 

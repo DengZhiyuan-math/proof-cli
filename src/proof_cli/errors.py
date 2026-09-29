@@ -11,6 +11,7 @@ ERROR_CODES: dict[str, str] = {
     # -- the CLI itself ----------------------------------------------------------------
     "USAGE_ERROR": "the command line didn't parse: a missing argument, an unknown option or command (exit 2)",
     "INTERNAL_ERROR": "an unexpected failure inside proof-cli; the message names it",
+    "INVALID_INPUT": "a legacy command (`theorem add`, `reference import`) refused its input under --json; the message says why",
     "PROJECT_NOT_FOUND": "a read was pointed at a folder with no proof project; nothing was created",
     "HUMAN_REVIEW_REQUIRED": "a Human Review decision, made only by the researcher on the proof map page; the error carries its URL",
     # -- nodes -------------------------------------------------------------------------
@@ -54,9 +55,13 @@ ERROR_CODES: dict[str, str] = {
     "TARGET_NOT_ACCEPTED": "the target isn't Accepted",
     "TARGET_NOT_REVIEWED": "the imported result hasn't been Reference-reviewed",
     "NOT_A_DEPENDENCY": "the target isn't one of the node's dependencies",
+    "ALREADY_A_DEPENDENCY": "the node already rests on that dependency",
+    "DEPENDENCY_CYCLE": "the edge would close a cycle of dependencies; the error names it (`cycle`)",
+    "DEPENDENCIES_CHANGED": "the node's dependencies changed since its snapshot was requested for review; request review again",
     "NO_DEPENDENCY_PIN": "the node never pinned that dependency; request review first",
     "DEPENDENCY_REQUIRED": "a Lightweight re-review names the dependency it re-pins",
     "INTERFACE_CHANGED": "the dependency's accepted interface changed: a new Candidate proof is needed, not a re-review",
+    "PIN_NOT_LAGGING": "the pin already names the dependency's accepted version: there is nothing to re-review",
     # -- Human Review decisions (made on the page) ---------------------------------------
     "INVALID_DECISION": "not a decision of this kind",
     "INVALID_DECISION_KIND": "not a decision kind",
@@ -71,12 +76,13 @@ ERROR_CODES: dict[str, str] = {
     "SAME_NODE": "a node can't replace itself",
     "NO_DEPENDENTS": "nothing that can move rests on the node",
     "STALE_VIEW": "what the decision is made on changed since the page showed it; reload",
+    "SNAPSHOT_UNREADABLE": "the Review snapshot the decision would be made on is missing or can't be read, so nothing is decided on it",
     # -- the proof map page's own requests -----------------------------------------------
     "NO_DECISIONS": "the request decided nothing",
     "MALFORMED_DECISION": "a decision in the request isn't a well-formed object",
     "NO_PDF": "that PDF doesn't exist",
     "NO_PROOF_FOLDER": "the node has no proof folder",
     "INVALID_REQUEST": "the page's request is missing what the action needs (a node id, which snapshot, …)",
-    "NOT_FOUND": "no such page route or node action",
+    "NOT_FOUND": "no such page route or node action, or (a legacy command under --json) no such contract, reference or target",
     "NOT_THIS_NODE": "the snapshot named belongs to another node",
 }
