@@ -1,8 +1,8 @@
-/* The node panel of a node's studio (ADR-0011, #70): what the node is, and the agent-reachable
-   actions of ADR-0006 — claim or unassign, split into Claims, request review, open a Challenge,
-   record an Evidence check. They go to the proof map's own API (absolute URLs, same origin), as
-   the page's git identity, with the CLI's effects and refusals. Human Review decisions stay on
-   the node's review page. Everything from the project is inserted as text, never as HTML. */
+/* The node panel of a node's studio (ADR-0011, #70): what the node is, its state and who holds
+   it. The agent-reachable actions of ADR-0006 (claim, split into Claims, request review, open a
+   Challenge, record an Evidence check) are the proof agent's, asked of it from its panel (app.js).
+   The node's Review decisions, when there are any, go to the proof map's own API (absolute URLs,
+   same origin) as the page's git identity. Everything from the project is inserted as text, never as HTML. */
 "use strict";
 
 (function nodePanel() {
@@ -27,44 +27,6 @@
 
   const note = h("p", "", { class: "node-note", role: "status" });
   function tell(text, bad) { note.textContent = text; note.classList.toggle("bad", !!bad); }
-
-  // one action: a button, optional inputs, what to send, what to do with the answer, and
-  // (`before`) what must succeed first, or the request isn't sent
-  function action(label, path, fields, send, done, before) {
-    const box = h("div", null, { class: "node-action" });
-    const inputs = fields.map(([key, kind, placeholder, options]) => {
-      let input;
-      if (kind === "select") {
-        input = h("select");
-        for (const o of options) input.append(h("option", o, { value: o }));
-        box.append(input);
-      } else if (kind === "checkbox") {
-        input = h("input", null, { type: "checkbox" });
-        const label = h("label");
-        label.append(input, ` ${placeholder}`);
-        box.append(label);
-      } else {
-        input = h(kind === "textarea" ? "textarea" : "input", null, kind === "textarea" ? { placeholder, rows: 2 } : { placeholder });
-        box.append(input);
-      }
-      input.dataset.key = key;
-      return input;
-    });
-    const button = h("button", label, { type: "button" });
-    button.onclick = async () => {
-      const values = Object.fromEntries(inputs.map((i) => [i.dataset.key, i.type === "checkbox" ? i.checked : i.value]));
-      button.disabled = true;
-      try {
-        if (before && !(await before())) return;
-        const answer = await call(base + path, send(values));
-        await done(answer);
-      }
-      catch (error) { tell(`${error.code || "error"}: ${error.message}`, true); }
-      finally { button.disabled = false; }
-    };
-    box.prepend(button);
-    return box;
-  }
 
   // where a node opens: a theorem, lemma or claim in its studio, an imported result on its own page
   const pageOf = (id, kind) => (kind === "imported_result" ? `/#/node/${encodeURIComponent(id)}` : `/studio/${encodeURIComponent(id)}/`);
@@ -135,23 +97,13 @@
   function axes(view, claimed) {
     const box = h("div", null, { class: "node-axes" });
     const chip = (text, tone) => box.append(h("span", text, { class: tone || "", title: text }));
-    chip(view.workflow_state, ["review-needed", "revision-requested", "blocked"].includes(view.workflow_state) ? "warn" : "");
+    // who holds the node is a state only (the proof agent claims through `proof`): a claimed
+    // node's workflow chip names its holder, and any other node says whether someone holds it
+    if (view.workflow_state !== "claimed") chip(view.workflow_state, ["review-needed", "revision-requested", "blocked"].includes(view.workflow_state) ? "warn" : "");
     chip(view.acceptance_state, ["rejected", "no-longer-callable"].includes(view.acceptance_state) ? "err" : view.acceptance_state === "unverifiable" ? "warn" : ["accepted", "reviewed"].includes(view.acceptance_state) ? "ok" : "");
     chip(view.integrity_state, view.integrity_state === "current" ? "" : "warn");
+    chip(claimed, "");
     return box;
-  }
-
-  // Claim when nobody holds the node; otherwise Unassign, or Take over from someone else
-  function claimRow(view) {
-    const row = h("div", null, { class: "node-claim" });
-    const holder = view.claim ? view.claim.claimant_id : null;
-    row.append(h("span", holder ? `Claimed by ${holder}` : "Unclaimed", { class: "node-holder" }));
-    if (!holder) row.append(action("Claim", "/claim", [], () => ({ reassign: false }), () => { tell("Claimed."); return render(); }));
-    else {
-      row.append(action("Unassign", "/unassign", [], () => ({}), () => { tell("Unassigned."); return render(); }));
-      row.append(action("Take over", "/claim", [], () => ({ reassign: true }), () => { tell("Claimed."); return render(); }));
-    }
-    return row;
   }
 
   async function render() {
@@ -179,9 +131,6 @@
       ...node.assumptions.map((a) => h("p", `assuming ${a}`, { class: "node-assumption" })),
       axes(view, claimed),
       h("h4", "Depends on"), deps,
-      // the claim, in one line: only the move that fits who holds the node now. Requesting
-      // review, splitting, Challenges and Evidence checks are the proof agent's: its panel offers them.
-      claimRow(view),
       reviewSection(view),
       note,
       h("p", null, { class: "node-links" }),
