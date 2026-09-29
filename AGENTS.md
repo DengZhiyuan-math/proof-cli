@@ -20,7 +20,7 @@ The CLI should help a researcher manage a proof map of nodes (theorems, lemmas, 
 
 - **Python 3.11+**, packaged with setuptools (`pyproject.toml`), source under `src/proof_cli/`
 - **Typer** for the CLI (the `proof` entry point, rooted by `--root` or `$PROOF_ROOT`), **Rich** for terminal output, **Pydantic v2** for domain models
-- **SQLite** project state at `.proof/project.sqlite3` (plus JSON side files under `.proof/`)
+- **SQLite** project state at `.proof/project.sqlite3`, collaboration state and memory included (the `side_documents` table; legacy `.proof/collaboration.json` and `.proof/memory.json` are migrated once and not read again)
 - **pytest** for tests (`tests/`)
 
 ## Workflow
