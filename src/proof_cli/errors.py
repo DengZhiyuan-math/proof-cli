@@ -45,6 +45,7 @@ ERROR_CODES: dict[str, str] = {
     "SCOPING_RATIONALE_REQUIRED": "requesting review needs a statement of why the node is scoped to prove directly",
     "WORKING_PROOF_MISSING": "the node has no working proof.tex",
     "WORKING_PROOF_UNCHANGED": "the working proof is the snapshot already under review",
+    "KEY_IDEAS_REQUIRED": "requesting review needs the node's key-ideas.md, with 核心思路 and 主要步骤 filled in (ADR-0013); `missing` names what is absent",
     "CANDIDATE_PROOF_NOT_FOUND": "no Candidate proof has this id",
     "REVIEW_NOT_FOUND": "no Human Review decision has this id",
     "CANDIDATE_PROOF_VERSION_CONFLICT": "that snapshot version is already indexed",

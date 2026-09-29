@@ -105,6 +105,8 @@ class Job:
         self.context = None     # a node's ProofAgentContext (proof_agent.py), or None outside a proof map
         self.before: dict[str, bytes | None] = {}     # file contents around the turn
         self.after: dict[str, bytes | None] = {}
+        # run once the backend is done, before the turn's changes are read (a draft's marker, ADR-0013)
+        self.finish: Callable[[], None] | None = None
 
     def emit(self, ev: dict) -> None:
         with self.cond:

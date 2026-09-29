@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from _proofs import ensure_key_ideas
+
 from _researcher import Researcher, researcher
 from proof_cli.authority import list_decisions
 from proof_cli.domain import ProofMapNodeKind
@@ -41,6 +43,7 @@ def _awaiting_review(store, node_id: str = "clm_1"):
     create_node(store, node_id=node_id, kind="claim", statement=r"$(f * g) * h = f * (g * h)$")
     working = store.root / "proofs" / node_id / "proof.tex"
     working.write_text(working.read_text().replace("% Write the proof here.", "By associativity of the integral."))
+    ensure_key_ideas(store, node_id)
     return request_review(store, node_id, requested_by="agent_a", rationale="small enough")
 
 
@@ -74,7 +77,8 @@ def test_a_decision_is_committed_with_its_snapshot_as_the_reviewers_git_identity
 
     assert _git(root, "log", "-1", "--format=%an <%ae>").strip() == "Ada Researcher <ada@example.org>"
     committed = set(_git(root, "show", "--name-only", "--format=", "HEAD").split())
-    assert committed == {"proofs/clm_1/reviews.jsonl", "proofs/clm_1/snapshots/v1/manifest.json", "proofs/clm_1/snapshots/v1/node/proof.tex", "proofs/clm_1/snapshots/v1/shared/preamble.tex"}  # the whole frozen snapshot (ADR-0011)
+    assert committed == {"proofs/clm_1/reviews.jsonl", "proofs/clm_1/snapshots/v1/manifest.json", "proofs/clm_1/snapshots/v1/node/proof.tex",
+                         "proofs/clm_1/snapshots/v1/node/key-ideas.md", "proofs/clm_1/snapshots/v1/shared/preamble.tex"}  # the whole frozen snapshot (ADR-0011)
     assert "review: acceptance accept on clm_1" in _git(root, "log", "-1", "--format=%B")
     assert "A  unrelated.txt" in _git(root, "status", "--porcelain")  # still staged, never swept into the decision
     assert json.loads((root / "proofs" / "clm_1" / "reviews.jsonl").read_text())["reviewer"] == "Ada Researcher <ada@example.org>"

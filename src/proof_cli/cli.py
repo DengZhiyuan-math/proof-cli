@@ -363,7 +363,7 @@ def _emit_node_error(exc: ProofMapError, json_output: bool, *, command: str) -> 
         detail_suffix = ""
         if exc.details:
             detail_suffix = " (" + ", ".join(f"{key}={value}" for key, value in exc.details.items()) + ")"
-        typer.echo(f"Error: {exc.message}{detail_suffix}")
+        typer.echo(f"Error: {exc.message}{detail_suffix} [{exc.code}]")
 
 
 def _emit_claim(claim, json_output: bool, *, command: str) -> None:

@@ -79,6 +79,7 @@ from .storage import (
     upsert_dependency_pin,
     delete_dependency_pin,
 )
+from . import key_ideas
 from .vault import (
     SNAPSHOT_MANIFEST,
     archived_pdf_path,
@@ -863,6 +864,9 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
     that snapshot is missing or can't be read: then they are snapshotted afresh
     as the next version, a re-snapshot after loss (#99), which needs its own
     Human Review — decisions on the lost snapshot stay unverifiable.
+    Needs the node's key-ideas summary, `key-ideas.md`, with its required fields filled in
+    (KEY_IDEAS_REQUIRED): it is frozen with the proof, and a change to it alone is a new
+    version (ADR-0013). Requesting review is how its author confirms a draft the agent wrote.
     Needs no claim. A node someone has claimed is theirs to hand over, and
     their claim ends here, as a wayfinder ticket's does when its work is.
     """
@@ -879,9 +883,12 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
     working = working_proof_path(store.root, node_id)
     if not working.is_file():
         raise ProofMapError("WORKING_PROOF_MISSING", f"{working.relative_to(store.root).as_posix()} doesn't exist")
-    # read once: what is hashed is exactly what is frozen, even if a file changes meanwhile
+    # read once: what is hashed is exactly what is frozen, even if a file changes meanwhile.
+    # The key-ideas summary is one of these inputs (ADR-0013): frozen, listed and hashed with
+    # the proof, so a change to it alone is a new version, by the same unchanged-check below
     contents = {rel: path.read_bytes() for rel, path in working_inputs(store.root, node_id).items()}
-    sha256 = manifest_digest({rel: hashlib.sha256(data).hexdigest() for rel, data in contents.items()})
+    summary = _require_key_ideas(store, node_id, contents.get(key_ideas.KEY_IDEAS_FILE))
+    sha256 =manifest_digest({rel: hashlib.sha256(data).hexdigest() for rel, data in contents.items()})
 
     # The holder check and every write are one SQLite write transaction (#18): a reassignment
     # can't slip in between them, it waits for this to commit. The files written go if it rolls
@@ -928,6 +935,7 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
             sha256=sha256,
             dependencies=list(node.dependencies),
             resnapshot_after_loss=resnapshot_of,
+            key_ideas_drafted_by=summary.drafted_by,
         )
         try:
             insert_candidate_proof(store, record, conn=conn)
@@ -950,10 +958,34 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
                 "sha256": sha256,
                 "requested_by": requested_by,
                 "resnapshot_after_loss": resnapshot_of,
+                # drafted by the proof agent, confirmed by its author in this request (ADR-0013)
+                "key_ideas_drafted_by": summary.drafted_by,
             },
             conn=conn,
         )
     return record
+
+
+def _require_key_ideas(store: ProjectStore, node_id: str, data: bytes | None) -> key_ideas.KeyIdeas:
+    """The node's working key-ideas summary, parsed; refused (KEY_IDEAS_REQUIRED) when it is
+    missing or a required field is empty (ADR-0013): review starts from the key ideas."""
+    path = (node_folder(store.root, node_id) / key_ideas.KEY_IDEAS_FILE).relative_to(store.root).as_posix()
+    required = " and ".join(key_ideas.HEADINGS[key] for key in key_ideas.REQUIRED)
+    if data is None:
+        raise ProofMapError(
+            "KEY_IDEAS_REQUIRED",
+            f"{path} doesn't exist: requesting review needs the proof's key ideas, with {required} "
+            "filled in (the studio's proof agent can draft it)",
+            details={"path": path, "missing": [key_ideas.KEY_IDEAS_FILE]},
+        )
+    parsed = key_ideas.parse(data.decode("utf-8", errors="replace"))
+    if parsed.missing:
+        raise ProofMapError(
+            "KEY_IDEAS_REQUIRED",
+            f"{path} leaves {' and '.join(parsed.missing)} empty: {required} are both required",
+            details={"path": path, "missing": parsed.missing},
+        )
+    return parsed
 
 
 def get_candidate_proof(store: ProjectStore, candidate_proof_id: str) -> CandidateProofRecord | None:

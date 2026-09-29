@@ -11,6 +11,8 @@ import re
 from pathlib import Path
 
 import pytest
+
+from _proofs import ensure_key_ideas
 from typer.testing import CliRunner
 
 from proof_cli import errors
@@ -330,5 +332,7 @@ def test_the_skills_node_workflow_runs_as_written(tmp_path: Path):
         ["node", "request-review", "P1", "--rationale", "one computation", "--requested-by", "agent_a", "--root", root],
     ]
     for args in steps:
+        if args[:2] == ["node", "request-review"]:
+            ensure_key_ideas(tmp_path, args[2])  # what the agent writes beside proof.tex before it asks (ADR-0013)
         result = runner.invoke(app, [*args, "--json"])
         assert result.exit_code == 0 and _envelope(result)["ok"], (args, result.output)

@@ -159,6 +159,8 @@ class ReviewRecord(BaseModel):
     # `authority.decision_row_verifies(store, decision_row_id)`
     decision_row_id: str | None = None
     signed: bool = False
+    # an Acceptance on a key-ideas summary the proof agent drafted and the author confirmed (ADR-0013)
+    key_ideas_drafted_by: str | None = None
 
 
 class ReviewHistoryEntry(BaseModel):
@@ -890,6 +892,7 @@ def list_review_records(store: ProjectStore, *, object_type: str = "", object_id
                 created_at=row["created_at"],
                 updated_at=row["created_at"],
                 decision_row_id=row["id"],
+                key_ideas_drafted_by=row.get("key_ideas_drafted_by"),
             )
         )
     return records

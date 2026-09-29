@@ -80,8 +80,9 @@ function showHome() {
     const statement = el("div", item.statement);
     if (item.citation) statement.append(citationLine(item.citation));
     if (item.candidate_proof && item.candidate_proof.id) {
-      // shown in full: recording the decision is about exactly this text
-      statement.append(el("p", `snapshot v${item.candidate_proof.version} · SHA-256 ${item.candidate_proof.sha256}`, { class: "hint" }), el("pre", item.candidate_proof.text));
+      // review starts from the key ideas (ADR-0013): the card shows the snapshot's 核心思路 and 难点;
+      // the whole summary and the decision are in the studio's review view, the frozen LaTeX on the node's page
+      statement.append(el("p", `snapshot v${item.candidate_proof.version} · SHA-256 ${item.candidate_proof.sha256}`, { class: "hint" }), keyIdeasCard(item.candidate_proof.key_ideas));
     }
     const tr = row([box, link, statement, choice, rationale]);
     tr.dataset.kind = item.kind; tr.dataset.target = item.node_id;
@@ -97,6 +98,18 @@ function showHome() {
   $("rail-review").textContent = state.pending.length ? pending : "";
   $("rail-review").className = state.pending.length ? "n hot" : "n";
   $("rail-warnings").textContent = state.warnings.length ? String(state.warnings.length) : "";
+}
+
+// A review card's key ideas (ADR-0013): 核心思路 and 难点 only, as text (`$…$` stays as written).
+function keyIdeasCard(summary) {
+  const block = el("div", null, { class: "key-ideas" });
+  if (!summary) { block.append(el("p", "这个 snapshot 没有关键思路摘要 · no key-ideas summary: read it in the studio", { class: "hint" })); return block; }
+  for (const [key, title] of [["core_idea", "核心思路"], ["difficulties", "难点"]]) {
+    const text = (summary.fields || {})[key];
+    if (text) block.append(el("span", title, { class: "lbl" }), el("p", text, { class: `key-idea ${key}` }));
+  }
+  if (summary.drafted_by) block.append(el("p", "由 agent 起草、作者确认", { class: "hint" }));
+  return block;
 }
 
 // The ReferenceRecord an imported result links (issue #91): what a Reference review is about.
@@ -400,8 +413,9 @@ function drawDag(nodes) {
       frontier.textContent = "FRONTIER";
       g.append(frontier);
     }
+    // hovering shows the current snapshot's 核心思路 (ADR-0013), under the statement it proves
     const title = svg("title");
-    title.textContent = n.statement;
+    title.textContent = n.core_idea ? `${n.statement}\n核心思路：${n.core_idea}` : n.statement;
     g.append(title);
     // drag a node to move it (its edges follow); a click without a drag opens it
     let drag = null;
@@ -453,7 +467,7 @@ function drawTree(nodes) {
     li.setAttribute("data-node-id", id);
     if ((parents.get(id) || 0) > 1) li.setAttribute("data-shared-by", String(parents.get(id)));
     if (!n) { li.append(el("span", `${id} (missing)`, { class: "warning" })); return li; }
-    li.append(el("a", n.id, { href: pageOf(n) }), ` — ${short(n.display_label || n.statement, 60)}`);
+    li.append(el("a", n.id, { href: pageOf(n), ...(n.core_idea ? { title: `核心思路：${n.core_idea}` } : {}) }), ` —${short(n.display_label || n.statement, 60)}`);
     li.append(el("span", n.acceptance_state, { class: `state-chip chip ${n.acceptance_state}` }), el("span", n.workflow_state, { class: `state-chip chip ${n.workflow_state}` }));
     li.append(el("span", n.integrity_state, { class: `state-chip chip ${n.integrity_state}${n.integrity_state === "current" ? "" : " warn-chip"}` }));
     if (n.assignee) li.append(el("span", `@${n.assignee}`, { class: "state-chip chip claimed" }));
@@ -612,7 +626,7 @@ async function showNode(nodeId) {
   const decisions = $("node-decisions").querySelector("tbody");
   decisions.replaceChildren(...view.decisions.map((d) => decisionRow(d, proof)));
   if (!view.decisions.length) decisions.append(row(["No decision to make on this node right now.", "", "", ""]));
-  $("node-history").replaceChildren(...view.history.filter((r) => r.kind).map((r) => el("li", `${r.updated_at} · ${r.kind} · ${r.decision} · ${r.reviewer_id}${r.rationale ? ` — ${r.rationale}` : ""}`)));
+  $("node-history").replaceChildren(...view.history.filter((r) => r.kind).map((r) => el("li", `${r.updated_at} · ${r.kind} · ${r.decision} · ${r.reviewer_id}${r.key_ideas_drafted_by ? ` · key ideas 由 agent 起草、作者确认 (${r.key_ideas_drafted_by})` : ""}${r.rationale ? ` — ${r.rationale}` : ""}`)));
 }
 
 async function route() {

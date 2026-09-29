@@ -57,3 +57,20 @@ def test_the_docs_say_the_proof_map_answers_what_can_be_called(doc):
     text = (REPO / doc).read_text()
     assert "trusted references" not in text, doc
     assert "Reference review" in text and "ADR-0012" in text, doc
+
+
+def test_adr_0013_puts_a_key_ideas_summary_in_every_snapshot():
+    """#103: the Review snapshot carries key-ideas.md, and the review view shows it, not the LaTeX."""
+    assert _status("0013").strip().startswith("accepted")
+    for name in ("0010", "0011"):
+        assert "ADR-0013" in _status(name), name
+    glossary = (REPO / "CONTEXT.md").read_text()
+    snapshot = glossary[glossary.index("**Review snapshot**:"):glossary.index("_Avoid_", glossary.index("**Review snapshot**:"))]
+    assert "Key-ideas summary" in snapshot and "KEY_IDEAS_REQUIRED" in snapshot and "ADR-0013" in snapshot
+    assert "**Key-ideas summary**:" in glossary and "key-ideas.md" in glossary
+    for heading in ("核心思路", "主要步骤", "难点", "未覆盖"):
+        assert heading in glossary, heading
+    for doc in ("README.md", ".agents/skills/proof-cli/SKILL.md"):
+        text = (REPO / doc).read_text()
+        assert "key-ideas.md" in text and "KEY_IDEAS_REQUIRED" in text, doc
+    assert "opens each frozen file read-only" not in (REPO / "README.md").read_text()

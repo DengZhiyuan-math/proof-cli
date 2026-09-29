@@ -6,6 +6,8 @@ import shutil
 from pathlib import Path
 from typing import Callable
 
+from .key_ideas import KEY_IDEAS_FILE
+
 
 def vault_dir(root: Path) -> Path:
     return root / "proofs"
@@ -120,6 +122,23 @@ def snapshot_folder_files(folder: Path) -> dict[str, bytes] | None:
         return None
 
 
+def snapshot_folder_file(folder: Path, rel: str) -> bytes | None:
+    """One file a snapshot folder froze, by its path from the node folder, as stored now; None
+    when the snapshot didn't freeze it, or it can't be read. Reads only that file and the manifest."""
+    try:
+        manifest = json.loads((folder / SNAPSHOT_MANIFEST).read_text(encoding="utf-8"))
+        return (folder / _stored(rel)).read_bytes() if rel in manifest["files"] else None
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def frozen_key_ideas(root: Path, file_path: str) -> bytes | None:
+    """The key-ideas summary a Review snapshot froze (ADR-0013), by the snapshot's `file_path`;
+    None for one that froze none: an older snapshot, a single-file one, or one that can't be read."""
+    path = root / file_path
+    return snapshot_folder_file(path.parent, KEY_IDEAS_FILE) if path.name == SNAPSHOT_MANIFEST else None
+
+
 def snapshot_folder_digest(folder: Path) -> str | None:
     """The snapshot's SHA-256 recomputed from the files stored now, not read from its manifest:
     an edit to any frozen file changes it. None if the snapshot is gone or unreadable."""
@@ -188,12 +207,15 @@ def node_folder(root: Path, node_id: str) -> Path:
 
 def build_is_current(root: Path, node_id: str) -> bool:
     """Whether the studio's build/proof.pdf is at least as new as every input a snapshot freezes
-    (`working_inputs`): the node's working sources and the shared preamble."""
+    (`working_inputs`) that goes into the PDF: the node's working sources and the shared
+    preamble, but not its key-ideas summary."""
     pdf = build_pdf_path(root, node_id)
     if not pdf.is_file():
         return False
     built = pdf.stat().st_mtime
-    return all(source.stat().st_mtime <= built for source in working_inputs(root, node_id).values() if source.exists())
+    # the key-ideas summary is frozen with the proof but isn't compiled into its PDF (ADR-0013)
+    inputs = {rel: path for rel, path in working_inputs(root, node_id).items() if rel != KEY_IDEAS_FILE}
+    return all(source.stat().st_mtime <= built for source in inputs.values() if source.exists())
 
 
 def write_working_proof(root: Path, *, node_id: str, kind: str, statement: str) -> None:
