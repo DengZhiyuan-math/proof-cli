@@ -172,6 +172,12 @@ class FakeElement {
     nodePageShown: !elements["node-page"].hidden,
     nodeSource: elements["node-source"].textContent,
     nodeSourceWarnings: elements["node-source"].querySelectorAll(".warning").map((w) => w.textContent),
+    // each Evidence check on the node's page (issue #122): what it reads, what its hover says, and its marks
+    nodeEvidence: elements["node-evidence"].querySelectorAll("li").map((li) => ({
+      text: li.textContent,
+      titles: li._all().map((n) => n.getAttribute("title")).filter(Boolean),
+      warnings: li.querySelectorAll(".warning").map((w) => w.textContent),
+    })),
     // each review card's citation line, and whether it is marked missing
     pendingCitations: elements.pending.querySelectorAll("tbody tr").map((tr) => tr.querySelectorAll(".citation").map((c) => c.textContent).join(" ")),
     pendingCitationMissing: elements.pending.querySelectorAll("tbody tr").map((tr) => tr.querySelectorAll(".citation.warning").length > 0),
