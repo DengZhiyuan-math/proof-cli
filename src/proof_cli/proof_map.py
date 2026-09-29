@@ -44,6 +44,8 @@ from .domain import (
 from .reviews import DecisionKind, DecisionPayload, PinnedDependency, git_identity
 from .storage import (
     ProjectStore,
+    memoized_read,
+    read_scoped,
     append_event,
     get_active_claim,
     get_candidate_proof as _get_candidate_proof,
@@ -321,6 +323,7 @@ def _as_counted(store: ProjectStore, node: ProofMapNode | None) -> ProofMapNode 
     return node if kind == node.kind else node.model_copy(update={"kind": kind})
 
 
+@memoized_read
 def get_node(store: ProjectStore, node_id: str) -> ProofMapNode | None:
     return _as_counted(store, get_proof_map_node(store, node_id))
 
@@ -332,6 +335,7 @@ def require_node(store: ProjectStore, node_id: str) -> ProofMapNode:
     return node
 
 
+@memoized_read
 def list_nodes(store: ProjectStore) -> list[ProofMapNode]:
     return [_as_counted(store, node) for node in list_proof_map_nodes(store)]
 
@@ -1105,6 +1109,7 @@ def _interface_of(node: ProofMapNode) -> str:
     return compute_interface_fingerprint(node.statement, node.assumptions)
 
 
+@memoized_read
 def get_accepted_interface_fingerprint(store: ProjectStore, node_id: str) -> str | None:
     """The interface fingerprint of `node_id` if it is Accepted, else `None`.
 
@@ -1154,6 +1159,7 @@ def pin_dependencies(store: ProjectStore, node: ProofMapNode) -> list[Dependency
     return pins
 
 
+@memoized_read
 def _signed_pins(store: ProjectStore, node_id: str) -> dict[str, PinnedDependency] | None:
     """For an Accepted node: the pins its counted Acceptance was made on,
     as later refreshed by verified Lightweight re-reviews. `None` for a node
@@ -1174,6 +1180,7 @@ def _signed_pins(store: ProjectStore, node_id: str) -> dict[str, PinnedDependenc
     return pins
 
 
+@memoized_read
 def get_dependency_pin(store: ProjectStore, node_id: str, target_node_id: str) -> DependencyPin | None:
     """The pin as it counts. For an Accepted node that's the signed pin, not
     the `dependency_pins` row, which a direct edit could change (#35 C)."""
@@ -1589,6 +1596,7 @@ def _acceptance(store: ProjectStore, node: ProofMapNode) -> tuple[str, _Counted 
     return "unreviewed", latest, None
 
 
+@memoized_read
 def _accepted_proof(store: ProjectStore, node_id: str) -> CandidateProofRecord | None:
     """The Candidate proof an Accepted node's counted Acceptance was made on."""
     node = get_node(store, node_id)
@@ -1606,6 +1614,8 @@ def get_accepted_version(store: ProjectStore, node_id: str) -> int | None:
     return proof.version if proof else None
 
 
+@memoized_read
+@read_scoped
 def get_acceptance_state(store: ProjectStore, node_id: str) -> str:
     """The node's acceptance_state, computed from its recorded Human Review decisions.
 
@@ -1803,6 +1813,7 @@ def migrate_dependents(
     return record
 
 
+@memoized_read
 def _no_longer_callable(store: ProjectStore, node_id: str) -> bool:
     """Whether any Reference review row says `no-longer-callable`: terminal however it's recorded, like a Reject."""
     return any(
@@ -1811,6 +1822,8 @@ def _no_longer_callable(store: ProjectStore, node_id: str) -> bool:
     )
 
 
+@memoized_read
+@read_scoped
 def get_reference_review_state(store: ProjectStore, node_id: str) -> str:
     """`unreviewed`, `reviewed`, `unverifiable` or `no-longer-callable`, from the newest `kind=reference_review` decision.
 
@@ -2028,6 +2041,7 @@ def _open_challenge_ids(store: ProjectStore, node_id: str) -> list[str]:
     return [challenge.id for challenge in list_challenges(store, target_node_id=node_id, status="open")]
 
 
+@memoized_read
 def has_open_challenge(store: ProjectStore, node_id: str) -> bool:
     return bool(list_challenges(store, target_node_id=node_id, status="open"))
 
@@ -2137,6 +2151,7 @@ def dismiss_challenge(
     )
 
 
+@memoized_read
 def _upstream_cause(store: ProjectStore, node_id: str, *, first: bool = True) -> str | None:
     """What makes `node_id` unsettled upstream: `"challenged"` if it is itself Challenged, or
     reachable (via dependency edges, transitively) from a Challenged node or a citation found
@@ -2183,6 +2198,7 @@ def _is_downstream_of_challenge_or_stale_pin(store: ProjectStore, node_id: str) 
     return _upstream_cause(store, node_id) is not None
 
 
+@memoized_read
 def _dependency_satisfied(store: ProjectStore, dependency_id: str) -> bool:
     """Whether a dependency has reached the standing that unblocks its dependents.
 
@@ -2217,6 +2233,8 @@ def _already_accepted(store: ProjectStore, node: ProofMapNode) -> bool:
     return node.kind != ProofMapNodeKind.imported_result and get_acceptance_state(store, node.id) == "accepted"
 
 
+@memoized_read
+@read_scoped
 def get_workflow_state(store: ProjectStore, node_id: str) -> str:
     """One of `open`, `claimed`, `review-needed`, `revision-requested`, `blocked`.
 
@@ -2269,6 +2287,8 @@ def get_workflow_state(store: ProjectStore, node_id: str) -> str:
     return "open"
 
 
+@memoized_read
+@read_scoped
 def get_blocked_reason(store: ProjectStore, node_id: str) -> str | None:
     """Why `get_workflow_state` reads `blocked`, or `None` if it doesn't.
 
@@ -2296,6 +2316,8 @@ def get_blocked_reason(store: ProjectStore, node_id: str) -> str | None:
     return "dependency-stale" if stale else "not-accepted"
 
 
+@memoized_read
+@read_scoped
 def get_integrity_state(store: ProjectStore, node_id: str) -> str:
     """One of `current`, `potentially-stale`, `challenged`.
 
@@ -2315,6 +2337,7 @@ def get_integrity_state(store: ProjectStore, node_id: str) -> str:
     return "current"
 
 
+@read_scoped
 def get_frontier(store: ProjectStore) -> list[ProofMapNode]:
     """The open, unblocked, unclaimed nodes: what an agent could claim right now (ADR-0010).
 
@@ -2331,6 +2354,7 @@ def get_frontier(store: ProjectStore) -> list[ProofMapNode]:
     ]
 
 
+@read_scoped
 def list_integrity_warnings(store: ProjectStore) -> list[AuthorityWarning]:
     """What about the recorded Human Review decisions doesn't count, node by node.
 
