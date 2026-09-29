@@ -93,7 +93,7 @@ A Human Review decision (Acceptance, Reference review, Evidence review, Lightwei
 _Avoid_: signed decision, confirmation, `--confirm`, approval flag
 
 **Proof map page**:
-proof-cli's own local web page, the map's home, and the researcher's one entry: the DAG and tree, the frontier, creating nodes, each node's three state axes, and the one place Review decisions are made. A theorem, lemma or claim opens in its **studio**, a LaTeX workspace built from prism-local's code with a node panel for claim, split, request review, Challenge and Evidence check. An imported result opens on its own page. See ADR-0008, ADR-0010, ADR-0011.
+proof-cli's own local web page, the map's home, and the researcher's one entry: the DAG and tree, the frontier, each node's three state axes, and the one place Review decisions are made. Nodes are created from the CLI, not on the page. A theorem, lemma or claim opens in its **studio**, a LaTeX workspace built from prism-local's code with a node panel for claim, split, request review, Challenge and Evidence check. An imported result opens on its own page. See ADR-0008, ADR-0010, ADR-0011.
 _Avoid_: review app (its ADR-0009 name), dashboard, admin panel
 
 **Studio**:
@@ -155,3 +155,15 @@ _Avoid_: stale, out of date
 **Split**:
 Decomposing a Theorem, Lemma, or Claim into new Claim nodes that become its dependencies, so each can be worked and Accepted independently. Not gated by review — it proposes work structure, not a mathematical result — so any agent or collaborator may do it, except that a node someone else has claimed is theirs to split unless it is taken over (`--reassign`), which moves the claim to the splitter — even for a node that is Blocked and so can't be claimed. A split is all or nothing: if any new Claim can't be created, none is, and the parent is left as it was. Splitting doesn't resolve the parent: once its new dependencies are Accepted, the parent still needs its own Candidate proof (even a short one) and its own Acceptance, combining them. A parent's existing dependencies aren't automatically reassigned to the new children; only a person or agent explicitly moving one decides that (`proof node depend <parent> --move <dependency> --to <child>`, which also adds or removes an edge; the same claimant and Accepted-node rules apply, and the pins are taken at the next request-review). A new Claim may name dependencies of its own, which may not rest on the node being split. Split doesn't apply to an Imported result (nothing to decompose) or a Rejected node (pursue a new node instead of reviving that one). A node produced by a split records which node it was split from, in `derived_from`.
 _Avoid_: decompose (fine informally, but keep decisions and CLI/agent protocol on "split"), break down
+
+### Publication
+
+A claim's way into a paper runs on two tracks that never feed each other (#30). The **mathematical track** is the node's own acceptance and integrity, read live from the counted Review decisions; publication never writes it. The **editorial track** is Editorial readiness. Nothing on either track is derived from the other: Accepted never makes a claim paper_ready, and paper_ready never makes a node Accepted.
+
+**Editorial readiness**:
+How far a claim has got towards a paper: internal_draft → collaborator_ready → supplement_ready → paper_ready, or withdrawn. It is editorial, not a Human Review decision, so any agent or collaborator may set it with `proof publication set`, and every output labels it editorial. The allowed moves are one step forward or back, withdrawn from any state, and withdrawn → internal_draft to start again; re-setting the current state (to edit a claim's details) is always allowed. Anything else fails with `INVALID_READINESS_TRANSITION`. Only a node that is Accepted · current may be put at supplement_ready or paper_ready (`PUBLICATION_NOT_ACCEPTED`); a theorem contract has no acceptance axis, so its claim never gets there (`PUBLICATION_NO_ACCEPTANCE_AXIS`). A ready claim whose node later stops being Accepted · current, for example because a Challenge was opened, is **withheld** from the paper and supplement exports and listed with the reason. The retired values migrate when a claim is loaded: `disputed` and `blocked` become internal_draft (the node's own axes now carry those facts), and `superseded` becomes withdrawn; the claim keeps `migrated_from` and a note.
+_Avoid_: publication status, approved (for readiness), paper-accepted
+
+**Release record**:
+An editorial note that a bundle went out to an audience (`proof publication release`, `proof publication withdraw`). `--approved-by` names who said so; it is not a Human Review decision. A release sign-off on record is the author of the git commit that releases it (the ADR-0010 pattern), with no mechanism of its own.
+_Avoid_: release approval (as if it were a review decision), sign-off record
