@@ -32,7 +32,7 @@ So the project answered "what can be called?" in two places, and one of them cou
    - The node page and the review card show the linked entry.
    - A Reference review binds the `reference_id`, not the entry's text. If the linked entry is deleted, the review reads unverifiable. Editing the entry's text doesn't touch the review.
 
-5. **Conditional auto-trust is deferred.** A rule that treats a reference meeting certain conditions as trusted without a review may come later. For now it is recorded under Not yet specified on the wayfinder map (#14).
+5. **Conditional auto-trust is deferred.** A rule that treats a reference meeting certain conditions as trusted without a review may come later. For now it is recorded under Not yet specified on the wayfinder map (#87).
 
 6. **A `BlockerRecord` is a legacy informational note, not attached to proof-map nodes.** ADR-0001 kept it as "an annotation attached to a node". It isn't one: nothing links it to a node, and none will. A problem with a node is expressed as a Challenge when it calls the node's standing into doubt, or informally otherwise (point 7). *(Researcher's decision, 2026-09-29, closing out #14.)*
 
