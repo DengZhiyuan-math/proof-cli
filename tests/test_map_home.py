@@ -1,4 +1,4 @@
-"""The proof map page's home (PR #107's instrument panel), run for real under node (issue #112).
+"""The proof map page's home (PR #107, redesigned in Apple's design language), run for real under node (issue #112).
 
 A review card shows its snapshot's 核心思路 and 难点, and a map node's hover its 核心思路 (ADR-0013).
 
@@ -61,20 +61,22 @@ ACCEPTED_CHALLENGED_FRONTIER = _node("lem_ch", "lemma", "Challenged but claimabl
 
 
 @pytest.mark.parametrize("warning, axes", [
-    ("CHALLENGED", {"acceptance_state": "accepted", "integrity_state": "challenged"}),
-    ("STALE", {"integrity_state": "potentially-stale"}),
-    ("UNVERIFIABLE", {"acceptance_state": "unverifiable"}),
+    ("Challenged", {"acceptance_state": "accepted", "integrity_state": "challenged"}),
+    ("Dependency changed", {"integrity_state": "potentially-stale"}),
+    ("Decision outdated", {"acceptance_state": "unverifiable"}),
 ])
 def test_a_frontier_node_on_the_canvas_keeps_its_frontier_marker_beside_its_warning(warning, axes):
     """Accepted and Challenged (or stale, or unverifiable), yet on the frontier: the warning must not replace the frontier."""
     (shown,) = _home(map_={"nodes": [_node("lem_w", frontier=True, **axes), _node("lem_plain", frontier=True)]})
     node = shown["dag"]["lem_w"]
-    assert "frontier" in node["classes"]
-    tags = {t["text"]: t["classes"] for t in node["tags"]}
-    assert "accent" in tags["FRONTIER"] and "warn" in tags[warning]
+    assert "frontier" in node["classes"] and "state-attention" in node["classes"]
+    # the warning's badge and the frontier's own, side by side; the word names the warning
+    assert node["icons"] == ["attention", "ready"]
+    assert [t["text"] for t in node["tags"]] == [warning]
     assert "on the frontier" in node["label"]
     # a plain frontier node says it once
-    assert [t["text"] for t in shown["dag"]["lem_plain"]["tags"]] == ["FRONTIER"]
+    plain = shown["dag"]["lem_plain"]
+    assert plain["icons"] == ["ready"] and [t["text"] for t in plain["tags"]] == ["Ready"]
 
 
 def test_a_frontier_node_in_the_tree_keeps_its_frontier_chip_beside_its_warning():
@@ -84,11 +86,12 @@ def test_a_frontier_node_in_the_tree_keeps_its_frontier_chip_beside_its_warning(
     assert "frontier" in line["chips"] and "challenged" in line["chips"]
 
 
-def test_the_frontier_border_is_never_overridden_by_a_warning_border():
+def test_the_frontier_border_is_never_overridden_by_a_state_border():
+    """Every state tints its card's edge; the frontier's blue edge comes after them all, so it wins."""
     css = (STATIC / "app.css").read_text()
     last_frontier = css.rindex("#dag-svg .node.frontier .box")
-    for warning in ("challenged", "stale", "unverifiable"):
-        assert last_frontier > css.index(f"#dag-svg .node.{warning} .box")  # the later rule of the same weight wins
+    for state_rule in ('#dag-svg .node[class*="state-"] .box', "#dag-svg .node.state-open .box"):
+        assert last_frontier > css.rindex(state_rule)  # the later rule wins
 
 
 # -- the tree's data attributes ----------------------------------------------------------
@@ -118,7 +121,7 @@ def test_the_tree_can_be_rooted_at_any_node():
 
 def test_the_caption_counts_the_nodes_and_the_frontier():
     (shown,) = _home()
-    assert shown["caption"].startswith("3 node(s) · 1 on the frontier")
+    assert shown["caption"].startswith("3 nodes · 1 on the frontier")
 
 
 # -- Awaiting review ---------------------------------------------------------------------
@@ -259,7 +262,7 @@ def test_enter_first_brings_the_first_match_into_view_then_opens_it():
     # the first Enter pans (and zooms, to at least life size) so the match sits in the middle of the canvas
     x, y, k = _centre(shown, "lem_bound")
     assert abs(x - 400) < 1 and k >= 1
-    assert abs(y - (44 + 600) / 2) < 1  # the middle of what the map bar leaves showing
+    assert abs(y - 600 / 2) < 1  # the middle of the canvas: the toolbar sits above it, not over it
     assert shown["scene"] != typed["scene"] and shown["href"] == ""
     assert "Enter again" in shown["find"]["count"]
     # the second opens its page: a lemma in its studio
@@ -294,22 +297,24 @@ def test_slash_focuses_the_search_box_and_f_still_fits_the_map():
     assert refitted["scene"] == fitted["scene"]
 
 
-def test_the_search_box_sits_on_the_map_bar_in_the_panels_style():
+def test_the_search_box_sits_in_the_toolbar_as_a_rounded_search_field():
     html = (STATIC / "index.html").read_text()
-    head = html[html.index('<div class="maphead">'):html.index('<div id="map-dag"')]
+    head = html[html.index('<header class="toolbar">'):html.index("</header>")]
     assert 'id="map-find"' in head and 'type="search"' in head and 'id="map-find-count"' in head
     count = head[head.rindex("<", 0, head.index('id="map-find-count"')):]
     assert 'aria-live="polite"' in count[:count.index(">")]
     css = (STATIC / "app.css").read_text()
     assert "#dag-svg .node.dim" in css and "#map-tree li.dim" in css
     rule = css[css.index(".find {"):]
-    assert "clip-path: polygon(" in rule[:rule.index("}")]  # chamfered like the panel's other controls
+    assert "border-radius" in rule[:rule.index("}")]  # rounded like the toolbar's other controls
+    assert 'body:not([data-page="map"]) .find' in css  # the map's own control: shown on the map only
 
 
-def test_the_map_bar_wraps_at_phone_width_rather_than_scrolling_sideways():
+def test_the_toolbar_wraps_at_phone_width_rather_than_scrolling_sideways():
     css = (STATIC / "app.css").read_text()
-    phone = css[css.index("@media (max-width: 720px)"):]
-    assert ".maphead" in phone and "flex-wrap: wrap" in phone
+    phone = css[css.index("@media (max-width: 760px)"):]
+    toolbar = phone[phone.index(".toolbar {"):]
+    assert "flex-wrap: wrap" in toolbar[:toolbar.index("}")]
     find = phone[phone.index(".find {"):]
     assert "min-width: 0" in find[:find.index("}")]
     box = phone[phone.index(".find input"):]
@@ -379,3 +384,20 @@ def test_the_map_page_loads_the_vendored_katex_and_serves_only_it_from_the_studi
     assert shared_asset("vendor/katex.min.js") and shared_asset("vendor/fonts/KaTeX_Main-Regular.woff2")
     for refused in ("app.js", "vendor/codemirror.js", "../studio/server.py", "vendor/fonts/../../server.py", "mathtext.js/../app.js"):
         assert shared_asset(refused) is None, refused
+
+
+# -- the warnings page (the Apple redesign) ------------------------------------------------
+
+
+def test_the_warnings_page_lists_the_nodes_that_need_attention_and_the_sidebar_counts_them():
+    nodes = {"nodes": [_node("lem_ch", "lemma", "Challenged one", integrity_state="challenged"),
+                       _node("lem_st", "lemma", "Stale one", integrity_state="potentially-stale"),
+                       _node("lem_ok", "lemma", "Fine one")]}
+    warning = {"code": "UNCONFIRMED", "message": "a decision git doesn't have", "details": {}}
+    (shown,) = _home(state=_state([], [warning]), map_=nodes)
+    assert len(shown["attention"]) == 2
+    assert "Challenged one" in shown["attention"][0] and "A Challenge is open" in shown["attention"][0]
+    assert "Stale one" in shown["attention"][1] and "A dependency moved" in shown["attention"][1]
+    assert shown["railWarnings"] == "3"  # two nodes and one review record
+    (quiet,) = _home(state=_state(), map_={"nodes": [_node("lem_ok")]})
+    assert quiet["attention"] == ["Nothing on the map needs attention."] and quiet["railWarnings"] == ""

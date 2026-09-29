@@ -166,12 +166,16 @@ def test_no_page_offers_open_in_prism_local():
         assert "prism-local" not in text.lower() and "PROOF_CLI_PRISM_LOCAL" not in text, path.name
 
 
-def test_the_studio_page_carries_the_node_panel():
+def test_the_studio_page_carries_the_node_panel_and_the_agents_actions():
+    """The node panel shows the node and who holds it; what the proof agent does is asked of it from its panel."""
     index = (STUDIO_STATIC / "index.html").read_text()
-    assert 'src="static/node.js"' in index and 'id="node-panel"' in index
+    assert 'src="static/node.js"' in index and 'id="node-panel"' in index and 'id="chat-plus"' in index and 'id="plus-menu"' in index
     panel = (STUDIO_STATIC / "node.js").read_text()
     for action in ("claim", "unassign", "split", "depend", "request-review", "challenge", "evidence"):
-        assert f"/{action}" in panel, action
+        assert f'"/{action}"' not in panel, action  # the agent does these, through `proof`
+    agent = (STUDIO_STATIC / "app.js").read_text()
+    for label in ("Prove it", "Request review", "Split into claims", "Edit dependencies", "Open a Challenge", "Record evidence"):
+        assert f'["{label}",' in agent, label
 
 
 # -- the panel in the browser (PR #76 audit), run for real under node ------------------
@@ -200,24 +204,25 @@ def _panel(**scenario):
     return _json.loads(done.stdout)
 
 
-def test_request_review_saves_the_editor_first_and_stops_if_it_cannot():
-    refused = _panel(saveAll=False, click={"label": "Request review", "values": {"rationale": "one argument"}})
-    assert refused["events"] == ["saveAll"]  # nothing requested from stale text on disk
-    assert "saved" in refused["note"]
+def test_the_agent_is_asked_only_after_the_editor_is_saved():
+    """A request to the agent (request review among them) snapshots files on disk: the editor saves first (PR #76 audit)."""
+    agent = (STUDIO_STATIC / "app.js").read_text()
+    send = agent[agent.index("async function chatSend()"):]
+    assert send.index("saveAll()") < send.index('api("/api/agent"')
 
-    saved = _panel(click={"label": "Request review", "values": {"rationale": "one argument"}})
-    assert saved["events"][0] == "saveAll" and saved["events"][1]["post"] == "/api/node/A/request-review"
+
+def test_the_claim_is_shown_as_a_state_without_a_button():
+    unclaimed = _panel()
+    assert "unclaimed" in unclaimed["panel"] and not unclaimed["events"]
+    held = _panel(view={**VIEW, "claim": {"claimant_id": "codex"}})
+    assert "claimed by codex" in held["panel"]
+    assert not any(word in held["panel"] for word in ("Unassign", "Take over"))
 
 
 def test_the_dependency_list_shows_pins_and_opens_each_dependency_where_it_lives():
     shown = _panel()
     assert shown["links"] == ["/studio/lem/", "/#/node/ref"]
     assert "pinned v3" in shown["deps"] and "accepted v4" in shown["deps"]
-
-
-def test_an_evidence_check_names_the_snapshot_it_checked():
-    sent = _panel(answer={"outcome": "passed"}, click={"label": "Record an Evidence check on snapshot v1", "values": {"outcome": "passed", "run_by": "lean"}})
-    assert sent["events"][-1]["body"]["candidate_proof_id"] == "cp-v1"
 
 
 # -- review in the studio (#71) --------------------------------------------------------
@@ -239,6 +244,11 @@ REVIEW_VIEW = {
 }
 
 
+def _choices(shown):
+    """The decisions a review sheet offers: its buttons but Done and Record Decision."""
+    return [label for label in shown["reviewButtons"] if label not in ("Done", "Record Decision")]
+
+
 def test_the_review_view_shows_only_the_summary_and_the_decision_controls():
     shown = _panel(view=REVIEW_VIEW)
     review = shown["review"]
@@ -250,7 +260,7 @@ def test_the_review_view_shows_only_the_summary_and_the_decision_controls():
     for source in ("MAIN", "BODY", "PRE", "body.tex", "proof.tex", "preamble.tex"):
         assert source not in review, source
     assert not [href for href in shown["reviewLinks"] if "pdf" in href]
-    assert shown["reviewButtons"] == ["Accept this snapshot"]
+    assert _choices(shown) == ["Accept this snapshot"]
     # the frozen sources and the PDF are a link away, on the node's page
     assert "/#/node/A" in shown["reviewLinks"]
 
@@ -271,19 +281,21 @@ def test_an_old_snapshot_without_a_summary_is_reviewed_with_a_note_and_a_link():
     shown = _panel(view=old)
     assert "这个 snapshot 没有关键思路摘要" in shown["review"]
     assert "/#/node/A" in shown["reviewLinks"]
-    assert shown["reviewButtons"] == ["Accept this snapshot"]  # still decided as before
+    assert _choices(shown) == ["Accept this snapshot"]  # still decided as before
     assert "MAIN" not in shown["review"]
 
 
-def test_the_panel_offers_the_proof_agents_draft_when_the_node_has_no_summary():
+def test_the_agent_panel_offers_the_proof_agents_draft_when_the_node_has_no_summary():
+    """The node panel says what is missing; the draft is the proof agent's, from its "+" menu."""
     missing = {**VIEW, "key_ideas_working": {"exists": False, "missing": ["key-ideas.md"]}}
-    drafted = _panel(view=missing, press="Draft key ideas with the proof agent")
-    assert "draftKeyIdeas" in drafted["events"]
+    drafted = _panel(view=missing, draft=True)
+    assert drafted["draftOffered"] and "draftKeyIdeas" in drafted["events"]
     assert "request review to confirm" in drafted["note"]
+    assert "No key-ideas.md yet" in drafted["text"] and not drafted["buttons"]  # a hint, not a button
     # with a summary in place there is nothing to draft; an incomplete one says what it lacks
-    assert "Draft key ideas with the proof agent" not in _panel(view=REVIEW_VIEW)["buttons"]
-    partial = _panel(view={**VIEW, "key_ideas_working": {"exists": True, "missing": ["主要步骤"]}})
-    assert "主要步骤" in partial["text"] and "Draft key ideas with the proof agent" not in partial["buttons"]
+    assert not _panel(view=REVIEW_VIEW, draft=True)["draftOffered"]
+    partial = _panel(view={**VIEW, "key_ideas_working": {"exists": True, "missing": ["主要步骤"]}}, draft=True)
+    assert "主要步骤" in partial["text"] and not partial["draftOffered"]
 
 
 def test_the_studio_page_can_draft_key_ideas_through_the_agent_panel():
@@ -292,7 +304,7 @@ def test_the_studio_page_can_draft_key_ideas_through_the_agent_panel():
 
 
 def test_a_decision_from_the_studio_carries_its_binding_and_the_snapshot_it_showed():
-    sent = _panel(view=REVIEW_VIEW, press="Accept this snapshot", rationale="every step checked",
+    sent = _panel(view=REVIEW_VIEW, press=["Accept this snapshot", "Record Decision"], rationale="every step checked",
                   answer={"results": [{"ok": True}]})
     posted = [e for e in sent["events"] if isinstance(e, dict) and e.get("post") == "/api/decide"]
     (decision,) = posted[0]["body"]["decisions"]
@@ -301,7 +313,7 @@ def test_a_decision_from_the_studio_carries_its_binding_and_the_snapshot_it_show
 
 
 def test_a_refused_confirmation_records_nothing():
-    sent = _panel(view=REVIEW_VIEW, press="Accept this snapshot", confirm=False)
+    sent = _panel(view=REVIEW_VIEW, press=["Accept this snapshot", "Record Decision"], confirm=False)
     assert not [e for e in sent["events"] if isinstance(e, dict) and e.get("post")]
 
 
@@ -334,6 +346,21 @@ def test_the_pending_list_sends_a_local_node_to_its_studios_review():
 
 
 
+def test_choosing_a_decision_alone_records_nothing():
+    """A decision is one choice, then Record: picking an option sends nothing."""
+    sent = _panel(view=REVIEW_VIEW, press="Accept this snapshot")
+    assert not [e for e in sent["events"] if isinstance(e, dict) and e.get("post")]
+
+
+def test_the_review_lives_in_the_agent_panel_and_the_agent_never_decides():
+    index = (STUDIO_STATIC / "index.html").read_text()
+    chat = index[index.index('<aside id="chat">'):]
+    assert 'id="review-card"' in chat
+    panel = (STUDIO_STATIC / "node.js").read_text()
+    review = panel[panel.index("function reviewSection"):panel.index("const VALUE_STATE")]
+    assert 'call("/api/decide"' in review and "/api/agent" not in review  # recorded as the researcher, straight to the map
+
+
 def test_a_damaged_snapshot_shows_as_such_in_the_review_section():
     broken = {**REVIEW_VIEW, "candidate_proof": {"id": "cp-v2", "version": 2, "sha256": None, "text": "", "files": {}, "unreadable": True}}
     shown = _panel(view=broken)
@@ -364,7 +391,7 @@ def test_a_malformed_formula_in_the_review_view_shows_as_text_and_never_throws()
     assert bad["text"] == "$\\frac{1}{$" and bad["title"]  # KaTeX's parse error, on hover
     assert {"class": "math", "text": "[katex: \\alpha]", "title": None} in shown["math"]
     assert "an unclosed $ stays text." in shown["review"]
-    assert shown["reviewButtons"] == ["Accept this snapshot"]  # the panel still rendered whole
+    assert _choices(shown) == ["Accept this snapshot"]  # the panel still rendered whole
 
 
 def test_without_katex_the_maths_shows_as_written():

@@ -14,7 +14,7 @@ class El {
 const scenario = JSON.parse(process.argv[2]);
 const elements = {};
 const context = {
-  document: { getElementById: (id) => (elements[id] ||= new El("div")), createElement: (tag) => new El(tag), addEventListener() {} },
+  document: { getElementById: (id) => (elements[id] ||= new El("div")), createElement: (tag) => new El(tag), createElementNS: (_, tag) => new El(tag), addEventListener() {} },  // the state chips carry an SVG icon
   window: { addEventListener() {} },
   location: { href: "" },
 };

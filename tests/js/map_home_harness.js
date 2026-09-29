@@ -84,13 +84,14 @@ class FakeElement {
   const scenario = JSON.parse(process.argv[2]);
   const ids = ["message", "project", "reviewer", "reviewer-initial", "stat-frontier", "stat-review", "rail-review", "rail-warnings",
     "home", "node-page", "confirm", "confirm-decisions", "confirm-record", "confirm-cancel",
+    "sidebar-toggle", "review-page", "warnings-page", "attention-nodes", "attention-count", "records-count",
     "pending", "pending-count", "decide-batch", "warnings",
     "view-dag", "view-tree", "tree-root", "tree-root-label", "map-caption", "map-dag", "map-tree", "dag-svg",
     "zoom-in", "zoom-out", "zoom-fit", "zoom-tidy", "zoom-level", "map-find", "map-find-count",
     "node-title", "node-axes", "node-warnings", "node-statement", "node-assumptions", "node-claim", "node-folder", "node-source",
     "node-dependents", "node-pdfs", "node-deps", "node-challenges", "node-proof-meta", "node-proof-exact", "node-evidence",
     "node-decisions", "node-history"];
-  const tags = { "tree-root": "select", "dag-svg": "svg", "decide-batch": "button", pending: "table", warnings: "ul", "map-find": "input",
+  const tags = { "tree-root": "select", "dag-svg": "svg", "decide-batch": "button", pending: "table", warnings: "ul", "map-find": "input", "attention-nodes": "ul",
     "node-deps": "table", "node-decisions": "table", "node-challenges": "ul", "node-evidence": "ul", "node-history": "ul" };
   const elements = Object.fromEntries(ids.map((id) => [id, new FakeElement(tags[id] || "div")]));
   Object.assign(elements["map-dag"], { clientWidth: 800, clientHeight: 600 });  // the canvas has a size, so it can be fitted and panned
@@ -146,6 +147,8 @@ class FakeElement {
       classes: g.className.split(" "),
       texts: g.querySelectorAll("text").map((t) => t.textContent),
       tags: g.querySelectorAll("text.tag").map((t) => ({ text: t.textContent, classes: t.className.split(" ") })),
+      // the state badges on the card's corner (the Apple redesign): each badge's state
+      icons: g.querySelectorAll("g.status-icon").map((i) => i.className.split(" ").find((c) => c !== "status-icon")),
       label: g.attributes["aria-label"],
       title: (g.querySelector("title") || { textContent: null }).textContent,  // what hovering it shows
     }])),
@@ -161,6 +164,9 @@ class FakeElement {
     pendingRows: elements.pending.querySelectorAll("tbody tr").map((tr) => tr.textContent),
     pendingCount: elements["pending-count"].textContent,
     warnings: elements.warnings.querySelectorAll("li").map((li) => li.textContent),
+    // the warnings page's nodes that need attention, and the sidebar's count of everything on it
+    attention: elements["attention-nodes"].querySelectorAll("li").map((li) => li.textContent),
+    railWarnings: elements["rail-warnings"].textContent,
     message: elements.message.textContent,
     // the node's own page, once one is open: its source block, which carries the citation
     nodePageShown: !elements["node-page"].hidden,
