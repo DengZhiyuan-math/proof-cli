@@ -24,7 +24,7 @@ Human Review decisions (accept, reject, Reference review, dismissing a Challenge
 
 ## As a node's proof agent
 
-A node's studio starts its agent in `proofs/<id>/` with `PROOF_ROOT` set to the project and its own brief (ADR-0011). The steps above are that brief. Files change only in the node's sources and `scratch/`; everything else goes through `proof`.
+A node's studio starts its agent in `proofs/<id>/` with `PROOF_ROOT` set to the project and its own brief (ADR-0011). The steps above are that brief. Files change only in the node's sources and `scratch/`; everything else goes through `proof`. Requesting review freezes the working inputs and shared preamble in `snapshots/v<N>/`, with a manifest; review is of that frozen snapshot.
 
 ## Working conventions
 
