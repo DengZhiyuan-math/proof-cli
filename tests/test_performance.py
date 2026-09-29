@@ -117,6 +117,24 @@ def test_a_release_with_different_ddl_reapplies_it(tmp_path: Path, monkeypatch, 
     assert any(statement.lstrip().upper().startswith("CREATE TABLE") for statement in statements)
 
 
+def test_a_project_stamped_before_snapshot_dependencies_gains_the_column(tmp_path: Path):
+    """A project an older release migrated and stamped, before #96's `candidate_proofs.dependencies`,
+    gets the column on its next connect: the added columns are part of the DDL fingerprint."""
+    store = ensure_project(tmp_path)
+    raw = sqlite3.connect(store.db_path)
+    raw.execute("ALTER TABLE candidate_proofs DROP COLUMN dependencies")
+    raw.commit()
+    cookie = raw.execute("PRAGMA schema_version").fetchone()[0]
+    older_digest = storage._SCHEMA_DDL_DIGEST ^ 1  # the older release's DDL, without the column
+    raw.execute(f"PRAGMA user_version = {(older_digest ^ cookie) & 0x7FFFFFFF}")  # current, as that release saw it
+    raw.commit()
+    raw.close()
+
+    with store.connect() as conn:
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(candidate_proofs)")}
+    assert "dependencies" in columns
+
+
 # -- reads stay linear -----------------------------------------------------------------
 
 

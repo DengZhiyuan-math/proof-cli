@@ -195,10 +195,22 @@ from .theorems import (
     apply_theorem,
     get_contract,
     list_theorems,
+    LEGACY_TRUST_NOTICE,
     show_theorem,
     theorem_callability,
     update_theorem,
 )
+
+
+def _dump_legacy(payload: dict) -> str:
+    # ensure_ascii off, so the notice reads as written (ADR-0012)
+    return json.dumps(payload, indent=2, ensure_ascii=False)
+
+
+def _labelled(record) -> str:
+    """A record that carries legacy trust fields, as JSON led by the legacy notice (ADR-0012)."""
+    payload = record.model_dump(mode="json") if hasattr(record, "model_dump") else dict(record)
+    return _dump_legacy({"legacy_notice": LEGACY_TRUST_NOTICE, **payload})
 
 
 def get_store(root: str | Path = ".") -> ProjectStore:
@@ -217,10 +229,6 @@ def _load_model_json(value: str, model: type[object]):
 
 def _load_model_json_list(values: list[str] | None, model: type[object]) -> list[object]:
     return [model.model_validate_json(value) for value in values or []]  # type: ignore[attr-defined]
-
-
-def _next_obligation_id(*parts: str) -> str:
-    return f"obl_{abs(hash(parts)) % 100000}"
 
 
 def _format_candidate_line(rank: int, title: str, source_kind: str, score: float, candidate_id: str) -> str:
@@ -778,7 +786,7 @@ def cmd_proof_retrieve(
         external_candidates=external_candidates,
         limit=limit,
     )
-    return report.model_dump_json(indent=2)
+    return _labelled(report)
 
 
 def cmd_project_analyze(root: str | Path = ".", *, query: str = "", limit: int = 5) -> str:
@@ -788,6 +796,11 @@ def cmd_project_analyze(root: str | Path = ".", *, query: str = "", limit: int =
     return render_json(report)
 
 
+def reference_list_data(root: str | Path = ".") -> dict:
+    references = list_references(get_store(root))
+    return {"legacy_notice": LEGACY_TRUST_NOTICE, "references": [reference.model_dump(mode="json") for reference in references]}
+
+
 def cmd_reference_list(root: str | Path = ".") -> str:
     references = list_references(get_store(root))
     if not references:
@@ -795,12 +808,13 @@ def cmd_reference_list(root: str | Path = ".") -> str:
     lines = ["References:"]
     for reference in references:
         lines.append(f"- {_format_reference_line(reference)}")
+    lines.append(f"(review status and callable: {LEGACY_TRUST_NOTICE})")
     return "\n".join(lines)
 
 
 def cmd_reference_show(reference_id: str, root: str | Path = ".") -> str:
     reference = get_reference(get_store(root), reference_id)
-    return reference.model_dump_json(indent=2) if reference else f"Reference not found: {reference_id}"
+    return _labelled(reference) if reference else f"Reference not found: {reference_id}"
 
 
 def cmd_reference_import(
@@ -833,7 +847,7 @@ def cmd_reference_import(
     )
     stored = import_reference(store, reference)
     _append_history(store, f"reference_import:{reference_id}", message=f"imported reference {reference_id}")
-    return stored.model_dump_json(indent=2)
+    return _labelled(stored)
 
 
 def cmd_proof_ground(
@@ -851,31 +865,18 @@ def cmd_proof_ground(
     _append_history(store, f"ground:{theorem_id}:{','.join(reference_ids)}", message=f"ground request for {theorem_id}")
     approved: list[str] = []
     missing: list[str] = []
-    blocked_reference_ids: list[str] = []
     for reference_id in reference_ids:
         reference = get_reference(store, reference_id)
         if reference is None:
             missing.append(f"reference {reference_id} not found")
-            blocked_reference_ids.append(reference_id)
             continue
         if not reference.is_callable:
             missing.append(f"reference {reference_id} is not callable")
-            blocked_reference_ids.append(reference_id)
             continue
         approved.append(reference_id)
 
     if missing:
-        add_obligation(
-            store,
-            ProofObligation(
-                id=_next_obligation_id(theorem_id, *reference_ids, "ground"),
-                goal_statement=f"ground {theorem_id}",
-                required_for=theorem_id,
-                blocking_reason="; ".join(missing),
-            ),
-            failed_reference_ids=blocked_reference_ids,
-            route_notes=notes or "grounding check failed",
-        )
+        # a failed ground is only reported; it no longer files an obligation nobody can resolve (ADR-0012)
         append_event(
             store,
             "dsl_ground_blocked",
@@ -952,10 +953,14 @@ def cmd_proof_obligation_derive(theorem_id: str, root: str | Path = ".", *, note
     return json.dumps(payload, indent=2)
 
 
-def cmd_proof_bug_scan(theorem_id: str, root: str | Path = ".") -> str:
+def bug_scan_data(theorem_id: str, root: str | Path = ".") -> dict:
     store = get_store(root)
     scan = _scan_and_store_bugs(store, theorem_id)
-    return scan.model_dump_json(indent=2)
+    return {"legacy_notice": LEGACY_TRUST_NOTICE, **scan.model_dump(mode="json")}
+
+
+def cmd_proof_bug_scan(theorem_id: str, root: str | Path = ".") -> str:
+    return _dump_legacy(bug_scan_data(theorem_id, root))
 
 
 def cmd_proof_bug_list(root: str | Path = ".", *, theorem_id: str = "") -> str:
@@ -1100,7 +1105,7 @@ def cmd_proof_trace_dependency(target_id: str, root: str | Path = ".") -> str:
         "recent_theorem_usage": list(load_state(store).recent_theorem_usage),
         "session_history": list(load_state(store).session_history[-10:]),
     }
-    return json.dumps(payload, indent=2)
+    return _labelled(payload)
 
 
 def cmd_proof_formalize_recommend(source_id: str, root: str | Path = ".", *, backend_target: str = "", notes: str = "") -> str:
@@ -1455,10 +1460,15 @@ def cmd_proof_trace_machine_check(source_id: str, root: str | Path = ".") -> str
 
 
 def cmd_proof_explain_apply(theorem_id: str, root: str | Path = ".") -> str:
+    data = explain_apply_data(theorem_id, root)
+    return _dump_legacy(data) if data is not None else f"explain:apply:blocked:theorem {theorem_id} not found"
+
+
+def explain_apply_data(theorem_id: str, root: str | Path = ".") -> dict | None:
     store = get_store(root)
     contract = get_contract(store, theorem_id)
     if contract is None:
-        return f"explain:apply:blocked:theorem {theorem_id} not found"
+        return None
     ok, reason = theorem_callability(store, theorem_id)
     state = load_state(store)
     open_obligations = [
@@ -1470,6 +1480,7 @@ def cmd_proof_explain_apply(theorem_id: str, root: str | Path = ".") -> str:
         or (obligation.required_for or "").startswith(f"use_{theorem_id}")
     ]
     payload = {
+        "legacy_notice": LEGACY_TRUST_NOTICE,
         "theorem_id": theorem_id,
         "callable": ok,
         "callability_reason": reason,
@@ -1485,15 +1496,21 @@ def cmd_proof_explain_apply(theorem_id: str, root: str | Path = ".") -> str:
         "local_usage_notes": list(contract.local_usage_notes),
         "imported_usage_notes": list(contract.imported_usage_notes),
     }
-    return json.dumps(payload, indent=2)
+    return payload
 
 
 def cmd_proof_provenance_show(target_id: str, root: str | Path = ".") -> str:
+    data = provenance_show_data(target_id, root)
+    return _dump_legacy(data) if data is not None else f"provenance:not-found:{target_id}"
+
+
+def provenance_show_data(target_id: str, root: str | Path = ".") -> dict | None:
     store = get_store(root)
     theorem = get_contract(store, target_id)
     if theorem is not None:
         ok, reason = theorem_callability(store, target_id)
-        payload = {
+        return {
+            "legacy_notice": LEGACY_TRUST_NOTICE,
             "kind": "theorem",
             "id": target_id,
             "source_ref": theorem.source_ref,
@@ -1507,12 +1524,11 @@ def cmd_proof_provenance_show(target_id: str, root: str | Path = ".") -> str:
             "imported_usage_notes": theorem.imported_usage_notes,
             "notes": theorem.notes,
         }
-        return json.dumps(payload, indent=2)
 
     reference = get_reference(store, target_id)
     if reference is not None:
-        return json.dumps(
-            {
+        return {
+                "legacy_notice": LEGACY_TRUST_NOTICE,
                 "kind": "reference",
                 "id": target_id,
                 "review_status": reference.review_status.value,
@@ -1523,11 +1539,8 @@ def cmd_proof_provenance_show(target_id: str, root: str | Path = ".") -> str:
                 "identifier": reference.identifier,
                 "url": reference.url,
                 "notes": reference.notes,
-            },
-            indent=2,
-        )
-
-    return f"provenance:not-found:{target_id}"
+            }
+    return None
 
 
 def cmd_publication_list(root: str | Path = ".", *, object_type: str = "") -> str:
@@ -1729,34 +1742,48 @@ def cmd_theorem_add(
         contributors=contributor,
         notes=notes,
     )
-    return contract.model_dump_json(indent=2)
+    return _labelled(contract)
 
 
 def cmd_theorem_show(theorem_id: str, root: str | Path = ".") -> str:
     contract = show_theorem(get_store(root), theorem_id)
-    return contract.model_dump_json(indent=2) if contract else "Theorem not found"
+    return _labelled(contract) if contract else "Theorem not found"
 
 
-def cmd_theorem_extract(theorem_id: str, root: str | Path = ".") -> str:
+def theorem_extract_data(theorem_id: str, root: str | Path = ".") -> dict | None:
     store = get_store(root)
     contract = show_theorem(store, theorem_id)
     if contract is None:
-        return f"Theorem not found: {theorem_id}"
+        return None
     ok, reason = theorem_callability(store, theorem_id)
-    payload = contract.model_dump(mode="json")
-    payload["callable"] = ok
-    payload["callability_reason"] = reason
-    return json.dumps(payload, indent=2)
+    return {"legacy_notice": LEGACY_TRUST_NOTICE, **contract.model_dump(mode="json"), "callable": ok, "callability_reason": reason}
+
+
+def cmd_theorem_extract(theorem_id: str, root: str | Path = ".") -> str:
+    data = theorem_extract_data(theorem_id, root)
+    return _dump_legacy(data) if data is not None else f"Theorem not found: {theorem_id}"
+
+
+def theorem_list_data(root: str | Path = ".") -> dict:
+    return {"legacy_notice": LEGACY_TRUST_NOTICE, "theorems": [item.model_dump(mode="json") for item in list_theorems(get_store(root))]}
 
 
 def cmd_theorem_list(root: str | Path = ".") -> str:
     items = list_theorems(get_store(root))
-    return "\n".join([f"{item.id}: {item.name} [{item.status.value}]" for item in items]) or "No theorems"
+    if not items:
+        return "No theorems"
+    lines = [f"{item.id}: {item.name} [{item.status.value}]" for item in items]
+    return "\n".join([*lines, f"(status: {LEGACY_TRUST_NOTICE})"])
+
+
+def theorem_apply_data(theorem_id: str, root: str | Path = ".") -> dict:
+    ok, reason = apply_theorem(get_store(root), theorem_id)
+    return {"legacy_notice": LEGACY_TRUST_NOTICE, "theorem_id": theorem_id, "applied": ok, "reason": reason}
 
 
 def cmd_theorem_apply(theorem_id: str, root: str | Path = ".") -> str:
-    ok, reason = apply_theorem(get_store(root), theorem_id)
-    return f"{theorem_id}: {reason}"
+    data = theorem_apply_data(theorem_id, root)
+    return f"{theorem_id}: {data['reason']}\n({LEGACY_TRUST_NOTICE})"
 
 
 def cmd_theorem_ground(theorem_id: str, reference_ids: list[str], root: str | Path = ".", *, notes: str = "") -> str:
@@ -1861,7 +1888,7 @@ def cmd_memory_show(artifact_id: str, root: str | Path = ".") -> str:
 
 def cmd_snapshot(root: str | Path = ".", handoff_note: str = "") -> str:
     snapshot = build_snapshot(get_store(root), handoff_note=handoff_note)
-    return snapshot.model_dump_json(indent=2)
+    return _labelled(snapshot)
 
 
 def cmd_history(root: str | Path = ".") -> str:
@@ -1873,8 +1900,13 @@ def cmd_export(root: str | Path = ".") -> str:
     return build_export(get_store(root))
 
 
+def export_data(root: str | Path = ".") -> dict:
+    return {"legacy_notice": LEGACY_TRUST_NOTICE, "export": cmd_export(root)}
+
+
 def cmd_exchange_export(root: str | Path = ".", *, note: str = "") -> str:
-    return bundle_to_json(export_exchange_bundle(get_store(root), note=note))
+    # an importer ignores the notice: the bundle model drops unknown fields (ADR-0012)
+    return _labelled(json.loads(bundle_to_json(export_exchange_bundle(get_store(root), note=note))))
 
 
 def cmd_exchange_import(bundle_json: str, root: str | Path = ".") -> str:
@@ -1885,7 +1917,7 @@ def cmd_exchange_import(bundle_json: str, root: str | Path = ".") -> str:
 def cmd_handoff_create(root: str | Path = ".", *, note: str = "") -> str:
     snapshot = create_snapshot(get_store(root), note=note)
     bundle = export_exchange_bundle(get_store(root), note=note or snapshot.handoff_note)
-    return bundle_to_json(bundle)
+    return _labelled(json.loads(bundle_to_json(bundle)))
 
 
 def cmd_handoff_inspect(bundle_json: str = "", root: str | Path = ".") -> str:
