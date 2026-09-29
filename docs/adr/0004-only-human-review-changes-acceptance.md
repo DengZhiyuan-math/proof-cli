@@ -1,6 +1,6 @@
 # Only Human Review changes acceptance; everything else derives integrity signals
 
-**Status**: accepted
+**Status**: accepted. Amended by ADR-0012: comment threads are not wired to proof map nodes; informal discussion lives in the studio's agent panel and git history.
 
 Auditing the peripheral modules against the graph model (issue #3, issue #9) surfaced a real violation of "human-in-the-loop": `verify accept` (`verification_results.py::_update_obligation`) directly closes or blocks a `ProofObligation` and mutates trust-sensitive project state, with no researcher decision in the loop. Nothing stopped an automated checker from silently deciding a result was established. Left as-is, the new graph model would inherit the same hole the moment any checker, checklist, or future automation touched a node.
 

@@ -127,7 +127,8 @@ def _next_steps(
             steps.append(f"recheck related contract(s): {', '.join(blocker.related_contracts)}")
     elif bottleneck_kind == "obligation" and obligations:
         obligation = obligations[0]
-        steps.append(f"resolve obligation {obligation.id}")
+        # an obligation is an informational note now; nothing resolves it (ADR-0012)
+        steps.append(f"state obligation {obligation.id} as a Claim node on the proof map")
         if obligation.source_step_id:
             steps.append(f"revisit source step {obligation.source_step_id}")
     elif bottleneck_kind == "route":

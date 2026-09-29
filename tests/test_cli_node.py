@@ -689,8 +689,7 @@ HUMAN_ONLY_COMMANDS = [
     ["node", "evidence", "review", "chk_1", "trusted"],
     ["node", "release", "clm_1", "--force", "--reason", "stuck"],
     ["challenge", "dismiss", "ch_1"],
-    ["reference", "review", "ref_std", "approve"],
-    ["obligation", "resolve", "obl_1"],
+    # `reference review` and `obligation resolve` are gone, not refused (ADR-0012): test_legacy_trust_retired.py
 ]
 # whatever an agent tries adding to them
 EXTRA_FLAGS = [[], ["--confirm"], ["--signed-decision", "decision.json"], ["--reviewer", "researcher", "--rationale", "trust me"]]

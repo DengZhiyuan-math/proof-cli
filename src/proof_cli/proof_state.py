@@ -10,6 +10,7 @@ from .publication import load_publication_workspace
 from .storage import (
     ProjectStore,
     append_event,
+    list_events,
     read_latest_snapshot,
     read_state,
     store_blocker,
