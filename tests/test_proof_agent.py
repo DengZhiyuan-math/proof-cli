@@ -154,7 +154,7 @@ def test_an_ask_turn_can_read_and_search_but_not_edit(studio):
     assert "WebSearch" in allowed and not [rule for rule in allowed if rule.startswith(("Edit", "Write"))]
 
 
-def test_codex_gets_web_search_the_project_and_the_network(tmp_path):
+def test_codex_gets_web_search_the_project_and_the_network_but_not_the_projects_agents_md(tmp_path):
     job = Job(1)
     job.mode, job.prompt = "edit", "prove it"
     job.context = ProofAgentContext("A", tmp_path, [])
@@ -162,6 +162,8 @@ def test_codex_gets_web_search_the_project_and_the_network(tmp_path):
     assert argv[1:3] == ["--search", "exec"]  # a global flag, before the subcommand
     assert argv[argv.index("--add-dir") + 1] == str(tmp_path)  # proof writes the project database
     assert "sandbox_workspace_write.network_access=true" in argv
+    # nor the repository's AGENTS.md, which Codex loads on its own (PR #79 review): project docs off
+    assert argv[argv.index("project_doc_max_bytes=0") - 1] == "-c"
     assert "Retrieval first" in prompt
 
 
@@ -239,6 +241,10 @@ def test_no_backend_tells_the_proof_agent_to_follow_the_repositorys_rules(studio
     job.mode, job.prompt, job.root = "edit", "prove it", store.root / "proofs" / "A"
     job.context = ProofAgentContext("A", store.root, [])
     codex_prompt = Codex("codex").command(job)[1]
+
+    ask = Job(2)
+    ask.mode, ask.prompt, ask.root, ask.context = "ask", "look", job.root, job.context
+    assert "project_doc_max_bytes=0" in Codex("codex").command(ask)[0]  # an Ask turn too
 
     for prompt in (claude_prompt, codex_prompt):
         assert "follow it exactly" not in prompt and "REPOSITORY RULE" not in prompt
