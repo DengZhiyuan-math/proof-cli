@@ -22,6 +22,10 @@ Every command acts on `--root`, else `$PROOF_ROOT`, else the current folder. Ins
 
 Human Review decisions (accept, reject, Reference review, dismissing a Challenge, …) belong to the researcher on the page; their commands answer `HUMAN_REVIEW_REQUIRED` with the page's URL.
 
+## As a node's proof agent
+
+A node's studio starts its agent in `proofs/<id>/` with `PROOF_ROOT` set to the project and its own brief (ADR-0011). The steps above are that brief. Files change only in the node's sources and `scratch/`; everything else goes through `proof`.
+
 ## Working conventions
 
 - Change project state through `proof`; the files under `.proof/` and `reviews.jsonl` are its record, not a place to edit.
