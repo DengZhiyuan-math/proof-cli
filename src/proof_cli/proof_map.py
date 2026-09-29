@@ -1251,6 +1251,44 @@ _ACCEPTANCE_DECISION_TO_GOVERNANCE_STATE = {
 _ACCEPTANCE_OBJECT_TYPE = "proof_map_node"
 
 
+def _pin_remedy(pin: DependencyPin | None, *, current: bool | None, accepted_version: int | None) -> str | None:
+    """What a lagging or changed pin needs: a Lightweight re-review, or a new Candidate proof (#23, #24)."""
+    if pin is None:
+        return None
+    if current is False:
+        return "new-candidate-proof"
+    if accepted_version is not None and pin.pinned_version != accepted_version:
+        return "lightweight-re-review"
+    return None
+
+
+def dependency_details(store: ProjectStore, node_id: str) -> list[dict]:
+    """Each of a node's dependencies as the node page and `node show --json` show it (#97):
+    its statement and kind, the pin as it counts, the version now Accepted, whether the pin
+    is still current, and the remedy a lagging or changed pin needs."""
+    node = require_node(store, node_id)
+    details = []
+    for dependency_id in node.dependencies:
+        pin = get_dependency_pin(store, node_id, dependency_id)
+        dependency = get_node(store, dependency_id)
+        accepted_version = get_accepted_version(store, dependency_id)
+        current = dependency_pin_is_current(store, pin) if pin else None
+        details.append(
+            {
+                "node_id": dependency_id,
+                "statement": dependency.statement if dependency else None,
+                # where the dependency opens: a studio, or an imported result's own page
+                "kind": dependency.kind.value if dependency else None,
+                "pin": pin.model_dump(mode="json") if pin else None,
+                # the pin lag a Lightweight re-review is about (#23/#24)
+                "accepted_version": accepted_version,
+                "current": current,
+                "remedy": _pin_remedy(pin, current=current, accepted_version=accepted_version),
+            }
+        )
+    return details
+
+
 def _require_awaiting_acceptance_review(store: ProjectStore, node_id: str) -> None:
     """A decision only ever answers a Candidate proof awaiting review.
 
