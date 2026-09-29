@@ -12,7 +12,9 @@ from .commands import (
     explain_apply_data,
     export_data,
     provenance_show_data,
+    memory_list_data,
     reference_list_data,
+    search_data,
     theorem_apply_data,
     theorem_extract_data,
     theorem_list_data,
@@ -123,6 +125,7 @@ from .proof_map import (
     add_dependency,
     claim_node,
     create_node,
+    dependency_details,
     move_dependency,
     remove_dependency,
     get_acceptance_state,
@@ -236,7 +239,11 @@ def export(root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--j
 
 
 @app.command()
-def search(query: str, root: str = ROOT_OPTION, limit: int = 10) -> None:
+def search(query: str, root: str = ROOT_OPTION, limit: int = 10, json_output: bool = typer.Option(False, "--json")) -> None:
+    """Search what the project holds for QUERY. Under --json, a candidate's trust level is legacy (ADR-0012)."""
+    if json_output:
+        typer.echo(dump_envelope(success_envelope("search", search_data(query, _root(root), limit=limit))))
+        return
     typer.echo(cmd_search(query, _root(root), limit=limit))
 
 
@@ -251,6 +258,16 @@ def reason(theorem_id: str, root: str = ROOT_OPTION, notes: str = "") -> None:
     typer.echo(cmd_proof_reason(theorem_id, _root(root), notes=notes))
 
 
+def _with_state_axes(store, node) -> dict:
+    """A node under --json, with its three state axes (ADR-0002)."""
+    return {
+        **node.model_dump(mode="json"),
+        "workflow_state": get_workflow_state(store, node.id),
+        "acceptance_state": get_acceptance_state(store, node.id),
+        "integrity_state": get_integrity_state(store, node.id),
+    }
+
+
 @app.command(rich_help_panel=PROOF_MAP_PANEL)
 @read_scoped
 def frontier(root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
@@ -258,16 +275,7 @@ def frontier(root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "-
     store = get_store(_root(root))
     nodes = get_frontier(store)
     if json_output:
-        entries = [
-            {
-                **node.model_dump(mode="json"),
-                "workflow_state": get_workflow_state(store, node.id),
-                "acceptance_state": get_acceptance_state(store, node.id),
-                "integrity_state": get_integrity_state(store, node.id),
-            }
-            for node in nodes
-        ]
-        typer.echo(dump_envelope(success_envelope("frontier", entries)))
+        typer.echo(dump_envelope(success_envelope("frontier", [_with_state_axes(store, node) for node in nodes])))
         return
     typer.echo(render_frontier(nodes))
 
@@ -425,6 +433,8 @@ def node_show(
         payload["blocked_reason"] = blocked_reason
         payload["working_proof"] = working_proof
         payload["snapshots"] = snapshots
+        # what the node page shows of each dependency: its pin, whether current, the remedy (#97)
+        payload["dependency_details"] = dependency_details(store, node_id)
         typer.echo(dump_envelope(success_envelope("node.show", payload)))
     else:
         typer.echo(
@@ -448,7 +458,7 @@ def node_list(
     store = get_store(_root(root))
     nodes = list_nodes(store)
     if json_output:
-        typer.echo(dump_envelope(success_envelope("node.list", [node.model_dump(mode="json") for node in nodes])))
+        typer.echo(dump_envelope(success_envelope("node.list", [_with_state_axes(store, node) for node in nodes])))
         return
     typer.echo(render_proof_map_node_list(nodes))
 
@@ -792,7 +802,11 @@ def review_serve(root: str = ROOT_OPTION) -> None:
 
 
 @map_app.command("open")
-def review_open(node_id: str = typer.Argument("", help="Open this node's decision page"), root: str = ROOT_OPTION) -> None:
+def review_open(
+    node_id: str = typer.Argument("", help="Open this node's decision page"),
+    root: str = ROOT_OPTION,
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
     """Open this project's proof map page (starting it in the background if needed), optionally at a node."""
     import subprocess
     import time
@@ -813,7 +827,7 @@ def review_open(node_id: str = typer.Argument("", help="Open this node's decisio
                 break
             time.sleep(0.1)
     url = project_url(store, node_id or None)
-    typer.echo(url)
+    typer.echo(dump_envelope(success_envelope("map.open", {"url": url, "node_id": node_id or None})) if json_output else url)
     webbrowser.open(url)
 
 
@@ -1231,18 +1245,25 @@ def memory_list(
     review_id: str = "",
     theorem_id: str = typer.Option("", help="Legacy scope (read-only, ADR-0012)"),
     goal_id: str = typer.Option("", help="Legacy scope (read-only, ADR-0012)"),
+    json_output: bool = typer.Option(False, "--json"),
 ) -> None:
-    typer.echo(
-        cmd_memory_list(
-            _root(root),
-            layer=layer,
-            node_id=node_id,
-            candidate_proof_id=candidate_proof_id,
-            review_id=review_id,
-            theorem_id=theorem_id,
-            goal_id=goal_id,
-        )
+    filters = dict(
+        layer=layer,
+        node_id=node_id,
+        candidate_proof_id=candidate_proof_id,
+        review_id=review_id,
+        theorem_id=theorem_id,
+        goal_id=goal_id,
     )
+    if not json_output:
+        typer.echo(cmd_memory_list(_root(root), **filters))
+        return
+    try:
+        data = memory_list_data(_root(root), **filters)
+    except ValueError as exc:
+        typer.echo(dump_envelope(error_envelope("memory.list", "INVALID_INPUT", str(exc))))
+        raise typer.Exit(code=1)
+    typer.echo(dump_envelope(success_envelope("memory.list", data)))
 
 
 @memory_app.command("show")

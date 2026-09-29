@@ -184,7 +184,8 @@
       action("Claim", "/claim", [["reassign", "checkbox", "take it over"]], (v) => ({ reassign: v.reassign }), () => { tell("Claimed."); return render(); }),
       action("Unassign", "/unassign", [], () => ({}), () => { tell("Unassigned."); return render(); }),
       action("Request review", "/request-review", [["rationale", "textarea", "why this node is scoped to prove directly"]], (v) => ({ rationale: v.rationale }),
-        (snapshot) => { tell(`Snapshot v${snapshot.version} awaits review.`); return render(); }, savedFirst),
+        (snapshot) => { tell(`Snapshot v${snapshot.version} awaits review.` + (snapshot.resnapshot_after_loss == null ? "" :
+          ` A re-snapshot after loss of v${snapshot.resnapshot_after_loss}: it needs its own review.`)); return render(); }, savedFirst),
       action("Split", "/split", [["children", "textarea", "one child per line: id = statement"], ["reassign", "checkbox", "take it over"]],
         (v) => ({ children: children(v.children), reassign: v.reassign }), (result) => { location.href = result.next; }),
       // one dependency edge at a time (#96): a Lemma the proof came to use, or a dependency handed down to a child

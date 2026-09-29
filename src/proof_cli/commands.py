@@ -769,6 +769,22 @@ def _find_memory_artifact(store: ProjectStore, artifact_id: str) -> MemoryArtifa
     return None
 
 
+_RETRIEVAL_PAST = {"search": "searched", "retrieve": "retrieved"}
+
+
+def _retrieval_report(
+    verb: str,
+    query: str,
+    root: str | Path,
+    *,
+    external_candidates: list[dict[str, object]] | None,
+    limit: int,
+):
+    store = get_store(root)
+    _append_history(store, f"{verb}:{query}", message=f"{_RETRIEVAL_PAST[verb]} {query}")
+    return retrieve_candidates(store, query=query, external_candidates=external_candidates, limit=limit)
+
+
 def cmd_proof_search(
     query: str,
     root: str | Path = ".",
@@ -776,15 +792,13 @@ def cmd_proof_search(
     external_candidates: list[dict[str, object]] | None = None,
     limit: int = 10,
 ) -> str:
-    store = get_store(root)
-    _append_history(store, f"search:{query}", message=f"searched {query}")
-    report = retrieve_candidates(
-        store,
-        query=query,
-        external_candidates=external_candidates,
-        limit=limit,
-    )
-    return _render_retrieval_report(report)
+    return _render_retrieval_report(_retrieval_report("search", query, root, external_candidates=external_candidates, limit=limit))
+
+
+def search_data(query: str, root: str | Path = ".", *, limit: int = 10) -> dict:
+    """`search`'s ranked candidates, for its --json envelope: a candidate's trust level is legacy (ADR-0012)."""
+    report = _retrieval_report("search", query, root, external_candidates=None, limit=limit)
+    return {"legacy_notice": LEGACY_TRUST_NOTICE, **report.model_dump(mode="json")}
 
 
 def cmd_proof_retrieve(
@@ -794,15 +808,7 @@ def cmd_proof_retrieve(
     external_candidates: list[dict[str, object]] | None = None,
     limit: int = 10,
 ) -> str:
-    store = get_store(root)
-    _append_history(store, f"retrieve:{query}", message=f"retrieved {query}")
-    report = retrieve_candidates(
-        store,
-        query=query,
-        external_candidates=external_candidates,
-        limit=limit,
-    )
-    return _labelled(report)
+    return _labelled(_retrieval_report("retrieve", query, root, external_candidates=external_candidates, limit=limit))
 
 
 def cmd_project_analyze(root: str | Path = ".", *, query: str = "", limit: int = 5) -> str:
@@ -1981,6 +1987,29 @@ def cmd_memory_add(
         notes=notes,
     )
     return artifact.model_dump_json(indent=2)
+
+
+def memory_list_data(
+    root: str | Path = ".",
+    *,
+    layer: str = "",
+    node_id: str = "",
+    candidate_proof_id: str = "",
+    review_id: str = "",
+    theorem_id: str = "",
+    goal_id: str = "",
+) -> dict:
+    """`memory list` for its --json envelope. An unknown layer is a ValueError."""
+    artifacts = list_memory_artifacts(
+        get_store(root),
+        layer=layer or None,
+        node_id=node_id or None,
+        candidate_proof_id=candidate_proof_id or None,
+        review_id=review_id or None,
+        theorem_id=theorem_id or None,
+        goal_id=goal_id or None,
+    )
+    return {"memory": [artifact.model_dump(mode="json") for artifact in artifacts]}
 
 
 def cmd_memory_list(
