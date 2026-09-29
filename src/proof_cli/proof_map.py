@@ -853,9 +853,10 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
         claim = get_active_claim(store, node_id, conn=conn)
         if claim is not None and claim.claimant_id != requested_by:  # a node someone holds is theirs to hand over
             raise _not_claimant(node_id, claim)
+        node = require_node(store, node_id)  # its dependencies as of the write lock, recorded with the snapshot
         current = get_current_candidate_proof(store, node_id, conn=conn)
-        # the same files, but on other dependencies than the snapshot pinned (#96): a new version re-pins them
-        if current is not None and current.sha256 == sha256 and _pins_match(store, node):
+        # the same files on other dependencies than that snapshot was made on (#96) are a new version
+        if current is not None and current.sha256 == sha256 and _snapshot_dependencies_stand(store, node, current):
             raise ProofMapError(
                 "WORKING_PROOF_UNCHANGED",
                 f"{node_id}'s working proof is unchanged since snapshot v{current.version}, which is already the one under review",
@@ -882,6 +883,7 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
             submitted_by=requested_by,
             scoping_rationale=rationale,
             sha256=sha256,
+            dependencies=list(node.dependencies),
         )
         try:
             insert_candidate_proof(store, record, conn=conn)
@@ -1241,17 +1243,44 @@ def _require_awaiting_acceptance_review(store: ProjectStore, node_id: str) -> No
             "a Human Review decision only applies to a submitted Candidate proof awaiting review",
             details={"workflow_state": workflow_state},
         )
-    if not _pins_match(store, require_node(store, node_id)):
-        # decided now, it would bind pins that aren't the node's dependencies and never count
+    current = get_current_candidate_proof(store, node_id)
+    if current is not None and not _snapshot_dependencies_stand(store, require_node(store, node_id), current):
+        # the snapshot was made on other dependencies: deciding it would accept a proof of a different node
         raise ProofMapError(
             "DEPENDENCIES_CHANGED",
-            f"{node_id}'s dependencies changed since its snapshot was requested for review; request review again to pin them",
+            f"{node_id}'s dependencies changed since snapshot v{current.version} was requested for review; request review again",
         )
 
 
-def _pins_match(store: ProjectStore, node: ProofMapNode) -> bool:
-    """Whether the node's pin rows are exactly its dependencies, as its last request-review left them."""
-    return {pin.target_node_id for pin in list_dependency_pins_for_node(store, node.id)} == set(node.dependencies)
+def _snapshot_dependencies_stand(store: ProjectStore, node: ProofMapNode, snapshot: CandidateProofRecord) -> bool:
+    """Whether `node`'s dependencies are still those `snapshot` was requested for review on (#96).
+
+    Read off the snapshot's own record, which no dependency edit touches —
+    not off the pins, which removing an edge deletes along with it. A
+    snapshot from before the record was kept falls back to its pins. A
+    withdrawn citation the researcher moved this node off (a counted
+    `dependent_migration`, #20) reads as its correction: re-Accepting the
+    same snapshot against the correction is exactly what that decision asks.
+    """
+    recorded = snapshot.dependencies
+    if recorded is None:
+        recorded = [pin.target_node_id for pin in list_dependency_pins_for_node(store, node.id)]
+    return {_migrated(store, node.id, dependency_id) for dependency_id in recorded} == set(node.dependencies)
+
+
+def _migrated(store: ProjectStore, node_id: str, dependency_id: str) -> str:
+    """Where counted Dependent migrations moved `node_id`'s edge on `dependency_id` (itself if none did)."""
+    seen = {dependency_id}
+    while True:
+        moved_to = None
+        for row in decision_rows(store, _ACCEPTANCE_OBJECT_TYPE, dependency_id, ReviewRecordKind.dependent_migration.value):
+            verdict = verify_decision_row(store, row["id"])
+            if verdict.status == "verified" and node_id in verdict.payload.migrated_dependents and verdict.payload.dependency_pins:
+                moved_to = verdict.payload.dependency_pins[0].target_node_id
+        if moved_to is None or moved_to in seen:
+            return dependency_id
+        seen.add(moved_to)
+        dependency_id = moved_to
 
 
 def decide_acceptance(

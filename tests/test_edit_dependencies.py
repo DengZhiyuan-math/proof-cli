@@ -258,6 +258,44 @@ def test_a_snapshot_awaiting_review_is_decided_only_against_the_dependencies_it_
     assert get_acceptance_state(store, "a") == "accepted"
 
 
+def test_a_challenged_accepted_node_with_a_dependency_removed_can_be_re_reviewed(store):
+    """PR #106 review (a): removing the edge also drops its pin, so the pins alone can't tell that it changed."""
+    _accepted(store, "lem")
+    _accepted(store, "a", dependencies=["lem"])
+    open_challenge(store, "a", opened_by="agent_x", rationale="doesn't need L")
+    remove_dependency(store, "a", "lem")
+    assert get_acceptance_state(store, "a") == "unverifiable"
+
+    snapshot = request_review(store, "a", requested_by="agent", rationale="proved without L")
+    assert snapshot.version == 2 and snapshot.dependencies == []
+    researcher(store).decide_acceptance("a", "accept")
+    assert get_acceptance_state(store, "a") == "accepted"
+
+
+def test_a_snapshot_awaiting_review_is_not_decided_once_a_dependency_is_removed(store):
+    """PR #106 review (b): the old snapshot was made on the removed edge, so it can't be Accepted as it stands."""
+    _accepted(store, "lem")
+    create_node(store, node_id="a", kind="claim", statement="A", dependencies=["lem"])
+    first = submit_proof(store, "a", claimant_id="agent", scoping_rationale="scoped", content="uses L")
+    assert first.dependencies == ["lem"]
+    remove_dependency(store, "a", "lem")
+
+    assert _code(lambda: researcher(store).decide_acceptance("a", "accept")) == "DEPENDENCIES_CHANGED"
+    request_review(store, "a", requested_by="agent", rationale="re-pinned")
+    researcher(store).decide_acceptance("a", "accept")
+    assert get_acceptance_state(store, "a") == "accepted"
+
+
+def test_moving_a_dependency_away_also_needs_a_new_snapshot_of_the_parent(store):
+    _accepted(store, "x")
+    create_node(store, node_id="c", kind="claim", statement="C")
+    create_node(store, node_id="p", kind="claim", statement="P", dependencies=["x", "c"])
+    submit_proof(store, "p", claimant_id="agent", scoping_rationale="scoped", content="p")
+    move_dependency(store, "p", "x", to="c")
+    # the parent's snapshot was made on x directly; a new one is requested even with the same text
+    assert request_review(store, "p", requested_by="agent", rationale="x now via c").version == 2
+
+
 # -- a split child's own dependencies (PR #104) -------------------------------------
 
 
