@@ -241,3 +241,52 @@ def test_scratch_files_are_not_part_of_a_snapshot(studio):
     manifest = json.loads((store.root / record.file_path).read_text()) if record.file_path.endswith(".json") else {"files": {}}
     assert not [name for name in manifest.get("files", {}) if name.startswith("scratch/")]
     assert [p.version for p in list_candidate_proofs(store, "A")] == [1]
+
+
+# -- PR #79 review: no inherited project rules; the API assistant reads the library -----------
+
+
+def test_no_backend_tells_the_proof_agent_to_follow_the_repositorys_rules(studio, tmp_path):
+    from proof_cli.studio.backend_openai import OpenAICompat
+
+    store, hub, log, monkeypatch = studio
+    for folder in (store.root, store.root / "proofs" / "A"):
+        (folder / "AGENTS.md").write_text("REPOSITORY RULE: commit everything\n")
+        (folder / "CLAUDE.md").write_text("REPOSITORY RULE: commit everything\n")
+    _turn(hub, monkeypatch, [])
+    argv = _log(log)["argv"]
+    claude_prompt = argv[argv.index("--append-system-prompt") + 1]
+
+    job = Job(1)
+    job.mode, job.prompt, job.root = "edit", "prove it", store.root / "proofs" / "A"
+    job.context = ProofAgentContext("A", store.root, [])
+    codex_prompt = Codex("codex").command(job)[1]
+    api_prompt = OpenAICompat("api", {"base_url": "http://127.0.0.1:9", "api_key_env": "NONE"}).system_prompt(job.root, job.context)
+
+    for prompt in (claude_prompt, codex_prompt, api_prompt):
+        assert "follow it exactly" not in prompt and "REPOSITORY RULE" not in prompt
+        assert "Retrieval first" in prompt
+
+
+def test_the_api_assistant_reads_the_configured_library_and_never_writes_it(studio, tmp_path):
+    from proof_cli.studio.backend_openai import OpenAICompat, ToolError
+
+    store, hub, log, monkeypatch = studio
+    papers = tmp_path / "papers"
+    papers.mkdir()
+    (papers / "lemma.tex").write_text("a lemma from the literature\n")
+    job = Job(1)
+    job.mode, job.root = "edit", store.root / "proofs" / "A"
+    job.context = ProofAgentContext("A", store.root, [papers.resolve()])
+    job.writable = lambda rel: hub.studio("A").agent_writable(rel) is not None
+    api = OpenAICompat("api", {"base_url": "http://127.0.0.1:9", "api_key_env": "NONE"})
+
+    assert "from the literature" in api.tool(job, "read_file", {"path": str(papers / "lemma.tex")}, [])
+    relative = os.path.relpath(papers / "lemma.tex", job.root)
+    assert "from the literature" in api.tool(job, "read_file", {"path": relative}, [])
+    for path in (str(papers / "lemma.tex"), relative):
+        with pytest.raises(ToolError):
+            api.tool(job, "write_file", {"path": path, "content": "overwritten"}, [])
+    assert (papers / "lemma.tex").read_text() == "a lemma from the literature\n"
+    with pytest.raises(ToolError):
+        api.tool(job, "read_file", {"path": str(tmp_path / "elsewhere.txt")}, [])
