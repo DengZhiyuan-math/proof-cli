@@ -14,14 +14,17 @@ The project is designed to support rigorous research workflows without replacing
 python -m pip install -e ".[dev]"
 ```
 
-## Command-line entry points
+## Command-line entry point
+
+The researcher's entry is the proof map page (`proof map open`, below). `proof` is the agents' interface, with `--json` for one envelope per call:
 
 ```bash
 proof --help
-proof codex
-proof-codex status
-proof codex doctor
+proof frontier
+proof node show <id>
 ```
+
+Every command acts on `--root`, else `$PROOF_ROOT`, else the current folder. An agent working inside a node's folder, like the studio's agent panel, keeps `PROOF_ROOT` set to the project root.
 
 ## Writing a proof
 
