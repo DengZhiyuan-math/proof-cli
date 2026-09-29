@@ -167,10 +167,13 @@ def _seed_real_project(tmp_path: Path) -> tuple[str, str]:
 def test_export_includes_grounded_imported_reasoning_and_repair_state(tmp_path: Path):
     standard_reference_id, theorem_id = _seed_real_project(tmp_path)
 
+    # theorem contracts have no acceptance axis, so their claims stop short of
+    # supplement_ready and paper_ready, and no paper or supplement export shows them (#30)
     cmd_publication_set(
         theorem_id,
-        "paper_ready",
+        "collaborator_ready",
         root=tmp_path,
+        object_type="theorem_contract",
         title="Main Publication Claim",
         section_placement="Section 3",
         reason="paper-facing claim",
@@ -178,8 +181,9 @@ def test_export_includes_grounded_imported_reasoning_and_repair_state(tmp_path: 
     )
     cmd_publication_set(
         "thm_aux2",
-        "supplement_ready",
+        "collaborator_ready",
         root=tmp_path,
+        object_type="theorem_contract",
         title="Supplement Publication Claim",
         section_placement="Supplement A",
         reason="technical detail retained for supplement",
@@ -188,6 +192,7 @@ def test_export_includes_grounded_imported_reasoning_and_repair_state(tmp_path: 
         "thm_blackbox",
         "internal_draft",
         root=tmp_path,
+        object_type="theorem_contract",
         title="Internal Publication Claim",
         reason="keep internal only",
         internal_only=True,
@@ -305,9 +310,10 @@ def test_export_includes_grounded_imported_reasoning_and_repair_state(tmp_path: 
     assert "status=repaired" in export_one
     assert "Memory layers: working=1, semantic=1, episodic=1, procedural=1, handoffs=1" in export_one
     assert standard_reference_id in export_one
-    assert "Main Publication Claim" in publication_paper
+    assert "Main Publication Claim" not in publication_paper
     assert "Internal Publication Claim" not in publication_paper
-    assert "Supplement Publication Claim" in publication_supplement
+    assert "Supplement Publication Claim" not in publication_supplement
+    assert {claim["object_id"] for claim in publication_bundle["publication_state"]["claims"]} >= {theorem_id, "thm_aux2"}
     assert publication_bundle["publication_state"]["states"]
     assert publication_bundle["bundle_snapshots"]
 
