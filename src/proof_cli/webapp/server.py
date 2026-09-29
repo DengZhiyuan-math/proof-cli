@@ -282,6 +282,18 @@ class ReviewApp:
                 raise RequestError(HTTPStatus.BAD_REQUEST, "INVALID_CHILD_SPEC", "each child needs an id and a statement")
             made = proof_map.split_node(self.store, node_id, children, created_by=actor, reassign=bool(body.get("reassign")))
             return {"children": [child.model_dump(mode="json") for child in made], "next": self.page_of(made[0]) if made else None}
+        if action == "depend":
+            op, dependency, to = body.get("op"), str(body.get("dependency") or "").strip(), str(body.get("to") or "").strip()
+            if op not in ("add", "remove", "move") or not dependency or (op == "move") != bool(to):
+                raise RequestError(
+                    HTTPStatus.BAD_REQUEST, "INVALID_REQUEST", "a dependency edit is op add, remove or move, a dependency, and for a move where to (to)"
+                )
+            who = {"edited_by": actor, "reassign": bool(body.get("reassign"))}
+            if op == "add":
+                return proof_map.add_dependency(self.store, node_id, dependency, **who).as_json()
+            if op == "remove":
+                return proof_map.remove_dependency(self.store, node_id, dependency, **who).as_json()
+            return proof_map.move_dependency(self.store, node_id, dependency, to=to, **who).as_json()
         if action == "request-review":
             return proof_map.request_review(self.store, node_id, requested_by=actor, rationale=str(body.get("rationale") or "")).model_dump(mode="json")
         if action == "challenge":
