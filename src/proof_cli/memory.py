@@ -5,13 +5,12 @@ import json
 import uuid
 from datetime import datetime
 from enum import Enum
-from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
 from .domain import ProjectSnapshot, utc_now
-from .storage import ProjectStore, read_state
+from .storage import ProjectStore, one_transaction, read_side_document, read_state, write_side_document
 from .verification_ir import (
     VerificationDependencyVersion,
     VerificationFragment,
@@ -217,6 +216,9 @@ _LAYER_DEFAULT_STATUS: dict[MemoryLayer, MemoryStatus] = {
     MemoryLayer.procedural: MemoryStatus.tactic,
 }
 
+# its `side_documents` row: formerly `.proof/memory.json` (#39)
+MEMORY_DOCUMENT = "memory"
+
 _BUG_SCAN_HISTORY_PREFIX = "proof_bug_scan:"
 _BUG_REVIEW_HISTORY_PREFIX = "proof_bug_review:"
 _BUG_REPAIR_HISTORY_PREFIX = "proof_bug_repair:"
@@ -228,10 +230,6 @@ _VERIFICATION_RESULT_HISTORY_PREFIX = "verification_result:"
 
 def _project_id(store: ProjectStore) -> str:
     return read_state(store).project_id
-
-
-def _memory_path(store: ProjectStore) -> Path:
-    return store.root / ".proof" / "memory.json"
 
 
 def _coerce_layer(layer: str | MemoryLayer) -> MemoryLayer:
@@ -403,11 +401,13 @@ def _coerce_handoff_snapshot(item: Any, project_id: str) -> HandoffSnapshot:
 
 
 def load_memory(store: ProjectStore) -> LayeredMemory:
-    path = _memory_path(store)
+    """The layered memory, read on this thread's open transaction if there
+    is one — so a `load_memory` → change → `save_memory` inside one
+    `store.transaction()` is a single critical section (#39)."""
     project_id = _project_id(store)
-    if not path.exists():
+    data = read_side_document(store, MEMORY_DOCUMENT)
+    if data is None:
         return LayeredMemory(project_id=project_id)
-    data = json.loads(path.read_text())
     layer_memory = LayeredMemory(project_id=data.get("project_id", project_id), version=int(data.get("version", 4)))
     for layer in (MemoryLayer.working, MemoryLayer.semantic, MemoryLayer.episodic, MemoryLayer.procedural):
         raw_entries = data.get(layer.value, [])
@@ -428,11 +428,10 @@ def load_memory(store: ProjectStore) -> LayeredMemory:
 
 
 def save_memory(store: ProjectStore, memory: LayeredMemory) -> LayeredMemory:
-    path = _memory_path(store)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    """Persist the whole layered memory to SQLite, atomically."""
     memory.project_id = _project_id(store)
     memory.version = 4
-    path.write_text(memory.model_dump_json(indent=2))
+    write_side_document(store, MEMORY_DOCUMENT, memory.model_dump_json())
     return memory
 
 
@@ -491,6 +490,7 @@ def _verification_records_from_state(store: ProjectStore) -> list[VerificationLi
     return records
 
 
+@one_transaction
 def synchronize_verification_history(store: ProjectStore) -> LayeredMemory:
     memory = load_memory(store)
     records = _verification_records_from_state(store)
@@ -539,6 +539,7 @@ def _append_debug_record(memory: LayeredMemory, record: ProofDebugMemoryRecord) 
     return True
 
 
+@one_transaction
 def record_proof_debug_record(
     store: ProjectStore,
     kind: ProofDebugMemoryKind | str,
@@ -944,6 +945,7 @@ def _proof_debug_records_from_state(store: ProjectStore) -> list[ProofDebugMemor
     return records
 
 
+@one_transaction
 def synchronize_proof_debug_history(store: ProjectStore) -> LayeredMemory:
     memory = load_memory(store)
     records = _proof_debug_records_from_state(store)
@@ -963,6 +965,7 @@ def synchronize_proof_debug_history(store: ProjectStore) -> LayeredMemory:
     return memory
 
 
+@one_transaction
 def record_verification_lifecycle(
     store: ProjectStore,
     fragment: VerificationFragment,
@@ -1042,6 +1045,7 @@ def record_verification_revalidation(
     )
 
 
+@one_transaction
 def append_memory_artifact(
     store: ProjectStore,
     layer: str | MemoryLayer,
@@ -1496,6 +1500,7 @@ def working_memory(store: ProjectStore, *, theorem_id: str | None = None) -> lis
     return _matching_artifacts(store, layer=MemoryLayer.working, theorem_id=theorem_id)
 
 
+@one_transaction
 def record_handoff_snapshot(
     store: ProjectStore,
     handoff_snapshot: HandoffSnapshot,
@@ -1598,6 +1603,7 @@ def build_handoff_snapshot(
     )
 
 
+@one_transaction
 def track_symbol(store: ProjectStore, symbol: str) -> LayeredMemory:
     memory = load_memory(store)
     if symbol not in memory.tracked_symbols:
