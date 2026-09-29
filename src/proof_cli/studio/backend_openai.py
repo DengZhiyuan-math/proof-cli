@@ -22,7 +22,7 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-from .backends import SYSTEM_APPEND, Backend, Job
+from .backends import Backend, Job, system_append
 from .fsutil import with_line_ends_of, write_bytes
 
 MAX_READ = 200_000        # characters of one read_file result
@@ -175,9 +175,11 @@ class OpenAICompat(Backend):
         return res
 
     def system_prompt(self, root: Path, context=None) -> str:
-        parts = [SYSTEM_APPEND, TOOL_PROMPT]
-        if context is not None:  # a node's proof agent, limited to file tools here (ADR-0011 point 8)
-            parts += [context.brief(), LIMITED_NOTE]
+        parts = [system_append(context), TOOL_PROMPT]
+        if context is not None:
+            # a node's proof agent, limited to file tools here; its instructions are its own,
+            # never the repository's CLAUDE.md/AGENTS.md (ADR-0011 point 8)
+            return "\n".join([*parts, LIMITED_NOTE])
         for name in PROJECT_RULES:
             p = root / name
             if p.is_file():
@@ -278,15 +280,17 @@ class OpenAICompat(Backend):
     @staticmethod
     def _path(job: Job, rel: str, reading: bool = False) -> tuple[str, Path]:
         rel = str(rel).replace("\\", "/")
-        if rel.startswith("/") or re.match(r"[A-Za-z]:", rel):
+        # a node's proof agent reads the whole proof project (../<id>/ from its node) and its
+        # library folders, by a relative or an absolute path; it writes only its node
+        # (job.writable decides which files there)
+        bounds = [job.context.project_root.resolve(), *job.context.library] if reading and job.context else [job.root.resolve()]
+        absolute = rel.startswith("/") or re.match(r"[A-Za-z]:", rel)
+        if absolute and not (reading and job.context):
             raise ToolError("give a path relative to the project root")
         root = job.root.resolve()
-        p = (root / rel).resolve()
-        # a node's proof agent reads the whole proof project (../<id>/ from its node), and
-        # writes only its node (job.writable decides which files there)
-        bound = job.context.project_root.resolve() if reading and job.context else root
-        if p != bound and bound not in p.parents:
-            raise ToolError("the path is outside the project")
+        p = Path(rel).resolve() if absolute else (root / rel).resolve()
+        if not any(p == bound or bound in p.parents for bound in bounds):
+            raise ToolError("the path is outside the project" + (" and its library" if reading and job.context else ""))
         r = p.relative_to(root).as_posix() if root in p.parents or p == root else os.path.relpath(p, root)
         if r == ".git" or r.startswith(".git/"):
             raise ToolError("the .git directory is off limits")

@@ -22,7 +22,7 @@ import time
 from pathlib import Path
 
 from .fsutil import read_json
-from .backends import NO_WINDOW, SYSTEM_APPEND, TREE, CliBackend, Job, find_bin, kill_tree
+from .backends import NO_WINDOW, TREE, CliBackend, Job, find_bin, kill_tree, system_append
 
 MODES = {"edit": "acceptEdits", "ask": "plan"}
 
@@ -198,7 +198,7 @@ class ClaudeCode(CliBackend):
             perm = "default" if job.mode == "edit" else "plan"
         cmd = [self.bin(), "-p", "--output-format", "stream-json", "--verbose",
                "--include-partial-messages", "--permission-mode", perm,
-               "--append-system-prompt", SYSTEM_APPEND + ("\n" + job.context.brief() if job.context else "")]
+               "--append-system-prompt", system_append(job.context)]
         if job.context:
             cmd += job.context.claude_args(job.mode == "edit", self.scope_rules(job.scope) if job.scope else None)
         elif job.scope:

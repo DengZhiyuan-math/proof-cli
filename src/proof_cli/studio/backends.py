@@ -62,6 +62,18 @@ and the compiled PDF.
 """
 
 
+def system_append(context=None) -> str:
+    """The instructions a turn starts with. A node's proof agent (proof_agent.py) gets its own
+    brief instead of the rule to follow the project's CLAUDE.md/AGENTS.md: its instructions and
+    permissions are explicit, never inherited from the repository (ADR-0011 point 8)."""
+    if context is None:
+        return SYSTEM_APPEND
+    general = SYSTEM_APPEND.replace(
+        "- Keep replies concise. If the project has a CLAUDE.md or AGENTS.md, follow it exactly.\n", "- Keep replies concise.\n"
+    )
+    return f"{general}\n{context.brief()}"
+
+
 def find_bin(env: str, name: str, extra: tuple[str, ...] = ()) -> str | None:
     """A CLI from the environment variable `env`, else PATH, else a few usual places."""
     return os.environ.get(env) or shutil.which(name) \
