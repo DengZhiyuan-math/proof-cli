@@ -412,7 +412,10 @@ pre.panel-view { font: 12px/1.5 var(--mono); white-space: pre-wrap; color: var(-
 .chat-actions .plus:hover, .chat-actions .plus[aria-expanded="true"] { background: var(--fill2); color: var(--text); }
 .chat-actions .plus svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
 .chat-actions .plus.has-review::after { content: ""; position: absolute; top: 0; right: 0; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); box-shadow: 0 0 0 2px var(--panel); }
-.chat-actions #chat-scope { flex: 1; min-width: 0; }
+/* the edit scope, as a dot only: orange = any file in the project, green = only the @-mentioned
+   files, grey = read-only (Ask); hover for the words */
+.chat-actions #chat-scope { flex: none; padding: 4px; font-size: 0; cursor: help; }
+.chat-actions #chat-scope::before { font-size: 10px; margin-right: 0; }
 .popover {
   position: absolute; left: 10px; right: 10px; bottom: 46px; z-index: 60;  /* just above the "+" row */
   background: var(--toolbar); backdrop-filter: saturate(180%) blur(24px); -webkit-backdrop-filter: saturate(180%) blur(24px);
