@@ -216,13 +216,23 @@ def test_split_promote_verify_and_exchange_import_never_write_acceptance_state(t
 
 
 def test_a_node_imported_without_its_snapshot_cannot_be_accepted(tmp_path: Path):
-    """#92: the bundle indexes the Candidate proof but carries no vault files, so the snapshot is missing here."""
+    """#92: a Candidate proof indexed here whose snapshot is missing can't be decided on.
+    Since #31 a bundle that doesn't carry the snapshot is refused whole, so the snapshot
+    goes missing after the import here."""
+    import shutil
+
     foreign = ensure_project(tmp_path / "foreign")
     _awaiting_review(foreign)
     local = ensure_project(tmp_path / "local")
+    stripped = export_exchange_bundle(foreign)
+    stripped.vault_files = []
+    with pytest.raises(ProofMapError) as refused:
+        import_exchange_bundle(local, stripped)
+    assert refused.value.code == "VAULT_FILE_MISSING"
+
     import_exchange_bundle(local, export_exchange_bundle(foreign))
+    shutil.rmtree(local.root / "proofs" / "clm_1" / "snapshots" / "v1")
     assert get_current_candidate_proof(local, "clm_1") is not None
-    assert not (local.root / "proofs" / "clm_1" / "snapshots" / "v1").exists()
 
     with pytest.raises(ProofMapError) as exc_info:
         _decide(local, "clm_1", "accept")
