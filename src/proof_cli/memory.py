@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -21,6 +21,11 @@ from .verification_ir import (
     VerificationScope,
 )
 from .verification_results import VerificationResultRecord
+
+if TYPE_CHECKING:  # annotations only: a runtime import would cycle (bugs -> checks -> memory)
+    from .bugs import ProofBugReport
+    from .debug_tasks import ProofDebugTask
+    from .evidence import EvidenceChain
 
 
 class MemoryLayer(str, Enum):
