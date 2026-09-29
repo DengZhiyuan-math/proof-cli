@@ -1,6 +1,6 @@
 # One web entry, with the LaTeX studio built in
 
-**Status**: proposed.
+**Status**: accepted (implemented in #67–#72).
 - **Supersedes** ADR-0010 point 5 ("prism-local is coupled only through files") and its note that proof-cli needs no TeX.
 - **Supersedes** ADR-0007's "Start agent is not the web app spawning or supervising an agent process": the node page now runs an agent.
 - **Amends** ADR-0006 (the command surface), ADR-0008 (the node page) and ADR-0010's snapshot (point 5 below).
