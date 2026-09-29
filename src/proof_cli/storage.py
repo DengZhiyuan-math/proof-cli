@@ -802,7 +802,8 @@ def create_project(root: str | Path, project_id: str) -> ProjectStore:
             for name, file_name in SIDE_DOCUMENT_FILES.items():
                 if not (project_proof_dir(store) / file_name).exists():
                     _mark_side_document_migrated(conn, name)  # nothing to move, so it's done
-        state_row = conn.execute("SELECT data FROM state WHERE project_id = ?", (project_id,)).fetchone()
+        # a project has one state row: opening one under another id (a default, say) adds none
+        state_row = conn.execute("SELECT data FROM state LIMIT 1").fetchone()
         if state_row is None:
             state = ProjectState(project_id=project_id)
             conn.execute(
@@ -811,18 +812,6 @@ def create_project(root: str | Path, project_id: str) -> ProjectStore:
             )
         conn.commit()
     return store
-
-
-def set_project_id(store: ProjectStore, project_id: str) -> None:
-    """Force the project's own id in `project_meta`, overwriting whatever was there.
-
-    Unlike `create_project`'s `INSERT`-if-absent, this always overwrites —
-    exchange import (issue #31) uses it to retarget a project onto an
-    imported bundle's project id even when the target already has one.
-    """
-    with store.connect() as conn:
-        conn.execute("INSERT OR REPLACE INTO project_meta(key, value) VALUES (?, ?)", ("project_id", project_id))
-        conn.commit()
 
 
 def load_project(root: str | Path) -> ProjectStore:
@@ -841,12 +830,11 @@ def read_state(store: ProjectStore) -> ProjectState:
 
 
 def write_state(store: ProjectStore, state: ProjectState) -> None:
-    with store.connect() as conn:
+    with _writing(store, None) as conn:
         conn.execute(
             "INSERT OR REPLACE INTO state(project_id, data) VALUES (?, ?)",
             (state.project_id, state.model_dump_json()),
         )
-        conn.commit()
 
 
 def append_event(
@@ -919,7 +907,7 @@ def import_theorem_contract(store: ProjectStore, contract: TheoremContract) -> T
     on `(id, version)`, so re-importing the same bundle twice updates the
     same row rather than erroring or duplicating.
     """
-    with store.connect() as conn:
+    with _writing(store, None) as conn:
         conn.execute("UPDATE theorem_contracts SET is_current = 0 WHERE id = ?", (contract.id,))
         conn.execute(
             """
@@ -940,7 +928,6 @@ def import_theorem_contract(store: ProjectStore, contract: TheoremContract) -> T
                 contract.updated_at.isoformat(),
             ),
         )
-        conn.commit()
     return contract
 
 
@@ -993,7 +980,7 @@ def list_events(store: ProjectStore) -> list[EventRecord]:
 
 
 def _upsert_reference(store: ProjectStore, reference: ReferenceRecord) -> ReferenceRecord:
-    with store.connect() as conn:
+    with _writing(store, None) as conn:
         conn.execute(
             """
             INSERT INTO reference_records(id, data, review_status, trust_level, is_callable, created_at, updated_at)
@@ -1015,7 +1002,6 @@ def _upsert_reference(store: ProjectStore, reference: ReferenceRecord) -> Refere
                 reference.updated_at.isoformat(),
             ),
         )
-        conn.commit()
     return reference
 
 
@@ -1042,7 +1028,7 @@ def import_reference_review(store: ProjectStore, review: ReferenceReviewRecord) 
     and timestamp instead, so `id` upserts rather than erroring on a
     re-import of the same bundle.
     """
-    with store.connect() as conn:
+    with _writing(store, None) as conn:
         conn.execute(
             """
             INSERT INTO reference_reviews(id, reference_id, data, created_at) VALUES (?, ?, ?, ?)
@@ -1053,7 +1039,6 @@ def import_reference_review(store: ProjectStore, review: ReferenceReviewRecord) 
             """,
             (review.id, review.reference_id, review.model_dump_json(), review.created_at.isoformat()),
         )
-        conn.commit()
     return review
 
 
@@ -1126,12 +1111,11 @@ def list_reference_reviews(store: ProjectStore) -> list[ReferenceReviewRecord]:
 
 
 def store_obligation(store: ProjectStore, obligation: ProofObligation) -> ProofObligation:
-    with store.connect() as conn:
+    with _writing(store, None) as conn:
         conn.execute(
             "INSERT OR REPLACE INTO obligations(id, data) VALUES (?, ?)",
             (obligation.id, obligation.model_dump_json()),
         )
-        conn.commit()
     return obligation
 
 
@@ -1142,12 +1126,11 @@ def list_obligations(store: ProjectStore) -> list[ProofObligation]:
 
 
 def store_blocker(store: ProjectStore, blocker: BlockerRecord) -> BlockerRecord:
-    with store.connect() as conn:
+    with _writing(store, None) as conn:
         conn.execute(
             "INSERT OR REPLACE INTO blockers(id, data) VALUES (?, ?)",
             (blocker.id, blocker.model_dump_json()),
         )
-        conn.commit()
     return blocker
 
 
@@ -1392,10 +1375,9 @@ def get_current_candidate_proof(
 def list_all_candidate_proofs(store: ProjectStore) -> list[CandidateProofRecord]:
     """Every candidate proof's index row across the whole project (issue #31).
 
-    Only the index — id, version, file_path, fingerprint, etc. The proof
-    text itself lives in the git-tracked Proof vault, not here; exchange
-    carries this index for fidelity, and relies on git for the vault files
-    themselves, same as it always has for the rest of the working tree.
+    Only the index: id, version, file_path, sha256, etc. The snapshot files
+    themselves live in the Proof vault (`proofs/<node-id>/snapshots/`); an
+    exchange bundle carries them beside this index (`ExchangeBundle.vault_files`).
     """
     with store.connect() as conn:
         rows = conn.execute("SELECT * FROM candidate_proofs ORDER BY node_id, version").fetchall()
@@ -1576,12 +1558,11 @@ def _row_to_evidence_check(row: sqlite3.Row) -> EvidenceCheck:
 
 
 def insert_evidence_check(store: ProjectStore, check: EvidenceCheck) -> EvidenceCheck:
-    with store.connect() as conn:
+    with _writing(store, None) as conn:
         conn.execute(
             "INSERT INTO evidence_checks(id, candidate_proof_id, outcome, notes, run_by, created_at) VALUES (?, ?, ?, ?, ?, ?)",
             (check.id, check.candidate_proof_id, check.outcome.value, check.notes, check.run_by, check.created_at.isoformat()),
         )
-        conn.commit()
     return check
 
 
@@ -1615,12 +1596,11 @@ def insert_governance_record(store: ProjectStore, *, kind: str, data: str) -> No
     their history-prefix constants; behavior is otherwise unchanged from
     before this table existed.
     """
-    with store.connect() as conn:
+    with _writing(store, None) as conn:
         conn.execute(
             "INSERT INTO governance_records(id, kind, data, created_at) VALUES (?, ?, ?, ?)",
             (str(uuid.uuid4()), kind, data, utc_now().isoformat()),
         )
-        conn.commit()
 
 
 def list_governance_records(store: ProjectStore, *, kind: str) -> list[str]:
@@ -1632,13 +1612,13 @@ def list_governance_records(store: ProjectStore, *, kind: str) -> list[str]:
     return [row["data"] for row in rows]
 
 
-def store_snapshot(store: ProjectStore, snapshot: ProjectSnapshot) -> ProjectSnapshot:
-    with store.connect() as conn:
+def store_snapshot(store: ProjectStore, snapshot: ProjectSnapshot, *, replace: bool = True) -> ProjectSnapshot:
+    """`replace=False` keeps a row already stored under the snapshot's id (exchange import: local wins, #31)."""
+    with _writing(store, None) as conn:
         conn.execute(
-            "INSERT OR REPLACE INTO snapshots(id, data, created_at) VALUES (?, ?, ?)",
+            f"INSERT OR {'REPLACE' if replace else 'IGNORE'} INTO snapshots(id, data, created_at) VALUES (?, ?, ?)",
             (snapshot.project_id, snapshot.model_dump_json(), snapshot.created_at.isoformat()),
         )
-        conn.commit()
     return snapshot
 
 
@@ -1650,12 +1630,11 @@ def read_latest_snapshot(store: ProjectStore) -> ProjectSnapshot | None:
 
 def store_publication_state(store: ProjectStore, project_id: str, data: str, *, updated_at: datetime | None = None) -> None:
     timestamp = (updated_at or utc_now()).isoformat()
-    with store.connect() as conn:
+    with _writing(store, None) as conn:
         conn.execute(
             "INSERT OR REPLACE INTO publication_state(project_id, data, updated_at) VALUES (?, ?, ?)",
             (project_id, data, timestamp),
         )
-        conn.commit()
 
 
 def read_publication_state(store: ProjectStore) -> str | None:
