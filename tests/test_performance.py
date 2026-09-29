@@ -15,17 +15,22 @@ from pathlib import Path
 
 import pytest
 
+import proof_cli.proof_map as proof_map
 import proof_cli.reviews as reviews
 import proof_cli.storage as storage
 from _proofs import submit_proof
 from _researcher import researcher
 from proof_cli.proof_map import (
+    counting_upstream_visits,
     create_node,
     get_acceptance_state,
     get_blocked_reason,
     get_frontier,
     get_integrity_state,
+    get_reference_review_state,
     get_workflow_state,
+    list_nodes,
+    open_challenge,
 )
 from proof_cli.storage import ensure_project, read_scope
 
@@ -202,3 +207,193 @@ def test_benchmark_a_200_node_chain(tmp_path: Path):
 
     assert frontier < 1.0, frontier
     assert node_show < 0.3, node_show
+
+
+# -- one topological pass per read (#108) ----------------------------------------------
+
+CHAIN = 200
+
+
+def _chain_with_claims(root: Path, length: int):
+    store = _accepted_chain(root, length)
+    for index in range(length):
+        create_node(store, node_id=f"c{index}", kind="claim", statement=f"c{index}", dependencies=[f"n{index}"])
+    return store
+
+
+@pytest.fixture(scope="module")
+def chain(tmp_path_factory):
+    """A 200-node Accepted chain with an open claim hanging off every link, built once.
+
+    Whether claim c<i> is blocked asks whether n<i> is settled, which means
+    walking everything above n<i>: walked per node, one read costs n^2/2
+    visits; in one pass, each link is visited once."""
+    return _chain_with_claims(tmp_path_factory.mktemp("chain"), CHAIN)
+
+
+def _page(read: str):
+    def run(store) -> None:
+        from proof_cli.webapp.server import ReviewApp
+
+        app = ReviewApp(store)
+        try:
+            app.map() if read == "map" else app.node(f"n{CHAIN - 1}")
+        finally:
+            app.close()
+
+    return run
+
+
+@pytest.mark.parametrize(
+    "read",
+    [
+        pytest.param(get_frontier, id="frontier"),
+        pytest.param(lambda store: _node_show(store, f"n{CHAIN - 1}"), id="node show"),
+        pytest.param(lambda store: _node_show(store, f"c{CHAIN - 1}"), id="node show, a blocked leaf"),
+        pytest.param(_page("map"), id="/api/map"),
+        pytest.param(_page("node"), id="/api/node"),
+    ],
+)
+def test_one_read_visits_each_upstream_node_once(chain, read):
+    """Each node's integrity is worked out once per read, and its dependents reuse it: O(n), not O(n^2)."""
+    with counting_upstream_visits() as visits:
+        read(chain)
+
+    assert 0 < visits.count <= CHAIN, visits.count
+
+
+def _scaled_dag(root: Path, copies: int):
+    """A scaled sample map: `copies` gadgets, each resting on the one before, so the map is deep and wide.
+
+        I<k> (imported, Reference-reviewed) <- A<k> <- B<k> <- D<k> <- E<k> (review-needed) <- F<k>
+                                     D<k-1> <-'   '-- C<k> <-'  '-- R<k> (Rejected)
+                                         B<k> <- G<k>, I<k> <- H<k> <- J<k> (open claims)
+    An open Challenge on B2, B5, ..., the second gadget's I found no longer callable, and A0
+    revised and re-Accepted, so the pins on it lag.
+
+    Stands in for the sample proof map fixture of #98 (PR #104) with `copies=n`, which isn't on
+    this branch's base yet; it can replace this once both land.
+    """
+    store = ensure_project(root)
+    decide = researcher(store)
+
+    def node(node_id, kind, dependencies, outcome=None):
+        create_node(store, node_id=node_id, kind=kind, statement=f"statement of {node_id}", dependencies=dependencies)
+        if outcome is not None:
+            submit_proof(store, node_id, claimant_id="agent_a", scoping_rationale="r", content=f"proof of {node_id}")
+        if outcome in ("accept", "reject"):
+            decide.decide_acceptance(node_id, outcome)
+
+    for k in range(copies):
+        create_node(store, node_id=f"I{k}", kind="imported_result", statement=f"known result {k}", source_locator="doi:10.0000/x", source_version="v1")
+        decide.decide_reference_review(f"I{k}")
+        node(f"A{k}", "lemma", [f"I{k}"] + ([f"D{k - 1}"] if k else []), "accept")
+        node(f"B{k}", "lemma", [f"A{k}"], "accept")
+        node(f"C{k}", "claim", [f"A{k}"], "accept")
+        node(f"D{k}", "lemma", [f"B{k}", f"C{k}"], "accept")
+        node(f"E{k}", "lemma", [f"D{k}"], "submit")
+        node(f"F{k}", "claim", [f"E{k}"])
+        node(f"G{k}", "claim", [f"B{k}"])
+        node(f"H{k}", "claim", [f"I{k}"])
+        node(f"J{k}", "claim", [f"H{k}"])
+        node(f"R{k}", "claim", [f"D{k}"], "reject")
+    for k in range(2, copies, 3):
+        open_challenge(store, f"B{k}", opened_by="agent_b", rationale="a hypothesis may be missing")
+    if copies > 1:
+        decide.decide_reference_review("I1", "no-longer-callable", rationale="the source has a gap")
+    # a proof-only revision of A0: B0's and C0's pins now lag its accepted version (#23)
+    submit_proof(store, "A0", claimant_id="agent_a", scoping_rationale="r", content="proof of A0, shorter")
+    decide.decide_acceptance("A0", "accept")
+    return store
+
+
+def _walk_per_node(store, node_id: str) -> str | None:
+    """The derivation before #108: a fresh reachability walk for every node asked about,
+    reporting a Challenge over a stale or lagging pin."""
+    visited: set[str] = set()
+    pending = [node_id]
+    found = None
+    while pending:
+        current_id = pending.pop()
+        if current_id in visited:
+            continue
+        visited.add(current_id)
+        if proof_map.has_open_challenge(store, current_id):
+            return "challenged"
+        node = proof_map.get_node(store, current_id)
+        if node is None:
+            continue
+        if node.kind.value == "imported_result" and proof_map._no_longer_callable(store, current_id):
+            return "challenged"
+        for dependency_id in node.dependencies:
+            pin = proof_map.get_dependency_pin(store, current_id, dependency_id)
+            if pin is not None and (not proof_map.dependency_pin_is_current(store, pin) or proof_map.dependency_pin_lags(store, pin)):
+                found = "stale"
+            pending.append(dependency_id)
+    return found
+
+
+def _axes(store, node) -> tuple:
+    imported = node.kind.value == "imported_result"
+    return (
+        get_workflow_state(store, node.id),
+        get_blocked_reason(store, node.id),
+        get_reference_review_state(store, node.id) if imported else get_acceptance_state(store, node.id),
+        get_integrity_state(store, node.id),
+    )
+
+
+def test_the_one_pass_derives_exactly_what_a_walk_per_node_does(tmp_path: Path, monkeypatch):
+    store = _scaled_dag(tmp_path, copies=4)
+
+    with read_scope():
+        one_pass = {node.id: _axes(store, node) for node in list_nodes(store)}
+        frontier = [node.id for node in get_frontier(store)]
+
+    with monkeypatch.context() as patched:
+        patched.setattr(proof_map, "_upstream_cause", _walk_per_node)
+        per_node = {node.id: _axes(store, node) for node in list_nodes(store)}  # no scope: nothing shared
+        per_node_frontier = [node.id for node in get_frontier(store)]
+
+    assert one_pass == per_node
+    assert frontier == per_node_frontier
+    # the scaled map exercises every value the pass derives
+    assert {axes[3] for axes in one_pass.values()} == {"current", "potentially-stale", "challenged"}
+    assert {axes[1] for axes in one_pass.values()} >= {None, "not-accepted", "dependency-challenged", "dependency-stale", "dependency-not-callable"}
+
+
+def test_a_dependency_cycle_is_answered_by_plain_reachability(tmp_path: Path):
+    """No service makes a cycle, but a hand-edited map may have one: the pass must still end, and agree."""
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="bad", kind="imported_result", statement="withdrawn", source_locator="doi:10.0000/y", source_version="v1")
+    researcher(store).decide_reference_review("bad", "no-longer-callable", rationale="gap")
+    create_node(store, node_id="a", kind="claim", statement="a")
+    create_node(store, node_id="b", kind="claim", statement="b", dependencies=["a"])
+    create_node(store, node_id="c", kind="claim", statement="c", dependencies=["bad"])
+    a = proof_map.get_node(store, "a")
+    storage.update_proof_map_node(store, a.model_copy(update={"dependencies": ["b"]}))  # a <- b <- a
+
+    with read_scope():
+        assert proof_map._is_downstream_of_challenge_or_stale_pin(store, "b") is False
+        assert proof_map._is_downstream_of_challenge_or_stale_pin(store, "a") is False
+
+    storage.update_proof_map_node(store, a.model_copy(update={"dependencies": ["b", "c"]}))  # and a <- c <- bad
+    with read_scope():
+        assert proof_map._is_downstream_of_challenge_or_stale_pin(store, "b") is True
+        assert proof_map._is_downstream_of_challenge_or_stale_pin(store, "a") is True
+
+
+@pytest.mark.skipif(not os.environ.get("PROOF_BENCHMARK"), reason="wall-clock benchmark: set PROOF_BENCHMARK=1")
+def test_benchmark_the_frontier_of_a_1000_node_chain(tmp_path: Path, capsys):
+    """Records the time; asserts only the visit count, which doesn't depend on the machine."""
+    length = 1000
+    store = _chain_with_claims(tmp_path, length)
+
+    with counting_upstream_visits() as visits:
+        started = time.perf_counter()
+        frontier = get_frontier(store)
+        elapsed = time.perf_counter() - started
+
+    with capsys.disabled():
+        print(f"\n1000-node chain: get_frontier {elapsed:.3f}s, {visits.count} upstream visits, {len(frontier)} on the frontier")
+    assert visits.count <= length
