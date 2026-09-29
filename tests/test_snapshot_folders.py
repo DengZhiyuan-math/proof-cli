@@ -463,3 +463,24 @@ def test_the_refusal_on_a_lost_snapshot_says_how_to_recover(tmp_path: Path):
         researcher(store).decide_acceptance("clm_1", "accept")
 
     assert "request review again" in str(refused.value)
+
+
+@pytest.mark.parametrize("how", ["deleted", "unreadable"])
+def test_a_lost_snapshot_whose_dependencies_also_changed_is_a_new_version_not_a_re_snapshot(tmp_path: Path, how):
+    from proof_cli.proof_map import add_dependency
+    from proof_cli.storage import list_events
+
+    store, folder = _node(tmp_path)
+    create_node(store, node_id="lem", kind="claim", statement="a lemma")
+    _request(store)
+    _lose(folder, how)
+    add_dependency(store, "clm_1", "lem")  # a reason for a new version on its own (#96)
+
+    record = _request(store)
+
+    assert record.version == 2 and record.resnapshot_after_loss is None
+    assert record.dependencies == ["lem"]
+    assert candidate_proof_sha256(store, record.id) == record.sha256
+    (event,) = [e for e in list_events(store) if e.kind == "proof_map_review_requested" and e.payload["version"] == 2]
+    assert "re-snapshot after loss" not in event.message
+    assert event.payload["resnapshot_after_loss"] is None
