@@ -1,6 +1,6 @@
 # LaTeX proof files, a plain Acceptance, and prism-local as a loosely coupled editor
 
-**Status**: accepted. Supersedes ADR-0003 and ADR-0009, and amends ADR-0006 and ADR-0007. Point 5 and the note that proof-cli needs no TeX are superseded by ADR-0011, which also amends the snapshot of point 1 (every input frozen as `snapshots/v<N>/`).
+**Status**: accepted. Supersedes ADR-0003 and ADR-0009, and amends ADR-0006 and ADR-0007. Point 5 and the note that proof-cli needs no TeX are superseded by ADR-0011, which also amends the snapshot of point 2 (every input frozen as `snapshots/v<N>/`).
 
 proof-cli's intended use is **personal and local, or a small team working through a GitHub repository**. The Markdown proof vault (ADR-0003) and the passkey-signed Human Review (ADR-0009) were built for a stronger threat model than that. They cost a lot: WebAuthn ceremonies, hash chains, a legacy cutoff, a trust pin, and a long tail of audit tickets. Meanwhile the Markdown view kept mangling mathematics. For example, `(f * g) * h` lost its asterisks, and a line starting `- x^2` turned into a bullet. Researchers already read and write mathematics in LaTeX and PDF. The author's own [prism-local](https://github.com/DengZhiyuan-math/Local-Ai-agent-for-latex) is a local LaTeX studio (editor, compile, PDF with SyncTeX, an AI agent panel with per-turn undo) built for exactly that.
 
