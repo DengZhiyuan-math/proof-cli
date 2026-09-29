@@ -111,7 +111,8 @@ def test_the_tree_view_shows_the_shared_claim_under_each_parent(sample):
 
     at_c2 = [(path, item) for path, item in drawn if item["id"] == "C2"]
     assert [path for path, _ in at_c2] == [("T", "L1", "C2"), ("T", "L2", "C2")]
-    assert all(item["shared"] for _, item in at_c2)
+    assert [item["shared_by"] for _, item in at_c2] == [2, 2]
+    assert all(item["shared_by"] == 0 for _, item in drawn if item["id"] != "C2")
     below_c1 = [("T", "L1", "C1", "I")] if "I" in get_node(sample.store, "C1").dependencies else []  # see the xfail above
     assert sorted(path for path, _ in drawn) == sorted(
         [("T",), ("T", "L1"), ("T", "L1", "C1"), ("T", "L1", "C2"), ("T", "L2"), ("T", "L2", "C2"), *below_c1]
