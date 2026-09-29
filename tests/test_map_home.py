@@ -401,3 +401,55 @@ def test_the_warnings_page_lists_the_nodes_that_need_attention_and_the_sidebar_c
     assert shown["railWarnings"] == "3"  # two nodes and one review record
     (quiet,) = _home(state=_state(), map_={"nodes": [_node("lem_ok")]})
     assert quiet["attention"] == ["Nothing on the map needs attention."] and quiet["railWarnings"] == ""
+
+
+# -- each Evidence check names the Review snapshot it checked (issue #122) -------------------
+
+SHA_V1, SHA_V2 = "1" * 8 + "e" * 56, "2" * 8 + "f" * 56
+
+
+def _check(check_id, proof_id, version, sha256, *, current, unreadable=False, outcome="passed"):
+    return {"id": check_id, "candidate_proof_id": proof_id, "outcome": outcome, "notes": "", "run_by": "lean",
+            "snapshot": {"id": proof_id, "version": version, "sha256": sha256, "current": current, "unreadable": unreadable,
+                         "location": f"proofs/lem_bound/snapshots/v{version}/"}}
+
+
+def _local_page(checks):
+    return {"node": {"id": "lem_bound", "kind": "lemma", "statement": "The partial sums are bounded", "assumptions": []},
+            "workflow_state": "review-needed", "acceptance_state": "unreviewed", "integrity_state": "current", "claim": None,
+            "studio": "/studio/lem_bound/", "folder": "/p/proofs/lem_bound", "source": None, "citation": None,
+            "dependents": [], "pdfs": {}, "dependencies": [], "challenges": [],
+            "candidate_proof": {"id": "cp-v2", "version": 2, "sha256": SHA_V2, "text": "Direct.", "files": {"proof.tex": "Direct."}, "unreadable": False},
+            "evidence_checks": checks, "decisions": [], "history": [], "warnings": []}
+
+
+def _evidence(checks):
+    _, page = _home(steps=[{"open": "lem_bound"}], nodes={"lem_bound": _local_page(checks)})
+    assert page["nodePageShown"]
+    return page["nodeEvidence"]
+
+
+def test_each_evidence_check_shows_the_version_and_hash_of_the_snapshot_it_checked():
+    on_current, on_older = _evidence([
+        _check("ev-2", "cp-v2", 2, SHA_V2, current=True),
+        _check("ev-1", "cp-v1", 1, SHA_V1, current=False, outcome="failed"),
+    ])
+    assert "v2" in on_current["text"] and SHA_V2[:12] in on_current["text"] and SHA_V2 not in on_current["text"]
+    assert any(SHA_V2 in title for title in on_current["titles"])  # the full hash on hover
+    assert "older" not in on_current["text"] and on_current["warnings"] == []
+    # a check on an older snapshot says so, and where that frozen snapshot is
+    assert "v1" in on_older["text"] and SHA_V1[:12] in on_older["text"]
+    assert on_older["warnings"] == ["for an older version v1"]
+    assert "proofs/lem_bound/snapshots/v1/" in on_older["text"]
+
+
+def test_an_evidence_check_on_an_unreadable_snapshot_is_marked_and_the_page_still_shows():
+    (shown,) = _evidence([_check("ev-1", "cp-v1", 1, SHA_V1, current=False, unreadable=True)])
+    assert "v1" in shown["text"] and SHA_V1[:12] in shown["text"]
+    assert shown["warnings"] == ["for an older version v1", "snapshot unreadable"]
+
+
+def test_an_evidence_check_without_a_snapshot_record_still_shows():
+    """A check listed without its snapshot (an older server's view) reads as before, and never throws."""
+    (shown,) = _evidence([{"id": "ev-1", "candidate_proof_id": "cp-v1", "outcome": "passed", "notes": "", "run_by": "lean"}])
+    assert "passed" in shown["text"] and "cp-v1" in shown["text"]
