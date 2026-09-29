@@ -161,6 +161,7 @@ function short(text, length) { return text.length > length ? text.slice(0, lengt
 
 // A node card's one state line, bottom right: what needs the researcher first (integrity, an
 // undecidable decision), then the frontier, a claim, a review request, a rejected route, blocked.
+// A frontier node with a warning keeps its frontier tag too, bottom left (ADR-0008): see drawDag.
 function tagOf(n) {
   if (n.integrity_state === "challenged") return ["challenged", "warn"];
   if (n.integrity_state === "potentially-stale") return ["stale", "warn"];
@@ -367,6 +368,12 @@ function drawDag(nodes) {
       tag.textContent = short(tagText, 28).toUpperCase();
       g.append(tag);
     }
+    // the frontier is its own, strongest signal (ADR-0008): a warning is shown beside it, never in its place
+    if (n.frontier && warningOf(n)) {
+      const frontier = svg("text", { class: "tag accent", x: left + 12, y: top + BOX.h - 8 });
+      frontier.textContent = "FRONTIER";
+      g.append(frontier);
+    }
     const title = svg("title");
     title.textContent = n.statement;
     g.append(title);
@@ -415,7 +422,10 @@ function drawTree(nodes) {
   if (chosen) select.value = chosen;
   const item = (id, ancestors) => {
     const n = byId.get(id);
+    // each line names its node; a node used by more than one parent also says how many share it
     const li = el("li");
+    li.setAttribute("data-node-id", id);
+    if ((parents.get(id) || 0) > 1) li.setAttribute("data-shared-by", String(parents.get(id)));
     if (!n) { li.append(el("span", `${id} (missing)`, { class: "warning" })); return li; }
     li.append(el("a", n.id, { href: pageOf(n) }), ` — ${short(n.display_label || n.statement, 60)}`);
     li.append(el("span", n.acceptance_state, { class: `state-chip chip ${n.acceptance_state}` }), el("span", n.workflow_state, { class: `state-chip chip ${n.workflow_state}` }));
