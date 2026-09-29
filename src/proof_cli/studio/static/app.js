@@ -637,8 +637,9 @@ async function loadAccount() {
   const el = $("#agent-account");
   const r = await api("/api/agent/account?provider=" + encodeURIComponent(C.provider || "")).catch(() => null);
   const a = r && r._status === 200 && r.account;
-  if (!a) { el.hidden = true; return; }
+  if (!a) { el.hidden = true; infoMark("account", ""); return; }
   el.hidden = false;
+  infoMark("account", r.problem ? "err" : "");  // a wrong account stops every turn: say so on the button
   const who = a.email ? a.email + (a.org ? " · " + a.org : "") : "not logged in";
   el.className = r.problem ? "bad" : r.allowed ? "locked" : "";
   el.textContent = r.problem ? r.problem : (r.allowed ? "Allowed account: " : "Account: ") + who;
@@ -901,10 +902,11 @@ let lastRate = null;
 function renderQuota(rate) {
   const q = $("#quota");
   lastRate = rate;
-  const hidden = store.get("chat.quotaHidden", false);
-  q.classList.toggle("collapsed", hidden);
+  const hidden = false;  // the usage limits live in the account-and-usage popover, shown in full
   const refresh = `<button class="tiny icon ghost" id="quota-refresh" title="Check usage now (a tiny Haiku call, ≈ $0.001)">${icon("refresh")}</button>`;
-  const hide = `<button class="tiny icon ghost" id="quota-toggle" title="Hide usage limits">${icon("up")}</button>`;
+  const hide = "";
+  const windows = rate && rate.unifiedWindows ? Object.values(rate.unifiedWindows) : [];
+  infoMark("quota", rate && rate.status && rate.status !== "allowed" ? "err" : windows.some((w) => (w.utilization || 0) >= 0.9) ? "warn" : "");
   if (!rate || !rate.unifiedWindows) {
     q.innerHTML = hidden
       ? `<span class="note q-sum" id="quota-toggle" title="Show usage limits">Usage: not checked yet <span class="q-open">${icon("down")}</span></span>`
@@ -957,12 +959,28 @@ async function checkUsage(auto = false) {
   if (r.error && !auto) toast(r.error);
 }
 $("#quota").addEventListener("click", (e) => {
-  if (e.target.id === "quota-refresh") return checkUsage();
-  if (e.target.closest("#quota-toggle")) {
-    store.set("chat.quotaHidden", !store.get("chat.quotaHidden", false));
-    renderQuota(lastRate);
-  }
+  if (e.target.closest("#quota-refresh")) return checkUsage();
 });
+
+// The account and the usage limits sit behind the ⓘ-style button in the panel's head; a dot on
+// it says when one of them needs you (red: the account is refused or usage is rate limited;
+// orange: a usage window is nearly spent).
+function infoMark(which, level) {  // may run before this line is reached: keep its state on itself
+  const marks = (infoMark.marks ||= {});
+  marks[which] = level;
+  const b = $("#chat-info"), levels = Object.values(marks);
+  b.classList.toggle("mark-err", levels.includes("err"));
+  b.classList.toggle("mark-warn", !levels.includes("err") && levels.includes("warn"));
+}
+function infoPopover(open) {
+  const pop = $("#agent-info");
+  if (open === undefined) open = pop.hidden;
+  pop.hidden = !open;
+  $("#chat-info").setAttribute("aria-expanded", String(open));
+}
+$("#chat-info").addEventListener("click", (e) => { e.stopPropagation(); infoPopover(); });
+document.addEventListener("click", (e) => { if (!e.target.closest("#agent-info, #chat-info")) infoPopover(false); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") infoPopover(false); });
 
 function diffHtml(diff) {
   return diff.split("\n").map((l) => {

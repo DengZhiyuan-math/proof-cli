@@ -252,6 +252,15 @@ li.CodeMirror-hint-active .hint-kind { color: var(--accent-text); opacity: .8; }
 #chat-head select { min-width: 0; flex: 0 1 auto; text-overflow: ellipsis; height: 26px; }
 #chat-head button { flex: none; white-space: nowrap; height: 26px; }
 #quota[hidden] { display: none; }
+/* account and usage limits: a popover from the panel's head */
+#chat { position: relative; }
+.popover.info { top: calc(var(--bar-h) + 4px); bottom: auto; left: auto; right: 10px; width: 300px; padding: 4px 0; }
+.popover.info #agent-account { border-bottom: .5px solid var(--border2); padding: 8px 12px; white-space: normal; }
+.popover.info #quota { border-bottom: 0; padding: 8px 12px; }
+#chat-info { position: relative; }
+#chat-info.mark-err::after, #chat-info.mark-warn::after { content: ""; position: absolute; top: 3px; right: 4px; width: 7px; height: 7px; border-radius: 50%; box-shadow: 0 0 0 2px var(--panel); }
+#chat-info.mark-err::after { background: var(--err); }
+#chat-info.mark-warn::after { background: var(--warn); }
 #agent-account { padding: 6px 12px; border-bottom: .5px solid var(--border2); font-size: 11.5px; color: var(--muted);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #agent-account.locked::before { content: "● "; color: var(--ok); }
