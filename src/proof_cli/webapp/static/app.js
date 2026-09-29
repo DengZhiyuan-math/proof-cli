@@ -43,8 +43,7 @@ function confirmDecisions(decisions) {
     $("confirm-decisions").replaceChildren(...decisions.map((d) => el("li",
       `${DECISION_LABELS[`${d.kind}:${d.decision}`] || `${d.kind}: ${d.decision}`} — ${d.target_id}${d.dependency_id ? ` (${d.kind === "dependent_migration" ? "onto" : "dependency"} ${d.dependency_id})` : ""}` +
       `${d.viewed_candidate_proof_sha256 ? ` · snapshot SHA-256 ${d.viewed_candidate_proof_sha256}` : ""} · rationale: ${d.rationale || "none"}`)));
-    for (const id of ["home", "node-page"]) $(id).hidden = true;
-    $("confirm").hidden = false;
+    $("confirm").hidden = false;  // a sheet over the page, which stays where it was
     const done = () => { $("confirm").hidden = true; route(); };
     $("confirm-cancel").onclick = () => { done(); reject(new Error("cancelled")); };
     $("confirm-record").onclick = () => { done(); resolve(); };
@@ -76,13 +75,28 @@ function showHome() {
     for (const decision of item.decisions) choice.append(el("option", decision));
     const rationale = el("input", null, { placeholder: "why" });
     // a local node is reviewed in its studio (#71); an imported result on its own page
-    const link = el("a", item.node_id, { href: item.kind === "reference_review" ? `#/node/${encodeURIComponent(item.node_id)}` : `/studio/${encodeURIComponent(item.node_id)}/#review` });
+    const inStudio = item.kind !== "reference_review";
+    const link = el("a", null, {
+      class: "review-link",
+      href: item.kind === "reference_review" ? `#/node/${encodeURIComponent(item.node_id)}` : `/studio/${encodeURIComponent(item.node_id)}/#review`,
+      title: inStudio ? "Review it in the node's studio" : "Review the source on the node's page",
+    });
+    // a page under a magnifier: "go and review this", then the node, then a chevron
+    const glass = svg("svg", { viewBox: "0 0 24 24", class: "review-link-icon", "aria-hidden": "true" });
+    glass.append(svg("path", { d: "M13 20H6.5A1.5 1.5 0 0 1 5 18.5v-13A1.5 1.5 0 0 1 6.5 4h7L18 8.5v2.5" }), svg("path", { d: "M13.5 4v4.5H18" }),
+      svg("circle", { cx: 16, cy: 16, r: 3 }), svg("path", { d: "m18.2 18.2 2.3 2.3" }));
+    const chevron = svg("svg", { viewBox: "0 0 24 24", class: "review-link-chevron", "aria-hidden": "true" });
+    chevron.append(svg("path", { d: "m9.5 6 6 6-6 6" }));
+    link.append(glass, el("span", item.node_id), chevron);
     const statement = el("div", item.statement);
     if (item.citation) statement.append(citationLine(item.citation));
     if (item.candidate_proof && item.candidate_proof.id) {
       // review starts from the key ideas (ADR-0013): the card shows the snapshot's 核心思路 and 难点;
-      // the whole summary and the decision are in the studio's review view, the frozen LaTeX on the node's page
-      statement.append(el("p", `snapshot v${item.candidate_proof.version} · SHA-256 ${item.candidate_proof.sha256}`, { class: "hint" }), keyIdeasCard(item.candidate_proof.key_ideas));
+      // the whole summary and the decision are in the studio's review view, the frozen LaTeX on the
+      // node's page. The hash is shortened here, in full on hover.
+      const proof = item.candidate_proof;
+      const hash = proof.sha256 ? ` · ${proof.sha256.slice(0, 12)}…` : "";
+      statement.append(el("p", `Snapshot v${proof.version}${hash}`, { class: "hint snap-meta", title: proof.sha256 ? `SHA-256 ${proof.sha256}` : "" }), keyIdeasCard(proof.key_ideas));
     }
     const tr = row([box, link, statement, choice, rationale]);
     tr.dataset.kind = item.kind; tr.dataset.target = item.node_id;
@@ -97,7 +111,7 @@ function showHome() {
   $("pending-count").textContent = pending;
   $("rail-review").textContent = state.pending.length ? pending : "";
   $("rail-review").className = state.pending.length ? "n hot" : "n";
-  $("rail-warnings").textContent = state.warnings.length ? String(state.warnings.length) : "";
+  $("records-count").textContent = state.warnings.length ? String(state.warnings.length) : "";
 }
 
 // who wrote a snapshot's key ideas, as its record says (ADR-0013): recorded by the studio, never read from the file
@@ -186,19 +200,12 @@ function decisionRow(decision, proof) {
 let mapData = null;
 let mapView = "dag";
 const SVG_NS = "http://www.w3.org/2000/svg";
-const BOX = { w: 190, h: 76, gapX: 40, gapY: 110, pad: 24, chamfer: 8 };
+const BOX = { w: 208, h: 92, gapX: 44, gapY: 104, pad: 24, radius: 14 };
 
 function svg(tag, attrs) {
   const node = document.createElementNS(SVG_NS, tag);
   for (const [key, value] of Object.entries(attrs || {})) node.setAttribute(key, value);
   return node;
-}
-
-function toneOf(n) {
-  if (["accepted", "reviewed"].includes(n.acceptance_state)) return "accepted";
-  if (["rejected", "no-longer-callable"].includes(n.acceptance_state)) return "rejected";
-  if (n.workflow_state === "review-needed") return "review";
-  return "none";
 }
 
 // which warning a node carries, each drawn differently: challenged, potentially stale, or a decision that no longer applies
@@ -211,27 +218,62 @@ function warningOf(n) {
 
 function short(text, length) { return text.length > length ? text.slice(0, length - 1) + "…" : text; }
 
-// A node card's one state line, bottom right: what needs the researcher first (integrity, an
-// undecidable decision), then the frontier, a claim, a review request, a rejected route, blocked.
-// A frontier node with a warning keeps its frontier tag too, bottom left (ADR-0008): see drawDag.
+// A node card's one state: an icon anyone reads at a glance, and a word. What needs the
+// researcher comes first (a Challenge, a moved dependency, a decision that no longer applies:
+// one "attention" icon, the word saying which), then the frontier, a claim, a review request,
+// a rejected route, blocked, accepted. A frontier node with a warning keeps its frontier mark too,
+// a small blue badge beside the warning's (ADR-0008): see drawDag.
 function tagOf(n) {
-  if (n.integrity_state === "challenged") return ["challenged", "warn"];
-  if (n.integrity_state === "potentially-stale") return ["stale", "warn"];
-  if (n.acceptance_state === "unverifiable") return ["unverifiable", "warn"];
-  if (n.frontier) return ["frontier", "accent"];
-  if (n.assignee) return [`claimed · ${n.assignee}`, ""];
-  if (n.workflow_state === "review-needed") return ["review needed", "warn"];
-  if (n.workflow_state === "revision-requested") return ["revision requested", "warn"];
-  if (["rejected", "no-longer-callable"].includes(n.acceptance_state)) return ["rejected", "crit"];
-  if (n.workflow_state === "blocked") return ["blocked", "muted"];
-  if (["accepted", "reviewed"].includes(n.acceptance_state)) return [n.acceptance_state, ""];
-  return ["", ""];
+  if (n.integrity_state === "challenged") return ["challenged", "attention"];
+  if (n.integrity_state === "potentially-stale") return ["dependency changed", "attention"];
+  if (n.acceptance_state === "unverifiable") return ["decision outdated", "attention"];
+  if (["rejected", "no-longer-callable"].includes(n.acceptance_state)) return [n.acceptance_state === "rejected" ? "rejected" : "no longer callable", "rejected"];
+  if (n.frontier) return ["ready", "ready"];
+  if (n.assignee) return [n.assignee, "claimed"];
+  if (n.workflow_state === "review-needed") return ["awaiting review", "review"];
+  if (n.workflow_state === "revision-requested") return ["revision requested", "review"];
+  if (n.workflow_state === "blocked") return ["blocked", "blocked"];
+  if (["accepted", "reviewed"].includes(n.acceptance_state)) return [n.acceptance_state, "accepted"];
+  return ["open", "open"];
 }
 
-// a card with chamfered corners, the page's one shape
-function chamfered(x, y, w, h, c) {
-  return `M${x + c},${y} H${x + w} V${y + h - c} L${x + w - c},${y + h} H${x} V${y + c} Z`;
+// the icons, SF Symbols' ".circle.fill" style: a filled disc, a white glyph, 16 × 16
+const STATUS_GLYPHS = {
+  ready: [["path", { d: "M6.4 4.9v6.2L11.3 8z", class: "glyph-fill" }]],
+  claimed: [["path", { d: "M9.4 6.6 4.7 11.3", class: "glyph" }], ["rect", { x: 6.8, y: 5.3, width: 5.6, height: 2.5, rx: 0.6, transform: "rotate(45 9.6 6.55)", class: "glyph-fill" }]],  // a hammer: work in progress
+  blocked: [["rect", { x: 5.2, y: 7.3, width: 5.6, height: 4.2, rx: 1, class: "glyph-fill" }], ["path", { d: "M6.4 7.3V6.1a1.6 1.6 0 0 1 3.2 0v1.2", class: "glyph" }]],
+  review: [["path", { d: "M8 4.6V8l2.3 1.5", class: "glyph" }]],
+  accepted: [["path", { d: "M4.9 8.3 7 10.4l4.2-4.6", class: "glyph" }]],
+  rejected: [["path", { d: "M5.6 5.6l4.8 4.8M10.4 5.6l-4.8 4.8", class: "glyph" }]],
+  attention: [["path", { d: "M8 5.6v3.9", class: "glyph" }], ["circle", { cx: 8, cy: 12, r: 1, class: "glyph-fill" }]],
+  open: [],
+};
+// A state value on the node page, the tree or anywhere else, as the map's icon for it plus its
+// word: every axis value lands on one of the seven states (neutral ones get a plain grey disc).
+const VALUE_STATE = {
+  frontier: "ready", claimed: "claimed", "review-needed": "review", "revision-requested": "review", blocked: "blocked",
+  accepted: "accepted", reviewed: "accepted", rejected: "rejected", "no-longer-callable": "rejected",
+  unverifiable: "attention", "potentially-stale": "attention", challenged: "attention",
+};
+function stateChip(value, text, title) {
+  const kind = VALUE_STATE[value] || "open";
+  const chip = el("span", null, { class: `chip state-${kind}`, title: title || text || value });
+  const icon = svg("svg", { viewBox: "-1 -1 18 18", class: "chip-icon", "aria-hidden": "true" });
+  icon.append(statusIcon(kind, 8, 8, 16));
+  chip.append(icon, text || value);
+  return chip;
 }
+
+function statusIcon(kind, x, y, size = 16) {
+  const icon = svg("g", { class: `status-icon ${kind}`, transform: `translate(${x - size / 2},${y - size / 2}) scale(${size / 16})` });
+  // a warning is a triangle, like the system's; every other state a disc
+  icon.append(kind === "attention" ? svg("path", { d: "M8 1.1c.5 0 .95.27 1.2.72l6.1 10.9c.52.93-.15 2.08-1.2 2.08H1.9c-1.05 0-1.72-1.15-1.2-2.08L6.8 1.82C7.05 1.37 7.5 1.1 8 1.1z", class: "disc" }) : svg("circle", { cx: 8, cy: 8, r: 8, class: "disc" }));
+  for (const [tag, attrs] of STATUS_GLYPHS[kind] || []) icon.append(svg(tag, attrs));
+  return icon;
+}
+
+const KIND_LABEL = { theorem: "Theorem", lemma: "Lemma", claim: "Claim", imported_result: "Imported result" };
+const capitalised = (text) => text.charAt(0).toUpperCase() + text.slice(1);
 
 // Layers by longest path from the top (a node sits below everything that depends on it),
 // then a few barycenter sweeps to cut crossings. Enough for tens to hundreds of nodes.
@@ -286,10 +328,10 @@ function applyView() {
 function fitView() {
   const canvas = $("map-dag");
   if (!view.content || !canvas || !canvas.clientWidth) return;
-  const pad = 40, top = 44;
-  view.k = Math.max(0.15, Math.min(1.2, (canvas.clientWidth - pad * 2) / view.content.width, (canvas.clientHeight - top - pad) / view.content.height));
+  const pad = 40, top = 24, bottom = 80;  // the legend and zoom controls float along the bottom
+  view.k = Math.max(0.15, Math.min(1.1, (canvas.clientWidth - pad * 2) / view.content.width, (canvas.clientHeight - top - bottom) / view.content.height));
   view.tx = (canvas.clientWidth - view.content.width * view.k) / 2;
-  view.ty = top + (canvas.clientHeight - top - pad - view.content.height * view.k) / 2;
+  view.ty = top + (canvas.clientHeight - top - bottom - view.content.height * view.k) / 2;
   view.fitted = true;
   applyView();
 }
@@ -386,7 +428,7 @@ function drawDag(nodes) {
   const rejected = (n) => ["rejected", "no-longer-callable"].includes(n.acceptance_state);
   const defs = svg("defs");
   const marker = svg("marker", { id: "arrow", viewBox: "0 0 10 10", refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: "auto-start-reverse" });
-  marker.append(svg("path", { d: "M0,1 L9,5 L0,9 z", fill: "var(--line-2)" }));
+  marker.append(svg("path", { d: "M1,1.5 L9,5 L1,8.5 z", class: "arrowhead" }));
   defs.append(marker);
   box.append(defs, scene);
   for (const n of nodes) for (const d of n.dependencies) {
@@ -400,33 +442,31 @@ function drawDag(nodes) {
   }
   for (const n of nodes) {
     const left = -BOX.w / 2, top = -BOX.h / 2;
-    const classes = ["node", `tone-${toneOf(n)}`, n.frontier ? "frontier" : "", n.assignee ? "claimed" : "", rejected(n) ? "rejected" : "", warningOf(n)].filter(Boolean).join(" ");
+    const classes = ["node", `state-${tagOf(n)[1]}`, n.frontier ? "frontier" : "", rejected(n) ? "rejected" : ""].filter(Boolean).join(" ");
     const place = () => { const p = at.get(n.id); g.setAttribute("transform", `translate(${p.x},${p.y})`); };
     const g = svg("g", { class: classes, "data-node-id": n.id, tabindex: 0, role: "link", "aria-label": `${n.kind} ${n.id}: ${n.acceptance_state}, ${n.workflow_state}, ${n.integrity_state}${n.assignee ? `, claimed by ${n.assignee}` : ""}${n.frontier ? ", on the frontier" : ""}` });
     place();
-    g.append(svg("path", { class: "box", d: chamfered(left, top, BOX.w, BOX.h, BOX.chamfer) }));
-    g.append(svg("rect", { class: `bar ${toneOf(n)}`, x: left, y: top + BOX.chamfer, width: 5, height: BOX.h - BOX.chamfer }));
-    const kind = svg("text", { class: "kind", x: left + 12, y: top + 16 });
-    kind.textContent = n.kind.replace("_", " ").toUpperCase();
-    const id = svg("text", { class: "id", x: left + BOX.w - 8, y: top + 16, "text-anchor": "end" });
-    id.textContent = short(n.id, 22);
-    const label = svg("text", { x: left + 12, y: top + 35 });
+    g.append(svg("rect", { class: "box", x: left, y: top, width: BOX.w, height: BOX.h, rx: BOX.radius }));
+    const kind = svg("text", { class: "kind", x: left + 14, y: top + 21 });
+    kind.textContent = `${KIND_LABEL[n.kind] || capitalised(n.kind.replace("_", " "))}  `;
+    const id = svg("tspan", { class: "id" });
+    id.textContent = short(n.id, 18);
+    kind.append(id);
+    const label = svg("text", { x: left + 14, y: top + 41 });
     label.textContent = short(n.display_label || n.statement, 22);
-    const meta = svg("text", { class: "meta", x: left + 12, y: top + 51 });
-    meta.textContent = n.display_label ? short(n.statement, 32) : "";
-    g.append(kind, id, label, meta);
-    const [tagText, tone] = tagOf(n);
-    if (tagText) {
-      const tag = svg("text", { class: `tag ${tone}`.trim(), x: left + BOX.w - 8, y: top + BOX.h - 8, "text-anchor": "end" });
-      tag.textContent = short(tagText, 28).toUpperCase();
-      g.append(tag);
-    }
+    const meta = svg("text", { class: "meta", x: left + 14, y: top + 58 });
+    meta.textContent = n.display_label ? short(n.statement, 30) : "";
+    g.append(kind, label, meta);
+    // the node's one state, as a word along the bottom
+    const [tagText, statusKind] = tagOf(n);
+    const status = svg("g", { class: `status ${statusKind}` });
+    const tag = svg("text", { class: "tag", x: left + 14, y: top + BOX.h - 13 });
+    tag.textContent = capitalised(short(tagText, 24));
+    status.append(tag);
+    // the state's icon, large, as a badge on the card's top-right corner
+    g.append(status, statusIcon(statusKind, left + BOX.w - 6, top + 6, 30));
     // the frontier is its own, strongest signal (ADR-0008): a warning is shown beside it, never in its place
-    if (n.frontier && warningOf(n)) {
-      const frontier = svg("text", { class: "tag accent", x: left + 12, y: top + BOX.h - 8 });
-      frontier.textContent = "FRONTIER";
-      g.append(frontier);
-    }
+    if (n.frontier && warningOf(n)) g.append(statusIcon("ready", left + BOX.w - 36, top + 6, 22));
     // hovering shows the current snapshot's 核心思路 (ADR-0013), under the statement it proves
     const title = svg("title");
     title.textContent = n.core_idea ? `${n.statement}\n核心思路：${n.core_idea}` : n.statement;
@@ -481,11 +521,11 @@ function drawTree(nodes) {
     li.setAttribute("data-node-id", id);
     if ((parents.get(id) || 0) > 1) li.setAttribute("data-shared-by", String(parents.get(id)));
     if (!n) { li.append(el("span", `${id} (missing)`, { class: "warning" })); return li; }
-    li.append(el("a", n.id, { href: pageOf(n), ...(n.core_idea ? { title: `核心思路：${n.core_idea}` } : {}) }), ` —${short(n.display_label || n.statement, 60)}`);
-    li.append(el("span", n.acceptance_state, { class: `state-chip chip ${n.acceptance_state}` }), el("span", n.workflow_state, { class: `state-chip chip ${n.workflow_state}` }));
-    li.append(el("span", n.integrity_state, { class: `state-chip chip ${n.integrity_state}${n.integrity_state === "current" ? "" : " warn-chip"}` }));
-    if (n.assignee) li.append(el("span", `@${n.assignee}`, { class: "state-chip chip claimed" }));
-    if (n.frontier) li.append(el("span", "frontier", { class: "state-chip chip frontier" }));
+    li.append(el("a", n.id, { href: pageOf(n), ...(n.core_idea ? { title: `核心思路：${n.core_idea}` } : {}) }), ` — ${short(n.display_label || n.statement, 60)}`);
+    const small = (chip) => { chip.classList.add("state-chip"); return chip; };
+    li.append(small(stateChip(n.acceptance_state)), small(stateChip(n.workflow_state)), small(stateChip(n.integrity_state)));
+    if (n.assignee) li.append(small(stateChip("claimed", n.assignee, `claimed by ${n.assignee}`)));
+    if (n.frontier) li.append(small(stateChip("frontier", "frontier", "on the frontier: ready to start")));
     if ((parents.get(id) || 0) > 1) li.append(el("span", "shared", { class: "state-chip shared-chip", title: `used by ${parents.get(id)} nodes; see the DAG` }));
     if (ancestors.has(id)) { li.append(" (cycle: not expanded again)"); return li; }
     if (n.dependencies.length) {
@@ -504,7 +544,7 @@ function drawTree(nodes) {
 function showMap() {
   const nodes = mapData.nodes;
   const frontier = nodes.filter((n) => n.frontier).length;
-  $("map-caption").textContent = `${nodes.length} node(s) · ${frontier} on the frontier · drag to pan · pinch or ⌘/ctrl + scroll to zoom · F fits · / finds`;
+  $("map-caption").textContent = `${nodes.length} ${nodes.length === 1 ? "node" : "nodes"} · ${frontier} on the frontier`;
   $("stat-frontier").textContent = String(frontier);
   $("map-dag").hidden = mapView !== "dag";
   $("map-tree").hidden = mapView !== "tree";
@@ -544,14 +584,14 @@ function applyFind() {
   count.textContent = `${found} of ${mapData.nodes.length} match · ${next}`;
 }
 
-// pan (and zoom to at least life size) so the node sits in the middle of what the map bar leaves showing
+// pan (and zoom to at least life size) so the node sits in the middle of the canvas (the toolbar
+// sits above it, not over it)
 function showOnCanvas(id) {
   const canvas = $("map-dag"), p = view.at && view.at.get(id);
   if (!p || !canvas.clientWidth) return;
-  const top = 44;
   view.k = Math.min(4, Math.max(view.k, 1));
   view.tx = canvas.clientWidth / 2 - p.x * view.k;
-  view.ty = (top + canvas.clientHeight) / 2 - p.y * view.k;
+  view.ty = canvas.clientHeight / 2 - p.y * view.k;
   applyView();
 }
 
@@ -599,7 +639,7 @@ async function showNode(nodeId) {
   const view = await api(`/api/node/${encodeURIComponent(nodeId)}`);
   const node = view.node;
   $("node-title").replaceChildren(node.id, el("small", node.kind.replace("_", " ")));
-  const axis = (name, value) => { const cell = el("div"); cell.append(el("span", name, { class: "lbl" }), el("span", value, { class: `chip ${value}`, title: `${name}: ${value}` })); return cell; };
+  const axis = (name, value) => { const cell = el("div"); cell.append(el("span", name, { class: "lbl" }), stateChip(value, value, `${name}: ${value}`)); return cell; };
   $("node-axes").replaceChildren(axis("workflow", view.workflow_state), axis("acceptance", view.acceptance_state), axis("integrity", view.integrity_state));
   const nodeWarnings = el("ul");
   showWarnings(view.warnings, nodeWarnings);
@@ -644,11 +684,16 @@ async function showNode(nodeId) {
 }
 
 async function route() {
+  // four pages: the map (#/), the review list (#/review), the warnings (#/warnings), a node (#/node/<id>)
   const match = location.hash.match(/^#\/node\/(.+)$/);
-  $("home").hidden = !!match;
-  $("node-page").hidden = !match;
-  if (!match && view.content && !view.fitted) fitView();  // drawn while the map was hidden
-  for (const link of document.querySelectorAll(".rail a[data-nav]")) link.classList.toggle("on", !match && (link.dataset.nav === "map" ? !location.hash.startsWith("#sec-") : location.hash === link.getAttribute("href")));
+  const page = match ? "node" : { "#/review": "review", "#/warnings": "warnings" }[location.hash] || "map";
+  document.body.dataset.page = page;
+  $("home").hidden = page !== "map";
+  $("review-page").hidden = page !== "review";
+  $("warnings-page").hidden = page !== "warnings";
+  $("node-page").hidden = page !== "node";
+  if (page === "map" && view.content && !view.fitted) fitView();  // drawn while the map was hidden
+  for (const link of document.querySelectorAll(".rail a[data-nav]")) link.classList.toggle("on", link.dataset.nav === page);
   if (match) {
     try { await showNode(decodeURIComponent(match[1])); } catch (error) { say(error.message, "error"); }
   }
@@ -662,7 +707,34 @@ async function refresh() {
   $("reviewer-initial").textContent = (state.reviewer || "?").trim().charAt(0).toUpperCase() || "?";
   showHome();
   showMap();
+  showAttention();
   await route();
+}
+
+// The warnings page's first list: every node the map marks "needs attention" — a Challenge open
+// on it, a dependency that moved (potentially stale), or a decision that no longer applies — with
+// why, each opening where the node lives. The sidebar counts these and the review-record warnings.
+const ATTENTION_WHY = {
+  challenged: "A Challenge is open on it: it may no longer be safe to depend on.",
+  "potentially-stale": "A dependency moved to a new accepted version: it may need a re-review or a new proof.",
+  unverifiable: "Its newest Review decision no longer matches its snapshot or its statement: decide it afresh.",
+};
+function showAttention() {
+  const nodes = mapData.nodes.filter((n) => warningOf(n));
+  const list = $("attention-nodes");
+  list.replaceChildren(...nodes.map((n) => {
+    const reason = n.integrity_state === "challenged" ? "challenged" : n.integrity_state === "potentially-stale" ? "potentially-stale" : "unverifiable";
+    const row = el("li");
+    const link = el("a", null, { href: pageOf(n), class: "attention-node" });
+    link.append(el("b", n.display_label || short(n.statement, 60)), el("span", `${KIND_LABEL[n.kind] || n.kind} · ${n.id}`, { class: "attention-id" }));
+    row.append(stateChip(reason, tagOf(n)[0]), link, el("p", ATTENTION_WHY[reason], { class: "hint" }));
+    return row;
+  }));
+  if (!nodes.length) list.append(el("li", "Nothing on the map needs attention.", { class: "attention-none" }));
+  $("attention-count").textContent = nodes.length ? String(nodes.length) : "";
+  const total = nodes.length + state.warnings.length;
+  $("rail-warnings").textContent = total ? String(total) : "";
+  $("rail-warnings").className = total ? "n hot" : "n";
 }
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -682,6 +754,15 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   wireCanvas();
   wireFind();
+  // the sidebar hides (remembered in this browser); on a narrow window it slides over the map
+  const narrow = () => matchMedia("(max-width: 760px)").matches;
+  try { if (localStorage.getItem("proof.map.sidebar") === "hidden") document.body.classList.add("sidebar-hidden"); } catch { /* ignore */ }
+  $("sidebar-toggle").addEventListener("click", () => {
+    if (narrow()) { document.body.classList.toggle("sidebar-shown"); return; }
+    const hidden = document.body.classList.toggle("sidebar-hidden");
+    try { localStorage.setItem("proof.map.sidebar", hidden ? "hidden" : "shown"); } catch { /* ignore */ }
+    if (view.fitted) setTimeout(fitView, 240);
+  });
   $("view-dag").addEventListener("click", () => { mapView = "dag"; showMap(); });
   $("view-tree").addEventListener("click", () => { mapView = "tree"; showMap(); });
   $("tree-root").addEventListener("change", showMap);

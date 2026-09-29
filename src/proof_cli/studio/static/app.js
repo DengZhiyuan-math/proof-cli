@@ -637,8 +637,9 @@ async function loadAccount() {
   const el = $("#agent-account");
   const r = await api("/api/agent/account?provider=" + encodeURIComponent(C.provider || "")).catch(() => null);
   const a = r && r._status === 200 && r.account;
-  if (!a) { el.hidden = true; return; }
+  if (!a) { el.hidden = true; infoMark("account", ""); return; }
   el.hidden = false;
+  infoMark("account", r.problem ? "err" : "");  // a wrong account stops every turn: say so on the button
   const who = a.email ? a.email + (a.org ? " · " + a.org : "") : "not logged in";
   el.className = r.problem ? "bad" : r.allowed ? "locked" : "";
   el.textContent = r.problem ? r.problem : (r.allowed ? "Allowed account: " : "Account: ") + who;
@@ -743,12 +744,22 @@ function describeScope(mentions, mode) {
   if (!mentions.length) return "Scope: whole workspace (any file, new files allowed)";
   return "Scope: only " + mentions.map(rangeLabel).join(", ");
 }
+const SCOPE_ICONS = {
+  wide: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5A1.5 1.5 0 0 1 5 6h4.2l1.8 2H19a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5z"/></svg>',
+  narrow: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3.5h6.5L18 8v11a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 19V5a1.5 1.5 0 0 1 1-1.5z"/><path d="M13.5 3.5V8H18"/></svg>',
+  ask: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5.5" y="10.5" width="13" height="9.5" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/></svg>',
+};
 function updateScope() {
   const ms = parseMentions($("#chat-input").value), mode = $("#chat-mode").value;
   const el = $("#chat-scope");
-  el.textContent = describeScope(ms, mode);
-  el.className = mode === "ask" ? "ask" : ms.length ? "narrow" : "wide";
-  el.title = "Type @ to point the agent at a file or at the editor selection. "
+  const scope = describeScope(ms, mode);
+  // shown as a small grey icon beside "+" (a folder: any file in the project; a page: only the
+  // @-mentioned files; a lock: read-only); the words are its tooltip and its label
+  const kind = mode === "ask" ? "ask" : ms.length ? "narrow" : "wide";
+  el.innerHTML = SCOPE_ICONS[kind];
+  el.className = kind;
+  el.setAttribute("aria-label", scope);
+  el.title = scope + "\nType @ to point the agent at a file or at the editor selection. "
     + "With @-mentions it may change only those files; without, any file in the project.";
 }
 function mentionHtml(text) {
@@ -773,6 +784,51 @@ function insertMention(token, snip, replaceFrom) {
   }
   updateScope(); inp.focus();
 }
+
+/* The "+" menu: what the proof agent does on this node (ADR-0006) — prove it, split it, request
+   review, open a Challenge, record an Evidence check — and, when a snapshot awaits review, the
+   researcher's own decision on it (node.js offers it through globalThis.studioReview). An agent
+   item writes its request into the message box, to add to and send; the agent carries it out
+   through `proof`. The decision opens the review sheet and is never the agent's (ADR-0010). */
+const AGENT_ACTIONS = [
+  ["Prove it", "Work on this node's proof: retrieval first, then write the proof in proof.tex and compile it."],
+  ["Request review", "This node's proof is ready. Compile it, then request review with a rationale for why the node is scoped to prove directly: "],
+  ["Split into claims", "This node is too large to prove directly. Propose Claims that together prove it, then split the node into them: "],
+  ["Edit dependencies", "Change one of this node's dependency edges (add a Lemma the proof uses, remove one it doesn't, or move one onto a split child): "],
+  ["Open a Challenge", "Open a Challenge on the dependency that may no longer hold, and say why: "],
+  ["Record evidence", "Run a checker on the snapshot under review and record the Evidence check with what it reported: "],
+];
+function askAgent(request, mode) {
+  if (mode) { $("#chat-mode").value = mode; store.set("chat.mode", mode); }
+  const inp = $("#chat-input");
+  inp.value = request; inp.focus(); inp.setSelectionRange(request.length, request.length); updateScope();
+}
+function plusMenu(open) {
+  const menu = $("#plus-menu");
+  if (open === undefined) open = menu.hidden;
+  $("#chat-plus").setAttribute("aria-expanded", String(open));
+  if (!open) { menu.hidden = true; return; }
+  const node = (tag, cls, text) => { const e = document.createElement(tag); e.className = cls; if (text) e.textContent = text; return e; };
+  const item = (label, run, title, cls = "") => {
+    const b = node("button", `menu-item ${cls}`.trim(), label);
+    b.type = "button"; b.setAttribute("role", "menuitem"); if (title) b.title = title;
+    b.onclick = () => { plusMenu(false); run(); };
+    return b;
+  };
+  const review = typeof globalThis.studioReview === "function" ? globalThis.studioReview() : null;
+  const keyIdeas = typeof globalThis.studioKeyIdeas === "function" ? globalThis.studioKeyIdeas() : null;
+  const rows = [node("div", "menu-head", "Ask the agent to")];
+  if (keyIdeas) rows.push(item("Draft key ideas", keyIdeas.draft, "The proof agent writes key-ideas.md from proof.tex and the dependencies; you edit it, then request review"));
+  if (review) rows.push(item(`Check snapshot v${review.version}`, () => askAgent(review.check, "ask"), "Read-only: the agent reports what does not hold"));
+  for (const [label, request] of AGENT_ACTIONS) rows.push(item(label, () => askAgent(request), request));
+  if (review) rows.push(node("hr", "menu-sep"), node("div", "menu-head", "Your decision"), item(`Review snapshot v${review.version}…`, review.open, "Accept, request a revision or reject: recorded as you", "decide"));
+  $("#review-card").hidden = true;
+  menu.replaceChildren(...rows);
+  menu.hidden = false;
+}
+$("#chat-plus").addEventListener("click", (e) => { e.stopPropagation(); plusMenu(); });
+document.addEventListener("click", (e) => { if (!e.target.closest("#plus-menu, #chat-plus")) plusMenu(false); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") { plusMenu(false); $("#review-card").hidden = true; } });
 
 async function chatSend() {
   if (C.job) return;
@@ -879,10 +935,11 @@ let lastRate = null;
 function renderQuota(rate) {
   const q = $("#quota");
   lastRate = rate;
-  const hidden = store.get("chat.quotaHidden", false);
-  q.classList.toggle("collapsed", hidden);
+  const hidden = false;  // the usage limits live in the account-and-usage popover, shown in full
   const refresh = `<button class="tiny icon ghost" id="quota-refresh" title="Check usage now (a tiny Haiku call, ≈ $0.001)">${icon("refresh")}</button>`;
-  const hide = `<button class="tiny icon ghost" id="quota-toggle" title="Hide usage limits">${icon("up")}</button>`;
+  const hide = "";
+  const windows = rate && rate.unifiedWindows ? Object.values(rate.unifiedWindows) : [];
+  infoMark("quota", rate && rate.status && rate.status !== "allowed" ? "err" : windows.some((w) => (w.utilization || 0) >= 0.9) ? "warn" : "");
   if (!rate || !rate.unifiedWindows) {
     q.innerHTML = hidden
       ? `<span class="note q-sum" id="quota-toggle" title="Show usage limits">Usage: not checked yet <span class="q-open">${icon("down")}</span></span>`
@@ -935,12 +992,28 @@ async function checkUsage(auto = false) {
   if (r.error && !auto) toast(r.error);
 }
 $("#quota").addEventListener("click", (e) => {
-  if (e.target.id === "quota-refresh") return checkUsage();
-  if (e.target.closest("#quota-toggle")) {
-    store.set("chat.quotaHidden", !store.get("chat.quotaHidden", false));
-    renderQuota(lastRate);
-  }
+  if (e.target.closest("#quota-refresh")) return checkUsage();
 });
+
+// The account and the usage limits sit behind the ⓘ-style button in the panel's head; a dot on
+// it says when one of them needs you (red: the account is refused or usage is rate limited;
+// orange: a usage window is nearly spent).
+function infoMark(which, level) {  // may run before this line is reached: keep its state on itself
+  const marks = (infoMark.marks ||= {});
+  marks[which] = level;
+  const b = $("#chat-info"), levels = Object.values(marks);
+  b.classList.toggle("mark-err", levels.includes("err"));
+  b.classList.toggle("mark-warn", !levels.includes("err") && levels.includes("warn"));
+}
+function infoPopover(open) {
+  const pop = $("#agent-info");
+  if (open === undefined) open = pop.hidden;
+  pop.hidden = !open;
+  $("#chat-info").setAttribute("aria-expanded", String(open));
+}
+$("#chat-info").addEventListener("click", (e) => { e.stopPropagation(); infoPopover(); });
+document.addEventListener("click", (e) => { if (!e.target.closest("#agent-info, #chat-info")) infoPopover(false); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") infoPopover(false); });
 
 function diffHtml(diff) {
   return diff.split("\n").map((l) => {

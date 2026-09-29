@@ -56,6 +56,7 @@ const ICONS = {
   refresh: '<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3L19.5 9"/><path d="M19.5 4.5V9H15"/>',
   arrow: '<path d="M5 12h14M13.5 6.5 19 12l-5.5 5.5"/>',
   spark: '<path d="M12 4l1.7 5.3L19 11l-5.3 1.7L12 18l-1.7-5.3L5 11l5.3-1.7z" fill="currentColor" stroke-width="1"/>',
+  gauge: '<path d="M4.2 16.5a8 8 0 1 1 15.6 0"/><path d="m12 15.5 3.6-4.6"/><circle cx="12" cy="15.8" r="1.2" fill="currentColor" stroke="none"/>',
   star: '<path d="m12 4.5 2.3 4.7 5.2.8-3.8 3.6.9 5.1L12 16.3l-4.6 2.4.9-5.1-3.8-3.6 5.2-.8z"/>',
 };
 function icon(name, cls = "") {
