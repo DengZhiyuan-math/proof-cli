@@ -34,10 +34,10 @@ def _state(pending=(), warnings=()):
     return {"project_id": "p", "origin": "/tmp/p", "reviewer": "Researcher <r@example.org>", "pending": list(pending), "warnings": list(warnings)}
 
 
-def _home(state=None, steps=()):
+def _home(state=None, steps=(), map_=None):
     if shutil.which("node") is None:
         pytest.skip("needs node")
-    scenario = {"state": state or _state(PENDING), "map": MAP, "steps": list(steps)}
+    scenario = {"state": state or _state(PENDING), "map": map_ or MAP, "steps": list(steps)}
     done = subprocess.run(["node", str(HARNESS), json.dumps(scenario)], capture_output=True, text=True, timeout=30)
     assert done.returncode == 0, done.stderr
     return json.loads(done.stdout)
@@ -71,6 +71,37 @@ def test_enter_in_the_find_box_opens_the_first_match_where_it_lives():
 def test_the_tree_dims_what_the_find_box_does_not_match():
     *_, tree = _home(steps=[{"view": "tree"}, {"filter": "lem_bound"}])
     assert tree["dimmed"] == ["thm_main", "ref_bw"]
+
+
+# -- the frontier is its own signal (ADR-0008) -------------------------------------------
+
+CLAIMABLE_BUT_CHALLENGED = {"nodes": [
+    _node("lem_ch", "lemma", "Challenged but claimable", acceptance_state="accepted", integrity_state="challenged", frontier=True),
+    _node("lem_plain", "lemma", "Only claimable", frontier=True),
+]}
+
+
+def test_a_frontier_node_shows_the_frontier_and_its_warning_side_by_side_in_the_dag():
+    """Accepted and Challenged, yet on the frontier: the warning must not replace 'ready to claim' (PR #93 review)."""
+    (shown,) = _home(map_=CLAIMABLE_BUT_CHALLENGED)
+    node = shown["dag"]["lem_ch"]
+    assert {"frontier", "challenged"} <= set(node["classes"])
+    assert "ready to claim" in node["texts"] and "challenged" in node["texts"]
+    assert "ready to claim" in node["label"] and "challenged" in node["label"]
+    assert shown["dag"]["lem_plain"]["texts"].count("ready to claim") == 1  # said once, not twice
+
+
+def test_a_frontier_node_shows_the_frontier_and_its_warning_side_by_side_in_the_tree():
+    chain = {"nodes": [_node("thm", "theorem", "Top", ["lem_ch"]), *CLAIMABLE_BUT_CHALLENGED["nodes"][:1]]}
+    *_, tree = _home(map_=chain, steps=[{"view": "tree"}])
+    assert tree["tree"]["lem_ch"] == ["ready to claim", "challenged"]
+
+
+def test_the_frontier_border_is_never_overridden_by_a_warning_border():
+    css = (STATIC / "app.css").read_text()
+    frontier = css.index("#dag-svg .node.frontier rect.box")
+    warning = css.index("#dag-svg .node.challenged rect.box")
+    assert frontier > warning  # the later rule of the same weight wins: the frontier's
 
 
 # -- Awaiting review --------------------------------------------------------------------

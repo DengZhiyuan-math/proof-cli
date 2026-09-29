@@ -87,6 +87,15 @@ class FakeElement {
     filtering: elements["dag-svg"].classList.contains("filtering"),
     matched: elements["dag-svg"].querySelectorAll("g").filter((g) => g.classList.contains("match")).map((g) => g.attributes["aria-label"].split(" ")[1].replace(":", "")),
     dimmed: elements["map-tree"].querySelectorAll("li").filter((li) => li.classList.contains("dim")).map((li) => li.querySelector(".muted").textContent),
+    // each drawn DAG node: its classes and every text it shows
+    dag: Object.fromEntries(elements["dag-svg"].querySelectorAll("g").map((g) => [
+      g.attributes["aria-label"].split(" ")[1].replace(":", ""),
+      { classes: g.className.split(" "), texts: g.querySelectorAll("text").map((t) => t.textContent), label: g.attributes["aria-label"] },
+    ])),
+    // each tree line, by its node id: the status chips it shows
+    tree: Object.fromEntries(elements["map-tree"].querySelectorAll("li").filter((li) => li.attributes["data-node-id"]).map((li) => [
+      li.attributes["data-node-id"], li.querySelector(".line").querySelectorAll(".status").map((s) => s.textContent),
+    ])),
     href: location.href,
     reviewHidden: elements.review.hidden, warningsHidden: elements["warnings-block"].hidden,
     pendingCount: elements["pending-count"].textContent,

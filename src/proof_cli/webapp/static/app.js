@@ -42,8 +42,11 @@ function row(cells) {
   return tr;
 }
 
-// One status per node, in words: the thing a reader needs to know first (ADR-0008: the frontier
-// before the axes; a warning before anything else). The full three axes are on the node's page.
+// A node's status, in words: a warning before anything else. The frontier is not a status but
+// its own signal (ADR-0008), shown beside this one and never replaced by it: an Accepted node
+// under a Challenge can still be ready to claim. The full three axes are on the node's page.
+const FRONTIER = "ready to claim";
+
 function statusOf(n) {
   if (n.integrity_state === "challenged") return { text: "challenged", tone: "warn" };
   if (n.integrity_state === "potentially-stale") return { text: "may be stale", tone: "warn" };
@@ -51,14 +54,17 @@ function statusOf(n) {
   if (["rejected", "no-longer-callable"].includes(n.acceptance_state)) return { text: n.acceptance_state.replace(/-/g, " "), tone: "rejected" };
   if (n.workflow_state === "review-needed") return { text: "awaiting review", tone: "review" };
   if (["accepted", "reviewed"].includes(n.acceptance_state)) return { text: n.acceptance_state, tone: "accepted" };
-  if (n.frontier) return { text: "ready to claim", tone: "frontier" };
   if (n.assignee) return { text: `claimed by ${n.assignee}`, tone: "" };
   return { text: n.workflow_state, tone: "" };
 }
 
-function statusChip(n) {
+// the chips a node shows: the frontier first, whenever it is on it, then its status
+function statusChips(n) {
   const s = statusOf(n);
-  return el("span", s.text, { class: `status ${s.tone}` });
+  const chips = n.frontier ? [el("span", FRONTIER, { class: "status frontier" })] : [];
+  // an open, unclaimed frontier node needs no second chip saying "open"
+  if (!(n.frontier && !s.tone && n.workflow_state === "open")) chips.push(el("span", s.text, { class: `status ${s.tone}` }));
+  return chips;
 }
 
 // Show exactly what will be recorded, then record it.
@@ -334,7 +340,10 @@ function drawDag(nodes) {
     const { x, y } = at.get(n.id);
     const status = statusOf(n);
     const classes = ["node", n.frontier ? "frontier" : "", warningOf(n), matches && matches(n) ? "match" : ""].filter(Boolean).join(" ");
-    const g = svg("g", { class: classes, tabindex: 0, role: "link", "aria-label": `${n.kind} ${n.id}: ${status.text}` });
+    // an open, unclaimed frontier node has nothing to add to "ready to claim"
+    const plainFrontier = n.frontier && !status.tone && n.workflow_state === "open";
+    const said = [n.frontier ? FRONTIER : "", plainFrontier ? "" : status.text].filter(Boolean).join(", ");
+    const g = svg("g", { class: classes, tabindex: 0, role: "link", "aria-label": `${n.kind} ${n.id}: ${said}` });
     g.append(svg("rect", { class: "box", x: x - BOX.w / 2, y: y - BOX.h / 2, width: BOX.w, height: BOX.h, rx: 1 }));
     g.append(svg("rect", { class: `bar ${toneOf(n)}`, x: x - BOX.w / 2, y: y - BOX.h / 2, width: 3, height: BOX.h }));
     const label = svg("text", { x: x - BOX.w / 2 + 12, y: y - 3 });
@@ -343,10 +352,18 @@ function drawDag(nodes) {
     const id = svg("text", { class: "sub", x: x - BOX.w / 2 + 12, y: y + 15 });
     id.textContent = short(n.id, 13);
     const sub = svg("text", { class: `sub ${status.tone}`, x: x + BOX.w / 2 - 10, y: y + 15, "text-anchor": "end" });
-    sub.textContent = n.assignee && !status.tone ? "claimed" : short(status.text, 15);
+    sub.textContent = plainFrontier ? "" : n.assignee && !status.tone ? "claimed" : short(status.text, 15);
     const title = svg("title");
-    title.textContent = `${n.id} (${n.kind})\n${n.statement}\n\n${n.workflow_state}${n.blocked_reason ? ` (${n.blocked_reason})` : ""} · ${n.acceptance_state} · ${n.integrity_state}${n.assignee ? ` · claimed by ${n.assignee}` : ""}`;
-    g.append(label, id, sub, title);
+    title.textContent = `${n.id} (${n.kind})${n.frontier ? ` · ${FRONTIER}` : ""}\n${n.statement}\n\n${n.workflow_state}${n.blocked_reason ? ` (${n.blocked_reason})` : ""} · ${n.acceptance_state} · ${n.integrity_state}${n.assignee ? ` · claimed by ${n.assignee}` : ""}`;
+    g.append(label, id, sub);
+    // the frontier (ADR-0008): a plate on the box's top edge, beside whatever warning the node carries
+    if (n.frontier) {
+      const left = x - BOX.w / 2 + 10, top = y - BOX.h / 2 - 7;
+      const tag = svg("text", { class: "tag", x: left + 5, y: top + 10 });
+      tag.textContent = FRONTIER;
+      g.append(svg("rect", { class: "plate", x: left, y: top, width: 92, height: 14 }), tag);
+    }
+    g.append(title);
     const open = () => { location.href = pageOf(n); };
     g.addEventListener("click", open);
     g.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); } });
@@ -373,12 +390,14 @@ function drawTree(nodes) {
   const matches = mapMatcher();
   const item = (id, ancestors) => {
     const n = byId.get(id);
-    const li = el("li");
+    // each line names its node in data-node-id; a node used by more than one parent carries a .shared-chip
+    const li = el("li", null, { "data-node-id": id });
     if (!n) { li.append(el("span", `${id} (missing)`, { class: "bad" })); return li; }
     if (matches && !matches(n)) li.classList.add("dim");
     const line = el("div", null, { class: "line" });
-    const shared = (parents.get(id) || 0) > 1 ? ` · shared by ${parents.get(id)}` : "";
-    line.append(el("a", short(n.display_label || n.statement, 70), { href: pageOf(n), title: n.statement }), el("span", `${n.id}${shared}`, { class: "muted small" }), statusChip(n));
+    line.append(el("a", short(n.display_label || n.statement, 70), { href: pageOf(n), title: n.statement }), el("span", n.id, { class: "muted small node-id" }));
+    if ((parents.get(id) || 0) > 1) line.append(el("span", `shared by ${parents.get(id)}`, { class: "muted small shared-chip", title: "expanded under each parent; see the DAG" }));
+    line.append(...statusChips(n));
     li.append(line);
     if (ancestors.has(id)) { line.append(el("span", "(cycle)", { class: "muted small" })); return li; }
     if (n.dependencies.length) {

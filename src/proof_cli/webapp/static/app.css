@@ -93,8 +93,12 @@ select:not([multiple]) { appearance: none; padding-right: 1.8rem; background-ima
 #dag-svg .node:focus { outline: none; }
 #dag-svg .node rect.box { fill: var(--panel); stroke: var(--rule); stroke-width: 1; transition: stroke .1s; }
 #dag-svg .node:hover rect.box, #dag-svg .node:focus rect.box { stroke: var(--ink); }
-#dag-svg .node.frontier rect.box { stroke: var(--accent); stroke-width: 2; }
 #dag-svg .node.challenged rect.box, #dag-svg .node.stale rect.box, #dag-svg .node.unverifiable rect.box { stroke: var(--warn); stroke-width: 1.5; stroke-dasharray: 4 3; }
+/* the frontier is its own, first signal (ADR-0008): after the warning rule, so a warning never takes its border;
+   the warning still shows in the node's status text */
+#dag-svg .node.frontier rect.box { stroke: var(--accent); stroke-width: 2; stroke-dasharray: none; }
+#dag-svg .node rect.plate { fill: var(--accent); }
+#dag-svg text.tag { fill: var(--accent-ink); font-size: 9px; font-family: var(--mono); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
 #dag-svg .bar.accepted { fill: var(--accepted); } #dag-svg .bar.review { fill: var(--review); }
 #dag-svg .bar.rejected { fill: var(--rejected); } #dag-svg .bar.none { fill: transparent; }
 #dag-svg text { fill: var(--ink); font-size: 12.5px; font-family: var(--font); font-weight: 500; }
