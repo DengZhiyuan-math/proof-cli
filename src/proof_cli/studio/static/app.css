@@ -7,7 +7,7 @@
   --bg: #0a0d13; --panel: #0e131a; --panel2: #121923; --panel3: #18212d; --border: #2a3a4d; --border2: #1c2734; --border-hi: #3b5068;
   --text: #e3e9f1; --text2: #aeb9c7; --muted: #6a7b8f; --faint: #3f4e60;
   --accent: #6fa8c2; --accent-text: #0a0d13; --accent-dim: rgba(111, 168, 194, .10);
-  --err: #b5605c; --warn: #c39a55; --ok: #aeb9c7; --hl: rgba(111, 168, 194, .28);
+  --err: #d0605a; --warn: #d9a84a; --ok: #5fb08c; --hl: rgba(111, 168, 194, .28);
   --sel: rgba(111, 168, 194, .22); --cm-bg: #0a0d13; --pdf-bg: #06080c;
   --display: "Rajdhani", "Bahnschrift", "DIN Alternate", "Avenir Next Condensed", system-ui, sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
@@ -25,7 +25,7 @@
     --bg: #eceff3; --panel: #f6f7f9; --panel2: #ffffff; --panel3: #e4e9ef; --border: #c3ccd7; --border2: #d8dee6; --border-hi: #a6b3c2;
     --text: #182029; --text2: #46525f; --muted: #6f7d8c; --faint: #a7b2be;
     --accent: #3d7d9b; --accent-text: #ffffff; --accent-dim: rgba(61, 125, 155, .10);
-    --err: #a04a46; --warn: #9a7223; --ok: #46525f; --hl: rgba(61, 125, 155, .25);
+    --err: #b8433d; --warn: #a9741a; --ok: #2f8a5f; --hl: rgba(61, 125, 155, .25);
     --sel: rgba(61, 125, 155, .18); --cm-bg: #ffffff; --pdf-bg: #d9dee5;
     --vs-text: #1f1f1f; --vs-kw: #0000ff; --vs-type: #267f99; --vs-str: #a31515; --vs-cmt: #008000; --vs-num: #098658; --vs-fn: #795e26;
     --vs-add: rgba(46, 160, 67, .18); --vs-del: rgba(248, 81, 73, .18);
@@ -36,7 +36,7 @@
   --bg: #eceff3; --panel: #f6f7f9; --panel2: #ffffff; --panel3: #e4e9ef; --border: #c3ccd7; --border2: #d8dee6; --border-hi: #a6b3c2;
   --text: #182029; --text2: #46525f; --muted: #6f7d8c; --faint: #a7b2be;
   --accent: #3d7d9b; --accent-text: #ffffff; --accent-dim: rgba(61, 125, 155, .10);
-  --err: #a04a46; --warn: #9a7223; --ok: #46525f; --hl: rgba(61, 125, 155, .25);
+  --err: #b8433d; --warn: #a9741a; --ok: #2f8a5f; --hl: rgba(61, 125, 155, .25);
   --sel: rgba(61, 125, 155, .18); --cm-bg: #ffffff; --pdf-bg: #d9dee5;
   --vs-text: #1f1f1f; --vs-kw: #0000ff; --vs-type: #267f99; --vs-str: #a31515; --vs-cmt: #008000; --vs-num: #098658; --vs-fn: #795e26;
   --vs-add: rgba(46, 160, 67, .18); --vs-del: rgba(248, 81, 73, .18);
@@ -120,7 +120,7 @@ button.flip .ico { transform: rotate(180deg); }
 #pdf-toolbar #compile-box { margin-right: 6px; }
 .toggle { display: flex; align-items: center; gap: 4px; color: var(--muted); white-space: nowrap; }
 .status { color: var(--muted); font-family: var(--mono); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.status.ok { color: var(--text2); } .status.err { color: var(--err); } .status.warn { color: var(--warn); }
+.status.ok { color: var(--ok); } .status.err { color: var(--err); } .status.warn { color: var(--warn); }
 .status.busy::before { content: ""; display: inline-block; width: 9px; height: 9px; margin-right: 6px;
   border: 2px solid var(--accent); border-top-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -329,8 +329,9 @@ pre.panel-view { font: 12px/1.45 var(--mono); white-space: pre-wrap; color: var(
 #node-panel .node-axes { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0; }
 #node-panel .node-axes span { font-family: var(--mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; padding: 3px 7px 2px; border: 1px solid var(--border); color: var(--text2); background: var(--panel2); }
 #node-panel .node-axes span.frontier { color: var(--accent); border-color: var(--accent); }
-#node-panel .node-axes span.warn { color: var(--warn); }
-#node-panel .node-axes span.err { color: var(--err); }
+#node-panel .node-axes span.ok { color: var(--ok); border-color: var(--ok); }
+#node-panel .node-axes span.warn { color: var(--warn); border-color: var(--warn); }
+#node-panel .node-axes span.err { color: var(--err); border-color: var(--err); }
 #node-panel h4 { margin: 12px 0 6px; font-family: var(--mono); font-size: 10px; font-weight: 400; text-transform: uppercase; letter-spacing: .14em; color: var(--muted); }
 #node-panel .node-deps { margin: 0; padding-left: 0; list-style: none; font-family: var(--mono); font-size: 11px; color: var(--text2); }
 #node-panel .node-deps li { padding: 3px 0; border-bottom: 1px dashed var(--border2); }
