@@ -747,9 +747,12 @@ function describeScope(mentions, mode) {
 function updateScope() {
   const ms = parseMentions($("#chat-input").value), mode = $("#chat-mode").value;
   const el = $("#chat-scope");
-  el.textContent = describeScope(ms, mode);
+  const scope = describeScope(ms, mode);
+  // shown as a dot beside "+" (its colour says wide, narrow or read-only); the words are its tooltip
+  el.textContent = scope;
   el.className = mode === "ask" ? "ask" : ms.length ? "narrow" : "wide";
-  el.title = "Type @ to point the agent at a file or at the editor selection. "
+  el.setAttribute("aria-label", scope);
+  el.title = scope + "\nType @ to point the agent at a file or at the editor selection. "
     + "With @-mentions it may change only those files; without, any file in the project.";
 }
 function mentionHtml(text) {
