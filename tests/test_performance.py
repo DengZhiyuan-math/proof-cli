@@ -135,6 +135,24 @@ def test_a_project_stamped_before_snapshot_dependencies_gains_the_column(tmp_pat
     assert "dependencies" in columns
 
 
+def test_a_project_stamped_before_side_documents_gains_the_table(tmp_path: Path):
+    """A project an older release migrated and stamped, before #39's `side_documents` table,
+    gets the table on its next connect: its DDL is part of the fingerprint."""
+    store = ensure_project(tmp_path)
+    raw = sqlite3.connect(store.db_path)
+    raw.execute("DROP TABLE side_documents")
+    raw.commit()
+    cookie = raw.execute("PRAGMA schema_version").fetchone()[0]
+    older_digest = storage._SCHEMA_DDL_DIGEST ^ 1  # the older release's DDL, without the table
+    raw.execute(f"PRAGMA user_version = {(older_digest ^ cookie) & 0x7FFFFFFF}")  # current, as that release saw it
+    raw.commit()
+    raw.close()
+
+    with store.connect() as conn:
+        tables = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    assert "side_documents" in tables
+
+
 # -- reads stay linear -----------------------------------------------------------------
 
 
