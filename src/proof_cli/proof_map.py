@@ -958,6 +958,18 @@ def dependency_pin_is_current(store: ProjectStore, pin: DependencyPin) -> bool:
     return _same_interface(store, pin.target_node_id, pin.pinned_fingerprint, current_fingerprint)
 
 
+def dependency_pin_lags(store: ProjectStore, pin: DependencyPin) -> bool:
+    """Whether a pin is behind its target's accepted version (#23): the target has moved on to
+    a new Accepted version since the dependent was checked against it, even with the same
+    interface. The same rule as the page's Lightweight re-review remedy; an imported result
+    has no versions, so it never lags."""
+    target = get_node(store, pin.target_node_id)
+    if target is None or target.kind == ProofMapNodeKind.imported_result:
+        return False
+    accepted = get_accepted_version(store, pin.target_node_id)
+    return accepted is not None and pin.pinned_version != accepted
+
+
 class AcceptanceDecision(str, Enum):
     """The only three ways a local node's acceptance_state may ever change.
 
@@ -1826,19 +1838,21 @@ def dismiss_challenge(
     )
 
 
-def _is_downstream_of_challenge_or_stale_pin(store: ProjectStore, node_id: str) -> bool:
-    """Whether `node_id` is itself Challenged, or reachable (via dependency edges,
-    transitively) from a Challenged node or a dependency edge whose pin no
-    longer matches its target's current accepted interface.
+def _upstream_cause(store: ProjectStore, node_id: str, *, first: bool = True) -> str | None:
+    """What makes `node_id` unsettled upstream: `"challenged"` if it is itself Challenged, or
+    reachable (via dependency edges, transitively) from a Challenged node or a citation found
+    no longer callable; `"stale"` if it is reachable from a dependency edge whose pin no longer
+    matches its target's accepted interface, or lags its accepted version (#23); else None.
 
-    Pure graph reachability over persisted Challenge and DependencyPin
-    records — nothing is stored per node. See ADR-0004 point 4. Walked with
-    an explicit worklist, not recursion: a long-running project's dependency
-    chain can run hundreds of nodes deep, well past Python's default
-    recursion limit.
+    `first`: stop at the first cause found (all that `bool()` needs); otherwise walk everything
+    and report a Challenge over a stale pin. Pure graph reachability over persisted Challenge
+    and DependencyPin records — nothing is stored per node. See ADR-0004 point 4. Walked with an
+    explicit worklist, not recursion: a long-running project's dependency chain can run
+    hundreds of nodes deep, well past Python's default recursion limit.
     """
     visited: set[str] = set()
     pending = [node_id]
+    found: str | None = None
     while pending:
         current_id = pending.pop()
         if current_id in visited:
@@ -1846,20 +1860,28 @@ def _is_downstream_of_challenge_or_stale_pin(store: ProjectStore, node_id: str) 
         visited.add(current_id)
 
         if has_open_challenge(store, current_id):
-            return True
+            return "challenged"
 
         node = get_node(store, current_id)
         if node is None:
             continue
         if node.kind == ProofMapNodeKind.imported_result and _no_longer_callable(store, current_id):
-            return True  # a citation found wanting: whatever rests on it needs a second look
+            return "challenged"  # a citation found wanting: whatever rests on it needs a second look
 
         for dependency_id in node.dependencies:
             pin = get_dependency_pin(store, current_id, dependency_id)
-            if pin is not None and not dependency_pin_is_current(store, pin):
-                return True
+            if pin is not None and (not dependency_pin_is_current(store, pin) or dependency_pin_lags(store, pin)):
+                if first:
+                    return "stale"
+                found = "stale"
             pending.append(dependency_id)
-    return False
+    return found
+
+
+def _is_downstream_of_challenge_or_stale_pin(store: ProjectStore, node_id: str) -> bool:
+    """Whether anything upstream of `node_id` unsettles it: a Challenge, a withdrawn citation, a
+    stale or lagging pin (see `_upstream_cause`)."""
+    return _upstream_cause(store, node_id) is not None
 
 
 def _dependency_satisfied(store: ProjectStore, dependency_id: str) -> bool:
@@ -1952,7 +1974,8 @@ def get_blocked_reason(store: ProjectStore, node_id: str) -> str | None:
     """Why `get_workflow_state` reads `blocked`, or `None` if it doesn't.
 
     `dependency-challenged` when an unresolved dependency is itself
-    Challenged or downstream of a Challenge/stale pin — distinct from the
+    Challenged or downstream of a Challenge; `dependency-stale` when it is
+    downstream only of a stale or lagging pin (#23) — both distinct from the
     ordinary `not-accepted` case of a dependency simply not having reached
     Acceptance/Reference-review yet.
     """
@@ -1963,12 +1986,15 @@ def get_blocked_reason(store: ProjectStore, node_id: str) -> str | None:
         dependency = get_node(store, dependency_id)
         if dependency is not None and dependency.kind == ProofMapNodeKind.imported_result and _no_longer_callable(store, dependency_id):
             return "dependency-not-callable"
+    stale = False
     for dependency_id in node.dependencies:
-        if not _dependency_satisfied(store, dependency_id) and _is_downstream_of_challenge_or_stale_pin(
-            store, dependency_id
-        ):
+        if _dependency_satisfied(store, dependency_id):
+            continue
+        cause = _upstream_cause(store, dependency_id, first=False)
+        if cause == "challenged":
             return "dependency-challenged"
-    return "not-accepted"
+        stale = stale or cause == "stale"
+    return "dependency-stale" if stale else "not-accepted"
 
 
 def get_integrity_state(store: ProjectStore, node_id: str) -> str:
