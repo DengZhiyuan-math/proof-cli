@@ -622,9 +622,8 @@ document.addEventListener("keydown", (e) => {
 window.addEventListener("beforeunload", (e) => { if (S.tabs.some(isDirty)) { e.preventDefault(); e.returnValue = ""; } });
 
 /* ------------------------------------------------------------------ agent panel */
-// The agent runs on one provider at a time (Claude Code, Codex CLI, DeepSeek or another
-// OpenAI-compatible API; see backends.py). Conversation, model and effort are kept per
-// provider. P holds what /api/agent/info reports about each provider.
+// The agent runs on one provider at a time, the Claude Code or the Codex CLI (backends.py).
+// Conversation, model and effort are kept per provider. P holds what /api/agent/info reports about each provider.
 const P = { list: [], byId: {} };
 const C = { provider: store.get("chat.provider", null), job: null, cur: null };
 const prov = () => P.byId[C.provider] || { id: C.provider, label: "Agent", models: [], efforts: [] };
@@ -688,8 +687,8 @@ function chatAppend(html, cls) {
 }
 function saveChatLog() { store.set("chat.log", $("#chat-log").innerHTML.slice(-400000)); }
 function chatIntro() {
-  chatAppend(`The agent works in this repository and follows the project's CLAUDE.md / AGENTS.md.
-Pick who runs it in the menu above: Claude Code, Codex CLI, or an API model such as DeepSeek.
+  chatAppend(`This is the node's proof agent: it reads the project, its library and the web, runs
+<code>proof</code> and computations, and writes this node's proof. Pick Claude Code or Codex CLI above.
 <b>Edit</b> mode may change files — every turn ends with a diff and an Undo button.
 <b>Ask</b> mode is read-only. Type <code>@</code> to point the agent at a file or the selection
 (or select text and press <code>${keys("⌘L")}</code>): it may then change only those files.
@@ -1084,13 +1083,10 @@ function renderProviders(info) {
       Prism page for this project, wait about 10 seconds, and open it again to restart it.</div>`, "card");
     return;
   }
-  // On a proof map node: which backends are the full proof agent, which a limited assistant (#72)
-  const CAPABILITY = {
-    full: "proof agent: reads the project, its library and the web; runs proof and computation; edits this node",
-    limited: "limited assistant: reads the project and edits this node; no commands or web search",
-  };
+  // On a proof map node the agent is the node's proof agent (#72), on either CLI
+  const CAPABILITY = info.proof_agent ? "proof agent: reads the project, its library and the web; runs proof and computation; edits this node" : "";
   $("#chat-provider").innerHTML = P.list.map((p) =>
-    `<option value="${esc(p.id)}"${p.available ? "" : " disabled"} title="${esc(p.reason || CAPABILITY[p.proof_agent] || "")}">${esc(p.label)}${p.proof_agent === "limited" ? " (limited)" : ""}${p.available ? "" : " (not set up)"}</option>`).join("");
+    `<option value="${esc(p.id)}"${p.available ? "" : " disabled"} title="${esc(p.reason || CAPABILITY)}">${esc(p.label)}${p.available ? "" : " (not set up)"}</option>`).join("");
   let id = C.provider;
   if (!P.byId[id] || !P.byId[id].available) id = info.default;
   if (!P.byId[id] || !P.byId[id].available) id = (P.list.find((p) => p.available) || P.list[0] || {}).id;

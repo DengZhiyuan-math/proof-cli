@@ -8,7 +8,7 @@ It began as a copy of [prism-local](https://github.com/DengZhiyuan-math/Local-Ai
 
 - The editor server: `server.py`, `httpbase.py`, `fsutil.py`, `texutil.py`.
 - Build: `build.py` and `proc.py`.
-- The agent panel: `agent.py` and the backends `backends.py`, `backend_claude.py`, `backend_codex.py` and `backend_openai.py`.
+- The agent panel: `agent.py` and the backends `backends.py`, `backend_claude.py` and `backend_codex.py`. prism-local's API-model backend (`backend_openai.py`, DeepSeek and other OpenAI-compatible APIs) was removed in #72: the proof agent runs on the Claude Code or Codex CLI.
 - The page: `static/`, with vendored CodeMirror 5 and PDF.js.
 
 ## Left out

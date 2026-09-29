@@ -12,9 +12,8 @@ call acts on the project.
 
 Its permissions are explicit, never the repository's own CLAUDE.md settings or Bash allowlist.
 They are a contract for cooperative local agents, enforced where a backend can (ADR-0010's
-threat model), not a sandbox against a hostile one. Claude Code and Codex, which search the web
-and run commands, are the full proof agent; an API model has only file tools and is a limited
-assistant.
+threat model), not a sandbox against a hostile one. It runs on the Claude Code or Codex CLI,
+which search the web and run commands; the studio has no API-model backend.
 """
 
 from __future__ import annotations
