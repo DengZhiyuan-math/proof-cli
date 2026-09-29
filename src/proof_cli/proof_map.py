@@ -20,6 +20,7 @@ from .authority import (
     decision_rows,
     list_authority_warnings,
     record_decision,
+    snapshot_matches,
     verify_decision_row,
 )
 from .collaboration import (
@@ -126,11 +127,20 @@ def _decide(
     `viewed_binding`: the `binding_digest` of what the page showed. If the
     decision would now bind anything else — another snapshot, interface,
     dependency pins, Challenges, dependents — it is refused (STALE_VIEW),
-    still inside the transaction, so nothing can change in between.
+    still inside the transaction, so nothing can change in between. A
+    decision on a snapshot that is missing or can't be read is refused
+    (SNAPSHOT_UNREADABLE): it would bind nothing (#92).
     """
     payload = build_decision_payload(
         store, kind, target_id, decision, rationale=rationale, **decision_binding(store, kind, target_id, dependency_id=dependency_id)
     )
+    if payload.candidate_proof_id is not None and payload.candidate_proof_sha256 is None:
+        raise ProofMapError(
+            "SNAPSHOT_UNREADABLE",
+            f"the Review snapshot {target_id}'s decision would be made on is missing or can't be read; "
+            "nothing can be decided on it until it is restored or a new snapshot is requested for review",
+            details={"candidate_proof_id": payload.candidate_proof_id},
+        )
     if viewed_binding is not None and viewed_binding != binding_digest(payload):
         raise ProofMapError(
             "STALE_VIEW", f"what this decision on {target_id} is made on changed since you viewed it; reload and read it again"
@@ -1255,7 +1265,10 @@ def _binding_problem(store: ProjectStore, node: ProofMapNode, payload: DecisionP
     proof = _get_candidate_proof(store, payload.candidate_proof_id) if payload.candidate_proof_id else None
     if proof is None or proof.node_id != node.id:
         return "it was made on a Candidate proof that isn't this node's"
-    if candidate_proof_sha256(store, proof.id) != payload.candidate_proof_sha256:
+    current = candidate_proof_sha256(store, proof.id)
+    if current is None:
+        return "the snapshot it was decided on is missing or can't be read"
+    if not snapshot_matches(payload.candidate_proof_sha256, current):
         return "the snapshot's text changed after it was decided on"
     if payload.interface_fingerprint != _interface_of(node):
         return "the node's statement or assumptions changed after it was decided on"
