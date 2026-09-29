@@ -177,12 +177,13 @@ const STATUS_GLYPHS = {
   review: [["path", { d: "M8 4.6V8l2.3 1.5", class: "glyph" }]],
   accepted: [["path", { d: "M4.9 8.3 7 10.4l4.2-4.6", class: "glyph" }]],
   rejected: [["path", { d: "M5.6 5.6l4.8 4.8M10.4 5.6l-4.8 4.8", class: "glyph" }]],
-  attention: [["path", { d: "M8 4.4v4.5", class: "glyph" }], ["circle", { cx: 8, cy: 11.4, r: 1, class: "glyph-fill" }]],
+  attention: [["path", { d: "M8 5.6v3.9", class: "glyph" }], ["circle", { cx: 8, cy: 12, r: 1, class: "glyph-fill" }]],
   open: [],
 };
 function statusIcon(kind, x, y) {
   const icon = svg("g", { class: `status-icon ${kind}`, transform: `translate(${x - 8},${y - 8})` });
-  icon.append(svg("circle", { cx: 8, cy: 8, r: 8, class: "disc" }));
+  // a warning is a triangle, like the system's; every other state a disc
+  icon.append(kind === "attention" ? svg("path", { d: "M8 1.1c.5 0 .95.27 1.2.72l6.1 10.9c.52.93-.15 2.08-1.2 2.08H1.9c-1.05 0-1.72-1.15-1.2-2.08L6.8 1.82C7.05 1.37 7.5 1.1 8 1.1z", class: "disc" }) : svg("circle", { cx: 8, cy: 8, r: 8, class: "disc" }));
   for (const [tag, attrs] of STATUS_GLYPHS[kind] || []) icon.append(svg(tag, attrs));
   return icon;
 }
@@ -356,7 +357,7 @@ function drawDag(nodes) {
   }
   for (const n of nodes) {
     const left = -BOX.w / 2, top = -BOX.h / 2;
-    const classes = ["node", n.frontier ? "frontier" : "", rejected(n) ? "rejected" : "", warningOf(n) ? "attention" : ""].filter(Boolean).join(" ");
+    const classes = ["node", `state-${tagOf(n)[1]}`, n.frontier ? "frontier" : "", rejected(n) ? "rejected" : ""].filter(Boolean).join(" ");
     const place = () => { const p = at.get(n.id); g.setAttribute("transform", `translate(${p.x},${p.y})`); };
     const g = svg("g", { class: classes, tabindex: 0, role: "link", "aria-label": `${n.kind} ${n.id}: ${n.acceptance_state}, ${n.workflow_state}, ${n.integrity_state}${n.assignee ? `, claimed by ${n.assignee}` : ""}${n.frontier ? ", on the frontier" : ""}` });
     place();
