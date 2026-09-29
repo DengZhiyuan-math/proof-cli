@@ -138,7 +138,8 @@ def _decide(
         raise ProofMapError(
             "SNAPSHOT_UNREADABLE",
             f"the Review snapshot {target_id}'s decision would be made on is missing or can't be read; "
-            "nothing can be decided on it until it is restored or a new snapshot is requested for review",
+            "nothing can be decided on it until it is restored, or you request review again "
+            "(an unchanged working proof is then re-snapshotted as a new version, which needs its own review)",
             details={"candidate_proof_id": payload.candidate_proof_id},
         )
     if viewed_binding is not None and viewed_binding != binding_digest(payload):
@@ -601,7 +602,10 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
     node's working sources and the shared preamble, byte for byte, into a new
     `snapshots/v<N>/` with a manifest, never overwritten, and records the
     manifest's SHA-256 (ADR-0011 point 5). A change to any input is a new
-    version; the same inputs as the snapshot under review are refused.
+    version; the same inputs as the snapshot under review are refused, unless
+    that snapshot is missing or can't be read: then they are snapshotted afresh
+    as the next version, a re-snapshot after loss (#99), which needs its own
+    Human Review — decisions on the lost snapshot stay unverifiable.
     Needs no claim. A node someone has claimed is theirs to hand over, and
     their claim ends here, as a wayfinder ticket's does when its work is.
     """
@@ -630,11 +634,16 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
         if claim is not None and claim.claimant_id != requested_by:  # a node someone holds is theirs to hand over
             raise _not_claimant(node_id, claim)
         current = get_current_candidate_proof(store, node_id, conn=conn)
-        if current is not None and current.sha256 == sha256:
+        # the current snapshot missing or unreadable: an unchanged proof is snapshotted afresh, a
+        # re-snapshot after loss, which needs a Human Review of its own (#99); its old decisions
+        # stay unverifiable
+        lost = current is not None and candidate_proof_sha256(store, current.id) is None
+        if current is not None and current.sha256 == sha256 and not lost:
             raise ProofMapError(
                 "WORKING_PROOF_UNCHANGED",
                 f"{node_id}'s working proof is unchanged since snapshot v{current.version}, which is already the one under review",
             )
+        resnapshot_of = current.version if lost and current.sha256 == sha256 else None
 
         # past any snapshot already on disk too: one the index never got is an orphan, reported
         # by list_integrity_warnings, and never overwritten
@@ -657,6 +666,7 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
             submitted_by=requested_by,
             scoping_rationale=rationale,
             sha256=sha256,
+            resnapshot_after_loss=resnapshot_of,
         )
         try:
             insert_candidate_proof(store, record, conn=conn)
@@ -669,9 +679,17 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
         append_event(
             store,
             "proof_map_review_requested",
-            f"snapshot v{version} of {node_id} requested for review",
+            f"snapshot v{version} of {node_id} requested for review"
+            + (f" (re-snapshot after loss of v{resnapshot_of})" if resnapshot_of is not None else ""),
             entity_id=node_id,
-            payload={"candidate_proof_id": record.id, "version": version, "file_path": record.file_path, "sha256": sha256, "requested_by": requested_by},
+            payload={
+                "candidate_proof_id": record.id,
+                "version": version,
+                "file_path": record.file_path,
+                "sha256": sha256,
+                "requested_by": requested_by,
+                "resnapshot_after_loss": resnapshot_of,
+            },
             conn=conn,
         )
     return record
