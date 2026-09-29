@@ -1,9 +1,9 @@
 from pathlib import Path
 
-from proof_cli.blockers import add_blocker, list_blockers, record_failed_route, resolve_blocker
+from proof_cli.blockers import add_blocker, list_blockers, record_failed_route
 from proof_cli.domain import BlockerRecord, ProofObligation, ProjectSnapshot
 from proof_cli.goals import add_goal, list_goals, set_current_theorem
-from proof_cli.obligations import add_obligation, block_obligation, close_obligation, list_obligations
+from proof_cli.obligations import add_obligation, list_obligations
 from proof_cli.proof_state import (
     build_snapshot,
     load_state,
@@ -92,22 +92,9 @@ def test_goals_blockers_obligations_and_snapshot(tmp_path: Path):
     assert summary["latest_snapshot"] is not None
 
 
-def test_closing_obligation_updates_open_queue(tmp_path: Path):
-    store = ensure_project(tmp_path)
-    add_obligation(
-        store,
-        ProofObligation(
-            id="obl_2",
-            goal_statement="close step",
-            required_for="thm_2",
-        ),
-    )
-    closed = close_obligation(store, "obl_2", rationale="proved explicitly")
-    assert closed.status.value == "resolved"
-    assert "obl_2" not in load_state(store).open_obligations
-
-
-def test_blocking_and_resolving_carry_literature_routes(tmp_path: Path):
+def test_obligations_and_blockers_carry_literature_routes(tmp_path: Path):
+    """Obligations and blockers are informational notes (ADR-0012): nothing resolves them,
+    but the literature routes they record stay queryable."""
     store = ensure_project(tmp_path)
 
     add_obligation(
@@ -120,17 +107,7 @@ def test_blocking_and_resolving_carry_literature_routes(tmp_path: Path):
         failed_reference_ids=["ref_gap"],
         route_notes="grounding gap from literature search",
     )
-    blocked = block_obligation(
-        store,
-        "obl_3",
-        "assumption mismatch",
-        failed_reference_ids=["ref_gap"],
-        route_notes="candidate paper route does not satisfy the theorem assumptions",
-    )
-    assert blocked.status.value == "blocked"
-    assert "failed_ref:ref_gap" in blocked.dependencies
-    assert "route_note:candidate paper route does not satisfy the theorem assumptions" in blocked.dependencies
-    assert "assumption mismatch" in blocked.blocking_reason
+    assert any(route.outcome == "failed" for route in list_literature_routes(store, target_id="obl_3"))
 
     add_blocker(
         store,
@@ -140,8 +117,8 @@ def test_blocking_and_resolving_carry_literature_routes(tmp_path: Path):
             description="needs imported result",
             failure_type="missing_route",
         ),
-        failed_reference_ids=["ref_gap"],
-        route_notes="no supporting paper result yet",
+        supporting_reference_ids=["ref_support"],
+        route_notes="standard result may cover the blocker",
     )
     record_failed_route(
         store,
@@ -152,18 +129,6 @@ def test_blocking_and_resolving_carry_literature_routes(tmp_path: Path):
         reference_title="Auxiliary Estimate",
         notes="failed assumption match",
     )
-
-    resolved = resolve_blocker(
-        store,
-        "blk_2",
-        rationale="support found",
-        supporting_reference_ids=["ref_support"],
-        route_notes="standard result now covers the blocker",
-    )
-    assert resolved.status.value == "resolved"
-    assert "supporting_ref:ref_support" in resolved.related_contracts
-    assert any(step.startswith("route_note:") for step in resolved.related_steps)
-    assert "literature: standard result now covers the blocker" in resolved.description
 
     routes = list_literature_routes(store, target_id="blk_2")
     assert any(route.outcome == "failed" for route in routes)

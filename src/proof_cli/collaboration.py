@@ -740,12 +740,9 @@ def record_review_decision(
     never modified; the returned record is the review as it now reads.
 
     A trust-bearing review (any `kind`, or an object type a derived axis
-    reads) is refused without a signed decision that verifies under an
-    active Reviewer key: the service layer itself can't append an unsigned
-    decision a derived axis would read (#35 B).
-
-    `signed_decision` is stored on the decision row as-is; the caller has
-    already checked (`authority.authorize`) that it authorizes this decision."""
+    reads) is refused outright: those are Human Review decisions, recorded in
+    the node's reviews.jsonl from the proof map page (ADR-0010), never in
+    this generic, editorial history."""
     _migrate_legacy_review_records(store, conn)
     def _current(tx: sqlite3.Connection) -> ReviewRecord | None:
         rows = list_review_history_rows(store, review_id=review_id, conn=tx)
