@@ -61,8 +61,10 @@ def snapshots_on_disk(root: Path, node_id: str) -> dict[int, Path]:
 # -- what a Review snapshot freezes (ADR-0011 point 5) --------------------------------------
 
 SNAPSHOT_MANIFEST = "manifest.json"
-# a snapshot keeps the shared preamble here: "../preamble.tex" from the node folder
-_SHARED = "_shared"
+# Inside a snapshot folder the node's files live under node/ and the shared preamble
+# ("../preamble.tex" from the node folder) under shared/, beside the manifest: whatever the
+# node's files are named, none can land on the manifest or the preamble (PR #78 review).
+_NODE, _SHARED = "node", "shared"
 # a node folder's own folders that are not inputs of its proof: output, frozen snapshots, the agent's scratch
 _NOT_INPUTS = {"build", "snapshots", "scratch"}
 
@@ -89,7 +91,7 @@ def manifest_digest(entries: dict[str, str]) -> str:
 
 
 def _stored(rel: str) -> str:
-    return f"{_SHARED}/{rel[3:]}" if rel.startswith("../") else rel
+    return f"{_SHARED}/{rel[3:]}" if rel.startswith("../") else f"{_NODE}/{rel}"
 
 
 def write_snapshot_folder(folder: Path, contents: dict[str, bytes]) -> dict[str, str]:
@@ -106,10 +108,15 @@ def write_snapshot_folder(folder: Path, contents: dict[str, bytes]) -> dict[str,
     return entries
 
 
-def snapshot_folder_files(folder: Path) -> dict[str, bytes]:
-    """The files a snapshot folder froze, by their path from the node folder, as stored now."""
-    manifest = json.loads((folder / SNAPSHOT_MANIFEST).read_text(encoding="utf-8"))
-    return {rel: (folder / _stored(rel)).read_bytes() for rel in manifest["files"] if (folder / _stored(rel)).is_file()}
+def snapshot_folder_files(folder: Path) -> dict[str, bytes] | None:
+    """The files a snapshot folder froze, by their path from the node folder, as stored now;
+    None when its manifest is missing or unreadable (a damaged snapshot, shown as such)."""
+    try:
+        manifest = json.loads((folder / SNAPSHOT_MANIFEST).read_text(encoding="utf-8"))
+        names = list(manifest["files"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return {rel: (folder / _stored(rel)).read_bytes() for rel in names if isinstance(rel, str) and (folder / _stored(rel)).is_file()}
 
 
 def snapshot_folder_digest(folder: Path) -> str | None:

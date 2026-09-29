@@ -82,7 +82,7 @@ def test_requesting_review_snapshots_the_working_file(tmp_path: Path):
 
     snapshot = store.root / record.file_path
     assert record.file_path == "proofs/clm_1/snapshots/v1/manifest.json"  # every input, frozen (ADR-0011)
-    assert (snapshot.parent / "proof.tex").read_bytes() == _working(store, "clm_1").read_bytes()
+    assert (snapshot.parent / "node" / "proof.tex").read_bytes() == _working(store, "clm_1").read_bytes()
     assert record.sha256 == snapshot_folder_digest(snapshot.parent)
     assert get_workflow_state(store, "clm_1") == "review-needed"
     # still exactly one top-level .tex: snapshots live in their own folder
@@ -265,7 +265,7 @@ def test_a_failed_request_never_removes_the_snapshot_a_later_one_wrote(tmp_path:
         request_review(store, "clm_1", requested_by="agent_a", rationale="a")
 
     (b_proof,) = b_proofs
-    assert ((tmp_path / b_proof.file_path).parent / "proof.tex").read_bytes() == _working(store, "clm_1").read_bytes()
+    assert ((tmp_path / b_proof.file_path).parent / "node" / "proof.tex").read_bytes() == _working(store, "clm_1").read_bytes()
 
 
 def test_a_request_whose_commit_fails_leaves_no_snapshot(tmp_path: Path, monkeypatch):
@@ -306,7 +306,7 @@ def test_a_stray_pdf_is_never_adopted_by_a_new_snapshot(tmp_path: Path):
     record = request_review(store, "clm_1", requested_by="agent_a", rationale="r")
 
     assert record.version == 2
-    assert not (store.root / record.file_path).with_suffix(".pdf").exists()
+    assert not (store.root / "proofs" / record.node_id / "snapshots" / f"v{record.version}.pdf").exists()
     (warning,) = [w for w in list_integrity_warnings(store) if w.code == "ORPHAN_SNAPSHOT"]
     assert warning.details == {"node_id": "clm_1", "file_path": "proofs/clm_1/snapshots/v1.pdf"}
 

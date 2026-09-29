@@ -74,7 +74,7 @@ def test_a_decision_is_committed_with_its_snapshot_as_the_reviewers_git_identity
 
     assert _git(root, "log", "-1", "--format=%an <%ae>").strip() == "Ada Researcher <ada@example.org>"
     committed = set(_git(root, "show", "--name-only", "--format=", "HEAD").split())
-    assert committed == {"proofs/clm_1/reviews.jsonl", "proofs/clm_1/snapshots/v1/manifest.json", "proofs/clm_1/snapshots/v1/proof.tex", "proofs/clm_1/snapshots/v1/_shared/preamble.tex"}  # the whole frozen snapshot (ADR-0011)
+    assert committed == {"proofs/clm_1/reviews.jsonl", "proofs/clm_1/snapshots/v1/manifest.json", "proofs/clm_1/snapshots/v1/node/proof.tex", "proofs/clm_1/snapshots/v1/shared/preamble.tex"}  # the whole frozen snapshot (ADR-0011)
     assert "review: acceptance accept on clm_1" in _git(root, "log", "-1", "--format=%B")
     assert "A  unrelated.txt" in _git(root, "status", "--porcelain")  # still staged, never swept into the decision
     assert json.loads((root / "proofs" / "clm_1" / "reviews.jsonl").read_text())["reviewer"] == "Ada Researcher <ada@example.org>"

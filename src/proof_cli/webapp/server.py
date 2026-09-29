@@ -70,14 +70,17 @@ def _proof_view(store: ProjectStore, proof) -> dict | None:
         return None
     path = store.root / proof.file_path
     if path.name == SNAPSHOT_MANIFEST:
-        files = {rel: data.decode("utf-8", errors="replace") for rel, data in snapshot_folder_files(path.parent).items()}
+        frozen = snapshot_folder_files(path.parent)
     else:
-        files = {"proof.tex": path.read_bytes().decode("utf-8", errors="replace")}
+        frozen = {"proof.tex": path.read_bytes()} if path.is_file() else None
+    # a damaged or missing snapshot still shows: its page, its (now void) decisions, its warnings
+    files = {rel: data.decode("utf-8", errors="replace") for rel, data in (frozen or {}).items()}
     return {
         "id": proof.id,
         "version": proof.version,
         "text": files.get("proof.tex", ""),
         "files": files,
+        "unreadable": frozen is None,
         "sha256": candidate_proof_sha256(store, proof.id),
     }
 

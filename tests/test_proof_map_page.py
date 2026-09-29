@@ -114,7 +114,7 @@ def test_a_stale_build_is_not_archived(tmp_path: Path):
 
     snapshot = request_review(store, "lem", requested_by="agent_a", rationale="scoped")
 
-    assert not (tmp_path / snapshot.file_path).with_suffix(".pdf").exists()
+    assert not (tmp_path / "proofs" / snapshot.node_id / "snapshots" / f"v{snapshot.version}.pdf").exists()
     assert DirectClient(store).get("/api/node/lem")[1]["data"]["pdfs"] == {"snapshot": False, "build": True}
 
 
@@ -130,7 +130,7 @@ def test_a_build_older_than_the_shared_preamble_is_not_archived(tmp_path: Path):
 
     snapshot = request_review(store, "lem", requested_by="agent_a", rationale="scoped")
 
-    assert not (tmp_path / snapshot.file_path).with_suffix(".pdf").exists()
+    assert not (tmp_path / "proofs" / snapshot.node_id / "snapshots" / f"v{snapshot.version}.pdf").exists()
 
 
 def test_an_archived_pdf_is_committed_with_the_decision(tmp_path: Path):
@@ -146,7 +146,7 @@ def test_an_archived_pdf_is_committed_with_the_decision(tmp_path: Path):
 
     committed = subprocess.run(["git", "-C", str(tmp_path), "show", "--name-only", "--format=", "HEAD"], capture_output=True, text=True).stdout.split()
     # the whole frozen snapshot (ADR-0011) and its archived PDF
-    assert set(committed) == {"proofs/lem/reviews.jsonl", "proofs/lem/snapshots/v1/manifest.json", "proofs/lem/snapshots/v1/proof.tex", "proofs/lem/snapshots/v1/_shared/preamble.tex", "proofs/lem/snapshots/v1.pdf"}
+    assert set(committed) == {"proofs/lem/reviews.jsonl", "proofs/lem/snapshots/v1/manifest.json", "proofs/lem/snapshots/v1/node/proof.tex", "proofs/lem/snapshots/v1/shared/preamble.tex", "proofs/lem/snapshots/v1.pdf"}
     assert (tmp_path / "proofs" / ".gitignore").read_text() == "*/build/\n"  # prism-local's build output stays out of git
 
 

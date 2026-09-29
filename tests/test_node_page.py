@@ -305,3 +305,10 @@ def test_deciding_on_a_snapshot_the_page_no_longer_shows_is_refused(page):
 def test_the_pending_list_sends_a_local_node_to_its_studios_review():
     text = (WEBAPP / "static" / "app.js").read_text()
     assert "`/studio/${encodeURIComponent(item.node_id)}/#review`" in text
+
+
+
+def test_a_damaged_snapshot_shows_as_such_in_the_review_section():
+    broken = {**REVIEW_VIEW, "candidate_proof": {"id": "cp-v2", "version": 2, "sha256": None, "text": "", "files": {}, "unreadable": True}}
+    shown = _panel(view=broken)
+    assert "can't be read" in shown["review"]
