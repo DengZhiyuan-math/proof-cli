@@ -57,6 +57,7 @@ ERROR_CODES: dict[str, str] = {
     "NO_DEPENDENCY_PIN": "the node never pinned that dependency; request review first",
     "DEPENDENCY_REQUIRED": "a Lightweight re-review names the dependency it re-pins",
     "INTERFACE_CHANGED": "the dependency's accepted interface changed: a new Candidate proof is needed, not a re-review",
+    "PIN_NOT_LAGGING": "the pin already names the dependency's accepted version: there is nothing to re-review",
     # -- Human Review decisions (made on the page) ---------------------------------------
     "INVALID_DECISION": "not a decision of this kind",
     "INVALID_DECISION_KIND": "not a decision kind",
