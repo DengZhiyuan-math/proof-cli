@@ -211,6 +211,10 @@ class CandidateProofRecord(BaseModel):
     interface_fingerprint: str | None = None
     sha256: str | None = None
     created_at: datetime = Field(default_factory=utc_now)
+    # set only on the record `request_review` returns, never indexed: the version whose lost
+    # (missing or unreadable) snapshot this one re-takes from an unchanged working proof (#99).
+    # The `proof_map_review_requested` event is its lasting record.
+    resnapshot_after_loss: int | None = None
 
 
 class DependencyPin(BaseModel):
