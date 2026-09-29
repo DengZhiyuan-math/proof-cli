@@ -90,6 +90,12 @@ function showHome() {
   }));
   if (!state.pending.length) body.append(row(["", "Nothing is awaiting review.", "", "", ""]));
   showWarnings(state.warnings, $("warnings"));
+  const pending = String(state.pending.length);
+  $("stat-review").textContent = pending;
+  $("pending-count").textContent = pending;
+  $("rail-review").textContent = state.pending.length ? pending : "";
+  $("rail-review").className = state.pending.length ? "n hot" : "n";
+  $("rail-warnings").textContent = state.warnings.length ? String(state.warnings.length) : "";
 }
 
 // what each decision means, in the researcher's words
@@ -128,7 +134,7 @@ function decisionRow(decision, proof) {
 let mapData = null;
 let mapView = "dag";
 const SVG_NS = "http://www.w3.org/2000/svg";
-const BOX = { w: 176, h: 58, gapX: 28, gapY: 74, pad: 24 };
+const BOX = { w: 190, h: 76, gapX: 40, gapY: 110, pad: 24, chamfer: 8 };
 
 function svg(tag, attrs) {
   const node = document.createElementNS(SVG_NS, tag);
@@ -152,6 +158,28 @@ function warningOf(n) {
 }
 
 function short(text, length) { return text.length > length ? text.slice(0, length - 1) + "…" : text; }
+
+// A node card's one state line, bottom right: what needs the researcher first (integrity, an
+// undecidable decision), then the frontier, a claim, a review request, a rejected route, blocked.
+// A frontier node with a warning keeps its frontier tag too, bottom left (ADR-0008): see drawDag.
+function tagOf(n) {
+  if (n.integrity_state === "challenged") return ["challenged", "warn"];
+  if (n.integrity_state === "potentially-stale") return ["stale", "warn"];
+  if (n.acceptance_state === "unverifiable") return ["unverifiable", "warn"];
+  if (n.frontier) return ["frontier", "accent"];
+  if (n.assignee) return [`claimed · ${n.assignee}`, ""];
+  if (n.workflow_state === "review-needed") return ["review needed", "warn"];
+  if (n.workflow_state === "revision-requested") return ["revision requested", "warn"];
+  if (["rejected", "no-longer-callable"].includes(n.acceptance_state)) return ["rejected", "crit"];
+  if (n.workflow_state === "blocked") return ["blocked", "muted"];
+  if (["accepted", "reviewed"].includes(n.acceptance_state)) return [n.acceptance_state, ""];
+  return ["", ""];
+}
+
+// a card with chamfered corners, the page's one shape
+function chamfered(x, y, w, h, c) {
+  return `M${x + c},${y} H${x + w} V${y + h - c} L${x + w - c},${y + h} H${x} V${y + c} Z`;
+}
 
 // Layers by longest path from the top (a node sits below everything that depends on it),
 // then a few barycenter sweeps to cut crossings. Enough for tens to hundreds of nodes.
@@ -190,62 +218,195 @@ function layers(nodes) {
   return rows;
 }
 
+// -- the map is a freeform canvas: drag to pan, pinch or ⌘/ctrl + scroll to zoom, F to fit ----
+const view = { k: 1, tx: 0, ty: 0, content: null, fitted: false };
+
+function applyView() {
+  const g = $("dag-view");
+  if (g) g.setAttribute("transform", `translate(${view.tx},${view.ty}) scale(${view.k})`);
+  const level = $("zoom-level");
+  if (level) level.textContent = `${Math.round(view.k * 100)}%`;
+  const canvas = $("map-dag");
+  if (canvas) { canvas.style.backgroundPosition = `${view.tx}px ${view.ty}px`; canvas.style.backgroundSize = `${24 * view.k}px ${24 * view.k}px`; }
+}
+
+// the whole map in the stage, centred, never larger than life
+function fitView() {
+  const canvas = $("map-dag");
+  if (!view.content || !canvas || !canvas.clientWidth) return;
+  const pad = 40, top = 44;
+  view.k = Math.max(0.15, Math.min(1.2, (canvas.clientWidth - pad * 2) / view.content.width, (canvas.clientHeight - top - pad) / view.content.height));
+  view.tx = (canvas.clientWidth - view.content.width * view.k) / 2;
+  view.ty = top + (canvas.clientHeight - top - pad - view.content.height * view.k) / 2;
+  view.fitted = true;
+  applyView();
+}
+
+function zoomAt(factor, cx, cy) {
+  const k = Math.min(4, Math.max(0.15, view.k * factor));
+  const r = k / view.k;
+  view.tx = cx - (cx - view.tx) * r;
+  view.ty = cy - (cy - view.ty) * r;
+  view.k = k;
+  applyView();
+}
+
+function wireCanvas() {
+  const canvas = $("map-dag");
+  let drag = null, suppressClick = false;
+  const move = (event) => {
+    if (!drag) return;
+    const dx = event.clientX - drag.x, dy = event.clientY - drag.y;
+    if (!drag.moved && Math.hypot(dx, dy) > 3) { drag.moved = true; canvas.classList.add("dragging"); }
+    if (drag.moved) { view.tx = drag.tx + dx; view.ty = drag.ty + dy; applyView(); }
+  };
+  const end = () => {
+    if (drag && drag.moved) suppressClick = true;
+    drag = null;
+    canvas.classList.remove("dragging");
+    window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", end); window.removeEventListener("pointercancel", end);
+  };
+  canvas.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    drag = { x: event.clientX, y: event.clientY, tx: view.tx, ty: view.ty, moved: false };
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", end); window.addEventListener("pointercancel", end);
+  });
+  // a drag ends on a node without opening it
+  canvas.addEventListener("click", (event) => { if (suppressClick) { event.stopPropagation(); event.preventDefault(); suppressClick = false; } }, true);
+  canvas.addEventListener("wheel", (event) => {
+    event.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    if (event.ctrlKey || event.metaKey) zoomAt(Math.exp(-event.deltaY * 0.01), event.clientX - rect.left, event.clientY - rect.top);
+    else { view.tx -= event.deltaX; view.ty -= event.deltaY; applyView(); }
+  }, { passive: false });
+  canvas.addEventListener("dblclick", (event) => {
+    if (event.target.closest(".node")) return;
+    const rect = canvas.getBoundingClientRect();
+    zoomAt(1.5, event.clientX - rect.left, event.clientY - rect.top);
+  });
+  $("zoom-in").addEventListener("click", () => zoomAt(1.25, canvas.clientWidth / 2, canvas.clientHeight / 2));
+  $("zoom-out").addEventListener("click", () => zoomAt(0.8, canvas.clientWidth / 2, canvas.clientHeight / 2));
+  $("zoom-fit").addEventListener("click", fitView);
+  $("zoom-tidy").addEventListener("click", () => { positions.clear(); view.fitted = false; if (mapData) drawDag(mapData.nodes); });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "f" || event.metaKey || event.ctrlKey || event.altKey) return;
+    if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)) return;
+    if ($("home").hidden || mapView !== "dag") return;
+    fitView();
+  });
+  window.addEventListener("resize", () => { if (view.fitted) fitView(); });
+}
+
+// Where the researcher dragged each node, kept in this browser only; "Tidy" forgets it.
+const positions = {
+  key() { return `proof.map.positions:${state ? state.project_id : ""}`; },
+  load() { try { return JSON.parse(localStorage.getItem(this.key()) || "{}"); } catch { return {}; } },
+  save(map) { try { localStorage.setItem(this.key(), JSON.stringify(map)); } catch { /* a private window: positions just don't persist */ } },
+  clear() { try { localStorage.removeItem(this.key()); } catch { /* ignore */ } },
+};
+
 function drawDag(nodes) {
   const box = $("dag-svg");
   box.replaceChildren();
   if (!nodes.length) {
-    box.setAttribute("width", 400); box.setAttribute("height", 60);
-    box.append(Object.assign(svg("text", { x: 16, y: 34 }), { textContent: "No nodes yet: create the first one below." }));
+    view.content = null;
+    box.append(Object.assign(svg("text", { x: 16, y: 64, class: "empty" }), { textContent: "No nodes yet: create the first one with `proof node create`." }));
     return;
   }
   const rows = layers(nodes);
   const widest = Math.max(...rows.map((row) => row.length));
   const width = BOX.pad * 2 + widest * BOX.w + (widest - 1) * BOX.gapX;
   const height = BOX.pad * 2 + rows.length * BOX.h + (rows.length - 1) * BOX.gapY + 16;
-  box.setAttribute("width", width); box.setAttribute("height", height);
-  box.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  const same = view.content && view.content.width === width && view.content.height === height;
+  view.content = { width, height };
+  const scene = svg("g", { id: "dag-view" });
   const at = new Map();
+  const saved = positions.load();
   rows.forEach((row, r) => row.forEach((id, i) => {
     const rowWidth = row.length * BOX.w + (row.length - 1) * BOX.gapX;
-    at.set(id, { x: (width - rowWidth) / 2 + i * (BOX.w + BOX.gapX) + BOX.w / 2, y: BOX.pad + r * (BOX.h + BOX.gapY) + BOX.h / 2 });
+    const own = saved[id] && Number.isFinite(saved[id].x) && Number.isFinite(saved[id].y) ? saved[id] : null;
+    at.set(id, own ? { x: own.x, y: own.y } : { x: (width - rowWidth) / 2 + i * (BOX.w + BOX.gapX) + BOX.w / 2, y: BOX.pad + r * (BOX.h + BOX.gapY) + BOX.h / 2 });
   }));
+  const edgeD = (from, to) => { const y1 = from.y + BOX.h / 2, y2 = to.y - BOX.h / 2; return `M${from.x},${y1} C${from.x},${y1 + 50} ${to.x},${y2 - 50} ${to.x},${y2}`; };
+  const edgesOf = new Map(nodes.map((n) => [n.id, []]));
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const rejected = (n) => ["rejected", "no-longer-callable"].includes(n.acceptance_state);
   const defs = svg("defs");
   const marker = svg("marker", { id: "arrow", viewBox: "0 0 10 10", refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: "auto-start-reverse" });
-  marker.append(svg("path", { d: "M0,0 L10,5 L0,10 z", fill: "var(--map-edge)" }));
+  marker.append(svg("path", { d: "M0,1 L9,5 L0,9 z", fill: "var(--line-2)" }));
   defs.append(marker);
-  box.append(defs);
+  box.append(defs, scene);
   for (const n of nodes) for (const d of n.dependencies) {
     const from = at.get(n.id), to = at.get(d);
     if (!from || !to) continue;
-    const y1 = from.y + BOX.h / 2, y2 = to.y - BOX.h / 2;
-    box.append(svg("path", { class: "edge", "marker-end": "url(#arrow)", d: `M${from.x},${y1} C${from.x},${y1 + 34} ${to.x},${y2 - 34} ${to.x},${y2}` }));
+    const dim = rejected(n) || (byId.has(d) && rejected(byId.get(d)));
+    const edge = svg("path", { class: dim ? "edge rejected" : "edge", "marker-end": "url(#arrow)", d: edgeD(from, to) });
+    const link = { edge, from: n.id, to: d };
+    edgesOf.get(n.id).push(link); edgesOf.get(d).push(link);
+    scene.append(edge);
   }
   for (const n of nodes) {
-    const { x, y } = at.get(n.id);
-    const classes = ["node", n.frontier ? "frontier" : "", warningOf(n)].filter(Boolean).join(" ");
+    const left = -BOX.w / 2, top = -BOX.h / 2;
+    const classes = ["node", `tone-${toneOf(n)}`, n.frontier ? "frontier" : "", n.assignee ? "claimed" : "", rejected(n) ? "rejected" : "", warningOf(n)].filter(Boolean).join(" ");
+    const place = () => { const p = at.get(n.id); g.setAttribute("transform", `translate(${p.x},${p.y})`); };
     const g = svg("g", { class: classes, tabindex: 0, role: "link", "aria-label": `${n.kind} ${n.id}: ${n.acceptance_state}, ${n.workflow_state}, ${n.integrity_state}${n.assignee ? `, claimed by ${n.assignee}` : ""}${n.frontier ? ", on the frontier" : ""}` });
-    g.append(svg("rect", { class: "box", x: x - BOX.w / 2, y: y - BOX.h / 2, width: BOX.w, height: BOX.h, rx: 8 }));
-    g.append(svg("rect", { class: `bar ${toneOf(n)}`, x: x - BOX.w / 2, y: y - BOX.h / 2, width: 5, height: BOX.h, rx: 2 }));
-    const kind = svg("text", { class: "kind", x: x - BOX.w / 2 + 12, y: y - BOX.h / 2 + 15 });
-    kind.textContent = `${n.kind} · ${n.id}`;
-    const label = svg("text", { x: x - BOX.w / 2 + 12, y: y + 3 });
-    label.textContent = short(n.display_label || n.statement, 24);
-    const meta = svg("text", { class: "meta", x: x - BOX.w / 2 + 12, y: y + BOX.h / 2 - 9 });
-    meta.textContent = [n.acceptance_state, n.workflow_state, n.integrity_state !== "current" ? n.integrity_state : "", n.assignee ? `@${n.assignee}` : ""].filter(Boolean).join(" · ");
-    g.append(kind, label, meta);
-    if (n.frontier) {
-      const tag = svg("text", { class: "tag", x: x, y: y + BOX.h / 2 + 13, "text-anchor": "middle" });
-      tag.textContent = "ready to claim";
+    place();
+    g.append(svg("path", { class: "box", d: chamfered(left, top, BOX.w, BOX.h, BOX.chamfer) }));
+    g.append(svg("rect", { class: `bar ${toneOf(n)}`, x: left, y: top + BOX.chamfer, width: 5, height: BOX.h - BOX.chamfer }));
+    const kind = svg("text", { class: "kind", x: left + 12, y: top + 16 });
+    kind.textContent = n.kind.replace("_", " ").toUpperCase();
+    const id = svg("text", { class: "id", x: left + BOX.w - 8, y: top + 16, "text-anchor": "end" });
+    id.textContent = short(n.id, 22);
+    const label = svg("text", { x: left + 12, y: top + 35 });
+    label.textContent = short(n.display_label || n.statement, 22);
+    const meta = svg("text", { class: "meta", x: left + 12, y: top + 51 });
+    meta.textContent = n.display_label ? short(n.statement, 32) : "";
+    g.append(kind, id, label, meta);
+    const [tagText, tone] = tagOf(n);
+    if (tagText) {
+      const tag = svg("text", { class: `tag ${tone}`.trim(), x: left + BOX.w - 8, y: top + BOX.h - 8, "text-anchor": "end" });
+      tag.textContent = short(tagText, 28).toUpperCase();
       g.append(tag);
+    }
+    // the frontier is its own, strongest signal (ADR-0008): a warning is shown beside it, never in its place
+    if (n.frontier && warningOf(n)) {
+      const frontier = svg("text", { class: "tag accent", x: left + 12, y: top + BOX.h - 8 });
+      frontier.textContent = "FRONTIER";
+      g.append(frontier);
     }
     const title = svg("title");
     title.textContent = n.statement;
     g.append(title);
-    const open = () => { location.href = pageOf(n); };
+    // drag a node to move it (its edges follow); a click without a drag opens it
+    let drag = null;
+    const move = (event) => {
+      if (!drag) return;
+      const dx = (event.clientX - drag.x) / view.k, dy = (event.clientY - drag.y) / view.k;
+      if (!drag.moved && Math.hypot(dx, dy) * view.k > 3) { drag.moved = true; g.classList.add("moving"); }
+      if (!drag.moved) return;
+      at.set(n.id, { x: drag.px + dx, y: drag.py + dy });
+      place();
+      for (const link of edgesOf.get(n.id)) link.edge.setAttribute("d", edgeD(at.get(link.from), at.get(link.to)));
+    };
+    const end = () => {
+      window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", end); window.removeEventListener("pointercancel", end);
+      if (drag && drag.moved) { const saved = positions.load(); saved[n.id] = at.get(n.id); positions.save(saved); setTimeout(() => g.classList.remove("moving"), 0); }
+      drag = null;
+    };
+    g.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      event.stopPropagation();  // the canvas doesn't pan under a node drag
+      const p = at.get(n.id);
+      drag = { x: event.clientX, y: event.clientY, px: p.x, py: p.y, moved: false };
+      window.addEventListener("pointermove", move); window.addEventListener("pointerup", end); window.addEventListener("pointercancel", end);
+    });
+    const open = () => { if (g.classList.contains("moving")) return; location.href = pageOf(n); };
     g.addEventListener("click", open);
     g.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); } });
-    box.append(g);
+    scene.append(g);
   }
+  // a redraw of the same map (after a decision) keeps where you were; a new shape is fitted
+  if (same && view.fitted) applyView(); else fitView();
 }
 
 // The tree answers "how is this proved?": a shared dependency is expanded in full under each of its
@@ -261,13 +422,16 @@ function drawTree(nodes) {
   if (chosen) select.value = chosen;
   const item = (id, ancestors) => {
     const n = byId.get(id);
+    // each line names its node; a node used by more than one parent also says how many share it
     const li = el("li");
+    li.setAttribute("data-node-id", id);
+    if ((parents.get(id) || 0) > 1) li.setAttribute("data-shared-by", String(parents.get(id)));
     if (!n) { li.append(el("span", `${id} (missing)`, { class: "warning" })); return li; }
     li.append(el("a", n.id, { href: pageOf(n) }), ` — ${short(n.display_label || n.statement, 60)}`);
-    li.append(el("span", n.acceptance_state, { class: "state-chip" }), el("span", n.workflow_state, { class: "state-chip" }));
-    li.append(el("span", n.integrity_state, { class: `state-chip${n.integrity_state === "current" ? "" : " warn-chip"}` }));
-    if (n.assignee) li.append(el("span", `@${n.assignee}`, { class: "state-chip" }));
-    if (n.frontier) li.append(el("span", "ready to claim", { class: "state-chip" }));
+    li.append(el("span", n.acceptance_state, { class: `state-chip chip ${n.acceptance_state}` }), el("span", n.workflow_state, { class: `state-chip chip ${n.workflow_state}` }));
+    li.append(el("span", n.integrity_state, { class: `state-chip chip ${n.integrity_state}${n.integrity_state === "current" ? "" : " warn-chip"}` }));
+    if (n.assignee) li.append(el("span", `@${n.assignee}`, { class: "state-chip chip claimed" }));
+    if (n.frontier) li.append(el("span", "frontier", { class: "state-chip chip frontier" }));
     if ((parents.get(id) || 0) > 1) li.append(el("span", "shared", { class: "state-chip shared-chip", title: `used by ${parents.get(id)} nodes; see the DAG` }));
     if (ancestors.has(id)) { li.append(" (cycle: not expanded again)"); return li; }
     if (n.dependencies.length) {
@@ -286,7 +450,8 @@ function drawTree(nodes) {
 function showMap() {
   const nodes = mapData.nodes;
   const frontier = nodes.filter((n) => n.frontier).length;
-  $("map-caption").textContent = `${nodes.length} node(s) · ${frontier} on the frontier · click a node to open it`;
+  $("map-caption").textContent = `${nodes.length} node(s) · ${frontier} on the frontier · drag to pan · pinch or ⌘/ctrl + scroll to zoom · F fits`;
+  $("stat-frontier").textContent = String(frontier);
   $("map-dag").hidden = mapView !== "dag";
   $("map-tree").hidden = mapView !== "tree";
   $("tree-root-label").hidden = mapView !== "tree";
@@ -300,38 +465,12 @@ function pageOf(n) {
   return n.kind === "imported_result" ? `#/node/${encodeURIComponent(n.id)}` : `/studio/${encodeURIComponent(n.id)}/`;
 }
 
-async function createNode(event) {
-  event.preventDefault();
-  const kind = $("new-kind").value;
-  const body = {
-    node_id: $("new-id").value.trim(), kind, statement: $("new-statement").value,
-    assumptions: $("new-assumptions").value.split("\n").map((a) => a.trim()).filter(Boolean),
-    // an imported result is established elsewhere: it takes no dependencies, whatever the (disabled) list still holds
-    dependencies: kind === "imported_result" ? [] : [...$("new-dependencies").selectedOptions].map((o) => o.value),
-  };
-  if (kind === "imported_result") Object.assign(body, { source_locator: $("new-locator").value, source_version: $("new-version").value, trust_level: $("new-trust").value });
-  try {
-    const node = await api("/api/nodes", body);
-    say(`Created ${node.kind} ${node.id}.`, "ok");
-    $("new-node").reset();
-    showNewNodeKind();
-    location.href = node.page;
-    if (node.page.startsWith("/#")) await refresh();
-  } catch (error) { showError(error); }
-}
-
-function showNewNodeKind() {
-  const imported = $("new-kind").value === "imported_result";
-  $("new-source").hidden = !imported;
-  $("new-dependencies").disabled = imported;  // an imported result is established elsewhere: no dependencies
-  if (imported) for (const option of $("new-dependencies").options) option.selected = false;
-}
-
 async function showNode(nodeId) {
   const view = await api(`/api/node/${encodeURIComponent(nodeId)}`);
   const node = view.node;
-  $("node-title").textContent = `${node.id} — ${node.kind}`;
-  $("node-axes").textContent = `workflow: ${view.workflow_state} · acceptance: ${view.acceptance_state} · integrity: ${view.integrity_state}`;
+  $("node-title").replaceChildren(node.id, el("small", node.kind.replace("_", " ")));
+  const axis = (name, value) => { const cell = el("div"); cell.append(el("span", name, { class: "lbl" }), el("span", value, { class: `chip ${value}`, title: `${name}: ${value}` })); return cell; };
+  $("node-axes").replaceChildren(axis("workflow", view.workflow_state), axis("acceptance", view.acceptance_state), axis("integrity", view.integrity_state));
   const nodeWarnings = el("ul");
   showWarnings(view.warnings, nodeWarnings);
   $("node-warnings").replaceChildren(el("h3", "Warnings for this node"), nodeWarnings);
@@ -377,6 +516,8 @@ async function route() {
   const match = location.hash.match(/^#\/node\/(.+)$/);
   $("home").hidden = !!match;
   $("node-page").hidden = !match;
+  if (!match && view.content && !view.fitted) fitView();  // drawn while the map was hidden
+  for (const link of document.querySelectorAll(".rail a[data-nav]")) link.classList.toggle("on", !match && (link.dataset.nav === "map" ? !location.hash.startsWith("#sec-") : location.hash === link.getAttribute("href")));
   if (match) {
     try { await showNode(decodeURIComponent(match[1])); } catch (error) { say(error.message, "error"); }
   }
@@ -385,9 +526,9 @@ async function route() {
 async function refresh() {
   state = await api("/api/state");
   mapData = await api("/api/map");
-  $("project").textContent = `· ${state.project_id} · ${state.origin}`;
-  $("new-dependencies").replaceChildren(...mapData.nodes.map((n) => el("option", `${n.id} (${n.kind})`, { value: n.id })));
-  $("reviewer").textContent = `Decisions are recorded as ${state.reviewer}.`;
+  $("project").replaceChildren(el("b", state.project_id));
+  $("reviewer").textContent = state.reviewer;  // decisions are recorded and committed as this identity
+  $("reviewer-initial").textContent = (state.reviewer || "?").trim().charAt(0).toUpperCase() || "?";
   showHome();
   showMap();
   await route();
@@ -408,11 +549,10 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!decisions.length) return say("Tick at least one decision.", "error");
     try { await decide(decisions); } catch (error) { showError(error); }
   });
+  wireCanvas();
   $("view-dag").addEventListener("click", () => { mapView = "dag"; showMap(); });
   $("view-tree").addEventListener("click", () => { mapView = "tree"; showMap(); });
   $("tree-root").addEventListener("change", showMap);
-  $("new-node").addEventListener("submit", createNode);
-  $("new-kind").addEventListener("change", showNewNodeKind);
   window.addEventListener("hashchange", route);
   refresh().catch((error) => say(error.message, "error"));
 });

@@ -305,3 +305,42 @@ def test_governance_workflow_compounds_across_multiple_projects(tmp_path: Path) 
     assert alpha_reuse[-1].outcome.outcome == "helpful"
     assert alpha_benchmarks[-1].replay.comparison is not None
     assert alpha_benchmarks[-1].replay.comparison.overall_interpretation == "assisted_better"
+
+
+def test_the_pack_commands_run_from_the_cli(tmp_path: Path) -> None:
+    """`proof pack ...` used to exit on a NameError: cli.py never imported its functions (#44)."""
+    from typer.testing import CliRunner
+
+    from proof_cli.cli import app
+
+    runner = CliRunner()
+    root = str(tmp_path)
+    assert runner.invoke(app, ["init", "--root", root]).exit_code == 0
+
+    listed = runner.invoke(app, ["pack", "list", "--root", root])
+    assert (listed.exit_code, listed.output.strip()) == (0, "No domain packs")
+
+    pack = _pack("pack_spectral_analysis", "proj_alpha")
+    installed = runner.invoke(
+        app,
+        [
+            "pack", "install", pack.model_dump_json(), "--root", root,
+            "--project-tag", "spectral", "--project-tag", "analysis",
+            "--available-asset-id", "asset_shared_uniformity", "--available-asset-kind", "proof_pattern",
+            "--notation-profile", "spectral_default",
+        ],
+    )
+    assert installed.exit_code == 0, installed.output
+    assert json.loads(installed.output)["installation"]["compatibility_check"]["compatible"] is True
+
+    shown = runner.invoke(app, ["pack", "show", "pack_spectral_analysis", "--root", root])
+    assert shown.exit_code == 0, shown.output
+    assert json.loads(shown.output)["pack"]["id"] == "pack_spectral_analysis"
+
+    newer = pack.model_copy(update={"version": "0.1.1", "supersedes_version": "0.1.0"})
+    updated = runner.invoke(app, ["pack", "update", newer.model_dump_json(), "--root", root, "--reviewer", "lead"])
+    assert updated.exit_code == 0, updated.output
+    assert json.loads(updated.output)["review_action"] == "update"
+
+    listed = runner.invoke(app, ["pack", "list", "--root", root])
+    assert listed.exit_code == 0 and "pack_spectral_analysis" in listed.output and "v0.1.1" in listed.output
