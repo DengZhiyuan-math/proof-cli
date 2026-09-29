@@ -153,6 +153,8 @@ def render_candidate_proof(record: CandidateProofRecord) -> str:
     table.add_row("Submitted by", record.submitted_by)
     table.add_row("Submitted at", record.created_at.isoformat())
     table.add_row("Scoping rationale", record.scoping_rationale)
+    if record.resnapshot_after_loss is not None:
+        table.add_row("Note", f"re-snapshot after loss of v{record.resnapshot_after_loss}; it needs its own review")
     console.print(table)
     return console.export_text()
 

@@ -111,13 +111,13 @@ def write_snapshot_folder(folder: Path, contents: dict[str, bytes]) -> dict[str,
 
 def snapshot_folder_files(folder: Path) -> dict[str, bytes] | None:
     """The files a snapshot folder froze, by their path from the node folder, as stored now;
-    None when its manifest is missing or unreadable (a damaged snapshot, shown as such)."""
+    None when its manifest or any file it names can't be read (a damaged snapshot, shown as such)."""
     try:
         manifest = json.loads((folder / SNAPSHOT_MANIFEST).read_text(encoding="utf-8"))
         names = list(manifest["files"])
+        return {rel: (folder / _stored(rel)).read_bytes() for rel in names if isinstance(rel, str) and (folder / _stored(rel)).is_file()}
     except (OSError, ValueError, KeyError, TypeError):
         return None
-    return {rel: (folder / _stored(rel)).read_bytes() for rel in names if isinstance(rel, str) and (folder / _stored(rel)).is_file()}
 
 
 def snapshot_folder_digest(folder: Path) -> str | None:

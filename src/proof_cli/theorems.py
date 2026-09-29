@@ -147,7 +147,17 @@ def list_theorems(store: ProjectStore) -> list[TheoremContract]:
     return list_contracts(store)
 
 
+# Every legacy output that reports a callable, trust or review state carries this (ADR-0012).
+LEGACY_TRUST_NOTICE = "legacy — not a trust source; what can be called is answered by the proof map"
+
+
 def theorem_callability(store: ProjectStore, theorem_id: str) -> tuple[bool, str]:
+    """(legacy, ADR-0012) What the pre-proof-map contract registry says about calling a theorem.
+
+    Frozen: nothing agent-reachable changes a contract's trust fields any more, and no
+    decision reads this. What can be called is answered by the proof map's nodes: an
+    Accepted local node, or a Reference-reviewed imported_result. Every output that
+    reports this result carries LEGACY_TRUST_NOTICE."""
     contract = get_contract(store, theorem_id)
     if contract is None:
         return False, f"theorem {theorem_id} not found"

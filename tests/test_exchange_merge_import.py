@@ -275,16 +275,17 @@ def test_an_unrelated_bundle_keeps_the_local_goal_comments_memory_and_publicatio
     cmd_goal_set("local goal", root=root)
     cmd_memory_add("local memory note", root=root)
     cmd_comment_add("theorem_contract", "thm_local", "a local comment", root=root, author_id="me")
-    cmd_publication_set("thm_local", "paper_ready", root=root, title="Local claim")
+    cmd_publication_set("thm_local", "collaborator_ready", root=root, title="Local claim", object_type="theorem_contract")
 
     foreign_root = tmp_path / "foreign"
     foreign = ensure_project(foreign_root, project_id="proj_foreign")
     add_theorem(foreign, theorem_id="thm_foreign", kind="lemma", name="Foreign", statement="B")
+    add_theorem(foreign, theorem_id="thm_local", kind="lemma", name="Their copy", statement="A")
     cmd_goal_set("foreign goal", root=foreign_root)
     cmd_memory_add("foreign memory note", root=foreign_root)
     cmd_comment_add("theorem_contract", "thm_local", "a foreign comment on the same object", root=foreign_root, author_id="them")
-    cmd_publication_set("thm_local", "internal_draft", root=foreign_root, title="Foreign claim on the same object")
-    cmd_publication_set("thm_foreign", "internal_draft", root=foreign_root, title="Foreign claim")
+    cmd_publication_set("thm_local", "internal_draft", root=foreign_root, title="Foreign claim on the same object", object_type="theorem_contract")
+    cmd_publication_set("thm_foreign", "internal_draft", root=foreign_root, title="Foreign claim", object_type="theorem_contract")
 
     import_exchange_bundle(local, export_exchange_bundle(foreign))
 
@@ -361,7 +362,7 @@ def _rich_source(root: Path):
     cmd_goal_set("goal_x", root=root)
     cmd_memory_add("memory_x", root=root)
     cmd_comment_add("proof_map_node", "L", "comment_x", root=root, author_id="me")
-    cmd_publication_set("thm_x", "internal_draft", root=root, title="X claim")
+    cmd_publication_set("thm_x", "internal_draft", root=root, title="X claim", object_type="theorem_contract")
     create_snapshot(store, note="handoff")
     return store
 
