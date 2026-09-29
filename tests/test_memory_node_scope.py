@@ -180,6 +180,25 @@ def test_memory_list_filters_by_candidate_proof_and_review_and_shows_the_scope(t
     assert "project-scope" not in by_node.stdout
 
 
+def test_memory_list_json_envelope_lists_only_the_entries_of_that_proof_or_review(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    proof, review = _reviewed(store, "clm_1")
+    record_memory(store, "semantic", "about the node", node_id="clm_1")
+    record_memory(store, "episodic", "about the proof", node_id="clm_1", candidate_proof_id=proof.id)
+    record_memory(store, "episodic", "about the review", node_id="clm_1", review_id=review.id)
+
+    for flag, value, expected in (
+        ("--candidate-proof-id", proof.id, "about the proof"),
+        ("--review-id", review.id, "about the review"),
+    ):
+        result = runner.invoke(app, ["memory", "list", "--root", str(tmp_path), flag, value, "--json"])
+        assert result.exit_code == 0, result.stdout
+        envelope = json.loads(result.stdout)
+        assert envelope["ok"] is True and envelope["command"] == "memory.list"
+        (artifact,) = envelope["data"]["memory"]
+        assert artifact["content"] == expected
+
+
 # -- node-scoped recovery and handoff ---------------------------------------------------
 
 
