@@ -46,6 +46,7 @@ ERROR_CODES: dict[str, str] = {
     "WORKING_PROOF_MISSING": "the node has no working proof.tex",
     "WORKING_PROOF_UNCHANGED": "the working proof is the snapshot already under review",
     "CANDIDATE_PROOF_NOT_FOUND": "no Candidate proof has this id",
+    "REVIEW_NOT_FOUND": "no Human Review decision has this id",
     "CANDIDATE_PROOF_VERSION_CONFLICT": "that snapshot version is already indexed",
     "SPLIT_REQUIRES_CHILDREN": "a split needs at least one child",
     "INVALID_CHILD_SPEC": "a split child is written <child-id>=<statement>",
@@ -99,5 +100,5 @@ ERROR_CODES: dict[str, str] = {
     "NO_PROOF_FOLDER": "the node has no proof folder",
     "INVALID_REQUEST": "the page's request is missing what the action needs (a node id, which snapshot, …)",
     "NOT_FOUND": "no such page route or node action, or (a legacy command under --json) no such contract, reference or target",
-    "NOT_THIS_NODE": "the snapshot named belongs to another node",
+    "NOT_THIS_NODE": "the snapshot, Candidate proof or review named belongs to another node",
 }
