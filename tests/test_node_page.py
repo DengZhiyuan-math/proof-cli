@@ -162,12 +162,18 @@ def test_no_page_offers_open_in_prism_local():
         assert "prism-local" not in text.lower() and "PROOF_CLI_PRISM_LOCAL" not in text, path.name
 
 
-def test_the_studio_page_carries_the_node_panel():
+def test_the_studio_page_carries_the_node_panel_and_the_agents_actions():
+    """The node panel claims and unassigns; what the proof agent does is asked of it from its panel."""
     index = (STUDIO_STATIC / "index.html").read_text()
-    assert 'src="static/node.js"' in index and 'id="node-panel"' in index
+    assert 'src="static/node.js"' in index and 'id="node-panel"' in index and 'id="agent-actions"' in index
     panel = (STUDIO_STATIC / "node.js").read_text()
-    for action in ("claim", "unassign", "split", "request-review", "challenge", "evidence"):
+    for action in ("claim", "unassign"):
         assert f"/{action}" in panel, action
+    for action in ("split", "request-review", "challenge", "evidence"):
+        assert f'"/{action}"' not in panel, action  # the agent does these, through `proof`
+    agent = (STUDIO_STATIC / "app.js").read_text()
+    for label in ("Prove it", "Request review", "Split into claims", "Open a Challenge", "Record evidence"):
+        assert f'["{label}",' in agent, label
 
 
 # -- the panel in the browser (PR #76 audit), run for real under node ------------------
@@ -196,24 +202,26 @@ def _panel(**scenario):
     return _json.loads(done.stdout)
 
 
-def test_request_review_saves_the_editor_first_and_stops_if_it_cannot():
-    refused = _panel(saveAll=False, click={"label": "Request review", "values": {"rationale": "one argument"}})
-    assert refused["events"] == ["saveAll"]  # nothing requested from stale text on disk
-    assert "saved" in refused["note"]
+def test_the_agent_is_asked_only_after_the_editor_is_saved():
+    """A request to the agent (request review among them) snapshots files on disk: the editor saves first (PR #76 audit)."""
+    agent = (STUDIO_STATIC / "app.js").read_text()
+    send = agent[agent.index("async function chatSend()"):]
+    assert send.index("saveAll()") < send.index('api("/api/agent"')
 
-    saved = _panel(click={"label": "Request review", "values": {"rationale": "one argument"}})
-    assert saved["events"][0] == "saveAll" and saved["events"][1]["post"] == "/api/node/A/request-review"
+
+def test_the_claim_offers_only_the_move_that_fits():
+    unclaimed = _panel(click={"label": "Claim"})
+    assert unclaimed["events"][-1] == {"post": "/api/node/A/claim", "body": {"reassign": False}}
+
+    held = _panel(view={**VIEW, "claim": {"claimant_id": "codex"}}, click={"label": "Take over"})
+    assert held["events"][-1] == {"post": "/api/node/A/claim", "body": {"reassign": True}}
+    assert "Unassign" in _panel(view={**VIEW, "claim": {"claimant_id": "codex"}})["panel"]
 
 
 def test_the_dependency_list_shows_pins_and_opens_each_dependency_where_it_lives():
     shown = _panel()
     assert shown["links"] == ["/studio/lem/", "/#/node/ref"]
     assert "pinned v3" in shown["deps"] and "accepted v4" in shown["deps"]
-
-
-def test_an_evidence_check_names_the_snapshot_it_checked():
-    sent = _panel(answer={"outcome": "passed"}, click={"label": "Record an Evidence check on snapshot v1", "values": {"outcome": "passed", "run_by": "lean"}})
-    assert sent["events"][-1]["body"]["candidate_proof_id"] == "cp-v1"
 
 
 # -- review in the studio (#71) --------------------------------------------------------

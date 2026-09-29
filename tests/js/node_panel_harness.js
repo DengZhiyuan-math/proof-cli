@@ -32,7 +32,7 @@ class El {
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, "../../src/proof_cli/studio/static/node.js"), "utf8"), context);
   await new Promise(setImmediate);
-  const out = { events, deps: null, links: [], note: "" };
+  const out = { events, deps: null, links: [], note: "", panel: panel.text() };
   const deps = panel.querySelector(".node-deps");
   if (deps) { out.deps = deps.text(); out.links = deps.all().filter((x) => x.tag === "a").map((x) => x.attrs.href); }
   if (scenario.click) {

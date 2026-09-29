@@ -774,6 +774,26 @@ function insertMention(token, snip, replaceFrom) {
   updateScope(); inp.focus();
 }
 
+/* Suggested actions: what the proof agent does on this node (ADR-0006) — prove it, split it,
+   request review, open a Challenge, record an Evidence check. A click writes the request into
+   the message box, to add to and send; the agent carries it out through `proof`. */
+const AGENT_ACTIONS = [
+  ["Prove it", "Work on this node's proof: retrieval first, then write the proof in proof.tex and compile it."],
+  ["Request review", "This node's proof is ready. Compile it, then request review with a rationale for why the node is scoped to prove directly: "],
+  ["Split into claims", "This node is too large to prove directly. Propose Claims that together prove it, then split the node into them: "],
+  ["Open a Challenge", "Open a Challenge on the dependency that may no longer hold, and say why: "],
+  ["Record evidence", "Run a checker on the snapshot under review and record the Evidence check with what it reported: "],
+];
+$("#agent-actions").replaceChildren(...AGENT_ACTIONS.map(([label, request]) => {
+  const b = document.createElement("button");
+  b.type = "button"; b.textContent = label; b.title = request;
+  b.onclick = () => {
+    const inp = $("#chat-input");
+    inp.value = request; inp.focus(); inp.setSelectionRange(request.length, request.length); updateScope();
+  };
+  return b;
+}));
+
 async function chatSend() {
   if (C.job) return;
   const text = $("#chat-input").value.trim();

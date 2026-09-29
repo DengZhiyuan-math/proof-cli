@@ -66,14 +66,6 @@
     return box;
   }
 
-  // A snapshot is of the files on disk: the editor's unsaved edits are saved first, and if any
-  // can't be (a conflict with the disk, an agent editing), nothing is requested (PR #76 audit).
-  async function savedFirst() {
-    if (typeof saveAll !== "function" || (await saveAll())) return true;
-    tell("Some edits couldn't be saved (see the editor), so no review was requested.", true);
-    return false;
-  }
-
   // where a node opens: a theorem, lemma or claim in its studio, an imported result on its own page
   const pageOf = (id, kind) => (kind === "imported_result" ? `/#/node/${encodeURIComponent(id)}` : `/studio/${encodeURIComponent(id)}/`);
   const version = (v) => (v === null || v === undefined ? "—" : `v${v}`);
@@ -139,11 +131,6 @@
     return box;
   }
 
-  const children = (text) => text.split("\n").map((line) => line.trim()).filter(Boolean).map((line) => {
-    const [id, ...rest] = line.split("=");
-    return { id: id.trim(), statement: rest.join("=").trim() };
-  });
-
   // the node's three state axes, one chip each (never folded into one status), plus its claim
   function axes(view, claimed) {
     const box = h("div", null, { class: "node-axes" });
@@ -152,13 +139,6 @@
     chip(view.acceptance_state, ["rejected", "no-longer-callable"].includes(view.acceptance_state) ? "err" : view.acceptance_state === "unverifiable" ? "warn" : ["accepted", "reviewed"].includes(view.acceptance_state) ? "ok" : "");
     chip(view.integrity_state, view.integrity_state === "current" ? "" : "warn");
     return box;
-  }
-
-  // a row that opens to show an action's fields and its button
-  function disclose(title, box) {
-    const row = h("details", null, { class: "node-more" });
-    row.append(h("summary", title), box);
-    return row;
   }
 
   // Claim when nobody holds the node; otherwise Unassign, or Take over from someone else
@@ -199,27 +179,12 @@
       ...node.assumptions.map((a) => h("p", `assuming ${a}`, { class: "node-assumption" })),
       axes(view, claimed),
       h("h4", "Depends on"), deps,
-      // the claim, in one line: only the move that fits who holds the node now
+      // the claim, in one line: only the move that fits who holds the node now. Requesting
+      // review, splitting, Challenges and Evidence checks are the proof agent's: its panel offers them.
       claimRow(view),
-      // everything that needs a few words first opens as a row, like a disclosure list
-      h("h4", "Actions"),
-      h("div", null, { class: "node-list" }),
       reviewSection(view),
       note,
       h("p", null, { class: "node-links" }),
-    );
-    panel.querySelector(".node-list").append(
-      disclose("Request review", action("Request review", "/request-review", [["rationale", "textarea", "Why this node is scoped to prove directly"]], (v) => ({ rationale: v.rationale }),
-        (snapshot) => { tell(`Snapshot v${snapshot.version} awaits review.`); return render(); }, savedFirst)),
-      disclose("Split into claims", action("Split", "/split", [["children", "textarea", "One child per line: id = statement"], ["reassign", "checkbox", "Take it over"]],
-        (v) => ({ children: children(v.children), reassign: v.reassign }), (result) => { location.href = result.next; })),
-      disclose("Open a Challenge", action("Open a Challenge", "/challenge", [["rationale", "textarea", "What may no longer hold"]], (v) => ({ rationale: v.rationale }),
-        () => { tell("Challenge opened."); return render(); })),
-      // on the snapshot this page shows: the server records it there, even if a newer one has come since
-      ...(proof ? [disclose("Record an Evidence check", action(`Record an Evidence check on snapshot v${proof.version}`, "/evidence",
-        [["outcome", "select", "", ["passed", "failed", "inconclusive", "error", "stale"]], ["run_by", "input", "Which checker ran it"], ["notes", "textarea", "What it found"]],
-        (v) => ({ candidate_proof_id: proof.id, outcome: v.outcome, run_by: v.run_by, notes: v.notes }),
-        (check) => { tell(`Evidence check ${check.outcome} recorded on snapshot v${proof.version}.`); return render(); }))] : []),
     );
     if (location.hash === "#review" && !render.scrolled) {
       render.scrolled = true;
