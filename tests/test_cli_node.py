@@ -226,7 +226,7 @@ def test_node_request_review_human_readable(tmp_path: Path):
     assert result.exit_code == 0
     assert "clm_1" in result.stdout
     assert "v1" in result.stdout.lower()
-    assert (tmp_path / "proofs" / "clm_1" / "snapshots" / "v1" / "proof.tex").exists()
+    assert (tmp_path / "proofs" / "clm_1" / "snapshots" / "v1" / "node" / "proof.tex").exists()
 
 
 def test_node_request_review_json_envelope(tmp_path: Path):
@@ -278,8 +278,8 @@ def test_node_second_request_review_creates_v2(tmp_path: Path):
     assert second.exit_code == 0
     payload = json.loads(second.stdout)
     assert payload["data"]["version"] == 2
-    assert (tmp_path / "proofs" / "clm_1" / "snapshots" / "v1" / "proof.tex").read_text() == "v1 text"
-    assert (tmp_path / "proofs" / "clm_1" / "snapshots" / "v2" / "proof.tex").read_text() == "v2 text"
+    assert (tmp_path / "proofs" / "clm_1" / "snapshots" / "v1" / "node" / "proof.tex").read_text() == "v1 text"
+    assert (tmp_path / "proofs" / "clm_1" / "snapshots" / "v2" / "node" / "proof.tex").read_text() == "v2 text"
 
 
 def test_node_submit_is_retired(tmp_path: Path):

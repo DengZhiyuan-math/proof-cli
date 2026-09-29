@@ -98,7 +98,12 @@
     box.append(h("h4", "Review"));
     const proof = view.candidate_proof;
     if (!proof) { box.append(h("p", "No snapshot has been requested for review yet.", { class: "node-hint" })); return box; }
-    box.append(h("p", `Snapshot v${proof.version} · SHA-256 ${proof.sha256.slice(0, 12)}…`, { title: proof.sha256 }));
+    if (proof.unreadable || !proof.sha256) {
+      // damaged or missing on disk: every decision on it has stopped counting (see the warnings)
+      box.append(h("p", `Snapshot v${proof.version} can't be read: its files or manifest were changed or removed.`, { class: "node-note bad" }));
+    } else {
+      box.append(h("p", `Snapshot v${proof.version} · SHA-256 ${proof.sha256.slice(0, 12)}…`, { title: proof.sha256 }));
+    }
     const files = h("p", null, { class: "node-files" });
     for (const [rel, text] of Object.entries(proof.files || {})) {
       const open = h("button", rel, { type: "button", title: "Open read-only" });

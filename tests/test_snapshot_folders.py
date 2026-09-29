@@ -58,7 +58,7 @@ def test_a_snapshot_is_a_folder_of_every_input_with_a_manifest_whose_hash_is_the
     snapshot = folder / "snapshots" / "v1"
     assert record.file_path == "proofs/clm_1/snapshots/v1/manifest.json"
     stored = sorted(p.relative_to(snapshot).as_posix() for p in snapshot.rglob("*") if p.is_file())
-    assert stored == ["_shared/preamble.tex", "body.tex", "manifest.json", "proof.tex", "refs.bib"]
+    assert stored == ["manifest.json", "node/body.tex", "node/proof.tex", "node/refs.bib", "shared/preamble.tex"]
     manifest = json.loads((snapshot / "manifest.json").read_text())
     assert manifest["files"] == {
         name: hashlib.sha256((folder / name).read_bytes()).hexdigest() for name in ("body.tex", "proof.tex", "refs.bib")
@@ -70,12 +70,12 @@ def test_a_snapshot_is_a_folder_of_every_input_with_a_manifest_whose_hash_is_the
 def test_a_snapshot_is_never_overwritten_and_an_edit_to_it_breaks_its_hash(tmp_path: Path):
     store, folder = _node(tmp_path)
     record = _request(store)
-    (folder / "snapshots" / "v1" / "body.tex").write_text("tampered\n")
+    (folder / "snapshots" / "v1" / "node" / "body.tex").write_text("tampered\n")
     assert candidate_proof_sha256(store, record.id) != record.sha256
 
     (folder / "body.tex").write_text("a second argument\n")
     second = _request(store)
-    assert second.version == 2 and (folder / "snapshots" / "v1" / "body.tex").read_text() == "tampered\n"
+    assert second.version == 2 and (folder / "snapshots" / "v1" / "node" / "body.tex").read_text() == "tampered\n"
 
 
 # -- a change to any input is a new version -------------------------------------------
@@ -194,3 +194,42 @@ def test_a_failed_request_leaves_no_snapshot_folder(tmp_path: Path, monkeypatch)
         _request(store)
     assert not (folder / "snapshots" / "v1").exists()
     assert list_candidate_proofs(store, "clm_1") == []
+
+
+
+# -- PR #78 review: a node's own files never collide with the snapshot's; a broken one still shows --
+
+
+def test_a_nodes_files_named_like_the_snapshots_own_are_frozen_without_colliding(tmp_path: Path):
+    store, folder = _node(tmp_path)
+    (folder / "manifest.json").write_text('{"a node file": "not the snapshot manifest"}\n')
+    for trap in ("_shared/preamble.tex", "shared/preamble.tex"):
+        (folder / trap).parent.mkdir(exist_ok=True)
+        (folder / trap).write_text(f"a node file at {trap}\n")
+
+    record = _request(store)
+
+    snapshot = folder / "snapshots" / "v1"
+    manifest = json.loads((snapshot / "manifest.json").read_text())
+    assert set(manifest["files"]) == {"proof.tex", "body.tex", "manifest.json", "_shared/preamble.tex", "shared/preamble.tex", "../preamble.tex"}
+    assert (snapshot / "node" / "manifest.json").read_text() == (folder / "manifest.json").read_text()
+    assert (snapshot / "node" / "shared" / "preamble.tex").read_text() == "a node file at shared/preamble.tex\n"
+    assert (snapshot / "shared" / "preamble.tex").read_bytes() == (store.root / "proofs" / "preamble.tex").read_bytes()
+    assert candidate_proof_sha256(store, record.id) == record.sha256
+
+
+def test_a_broken_snapshot_still_shows_its_node_page_and_the_warning(tmp_path: Path):
+    from _review_client import DirectClient
+
+    store, folder = _node(tmp_path)
+    _request(store)
+    researcher(store).decide_acceptance("clm_1", "accept")
+    (folder / "snapshots" / "v1" / "manifest.json").write_text("{ not json")
+
+    status, body = DirectClient(store).get("/api/node/clm_1")
+
+    assert status == 200, body
+    view = body["data"]
+    assert view["candidate_proof"]["unreadable"] is True and view["candidate_proof"]["sha256"] is None
+    assert view["acceptance_state"] == "unverifiable"
+    assert any(w["code"] == "DECISION_NO_LONGER_APPLIES" for w in view["warnings"])

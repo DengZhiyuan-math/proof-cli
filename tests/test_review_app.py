@@ -50,7 +50,7 @@ def test_the_home_page_lists_what_awaits_review_with_its_exact_snapshot(page):
 
     (pending,) = state["pending"]
     assert pending["node_id"] == "clm_1"
-    assert pending["candidate_proof"]["text"] == (store.root / snapshot.file_path).read_text()
+    assert pending["candidate_proof"]["text"] == (store.root / snapshot.file_path).parent.joinpath("node", "proof.tex").read_text()  # the frozen proof.tex (#71)
     assert pending["candidate_proof"]["sha256"] == snapshot.sha256
     assert state["reviewer"]  # whose decisions these will be
 
@@ -61,7 +61,7 @@ def test_the_node_page_shows_the_exact_latex_never_a_rendering(page):
 
     view = client.get("/api/node/clm_1")[1]["data"]
 
-    assert view["candidate_proof"]["text"] == (store.root / snapshot.file_path).read_text()
+    assert view["candidate_proof"]["text"] == (store.root / snapshot.file_path).parent.joinpath("node", "proof.tex").read_text()
     assert "(f * g) * h" in view["candidate_proof"]["text"] and "- x^2" in view["candidate_proof"]["text"]
     static = Path(__file__).parent.parent / "src" / "proof_cli" / "webapp" / "static" / "app.js"
     assert "renderMarkdown" not in static.read_text()
