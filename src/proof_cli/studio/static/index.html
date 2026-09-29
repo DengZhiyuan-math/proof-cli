@@ -86,10 +86,13 @@
         <option value="edit">Edit</option>
         <option value="ask">Ask (read-only)</option>
       </select>
+      <button id="chat-info" class="icon" data-icon="gauge" aria-label="Account and usage limits" aria-haspopup="dialog" aria-expanded="false" title="Account and usage limits"></button>
       <button id="chat-new" title="Start a new conversation">New chat</button>
     </div>
-    <div id="agent-account" hidden></div>
-    <div id="quota"></div>
+    <div id="agent-info" class="popover info" role="dialog" aria-label="Account and usage limits" hidden>
+      <div id="agent-account" hidden></div>
+      <div id="quota"></div>
+    </div>
     <div id="chat-log"></div>
     <div id="chat-foot">
       <section id="review-card" class="popover" aria-label="Review" hidden></section>
