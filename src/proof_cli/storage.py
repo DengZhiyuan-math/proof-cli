@@ -34,8 +34,6 @@ from .references import (
     ReferenceRecord,
     ReferenceReviewRecord,
     ReferenceReviewStatus,
-    ReferenceSourceType,
-    ReferenceTrustLevel,
     utc_now,
 )
 
@@ -217,7 +215,8 @@ CREATE TABLE IF NOT EXISTS review_history (
 _REVIEW_HISTORY_ADDED_COLUMNS = {"prev_row_hash": "TEXT", "signed_decision": "TEXT", "payload_hash": "TEXT"}
 _CHALLENGE_ADDED_COLUMNS = {"resolution_review_id": "TEXT"}
 _CLAIM_DROPPED_COLUMNS = ("token_hash",)  # the #37 claim token, gone with ADR-0010
-_CANDIDATE_PROOF_ADDED_COLUMNS = {"sha256": "TEXT"}  # a Review snapshot's hash (ADR-0010)
+# a Review snapshot's hash (ADR-0010), and the node's dependencies as the snapshot was requested (#96, JSON)
+_CANDIDATE_PROOF_ADDED_COLUMNS = {"sha256": "TEXT", "dependencies": "TEXT"}
 
 REVIEW_HISTORY_TRIGGERS = """
 CREATE INDEX IF NOT EXISTS idx_review_history_object ON review_history(object_type, object_id, seq);
@@ -673,18 +672,18 @@ def memoized_read(func):
     with every other caller in the scope."""
 
     @functools.wraps(func)
-    def wrapper(first, *args, **kwargs):
+    def wrapper(store_or_root, /, *args, **kwargs):  # positional-only: a read may take its own `first=`
         scope = _READ_SCOPE.get()
         if scope is None or kwargs or scope.transaction is not _ACTIVE_TRANSACTION.get():
-            return func(first, *args, **kwargs)
-        root = first.root if isinstance(first, ProjectStore) else first
+            return func(store_or_root, *args, **kwargs)
+        root = store_or_root.root if isinstance(store_or_root, ProjectStore) else store_or_root
         try:
             key = (func, root, args)
             hash(key)
         except TypeError:
-            return func(first, *args)
+            return func(store_or_root, *args)
         if key not in scope.memo:
-            scope.memo[key] = func(first, *args)
+            scope.memo[key] = func(store_or_root, *args)
         return scope.memo[key]
 
     return wrapper
@@ -1045,16 +1044,6 @@ def import_reference_review(store: ProjectStore, review: ReferenceReviewRecord) 
     return review
 
 
-def _reference_trust_level(reference: ReferenceRecord, review_status: ReferenceReviewStatus) -> ReferenceTrustLevel:
-    if review_status != ReferenceReviewStatus.approved:
-        return reference.trust_level
-    if reference.trust_level == ReferenceTrustLevel.foundational:
-        return reference.trust_level
-    if reference.source_type == ReferenceSourceType.standard_reference:
-        return ReferenceTrustLevel.standard_reference
-    return ReferenceTrustLevel.external_research_source
-
-
 def store_reference(store: ProjectStore, reference: ReferenceRecord) -> ReferenceRecord:
     return _upsert_reference(store, reference)
 
@@ -1165,8 +1154,9 @@ def update_proof_map_node(store: ProjectStore, node: ProofMapNode, *, conn: sqli
 
     Its callers are the node's sanctioned edits: Promote (issue #22)
     changing `kind` from `claim` to `lemma`, Split (issue #26) appending
-    children to `dependencies`, and moving dependents off a withdrawn
-    imported result (issue #20) swapping one dependency for its correction.
+    children to `dependencies`, moving dependents off a withdrawn
+    imported result (issue #20) swapping one dependency for its correction,
+    and adding, removing or moving one dependency edge (issue #96).
     """
     with _writing(store, conn) as conn:
         conn.execute(
@@ -1281,6 +1271,7 @@ def _row_to_candidate_proof(row: sqlite3.Row) -> CandidateProofRecord:
         scoping_rationale=row["scoping_rationale"],
         interface_fingerprint=row["interface_fingerprint"],
         sha256=row["sha256"],
+        dependencies=json.loads(row["dependencies"]) if row["dependencies"] is not None else None,
         created_at=row["created_at"],
     )
 
@@ -1309,8 +1300,8 @@ def insert_candidate_proof(
         conn.execute("UPDATE candidate_proofs SET is_current = 0 WHERE node_id = ?", (record.node_id,))
         conn.execute(
             """
-            INSERT INTO candidate_proofs(id, node_id, version, file_path, is_current, review_record_id, submitted_by, scoping_rationale, interface_fingerprint, sha256, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO candidate_proofs(id, node_id, version, file_path, is_current, review_record_id, submitted_by, scoping_rationale, interface_fingerprint, sha256, dependencies, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record.id,
@@ -1323,6 +1314,7 @@ def insert_candidate_proof(
                 record.scoping_rationale,
                 record.interface_fingerprint,
                 record.sha256,
+                json.dumps(record.dependencies) if record.dependencies is not None else None,
                 record.created_at.isoformat(),
             ),
         )
@@ -1801,5 +1793,3 @@ def list_review_history_rows(
         with store.connect() as own:
             rows = own.execute(query, params).fetchall()
     return [_row_to_review_history(row) for row in rows]
-
-
