@@ -65,13 +65,12 @@ def test_the_sample_has_the_shape_of_spec_14(sample):
     assert challenge.target_node_id == "L1" and challenge.id == sample.challenges[0]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="product gap: no service adds a dependency to an existing node, and split_node silently ignores a child "
-    "spec's `dependencies`, so a split child (C1) can't be made to rest on the imported result I (issue #98)",
-)
 def test_c1_rests_on_the_reference_reviewed_imported_result(sample):
-    assert _map(sample.store)["C1"]["dependencies"] == ["I"]
+    """A split child can carry its own dependency (#106): C1 rests on I, whose Reference review unblocks it."""
+    nodes = _map(sample.store)
+    assert nodes["C1"]["dependencies"] == ["I"]
+    assert nodes["I"]["dependencies"] == []
+    assert sorted(node_id for node_id, n in nodes.items() if "I" in n["dependencies"]) == ["C1"]
 
 
 def test_every_node_reads_its_three_axes_and_blocked_reason(sample):
@@ -113,9 +112,8 @@ def test_the_tree_view_shows_the_shared_claim_under_each_parent(sample):
     assert [path for path, _ in at_c2] == [("T", "L1", "C2"), ("T", "L2", "C2")]
     assert [item["shared_by"] for _, item in at_c2] == [2, 2]
     assert all(item["shared_by"] == 0 for _, item in drawn if item["id"] != "C2")
-    below_c1 = [("T", "L1", "C1", "I")] if "I" in get_node(sample.store, "C1").dependencies else []  # see the xfail above
     assert sorted(path for path, _ in drawn) == sorted(
-        [("T",), ("T", "L1"), ("T", "L1", "C1"), ("T", "L1", "C2"), ("T", "L2"), ("T", "L2", "C2"), *below_c1]
+        [("T",), ("T", "L1"), ("T", "L1", "C1"), ("T", "L1", "C2"), ("T", "L2"), ("T", "L2", "C2"), ("T", "L1", "C1", "I")]
     )  # R, derived from T but not a premise, isn't part of how T is proved
 
 
@@ -149,5 +147,6 @@ def test_the_builder_scales_for_a_performance_baseline(tmp_path: Path):
     assert len(nodes) == 1 + 3 * 6
     assert nodes["T"]["dependencies"] == ["L1", "L2", "L1-2", "L2-2", "L1-3", "L2-3"]
     assert nodes["L2-3"]["dependencies"] == ["C2-3"]
+    assert nodes["C1-3"]["dependencies"] == ["I-3"]
     assert {node_id for node_id, n in nodes.items() if n["frontier"]} == set(scaled.ids("L1"))
     assert len(scaled.challenges) == 3

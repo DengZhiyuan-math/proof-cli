@@ -11,10 +11,6 @@ through, and the `_researcher` helper, which calls the very functions the proof 
 decisions call. No SQL. `build_sample_proof_map(root, copies=n)` repeats everything under T but
 the theorem itself n times (ids suffixed `-2`, `-3`, …), a baseline to scale a performance test on.
 
-Known gap (see the xfail in tests/test_sample_proof_map.py): no service gives an existing node a
-dependency, and `split_node` ignores a child spec's `dependencies`, so the edge C1 -> I is asked for
-here but not recorded. It changes no node's axes: I is Reference-reviewed and never challenged.
-
 Run as a script to leave a copy of the sample project behind:
 
     PYTHONPATH=src python tests/fixtures/build_sample_proof_map.py /tmp/sample-map
@@ -66,7 +62,6 @@ def build_sample_proof_map(root: Path, *, copies: int = 1) -> SampleProofMap:
             store,
             n["L1"],
             [
-                # `dependencies` is not honoured by split_node today (see the module docstring)
                 {"id": n["C1"], "statement": f"First half of {n['L1']}", "dependencies": [n["I"]]},
                 {"id": n["C2"], "statement": f"Second half of {n['L1']}"},
             ],
