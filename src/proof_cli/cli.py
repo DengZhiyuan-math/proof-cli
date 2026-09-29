@@ -4,6 +4,7 @@ import json
 import sys
 from pathlib import Path
 
+import click
 import typer
 
 from .commands import (
@@ -99,8 +100,11 @@ from .contract import ProofGroup
 from .collaboration import summarize_review_record
 from .proof_map import (
     ProofMapError,
+    add_dependency,
     claim_node,
     create_node,
+    move_dependency,
+    remove_dependency,
     get_acceptance_state,
     get_blocked_reason,
     get_frontier,
@@ -536,6 +540,52 @@ def node_split(
         )
     else:
         typer.echo(render_proof_map_node_list(children))
+
+
+@node_app.command("depend")
+def node_depend(
+    node_id: str,
+    add: str = typer.Option("", "--add", help="Make the node rest on this node too"),
+    remove: str = typer.Option("", "--remove", help="Stop the node resting on this dependency"),
+    move: str = typer.Option("", "--move", help="Move this dependency down onto the node given by --to"),
+    to: str = typer.Option("", "--to", help="With --move: one of the node's own dependencies, e.g. a split child"),
+    by: str = typer.Option("human", "--by", help="Who is editing (an agent or person name)"),
+    reassign: bool = typer.Option(False, "--reassign", help="Take the claim over from whoever holds it (recorded as `claim --reassign` records it)"),
+    root: str = ROOT_OPTION,
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Add, remove or move one of node_id's dependencies. Ungated, like split (#96).
+
+    A node someone else holds is theirs to edit unless --reassign; an Accepted
+    node only under an open Challenge. Pins are taken at the next request-review."""
+    named = [flag for flag, value in (("--add", add), ("--remove", remove), ("--move", move)) if value]
+    if len(named) != 1:
+        raise click.UsageError("name exactly one of --add, --remove or --move")
+    if bool(to) != bool(move):
+        raise click.UsageError("--move and --to go together: --move <dependency> --to <child>")
+    store = get_store(_root(root))
+    try:
+        if add:
+            edit = add_dependency(store, node_id, add, edited_by=by, reassign=reassign)
+        elif remove:
+            edit = remove_dependency(store, node_id, remove, edited_by=by, reassign=reassign)
+        else:
+            edit = move_dependency(store, node_id, move, to=to, edited_by=by, reassign=reassign)
+    except ProofMapError as exc:
+        _emit_node_error(exc, json_output, command="node.depend")
+        raise typer.Exit(code=1)
+    if json_output:
+        typer.echo(dump_envelope(success_envelope("node.depend", edit.as_json())))
+        return
+    summary = {
+        "add": f"{node_id} now rests on {edit.dependency_id}",
+        "remove": f"{node_id} no longer rests on {edit.dependency_id}",
+        "move": f"moved dependency {edit.dependency_id} of {node_id} onto {to}",
+    }[edit.op]
+    typer.echo(summary + "; pins are taken at the next request-review")
+    typer.echo(render_proof_map_node(edit.node))
+    if edit.to is not None:
+        typer.echo(render_proof_map_node(edit.to))
 
 
 def _emit_challenge(challenge, json_output: bool, *, command: str) -> None:

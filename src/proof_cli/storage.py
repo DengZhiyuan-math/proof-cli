@@ -1041,8 +1041,9 @@ def update_proof_map_node(store: ProjectStore, node: ProofMapNode, *, conn: sqli
 
     Its callers are the node's sanctioned edits: Promote (issue #22)
     changing `kind` from `claim` to `lemma`, Split (issue #26) appending
-    children to `dependencies`, and moving dependents off a withdrawn
-    imported result (issue #20) swapping one dependency for its correction.
+    children to `dependencies`, moving dependents off a withdrawn
+    imported result (issue #20) swapping one dependency for its correction,
+    and adding, removing or moving one dependency edge (issue #96).
     """
     with _writing(store, conn) as conn:
         conn.execute(
