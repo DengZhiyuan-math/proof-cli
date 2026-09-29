@@ -97,6 +97,7 @@ from .commands import (
 from .envelope import dump_envelope, error_envelope, success_envelope
 from .contract import ProofGroup
 from .collaboration import summarize_review_record
+from .storage import read_scoped
 from .proof_map import (
     ProofMapError,
     claim_node,
@@ -225,6 +226,7 @@ def reason(theorem_id: str, root: str = ROOT_OPTION, notes: str = "") -> None:
 
 
 @app.command(rich_help_panel=PROOF_MAP_PANEL)
+@read_scoped
 def frontier(root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
     """The open, unblocked, unclaimed nodes: what an agent could claim right now."""
     store = get_store(_root(root))
@@ -335,6 +337,7 @@ def node_create(
 
 
 @node_app.command("show")
+@read_scoped
 def node_show(
     node_id: str,
     root: str = ROOT_OPTION,
