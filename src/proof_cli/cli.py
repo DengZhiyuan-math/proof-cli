@@ -384,6 +384,7 @@ def node_show(
 
 
 @node_app.command("list")
+@read_scoped
 def node_list(
     root: str = ROOT_OPTION,
     json_output: bool = typer.Option(False, "--json"),
