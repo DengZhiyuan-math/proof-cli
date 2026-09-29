@@ -7,9 +7,11 @@ import shutil
 import sqlite3
 from pathlib import Path
 import uuid
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from typing import Any, Iterator
 
 from .authority import (
     AuthorityWarning,
@@ -47,6 +49,7 @@ from .storage import (
     ProjectStore,
     memoized_read,
     read_scoped,
+    scoped_memo,
     append_event,
     get_active_claim,
     get_candidate_proof as _get_candidate_proof,
@@ -2284,45 +2287,149 @@ def dismiss_challenge(
     )
 
 
-@memoized_read
-def _upstream_cause(store: ProjectStore, node_id: str, *, first: bool = True) -> str | None:
+@dataclass
+class UpstreamVisits:
+    """How many nodes the integrity walk expanded (read its dependencies) while counted (#108)."""
+
+    count: int = 0
+
+
+_UPSTREAM_VISITS: ContextVar[UpstreamVisits | None] = ContextVar("proof_cli_upstream_visits", default=None)
+
+
+@contextmanager
+def counting_upstream_visits() -> Iterator[UpstreamVisits]:
+    """Count the upstream walk's node visits for the duration: a machine-independent cost of a read."""
+    counter = UpstreamVisits()
+    token = _UPSTREAM_VISITS.set(counter)
+    try:
+        yield counter
+    finally:
+        _UPSTREAM_VISITS.reset(token)
+
+
+def _visited_upstream() -> None:
+    counter = _UPSTREAM_VISITS.get()
+    if counter is not None:
+        counter.count += 1
+
+
+# How much each upstream cause weighs: a Challenge outranks a stale pin, which outranks nothing.
+_CAUSE_RANK = {None: 0, "stale": 1, "challenged": 2}
+
+
+def _worse(a: str | None, b: str | None) -> str | None:
+    return a if _CAUSE_RANK[a] >= _CAUSE_RANK[b] else b
+
+
+def _own_cause(store: ProjectStore, node_id: str) -> str | None:
+    """What `node_id` itself starts, never looking further up: `"challenged"` for an open
+    Challenge on it or an Imported result found no longer callable, `"stale"` for one of its own
+    dependency edges pinned to an interface its target no longer offers, or behind its target's
+    accepted version (#23), else None."""
+    _visited_upstream()
+    if has_open_challenge(store, node_id):
+        return "challenged"
+    node = get_node(store, node_id)
+    if node is None:
+        return None
+    if node.kind == ProofMapNodeKind.imported_result and _no_longer_callable(store, node_id):
+        return "challenged"  # a citation found wanting: whatever rests on it needs a second look
+    for dependency_id in node.dependencies:
+        pin = get_dependency_pin(store, node_id, dependency_id)
+        if pin is not None and (not dependency_pin_is_current(store, pin) or dependency_pin_lags(store, pin)):
+            return "stale"
+    return None
+
+
+_UPSTREAM_CAUSES = "upstream_cause"
+
+
+def _upstream_cause(store: ProjectStore, node_id: str) -> str | None:
     """What makes `node_id` unsettled upstream: `"challenged"` if it is itself Challenged, or
     reachable (via dependency edges, transitively) from a Challenged node or a citation found
-    no longer callable; `"stale"` if it is reachable from a dependency edge whose pin no longer
-    matches its target's accepted interface, or lags its accepted version (#23); else None.
+    no longer callable; `"stale"` if it is reachable only from a dependency edge whose pin no
+    longer matches its target's accepted interface, or lags its accepted version (#23); else None.
 
-    `first`: stop at the first cause found (all that `bool()` needs); otherwise walk everything
-    and report a Challenge over a stale pin. Pure graph reachability over persisted Challenge
-    and DependencyPin records — nothing is stored per node. See ADR-0004 point 4. Walked with an
-    explicit worklist, not recursion: a long-running project's dependency chain can run
-    hundreds of nodes deep, well past Python's default recursion limit.
+    Pure graph reachability over persisted Challenge and DependencyPin records — nothing is
+    stored per node. See ADR-0004 point 4.
+
+    One topological pass per read (#108): a depth-first walk in dependency order that records
+    each node's cause in the read scope's memo, so a dependent asked about later reuses its
+    dependencies' causes instead of walking above them again. Over a whole map, every node is
+    visited once per read. Walked with an explicit stack, not recursion: a long-running
+    project's dependency chain can run hundreds of nodes deep, well past Python's default
+    recursion limit.
     """
+    memo: dict[str, str | None] = scoped_memo(store, _UPSTREAM_CAUSES)
+    if node_id in memo:
+        return memo[node_id]
+
+    # the path being walked: each node, its dependencies still to see, and the worst cause so far
+    stack: list[list] = []
+    on_path: set[str] = set()
+
+    def challenged() -> str:
+        for path_id, _, _ in stack:  # nothing outranks a Challenge: everything on the path has it
+            memo[path_id] = "challenged"
+        return "challenged"
+
+    def enter(current_id: str) -> bool:
+        """Visit a node; whether its own cause already settles the answer (a Challenge)."""
+        own = _own_cause(store, current_id)
+        if own == "challenged":
+            memo[current_id] = own
+            return True
+        node = get_node(store, current_id)
+        stack.append([current_id, iter(node.dependencies if node is not None else []), own])
+        on_path.add(current_id)
+        return False
+
+    if enter(node_id):
+        return "challenged"
+    while stack:
+        top = stack[-1]
+        current_id, dependencies, cause = top
+        dependency_id = next(dependencies, None)
+        if dependency_id is None:  # every dependency seen: its cause is settled
+            stack.pop()
+            on_path.discard(current_id)
+            memo[current_id] = cause
+            if stack:
+                stack[-1][2] = _worse(stack[-1][2], cause)
+            continue
+        if dependency_id in memo:
+            if memo[dependency_id] == "challenged":
+                return challenged()
+            top[2] = _worse(cause, memo[dependency_id])
+            continue
+        if dependency_id in on_path:
+            # A dependency cycle, which no service creates: answer by plain reachability instead.
+            for path_id, _, _ in stack:
+                memo.pop(path_id, None)
+            return _reachable_cause(store, node_id)
+        if enter(dependency_id):
+            return challenged()
+    return memo[node_id]
+
+
+def _reachable_cause(store: ProjectStore, node_id: str) -> str | None:
+    """Plain reachability from `node_id`: the worst cause any node it reaches starts, remembering nothing."""
     visited: set[str] = set()
     pending = [node_id]
-    found: str | None = None
+    worst: str | None = None
     while pending:
         current_id = pending.pop()
         if current_id in visited:
             continue
         visited.add(current_id)
-
-        if has_open_challenge(store, current_id):
-            return "challenged"
-
+        worst = _worse(worst, _own_cause(store, current_id))
+        if worst == "challenged":
+            return worst
         node = get_node(store, current_id)
-        if node is None:
-            continue
-        if node.kind == ProofMapNodeKind.imported_result and _no_longer_callable(store, current_id):
-            return "challenged"  # a citation found wanting: whatever rests on it needs a second look
-
-        for dependency_id in node.dependencies:
-            pin = get_dependency_pin(store, current_id, dependency_id)
-            if pin is not None and (not dependency_pin_is_current(store, pin) or dependency_pin_lags(store, pin)):
-                if first:
-                    return "stale"
-                found = "stale"
-            pending.append(dependency_id)
-    return found
+        if node is not None:
+            pending.extend(node.dependencies)
+    return worst
 
 
 def _is_downstream_of_challenge_or_stale_pin(store: ProjectStore, node_id: str) -> bool:
@@ -2442,7 +2549,7 @@ def get_blocked_reason(store: ProjectStore, node_id: str) -> str | None:
     for dependency_id in node.dependencies:
         if _dependency_satisfied(store, dependency_id):
             continue
-        cause = _upstream_cause(store, dependency_id, first=False)
+        cause = _upstream_cause(store, dependency_id)
         if cause == "challenged":
             return "dependency-challenged"
         stale = stale or cause == "stale"

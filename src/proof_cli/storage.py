@@ -720,6 +720,21 @@ def memoized_read(func):
     return wrapper
 
 
+def scoped_memo(store: ProjectStore, name: str) -> dict:
+    """A table one derivation fills in as it goes, shared by every caller in the current read scope (#108).
+
+    Unlike `memoized_read`, which remembers whole answers, this lets a walk
+    over the map record each node's result as it reaches it, so the next
+    question reuses what the last one worked out. It is dropped exactly when
+    the scope's other memos are, on any write, and a scope from outside the
+    current transaction doesn't count; outside a scope it is a fresh table
+    for one call."""
+    scope = _READ_SCOPE.get()
+    if scope is None or scope.transaction is not _ACTIVE_TRANSACTION.get():
+        return {}
+    return scope.memo.setdefault((scoped_memo, store.root, name), {})
+
+
 def read_scoped(func):
     """Run the whole of `func` inside one `read_scope`."""
 
