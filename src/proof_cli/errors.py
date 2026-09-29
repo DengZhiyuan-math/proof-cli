@@ -71,6 +71,7 @@ ERROR_CODES: dict[str, str] = {
     "SAME_NODE": "a node can't replace itself",
     "NO_DEPENDENTS": "nothing that can move rests on the node",
     "STALE_VIEW": "what the decision is made on changed since the page showed it; reload",
+    "SNAPSHOT_UNREADABLE": "the Review snapshot the decision would be made on is missing or can't be read, so nothing is decided on it",
     # -- the proof map page's own requests -----------------------------------------------
     "NO_DECISIONS": "the request decided nothing",
     "MALFORMED_DECISION": "a decision in the request isn't a well-formed object",

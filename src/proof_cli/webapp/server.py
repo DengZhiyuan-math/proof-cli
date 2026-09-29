@@ -141,7 +141,19 @@ def _available_decisions(store: ProjectStore, node, *, claim, proof, dependencie
     for challenge in challenges:
         if challenge.status.value == "open":
             offered.append({"kind": "challenge_resolution", "target_id": challenge.id, "decision": "dismissed"})
+    # a decision on a snapshot that is missing or can't be read would be refused (SNAPSHOT_UNREADABLE, #92):
+    # it isn't offered, and the review section says the snapshot can't be read
+    offered = [item for item in offered if not _on_unreadable_snapshot(store, item)]
     return [{**item, "binding": _binding(store, item["kind"], item["target_id"], item["decision"], item.get("dependency_id"))} for item in offered]
+
+
+def _on_unreadable_snapshot(store: ProjectStore, item: dict) -> bool:
+    """Whether the decision offered as `item` would be made on a snapshot that is missing or can't be read."""
+    try:
+        payload = proof_map.prepare_decision(store, item["kind"], item["target_id"], item["decision"], dependency_id=item.get("dependency_id"))
+    except proof_map.ProofMapError:
+        return False
+    return payload.candidate_proof_id is not None and payload.candidate_proof_sha256 is None
 
 
 def _binding(store: ProjectStore, kind: str, target_id: str, decision: str, dependency_id: str | None = None) -> str | None:
@@ -319,11 +331,13 @@ class ReviewApp:
                 continue
             if proof_map.get_workflow_state(self.store, node.id) == "review-needed":
                 proof = get_current_candidate_proof(self.store, node.id)
+                # still listed as awaiting review, but nothing is offered on a snapshot that can't be read (#92)
+                readable = proof is None or candidate_proof_sha256(self.store, proof.id) is not None
                 pending.append(
                     {
                         "node_id": node.id,
                         "kind": "acceptance",
-                        "decisions": [decision.value for decision in proof_map.AcceptanceDecision],
+                        "decisions": [decision.value for decision in proof_map.AcceptanceDecision] if readable else [],
                         "bindings": {d.value: _binding(self.store, "acceptance", node.id, d.value) for d in proof_map.AcceptanceDecision},
                         "statement": node.statement,
                         "acceptance_state": proof_map.get_acceptance_state(self.store, node.id),
