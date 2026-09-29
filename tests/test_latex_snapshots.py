@@ -23,6 +23,7 @@ from proof_cli.proof_map import (
     request_review,
 )
 from proof_cli.storage import ensure_project, list_all_claims
+from proof_cli.vault import snapshot_folder_digest
 
 runner = CliRunner()
 
@@ -80,9 +81,9 @@ def test_requesting_review_snapshots_the_working_file(tmp_path: Path):
     record = request_review(store, "clm_1", requested_by="agent_a", rationale="small enough to prove directly")
 
     snapshot = store.root / record.file_path
-    assert record.file_path == "proofs/clm_1/snapshots/v1.tex"
-    assert snapshot.read_bytes() == _working(store, "clm_1").read_bytes()
-    assert record.sha256 == hashlib.sha256(snapshot.read_bytes()).hexdigest()
+    assert record.file_path == "proofs/clm_1/snapshots/v1/manifest.json"  # every input, frozen (ADR-0011)
+    assert (snapshot.parent / "node" / "proof.tex").read_bytes() == _working(store, "clm_1").read_bytes()
+    assert record.sha256 == snapshot_folder_digest(snapshot.parent)
     assert get_workflow_state(store, "clm_1") == "review-needed"
     # still exactly one top-level .tex: snapshots live in their own folder
     assert [p.name for p in (store.root / "proofs" / "clm_1").glob("*.tex")] == ["proof.tex"]
@@ -101,7 +102,7 @@ def test_an_unchanged_working_file_is_not_snapshotted_again(tmp_path: Path):
     before = (store.root / first.file_path).read_bytes()
     _working(store, "clm_1").write_text(_working(store, "clm_1").read_text() + "% revised\n")
     second = request_review(store, "clm_1", requested_by="agent_a", rationale="r")
-    assert (second.version, second.file_path) == (2, "proofs/clm_1/snapshots/v2.tex")
+    assert (second.version, second.file_path) == (2, "proofs/clm_1/snapshots/v2/manifest.json")
     assert (store.root / first.file_path).read_bytes() == before
     assert [p.is_current for p in list_candidate_proofs(store, "clm_1")] == [False, True]
 
@@ -153,7 +154,7 @@ def test_a_reassignment_racing_a_request_waits_for_it_rather_than_being_overridd
     claim_node(store, "clm_1", claimant_id="agent_a", session_id="s")
     _write_proof(store, "clm_1", "A's work")
 
-    original = proof_map.write_snapshot
+    original = proof_map.write_snapshot_folder
     reassigner = threading.Thread(target=lambda: claim_node(store, "clm_1", claimant_id="agent_b", session_id="s", reassign=True))
 
     def write_after_a_reassignment(path, content):
@@ -161,7 +162,7 @@ def test_a_reassignment_racing_a_request_waits_for_it_rather_than_being_overridd
         reassigner.join(timeout=0.5)  # never finishes while A holds the write lock
         original(path, content)
 
-    monkeypatch.setattr(proof_map, "write_snapshot", write_after_a_reassignment)
+    monkeypatch.setattr(proof_map, "write_snapshot_folder", write_after_a_reassignment)
     request_review(store, "clm_1", requested_by="agent_a", rationale="r")
     reassigner.join()
 
@@ -187,7 +188,7 @@ def test_a_failed_request_leaves_no_snapshot_and_no_row(tmp_path: Path, monkeypa
     with pytest.raises(RuntimeError):
         request_review(store, "clm_1", requested_by="agent_a", rationale="r")
 
-    assert not (store.root / "proofs" / "clm_1" / "snapshots" / "v1.tex").exists()
+    assert not (store.root / "proofs" / "clm_1" / "snapshots" / "v1").exists()
     assert list_candidate_proofs(store, "clm_1") == []
     assert get_active_claim(store, "clm_1").claimant_id == "agent_a"
 
@@ -203,7 +204,7 @@ def test_an_orphan_snapshot_is_skipped_and_reported_not_a_permanent_block(tmp_pa
     record = request_review(store, "clm_1", requested_by="agent_a", rationale="r")
 
     assert record.version == 2
-    assert record.file_path == "proofs/clm_1/snapshots/v2.tex"
+    assert record.file_path == "proofs/clm_1/snapshots/v2/manifest.json"
     assert orphan.read_text() == "left behind by a crash"  # never overwritten or adopted
     (warning,) = [w for w in list_integrity_warnings(store) if w.code == "ORPHAN_SNAPSHOT"]
     assert warning.details == {"node_id": "clm_1", "file_path": "proofs/clm_1/snapshots/v1.tex"}
@@ -253,18 +254,18 @@ def test_a_failed_request_never_removes_the_snapshot_a_later_one_wrote(tmp_path:
             with real_transaction() as conn:
                 yield conn
         except OSError:
-            monkeypatch.setattr(proof_map, "write_snapshot", real_write_snapshot)
+            monkeypatch.setattr(proof_map, "write_snapshot_folder", real_write_snapshot)
             b_proofs.append(request_review(ProjectStore(tmp_path), "clm_1", requested_by="agent_b", rationale="b"))
             raise
 
-    real_write_snapshot = proof_map.write_snapshot
-    monkeypatch.setattr(proof_map, "write_snapshot", no_space)
+    real_write_snapshot = proof_map.write_snapshot_folder
+    monkeypatch.setattr(proof_map, "write_snapshot_folder", no_space)
     monkeypatch.setattr(store, "transaction", then_b_requests_review)
     with pytest.raises(OSError):
         request_review(store, "clm_1", requested_by="agent_a", rationale="a")
 
     (b_proof,) = b_proofs
-    assert (tmp_path / b_proof.file_path).read_bytes() == _working(store, "clm_1").read_bytes()
+    assert ((tmp_path / b_proof.file_path).parent / "node" / "proof.tex").read_bytes() == _working(store, "clm_1").read_bytes()
 
 
 def test_a_request_whose_commit_fails_leaves_no_snapshot(tmp_path: Path, monkeypatch):
@@ -305,7 +306,7 @@ def test_a_stray_pdf_is_never_adopted_by_a_new_snapshot(tmp_path: Path):
     record = request_review(store, "clm_1", requested_by="agent_a", rationale="r")
 
     assert record.version == 2
-    assert not (store.root / record.file_path).with_suffix(".pdf").exists()
+    assert not (store.root / "proofs" / record.node_id / "snapshots" / f"v{record.version}.pdf").exists()
     (warning,) = [w for w in list_integrity_warnings(store) if w.code == "ORPHAN_SNAPSHOT"]
     assert warning.details == {"node_id": "clm_1", "file_path": "proofs/clm_1/snapshots/v1.pdf"}
 
@@ -358,7 +359,7 @@ def test_a_real_build_is_archived_with_the_snapshot(tmp_path: Path):
 
     snapshot = request_review(store, "lem_1", requested_by="agent_a", rationale="one estimate")
 
-    archived = (tmp_path / snapshot.file_path).with_suffix(".pdf")
+    archived = tmp_path / "proofs" / "lem_1" / "snapshots" / f"v{snapshot.version}.pdf"  # beside the frozen folder
     assert archived.read_bytes() == (folder / "build" / "proof.pdf").read_bytes()
     assert archived.read_bytes().startswith(b"%PDF")
 
@@ -372,7 +373,7 @@ def test_request_review_and_show_on_the_cli(tmp_path: Path):
     result = runner.invoke(app, ["node", "request-review", "clm_1", "--rationale", "r", "--requested-by", "agent_a", "--root", root, "--json"])
     assert result.exit_code == 0, result.stdout
     payload = json.loads(result.stdout)["data"]
-    assert (payload["version"], payload["file_path"]) == (1, "proofs/clm_1/snapshots/v1.tex")
+    assert (payload["version"], payload["file_path"]) == (1, "proofs/clm_1/snapshots/v1/manifest.json")
 
     again = runner.invoke(app, ["node", "request-review", "clm_1", "--rationale", "r", "--root", root, "--json"])
     assert again.exit_code == 1
@@ -380,8 +381,8 @@ def test_request_review_and_show_on_the_cli(tmp_path: Path):
 
     shown = json.loads(runner.invoke(app, ["node", "show", "clm_1", "--root", root, "--json"]).stdout)["data"]
     assert shown["working_proof"] == "proofs/clm_1/proof.tex"
-    assert [s["file_path"] for s in shown["snapshots"]] == ["proofs/clm_1/snapshots/v1.tex"]
+    assert [s["file_path"] for s in shown["snapshots"]] == ["proofs/clm_1/snapshots/v1/manifest.json"]
     assert shown["snapshots"][0]["sha256"] == payload["sha256"]
 
     human = runner.invoke(app, ["node", "show", "clm_1", "--root", root])
-    assert "proofs/clm_1/proof.tex" in human.stdout and "snapshots/v1.tex" in human.stdout
+    assert "proofs/clm_1/proof.tex" in human.stdout and "snapshots/v1/" in human.stdout

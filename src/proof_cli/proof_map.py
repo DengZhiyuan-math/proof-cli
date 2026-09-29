@@ -71,7 +71,21 @@ from .storage import (
     upsert_dependency_pin,
     delete_dependency_pin,
 )
-from .vault import build_is_current, build_pdf_path, node_folder, snapshot_path, snapshots_on_disk, working_proof_path, write_snapshot, write_working_proof
+from .vault import (
+    SNAPSHOT_MANIFEST,
+    archived_pdf_path,
+    build_is_current,
+    build_pdf_path,
+    manifest_digest,
+    node_folder,
+    remove_snapshot,
+    snapshot_dir,
+    snapshots_on_disk,
+    working_inputs,
+    working_proof_path,
+    write_snapshot_folder,
+    write_working_proof,
+)
 
 
 class ProofMapError(Exception):
@@ -572,9 +586,12 @@ def release_node(
 def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rationale: str) -> CandidateProofRecord:
     """Snapshot a node's working `proof.tex` for review (ADR-0010).
 
-    The working file is edited freely — by agents, the researcher, prism-local
-    — and never reviewed directly: this copies it, byte for byte, to a new
-    `snapshots/v<N>.tex` that is never overwritten, and records its SHA-256.
+    The working sources are edited freely — in the node's studio, by agents —
+    and never reviewed directly: this freezes every input of the proof, the
+    node's working sources and the shared preamble, byte for byte, into a new
+    `snapshots/v<N>/` with a manifest, never overwritten, and records the
+    manifest's SHA-256 (ADR-0011 point 5). A change to any input is a new
+    version; the same inputs as the snapshot under review are refused.
     Needs no claim. A node someone has claimed is theirs to hand over, and
     their claim ends here, as a wayfinder ticket's does when its work is.
     """
@@ -591,8 +608,9 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
     working = working_proof_path(store.root, node_id)
     if not working.is_file():
         raise ProofMapError("WORKING_PROOF_MISSING", f"{working.relative_to(store.root).as_posix()} doesn't exist")
-    content = working.read_bytes()
-    sha256 = hashlib.sha256(content).hexdigest()
+    # read once: what is hashed is exactly what is frozen, even if a file changes meanwhile
+    contents = {rel: path.read_bytes() for rel, path in working_inputs(store.root, node_id).items()}
+    sha256 = manifest_digest({rel: hashlib.sha256(data).hexdigest() for rel, data in contents.items()})
 
     # The holder check and every write are one SQLite write transaction (#18): a reassignment
     # can't slip in between them, it waits for this to commit. The files written go if it rolls
@@ -611,20 +629,21 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
         # past any snapshot already on disk too: one the index never got is an orphan, reported
         # by list_integrity_warnings, and never overwritten
         version = max([next_candidate_proof_version(store, node_id, conn=conn), *(n + 1 for n in snapshots_on_disk(store.root, node_id))])
-        path = snapshot_path(store.root, node_id, version)
+        folder = snapshot_dir(store.root, node_id, version)
+        pdf = archived_pdf_path(store.root, node_id, version)
         # listed before writing, so a write that fails partway still goes; and only if absent
         # now, under the write lock, so a rollback never removes a file this request didn't write
-        ours = [p for p in (path, path.with_suffix(".pdf")) if not p.exists()]
-        on_rollback(store, lambda: _remove_files(ours))
-        write_snapshot(path, content)
+        ours = [p for p in (folder, pdf) if not p.exists()]
+        on_rollback(store, lambda: [remove_snapshot(p) for p in ours])
+        write_snapshot_folder(folder, contents)
         if build_is_current(store.root, node_id):
-            # a PDF compiled from this very text, preamble included (prism-local's build): archived beside the snapshot
-            shutil.copyfile(build_pdf_path(store.root, node_id), path.with_suffix(".pdf"))
+            # a PDF compiled from these very inputs (the studio's build): archived beside the snapshot
+            shutil.copyfile(build_pdf_path(store.root, node_id), pdf)
         record = CandidateProofRecord(
             id=str(uuid.uuid4()),
             node_id=node_id,
             version=version,
-            file_path=path.relative_to(store.root).as_posix(),
+            file_path=(folder / SNAPSHOT_MANIFEST).relative_to(store.root).as_posix(),
             submitted_by=requested_by,
             scoping_rationale=rationale,
             sha256=sha256,
@@ -646,11 +665,6 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
             conn=conn,
         )
     return record
-
-
-def _remove_files(paths: list[Path]) -> None:
-    for path in paths:
-        path.unlink(missing_ok=True)
 
 
 def get_candidate_proof(store: ProjectStore, candidate_proof_id: str) -> CandidateProofRecord | None:
@@ -2005,7 +2019,10 @@ def list_integrity_warnings(store: ProjectStore) -> list[AuthorityWarning]:
     for node in list_nodes(store):
         if node.kind == ProofMapNodeKind.imported_result:
             continue
-        indexed = {proof.file_path for proof in list_candidate_proofs_for_node(store, node.id)}
+        # a folder snapshot is known by its folder, an old single-file one by its file
+        indexed = {
+            proof.file_path.removesuffix("/" + SNAPSHOT_MANIFEST) for proof in list_candidate_proofs_for_node(store, node.id)
+        }
         for _, path in sorted(snapshots_on_disk(store.root, node.id).items()):
             file_path = path.relative_to(store.root).as_posix()
             if file_path not in indexed:

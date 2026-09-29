@@ -299,3 +299,9 @@ pre.panel-view { font: 12px/1.45 var(--mono); white-space: pre-wrap; }
 #node-panel .node-action button { align-self: flex-start; }
 #node-panel textarea, #node-panel input:not([type=checkbox]), #node-panel select { width: 100%; box-sizing: border-box; font: inherit; }
 #node-panel .node-note.bad { color: var(--error, #b3261e); }
+
+/* a Review snapshot's read-only tabs (#71) */
+.tab.readonly .name { font-style: italic; }
+#node-panel .node-review { border-top: 1px solid var(--border, #ddd); margin-top: 8px; padding-top: 4px; }
+#node-panel .node-files button { margin: 2px 4px 2px 0; }
+#node-panel .node-decision { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }

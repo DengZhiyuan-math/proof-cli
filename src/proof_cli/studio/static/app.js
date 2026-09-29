@@ -59,6 +59,7 @@ async function openFile(path, line) {
   }
   S.active = path;
   cm.swapDoc(t.doc);
+  cm.setOption("readOnly", !!t.readOnly);   // a Review snapshot's file is read, never edited
   cm.getWrapperElement().style.display = "";
   $("#empty-editor").hidden = true;
   applyDiagnostics();
@@ -67,6 +68,16 @@ async function openFile(path, line) {
   if (line) jumpToLine(line);
   cm.focus();
   cm.refresh();
+}
+
+// A file of a frozen Review snapshot (#71), opened beside the working files: read-only, never
+// saved, never reloaded from disk, never kept in the session. `path` names it for its tab.
+function openReadOnly(path, content) {
+  if (!S.tabs.some((x) => x.path === path)) {
+    const doc = CodeMirror.Doc(content, modeFor(path));
+    S.tabs.push({ path, doc, readOnly: true, mtime: 0, gen: doc.changeGeneration(true) });
+  }
+  return openFile(path);
 }
 
 function jumpToLine(line) {
@@ -93,8 +104,8 @@ async function closeTab(path) {
 
 function renderTabs() {
   $("#tabs").innerHTML = S.tabs.map((t) => `
-    <div class="tab ${t.path === S.active ? "active" : ""} ${isDirty(t) ? "dirty" : ""}" data-path="${esc(t.path)}" title="${esc(t.path)}">
-      <span class="name">${esc(t.path.split("/").pop())}</span><span class="close" data-close="${esc(t.path)}">×</span>
+    <div class="tab ${t.path === S.active ? "active" : ""} ${isDirty(t) ? "dirty" : ""} ${t.readOnly ? "readonly" : ""}" data-path="${esc(t.path)}" title="${esc(t.path)}${t.readOnly ? " (read-only: a Review snapshot)" : ""}">
+      <span class="name">${esc(t.readOnly ? t.path : t.path.split("/").pop())}</span><span class="close" data-close="${esc(t.path)}">×</span>
     </div>`).join("");
 }
 $("#tabs").addEventListener("click", (e) => {
@@ -103,7 +114,10 @@ $("#tabs").addEventListener("click", (e) => {
 });
 $("#tabs").addEventListener("auxclick", (e) => { const t = e.target.closest(".tab"); if (t && e.button === 1) closeTab(t.dataset.path); });
 
-function persistSession() { store.set("session", { tabs: S.tabs.map((t) => t.path), active: S.active }); }
+function persistSession() {
+  const working = S.tabs.filter((t) => !t.readOnly);   // a snapshot's tabs are reopened from the node panel
+  store.set("session", { tabs: working.map((t) => t.path), active: working.some((t) => t.path === S.active) ? S.active : null });
+}
 
 /* ------------------------------------------------------------------ save & external changes */
 // One save per tab at a time: a second save waits for the first, so two writes never
@@ -274,7 +288,7 @@ async function poll() {
   const r = await api("/api/tree").catch(() => null);
   if (!r || r._status !== 200) { $("#build-status").textContent = "server not reachable"; $("#build-status").className = "status err"; return; }
   $("#projname").textContent = r.root;
-  document.title = r.root + " · prism-local";
+  document.title = r.root + " · proof studio";
   const changed = JSON.stringify(r.files.map((f) => [f.path, f.git])) !== JSON.stringify(S.files.map((f) => [f.path, f.git]));
   S.files = r.files; S.order = r.order || [];
   if (changed) renderTree();

@@ -75,7 +75,8 @@ function showHome() {
     const choice = el("select");
     for (const decision of item.decisions) choice.append(el("option", decision));
     const rationale = el("input", null, { placeholder: "why" });
-    const link = el("a", item.node_id, { href: `#/node/${encodeURIComponent(item.node_id)}` });
+    // a local node is reviewed in its studio (#71); an imported result on its own page
+    const link = el("a", item.node_id, { href: item.kind === "reference_review" ? `#/node/${encodeURIComponent(item.node_id)}` : `/studio/${encodeURIComponent(item.node_id)}/#review` });
     const statement = el("div", item.statement);
     if (item.candidate_proof && item.candidate_proof.id) {
       // shown in full: recording the decision is about exactly this text
@@ -358,7 +359,9 @@ async function showNode(nodeId) {
   const proof = view.candidate_proof;
   if (proof) {
     $("node-proof-meta").textContent = `snapshot v${proof.version} · ${proof.id} · SHA-256 ${proof.sha256}`;
-    $("node-proof-exact").textContent = proof.text;
+    // every file the snapshot froze (#71), each under its path from the node folder
+    const files = Object.entries(proof.files || { "proof.tex": proof.text });
+    $("node-proof-exact").textContent = files.length === 1 ? files[0][1] : files.map(([rel, text]) => `%%%%% ${rel}\n${text}`).join("\n");
   } else {
     $("node-proof-meta").textContent = "No snapshot has been requested for review yet.";
     $("node-proof-exact").textContent = "";
