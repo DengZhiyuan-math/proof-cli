@@ -45,6 +45,7 @@ from .reviews import (
 )
 from .storage import (
     ProjectStore,
+    memoized_read,
     active_transaction,
     after_commit,
     before_commit,
@@ -91,6 +92,7 @@ def human_review_required(kind: DecisionKind | str, target_id: str) -> Authority
     )
 
 
+@memoized_read
 def candidate_proof_sha256(store: ProjectStore, candidate_proof_id: str) -> str | None:
     """SHA-256 of a Candidate proof (a Review snapshot) as it is on disk now, or None if it's missing
     or can't be read: a folder snapshot's manifest digest recomputed from its stored files
@@ -174,6 +176,7 @@ def list_decisions(store: ProjectStore) -> list[dict]:
     return [_row(entry) for entry in _entries(store)[0]]
 
 
+@memoized_read
 def decision_rows(store: ProjectStore, object_type: str, object_id: str, kind: str) -> list[dict]:
     """The decisions on one object and kind, oldest first."""
     return [
@@ -183,6 +186,7 @@ def decision_rows(store: ProjectStore, object_type: str, object_id: str, kind: s
     ]
 
 
+@memoized_read
 def verify_decision_row(store: ProjectStore, row_id: str | None) -> RowVerdict:
     """Whether the decision `row_id` counts: recorded, and made on something (its payload)."""
     if row_id is None:

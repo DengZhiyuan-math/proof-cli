@@ -22,6 +22,7 @@ from proof_cli.collaboration import (
     ReviewRecordKind,
     list_review_history,
     list_review_history_integrity_warnings,
+    list_contributors,
     list_review_records,
     load_collaboration,
     record_review_decision,
@@ -48,6 +49,7 @@ from proof_cli.storage import (
     ensure_project,
     list_events,
     on_rollback,
+    read_side_document,
 )
 
 SRC = Path(__file__).resolve().parents[1] / "src"
@@ -93,8 +95,9 @@ from proof_cli.storage import load_project
 store = load_project(sys.argv[1])
 for node_id in json.loads(open(sys.argv[2]).read()):
     decide_acceptance(store, node_id, "accept", reviewer="Researcher <r@example.org>")
-    # interleave a JSON-backed collaboration write: it used to rewrite the
-    # whole file, review records included, and erase other processes' decisions
+    # interleave a collaboration write: it used to rewrite the whole JSON
+    # file, review records included, and erase other processes' decisions
+    # and contributors (issues #33, #39)
     upsert_contributor(store, Contributor(display_name=f"reviewer for {node_id}"))
 """
 
@@ -130,6 +133,8 @@ def test_concurrent_decisions_from_several_processes_are_all_kept(tmp_path: Path
     assert len(decisions) == 30
     assert all(row["decision"] == "approved" for row in decisions)
     assert sorted(row["seq"] for row in list_decisions(store)) == list(range(1, 31))  # one order, no collisions
+    # and no process's contributor was overwritten by another's (issue #39)
+    assert sorted(c.display_name for c in list_contributors(store)) == sorted(f"reviewer for {n}" for n in node_ids)
 
 
 # -- interrupted decisions ----------------------------------------------------
@@ -324,7 +329,7 @@ def test_saving_collaboration_state_cannot_touch_review_history(tmp_path: Path):
     save_collaboration(store, state)
 
     assert get_acceptance_state(store, "clm_1") == "accepted"
-    assert "review_records" not in json.loads(collaboration_state_path(store).read_text())
+    assert "review_records" not in read_side_document(store, "collaboration")  # SQLite since #39
 
 
 # -- generic `proof review` commands can't reach trust-bearing reviews --------
