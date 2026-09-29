@@ -10,7 +10,7 @@
   --accent: #6fa8c2; --accent-2: #9cc4d6; --accent-dim: rgba(111, 168, 194, .10); --accent-line: rgba(111, 168, 194, .55);
   --ok: #5fb08c; --ok-dim: rgba(95, 176, 140, .12);
   --warn: #d9a84a; --warn-dim: rgba(217, 168, 74, .14);
-  --crit: #d0605a; --crit-dim: rgba(208, 96, 90, .14); --paper: #f6f4ee;
+  --crit: #d0605a; --crit-dim: rgba(208, 96, 90, .14); --paper: #f6f4ee; --tint: 14%;
   --display: "Rajdhani", "Bahnschrift", "DIN Alternate", "Avenir Next Condensed", system-ui, sans-serif;
   --body: "IBM Plex Sans", -apple-system, system-ui, "Segoe UI", sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
@@ -19,13 +19,13 @@
 }
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
-    --bg: #eceff3; --panel: #f6f7f9; --panel-2: #ffffff; --panel-3: #e4e9ef; --panel-hi: #d9e0e8;
-    --line: #d8dee6; --line-2: #c3ccd7; --line-hi: #a6b3c2;
-    --fg: #182029; --fg-2: #46525f; --muted: #6f7d8c; --faint: #a7b2be;
-    --accent: #3d7d9b; --accent-2: #2b6683; --accent-dim: rgba(61, 125, 155, .10); --accent-line: rgba(61, 125, 155, .5);
-    --ok: #2f8a5f; --ok-dim: rgba(47, 138, 95, .12);
-    --warn: #a9741a; --warn-dim: rgba(169, 116, 26, .14);
-    --crit: #b8433d; --crit-dim: rgba(184, 67, 61, .12);
+    --bg: #e6eaef; --panel: #f7f8fa; --panel-2: #ffffff; --panel-3: #dfe5ec; --panel-hi: #d2dae3;
+    --line: #cdd5de; --line-2: #aab6c4; --line-hi: #7f90a3;
+    --fg: #10171f; --fg-2: #35414d; --muted: #566575; --faint: #93a0ad;
+    --accent: #1e6b8e; --accent-2: #155674; --accent-dim: rgba(30, 107, 142, .12); --accent-line: rgba(30, 107, 142, .7);
+    --ok: #1f7a4d; --ok-dim: rgba(31, 122, 77, .16);
+    --warn: #9a640c; --warn-dim: rgba(154, 100, 12, .18);
+    --crit: #b1332c; --crit-dim: rgba(177, 51, 44, .14); --tint: 24%;
     color-scheme: light;
   }
 }
@@ -181,10 +181,10 @@ main { flex: 1; min-width: 0; overflow: auto; padding: 16px 20px 48px; }
 #dag-svg .node.challenged .box { stroke: var(--warn); stroke-width: 1.6; stroke-dasharray: 7 4; }
 #dag-svg .node.stale .box { stroke: var(--warn); stroke-width: 1.4; stroke-dasharray: 2 4; }
 #dag-svg .node.unverifiable .box { stroke: var(--warn); stroke-width: 1.6; stroke-dasharray: 5 3; }
-#dag-svg .node.tone-accepted .box { fill: color-mix(in srgb, var(--ok) 14%, var(--panel)); stroke: var(--ok); }
-#dag-svg .node.tone-review .box { fill: color-mix(in srgb, var(--warn) 16%, var(--panel)); stroke: var(--warn); stroke-width: 1.6; }
-#dag-svg .node.tone-rejected .box { fill: color-mix(in srgb, var(--crit) 12%, var(--panel)); stroke: var(--crit); }
-#dag-svg .node.frontier .box { stroke: var(--accent); stroke-width: 2.4; }
+#dag-svg .node.tone-accepted .box { fill: color-mix(in srgb, var(--ok) var(--tint), var(--panel)); stroke: var(--ok); stroke-width: 1.6; }
+#dag-svg .node.tone-review .box { fill: color-mix(in srgb, var(--warn) var(--tint), var(--panel)); stroke: var(--warn); stroke-width: 1.8; }
+#dag-svg .node.tone-rejected .box { fill: color-mix(in srgb, var(--crit) var(--tint), var(--panel)); stroke: var(--crit); stroke-width: 1.6; }
+#dag-svg .node.frontier .box { stroke: var(--accent); stroke-width: 2.6; fill: color-mix(in srgb, var(--accent) calc(var(--tint) / 2), var(--panel)); }
 #dag-svg .node.moving { cursor: grabbing; } #dag-svg .node.moving .box { stroke: var(--fg); }
 #dag-svg .bar { stroke: none; }
 #dag-svg .bar.accepted { fill: var(--ok); } #dag-svg .bar.review { fill: var(--warn); }
