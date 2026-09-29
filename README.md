@@ -34,7 +34,7 @@ Each local proof map node has a standalone LaTeX document, `proofs/<id>/proof.te
 proof node request-review <id> --rationale "why it is scoped to prove directly"
 ```
 
-This copies the working file to an immutable snapshot, `proofs/<id>/snapshots/v<N>.tex`, and records its SHA-256. Review is always of a snapshot, never of the working file (ADR-0010).
+This freezes every input of the proof into an immutable snapshot, `proofs/<id>/snapshots/v<N>/`: the node's working sources (not `build/`, `scratch/` or older snapshots) and the shared preamble, with a `manifest.json` of each file's SHA-256. The snapshot's SHA-256, which decisions bind, is that of the manifest, so a change to any input, an `\input` file or a preamble macro included, is a new version to review. Review is always of a snapshot, never of the working files (ADR-0010, ADR-0011). The researcher reviews it in the node's studio: the node panel opens each frozen file read-only, with the snapshot's archived PDF, and records the decisions.
 
 ## The proof map page
 

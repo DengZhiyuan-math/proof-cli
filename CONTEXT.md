@@ -53,10 +53,10 @@ A proof of a proof map node, written by an agent or collaborator; a reviewable a
 _Avoid_: resolution, solution
 
 **Proof vault**:
-The repo's top-level `proofs/` directory. It holds a shared `preamble.tex`, and one folder per node with its working `proof.tex`, its Review snapshots (`snapshots/v<N>.tex`) and its Review decisions (`reviews.jsonl`), all tracked by git. Each node folder is an ordinary LaTeX project: the node's studio edits it, and any LaTeX editor can open it as is. Older `v<N>.md` files from ADR-0003 remain as read-only history. Distinct from `.proof/`, which holds internal, non-human-authored project state.
+The repo's top-level `proofs/` directory. It holds a shared `preamble.tex`, and one folder per node with its working `proof.tex`, its Review snapshots (`snapshots/v<N>/`, every input of the proof frozen with a manifest; older ones are single `v<N>.tex` files) and its Review decisions (`reviews.jsonl`), all tracked by git. Each node folder is an ordinary LaTeX project: the node's studio edits it, and any LaTeX editor can open it as is. Older `v<N>.md` files from ADR-0003 remain as read-only history. Distinct from `.proof/`, which holds internal, non-human-authored project state.
 
 **Review snapshot**:
-A copy of a node's working `proof.tex`, taken when its author requests review. It is never overwritten, and its SHA-256 is recorded. A Review decision is always about one snapshot, named by that hash; a compiled PDF may be archived beside it, but the `.tex` and its hash are what count. See ADR-0010.
+Every input of a node's proof, frozen together when its author requests review: the node's working sources and the shared preamble, stored as `snapshots/v<N>/` with a manifest of each file's SHA-256. It is never overwritten. Its SHA-256 is the manifest's, recomputed from the stored files, so a change to any input is a new snapshot and an edit to a frozen file breaks every decision on it. A Review decision is always about one snapshot, named by that hash; a compiled PDF may be archived beside it (only when the build was current against every input), but the frozen files and their hash are what count. Older snapshots are a single `v<N>.tex` and its hash. See ADR-0010, ADR-0011.
 _Avoid_: version (ambiguous with a dependency's accepted version), submission
 _Avoid_: .proof, proof store
 
