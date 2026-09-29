@@ -234,6 +234,13 @@ td { text-align: left; padding: 10px 12px; border-bottom: .5px solid var(--sep);
 tr:last-child td { border-bottom: 0; }
 td a { font-family: var(--mono); font-size: 12px; }
 #pending pre { max-height: 220px; overflow: auto; font-size: 11px; }
+/* the way into a pending review: a button-like link with a "review" icon and a chevron */
+.review-link { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px 0 9px; border-radius: 8px; white-space: nowrap;
+  font-family: var(--mono); font-size: 12px; color: var(--blue); background: color-mix(in srgb, var(--blue) 11%, transparent); }
+.review-link:hover { text-decoration: none; background: color-mix(in srgb, var(--blue) 18%, transparent); }
+.review-link svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.review-link-icon { width: 17px; height: 17px; }
+.review-link-chevron { width: 13px; height: 13px; opacity: .7; }
 
 /* ---------- a node's page */
 #node-page { max-width: 1040px; margin: 0 auto; padding: 20px 24px 56px; display: grid; gap: 24px; }
