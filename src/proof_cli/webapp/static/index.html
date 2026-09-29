@@ -82,7 +82,11 @@
       </section>
       <section id="warnings-page" class="page" hidden>
         <h1 class="page-title">Warnings</h1>
-        <p class="hint">Review decisions that don't count as recorded: unreadable or unconfirmed records, decisions git doesn't have yet, an Acceptance that no longer describes its node, a snapshot that was never indexed. Challenged and stale nodes show on the map.</p>
+        <p class="hint">What may no longer hold, and review decisions that don't count as recorded.</p>
+        <h2 class="group-head">Nodes that need attention <span class="n" id="attention-count"></span></h2>
+        <div class="card"><ul id="attention-nodes" class="attention-list"></ul></div>
+        <h2 class="group-head">Review records <span class="n" id="records-count"></span></h2>
+        <p class="hint">Unreadable or unconfirmed records, decisions git doesn't have yet, an Acceptance that no longer describes its node, a snapshot that was never indexed.</p>
         <div class="card"><div class="pb"><ul id="warnings"></ul></div></div>
       </section>
       <section id="node-page" hidden>

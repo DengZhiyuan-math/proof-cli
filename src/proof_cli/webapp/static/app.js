@@ -106,7 +106,7 @@ function showHome() {
   $("pending-count").textContent = pending;
   $("rail-review").textContent = state.pending.length ? pending : "";
   $("rail-review").className = state.pending.length ? "n hot" : "n";
-  $("rail-warnings").textContent = state.warnings.length ? String(state.warnings.length) : "";
+  $("records-count").textContent = state.warnings.length ? String(state.warnings.length) : "";
 }
 
 // what each decision means, in the researcher's words
@@ -567,7 +567,34 @@ async function refresh() {
   $("reviewer-initial").textContent = (state.reviewer || "?").trim().charAt(0).toUpperCase() || "?";
   showHome();
   showMap();
+  showAttention();
   await route();
+}
+
+// The warnings page's first list: every node the map marks "needs attention" — a Challenge open
+// on it, a dependency that moved (potentially stale), or a decision that no longer applies — with
+// why, each opening where the node lives. The sidebar counts these and the review-record warnings.
+const ATTENTION_WHY = {
+  challenged: "A Challenge is open on it: it may no longer be safe to depend on.",
+  "potentially-stale": "A dependency moved to a new accepted version: it may need a re-review or a new proof.",
+  unverifiable: "Its newest Review decision no longer matches its snapshot or its statement: decide it afresh.",
+};
+function showAttention() {
+  const nodes = mapData.nodes.filter((n) => warningOf(n));
+  const list = $("attention-nodes");
+  list.replaceChildren(...nodes.map((n) => {
+    const reason = n.integrity_state === "challenged" ? "challenged" : n.integrity_state === "potentially-stale" ? "potentially-stale" : "unverifiable";
+    const row = el("li");
+    const link = el("a", null, { href: pageOf(n), class: "attention-node" });
+    link.append(el("b", n.display_label || short(n.statement, 60)), el("span", `${KIND_LABEL[n.kind] || n.kind} · ${n.id}`, { class: "attention-id" }));
+    row.append(stateChip(reason, tagOf(n)[0]), link, el("p", ATTENTION_WHY[reason], { class: "hint" }));
+    return row;
+  }));
+  if (!nodes.length) list.append(el("li", "Nothing on the map needs attention.", { class: "attention-none" }));
+  $("attention-count").textContent = nodes.length ? String(nodes.length) : "";
+  const total = nodes.length + state.warnings.length;
+  $("rail-warnings").textContent = total ? String(total) : "";
+  $("rail-warnings").className = total ? "n hot" : "n";
 }
 
 document.addEventListener("DOMContentLoaded", () => {
