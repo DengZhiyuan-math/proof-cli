@@ -141,7 +141,8 @@ def _decide(
         raise ProofMapError(
             "SNAPSHOT_UNREADABLE",
             f"the Review snapshot {target_id}'s decision would be made on is missing or can't be read; "
-            "nothing can be decided on it until it is restored or a new snapshot is requested for review",
+            "nothing can be decided on it until it is restored, or you request review again "
+            "(an unchanged working proof is then re-snapshotted as a new version, which needs its own review)",
             details={"candidate_proof_id": payload.candidate_proof_id},
         )
     if viewed_binding is not None and viewed_binding != binding_digest(payload):
@@ -840,7 +841,10 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
     node's working sources and the shared preamble, byte for byte, into a new
     `snapshots/v<N>/` with a manifest, never overwritten, and records the
     manifest's SHA-256 (ADR-0011 point 5). A change to any input is a new
-    version; the same inputs as the snapshot under review are refused.
+    version; the same inputs as the snapshot under review are refused, unless
+    that snapshot is missing or can't be read: then they are snapshotted afresh
+    as the next version, a re-snapshot after loss (#99), which needs its own
+    Human Review — decisions on the lost snapshot stay unverifiable.
     Needs no claim. A node someone has claimed is theirs to hand over, and
     their claim ends here, as a wayfinder ticket's does when its work is.
     """
@@ -870,12 +874,18 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
             raise _not_claimant(node_id, claim)
         node = require_node(store, node_id)  # its dependencies as of the write lock, recorded with the snapshot
         current = get_current_candidate_proof(store, node_id, conn=conn)
-        # the same files on other dependencies than that snapshot was made on (#96) are a new version
-        if current is not None and current.sha256 == sha256 and _snapshot_dependencies_stand(store, node, current):
+        # refused only if nothing is new: the same files (ADR-0011), on the dependencies that
+        # snapshot was made on (#96), and the snapshot itself still there to review. A missing or
+        # unreadable one is taken afresh from an unchanged proof, a re-snapshot after loss, which
+        # needs a Human Review of its own; its old decisions stay unverifiable (#99)
+        unchanged = current is not None and current.sha256 == sha256 and _snapshot_dependencies_stand(store, node, current)
+        lost = unchanged and candidate_proof_sha256(store, current.id) is None
+        if unchanged and not lost:
             raise ProofMapError(
                 "WORKING_PROOF_UNCHANGED",
                 f"{node_id}'s working proof is unchanged since snapshot v{current.version}, which is already the one under review",
             )
+        resnapshot_of = current.version if lost else None
 
         # past any snapshot already on disk too: one the index never got is an orphan, reported
         # by list_integrity_warnings, and never overwritten
@@ -899,6 +909,7 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
             scoping_rationale=rationale,
             sha256=sha256,
             dependencies=list(node.dependencies),
+            resnapshot_after_loss=resnapshot_of,
         )
         try:
             insert_candidate_proof(store, record, conn=conn)
@@ -911,9 +922,17 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
         append_event(
             store,
             "proof_map_review_requested",
-            f"snapshot v{version} of {node_id} requested for review",
+            f"snapshot v{version} of {node_id} requested for review"
+            + (f" (re-snapshot after loss of v{resnapshot_of})" if resnapshot_of is not None else ""),
             entity_id=node_id,
-            payload={"candidate_proof_id": record.id, "version": version, "file_path": record.file_path, "sha256": sha256, "requested_by": requested_by},
+            payload={
+                "candidate_proof_id": record.id,
+                "version": version,
+                "file_path": record.file_path,
+                "sha256": sha256,
+                "requested_by": requested_by,
+                "resnapshot_after_loss": resnapshot_of,
+            },
             conn=conn,
         )
     return record
@@ -1250,6 +1269,44 @@ _ACCEPTANCE_DECISION_TO_GOVERNANCE_STATE = {
 }
 
 _ACCEPTANCE_OBJECT_TYPE = "proof_map_node"
+
+
+def _pin_remedy(pin: DependencyPin | None, *, current: bool | None, accepted_version: int | None) -> str | None:
+    """What a lagging or changed pin needs: a Lightweight re-review, or a new Candidate proof (#23, #24)."""
+    if pin is None:
+        return None
+    if current is False:
+        return "new-candidate-proof"
+    if accepted_version is not None and pin.pinned_version != accepted_version:
+        return "lightweight-re-review"
+    return None
+
+
+def dependency_details(store: ProjectStore, node_id: str) -> list[dict]:
+    """Each of a node's dependencies as the node page and `node show --json` show it (#97):
+    its statement and kind, the pin as it counts, the version now Accepted, whether the pin
+    is still current, and the remedy a lagging or changed pin needs."""
+    node = require_node(store, node_id)
+    details = []
+    for dependency_id in node.dependencies:
+        pin = get_dependency_pin(store, node_id, dependency_id)
+        dependency = get_node(store, dependency_id)
+        accepted_version = get_accepted_version(store, dependency_id)
+        current = dependency_pin_is_current(store, pin) if pin else None
+        details.append(
+            {
+                "node_id": dependency_id,
+                "statement": dependency.statement if dependency else None,
+                # where the dependency opens: a studio, or an imported result's own page
+                "kind": dependency.kind.value if dependency else None,
+                "pin": pin.model_dump(mode="json") if pin else None,
+                # the pin lag a Lightweight re-review is about (#23/#24)
+                "accepted_version": accepted_version,
+                "current": current,
+                "remedy": _pin_remedy(pin, current=current, accepted_version=accepted_version),
+            }
+        )
+    return details
 
 
 def _require_awaiting_acceptance_review(store: ProjectStore, node_id: str) -> None:

@@ -387,3 +387,75 @@ def test_a_folder_snapshot_file_that_cant_be_read_is_refused_and_its_page_still_
     status, body = DirectClient(store).get("/api/node/clm_1")
     assert status == 200, body
     assert body["data"]["candidate_proof"]["sha256"] is None
+
+
+# -- #99: a lost snapshot is re-snapshotted from an unchanged working proof ----------------
+
+
+@pytest.mark.parametrize("how", ["deleted", "unreadable"])
+def test_after_a_snapshot_is_lost_an_unchanged_proof_is_re_snapshotted_for_review(tmp_path: Path, how):
+    from typer.testing import CliRunner
+
+    from proof_cli.cli import app
+    from proof_cli.storage import list_events
+
+    store, folder = _node(tmp_path)
+    _request(store)
+    _lose(folder, how)
+
+    result = CliRunner().invoke(
+        app, ["node", "request-review", "clm_1", "--root", str(tmp_path), "--requested-by", "agent_a", "--rationale", "scoped"]
+    )
+
+    assert result.exit_code == 0, result.stdout
+    assert "re-snapshot after loss" in result.stdout
+    (first, second) = list_candidate_proofs(store, "clm_1")
+    assert (first.version, second.version) == (1, 2) and second.is_current
+    assert candidate_proof_sha256(store, second.id) == second.sha256
+    assert get_workflow_state(store, "clm_1") == "review-needed"
+    (event,) = [e for e in list_events(store) if e.kind == "proof_map_review_requested" and e.payload["version"] == 2]
+    assert "re-snapshot after loss" in event.message
+    assert event.payload["resnapshot_after_loss"] == 1
+
+
+def test_an_intact_snapshot_with_an_unchanged_proof_is_still_refused_even_after_a_decision(tmp_path: Path):
+    store, folder = _node(tmp_path)
+    _request(store)
+    researcher(store).decide_acceptance("clm_1", "accept")
+
+    with pytest.raises(ProofMapError) as refused:
+        _request(store)
+
+    assert refused.value.code == "WORKING_PROOF_UNCHANGED"
+    assert [p.version for p in list_candidate_proofs(store, "clm_1")] == [1]
+
+
+def test_the_re_snapshot_needs_a_fresh_acceptance_and_the_old_decision_never_revives(tmp_path: Path):
+    store, folder = _node(tmp_path)
+    _request(store)
+    researcher(store).decide_acceptance("clm_1", "accept")
+    shutil.rmtree(folder / "snapshots" / "v1")
+
+    record = _request(store)
+
+    assert record.version == 2 and record.resnapshot_after_loss == 1
+    assert get_acceptance_state(store, "clm_1") == "unverifiable"  # the Accept on v1 doesn't carry over to v2
+    assert get_workflow_state(store, "clm_1") == "review-needed"
+
+    researcher(store).decide_acceptance("clm_1", "accept")
+    assert get_acceptance_state(store, "clm_1") == "accepted"
+
+    # the v2 snapshot then being lost voids its own Accept; v1's is never read again
+    shutil.rmtree(folder / "snapshots" / "v2")
+    assert get_acceptance_state(store, "clm_1") == "unverifiable"
+
+
+def test_the_refusal_on_a_lost_snapshot_says_how_to_recover(tmp_path: Path):
+    store, folder = _node(tmp_path)
+    _request(store)
+    _lose(folder, "deleted")
+
+    with pytest.raises(ProofMapError) as refused:
+        researcher(store).decide_acceptance("clm_1", "accept")
+
+    assert "request review again" in str(refused.value)
