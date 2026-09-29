@@ -240,7 +240,7 @@ def test_the_review_section_opens_every_frozen_file_read_only():
 
 
 def test_a_decision_from_the_studio_carries_its_binding_and_the_snapshot_it_showed():
-    sent = _panel(view=REVIEW_VIEW, press="Accept this snapshot", rationale="every step checked",
+    sent = _panel(view=REVIEW_VIEW, press=["Accept this snapshot", "Record Decision"], rationale="every step checked",
                   answer={"results": [{"ok": True}]})
     posted = [e for e in sent["events"] if isinstance(e, dict) and e.get("post") == "/api/decide"]
     (decision,) = posted[0]["body"]["decisions"]
@@ -249,7 +249,7 @@ def test_a_decision_from_the_studio_carries_its_binding_and_the_snapshot_it_show
 
 
 def test_a_refused_confirmation_records_nothing():
-    sent = _panel(view=REVIEW_VIEW, press="Accept this snapshot", confirm=False)
+    sent = _panel(view=REVIEW_VIEW, press=["Accept this snapshot", "Record Decision"], confirm=False)
     assert not [e for e in sent["events"] if isinstance(e, dict) and e.get("post")]
 
 
@@ -279,6 +279,21 @@ def test_the_pending_list_sends_a_local_node_to_its_studios_review():
     text = (WEBAPP / "static" / "app.js").read_text()
     assert "`/studio/${encodeURIComponent(item.node_id)}/#review`" in text
 
+
+
+def test_choosing_a_decision_alone_records_nothing():
+    """A decision is one choice, then Record: picking an option sends nothing."""
+    sent = _panel(view=REVIEW_VIEW, press="Accept this snapshot")
+    assert not [e for e in sent["events"] if isinstance(e, dict) and e.get("post")]
+
+
+def test_the_review_lives_in_the_agent_panel_and_the_agent_never_decides():
+    index = (STUDIO_STATIC / "index.html").read_text()
+    chat = index[index.index('<aside id="chat">'):]
+    assert 'id="review-card"' in chat
+    panel = (STUDIO_STATIC / "node.js").read_text()
+    review = panel[panel.index("function reviewSection"):panel.index("const VALUE_STATE")]
+    assert 'call("/api/decide"' in review and "/api/agent" not in review  # recorded as the researcher, straight to the map
 
 
 def test_a_damaged_snapshot_shows_as_such_in_the_review_section():

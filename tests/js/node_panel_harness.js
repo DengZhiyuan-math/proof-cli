@@ -1,6 +1,6 @@
 // Runs the studio's real node panel (src/proof_cli/studio/static/node.js) against a minimal DOM.
-// argv[2]: JSON {view, saveAll: true|false|null, click: {label, values}, press: button label,
-// answer, confirm}. Prints what happened.
+// argv[2]: JSON {view, saveAll: true|false|null, press: a button label or a list of them,
+// rationale, answer, confirm}. Prints what happened.
 const fs = require("fs"), path = require("path"), vm = require("vm");
 
 class El {
@@ -16,10 +16,11 @@ class El {
 
 (async () => {
   const scenario = JSON.parse(process.argv[2]);
-  const panel = new El("div"), name = new El("span"), events = [];
+  const panel = new El("div"), card = new El("section"), name = new El("span"), events = [];
+  const everything = () => [...panel.all(), ...card.all()];  // the node panel and the review card in the agent panel
   const context = {
     NODE: scenario.view.node.id,
-    document: { getElementById: (id) => (id === "node-panel" ? panel : name), createElement: (tag) => new El(tag) },
+    document: { getElementById: (id) => (id === "node-panel" ? panel : id === "review-card" ? card : name), createElement: (tag) => new El(tag) },
     location: {},
     confirm: () => { events.push("confirm"); return scenario.confirm !== false; },
     openReadOnly: (name, text) => { events.push({ openReadOnly: name, text }); },
@@ -35,24 +36,17 @@ class El {
   const out = { events, deps: null, links: [], note: "", panel: panel.text() };
   const deps = panel.querySelector(".node-deps");
   if (deps) { out.deps = deps.text(); out.links = deps.all().filter((x) => x.tag === "a").map((x) => x.attrs.href); }
-  if (scenario.click) {
-    const box = panel.all().find((x) => x.tag === "div" && x.attrs.class === "node-action" && x.children[0].textContent === scenario.click.label);
-    for (const [key, value] of Object.entries(scenario.click.values || {})) {
-      const input = box.all().find((x) => x.dataset.key === key);
-      if (input.type === "checkbox") input.checked = value; else input.value = value;
-    }
-    await box.children[0].onclick();
-    out.note = panel.querySelector(".node-note").textContent;
-  }
-  if (scenario.press) {  // any button, by its label: a review file, a decision
-    const button = panel.all().find((x) => x.tag === "button" && x.textContent === scenario.press);
-    if (!button) throw new Error(`no button ${scenario.press}`);
-    const row = panel.all().find((x) => x.children && x.children.includes(button));
-    const why = row && row.children.find((x) => x.tag === "input");
+  if (scenario.press) {  // buttons by their labels, in order: a review file; a decision, then Record
+    const note = () => (card.querySelector(".node-note") || panel.querySelector(".node-note") || { textContent: "" }).textContent;
+    const why = everything().find((x) => x.attrs.class === "review-why");
     if (why && scenario.rationale) why.value = scenario.rationale;
-    await button.onclick();
-    out.note = panel.querySelector(".node-note").textContent;
+    for (const label of [].concat(scenario.press)) {
+      const button = everything().find((x) => x.tag === "button" && x.textContent === label);
+      if (!button) throw new Error(`no button ${label}`);
+      await button.onclick();
+    }
+    out.note = note();
   }
-  out.review = (panel.querySelector(".node-review") || { text: () => "" }).text();
+  out.review = (card.querySelector(".node-review") || { text: () => "" }).text();
   console.log(JSON.stringify(out));
 })();
