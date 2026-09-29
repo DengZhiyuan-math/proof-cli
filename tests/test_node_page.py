@@ -163,13 +163,11 @@ def test_no_page_offers_open_in_prism_local():
 
 
 def test_the_studio_page_carries_the_node_panel_and_the_agents_actions():
-    """The node panel claims and unassigns; what the proof agent does is asked of it from its panel."""
+    """The node panel shows the node and who holds it; what the proof agent does is asked of it from its panel."""
     index = (STUDIO_STATIC / "index.html").read_text()
     assert 'src="static/node.js"' in index and 'id="node-panel"' in index and 'id="agent-actions"' in index
     panel = (STUDIO_STATIC / "node.js").read_text()
-    for action in ("claim", "unassign"):
-        assert f"/{action}" in panel, action
-    for action in ("split", "request-review", "challenge", "evidence"):
+    for action in ("claim", "unassign", "split", "request-review", "challenge", "evidence"):
         assert f'"/{action}"' not in panel, action  # the agent does these, through `proof`
     agent = (STUDIO_STATIC / "app.js").read_text()
     for label in ("Prove it", "Request review", "Split into claims", "Open a Challenge", "Record evidence"):
@@ -209,13 +207,12 @@ def test_the_agent_is_asked_only_after_the_editor_is_saved():
     assert send.index("saveAll()") < send.index('api("/api/agent"')
 
 
-def test_the_claim_offers_only_the_move_that_fits():
-    unclaimed = _panel(click={"label": "Claim"})
-    assert unclaimed["events"][-1] == {"post": "/api/node/A/claim", "body": {"reassign": False}}
-
-    held = _panel(view={**VIEW, "claim": {"claimant_id": "codex"}}, click={"label": "Take over"})
-    assert held["events"][-1] == {"post": "/api/node/A/claim", "body": {"reassign": True}}
-    assert "Unassign" in _panel(view={**VIEW, "claim": {"claimant_id": "codex"}})["panel"]
+def test_the_claim_is_shown_as_a_state_without_a_button():
+    unclaimed = _panel()
+    assert "unclaimed" in unclaimed["panel"] and not unclaimed["events"]
+    held = _panel(view={**VIEW, "claim": {"claimant_id": "codex"}})
+    assert "claimed by codex" in held["panel"]
+    assert not any(word in held["panel"] for word in ("Unassign", "Take over"))
 
 
 def test_the_dependency_list_shows_pins_and_opens_each_dependency_where_it_lives():

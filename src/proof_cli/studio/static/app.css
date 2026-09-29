@@ -370,14 +370,6 @@ pre.panel-view { font: 12px/1.5 var(--mono); white-space: pre-wrap; color: var(-
 #node-panel .node-deps li { padding: 5px 0; border-bottom: .5px solid var(--border2); }
 #node-panel .node-deps li:last-child { border-bottom: 0; }
 #node-panel .node-deps a { font-family: var(--mono); }
-/* the claim: one line, one small button */
-#node-panel .node-claim { display: flex; align-items: center; gap: 6px; margin: 4px 0 2px; }
-#node-panel .node-holder { color: var(--text2); font-size: 12px; margin-right: auto; }
-#node-panel .node-claim .node-action { margin: 0; }
-#node-panel .node-claim button { height: 24px; padding: 0 10px; font-size: 12px; }
-#node-panel .node-action { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
-#node-panel .node-action button { align-self: flex-start; }
-#node-panel .node-action label { color: var(--text2); font-size: 12px; display: flex; align-items: center; gap: 6px; }
 #node-panel textarea, #node-panel input:not([type=checkbox]), #node-panel select { width: 100%; box-sizing: border-box; font: inherit; font-size: 12.5px; }
 #node-panel .node-note { font-size: 12px; color: var(--ok); }
 #node-panel .node-note:empty { display: none; }
