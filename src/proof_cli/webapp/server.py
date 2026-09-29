@@ -94,18 +94,6 @@ def _warnings_for(warnings: list, *ids: str) -> list[dict]:
     ]
 
 
-def _remedy(dependency: dict) -> str | None:
-    """What a lagging or changed pin needs: a Lightweight re-review, or a new Candidate proof (#23, #24)."""
-    pin = dependency["pin"]
-    if pin is None:
-        return None
-    if dependency["current"] is False:
-        return "new-candidate-proof"
-    if dependency["accepted_version"] is not None and pin["pinned_version"] != dependency["accepted_version"]:
-        return "lightweight-re-review"
-    return None
-
-
 def _available_decisions(store: ProjectStore, node, *, claim, proof, dependencies: list[dict], challenges: list) -> list[dict]:
     """Every Human Review decision the researcher could sign on this node's page right now.
 
@@ -343,23 +331,7 @@ class ReviewApp:
             raise RequestError(HTTPStatus.NOT_FOUND, "NODE_NOT_FOUND", f"proof map node {node_id} not found")
         proof = get_current_candidate_proof(store, node_id)
         checks = [check.model_dump(mode="json") for check in proof_map.list_evidence_checks(store, proof.id)] if proof else []
-        dependencies = []
-        for dependency_id in node.dependencies:
-            pin = proof_map.get_dependency_pin(store, node_id, dependency_id)
-            dependency = proof_map.get_node(store, dependency_id)
-            dependencies.append(
-                {
-                    "node_id": dependency_id,
-                    "statement": dependency.statement if dependency else None,
-                    # where the dependency opens: a studio, or an imported result's own page
-                    "kind": dependency.kind.value if dependency else None,
-                    "pin": pin.model_dump(mode="json") if pin else None,
-                    # the pin lag a Lightweight re-review is about (#23/#24)
-                    "accepted_version": proof_map.get_accepted_version(store, dependency_id),
-                    "current": proof_map.dependency_pin_is_current(store, pin) if pin else None,
-                }
-            )
-            dependencies[-1]["remedy"] = _remedy(dependencies[-1])
+        dependencies = proof_map.dependency_details(store, node_id)
         challenges = proof_map.list_challenges(store, target_node_id=node_id)
         warnings = proof_map.list_integrity_warnings(store)
         claim = get_active_claim(store, node_id)
