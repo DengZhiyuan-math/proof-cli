@@ -8,97 +8,123 @@
   <script src="/static/app.js" defer></script>
 </head>
 <body>
-  <header>
-    <h1><a href="#/">Proof map</a> <span id="project"></span></h1>
-    <p id="reviewer" class="hint"></p>
+  <header class="topbar">
+    <div class="brand"><i></i><a href="#/">Proof OS</a></div>
+    <div class="crumb" id="project"></div>
+    <div class="stats">
+      <div class="stat frontier"><span class="lbl">Frontier</span><b id="stat-frontier">–</b></div>
+      <div class="stat review"><span class="lbl">Awaiting you</span><b id="stat-review">–</b></div>
+    </div>
+    <div class="actor" title="Decisions are recorded and committed as this identity"><i id="reviewer-initial">·</i><span id="reviewer"></span></div>
   </header>
-  <main>
-    <div id="message" role="status"></div>
-    <section id="home">
-      <div class="map-head">
-        <h2>Map</h2>
-        <div class="view-switch" role="group" aria-label="View">
-          <button id="view-dag" type="button" aria-pressed="true">DAG</button>
-          <button id="view-tree" type="button" aria-pressed="false">Tree</button>
+  <div class="shell">
+    <nav class="rail" aria-label="Sections">
+      <a href="#/" class="on" data-nav="map"><i class="ico dag"></i>Map</a>
+      <a href="#sec-review" data-nav="review"><i class="ico q"></i>Review<span class="n" id="rail-review"></span></a>
+      <a href="#sec-warnings" data-nav="warnings"><i class="ico warn"></i>Warn<span class="n" id="rail-warnings"></span></a>
+    </nav>
+    <main>
+      <div id="message" role="status"></div>
+      <section id="home">
+        <div class="stage">
+          <div class="maphead">
+            <div class="view-switch" role="group" aria-label="View">
+              <button id="view-dag" type="button" aria-pressed="true">DAG</button>
+              <button id="view-tree" type="button" aria-pressed="false">Tree</button>
+            </div>
+            <label id="tree-root-label" hidden>rooted at <select id="tree-root"></select></label>
+            <label class="find" title="Find a node by id, label or statement (/)"><span class="lbl">Find</span><input id="map-find" type="search" placeholder="id, label or statement" aria-label="Find a node by id, label or statement" autocomplete="off" spellcheck="false"><kbd>/</kbd></label>
+            <span id="map-find-count" class="lbl" role="status" aria-live="polite"></span>
+            <span class="hint" id="map-caption"></span>
+            <div class="zoom" role="group" aria-label="Zoom">
+              <button id="zoom-out" type="button" aria-label="Zoom out">−</button>
+              <span id="zoom-level">100%</span>
+              <button id="zoom-in" type="button" aria-label="Zoom in">+</button>
+              <button id="zoom-fit" type="button" title="Fit the whole map (F)">Fit</button>
+              <button id="zoom-tidy" type="button" title="Forget where you dragged the nodes and lay the map out again">Tidy</button>
+            </div>
+          </div>
+          <div id="map-dag" class="map-canvas"><svg id="dag-svg" role="img" aria-label="Dependency graph of the proof map"></svg></div>
+          <div id="map-tree" hidden></div>
+          <ul class="legend">
+            <li><span class="swatch frontier"></span>frontier: open, unblocked, unclaimed</li>
+            <li><span class="swatch claimed"></span>claimed</li>
+            <li><span class="swatch accepted"></span>accepted / reviewed</li>
+            <li><span class="swatch review"></span>awaiting review</li>
+            <li><span class="swatch rejected"></span>rejected / no longer callable</li>
+            <li><span class="swatch challenged"></span>challenged</li>
+            <li><span class="swatch stale"></span>potentially stale</li>
+            <li><span class="swatch unverifiable"></span>unverifiable</li>
+          </ul>
         </div>
-        <label id="tree-root-label" hidden>rooted at <select id="tree-root"></select></label>
-      </div>
-      <p class="hint" id="map-caption"></p>
-      <ul class="legend">
-        <li><span class="swatch frontier"></span>on the frontier: open, unblocked, unclaimed</li>
-        <li><span class="swatch accepted"></span>accepted / reviewed</li>
-        <li><span class="swatch review"></span>awaiting review</li>
-        <li><span class="swatch rejected"></span>rejected / no longer callable</li>
-        <li><span class="swatch challenged"></span>challenged</li>
-        <li><span class="swatch stale"></span>potentially stale (a dependency moved)</li>
-        <li><span class="swatch unverifiable"></span>unverifiable (a decision no longer applies)</li>
-      </ul>
-      <div id="map-dag" class="map-scroll"><svg id="dag-svg" role="img" aria-label="Dependency graph of the proof map"></svg></div>
-      <div id="map-tree" hidden></div>
-      <h2>New node</h2>
-      <p class="hint">A theorem, lemma or claim opens in its own LaTeX studio; an imported result cites an external source. A corrected source is a new imported result.</p>
-      <form id="new-node">
-        <label>Kind <select id="new-kind">
-          <option value="claim">claim</option><option value="lemma">lemma</option>
-          <option value="theorem">theorem</option><option value="imported_result">imported result</option>
-        </select></label>
-        <label>Id <input id="new-id" required pattern="[A-Za-z0-9_\-][A-Za-z0-9._\-]*" placeholder="clm_bound"></label>
-        <label class="wide">Statement <textarea id="new-statement" required rows="2"></textarea></label>
-        <label class="wide">Assumptions, one per line <textarea id="new-assumptions" rows="2"></textarea></label>
-        <label class="wide">Depends on <select id="new-dependencies" multiple size="4"></select></label>
-        <fieldset id="new-source" hidden>
-          <legend>Source</legend>
-          <label>Locator <input id="new-locator" placeholder="doi:10.1000/xyz, arXiv:2501.01234"></label>
-          <label>Version <input id="new-version" placeholder="v2, published 2024"></label>
-          <label>Trust level <select id="new-trust">
-            <option value="">—</option><option value="external_reference">external reference</option>
-            <option value="foundational">foundational</option><option value="project_verified">project verified</option>
-            <option value="temporary_admit">temporary admit</option>
-          </select></label>
-        </fieldset>
-        <button type="submit">Create</button>
-      </form>
-      <h2>Awaiting review</h2>
-      <p class="hint">Tick the decisions to make, choose each outcome and rationale, then record them. Each decision is committed to git with its snapshot, as the identity shown above.</p>
-      <table id="pending"><thead><tr><th></th><th>Node</th><th>Statement and snapshot</th><th>Decision</th><th>Rationale</th></tr></thead><tbody></tbody></table>
-      <button id="decide-batch" type="button">Record selected decisions</button>
-      <h2>Warnings</h2>
-      <ul id="warnings"></ul>
-    </section>
-    <section id="node-page" hidden>
-      <h2 id="node-title"></h2>
-      <p id="node-axes"></p>
-      <div id="node-warnings"></div>
-      <h3>Statement</h3>
-      <div id="node-statement" class="statement"></div>
-      <div id="node-assumptions"></div>
-      <p id="node-claim"></p>
-      <div id="node-folder"></div>
-      <div id="node-source"></div>
-      <p id="node-dependents"></p>
-      <h3>Dependencies and pins</h3>
-      <table id="node-deps"><thead><tr><th>Dependency</th><th>Pinned version</th><th>Accepted version now</th><th>Pinned interface</th><th>Current?</th></tr></thead><tbody></tbody></table>
-      <h3>Challenges</h3>
-      <ul id="node-challenges"></ul>
-      <h3>Review snapshot</h3>
-      <p id="node-proof-meta"></p>
-      <p class="hint">Exactly the LaTeX being decided on; its SHA-256 is recorded with the decision. The node's studio shows its compiled PDF.</p>
-      <p id="node-pdfs"></p>
-      <pre id="node-proof-exact"></pre>
-      <h3>Evidence checks</h3>
-      <ul id="node-evidence"></ul>
-      <h3>Decisions you can make here</h3>
-      <table id="node-decisions"><thead><tr><th>Decision</th><th>On</th><th>Rationale</th><th></th></tr></thead><tbody></tbody></table>
-      <h3>Review history</h3>
-      <ul id="node-history"></ul>
-    </section>
-    <section id="confirm" hidden>
-      <h2>You are about to record</h2>
-      <p class="hint">Each of these is written to the node's reviews.jsonl and committed with its snapshot, as the identity shown above.</p>
-      <ul id="confirm-decisions"></ul>
-      <button id="confirm-record" type="button">Record</button>
-      <button id="confirm-cancel" type="button">Cancel</button>
-    </section>
-  </main>
+        <div class="below">
+          <div class="panel" id="sec-review">
+            <h2 class="ph">Awaiting review <span class="n" id="pending-count"></span></h2>
+            <p class="hint pad">Tick the decisions to make, choose each outcome and rationale, then record them. Each decision is committed to git with its snapshot, as the identity shown above.</p>
+            <table id="pending"><thead><tr><th></th><th>Node</th><th>Statement and snapshot</th><th>Decision</th><th>Rationale</th></tr></thead><tbody></tbody></table>
+            <button id="decide-batch" type="button" class="primary">Record selected decisions</button>
+          </div>
+          <div class="panel" id="sec-warnings">
+            <h2 class="ph">Warnings</h2>
+            <div class="pb"><ul id="warnings"></ul></div>
+          </div>
+        </div>
+      </section>
+      <section id="node-page" class="panel" hidden>
+        <div class="nodehead">
+          <h2 id="node-title"></h2>
+          <div id="node-axes" class="axes"></div>
+        </div>
+        <div class="section">
+          <h3>Statement</h3>
+          <div id="node-statement" class="statement"></div>
+          <div id="node-assumptions"></div>
+          <p id="node-claim"></p>
+          <div id="node-folder"></div>
+          <div id="node-source"></div>
+          <p id="node-dependents" class="hint"></p>
+        </div>
+        <div class="section" id="node-warnings"></div>
+        <div class="section">
+          <h3>Dependencies and pins</h3>
+          <table id="node-deps"><thead><tr><th>Dependency</th><th>Pinned version</th><th>Accepted version now</th><th>Pinned interface</th><th>Current?</th></tr></thead><tbody></tbody></table>
+        </div>
+        <div class="section">
+          <h3>Challenges</h3>
+          <ul id="node-challenges"></ul>
+        </div>
+        <div class="section">
+          <h3>Review snapshot</h3>
+          <p id="node-proof-meta" class="mono"></p>
+          <p class="hint">Exactly the LaTeX being decided on; its SHA-256 is recorded with the decision. The node's studio shows its compiled PDF.</p>
+          <p id="node-pdfs"></p>
+          <pre id="node-proof-exact"></pre>
+        </div>
+        <div class="section">
+          <h3>Evidence checks</h3>
+          <ul id="node-evidence"></ul>
+        </div>
+        <div class="section">
+          <h3>Decisions you can make here</h3>
+          <table id="node-decisions"><thead><tr><th>Decision</th><th>On</th><th>Rationale</th><th></th></tr></thead><tbody></tbody></table>
+        </div>
+        <div class="section">
+          <h3>Review history</h3>
+          <ul id="node-history"></ul>
+        </div>
+      </section>
+      <section id="confirm" class="panel" hidden>
+        <h2 class="ph">You are about to record</h2>
+        <div class="pb">
+          <p class="hint">Each of these is written to the node's reviews.jsonl and committed with its snapshot, as the identity shown above.</p>
+          <ul id="confirm-decisions"></ul>
+        </div>
+        <div class="record">
+          <span class="lbl">One line per decision · committed as you</span>
+          <span class="btns"><button id="confirm-cancel" type="button">Cancel</button><button id="confirm-record" type="button" class="primary">Record &amp; commit</button></span>
+        </div>
+      </section>
+    </main>
+  </div>
 </body>
 </html>

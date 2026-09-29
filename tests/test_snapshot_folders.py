@@ -8,6 +8,7 @@ manifest, recomputed from the stored files. Older single-file snapshots read as 
 import hashlib
 import json
 import os
+import shutil
 import time
 from pathlib import Path
 
@@ -233,3 +234,228 @@ def test_a_broken_snapshot_still_shows_its_node_page_and_the_warning(tmp_path: P
     assert view["candidate_proof"]["unreadable"] is True and view["candidate_proof"]["sha256"] is None
     assert view["acceptance_state"] == "unverifiable"
     assert any(w["code"] == "DECISION_NO_LONGER_APPLIES" for w in view["warnings"])
+
+
+# -- #92: a missing or unreadable snapshot binds nothing (None is never a match) ---------------
+
+
+def _lose(folder: Path, how: str) -> None:
+    snapshot = folder / "snapshots" / "v1"
+    if how == "deleted":
+        shutil.rmtree(snapshot)
+    else:
+        (snapshot / "manifest.json").write_text("{ not json")
+
+
+@pytest.mark.parametrize("how", ["deleted", "unreadable"])
+@pytest.mark.parametrize("decision", ["accept", "revision-requested", "reject"])
+def test_no_decision_is_made_on_a_missing_or_unreadable_snapshot(tmp_path: Path, how, decision):
+    store, folder = _node(tmp_path)
+    _request(store)
+    _lose(folder, how)
+
+    with pytest.raises(ProofMapError) as refused:
+        researcher(store).decide_acceptance("clm_1", decision)
+
+    assert refused.value.code == "SNAPSHOT_UNREADABLE"
+    assert not (folder / "reviews.jsonl").exists()
+    assert get_acceptance_state(store, "clm_1") == "unreviewed"
+
+
+def test_an_old_single_file_snapshot_that_is_gone_is_refused_too(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="old", kind="claim", statement="s")
+    insert_candidate_proof(store, CandidateProofRecord(
+        id="cp-old", node_id="old", version=1, file_path="proofs/old/snapshots/v1.tex",
+        submitted_by="agent_a", scoping_rationale="scoped", sha256="0" * 64,
+    ))
+    with pytest.raises(ProofMapError) as refused:
+        researcher(store).decide_acceptance("old", "accept")
+    assert refused.value.code == "SNAPSHOT_UNREADABLE"
+
+
+def test_an_acceptance_whose_snapshot_is_then_deleted_stops_counting_and_blocks_its_dependents(tmp_path: Path):
+    store, folder = _node(tmp_path)
+    _request(store)
+    researcher(store).decide_acceptance("clm_1", "accept")
+    create_node(store, node_id="user", kind="claim", statement="uses clm_1", dependencies=["clm_1"])
+    assert get_workflow_state(store, "user") == "open"
+
+    shutil.rmtree(folder / "snapshots" / "v1")
+
+    assert get_acceptance_state(store, "clm_1") == "unverifiable"
+    assert get_workflow_state(store, "user") == "blocked"
+    assert any(w.code == "DECISION_NO_LONGER_APPLIES" for w in list_integrity_warnings(store))
+
+
+@pytest.mark.parametrize("snapshot", ["present", "deleted"])
+def test_a_decision_line_naming_no_snapshot_hash_reads_unverifiable(tmp_path: Path, snapshot):
+    """The audit's reproduction (#92): a recorded `candidate_proof_sha256: null` matched a missing snapshot's None."""
+    store, folder = _node(tmp_path)
+    _request(store)
+    researcher(store).decide_acceptance("clm_1", "accept")
+    reviews = folder / "reviews.jsonl"
+    (line,) = [json.loads(text) for text in reviews.read_text().splitlines()]
+    line["payload"]["candidate_proof_sha256"] = None
+    reviews.write_text(json.dumps(line) + "\n")
+    if snapshot == "deleted":
+        shutil.rmtree(folder / "snapshots" / "v1")
+
+    assert get_acceptance_state(store, "clm_1") == "unverifiable"
+
+
+def test_the_page_offers_no_decision_on_an_unreadable_snapshot_and_says_why_one_is_refused(tmp_path: Path):
+    from _review_client import DirectClient
+
+    store, folder = _node(tmp_path)
+    _request(store)
+    client = DirectClient(store)
+    offered = client.get("/api/node/clm_1")[1]["data"]
+    accept = next(d for d in offered["decisions"] if d["decision"] == "accept")
+    shutil.rmtree(folder / "snapshots" / "v1")
+
+    view = client.get("/api/node/clm_1")[1]["data"]
+    assert view["candidate_proof"]["unreadable"] is True
+    assert not [d for d in view["decisions"] if d["kind"] == "acceptance"]
+    (pending,) = [item for item in client.get("/api/state")[1]["data"]["pending"] if item["node_id"] == "clm_1"]
+    assert pending["decisions"] == []
+
+    # an Accept the page offered before the snapshot went is refused, with the reason
+    (result,) = client.post("/api/decide", {"decisions": [accept]})[1]["data"]["results"]
+    assert result["ok"] is False and result["error"]["code"] == "SNAPSHOT_UNREADABLE"
+    assert not (folder / "reviews.jsonl").exists()
+
+
+# -- PR #95 review: a snapshot file the process can't read is unreadable, not a crash ----------
+
+needs_permissions = pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0, reason="root reads a chmod 000 file")
+
+
+@pytest.fixture
+def unreadable():
+    """Make a file unreadable (chmod 000) for the test, and readable again after it."""
+    made: list[Path] = []
+
+    def make(path: Path) -> None:
+        path.chmod(0)
+        made.append(path)
+
+    yield make
+    for path in made:
+        path.chmod(0o644)
+
+
+def _old_snapshot(store, text: bytes = b"\\documentclass{amsart}\\begin{document}old\\end{document}\n") -> Path:
+    create_node(store, node_id="old", kind="claim", statement="s")
+    path = store.root / "proofs" / "old" / "snapshots" / "v1.tex"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(text)
+    insert_candidate_proof(store, CandidateProofRecord(
+        id="cp-old", node_id="old", version=1, file_path="proofs/old/snapshots/v1.tex",
+        submitted_by="agent_a", scoping_rationale="scoped", sha256=hashlib.sha256(text).hexdigest(),
+    ))
+    return path
+
+
+@needs_permissions
+def test_an_old_single_file_snapshot_that_cant_be_read_is_refused_and_voids_its_decision(tmp_path: Path, unreadable):
+    store = ensure_project(tmp_path)
+    path = _old_snapshot(store)
+    unreadable(path)
+
+    assert candidate_proof_sha256(store, "cp-old") is None
+    with pytest.raises(ProofMapError) as refused:
+        researcher(store).decide_acceptance("old", "accept")
+    assert refused.value.code == "SNAPSHOT_UNREADABLE"
+
+    path.chmod(0o644)
+    researcher(store).decide_acceptance("old", "accept")
+    unreadable(path)
+    assert get_acceptance_state(store, "old") == "unverifiable"
+
+
+@needs_permissions
+def test_a_folder_snapshot_file_that_cant_be_read_is_refused_and_its_page_still_shows(tmp_path: Path, unreadable):
+    from _review_client import DirectClient
+
+    store, folder = _node(tmp_path)
+    _request(store)
+    researcher(store).decide_acceptance("clm_1", "accept")
+    unreadable(folder / "snapshots" / "v1" / "node" / "body.tex")
+
+    assert get_acceptance_state(store, "clm_1") == "unverifiable"
+    status, body = DirectClient(store).get("/api/node/clm_1")
+    assert status == 200, body
+    assert body["data"]["candidate_proof"]["sha256"] is None
+
+
+# -- #99: a lost snapshot is re-snapshotted from an unchanged working proof ----------------
+
+
+@pytest.mark.parametrize("how", ["deleted", "unreadable"])
+def test_after_a_snapshot_is_lost_an_unchanged_proof_is_re_snapshotted_for_review(tmp_path: Path, how):
+    from typer.testing import CliRunner
+
+    from proof_cli.cli import app
+    from proof_cli.storage import list_events
+
+    store, folder = _node(tmp_path)
+    _request(store)
+    _lose(folder, how)
+
+    result = CliRunner().invoke(
+        app, ["node", "request-review", "clm_1", "--root", str(tmp_path), "--requested-by", "agent_a", "--rationale", "scoped"]
+    )
+
+    assert result.exit_code == 0, result.stdout
+    assert "re-snapshot after loss" in result.stdout
+    (first, second) = list_candidate_proofs(store, "clm_1")
+    assert (first.version, second.version) == (1, 2) and second.is_current
+    assert candidate_proof_sha256(store, second.id) == second.sha256
+    assert get_workflow_state(store, "clm_1") == "review-needed"
+    (event,) = [e for e in list_events(store) if e.kind == "proof_map_review_requested" and e.payload["version"] == 2]
+    assert "re-snapshot after loss" in event.message
+    assert event.payload["resnapshot_after_loss"] == 1
+
+
+def test_an_intact_snapshot_with_an_unchanged_proof_is_still_refused_even_after_a_decision(tmp_path: Path):
+    store, folder = _node(tmp_path)
+    _request(store)
+    researcher(store).decide_acceptance("clm_1", "accept")
+
+    with pytest.raises(ProofMapError) as refused:
+        _request(store)
+
+    assert refused.value.code == "WORKING_PROOF_UNCHANGED"
+    assert [p.version for p in list_candidate_proofs(store, "clm_1")] == [1]
+
+
+def test_the_re_snapshot_needs_a_fresh_acceptance_and_the_old_decision_never_revives(tmp_path: Path):
+    store, folder = _node(tmp_path)
+    _request(store)
+    researcher(store).decide_acceptance("clm_1", "accept")
+    shutil.rmtree(folder / "snapshots" / "v1")
+
+    record = _request(store)
+
+    assert record.version == 2 and record.resnapshot_after_loss == 1
+    assert get_acceptance_state(store, "clm_1") == "unverifiable"  # the Accept on v1 doesn't carry over to v2
+    assert get_workflow_state(store, "clm_1") == "review-needed"
+
+    researcher(store).decide_acceptance("clm_1", "accept")
+    assert get_acceptance_state(store, "clm_1") == "accepted"
+
+    # the v2 snapshot then being lost voids its own Accept; v1's is never read again
+    shutil.rmtree(folder / "snapshots" / "v2")
+    assert get_acceptance_state(store, "clm_1") == "unverifiable"
+
+
+def test_the_refusal_on_a_lost_snapshot_says_how_to_recover(tmp_path: Path):
+    store, folder = _node(tmp_path)
+    _request(store)
+    _lose(folder, "deleted")
+
+    with pytest.raises(ProofMapError) as refused:
+        researcher(store).decide_acceptance("clm_1", "accept")
+
+    assert "request review again" in str(refused.value)
