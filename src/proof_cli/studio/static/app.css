@@ -367,7 +367,28 @@ pre.panel-view { font: 12px/1.5 var(--mono); white-space: pre-wrap; color: var(-
 #node-panel .node-deps li { padding: 5px 0; border-bottom: .5px solid var(--border2); }
 #node-panel .node-deps li:last-child { border-bottom: 0; }
 #node-panel .node-deps a { font-family: var(--mono); }
-#node-panel .node-action { display: flex; flex-direction: column; gap: 5px; margin: 8px 0; }
+/* the claim: one line, one small button */
+#node-panel .node-claim { display: flex; align-items: center; gap: 6px; margin: 4px 0 2px; }
+#node-panel .node-holder { color: var(--text2); font-size: 12px; margin-right: auto; }
+#node-panel .node-claim .node-action { margin: 0; }
+#node-panel .node-claim button { height: 24px; padding: 0 10px; font-size: 12px; }
+/* the actions: a grouped list whose rows open to their fields */
+#node-panel .node-list { background: var(--panel2); border-radius: 10px; box-shadow: var(--shadow-card); overflow: hidden; }
+#node-panel .node-more + .node-more { border-top: .5px solid var(--border2); }
+#node-panel .node-more summary {
+  list-style: none; display: flex; align-items: center; height: 34px; padding: 0 12px; cursor: pointer; font-size: 13px; color: var(--text);
+}
+#node-panel .node-more summary::-webkit-details-marker { display: none; }
+#node-panel .node-more summary::after {
+  content: ""; margin-left: auto; width: 6px; height: 6px; border: solid var(--muted); border-width: 0 1.6px 1.6px 0;
+  transform: rotate(-45deg); transition: transform .15s ease;
+}
+#node-panel .node-more[open] summary::after { transform: rotate(45deg); }
+#node-panel .node-more summary:hover { background: var(--fill); }
+#node-panel .node-more .node-action { padding: 2px 12px 12px; margin: 0; }
+#node-panel .node-action { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+/* the submit button sits under its fields, blue */
+#node-panel .node-more .node-action > button { order: 99; align-self: flex-end; background: var(--accent); color: var(--accent-text); border-color: transparent; }
 #node-panel .node-action button { align-self: flex-start; }
 #node-panel .node-action label { color: var(--text2); font-size: 12px; display: flex; align-items: center; gap: 6px; }
 #node-panel textarea, #node-panel input:not([type=checkbox]), #node-panel select { width: 100%; box-sizing: border-box; font: inherit; font-size: 12.5px; }

@@ -151,8 +151,27 @@
     chip(view.workflow_state, ["review-needed", "revision-requested", "blocked"].includes(view.workflow_state) ? "warn" : "");
     chip(view.acceptance_state, ["rejected", "no-longer-callable"].includes(view.acceptance_state) ? "err" : view.acceptance_state === "unverifiable" ? "warn" : ["accepted", "reviewed"].includes(view.acceptance_state) ? "ok" : "");
     chip(view.integrity_state, view.integrity_state === "current" ? "" : "warn");
-    chip(claimed, "");
     return box;
+  }
+
+  // a row that opens to show an action's fields and its button
+  function disclose(title, box) {
+    const row = h("details", null, { class: "node-more" });
+    row.append(h("summary", title), box);
+    return row;
+  }
+
+  // Claim when nobody holds the node; otherwise Unassign, or Take over from someone else
+  function claimRow(view) {
+    const row = h("div", null, { class: "node-claim" });
+    const holder = view.claim ? view.claim.claimant_id : null;
+    row.append(h("span", holder ? `Claimed by ${holder}` : "Unclaimed", { class: "node-holder" }));
+    if (!holder) row.append(action("Claim", "/claim", [], () => ({ reassign: false }), () => { tell("Claimed."); return render(); }));
+    else {
+      row.append(action("Unassign", "/unassign", [], () => ({}), () => { tell("Unassigned."); return render(); }));
+      row.append(action("Take over", "/claim", [], () => ({ reassign: true }), () => { tell("Claimed."); return render(); }));
+    }
+    return row;
   }
 
   async function render() {
@@ -180,24 +199,27 @@
       ...node.assumptions.map((a) => h("p", `assuming ${a}`, { class: "node-assumption" })),
       axes(view, claimed),
       h("h4", "Depends on"), deps,
+      // the claim, in one line: only the move that fits who holds the node now
+      claimRow(view),
+      // everything that needs a few words first opens as a row, like a disclosure list
       h("h4", "Actions"),
-      action("Claim", "/claim", [["reassign", "checkbox", "take it over"]], (v) => ({ reassign: v.reassign }), () => { tell("Claimed."); return render(); }),
-      action("Unassign", "/unassign", [], () => ({}), () => { tell("Unassigned."); return render(); }),
-      action("Request review", "/request-review", [["rationale", "textarea", "why this node is scoped to prove directly"]], (v) => ({ rationale: v.rationale }),
-        (snapshot) => { tell(`Snapshot v${snapshot.version} awaits review.`); return render(); }, savedFirst),
-      action("Split", "/split", [["children", "textarea", "one child per line: id = statement"], ["reassign", "checkbox", "take it over"]],
-        (v) => ({ children: children(v.children), reassign: v.reassign }), (result) => { location.href = result.next; }),
-      action("Open a Challenge", "/challenge", [["rationale", "textarea", "what may no longer hold"]], (v) => ({ rationale: v.rationale }),
-        () => { tell("Challenge opened."); return render(); }),
-      // on the snapshot this page shows: the server records it there, even if a newer one has come since
-      ...(proof ? [action(`Record an Evidence check on snapshot v${proof.version}`, "/evidence",
-        [["outcome", "select", "", ["passed", "failed", "inconclusive", "error", "stale"]], ["run_by", "input", "which checker ran it"], ["notes", "textarea", "what it found"]],
-        (v) => ({ candidate_proof_id: proof.id, outcome: v.outcome, run_by: v.run_by, notes: v.notes }),
-        (check) => { tell(`Evidence check ${check.outcome} recorded on snapshot v${proof.version}.`); return render(); })]
-        : [h("p", "No snapshot to run an Evidence check on yet.", { class: "node-hint" })]),
+      h("div", null, { class: "node-list" }),
       reviewSection(view),
       note,
       h("p", null, { class: "node-links" }),
+    );
+    panel.querySelector(".node-list").append(
+      disclose("Request review", action("Request review", "/request-review", [["rationale", "textarea", "Why this node is scoped to prove directly"]], (v) => ({ rationale: v.rationale }),
+        (snapshot) => { tell(`Snapshot v${snapshot.version} awaits review.`); return render(); }, savedFirst)),
+      disclose("Split into claims", action("Split", "/split", [["children", "textarea", "One child per line: id = statement"], ["reassign", "checkbox", "Take it over"]],
+        (v) => ({ children: children(v.children), reassign: v.reassign }), (result) => { location.href = result.next; })),
+      disclose("Open a Challenge", action("Open a Challenge", "/challenge", [["rationale", "textarea", "What may no longer hold"]], (v) => ({ rationale: v.rationale }),
+        () => { tell("Challenge opened."); return render(); })),
+      // on the snapshot this page shows: the server records it there, even if a newer one has come since
+      ...(proof ? [disclose("Record an Evidence check", action(`Record an Evidence check on snapshot v${proof.version}`, "/evidence",
+        [["outcome", "select", "", ["passed", "failed", "inconclusive", "error", "stale"]], ["run_by", "input", "Which checker ran it"], ["notes", "textarea", "What it found"]],
+        (v) => ({ candidate_proof_id: proof.id, outcome: v.outcome, run_by: v.run_by, notes: v.notes }),
+        (check) => { tell(`Evidence check ${check.outcome} recorded on snapshot v${proof.version}.`); return render(); }))] : []),
     );
     if (location.hash === "#review" && !render.scrolled) {
       render.scrolled = true;
