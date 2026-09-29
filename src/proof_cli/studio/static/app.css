@@ -311,9 +311,6 @@ li.CodeMirror-hint-active .hint-kind { color: var(--accent-text); opacity: .8; }
 .msg.sys .err { color: var(--err); }
 .chip-cmd { display: inline-block; font: 11.5px var(--mono); color: var(--accent); background: var(--accent-dim); border-radius: 999px; padding: 1px 8px; margin: 2px 0; cursor: pointer; }
 .chip-cmd:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
-.agent-actions { display: flex; flex-wrap: wrap; gap: 6px; }
-.agent-actions button { height: 26px; padding: 0 11px; border-radius: 13px; font-size: 12px; font-weight: 500; color: var(--accent); background: var(--accent-dim); border-color: transparent; box-shadow: none; }
-.agent-actions button:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
 #chat-scope { font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
 #chat-scope::before { content: "●"; margin-right: 5px; font-size: 9px; vertical-align: 1px; }
 #chat-scope.wide::before { color: var(--warn); }
@@ -398,17 +395,46 @@ pre.panel-view { font: 12px/1.5 var(--mono); white-space: pre-wrap; color: var(-
 
 /* a Review snapshot's read-only tabs (#71) */
 .tab.readonly .name { font-style: italic; }
-/* the review, a card at the top of the agent panel: the snapshot, one choice, one rationale, Record */
-#review-card { flex: none; margin: 10px 10px 0; padding: 12px 12px 10px; border-radius: 12px; background: var(--panel2); box-shadow: var(--shadow-card); max-height: 60%; overflow: auto; }
-#review-card .node-review { display: flex; flex-direction: column; gap: 8px; }
-#review-card .review-head { display: flex; align-items: baseline; gap: 8px; }
+/* the "+" button and what it opens: popovers rising from the message box */
+.chat-actions .plus {
+  position: relative; width: 28px; height: 28px; padding: 0; border-radius: 50%; border: 0; box-shadow: none;
+  background: var(--fill); color: var(--text2);
+}
+.chat-actions .plus:hover, .chat-actions .plus[aria-expanded="true"] { background: var(--fill2); color: var(--text); }
+.chat-actions .plus svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+.chat-actions .plus.has-review::after { content: ""; position: absolute; top: 0; right: 0; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); box-shadow: 0 0 0 2px var(--panel); }
+.chat-actions #chat-scope { flex: 1; min-width: 0; }
+.popover {
+  position: absolute; left: 10px; right: 10px; bottom: 46px; z-index: 60;  /* just above the "+" row */
+  background: var(--toolbar); backdrop-filter: saturate(180%) blur(24px); -webkit-backdrop-filter: saturate(180%) blur(24px);
+  border-radius: 12px; box-shadow: var(--shadow-pop);
+}
+.popover.menu { right: auto; width: 250px; padding: 5px; }
+.menu-head { font-size: 11px; font-weight: 600; color: var(--muted); padding: 6px 9px 3px; }
+.menu-sep { border: 0; border-top: .5px solid var(--border); margin: 5px 4px; }
+.menu-item {
+  display: flex; width: 100%; height: 28px; justify-content: flex-start; padding: 0 9px; border: 0; border-radius: 6px;
+  background: transparent; box-shadow: none; font-weight: 400;
+}
+.menu-item:hover, .menu-item:focus-visible { background: var(--accent); color: #fff; box-shadow: none; }
+.menu-item.decide { font-weight: 500; }
+.menu-item.decide::before { content: ""; width: 7px; height: 7px; margin-right: 8px; border-radius: 50%; background: var(--warn); }
+
+/* the review sheet: title and Done, the files folded away, one choice, one rationale, Record */
+#review-card { padding: 12px; max-height: 70vh; overflow: auto; }
+#review-card .node-review { display: flex; flex-direction: column; gap: 10px; }
+#review-card .review-head { display: flex; align-items: center; gap: 8px; }
 #review-card .review-head h4 { margin: 0; font-size: 13px; font-weight: 600; }
-#review-card .review-snap { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--muted); }
-#review-card .node-files { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; }
+#review-card .review-done { margin-left: auto; height: 24px; padding: 0 10px; border: 0; box-shadow: none; background: transparent; color: var(--accent); }
+#review-card .review-files summary { cursor: pointer; font-size: 12px; color: var(--muted); list-style: none; }
+#review-card .review-files summary::-webkit-details-marker { display: none; }
+#review-card .review-files summary::before { content: "›"; display: inline-block; width: 12px; transition: transform .15s ease; }
+#review-card .review-files[open] summary::before { transform: rotate(90deg); }
+#review-card .node-files { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0 4px; }
 #review-card .node-files button { height: 22px; padding: 0 8px; font-family: var(--mono); font-size: 11px; font-weight: 400; border-radius: 6px; }
+#review-card .review-files a { font-size: 12px; }
 #review-card .node-hint { margin: 0; color: var(--muted); font-size: 11.5px; line-height: 1.4; }
-#review-card .review-ask { align-self: flex-start; height: 26px; border-radius: 13px; padding: 0 11px; font-size: 12px; color: var(--accent); background: var(--accent-dim); border-color: transparent; box-shadow: none; }
-#review-card .review-choices { display: flex; flex-direction: column; border-radius: 9px; background: var(--panel3); overflow: hidden; }
+#review-card .review-choices { display: flex; flex-direction: column; border-radius: 9px; background: var(--fill); overflow: hidden; }
 #review-card .review-choice {
   height: 32px; justify-content: flex-start; gap: 9px; padding: 0 10px; border: 0; border-radius: 0; box-shadow: none; background: transparent; font-weight: 400;
 }
@@ -417,9 +443,8 @@ pre.panel-view { font: 12px/1.5 var(--mono); white-space: pre-wrap; color: var(-
 #review-card .review-choice:hover { background: var(--fill); }
 #review-card .review-choice.on { font-weight: 500; }
 #review-card .review-choice.on::before { border: 4.5px solid var(--accent); background: #fff; }
-#review-card .review-why { width: 100%; resize: vertical; font: 12.5px/1.4 var(--font); }
-#review-card .review-record { align-self: flex-end; }
-#review-card .review-history { font-size: 11.5px; }
+#review-card .review-send { display: flex; gap: 8px; }
+#review-card .review-why { flex: 1; min-width: 0; font: 12.5px/1.4 var(--font); }
 #review-card .node-note { margin: 8px 0 0; font-size: 12px; color: var(--ok); }
 #review-card .node-note:empty { display: none; }
 #review-card .node-note.bad { color: var(--err); }

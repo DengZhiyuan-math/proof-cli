@@ -44,54 +44,44 @@
     "challenge_resolution:dismissed": "Dismiss this Challenge (a false alarm)",
   };
 
-  // Review in the studio (#71), in the agent panel: the snapshot under review, every frozen file
-  // read-only, its archived PDF apart from the working build, and the decisions this node offers,
-  // as one choice, one rationale and one Record. The decision is the researcher's own (ADR-0010):
-  // it goes straight to the proof map as this page's identity, never through the agent, which
-  // may only be asked to check the snapshot first. Each is sent with the binding of what this
-  // page showed, so a change since is refused (STALE_VIEW).
-  function reviewSection(view) {
+  // Review in the studio (#71): a sheet over the agent panel, opened from its "+" menu when a
+  // snapshot awaits review. The snapshot, its frozen files (read-only) and whether a PDF was
+  // archived, folded away; then the decisions on offer as one choice, one rationale and one
+  // Record. The decision is the researcher's own (ADR-0010): it goes straight to the proof map as
+  // this page's identity, never through the agent. Each is sent with the binding of what this page
+  // showed, so a change since is refused (STALE_VIEW).
+  function reviewSection(view, close) {
     const box = h("div", null, { class: "node-review", id: "node-review" });
     const proof = view.candidate_proof;
     if (!proof) return box;
     const head = h("div", null, { class: "review-head" });
-    head.append(h("h4", "Review"));
+    head.append(h("h4", `Review snapshot v${proof.version}`));
+    const done = h("button", "Done", { type: "button", class: "review-done" });
+    done.onclick = close;
+    head.append(done);
+    box.append(head);
     if (proof.unreadable || !proof.sha256) {
       // damaged or missing on disk: every decision on it has stopped counting (see the warnings)
-      box.append(head, h("p", `Snapshot v${proof.version} can't be read: its files or manifest were changed or removed.`, { class: "node-note bad" }));
-    } else {
-      head.append(h("span", `Snapshot v${proof.version} · ${proof.sha256.slice(0, 12)}…`, { class: "review-snap", title: proof.sha256 }));
-      box.append(head);
+      box.append(h("p", `Snapshot v${proof.version} can't be read: its files or manifest were changed or removed.`, { class: "node-note bad" }));
     }
+    const more = h("details", null, { class: "review-files" });
+    more.append(h("summary", proof.sha256 ? `Files · ${proof.sha256.slice(0, 12)}…` : "Files"));
     const files = h("p", null, { class: "node-files" });
     for (const [rel, text] of Object.entries(proof.files || {})) {
       const open = h("button", rel, { type: "button", title: "Open read-only" });
       open.onclick = () => (typeof openReadOnly === "function" ? openReadOnly(`v${proof.version} · ${rel}`, text) : null);
       files.append(open);
     }
-    box.append(files);
-    const pdf = h("p", null, { class: "node-hint" });
-    if (view.pdfs && view.pdfs.snapshot) pdf.append(h("a", "PDF archived with this snapshot", { href: `${base}/pdf/snapshot`, target: "_blank", rel: "noopener" }), " · the PDF pane shows the working build.");
-    else pdf.append("No PDF was archived with this snapshot. The PDF pane shows the working build, which may be newer.");
-    box.append(pdf);
+    more.append(files);
+    if (view.pdfs && view.pdfs.snapshot) more.append(h("a", "PDF archived with this snapshot", { href: `${base}/pdf/snapshot`, target: "_blank", rel: "noopener" }));
+    else more.append(h("p", "No PDF was archived with this snapshot; the PDF pane shows the working build.", { class: "node-hint" }));
+    box.append(more);
 
     const offered = view.decisions || [];
-    if (offered.length && proof.sha256) {
-      const check = h("button", "Ask the agent to check it", { type: "button", class: "review-ask" });
-      check.onclick = () => {
-        const input = document.getElementById("chat-input"), mode = document.getElementById("chat-mode");
-        if (mode) { mode.value = "ask"; mode.dispatchEvent(new Event("change")); }
-        if (input) {
-          input.value = `Check snapshot v${proof.version} of this node before I decide: read every frozen file, verify each step against the dependencies it cites, and report what does not hold. Change nothing.`;
-          input.focus(); input.dispatchEvent(new Event("input"));
-        }
-      };
-      box.append(check);
-    }
     if (!offered.length) { box.append(h("p", "No decision to make on this node right now.", { class: "node-hint" })); return box; }
     let chosen = null;
     const choices = h("div", null, { class: "review-choices", role: "radiogroup" });
-    const why = h("textarea", null, { class: "review-why", rows: 2, placeholder: "Why (recorded with the decision)" });
+    const why = h("input", null, { class: "review-why", placeholder: "Why" });
     const record = h("button", "Record Decision", { type: "button", class: "primary review-record" });
     record.disabled = true;
     offered.forEach((d) => {
@@ -108,7 +98,7 @@
       if (!chosen) return;
       const { d, label } = chosen;
       const on = d.dependency_id ? `${d.target_id} (${d.dependency_id})` : d.target_id;
-      if (!confirm(`${label} — on ${on}.\nIt is recorded in the node's reviews.jsonl and committed to git as your identity.`)) return;
+      if (!confirm(`${label} — on ${on}.\nIt is recorded in the node's reviews.jsonl and committed to git as your identity, not by the agent.`)) return;
       const binds = ["acceptance", "promote", "dependency_revalidation"].includes(d.kind);
       const item = { ...d, rationale: why.value, ...(binds ? { viewed_candidate_proof_sha256: proof.sha256 } : {}) };
       try {
@@ -119,8 +109,9 @@
       } catch (error) { tell(`${error.code || "error"}: ${error.message}`, true); }
       await render();
     };
-    box.append(choices, why, record, h("p", "Only you decide: this is recorded as you, not by the agent.", { class: "node-hint" }));
-    box.append(h("a", "Review history and details", { href: `/#/node/${encodeURIComponent(view.node.id)}`, class: "review-history" }));
+    const send = h("div", null, { class: "review-send" });
+    send.append(why, record);
+    box.append(choices, send);
     return box;
   }
 
@@ -197,18 +188,26 @@
       axes(view, claimed),
       h("h4", "Depends on"), deps,
     );
-    // the review lives in the agent panel, shown only when there is a snapshot to review; the
-    // note under it reports what a decision did
+    // the review is a sheet over the agent panel, opened from its "+" menu; the note under it
+    // reports what a decision did. The "+" carries a dot while a snapshot awaits a decision.
     const card = document.getElementById("review-card");
+    const reviewable = !!(proof && (view.decisions || []).length);
     if (card) {
-      card.replaceChildren(reviewSection(view), note);
-      card.hidden = !view.candidate_proof;
+      card.replaceChildren(reviewSection(view, () => { card.hidden = true; }), note);
+      if (!proof) card.hidden = true;
     }
+    const plus = document.getElementById("chat-plus");
+    if (plus && plus.classList) plus.classList.toggle("has-review", reviewable);
+    globalThis.studioReview = () => (reviewable ? {
+      version: proof.version,
+      check: `Check snapshot v${proof.version} of this node before I decide: read every frozen file, verify each step against the dependencies it cites, and report what does not hold. Change nothing.`,
+      open: () => { if (card) card.hidden = false; },
+    } : null);
     if (location.hash === "#review" && !render.scrolled) {
       render.scrolled = true;
-      // the card heads the agent panel: showing the panel is enough (scrolling it into view
-      // would shift the whole page sideways)
+      // arriving from the map's review list: show the agent panel with the review sheet open
       if (typeof chatHidden === "function") chatHidden(false);
+      if (card && proof) card.hidden = false;
     }
   }
 

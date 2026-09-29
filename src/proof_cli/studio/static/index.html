@@ -90,14 +90,17 @@
     </div>
     <div id="agent-account" hidden></div>
     <div id="quota"></div>
-    <section id="review-card" aria-label="Review" hidden></section>
     <div id="chat-log"></div>
     <div id="chat-foot">
-      <div id="agent-actions" class="agent-actions" aria-label="Ask the proof agent to"></div>
-      <div id="chat-scope"></div>
+      <section id="review-card" class="popover" aria-label="Review" hidden></section>
+      <div id="plus-menu" class="popover menu" role="menu" hidden></div>
       <div id="slash-menu" role="listbox" hidden></div>
-      <textarea id="chat-input" rows="3" placeholder="Ask the agent… @ a file or the selection to limit its edits, / for commands (↵ send, ⇧↵ newline)"></textarea>
+      <textarea id="chat-input" rows="2" placeholder="Ask the proof agent…" title="@ a file or the selection to limit its edits · / for commands · ↵ send, ⇧↵ newline"></textarea>
       <div class="chat-actions">
+        <button id="chat-plus" class="plus" type="button" aria-label="Actions and review" aria-haspopup="menu" aria-expanded="false" title="Ask the agent to…, or review a snapshot">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6v12M6 12h12"/></svg>
+        </button>
+        <span id="chat-scope"></span>
         <span id="chat-status" class="status"></span>
         <button id="chat-send" class="primary">Send</button>
       </div>
