@@ -90,8 +90,14 @@ function showHome() {
     link.append(glass, el("span", item.node_id), chevron);
     const statement = el("div", item.statement);
     if (item.candidate_proof && item.candidate_proof.id) {
-      // shown in full: recording the decision is about exactly this text
-      statement.append(el("p", `snapshot v${item.candidate_proof.version} · SHA-256 ${item.candidate_proof.sha256}`, { class: "hint" }), el("pre", item.candidate_proof.text));
+      // the decision is about exactly this text: the hash is shortened (in full on hover) and the
+      // LaTeX folded under one click, never left out
+      const proof = item.candidate_proof, lines = (proof.text || "").split("\n").length;
+      const hash = proof.sha256 ? ` · ${proof.sha256.slice(0, 12)}…` : "";
+      statement.append(el("p", `Snapshot v${proof.version}${hash}`, { class: "hint snap-meta", title: proof.sha256 ? `SHA-256 ${proof.sha256}` : "" }));
+      const text = el("details", null, { class: "snap-text" });
+      text.append(el("summary", `Show the LaTeX · ${lines} ${lines === 1 ? "line" : "lines"}`), el("pre", proof.text));
+      statement.append(text);
     }
     const tr = row([box, link, statement, choice, rationale]);
     tr.dataset.kind = item.kind; tr.dataset.target = item.node_id;
