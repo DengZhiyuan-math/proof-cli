@@ -141,13 +141,6 @@ function svg(tag, attrs) {
   return node;
 }
 
-function toneOf(n) {
-  if (["accepted", "reviewed"].includes(n.acceptance_state)) return "accepted";
-  if (["rejected", "no-longer-callable"].includes(n.acceptance_state)) return "rejected";
-  if (n.workflow_state === "review-needed") return "review";
-  return "none";
-}
-
 // which warning a node carries, each drawn differently: challenged, potentially stale, or a decision that no longer applies
 function warningOf(n) {
   if (n.integrity_state === "challenged") return "challenged";
@@ -158,20 +151,40 @@ function warningOf(n) {
 
 function short(text, length) { return text.length > length ? text.slice(0, length - 1) + "…" : text; }
 
-// A node card's one state line, bottom right: what needs the researcher first (integrity, an
-// undecidable decision), then the frontier, a claim, a review request, a rejected route, blocked.
+// A node card's one state: an icon anyone reads at a glance, and a word. What needs the
+// researcher comes first (a Challenge, a moved dependency, a decision that no longer applies:
+// one "attention" icon, the word saying which), then the frontier, a claim, a review request,
+// a rejected route, blocked, accepted.
 function tagOf(n) {
-  if (n.integrity_state === "challenged") return ["challenged", "warn"];
-  if (n.integrity_state === "potentially-stale") return ["stale", "warn"];
-  if (n.acceptance_state === "unverifiable") return ["unverifiable", "warn"];
-  if (n.frontier) return ["frontier", "accent"];
-  if (n.assignee) return [`claimed · ${n.assignee}`, ""];
-  if (n.workflow_state === "review-needed") return ["review needed", "warn"];
-  if (n.workflow_state === "revision-requested") return ["revision requested", "warn"];
-  if (["rejected", "no-longer-callable"].includes(n.acceptance_state)) return ["rejected", "crit"];
-  if (n.workflow_state === "blocked") return ["blocked", "muted"];
-  if (["accepted", "reviewed"].includes(n.acceptance_state)) return [n.acceptance_state, "ok"];
-  return ["open", "muted"];
+  if (n.integrity_state === "challenged") return ["challenged", "attention"];
+  if (n.integrity_state === "potentially-stale") return ["dependency changed", "attention"];
+  if (n.acceptance_state === "unverifiable") return ["decision no longer applies", "attention"];
+  if (["rejected", "no-longer-callable"].includes(n.acceptance_state)) return [n.acceptance_state === "rejected" ? "rejected" : "no longer callable", "rejected"];
+  if (n.frontier) return ["ready", "ready"];
+  if (n.assignee) return [n.assignee, "claimed"];
+  if (n.workflow_state === "review-needed") return ["awaiting review", "review"];
+  if (n.workflow_state === "revision-requested") return ["revision requested", "review"];
+  if (n.workflow_state === "blocked") return ["blocked", "blocked"];
+  if (["accepted", "reviewed"].includes(n.acceptance_state)) return [n.acceptance_state, "accepted"];
+  return ["open", "open"];
+}
+
+// the icons, SF Symbols' ".circle.fill" style: a filled disc, a white glyph, 16 × 16
+const STATUS_GLYPHS = {
+  ready: [["path", { d: "M6.4 4.9v6.2L11.3 8z", class: "glyph-fill" }]],
+  claimed: [["circle", { cx: 8, cy: 6.1, r: 1.9, class: "glyph-fill" }], ["path", { d: "M4.6 11.9a3.4 3.4 0 0 1 6.8 0z", class: "glyph-fill" }]],
+  blocked: [["rect", { x: 5.2, y: 7.3, width: 5.6, height: 4.2, rx: 1, class: "glyph-fill" }], ["path", { d: "M6.4 7.3V6.1a1.6 1.6 0 0 1 3.2 0v1.2", class: "glyph" }]],
+  review: [["path", { d: "M8 4.6V8l2.3 1.5", class: "glyph" }]],
+  accepted: [["path", { d: "M4.9 8.3 7 10.4l4.2-4.6", class: "glyph" }]],
+  rejected: [["path", { d: "M5.6 5.6l4.8 4.8M10.4 5.6l-4.8 4.8", class: "glyph" }]],
+  attention: [["path", { d: "M8 4.4v4.5", class: "glyph" }], ["circle", { cx: 8, cy: 11.4, r: 1, class: "glyph-fill" }]],
+  open: [],
+};
+function statusIcon(kind, x, y) {
+  const icon = svg("g", { class: `status-icon ${kind}`, transform: `translate(${x - 8},${y - 8})` });
+  icon.append(svg("circle", { cx: 8, cy: 8, r: 8, class: "disc" }));
+  for (const [tag, attrs] of STATUS_GLYPHS[kind] || []) icon.append(svg(tag, attrs));
+  return icon;
 }
 
 const KIND_LABEL = { theorem: "Theorem", lemma: "Lemma", claim: "Claim", imported_result: "Imported result" };
@@ -343,7 +356,7 @@ function drawDag(nodes) {
   }
   for (const n of nodes) {
     const left = -BOX.w / 2, top = -BOX.h / 2;
-    const classes = ["node", `tone-${toneOf(n)}`, n.frontier ? "frontier" : "", n.assignee ? "claimed" : "", rejected(n) ? "rejected" : "", warningOf(n)].filter(Boolean).join(" ");
+    const classes = ["node", n.frontier ? "frontier" : "", rejected(n) ? "rejected" : "", warningOf(n) ? "attention" : ""].filter(Boolean).join(" ");
     const place = () => { const p = at.get(n.id); g.setAttribute("transform", `translate(${p.x},${p.y})`); };
     const g = svg("g", { class: classes, tabindex: 0, role: "link", "aria-label": `${n.kind} ${n.id}: ${n.acceptance_state}, ${n.workflow_state}, ${n.integrity_state}${n.assignee ? `, claimed by ${n.assignee}` : ""}${n.frontier ? ", on the frontier" : ""}` });
     place();
@@ -358,14 +371,11 @@ function drawDag(nodes) {
     meta.textContent = n.display_label ? short(n.statement, 30) : "";
     g.append(kind, id, label, meta);
     // the node's one state, as a capsule along the bottom
-    const [tagText, tone] = tagOf(n);
-    const status = svg("g", { class: `status ${tone}`.trim() });
-    const text = capitalised(short(tagText, 26));
-    const pillWidth = Math.min(BOX.w - 28, 24 + text.length * 6.3);
-    status.append(svg("rect", { class: "pill", x: left + 12, y: top + BOX.h - 26, width: pillWidth, height: 18, rx: 9 }));
-    status.append(svg("circle", { class: "pill-dot", cx: left + 22, cy: top + BOX.h - 17, r: 3 }));
-    const tag = svg("text", { class: "tag", x: left + 30, y: top + BOX.h - 13 });
-    tag.textContent = text;
+    const [tagText, statusKind] = tagOf(n);
+    const status = svg("g", { class: `status ${statusKind}` });
+    status.append(statusIcon(statusKind, left + 22, top + BOX.h - 18));
+    const tag = svg("text", { class: "tag", x: left + 36, y: top + BOX.h - 14 });
+    tag.textContent = capitalised(short(tagText, 24));
     status.append(tag);
     g.append(status);
     const title = svg("title");
