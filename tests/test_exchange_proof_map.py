@@ -1,6 +1,7 @@
 from _researcher import researcher
 """Issue #31: exchange carries the new ProofMapNode model, and none of its
-reads/writes bypass the storage layer with direct SQL anymore.
+reads/writes bypass the storage layer with direct SQL anymore. The merge
+import itself is tested in test_exchange_merge_import.py.
 """
 import json
 from pathlib import Path
@@ -83,9 +84,9 @@ def test_exchange_round_trips_the_full_proof_map_graph(tmp_path: Path) -> None:
     # blocked, not claimed: lem_1 (its dependency) has an open Challenge —
     # this is the correct, imported state, not a round-trip artifact
     assert get_workflow_state(target_store, "clm_1") == "blocked"
-    active_claim = get_active_claim(target_store, "clm_1")
-    assert active_claim is not None
-    assert active_claim.claimant_id == "agent_d"
+    # an assignee in the source project isn't working here: the claim arrives released (#31)
+    assert get_active_claim(target_store, "clm_1") is None
+    assert [claim["claimant_id"] for claim in report.released_claims] == ["agent_d"]
 
     proofs = list_candidate_proofs(target_store, "lem_1")
     assert len(proofs) == 1
@@ -131,12 +132,14 @@ def test_cli_exchange_export_and_import_round_trip_proof_map_nodes(tmp_path: Pat
     assert export_result.exit_code == 0
 
     runner.invoke(app, ["init", "--root", str(target_root)])
+    bundle_file = tmp_path / "bundle.json"
+    bundle_file.write_text(export_result.stdout)
     import_result = runner.invoke(
         app,
-        ["exchange", "import", export_result.stdout, "--root", str(target_root)],
+        ["exchange", "import", str(bundle_file), "--root", str(target_root), "--json"],
     )
-    assert import_result.exit_code == 0
-    payload = json.loads(import_result.stdout)
+    assert import_result.exit_code == 0, import_result.output
+    payload = json.loads(import_result.stdout)["data"]
     assert "proof_map_nodes" in payload["imported_sections"]
 
     show_result = runner.invoke(app, ["node", "show", "lem_1", "--root", str(target_root), "--json"])

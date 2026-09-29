@@ -4,6 +4,7 @@ import hashlib
 import json
 import shutil
 from pathlib import Path
+from typing import Callable
 
 
 def vault_dir(root: Path) -> Path:
@@ -128,6 +129,44 @@ def snapshot_folder_digest(folder: Path) -> str | None:
     except (OSError, ValueError, KeyError, TypeError):
         return None
     return manifest_digest(entries)
+
+
+def snapshot_digest_of(manifest: bytes | None, stored: Callable[[str], bytes | None]) -> str | None:
+    """`snapshot_folder_digest` over files that aren't on disk (an exchange bundle's, say):
+    `manifest` is the snapshot's manifest.json and `stored(path)` a file by its path inside
+    the snapshot folder. None when the manifest is unreadable or a file it names is missing."""
+    try:
+        names = list(json.loads((manifest or b"").decode("utf-8"))["files"])
+    except (ValueError, KeyError, TypeError, UnicodeDecodeError):
+        return None
+    entries: dict[str, str] = {}
+    for rel in names:
+        data = stored(_stored(rel)) if isinstance(rel, str) else None
+        if data is None:
+            return None
+        entries[rel] = hashlib.sha256(data).hexdigest()
+    return manifest_digest(entries)
+
+
+# what an exchange bundle leaves out of a node folder: regenerated output, the agent's scratch,
+# and the node's recorded decisions, which count only where they were made (ADR-0010, #31)
+_NOT_EXCHANGED = {"build", "scratch"}
+
+
+def exchanged_files(root: Path, node_id: str) -> dict[str, Path]:
+    """The files an exchange bundle carries for a node, by their path from the project root:
+    its working sources, snapshots and archived PDFs, never its build output, scratch folder,
+    hidden files or `reviews.jsonl`."""
+    folder = node_folder(root, node_id)
+    found: dict[str, Path] = {}
+    for path in sorted(folder.rglob("*")) if folder.is_dir() else ():
+        rel = path.relative_to(folder)
+        if not path.is_file() or path.is_symlink() or rel.parts[0] in _NOT_EXCHANGED or rel.name == "reviews.jsonl":
+            continue
+        if any(part.startswith(".") for part in rel.parts):
+            continue
+        found[path.relative_to(root).as_posix()] = path
+    return found
 
 
 def remove_snapshot(path: Path) -> None:

@@ -71,6 +71,14 @@ ERROR_CODES: dict[str, str] = {
     "SAME_NODE": "a node can't replace itself",
     "NO_DEPENDENTS": "nothing that can move rests on the node",
     "STALE_VIEW": "what the decision is made on changed since the page showed it; reload",
+    # -- exchange (#31): a rejected import writes nothing; `problems` lists every one ---------
+    "BUNDLE_UNREADABLE": "the bundle file couldn't be read",
+    "MALFORMED_BUNDLE": "the input isn't JSON, or doesn't match the exchange bundle schema",
+    "IMPORT_ID_CONFLICT": "a record the bundle would add reuses an id this project (or the bundle itself) already uses",
+    "INVALID_VAULT_PATH": "a Candidate proof file_path or vault file isn't a relative path inside its node's proofs/<node-id>/ folder",
+    "VAULT_FILE_MISSING": "an imported Candidate proof's snapshot isn't carried whole in the bundle",
+    "VAULT_HASH_MISMATCH": "a vault file doesn't match its SHA-256, or a snapshot doesn't match the SHA-256 its index records",
+    "VAULT_FILE_CONFLICT": "a vault file would overwrite a different file already here",
     # -- the proof map page's own requests -----------------------------------------------
     "NO_DECISIONS": "the request decided nothing",
     "MALFORMED_DECISION": "a decision in the request isn't a well-formed object",
