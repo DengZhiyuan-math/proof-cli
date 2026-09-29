@@ -26,7 +26,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError
 
-from .vault import SNAPSHOT_MANIFEST, archived_pdf_path, snapshot_folder_digest
+from . import key_ideas
+from .vault import SNAPSHOT_MANIFEST, archived_pdf_path, frozen_key_ideas, snapshot_folder_digest
 from .reviews import (
     DECISION_ROWS,
     DecisionKind,
@@ -163,6 +164,7 @@ def _row(entry: ReviewEntry) -> dict:
         "created_at": entry.decided_at.isoformat(),
         "payload": entry.payload,
         "migrated": entry.migrated,
+        "key_ideas_drafted_by": entry.key_ideas_drafted_by,
     }
 
 
@@ -283,6 +285,10 @@ def record_decision(
     if payload.candidate_proof_id:
         proof = get_candidate_proof(store, payload.candidate_proof_id)
         if proof is not None:
+            if kind == DecisionKind.acceptance:
+                # "drafted by agent, confirmed by author" (ADR-0013), read from the summary the snapshot froze
+                summary = frozen_key_ideas(store.root, proof.file_path)
+                entry.key_ideas_drafted_by = key_ideas.parse(summary.decode("utf-8", errors="replace")).drafted_by if summary else None
             snapshot = store.root / proof.file_path
             frozen = snapshot.parent if snapshot.name == SNAPSHOT_MANIFEST else snapshot  # a folder snapshot, or an old file
             paths += [frozen, archived_pdf_path(store.root, proof.node_id, proof.version)]  # the PDF only if one was archived

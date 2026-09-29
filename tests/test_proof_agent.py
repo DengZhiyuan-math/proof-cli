@@ -14,7 +14,9 @@ from pathlib import Path
 
 import pytest
 
-from proof_cli.proof_map import create_node, get_acceptance_state, get_active_claim, get_node, list_candidate_proofs
+from _proofs import KEY_IDEAS, write_key_ideas
+from proof_cli.key_ideas import drafted_marker
+from proof_cli.proof_map import add_dependency, create_node, request_review, get_acceptance_state, get_active_claim, get_node, list_candidate_proofs
 from proof_cli.storage import ensure_project
 from proof_cli.studio.backends import Job
 from proof_cli.studio.backend_codex import Codex
@@ -219,6 +221,7 @@ def test_scratch_files_are_not_part_of_a_snapshot(studio):
     folder = store.root / "proofs" / "A"
     (folder / "scratch").mkdir()
     (folder / "scratch" / "check.py").write_text("print(1)\n")
+    write_key_ideas(store, "A")
     record = request_review(store, "A", requested_by="studio-agent", rationale="scoped")
     manifest = json.loads((store.root / record.file_path).read_text()) if record.file_path.endswith(".json") else {"files": {}}
     assert not [name for name in manifest.get("files", {}) if name.startswith("scratch/")]
@@ -249,5 +252,70 @@ def test_no_backend_tells_the_proof_agent_to_follow_the_repositorys_rules(studio
     for prompt in (claude_prompt, codex_prompt):
         assert "follow it exactly" not in prompt and "REPOSITORY RULE" not in prompt
         assert "Retrieval first" in prompt
+
+
+# -- ADR-0013: the proof agent drafts a missing key-ideas summary ---------------------------------
+
+
+def _wait(agent, started) -> None:
+    job = agent.jobs[started["job"]]
+    deadline = time.monotonic() + 60
+    while not job.done and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert job.done
+
+
+def test_the_standing_brief_asks_for_the_key_ideas_before_review(studio):
+    store, hub, log, monkeypatch = studio
+    brief = hub.studio("A").agent.context_fn().brief()
+    assert "key-ideas.md" in brief and brief.index("key-ideas.md") < brief.index("request-review A")
+
+
+def test_the_drafting_brief_names_the_proof_the_dependencies_and_the_four_fields(studio):
+    store, hub, log, monkeypatch = studio
+    create_node(store, node_id="L", kind="lemma", statement="a lemma")
+    add_dependency(store, "A", "L", edited_by="author")
+    context = hub.studio("A").agent.context_fn()  # made fresh each turn: the node's dependencies as of now
+    assert context.dependencies == ["L"]
+    prompt = context.key_ideas_prompt()
+    for text in ("key-ideas.md", "proof.tex", "L (../L/)", "## 核心思路", "## 主要步骤", "## 难点", "## 未覆盖", "$…$"):
+        assert text in prompt, text
+
+
+def test_the_proof_agent_drafts_a_missing_summary_which_the_author_confirms_by_requesting_review(studio):
+    store, hub, log, monkeypatch = studio
+    folder = store.root / "proofs" / "A"
+    monkeypatch.setenv("FAKE_SCRIPT", json.dumps([["write", "key-ideas.md", KEY_IDEAS]]))
+    studio_a = hub.studio("A")
+
+    answer = studio_a.post("/api/key-ideas/draft", {"provider": "claude"})
+    assert answer.status == 200, answer.body
+    started = json.loads(answer.body)
+    _wait(studio_a.agent, started)
+
+    # an edit turn that may write only key-ideas.md
+    argv = _log(log)["argv"]
+    allowed = argv[argv.index("--allowedTools") + 1:argv.index("--disallowedTools")]
+    assert "Write(./key-ideas.md)" in allowed and "Write(./**)" not in allowed
+    # its first line records the drafter, as part of the turn (so its Undo removes the draft too)
+    text = (folder / "key-ideas.md").read_text()
+    assert text == drafted_marker("studio-agent") + "\n" + KEY_IDEAS
+    assert studio_a.agent.turns[started["job"]].after["key-ideas.md"] == text.encode()
+
+    # a second draft over an existing summary is refused: it is the author's now
+    assert studio_a.post("/api/key-ideas/draft", {"provider": "claude"}).status == 409
+
+    # the author edits it and requests review: that confirms it, and the snapshot records who drafted it
+    (folder / "key-ideas.md").write_text(text.replace("compactness", "compactness and continuity"))
+    record = request_review(store, "A", requested_by="author", rationale="scoped")
+    assert record.key_ideas_drafted_by == "studio-agent"
+
+
+def test_a_drafting_turn_that_writes_nothing_leaves_no_summary(studio):
+    store, hub, log, monkeypatch = studio
+    monkeypatch.setenv("FAKE_SCRIPT", json.dumps([]))
+    studio_a = hub.studio("A")
+    _wait(studio_a.agent, json.loads(studio_a.post("/api/key-ideas/draft", {"provider": "claude"}).body))
+    assert not (store.root / "proofs" / "A" / "key-ideas.md").exists()
 
 

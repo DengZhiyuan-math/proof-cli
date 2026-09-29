@@ -349,6 +349,12 @@ pre.panel-view { font: 12px/1.45 var(--mono); white-space: pre-wrap; color: var(
 /* a Review snapshot's read-only tabs (#71) */
 .tab.readonly .name { font-style: italic; }
 #node-panel .node-review { border-top: 1px solid var(--border); margin-top: 10px; padding-top: 4px; }
-#node-panel .node-files button { margin: 2px 4px 2px 0; }
+/* the review view reads the snapshot's key ideas (ADR-0013); its frozen LaTeX is on the node's page */
+#node-panel .key-ideas { border-left: 2px solid var(--accent); padding: 2px 10px; margin: 6px 0 8px; }
+#node-panel .key-ideas h5 { margin: 8px 0 2px; font-family: var(--mono); font-size: 10px; font-weight: 400; letter-spacing: .14em; color: var(--muted); }
+#node-panel .key-ideas .key-idea { margin: 0; font-family: var(--math); font-size: 14px; line-height: 1.5; white-space: pre-wrap; color: var(--text); }
+#node-panel .key-ideas .key-idea.difficulties { color: var(--warn); }
+#node-panel .node-note.no-key-ideas { color: var(--warn); }
+#node-panel .node-review-links { font-family: var(--mono); font-size: 11px; }
 #node-panel .node-decision { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
 #node-panel .node-decision button { align-self: flex-start; color: var(--warn); }

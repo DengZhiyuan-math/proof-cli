@@ -143,6 +143,7 @@ class FakeElement {
       texts: g.querySelectorAll("text").map((t) => t.textContent),
       tags: g.querySelectorAll("text.tag").map((t) => ({ text: t.textContent, classes: t.className.split(" ") })),
       label: g.attributes["aria-label"],
+      title: (g.querySelector("title") || { textContent: null }).textContent,  // what hovering it shows
     }])),
     // each tree line in drawing order
     tree: elements["map-tree"].querySelectorAll("li").map(treeLine),
@@ -164,6 +165,8 @@ class FakeElement {
     // each review card's citation line, and whether it is marked missing
     pendingCitations: elements.pending.querySelectorAll("tbody tr").map((tr) => tr.querySelectorAll(".citation").map((c) => c.textContent).join(" ")),
     pendingCitationMissing: elements.pending.querySelectorAll("tbody tr").map((tr) => tr.querySelectorAll(".citation.warning").length > 0),
+    // each review card's key ideas (ADR-0013): the text of its .key-ideas block
+    pendingKeyIdeas: elements.pending.querySelectorAll("tbody tr").map((tr) => tr.querySelectorAll(".key-ideas").map((k) => k.textContent).join(" ")),
     confirmShown: !elements.confirm.hidden,
     posted,
   });

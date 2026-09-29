@@ -41,7 +41,8 @@ from ..storage import (
     read_state,
 )
 from ..authority import candidate_proof_sha256
-from ..vault import SNAPSHOT_MANIFEST, archived_pdf_path, build_pdf_path, node_folder, snapshot_folder_files
+from .. import key_ideas
+from ..vault import SNAPSHOT_MANIFEST, archived_pdf_path, build_pdf_path, frozen_key_ideas, node_folder, snapshot_folder_files
 from .studios import StudioHub
 
 
@@ -94,7 +95,28 @@ def _proof_view(store: ProjectStore, proof) -> dict | None:
         "files": files,
         "unreadable": frozen is None,
         "sha256": candidate_proof_sha256(store, proof.id),
+        # what review starts from (ADR-0013): the key-ideas summary the snapshot froze, its four
+        # fields and who drafted it; None for an older snapshot that froze none
+        "key_ideas": key_ideas.view((frozen or {}).get(key_ideas.KEY_IDEAS_FILE)),
     }
+
+
+def _working_key_ideas(store: ProjectStore, node_id: str) -> dict:
+    """Whether the node's working key-ideas.md exists, and what it still lacks before review can be requested."""
+    try:
+        data = (node_folder(store.root, node_id) / key_ideas.KEY_IDEAS_FILE).read_bytes()
+    except OSError:
+        return {"exists": False, "missing": [key_ideas.KEY_IDEAS_FILE]}
+    return {"exists": True, "missing": key_ideas.parse(data.decode("utf-8", errors="replace")).missing}
+
+
+def _core_idea(store: ProjectStore, node_id: str) -> str | None:
+    """The 核心思路 of the node's current snapshot, for the map's hover; None when it froze no summary."""
+    proof = get_current_candidate_proof(store, node_id)
+    data = frozen_key_ideas(store.root, proof.file_path) if proof is not None else None
+    if data is None:
+        return None
+    return key_ideas.parse(data.decode("utf-8", errors="replace")).fields.get("core_idea") or None
 
 
 def _warnings_for(warnings: list, *ids: str) -> list[dict]:
@@ -228,6 +250,8 @@ class ReviewApp:
                     "integrity_state": proof_map.get_integrity_state(self.store, node.id),
                     "assignee": claim.claimant_id if claim else None,
                     "frontier": node.id in frontier,
+                    # the hover shows the current snapshot's 核心思路 (ADR-0013)
+                    "core_idea": None if imported else _core_idea(self.store, node.id),
                 }
             )
         return {"nodes": nodes}
@@ -392,6 +416,8 @@ class ReviewApp:
             ),
             "integrity_state": proof_map.get_integrity_state(store, node_id),
             "candidate_proof": _proof_view(store, proof),
+            # the working summary: whether review can be requested yet, or the proof agent should draft it (ADR-0013)
+            "key_ideas_working": _working_key_ideas(store, node_id) if node.kind != ProofMapNodeKind.imported_result else None,
             "folder": str(node_folder(store.root, node_id)) if node.kind != ProofMapNodeKind.imported_result else None,
             # where the node is worked on: a local node's studio (ADR-0011), or nothing for an imported result
             "studio": self.page_of(node) if node.kind != ProofMapNodeKind.imported_result else None,

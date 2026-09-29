@@ -12,6 +12,8 @@ import json
 from pathlib import Path
 
 import pytest
+
+from _proofs import ensure_key_ideas
 from typer.testing import CliRunner
 
 from _researcher import researcher
@@ -37,6 +39,7 @@ def _reviewed(store, node_id: str, *, accept: bool = True):
     create_node(store, node_id=node_id, kind="claim", statement=f"statement of {node_id}")
     working = store.root / "proofs" / node_id / "proof.tex"
     working.write_text(working.read_text().replace("% Write the proof here.", f"A proof of {node_id}."))
+    ensure_key_ideas(store, node_id)
     proof = request_review(store, node_id, requested_by="agent_a", rationale="small enough")
     review = researcher(store).decide_acceptance(node_id, "accept") if accept else None
     return proof, review

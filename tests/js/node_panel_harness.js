@@ -1,6 +1,6 @@
 // Runs the studio's real node panel (src/proof_cli/studio/static/node.js) against a minimal DOM.
 // argv[2]: JSON {view, saveAll: true|false|null, click: {label, values}, press: button label,
-// answer, confirm}. Prints what happened.
+// answer, confirm}. Prints what happened: the events, the review section's text, links and buttons.
 const fs = require("fs"), path = require("path"), vm = require("vm");
 
 class El {
@@ -23,6 +23,7 @@ class El {
     location: {},
     confirm: () => { events.push("confirm"); return scenario.confirm !== false; },
     openReadOnly: (name, text) => { events.push({ openReadOnly: name, text }); },
+    draftKeyIdeas: async () => { events.push("draftKeyIdeas"); },
     fetch: async (url, options = {}) => {
       if (options.method === "POST") events.push({ post: url, body: JSON.parse(options.body) });
       return { json: async () => ({ ok: true, data: options.method === "POST" ? (scenario.answer || { version: 2 }) : scenario.view }) };
@@ -53,6 +54,11 @@ class El {
     await button.onclick();
     out.note = panel.querySelector(".node-note").textContent;
   }
-  out.review = (panel.querySelector(".node-review") || { text: () => "" }).text();
+  const review = panel.querySelector(".node-review") || { text: () => "", all: () => [] };
+  out.review = review.text();
+  out.reviewLinks = review.all().filter((x) => x.tag === "a").map((x) => x.attrs.href);
+  out.reviewButtons = review.all().filter((x) => x.tag === "button").map((x) => x.textContent);
+  out.buttons = panel.all().filter((x) => x.tag === "button").map((x) => x.textContent);
+  out.text = panel.text();
   console.log(JSON.stringify(out));
 })();

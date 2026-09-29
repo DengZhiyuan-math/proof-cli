@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 
 import pytest
 
+from _proofs import ensure_key_ideas
 from _researcher import researcher
 from _review_client import DirectClient, decide, serving
 from proof_cli.proof_map import create_node, get_acceptance_state, request_review
@@ -36,6 +37,7 @@ def _awaiting(store, node_id="clm_1"):
     create_node(store, node_id=node_id, kind="claim", statement=r"$(f * g) * h = f * (g * h)$")
     working = store.root / "proofs" / node_id / "proof.tex"
     working.write_text(working.read_text().replace("% Write the proof here.", "- x^2 \\le 0 fails; take $(f * g) * h$."))
+    ensure_key_ideas(store, node_id)
     return request_review(store, node_id, requested_by="agent_a", rationale="scoped")
 
 

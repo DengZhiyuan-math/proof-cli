@@ -225,6 +225,10 @@ class CandidateProofRecord(BaseModel):
     # (missing or unreadable) snapshot this one re-takes from an unchanged working proof (#99).
     # The `proof_map_review_requested` event is its lasting record.
     resnapshot_after_loss: int | None = None
+    # set only on the record `request_review` returns, never indexed: who drafted the key-ideas
+    # summary this snapshot froze, when the proof agent did (ADR-0013); the author confirmed it by
+    # requesting review. The frozen key-ideas.md itself is the lasting record.
+    key_ideas_drafted_by: str | None = None
 
 
 class DependencyPin(BaseModel):

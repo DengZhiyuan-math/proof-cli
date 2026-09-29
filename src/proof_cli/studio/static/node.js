@@ -90,30 +90,42 @@
     "challenge_resolution:dismissed": "Dismiss this Challenge (a false alarm)",
   };
 
-  // Review in the studio (#71): the snapshot under review, every frozen file read-only, its
-  // archived PDF apart from the working build, and the decisions this node offers — each sent
-  // with the binding of what this page showed, so a change since is refused (STALE_VIEW).
+  // The four fields of a key-ideas summary (ADR-0013), in order. Shown as text: `$…$` stays as written.
+  const KEY_IDEAS = [["core_idea", "核心思路"], ["main_steps", "主要步骤"], ["difficulties", "难点"], ["not_covered", "未覆盖"]];
+
+  function keyIdeasBlock(summary) {
+    const block = h("div", null, { class: "key-ideas" });
+    for (const [key, title] of KEY_IDEAS) {
+      const text = (summary.fields || {})[key];
+      if (!text) continue;
+      block.append(h("h5", title), h("p", text, { class: `key-idea ${key}` }));
+    }
+    if (summary.drafted_by) block.append(h("p", `由 agent 起草、作者确认 · drafted by ${summary.drafted_by}, confirmed by the author's review request`, { class: "node-hint drafted" }));
+    return block;
+  }
+
+  // Review in the studio (ADR-0013, amending #71): the snapshot under review is read from its
+  // key-ideas summary, and decided here — each decision sent with the binding of what this page
+  // showed, so a change since is refused (STALE_VIEW). Its frozen LaTeX and archived PDF aren't
+  // shown here: the node's page has them.
   function reviewSection(view) {
     const box = h("div", null, { class: "node-review", id: "node-review" });
     box.append(h("h4", "Review"));
     const proof = view.candidate_proof;
     if (!proof) { box.append(h("p", "No snapshot has been requested for review yet.", { class: "node-hint" })); return box; }
+    const frozen = h("a", `v${proof.version} 的冻结源文件和 PDF · the frozen LaTeX and PDF, on the node's page`, { href: `/#/node/${encodeURIComponent(NODE)}`, class: "node-frozen" });
     if (proof.unreadable || !proof.sha256) {
       // damaged or missing on disk: every decision on it has stopped counting (see the warnings)
       box.append(h("p", `Snapshot v${proof.version} can't be read: its files or manifest were changed or removed.`, { class: "node-note bad" }));
     } else {
       box.append(h("p", `Snapshot v${proof.version} · SHA-256 ${proof.sha256.slice(0, 12)}…`, { title: proof.sha256 }));
+      if (proof.key_ideas) box.append(keyIdeasBlock(proof.key_ideas));
+      // an older snapshot, frozen before summaries: reviewed as before, from its files
+      else box.append(h("p", "这个 snapshot 没有关键思路摘要 · this snapshot has no key-ideas summary: read its frozen files on the node's page.", { class: "node-note no-key-ideas" }));
     }
-    const files = h("p", null, { class: "node-files" });
-    for (const [rel, text] of Object.entries(proof.files || {})) {
-      const open = h("button", rel, { type: "button", title: "Open read-only" });
-      open.onclick = () => (typeof openReadOnly === "function" ? openReadOnly(`v${proof.version} · ${rel}`, text) : null);
-      files.append(open);
-    }
-    box.append(files);
-    if (view.pdfs && view.pdfs.snapshot) box.append(h("a", "PDF archived with this snapshot", { href: `${base}/pdf/snapshot`, target: "_blank", rel: "noopener" }));
-    else box.append(h("p", "No PDF was archived with this snapshot (the build wasn't current when review was requested).", { class: "node-hint" }));
-    box.append(h("p", "The PDF pane shows the working build, which may be newer than this snapshot.", { class: "node-hint" }));
+    const links = h("p", null, { class: "node-review-links" });
+    links.append(frozen);
+    box.append(links);
     for (const d of view.decisions || []) {
       const row = h("div", null, { class: "node-decision" });
       const label = DECISIONS[`${d.kind}:${d.decision}`] || `${d.kind}: ${d.decision}`;
@@ -175,6 +187,27 @@
     if (!view.dependencies.length) deps.append(h("li", "no dependencies"));
     const claimed = view.claim ? `claimed by ${view.claim.claimant_id}` : "unclaimed";
     const proof = view.candidate_proof;
+    // the working key-ideas.md a review request needs (ADR-0013): drafted by the proof agent when
+    // there is none; the author edits it, and requesting review confirms it
+    const working = view.key_ideas_working;
+    const summary = [];
+    if (working && !working.exists) {
+      summary.push(h("p", "No key-ideas.md yet: a review request needs one (核心思路, 主要步骤, 难点, 未覆盖).", { class: "node-hint" }));
+      const draft = h("button", "Draft key ideas with the proof agent", { type: "button", title: "The proof agent writes key-ideas.md from proof.tex and the dependencies; you edit it, then request review" });
+      draft.onclick = async () => {
+        if (typeof draftKeyIdeas !== "function") { tell("The agent panel isn't available on this page.", true); return; }
+        draft.disabled = true;
+        try { await draftKeyIdeas(); tell("The proof agent drafted key-ideas.md: read and edit it, then request review to confirm it."); }
+        catch (error) { tell(`${error.code || "error"}: ${error.message}`, true); }
+        finally { draft.disabled = false; }
+        await render();
+      };
+      const box = h("div", null, { class: "node-action" });
+      box.append(draft);
+      summary.push(box);
+    } else if (working && working.missing.length) {
+      summary.push(h("p", `key-ideas.md still leaves ${working.missing.join(" and ")} empty: fill it in before requesting review.`, { class: "node-hint" }));
+    }
     panel.replaceChildren(
       h("p", node.statement, { class: "node-statement" }),
       ...node.assumptions.map((a) => h("p", `assuming ${a}`, { class: "node-assumption" })),
@@ -183,9 +216,11 @@
       h("h4", "Actions"),
       action("Claim", "/claim", [["reassign", "checkbox", "take it over"]], (v) => ({ reassign: v.reassign }), () => { tell("Claimed."); return render(); }),
       action("Unassign", "/unassign", [], () => ({}), () => { tell("Unassigned."); return render(); }),
+      ...summary,
       action("Request review", "/request-review", [["rationale", "textarea", "why this node is scoped to prove directly"]], (v) => ({ rationale: v.rationale }),
         (snapshot) => { tell(`Snapshot v${snapshot.version} awaits review.` + (snapshot.resnapshot_after_loss == null ? "" :
-          ` A re-snapshot after loss of v${snapshot.resnapshot_after_loss}: it needs its own review.`)); return render(); }, savedFirst),
+          ` A re-snapshot after loss of v${snapshot.resnapshot_after_loss}: it needs its own review.`) +
+          (snapshot.key_ideas_drafted_by ? ` Its key ideas, drafted by ${snapshot.key_ideas_drafted_by}, are confirmed as yours.` : "")); return render(); }, savedFirst),
       action("Split", "/split", [["children", "textarea", "one child per line: id = statement"], ["reassign", "checkbox", "take it over"]],
         (v) => ({ children: children(v.children), reassign: v.reassign }), (result) => { location.href = result.next; }),
       // one dependency edge at a time (#96): a Lemma the proof came to use, or a dependency handed down to a child

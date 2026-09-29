@@ -169,6 +169,8 @@ def render_candidate_proof(record: CandidateProofRecord) -> str:
     table.add_row("Scoping rationale", record.scoping_rationale)
     if record.resnapshot_after_loss is not None:
         table.add_row("Note", f"re-snapshot after loss of v{record.resnapshot_after_loss}; it needs its own review")
+    if record.key_ideas_drafted_by is not None:
+        table.add_row("Key ideas", f"drafted by {record.key_ideas_drafted_by}, confirmed by {record.submitted_by} in this request")
     console.print(table)
     return console.export_text()
 

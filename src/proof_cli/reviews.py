@@ -92,6 +92,10 @@ class ReviewEntry(BaseModel):
     payload: DecisionPayload | None = None
     # moved here from the SQLite review_history table (ADR-0010)
     migrated: bool = False
+    # an Acceptance of a snapshot whose key-ideas summary the proof agent drafted, and its
+    # author confirmed by requesting review: who drafted it (ADR-0013). Not part of what the
+    # decision binds; the frozen summary itself is, through the snapshot's SHA-256.
+    key_ideas_drafted_by: str | None = None
 
 
 # (kind, decision value) -> (object_type, recorded state)

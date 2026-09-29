@@ -95,10 +95,15 @@ class StudioHub:
                 root, node_id = self.store.root, node.id
                 self._studios[node.id] = Studio(
                     folder, fixed_build=NODE_BUILD, hidden=NODE_HIDDEN, agent_scratch="scratch",
-                    # the node's proof agent: rooted at the project, reading its library (ADR-0011 point 8)
-                    agent_context=lambda: ProofAgentContext(node_id, root, library_folders(root)),
+                    # the node's proof agent: rooted at the project, reading its library (ADR-0011 point 8),
+                    # and knowing the node's dependencies as of each turn, to draft its key ideas (ADR-0013)
+                    agent_context=lambda: ProofAgentContext(node_id, root, library_folders(root), dependencies=self._dependencies(node_id)),
                 )
             return self._studios[node.id]
+
+    def _dependencies(self, node_id: str) -> list[str]:
+        node = proof_map.get_node(self.store, node_id)
+        return list(node.dependencies) if node is not None else []
 
     def close(self) -> None:
         with self._lock:

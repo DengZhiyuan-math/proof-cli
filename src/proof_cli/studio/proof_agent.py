@@ -26,6 +26,8 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .. import key_ideas
+
 PROJECT_CONFIG = "proof.toml"
 # the commands the agent may run besides `proof`: computation in support of its reasoning
 COMPUTATION = ("python", "python3", "sage", "lean", "lake", "gp", "maxima", "M2", "magma", "gap")
@@ -67,14 +69,40 @@ Work this way:
    directly, split it into Claims instead: `proof node split {node} --child <id>=<statement>
    --created-by {name}`. If the proof comes to use another node of the map, add the edge:
    `proof node depend {node} --add <id> --by {name}` (`--remove <id>`, `--move <id> --to <child>`).
-4. When the proof is ready: `proof node request-review {node} --rationale "<why this node is
-   scoped to prove directly>" --requested-by {name}`.
+4. When the proof is ready, write its key ideas in key-ideas.md (核心思路, 主要步骤, 难点, 未覆盖;
+   the review starts from them), then: `proof node request-review {node} --rationale "<why this
+   node is scoped to prove directly>" --requested-by {name}`.
 5. Record an Evidence check only for a checker you actually ran, with what it reported:
    `proof node evidence record <candidate-proof-id> <outcome> --run-by <checker>`.
 
 `proof` acts on the project through $PROOF_ROOT. Change project state only through `proof`, and
 change files only in this node's folder: its sources and scratch/, never snapshots/, build/ or
 reviews.jsonl.
+"""
+
+
+KEY_IDEAS_BRIEF = """\
+Draft this node's key-ideas summary: create key-ideas.md in this folder ({node}). It is what the
+researcher reads first when reviewing the proof, so it must say what the proof in proof.tex
+actually does, not what it should do. Read proof.tex (and any file it \\input's) and the
+dependencies it rests on: {dependencies}. Don't change the proof, and write no other file.
+
+Write Markdown, with mathematics as $…$, under exactly these four headings:
+
+## 核心思路
+One or two sentences: why the result holds. (Required.)
+
+## 主要步骤
+3–7 numbered steps, each naming the dependency node it uses, by id. (Required.)
+
+## 难点
+Where the proof is most likely to be wrong: what the reviewer should check hardest. Write 「无」 if nothing stands out.
+
+## 未覆盖
+Boundary cases, extra assumptions, or parts not yet handled. Write 「无」 if there are none.
+
+If proof.tex has no proof yet, say so under 核心思路 instead of inventing one. The author edits
+your draft; requesting review is how they confirm it, and the review records that you drafted it.
 """
 
 
@@ -86,6 +114,22 @@ class ProofAgentContext:
     project_root: Path
     library: list[Path] = field(default_factory=list)
     name: str = "studio-agent"   # the name it claims, splits and requests review under
+    dependencies: list[str] = field(default_factory=list)   # the node's, for drafting its key ideas
+
+    def key_ideas_prompt(self) -> str:
+        """The turn that drafts a missing key-ideas.md from proof.tex and the dependencies (ADR-0013)."""
+        deps = ", ".join(f"{dep} (../{dep}/)" for dep in self.dependencies) or "none (it has no dependencies)"
+        return KEY_IDEAS_BRIEF.format(node=self.node_id, dependencies=deps)
+
+    def mark_drafted(self, path: Path) -> None:
+        """After the drafting turn: the summary's first line records that this agent drafted it,
+        so the review of the snapshot that freezes it notes "drafted by agent, confirmed by author"."""
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return  # nothing was drafted
+        if key_ideas.parse(text).drafted_by is None:
+            path.write_text(key_ideas.drafted_marker(self.name) + "\n" + text, encoding="utf-8")
 
     def env(self) -> dict[str, str]:
         """The agent's environment: PROOF_ROOT set to the project, and `proof` reachable."""
