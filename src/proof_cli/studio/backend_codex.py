@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .backends import SYSTEM_APPEND, CliBackend, Job, find_bin
+from .backends import CliBackend, Job, find_bin, system_append
 
 SANDBOX = {"edit": "workspace-write", "ask": "read-only"}
 
@@ -58,8 +58,12 @@ class Codex(CliBackend):
         return {**super().info(), "bin": self.bin()}
 
     def command(self, job: Job) -> tuple[list[str], str]:
-        cmd = [self.bin(), "exec", "--json", "--skip-git-repo-check",
-               "--sandbox", SANDBOX.get(job.mode, "read-only")]
+        sandbox = SANDBOX.get(job.mode, "read-only")
+        if job.context:  # a node's proof agent (proof_agent.py)
+            before, after = job.context.codex_args(sandbox)
+            cmd = [self.bin(), *before, "exec", "--json", "--skip-git-repo-check", *after]
+        else:
+            cmd = [self.bin(), "exec", "--json", "--skip-git-repo-check", "--sandbox", sandbox]
         if job.model:
             cmd += ["-m", job.model]
         if job.effort:
@@ -70,7 +74,7 @@ class Codex(CliBackend):
         else:
             # Codex has no flag to add to its system prompt; the first message carries it
             # and the resumed conversation keeps it.
-            prompt = f"[Instructions from the editor]\n{SYSTEM_APPEND}\n[Message]\n{prompt}"
+            prompt = f"[Instructions from the editor]\n{system_append(job.context)}\n[Message]\n{prompt}"
         return cmd + ["-"], prompt
 
     def handle(self, d: dict, job: Job, st: dict) -> None:

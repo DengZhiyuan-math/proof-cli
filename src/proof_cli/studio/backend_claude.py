@@ -22,7 +22,7 @@ import time
 from pathlib import Path
 
 from .fsutil import read_json
-from .backends import NO_WINDOW, SYSTEM_APPEND, TREE, CliBackend, Job, find_bin, kill_tree
+from .backends import NO_WINDOW, TREE, CliBackend, Job, find_bin, kill_tree, system_append
 
 MODES = {"edit": "acceptEdits", "ask": "plan"}
 
@@ -192,10 +192,16 @@ class ClaudeCode(CliBackend):
             # acceptEdits would accept an edit to any file. In default mode a headless run
             # refuses every write that no rule allows, so only these files can change.
             perm = "default"
+        if job.context:
+            # a node's proof agent (proof_agent.py): explicit permissions, never the repository's.
+            # In default mode a headless run refuses whatever no rule allows.
+            perm = "default" if job.mode == "edit" else "plan"
         cmd = [self.bin(), "-p", "--output-format", "stream-json", "--verbose",
                "--include-partial-messages", "--permission-mode", perm,
-               "--append-system-prompt", SYSTEM_APPEND]
-        if job.scope:
+               "--append-system-prompt", system_append(job.context)]
+        if job.context:
+            cmd += job.context.claude_args(job.mode == "edit", self.scope_rules(job.scope) if job.scope else None)
+        elif job.scope:
             cmd += ["--allowedTools", *self.scope_rules(job.scope)]
         if job.session_id:
             cmd += ["--resume", job.session_id]
