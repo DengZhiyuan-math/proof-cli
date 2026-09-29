@@ -1,6 +1,6 @@
 # The web app is a full human interaction surface, not a read-only viewer
 
-**Status**: accepted; amended by ADR-0010 (decisions are made on the proof map page without a passkey)
+**Status**: accepted; amended by ADR-0010 (decisions are made on the proof map page without a passkey); its "Start agent" paragraph is superseded by ADR-0011 (the node page runs the node's proof agent)
 
 The local web app (issue #5) could have stayed a pretty graph viewer, leaving every mutation — Accept, revise, Split, Promote, open or resolve a Challenge — to the CLI. That would break the product's own loop: a researcher who can *see* the structure but has to switch to a terminal to *act* on it isn't getting what a visual proof map is for.
 
@@ -13,5 +13,7 @@ This does not weaken ADR-0004 or ADR-0006, because of what actually changes unde
   - *Superseded by ADR-0009:* a `confirmed=True` flag or a form click is not a human decision — any agent can pass the flag. Human-only operations are now issued only from the web app and count only when signed with an enrolled reviewer passkey; the CLI can only request them.
 
 "Start agent" (handing a claimed-and-ready node to an agent) means posting it to wherever agents pick up work, or notifying one that's already running — it is not the web app spawning or supervising an agent process itself. Agent orchestration belongs to whatever runs the agent (Codex, Claude Code), not to proof-cli's core.
+
+*Superseded by ADR-0011 (#72):* the web app now does run an agent. A local node's page is its studio, whose agent panel starts the node's proof agent (Claude Code or Codex) in the node's folder. The permission split above is unchanged: the proof agent reaches the project only through `proof`, which makes no Human Review decision.
 
 This is hard to reverse the way ADR-0006 already is: once three surfaces are built against one service layer with this permission split baked in, un-writable-ing the web app, or re-centering the protocol back on the CLI specifically, would mean reworking every adapter's relationship to that layer, not a local change.

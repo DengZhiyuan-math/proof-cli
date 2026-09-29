@@ -232,7 +232,7 @@ def test_proof_codex_and_the_mcp_plugin_are_gone():
 
 def test_nothing_still_points_at_the_retired_entries():
     """Outside the archived plans and the ADRs' history, no tracked file names them: the
-    repository's sources and shipped files, never a local cache (PR #77 review)."""
+    repository's implementation and docs, not regression-test literals or local caches."""
     import subprocess
 
     listed = subprocess.run(["git", "ls-files", "-z"], cwd=REPO, capture_output=True, text=True)
@@ -242,7 +242,7 @@ def test_nothing_still_points_at_the_retired_entries():
     this = Path(__file__).resolve()
     for rel in filter(None, listed.stdout.split("\0")):
         path = REPO / rel
-        if rel.startswith(".planning/") or rel.startswith("docs/adr/") or path == this or not path.is_file():
+        if rel.startswith((".planning/", "docs/adr/", "tests/")) or path == this or not path.is_file():
             continue
         text = path.read_text(errors="ignore").lower()
         assert not [name for name in retired if name in text], rel

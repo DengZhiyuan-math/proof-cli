@@ -1,6 +1,6 @@
 # Agent execution protocol: exclusive claims, a unified command surface, a JSON contract
 
-**Status**: accepted; amended by ADR-0010 (submit is "request review" on a snapshot; a claim is a plain assignee, no token)
+**Status**: accepted; amended by ADR-0010 (submit is "request review" on a snapshot; a claim is a plain assignee, no token) and by ADR-0011 (`proof` is the one agent entry, rooted by `PROOF_ROOT`; `proof-codex`, `proof codex` and the MCP plugin are retired)
 
 Every prior decision in this map (ADR-0001 through ADR-0005) fixed the domain model. This one (issue #13) fixes how an agent is allowed to touch it: what a claim actually guards against, what commands exist and how they're grouped, what "the JSON output" concretely looks like, and how "split before you hallucinate a proof" is enforced given the system cannot itself judge whether a proof is too large or too weak. Twelve invariants:
 
@@ -51,3 +51,5 @@ This is hard to reverse the way a public API always is: once the Codex plugin, a
 - §7's `CLAIM_CONFLICT` carries `node_id`, `assignee` and `claimed_at` rather than `active_claim_id`: a claim is an assignee, not a token (ADR-0010).
 - **Every `--json` invocation writes exactly one envelope to stdout, a failure included**, on both entry points, `proof` and `proof-codex` (`src/proof_cli/contract.py`). A command line that doesn't parse is `USAGE_ERROR` (exit 2). An unexpected failure is `INTERNAL_ERROR` (exit 1), never a traceback. The one exception is `--help`, which prints help.
 - **Only a command that creates content may start a project** (`STARTS_A_PROJECT`: `init`, `node create`, `theorem add`, `reference import`, `exchange import` and the like). Any other command pointed at a folder with no project fails with `PROJECT_NOT_FOUND` and creates nothing. A command missing from that list fails safe: it refuses, rather than silently starting a project in a mistyped `--root`.
+
+**Update (ADR-0011, #67):** `proof` is the one agent entry. `proof-codex`, the `proof codex …` group and the proof-routing MCP plugin are retired, so the rule above about "both entry points" now concerns `proof` alone. Every command's `--root` defaults to `$PROOF_ROOT`, then to the current folder. An agent working inside a node's folder, including the studio's proof agent, keeps `PROOF_ROOT` set to the project, so its calls never start a nested project.

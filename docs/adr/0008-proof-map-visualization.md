@@ -1,6 +1,6 @@
 # DAG is canonical, tree is explanatory, fog lives outside the graph
 
-**Status**: accepted
+**Status**: accepted; amended by ADR-0011 (a local node's page is its LaTeX studio; an imported result has its own page)
 
 A throwaway prototype (issue #10, `prototype/proof-map-ui` branch, published as a Claude Artifact) tested whether the domain model settled in ADR-0001 through ADR-0007 actually reads as a proof map a mathematician can use — not whether it looks good, but whether it answers, at a glance: how is the main theorem decomposed, what's already proven, what's in progress, what's ready for an agent right now, and what's blocking everything. Three decisions came out of building and looking at it.
 
@@ -11,3 +11,5 @@ A throwaway prototype (issue #10, `prototype/proof-map-ui` branch, published as 
 **Proof fog stays outside the graph, as its own list, never a graph node.** A fog item is by definition not precise enough to be a Claim yet — giving it a node would either force a premature, fake-precise statement into the model, or require a special "vague" node kind that every graph operation (dependency, frontier, Acceptance) then has to special-case. Instead fog is a flat, separate list next to the graph; when an item becomes precise enough to state and depend on, it **crystallizes**: a new Claim node is created (an ordinary node-creation, not a migration of the fog item itself) and the fog entry is dropped. Nothing about the graph model needs to know fog exists.
 
 These three are genuine trade-offs made after trying the shape, not the obvious path (a tree would have been the simpler default to build; fog-as-a-node would have been the simpler model to implement), and reversing any of them means redoing both the visualization and, for the first two, re-litigating how the graph itself is read — hence an ADR rather than a prototype note.
+
+**Update (ADR-0011, #70):** the map page is the researcher's one entry, and where nodes are created. Clicking a theorem, lemma or claim opens its **studio**: editor, compile, PDF with SyncTeX, the proof agent, and a node panel for claim, split, request review, Challenge, Evidence check and the node's Review decisions. Clicking an imported result opens its own page, with its source, dependents and Reference review. The three views above (DAG, tree, fog) are unchanged.
