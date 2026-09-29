@@ -7,11 +7,11 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field, model_serializer
+from pydantic import BaseModel, Field, model_serializer, model_validator
 
-from .collaboration import CollaborationState, list_review_records, load_collaboration
+from .collaboration import CollaborationState, load_collaboration
 from .domain import ProjectSnapshot, ProofMapNode, TheoremContract, TheoremProvenanceKind, utc_now
-from .proof_map import get_acceptance_state, get_integrity_state, get_node, list_nodes
+from .proof_map import ProofMapError, get_acceptance_state, get_integrity_state, get_node, list_nodes
 from .references import ReferenceRecord
 from .storage import (
     ProjectStore,
@@ -36,17 +36,60 @@ class PublicationAudience(str, Enum):
 
 
 class PublicationReadiness(str, Enum):
+    """The editorial track (issue #30): how far a claim has got towards a paper.
+
+    Editorial, never a Human Review decision, and settable by agents. It says
+    nothing about whether the mathematics holds; that is the node's own
+    acceptance and integrity, read live (`node_acceptance_and_integrity`).
+    """
+
     internal_draft = "internal_draft"
     collaborator_ready = "collaborator_ready"
     supplement_ready = "supplement_ready"
     paper_ready = "paper_ready"
-    disputed = "disputed"
-    blocked = "blocked"
     withdrawn = "withdrawn"
-    superseded = "superseded"
 
 
 PublicationState = PublicationReadiness
+
+# The moves the editorial track allows, documented in CONTEXT.md ("Editorial
+# readiness"): one step forward or back, withdraw from anywhere, and a
+# withdrawn claim starts again at internal_draft. Re-setting the current state
+# (to edit a claim's details) is always allowed.
+ALLOWED_TRANSITIONS: dict[PublicationReadiness, tuple[PublicationReadiness, ...]] = {
+    PublicationReadiness.internal_draft: (PublicationReadiness.collaborator_ready, PublicationReadiness.withdrawn),
+    PublicationReadiness.collaborator_ready: (
+        PublicationReadiness.internal_draft,
+        PublicationReadiness.supplement_ready,
+        PublicationReadiness.withdrawn,
+    ),
+    PublicationReadiness.supplement_ready: (
+        PublicationReadiness.collaborator_ready,
+        PublicationReadiness.paper_ready,
+        PublicationReadiness.withdrawn,
+    ),
+    PublicationReadiness.paper_ready: (PublicationReadiness.supplement_ready, PublicationReadiness.withdrawn),
+    PublicationReadiness.withdrawn: (PublicationReadiness.internal_draft,),
+}
+
+# States that put a claim in front of readers outside the project: only a node
+# that is `accepted · current` may be moved to one (the write gate), and an
+# export withholds a claim at one that no longer is.
+READY_STATES = frozenset({PublicationReadiness.supplement_ready, PublicationReadiness.paper_ready})
+
+# Readiness values the enum used to hold, and what a stored claim carrying one
+# becomes when it is loaded. `disputed` and `blocked` were mathematical or
+# workflow facts, which the node's own axes now carry, so the claim drops back
+# to a draft; `superseded` means another claim replaced it, so it is withdrawn.
+LEGACY_READINESS: dict[str, PublicationReadiness] = {
+    "disputed": PublicationReadiness.internal_draft,
+    "blocked": PublicationReadiness.internal_draft,
+    "superseded": PublicationReadiness.withdrawn,
+}
+
+PUBLICATION_OBJECT_TYPES = ("proof_map_node", "theorem_contract")
+
+EDITORIAL_LABEL = "editorial, not a Human Review decision"
 
 
 class PublicationCitationKind(str, Enum):
@@ -70,6 +113,8 @@ class PublicationReleaseStatus(str, Enum):
 
 
 class PublicationClaim(BaseModel):
+    """A claim's editorial record. Every field here is editorial (`track`)."""
+
     id: str = Field(default_factory=lambda: _new_id("pubclaim"))
     object_type: str
     object_id: str
@@ -82,11 +127,32 @@ class PublicationClaim(BaseModel):
     editorial_notes: list[str] = Field(default_factory=list)
     supporting_reference_ids: list[str] = Field(default_factory=list)
     supporting_theorem_ids: list[str] = Field(default_factory=list)
-    release_status: PublicationReleaseStatus = PublicationReleaseStatus.approved
+    # None until a release status is explicitly given (issue #30: no default approval)
+    release_status: PublicationReleaseStatus | None = None
     release_notes: str = ""
     updated_by: str = "human"
+    # the retired readiness value this claim was loaded with, if any (LEGACY_READINESS)
+    migrated_from: str | None = None
+    track: str = "editorial"
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_readiness(cls, data: Any) -> Any:
+        if isinstance(data, dict) and data.get("readiness") in LEGACY_READINESS:
+            legacy = data["readiness"]
+            migrated = LEGACY_READINESS[legacy].value
+            data = {
+                **data,
+                "readiness": migrated,
+                "migrated_from": legacy,
+                "editorial_notes": [
+                    *data.get("editorial_notes", []),
+                    f"readiness '{legacy}' is retired; migrated to '{migrated}' (issue #30)",
+                ],
+            }
+        return data
 
     @property
     def publication_state(self) -> PublicationReadiness:
@@ -110,6 +176,8 @@ class PublicationSelection(BaseModel):
     # (issue #30). `None` for a claim not backed by a proof_map_node.
     acceptance_state: str | None = None
     integrity_state: str | None = None
+    # at a ready state for this audience, but not `accepted · current` now
+    withheld: bool = False
 
 
 class PublicationView(BaseModel):
@@ -155,6 +223,9 @@ class PublicationReleaseRecord(BaseModel):
     withdrawn_by: list[str] = Field(default_factory=list)
     rationale: str = ""
     notes: str = ""
+    # an editorial record: `approved_by` names who said so, and is not a Human
+    # Review decision; a release sign-off on record is the release commit's git author
+    track: str = "editorial"
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 
@@ -261,10 +332,6 @@ def _normalize_audience(value: PublicationAudience | str) -> PublicationAudience
     return value if isinstance(value, PublicationAudience) else PublicationAudience(value)
 
 
-def _normalize_readiness(value: PublicationReadiness | str) -> PublicationReadiness:
-    return value if isinstance(value, PublicationReadiness) else PublicationReadiness(value)
-
-
 def _normalize_visibility(value: PublicationVisibility | str | None) -> PublicationVisibility:
     if value is None:
         return PublicationVisibility.internal_only
@@ -276,10 +343,7 @@ def _claim_visibility(claim: PublicationClaim) -> PublicationVisibility:
         return PublicationVisibility.internal_only
     if claim.readiness == PublicationReadiness.paper_ready:
         return PublicationVisibility.paper
-    if claim.readiness in {
-        PublicationReadiness.supplement_ready,
-        PublicationReadiness.collaborator_ready,
-    }:
+    if claim.readiness == PublicationReadiness.supplement_ready:
         return PublicationVisibility.supplement
     return PublicationVisibility.internal_only
 
@@ -329,7 +393,8 @@ def _claim_from_proof_map_node(node: ProofMapNode) -> PublicationClaim:
         readiness=PublicationReadiness.internal_draft,
         citation_kind=PublicationCitationKind.project_original,
         internal_only=False,
-        supporting_theorem_ids=list(node.dependencies),
+        # a node's dependencies are node ids, not theorem-contract ids: they stay
+        # on the node, and aren't copied into supporting_theorem_ids (issue #30)
         updated_by=node.updated_by,
         created_at=node.created_at,
         updated_at=node.updated_at,
@@ -345,9 +410,130 @@ def node_acceptance_and_integrity(store: ProjectStore, object_type: str, object_
     publication's own editorial `readiness` is a completely separate,
     explicitly-set track (issue #30).
     """
-    if object_type != "proof_map_node":
+    if object_type != "proof_map_node" or get_node(store, object_id) is None:
         return None, None
     return get_acceptance_state(store, object_id), get_integrity_state(store, object_id)
+
+
+def standing_problem(object_type: str, acceptance_state: str | None, integrity_state: str | None) -> str | None:
+    """Why a claim can't stand at a ready state, or None when its node is `accepted · current`."""
+    if object_type != "proof_map_node":
+        return f"a {object_type} claim has no acceptance axis"
+    if acceptance_state is None:
+        return "no such proof map node"
+    if acceptance_state != "accepted" or integrity_state != "current":
+        return f"not accepted · current (acceptance={acceptance_state}, integrity={integrity_state})"
+    return None
+
+
+def _axes_text(acceptance_state: str | None, integrity_state: str | None) -> str:
+    if acceptance_state is None:
+        return "acceptance=none integrity=none"
+    return f"acceptance={acceptance_state} integrity={integrity_state}"
+
+
+def claim_payload(store: ProjectStore, claim: PublicationClaim) -> dict[str, Any]:
+    """A claim as the CLI and the exports show it: its editorial record, and its node's live axes beside it."""
+    acceptance_state, integrity_state = node_acceptance_and_integrity(store, claim.object_type, claim.object_id)
+    return {
+        **claim.model_dump(mode="json"),
+        "track": "editorial",
+        "acceptance_state": acceptance_state,
+        "integrity_state": integrity_state,
+    }
+
+
+def _normalize_object_type(object_type: str) -> str:
+    if object_type not in PUBLICATION_OBJECT_TYPES:
+        raise ProofMapError(
+            "INVALID_OBJECT_TYPE",
+            f"not a publication object type: {object_type!r}",
+            details={"object_type": object_type, "allowed": list(PUBLICATION_OBJECT_TYPES)},
+        )
+    return object_type
+
+
+def _require_object(store: ProjectStore, object_type: str, object_id: str) -> Any:
+    from .theorems import list_theorems
+
+    if object_type == "proof_map_node":
+        node = get_node(store, object_id)
+        if node is None:
+            raise ProofMapError("NODE_NOT_FOUND", f"no proof map node {object_id!r}", details={"node_id": object_id})
+        return node
+    theorem = next((item for item in list_theorems(store) if item.id == object_id), None)
+    if theorem is None:
+        raise ProofMapError("THEOREM_NOT_FOUND", f"no theorem contract {object_id!r}", details={"theorem_id": object_id})
+    return theorem
+
+
+def _parse_enum(enum: type[Enum], value: Any, code: str, what: str) -> Any:
+    if isinstance(value, enum):
+        return value
+    try:
+        return enum(value)
+    except ValueError:
+        raise ProofMapError(
+            code, f"not a {what}: {value!r}", details={"value": value, "allowed": [member.value for member in enum]}
+        ) from None
+
+
+def parse_readiness(value: PublicationReadiness | str) -> PublicationReadiness:
+    return _parse_enum(PublicationReadiness, value, "INVALID_READINESS", "readiness")
+
+
+def parse_audience(value: PublicationAudience | str) -> PublicationAudience:
+    return _parse_enum(PublicationAudience, value, "INVALID_AUDIENCE", "publication audience")
+
+
+def parse_release_status(value: PublicationReleaseStatus | str) -> PublicationReleaseStatus:
+    return _parse_enum(PublicationReleaseStatus, value, "INVALID_RELEASE_STATUS", "release status")
+
+
+def parse_citation_kind(value: PublicationCitationKind | str) -> PublicationCitationKind:
+    return _parse_enum(PublicationCitationKind, value, "INVALID_CITATION_KIND", "citation kind")
+
+
+def check_readiness_write(
+    store: ProjectStore, object_type: str, object_id: str, current: PublicationReadiness, target: PublicationReadiness
+) -> None:
+    """The editorial track's rules for one write (issue #30), raising a stable ProofMapError.
+
+    The move must be one ALLOWED_TRANSITIONS lists, and a ready state needs a
+    node that is `accepted · current` now. A theorem_contract claim has no
+    acceptance axis, so it never reaches one.
+    """
+    if target != current and target not in ALLOWED_TRANSITIONS[current]:
+        raise ProofMapError(
+            "INVALID_READINESS_TRANSITION",
+            f"the editorial track doesn't move {current.value} -> {target.value}",
+            details={
+                "from": current.value,
+                "to": target.value,
+                "allowed": [current.value, *(state.value for state in ALLOWED_TRANSITIONS[current])],
+            },
+        )
+    if target not in READY_STATES:
+        return
+    if object_type != "proof_map_node":
+        raise ProofMapError(
+            "PUBLICATION_NO_ACCEPTANCE_AXIS",
+            f"{object_type}/{object_id} has no acceptance axis, so it can't be marked {target.value}",
+            details={"object_type": object_type, "object_id": object_id, "readiness": target.value},
+        )
+    acceptance_state, integrity_state = node_acceptance_and_integrity(store, object_type, object_id)
+    if acceptance_state != "accepted" or integrity_state != "current":
+        raise ProofMapError(
+            "PUBLICATION_NOT_ACCEPTED",
+            f"{object_id} is {acceptance_state} · {integrity_state}; only a node that is accepted · current "
+            f"may be marked {target.value}",
+            details={
+                "node_id": object_id,
+                "readiness": target.value,
+                "acceptance_state": acceptance_state,
+                "integrity_state": integrity_state,
+            },
+        )
 
 
 def _claim_sort_key(claim: PublicationClaim) -> tuple[str, str, str]:
@@ -381,7 +567,7 @@ def set_publication_claim(
     store: ProjectStore,
     object_id: str,
     *,
-    object_type: str = "theorem_contract",
+    object_type: str = "proof_map_node",
     display_name: str = "",
     title: str = "",
     section_placement: str = "",
@@ -392,14 +578,29 @@ def set_publication_claim(
     editorial_notes: list[str] | None = None,
     supporting_reference_ids: list[str] | None = None,
     supporting_theorem_ids: list[str] | None = None,
-    release_status: PublicationReleaseStatus | str = PublicationReleaseStatus.approved,
+    release_status: PublicationReleaseStatus | str | None = None,
     release_notes: str = "",
     updated_by: str = "human",
 ) -> PublicationClaim:
+    """Set a claim's editorial record: an editorial write, open to agents, never a Human Review decision.
+
+    Refused, with a stable code, for an object that doesn't exist, a move the
+    editorial track doesn't allow, or a ready state on a node that isn't
+    `accepted · current` (`check_readiness_write`). Nothing is written then.
+    """
+    _normalize_object_type(object_type)
+    target_object = _require_object(store, object_type, object_id)
+    target = parse_readiness(readiness)
+    citation = parse_citation_kind(citation_kind) if citation_kind else None
+    release = parse_release_status(release_status) if release_status else None
     state = load_publication_state(store)
     claim = next((item for item in state.claims if item.object_type == object_type and item.object_id == object_id), None)
+    check_readiness_write(
+        store, object_type, object_id, claim.readiness if claim is not None else PublicationReadiness.internal_draft, target
+    )
     if claim is None:
-        claim = PublicationClaim(object_type=object_type, object_id=object_id)
+        claim = _claim_from_proof_map_node(target_object) if object_type == "proof_map_node" else _claim_from_theorem(target_object)
+        claim.created_at = claim.updated_at = utc_now()
         state.claims.append(claim)
     if not display_name:
         display_name = claim.display_name
@@ -408,18 +609,18 @@ def set_publication_claim(
     claim.display_name = display_name
     claim.title = title
     claim.section_placement = section_placement or claim.section_placement
-    claim.readiness = _normalize_readiness(readiness)
+    claim.readiness = target
     claim.internal_only = internal_only
-    claim.citation_kind = citation_kind if isinstance(citation_kind, PublicationCitationKind) or citation_kind is None else PublicationCitationKind(citation_kind)
-    if claim.citation_kind is None:
-        claim.citation_kind = PublicationCitationKind.project_original
+    if citation is not None:
+        claim.citation_kind = citation
     if editorial_notes is not None:
         claim.editorial_notes = list(editorial_notes)
     if supporting_reference_ids is not None:
         claim.supporting_reference_ids = list(supporting_reference_ids)
     if supporting_theorem_ids is not None:
         claim.supporting_theorem_ids = list(supporting_theorem_ids)
-    claim.release_status = release_status if isinstance(release_status, PublicationReleaseStatus) else PublicationReleaseStatus(release_status)
+    if release is not None:
+        claim.release_status = release
     claim.release_notes = release_notes or readiness_reason or claim.release_notes
     claim.updated_by = updated_by
     claim.updated_at = utc_now()
@@ -439,7 +640,7 @@ def set_publication_state(
     object_id: str,
     publication_state: PublicationReadiness | str,
     *,
-    object_type: str = "theorem_contract",
+    object_type: str = "proof_map_node",
     display_name: str = "",
     title: str = "",
     section_placement: str = "",
@@ -449,7 +650,7 @@ def set_publication_state(
     editorial_notes: list[str] | None = None,
     supporting_reference_ids: list[str] | None = None,
     supporting_theorem_ids: list[str] | None = None,
-    release_status: PublicationReleaseStatus | str = PublicationReleaseStatus.approved,
+    release_status: PublicationReleaseStatus | str | None = None,
     release_notes: str = "",
     updated_by: str = "human",
 ) -> PublicationClaim:
@@ -478,7 +679,7 @@ def set_publication_readiness(
     object_id: str,
     readiness: PublicationReadiness | str,
     *,
-    object_type: str = "theorem_contract",
+    object_type: str = "proof_map_node",
     display_name: str = "",
     title: str = "",
     section_placement: str = "",
@@ -488,7 +689,7 @@ def set_publication_readiness(
     editorial_notes: list[str] | None = None,
     supporting_reference_ids: list[str] | None = None,
     supporting_theorem_ids: list[str] | None = None,
-    release_status: PublicationReleaseStatus | str = PublicationReleaseStatus.approved,
+    release_status: PublicationReleaseStatus | str | None = None,
     release_notes: str = "",
     updated_by: str = "human",
 ) -> PublicationClaim:
@@ -519,7 +720,7 @@ def list_publication_claims(store: ProjectStore, *, object_type: str = "") -> li
     return claims
 
 
-def get_publication_claim(store: ProjectStore, object_id: str, *, object_type: str = "theorem_contract") -> PublicationClaim | None:
+def get_publication_claim(store: ProjectStore, object_id: str, *, object_type: str = "proof_map_node") -> PublicationClaim | None:
     from .theorems import list_theorems
 
     state = load_publication_state(store)
@@ -612,23 +813,28 @@ def _select_claims_for_audience(
         if claim.internal_only:
             visible = False
             reasons.append("internal only")
-        if claim.readiness in {PublicationReadiness.blocked, PublicationReadiness.disputed} and audience != PublicationAudience.internal:
+        if claim.readiness == PublicationReadiness.withdrawn and audience != PublicationAudience.internal:
             visible = False
-            reasons.append(f"readiness={claim.readiness.value}")
+            reasons.append("withdrawn")
         if audience == PublicationAudience.paper:
             if claim.readiness != PublicationReadiness.paper_ready:
                 visible = False
                 reasons.append("not paper ready")
         elif audience == PublicationAudience.supplement:
-            if claim.readiness not in {
-                PublicationReadiness.paper_ready,
-                PublicationReadiness.supplement_ready,
-                PublicationReadiness.collaborator_ready,
-            }:
+            if claim.readiness not in READY_STATES:
                 visible = False
                 reasons.append("not supplement ready")
         section_label = (section_mapping or {}).get(claim.object_id, claim.section_placement)
         acceptance_state, integrity_state = node_acceptance_and_integrity(store, claim.object_type, claim.object_id)
+        # the mathematical track: a claim at a ready state whose node isn't
+        # `accepted · current` any more is withheld from outside readers, and flagged
+        withheld = False
+        if visible and audience != PublicationAudience.internal:
+            problem = standing_problem(claim.object_type, acceptance_state, integrity_state)
+            if problem is not None:
+                visible = False
+                withheld = True
+                reasons.append(f"withheld: {problem}")
         selections.append(
             PublicationSelection(
                 claim=claim,
@@ -637,6 +843,7 @@ def _select_claims_for_audience(
                 section_label=section_label,
                 acceptance_state=acceptance_state,
                 integrity_state=integrity_state,
+                withheld=withheld,
             )
         )
     return selections
@@ -775,6 +982,80 @@ def list_editorial_notes(store: ProjectStore, *, scope: str = "") -> list[Public
     return records
 
 
+def _selection_payload(selection: PublicationSelection) -> dict[str, Any]:
+    return {
+        **selection.claim.model_dump(mode="json"),
+        "track": "editorial",
+        "acceptance_state": selection.acceptance_state,
+        "integrity_state": selection.integrity_state,
+    }
+
+
+def _withheld_payload(selection: PublicationSelection) -> dict[str, Any]:
+    claim = selection.claim
+    return {
+        "object_type": claim.object_type,
+        "object_id": claim.object_id,
+        "display_name": claim.display_name,
+        "readiness": claim.readiness.value,
+        "track": "editorial",
+        "acceptance_state": selection.acceptance_state,
+        "integrity_state": selection.integrity_state,
+        "reason": standing_problem(claim.object_type, selection.acceptance_state, selection.integrity_state),
+    }
+
+
+def publication_review_records(store: ProjectStore, object_ids: set[str]) -> dict[str, list[dict[str, Any]]]:
+    """The review records on these objects, with what counts kept apart from what doesn't (issue #30).
+
+    - `human_review_decisions`: the counted Human Review decisions from
+      `reviews.jsonl`, each one checked with `verify_decision_row`.
+    - `not_counted`: a recorded decision that doesn't verify. It carries its
+      recorded value as `recorded_decision`, never as a `decision`.
+    - `editorial_reviews`: the generic `review_history` reviews (`proof review
+      request/decide`). They are editorial: they never change acceptance, and
+      their outcome is `editorial_decision`, so none reads as an approval.
+    """
+    from . import authority
+    from .collaboration import _fold_review_history, list_review_history
+
+    counted: list[dict[str, Any]] = []
+    not_counted: list[dict[str, Any]] = []
+    for row in authority.list_decisions(store):
+        if row["object_id"] not in object_ids:
+            continue
+        base = {
+            "review_id": row["review_id"],
+            "object_type": row["object_type"],
+            "object_id": row["object_id"],
+            "kind": row["kind"],
+            "reviewer_id": row["reviewer_id"],
+            "rationale": row["rationale"],
+            "created_at": row["created_at"],
+        }
+        verdict = authority.verify_decision_row(store, row["id"])
+        if verdict.status == "verified":
+            counted.append({**base, "decision": row["decision"], "counted": True, "track": "human_review"})
+        else:
+            not_counted.append({**base, "recorded_decision": row["decision"], "counted": False, "reason": verdict.reason})
+    editorial = [
+        {
+            "review_id": record.id,
+            "object_type": record.object_type,
+            "object_id": record.object_id,
+            "reviewer_id": record.reviewer_id,
+            "editorial_decision": record.decision.value,
+            "rationale": record.rationale,
+            "counted": False,
+            "track": "editorial",
+            "created_at": record.created_at.isoformat(),
+        }
+        for record in _fold_review_history(list_review_history(store))
+        if record.object_id in object_ids
+    ]
+    return {"human_review_decisions": counted, "not_counted": not_counted, "editorial_reviews": editorial}
+
+
 def _bundle_payload(
     store: ProjectStore,
     *,
@@ -790,14 +1071,15 @@ def _bundle_payload(
     collaboration = load_collaboration(store)
     memory = load_memory(store)
     view = build_publication_view(store, audience, view_id=view_id)
-    claims = [selection.claim.model_dump(mode="json") for selection in view.selections if selection.visible]
+    claims = [_selection_payload(selection) for selection in view.selections if selection.visible]
+    withheld_claims = [_withheld_payload(selection) for selection in view.selections if selection.withheld]
     suppressed_claim_ids = [selection.claim.object_id for selection in view.selections if not selection.visible]
     visible_claim_ids = {claim["object_id"] for claim in claims}
     references = [reference.model_dump(mode="json") for reference in list_references(store)]
     theorem_contracts = [theorem.model_dump(mode="json") for theorem in list_theorems(store) if theorem.id in visible_claim_ids]
     obligations = [obligation.model_dump(mode="json") for obligation in list_obligations(store)]
     blockers = [blocker.model_dump(mode="json") for blocker in list_blockers(store)]
-    review_records = [record.model_dump(mode="json") for record in list_review_records(store) if record.object_id in visible_claim_ids]
+    review_records = publication_review_records(store, visible_claim_ids)
     citations = [record for record in publication_state.citation_provenance if record.get("theorem_id") in visible_claim_ids]
     verification_summaries = [record.model_dump(mode="json") for record in publication_state.verification_summaries if record.scope in visible_claim_ids]
     editorial_notes = [record.model_dump(mode="json") for record in publication_state.editorial_notes if record.scope in visible_claim_ids]
@@ -819,9 +1101,11 @@ def _bundle_payload(
         "audience": audience.value,
         "view": view.model_dump(mode="json"),
         "project_state": state.model_dump(mode="json"),
-        "collaboration": collaboration.model_dump(mode="json"),
+        # its raw review listing is left out: `review_records` below separates what counts
+        "collaboration": collaboration.model_dump(mode="json", exclude={"review_records"}),
         "memory": memory.model_dump(mode="json"),
         "claims": claims,
+        "withheld_claims": withheld_claims,
         "suppressed_claim_ids": suppressed_claim_ids,
         "theorem_contracts": theorem_contracts,
         "obligations": obligations,
@@ -870,6 +1154,8 @@ def build_publication_manifest(store: ProjectStore, *, view_id: str = "", audien
         "claim_count": len(all_claims),
         "visible_claim_count": len(bundle["claims"]),
         "suppressed_claim_count": len(bundle["suppressed_claim_ids"]),
+        "withheld_claim_count": len(bundle["withheld_claims"]),
+        "withheld_claim_ids": [item["object_id"] for item in bundle["withheld_claims"]],
         "reference_count": len(bundle["references"]),
         "verification_summary_count": len(bundle["verification_summaries"]),
         "release_count": len(bundle["release_history"]),
@@ -893,15 +1179,18 @@ def _record_release(
     audience: PublicationAudience,
     status: PublicationReleaseStatus | str,
     approved_by: list[str] | None = None,
+    withdrawn_by: list[str] | None = None,
     rationale: str = "",
     note: str = "",
 ) -> PublicationReleaseRecord:
+    """Append an editorial release record. `approved_by` is who said so, not a Human Review decision."""
     state = load_publication_state(store)
     record = PublicationReleaseRecord(
         bundle_id=bundle_id,
         audience=audience,
-        status=status if isinstance(status, PublicationReleaseStatus) else PublicationReleaseStatus(status),
+        status=parse_release_status(status),
         approved_by=list(approved_by or []),
+        withdrawn_by=list(withdrawn_by or []),
         rationale=rationale,
         notes=note,
     )
@@ -927,7 +1216,7 @@ def record_publication_release(
     note: str = "",
     bundle_id: str = "",
 ) -> PublicationReleaseRecord:
-    audience_enum = _normalize_audience(audience)
+    audience_enum = parse_audience(audience)
     if not bundle_id:
         bundle_id = f"{audience_enum.value}:{load_publication_state(store).project_id}"
     return _record_release(
@@ -959,9 +1248,31 @@ def record_release_withdrawal(
         audience=audience,
         status=PublicationReleaseStatus.withdrawn,
         approved_by=[],
+        withdrawn_by=withdrawn_by,
         rationale=reason,
         note=reason,
     )
+
+
+def withdraw_release(
+    store: ProjectStore,
+    release_or_bundle_id: str,
+    *,
+    withdrawn_by: list[str] | None = None,
+    reason: str = "",
+) -> PublicationReleaseRecord:
+    """Withdraw a recorded release, named by its release id or its bundle id: an editorial record.
+
+    Appends a `withdrawn` record for that bundle, with the release's audience.
+    Refused with RELEASE_NOT_FOUND when nothing was released under that name.
+    """
+    history = load_publication_state(store).release_history
+    release = next((record for record in reversed(history) if release_or_bundle_id in (record.id, record.bundle_id)), None)
+    if release is None:
+        raise ProofMapError(
+            "RELEASE_NOT_FOUND", f"no release has id or bundle id {release_or_bundle_id!r}", details={"release_id": release_or_bundle_id}
+        )
+    return record_release_withdrawal(store, release.bundle_id, withdrawn_by=withdrawn_by, reason=reason)
 
 
 def list_publication_releases(store: ProjectStore, *, audience: PublicationAudience | str = "", status: str = "") -> list[PublicationReleaseRecord]:
@@ -1060,7 +1371,13 @@ def summarize_publication_claim(claim: PublicationClaim, theorem: TheoremContrac
     name = claim.display_name or claim.title or claim.object_id
     theorem_text = f" theorem={theorem.name}" if theorem is not None else ""
     section = f" section={claim.section_placement}" if claim.section_placement else ""
-    return f"{claim.object_type}/{claim.object_id}: {name} [{claim.readiness.value}/{claim.visibility.value}]{section}{theorem_text}"
+    return f"{claim.object_type}/{claim.object_id}: {name} [{claim.readiness.value}/{claim.visibility.value} · editorial]{section}{theorem_text}"
+
+
+def summarize_claim_with_axes(store: ProjectStore, claim: PublicationClaim) -> str:
+    """One claim's line: its editorial readiness, then its node's live acceptance and integrity."""
+    acceptance_state, integrity_state = node_acceptance_and_integrity(store, claim.object_type, claim.object_id)
+    return f"{summarize_publication_claim(claim)} {_axes_text(acceptance_state, integrity_state)}"
 
 
 def summarize_publication_view(view: PublicationView) -> str:
@@ -1077,7 +1394,10 @@ def summarize_publication_state(record: PublicationStateRecord) -> str:
 def summarize_publication_release(record: PublicationReleaseRecord) -> str:
     approvers = ",".join(record.approved_by) or "none"
     withdrawn = ",".join(record.withdrawn_by) or "none"
-    return f"{record.bundle_id}: {record.status.value} [{record.audience.value}] approved_by={approvers} withdrawn_by={withdrawn}"
+    return (
+        f"{record.bundle_id}: {record.status.value} [{record.audience.value} · editorial] "
+        f"approved_by={approvers} withdrawn_by={withdrawn}"
+    )
 
 
 def summarize_publication_editorial_note(note: PublicationEditorialNote) -> str:
@@ -1118,7 +1438,8 @@ def render_publication_summary(view: PublicationView, *, store: ProjectStore | N
             lines.append(
                 f"- {selection.claim.object_type}/{selection.claim.object_id}: "
                 f"{selection.claim.display_name or selection.claim.title or selection.claim.object_id} "
-                f"[{selection.claim.readiness.value}]{section} {status}{reason}"
+                f"[{selection.claim.readiness.value} · editorial] "
+                f"{_axes_text(selection.acceptance_state, selection.integrity_state)}{section} {status}{reason}"
             )
     else:
         lines.append("- none")
@@ -1146,53 +1467,86 @@ def publication_summary_json(store: ProjectStore, audience: PublicationAudience 
     )
 
 
-def publication_claim_json(store: ProjectStore, object_id: str, *, object_type: str = "theorem_contract") -> str:
+def publication_claim_json(store: ProjectStore, object_id: str, *, object_type: str = "proof_map_node") -> str:
     claim = get_publication_claim(store, object_id, object_type=object_type)
     return claim.model_dump_json(indent=2) if claim is not None else json.dumps({"error": f"publication claim not found: {object_type}/{object_id}"}, indent=2)
+
+
+def _claim_line(selection: PublicationSelection) -> str:
+    claim = selection.claim
+    return (
+        f"- {claim.object_id}: {claim.display_name or claim.title or claim.object_id} "
+        f"[{claim.readiness.value} · editorial] {_axes_text(selection.acceptance_state, selection.integrity_state)} "
+        f"section={selection.section_label or claim.section_placement or 'unspecified'}"
+    )
+
+
+def _withheld_lines(view: PublicationView) -> list[str]:
+    lines = ["", "Withheld (marked ready, but not accepted · current):"]
+    withheld = [selection for selection in view.selections if selection.withheld]
+    if withheld:
+        for selection in withheld:
+            claim = selection.claim
+            lines.append(
+                f"- {claim.object_id} [{claim.readiness.value} · editorial] "
+                f"{_axes_text(selection.acceptance_state, selection.integrity_state)}: WITHHELD, "
+                f"{standing_problem(claim.object_type, selection.acceptance_state, selection.integrity_state)}"
+            )
+    else:
+        lines.append("- none")
+    return lines
+
+
+def _export_header(title: str, bundle: dict[str, Any], view: PublicationView) -> list[str]:
+    return [
+        title,
+        f"Project: {bundle['project_id']}",
+        f"Audience: {bundle['audience']}",
+        f"View: {view.name} ({view.id})",
+        "Readiness is editorial, not a Human Review decision; acceptance and integrity are the node's own, read live.",
+        "",
+        "Claims:",
+    ]
+
+
+def _visible_lines(view: PublicationView) -> list[str]:
+    visible = [selection for selection in view.selections if selection.visible]
+    return [_claim_line(selection) for selection in visible] or ["- none"]
+
+
+def _suppressed_lines(view: PublicationView) -> list[str]:
+    suppressed = [selection.claim.object_id for selection in view.selections if not selection.visible and not selection.withheld]
+    return ["", "Suppressed claims:", *([f"- {claim_id}" for claim_id in suppressed] or ["- none"])]
+
+
+def publication_export_data(store: ProjectStore, audience: PublicationAudience | str, *, view_id: str = "") -> dict[str, Any]:
+    """What a paper or supplement export contains, for `--json`: the claims shown, the ones withheld, and why."""
+    audience_enum = parse_audience(audience)
+    bundle = _bundle_payload(store, audience=audience_enum, view_id=view_id)
+    return {
+        "project_id": bundle["project_id"],
+        "audience": bundle["audience"],
+        "view_id": bundle["view"]["id"],
+        "claims": bundle["claims"],
+        "withheld_claims": bundle["withheld_claims"],
+        "suppressed_claim_ids": bundle["suppressed_claim_ids"],
+        "citation_provenance": bundle["citation_provenance"],
+        "verification_summaries": bundle["verification_summaries"],
+        "review_records": bundle["review_records"],
+    }
 
 
 def publication_paper_export(store: ProjectStore, *, view_id: str = "") -> str:
     bundle = build_publication_paper(store, view_id=view_id)
     view = build_publication_view(store, PublicationAudience.paper, view_id=view_id)
-    lines = [
-        "# Publication Draft",
-        f"Project: {bundle['project_id']}",
-        f"Audience: {bundle['audience']}",
-        f"View: {view.name} ({view.id})",
-        "",
-        "Claims:",
-    ]
-    visible = [selection.claim for selection in view.selections if selection.visible]
-    if visible:
-        for claim in visible:
-            lines.append(
-                f"- {claim.object_id}: {claim.display_name or claim.title or claim.object_id} "
-                f"[{claim.readiness.value}] section={claim.section_placement or 'unspecified'}"
-            )
-    else:
-        lines.append("- none")
-    lines.extend(
-        [
-            "",
-            "Suppressed claims:",
-        ]
-    )
-    suppressed = [selection.claim.object_id for selection in view.selections if not selection.visible]
-    if suppressed:
-        lines.extend(f"- {claim_id}" for claim_id in suppressed)
-    else:
-        lines.append("- none")
-    lines.extend(
-        [
-            "",
-            "Citations:",
-        ]
-    )
+    lines = _export_header("# Publication Draft", bundle, view)
+    lines.extend(_visible_lines(view))
+    lines.extend(_withheld_lines(view))
+    lines.extend(_suppressed_lines(view))
+    lines.extend(["", "Citations:"])
     if bundle["citation_provenance"]:
         for citation in bundle["citation_provenance"]:
-            lines.append(
-                f"- {citation['theorem_id']} <- {citation['source_reference_id']} [{citation['usage_type']}]"
-            )
+            lines.append(f"- {citation['theorem_id']} <- {citation['source_reference_id']} [{citation['usage_type']}]")
     else:
         lines.append("- none")
     return "\n".join(lines)
@@ -1201,58 +1555,35 @@ def publication_paper_export(store: ProjectStore, *, view_id: str = "") -> str:
 def publication_supplement_export(store: ProjectStore, *, view_id: str = "") -> str:
     bundle = build_publication_supplement(store, view_id=view_id)
     view = build_publication_view(store, PublicationAudience.supplement, view_id=view_id)
-    lines = [
-        "# Technical Supplement",
-        f"Project: {bundle['project_id']}",
-        f"Audience: {bundle['audience']}",
-        f"View: {view.name} ({view.id})",
-        "",
-        "Claims:",
-    ]
-    visible = [selection.claim for selection in view.selections if selection.visible]
-    if visible:
-        for claim in visible:
-            lines.append(
-                f"- {claim.object_id}: {claim.display_name or claim.title or claim.object_id} "
-                f"[{claim.readiness.value}] section={claim.section_placement or 'unspecified'}"
-            )
-    else:
-        lines.append("- none")
+    lines = _export_header("# Technical Supplement", bundle, view)
+    lines.extend(_visible_lines(view))
+    lines.extend(_withheld_lines(view))
+    records = bundle["review_records"]
+    lines.extend(["", "Human Review decisions (counted):"])
+    lines.extend(
+        [f"- {row['object_type']}/{row['object_id']}: {row['kind']} {row['decision']} by {row['reviewer_id']}" for row in records["human_review_decisions"]]
+        or ["- none"]
+    )
+    if records["not_counted"]:
+        lines.extend(["", "Recorded decisions that don't count:"])
+        lines.extend(
+            f"- {row['object_type']}/{row['object_id']}: {row['kind']}, not counted ({row['reason']})" for row in records["not_counted"]
+        )
+    lines.extend(["", "Editorial reviews (not Human Review; they don't change acceptance):"])
     lines.extend(
         [
-            "",
-            "Review history:",
+            f"- {row['object_type']}/{row['object_id']}: editorial {row['editorial_decision']} by {row['reviewer_id']}"
+            for row in records["editorial_reviews"]
         ]
+        or ["- none"]
     )
-    if bundle["review_records"]:
-        for record in bundle["review_records"]:
-            lines.append(
-                f"- {record['object_type']}/{record['object_id']}: {record['decision']} by {record['reviewer_id']}"
-            )
-    else:
-        lines.append("- none")
-    lines.extend(
-        [
-            "",
-            "Verification summaries:",
-        ]
-    )
+    lines.extend(["", "Verification summaries:"])
     if bundle["verification_summaries"]:
         for summary in bundle["verification_summaries"]:
             lines.append(f"- {summary['scope']}: {summary['summary']} [{summary['publication_visibility']}]")
     else:
         lines.append("- none")
-    lines.extend(
-        [
-            "",
-            "Suppressed claims:",
-        ]
-    )
-    suppressed = [selection.claim.object_id for selection in view.selections if not selection.visible]
-    if suppressed:
-        lines.extend(f"- {claim_id}" for claim_id in suppressed)
-    else:
-        lines.append("- none")
+    lines.extend(_suppressed_lines(view))
     return "\n".join(lines)
 
 
@@ -1295,11 +1626,12 @@ def record_release_approval(
     approved_by: list[str] | None = None,
     notes: str = "",
     status: PublicationReleaseStatus | str = PublicationReleaseStatus.approved,
+    audience: PublicationAudience | str = PublicationAudience.paper,
 ) -> PublicationReleaseRecord:
     return _record_release(
         store,
         bundle_id=bundle_id,
-        audience=PublicationAudience.paper,
+        audience=parse_audience(audience),
         status=status,
         approved_by=approved_by,
         rationale=notes,
@@ -1379,4 +1711,18 @@ __all__ = [
     "summarize_publication_verification",
     "summarize_publication_view",
     "withdraw_publication_release",
+    "withdraw_release",
+    "ALLOWED_TRANSITIONS",
+    "READY_STATES",
+    "LEGACY_READINESS",
+    "EDITORIAL_LABEL",
+    "claim_payload",
+    "check_readiness_write",
+    "node_acceptance_and_integrity",
+    "parse_audience",
+    "parse_readiness",
+    "publication_export_data",
+    "publication_review_records",
+    "standing_problem",
+    "summarize_claim_with_axes",
 ]

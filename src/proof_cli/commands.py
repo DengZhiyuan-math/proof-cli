@@ -36,7 +36,16 @@ from .export import build_export
 from .evidence import EvidenceChain, build_evidence_chains
 from .formal_bridge import FormalBridgeProofStep, machine_check_trace, translate_selection
 from .formalization_recommendations import FormalizationRecommendation, rank_formalization_candidates
+from .proof_map import ProofMapError
 from .publication import (
+    EDITORIAL_LABEL,
+    build_publication_view,
+    claim_payload,
+    parse_audience,
+    publication_export_data,
+    record_publication_release,
+    summarize_claim_with_axes,
+    withdraw_release,
     PublicationCitationKind,
     PublicationReleaseStatus,
     PublicationReadiness,
@@ -1543,30 +1552,76 @@ def provenance_show_data(target_id: str, root: str | Path = ".") -> dict | None:
     return None
 
 
+# -- publication: the editorial track (issue #30) ------------------------------------------
+#
+# Every publication command is editorial: agents may run it, and none is a Human
+# Review decision or changes acceptance. Each has a `*_data` function the CLI's
+# `--json` envelope carries, and a `cmd_*` function that renders it for people.
+# A refused write raises ProofMapError with a stable code (src/proof_cli/errors.py).
+
+
+def _editorial_line(what: str) -> str:
+    return f"{what} ({EDITORIAL_LABEL})"
+
+
+def publication_list_data(root: str | Path = ".", *, object_type: str = "") -> list[dict]:
+    store = get_store(root)
+    return [claim_payload(store, record) for record in list_publication_state_records(store, object_type=object_type)]
+
+
 def cmd_publication_list(root: str | Path = ".", *, object_type: str = "") -> str:
     store = get_store(root)
     records = list_publication_state_records(store, object_type=object_type)
     if not records:
         return "No publication claims"
-    lines = ["Publication claims:"]
-    lines.extend(f"- {summarize_publication_state(record)}" for record in records)
+    lines = [_editorial_line("Publication claims, readiness") + ":"]
+    lines.extend(f"- {summarize_claim_with_axes(store, record)}" for record in records)
     return "\n".join(lines)
 
 
-def cmd_publication_show(object_id: str, root: str | Path = ".") -> str:
+def publication_show_data(object_id: str, root: str | Path = ".", *, object_type: str = "") -> list[dict]:
     store = get_store(root)
-    records = list_publication_state_records(store, object_id=object_id)
+    records = list_publication_state_records(store, object_type=object_type, object_id=object_id)
     if not records:
-        return f"Publication claim not found: {object_id}"
-    return json.dumps([record.model_dump(mode="json") for record in records], indent=2)
+        raise ProofMapError(
+            "PUBLICATION_CLAIM_NOT_FOUND", f"no publication claim for {object_id!r}", details={"object_id": object_id}
+        )
+    return [claim_payload(store, record) for record in records]
 
 
-def cmd_publication_set(
+def _render_claim_payload(payload: dict) -> list[str]:
+    axes = (
+        f"acceptance={payload['acceptance_state']} integrity={payload['integrity_state']}"
+        if payload["acceptance_state"] is not None
+        else "acceptance=none integrity=none (no acceptance axis)"
+    )
+    lines = [
+        f"{payload['object_type']}/{payload['object_id']}: {payload['display_name'] or payload['title'] or payload['object_id']}",
+        f"  readiness: {payload['readiness']} ({EDITORIAL_LABEL})",
+        f"  node: {axes}",
+    ]
+    if payload.get("section_placement"):
+        lines.append(f"  section: {payload['section_placement']}")
+    if payload.get("release_status"):
+        lines.append(f"  release status: {payload['release_status']} (editorial)")
+    if payload.get("migrated_from"):
+        lines.append(f"  migrated from retired readiness: {payload['migrated_from']}")
+    return lines
+
+
+def cmd_publication_show(object_id: str, root: str | Path = ".", *, object_type: str = "") -> str:
+    lines: list[str] = []
+    for payload in publication_show_data(object_id, root, object_type=object_type):
+        lines.extend(_render_claim_payload(payload))
+    return "\n".join(lines)
+
+
+def publication_set_data(
     object_id: str,
     readiness: str,
     root: str | Path = ".",
     *,
-    object_type: str = "theorem_contract",
+    object_type: str = "proof_map_node",
     display_name: str = "",
     title: str = "",
     section_placement: str = "",
@@ -1576,26 +1631,25 @@ def cmd_publication_set(
     editorial_note: list[str] | None = None,
     supporting_reference_id: list[str] | None = None,
     supporting_theorem_id: list[str] | None = None,
-    release_status: str = "draft",
+    release_status: str = "",
     release_notes: str = "",
-) -> str:
+) -> dict:
     store = get_store(root)
-    release_status_value = PublicationReleaseStatus.approved if release_status == "draft" else PublicationReleaseStatus(release_status)
     state_record = set_publication_state(
         store,
         object_id,
-        PublicationReadiness(readiness),
+        readiness,
         object_type=object_type,
         display_name=display_name,
         title=title,
         section_placement=section_placement,
         reason=reason,
-        citation_kind=PublicationCitationKind(citation_kind) if citation_kind else None,
+        citation_kind=citation_kind or None,
         internal_only=internal_only,
         editorial_notes=editorial_note,
         supporting_reference_ids=supporting_reference_id,
         supporting_theorem_ids=supporting_theorem_id,
-        release_status=release_status_value,
+        release_status=release_status or None,
         release_notes=release_notes,
         updated_by=display_name or "human",
     )
@@ -1610,7 +1664,7 @@ def cmd_publication_set(
         view_visibility = PublicationVisibility.internal_only
     if internal_only:
         view_visibility = PublicationVisibility.internal_only
-    if title or section_placement or citation_kind or editorial_note or supporting_reference_id or supporting_theorem_id or release_notes:
+    if title or section_placement or citation_kind or editorial_note or supporting_reference_id or supporting_theorem_id or release_notes or release_status:
         view = create_publication_view(
             store,
             name=title or display_name or object_id,
@@ -1628,23 +1682,41 @@ def cmd_publication_set(
         if supporting_theorem_id:
             for theorem_id in supporting_theorem_id:
                 record_citation_provenance(store, theorem_id, object_id, usage_type=citation_kind or "project-original", citation_note=reason)
-        if release_status and release_status != "draft":
-            release_enum = PublicationReleaseStatus(release_status)
-            if release_enum == PublicationReleaseStatus.withdrawn:
+        # a release is recorded only when a release status is given explicitly (issue #30)
+        if release_status:
+            if state_record.release_status == PublicationReleaseStatus.withdrawn:
                 record_release_withdrawal(store, view.id, withdrawn_by=[display_name] if display_name else [], reason=release_notes or reason)
             else:
-                record_release_approval(store, view.id, approved_by=[display_name] if display_name else [], notes=release_notes or reason, status=release_enum)
-    return state_record.model_dump_json(indent=2)
+                record_release_approval(
+                    store,
+                    view.id,
+                    approved_by=[display_name] if display_name else [],
+                    notes=release_notes or reason,
+                    status=state_record.release_status,
+                    audience=view_audience,
+                )
+    return claim_payload(store, state_record)
+
+
+def cmd_publication_set(object_id: str, readiness: str, root: str | Path = ".", **options) -> str:
+    payload = publication_set_data(object_id, readiness, root, **options)
+    return "\n".join([_editorial_line(f"Readiness set to {payload['readiness']}"), *_render_claim_payload(payload)])
+
+
+def publication_view_data(root: str | Path = ".", *, audience: str = "paper") -> dict:
+    store = get_store(root)
+    return build_publication_view(store, parse_audience(audience or "paper")).model_dump(mode="json")
 
 
 def cmd_publication_view(root: str | Path = ".", *, audience: str = "paper") -> str:
     store = get_store(root)
+    if audience:
+        parse_audience(audience)
     state_records = list_publication_state_records(store)
     views = [view for view in list_publication_views(store) if audience == "" or view.visibility.value == audience or audience == "paper" and view.visibility == PublicationVisibility.paper]
-    lines = ["Publication workspace:"]
-    lines.append("State records:")
+    lines = ["Publication workspace:", f"Readiness is {EDITORIAL_LABEL}.", "State records:"]
     if state_records:
-        lines.extend(f"- {summarize_publication_state(record)}" for record in state_records)
+        lines.extend(f"- {summarize_claim_with_axes(store, record)}" for record in state_records)
     else:
         lines.append("- none")
     lines.append("Views:")
@@ -1655,20 +1727,59 @@ def cmd_publication_view(root: str | Path = ".", *, audience: str = "paper") -> 
     return "\n".join(lines)
 
 
+PUBLICATION_EXPORT_FORMATS = ("paper", "supplement", "bundle", "manifest")
+
+
+def _check_export_format(format: str) -> None:
+    if format not in PUBLICATION_EXPORT_FORMATS:
+        raise ProofMapError(
+            "UNSUPPORTED_FORMAT",
+            f"not a publication export format: {format!r}",
+            details={"format": format, "allowed": list(PUBLICATION_EXPORT_FORMATS)},
+        )
+
+
+def publication_export_json(root: str | Path = ".", *, audience: str = "paper", format: str = "paper") -> dict:
+    """What `publication export --json` carries. `paper` and `supplement` fix their own audience;
+    `bundle` and `manifest` use `--audience`."""
+    _check_export_format(format)
+    store = get_store(root)
+    if format in ("paper", "supplement"):
+        return {"format": format, **publication_export_data(store, format)}
+    audience_enum = parse_audience(audience)
+    if format == "bundle":
+        return build_publication_bundle(store, audience=audience_enum)
+    return build_publication_manifest(store, audience=audience_enum)
+
+
 def cmd_publication_export(root: str | Path = ".", *, audience: str = "paper", format: str = "paper") -> str:
+    _check_export_format(format)
     store = get_store(root)
     if format == "paper":
         return publication_paper_export(store)
     if format == "supplement":
         return publication_supplement_export(store)
-    if format == "bundle":
-        return render_publication_bundle(build_publication_bundle(store))
-    if format == "manifest":
-        return json.dumps(build_publication_manifest(store), indent=2, sort_keys=True)
-    return f"publication:unsupported-format:{format}"
+    return json.dumps(publication_export_json(root, audience=audience, format=format), indent=2, sort_keys=True)
 
 
-def cmd_publication_release(
+def _release_payload(record) -> dict:
+    return {**record.model_dump(mode="json"), "track": "editorial"}
+
+
+def _render_release(payload: dict, what: str) -> str:
+    approvers = ",".join(payload["approved_by"]) or "none"
+    withdrawn = ",".join(payload["withdrawn_by"]) or "none"
+    return "\n".join(
+        [
+            _editorial_line(what),
+            f"{payload['id']}: {payload['bundle_id']} {payload['status']} [{payload['audience']}] "
+            f"approved_by={approvers} withdrawn_by={withdrawn}",
+            "A release sign-off on record is the author of the git commit that releases it.",
+        ]
+    )
+
+
+def publication_release_data(
     root: str | Path = ".",
     *,
     audience: str = "paper",
@@ -1676,21 +1787,30 @@ def cmd_publication_release(
     approved_by: list[str] | None = None,
     rationale: str = "",
     note: str = "",
-) -> str:
+) -> dict:
     store = get_store(root)
-    record = record_release_approval(store, bundle_id=audience, approved_by=approved_by, notes=note or rationale, status=PublicationReleaseStatus(status))
-    return record.model_dump_json(indent=2)
+    record = record_publication_release(
+        store, audience=parse_audience(audience), status=status, approved_by=approved_by, rationale=rationale, note=note or rationale
+    )
+    return _release_payload(record)
 
 
-def cmd_publication_withdraw(
+def cmd_publication_release(root: str | Path = ".", **options) -> str:
+    return _render_release(publication_release_data(root, **options), "Release recorded")
+
+
+def publication_withdraw_data(
     release_id: str,
     root: str | Path = ".",
     *,
     rationale: str = "",
     approved_by: list[str] | None = None,
-) -> str:
-    release = record_release_withdrawal(get_store(root), release_id, withdrawn_by=approved_by, reason=rationale)
-    return release.model_dump_json(indent=2)
+) -> dict:
+    return _release_payload(withdraw_release(get_store(root), release_id, withdrawn_by=approved_by, reason=rationale))
+
+
+def cmd_publication_withdraw(release_id: str, root: str | Path = ".", **options) -> str:
+    return _render_release(publication_withdraw_data(release_id, root, **options), "Release withdrawn")
 
 
 def cmd_init(root: str | Path = ".") -> str:
