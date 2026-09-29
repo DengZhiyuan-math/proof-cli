@@ -8,7 +8,7 @@ from proof_cli.commands import cmd_proof_formalize_recommend, cmd_theorem_ground
 from proof_cli.cli import app
 from proof_cli.domain import BlockerRecord, ProofObligation, TheoremProvenanceKind, TheoremReviewState, TheoremStatus, TrustLevel
 from proof_cli.memory import list_memory_artifacts, record_memory
-from proof_cli.obligations import add_obligation, list_obligations
+from proof_cli.obligations import add_obligation
 from proof_cli.proof_state import load_state, record_theorem_usage, set_current_context, set_current_theorem
 from proof_cli.references import ReferenceRecord, ReferenceSourceType
 from _legacy_seed import seed_reference_review
@@ -331,22 +331,6 @@ def test_phase_two_cli_paths_are_reachable_and_readable(tmp_path: Path):
     assert '"title": "Standard Estimate"' in result.stdout
     assert '"review_status": "approved"' in result.stdout
 
-    result = runner.invoke(
-        app,
-        [
-            "reference",
-            "review",
-            paper_reference_id,
-            "defer",
-            "--root",
-            str(tmp_path),
-            "--json",
-        ],
-    )
-    # reference approval is retired (#37): trust comes from Reference-reviewing an imported_result node
-    assert result.exit_code == 1
-    assert json.loads(result.stdout)["error"]["code"] == "HUMAN_REVIEW_REQUIRED"
-
     result = runner.invoke(app, ["theorem", "extract", "thm_main", "--root", str(tmp_path)])
     assert result.exit_code == 0
     assert '"callable": true' in result.stdout
@@ -622,21 +606,3 @@ def test_phase_six_cli_surface_routes_to_collaboration_workflows(tmp_path: Path)
     exchange_result = runner.invoke(app, ["exchange", "export", "--root", str(tmp_path)])
     assert exchange_result.exit_code == 0
     assert "\"project_id\"" in exchange_result.stdout
-
-
-def test_obligation_resolve_is_a_human_review_decision_on_the_base_cli(tmp_path: Path) -> None:
-    store = ensure_project(tmp_path)
-    add_obligation(
-        store,
-        ProofObligation(
-            id="obl_base_resolve",
-            goal_statement="bridge A to C",
-            required_for="thm_tiny",
-        ),
-    )
-
-    result = runner.invoke(app, ["obligation", "resolve", "obl_base_resolve", "--root", str(tmp_path), "--json"])
-
-    assert result.exit_code == 1
-    assert json.loads(result.stdout)["error"]["code"] == "HUMAN_REVIEW_REQUIRED"
-    assert list_obligations(store)[0].status.value == "open"

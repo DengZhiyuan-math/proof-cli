@@ -10,7 +10,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from proof_cli.cli import app
-from proof_cli.proof_map import claim_node, create_node
+from proof_cli.proof_map import claim_node, create_node, open_challenge
 from proof_cli.publication import (
     PublicationAudience,
     PublicationReadiness,
@@ -34,6 +34,12 @@ def _accept(store, node_id, *, claimant="agent_a", session="sess_1"):
     return researcher(store).decide_acceptance(node_id, "accept")
 
 
+def _to_paper_ready(store, node_id):
+    # the editorial track moves one step at a time (issue #30)
+    for step in ("collaborator_ready", "supplement_ready", "paper_ready"):
+        set_publication_claim(store, node_id, object_type="proof_map_node", readiness=step)
+
+
 def test_fresh_node_gets_a_default_internal_draft_claim_regardless_of_acceptance(tmp_path: Path):
     store = ensure_project(tmp_path)
     create_node(store, node_id="clm_1", kind="claim", statement="A claim")
@@ -54,8 +60,8 @@ def test_paper_ready_is_never_derived_from_accepted_and_requires_an_explicit_cal
     claim = get_publication_claim(store, "clm_1", object_type="proof_map_node")
     assert claim.readiness == PublicationReadiness.internal_draft
 
-    # an explicit human editorial action is the only way to reach paper_ready
-    set_publication_claim(store, "clm_1", object_type="proof_map_node", readiness=PublicationReadiness.paper_ready)
+    # an explicit editorial action is the only way to reach paper_ready
+    _to_paper_ready(store, "clm_1")
     claim = get_publication_claim(store, "clm_1", object_type="proof_map_node")
     assert claim.readiness == PublicationReadiness.paper_ready
 
@@ -63,19 +69,23 @@ def test_paper_ready_is_never_derived_from_accepted_and_requires_an_explicit_cal
 def test_acceptance_and_integrity_are_read_live_not_stored_on_the_claim(tmp_path: Path):
     store = ensure_project(tmp_path)
     create_node(store, node_id="clm_1", kind="claim", statement="A claim")
-    set_publication_claim(store, "clm_1", object_type="proof_map_node", readiness=PublicationReadiness.paper_ready)
+    set_publication_claim(store, "clm_1", object_type="proof_map_node", readiness="collaborator_ready")
 
-    # not accepted yet: readiness (editorial) is paper_ready, acceptance is not
+    # not accepted yet: readiness (editorial) is collaborator_ready, acceptance is not
     acceptance_state, _ = node_acceptance_and_integrity(store, "proof_map_node", "clm_1")
     assert acceptance_state == "unreviewed"
 
     # accept afterward, with no further publication call at all
     _accept(store, "clm_1")
-
-    # the same read call now reflects the new acceptance state immediately —
-    # nothing needed to be re-synced or re-derived on the publication side
     acceptance_state, _ = node_acceptance_and_integrity(store, "proof_map_node", "clm_1")
     assert acceptance_state == "accepted"
+    _to_paper_ready(store, "clm_1")
+
+    # a Challenge opened later shows at once, with nothing re-synced on the
+    # publication side, and the editorial readiness is left as it was
+    open_challenge(store, "clm_1", opened_by="agent_b", rationale="gap")
+    _, integrity_state = node_acceptance_and_integrity(store, "proof_map_node", "clm_1")
+    assert integrity_state == "challenged"
     claim = get_publication_claim(store, "clm_1", object_type="proof_map_node")
     assert claim.readiness == PublicationReadiness.paper_ready
 
@@ -91,7 +101,7 @@ def test_publication_view_selection_carries_live_acceptance_and_integrity(tmp_pa
     store = ensure_project(tmp_path)
     create_node(store, node_id="clm_1", kind="claim", statement="A claim")
     _accept(store, "clm_1")
-    set_publication_claim(store, "clm_1", object_type="proof_map_node", readiness=PublicationReadiness.paper_ready)
+    _to_paper_ready(store, "clm_1")
 
     view = build_publication_view(store, PublicationAudience.paper)
     selection = next(s for s in view.selections if s.claim.object_id == "clm_1")
@@ -112,16 +122,16 @@ def test_cli_publication_set_and_show_for_a_proof_map_node(tmp_path: Path):
     set_result = runner.invoke(
         app,
         [
-            "publication", "set", "clm_1", "paper_ready", "--root", str(tmp_path),
+            "publication", "set", "clm_1", "collaborator_ready", "--root", str(tmp_path),
             "--object-type", "proof_map_node",
         ],
     )
     assert set_result.exit_code == 0
 
-    show_result = runner.invoke(app, ["publication", "show", "clm_1", "--root", str(tmp_path)])
+    show_result = runner.invoke(app, ["publication", "show", "clm_1", "--root", str(tmp_path), "--json"])
     assert show_result.exit_code == 0
-    payload = json.loads(show_result.stdout)
-    assert payload[0]["readiness"] == "paper_ready"
+    payload = json.loads(show_result.stdout)["data"]
+    assert payload[0]["readiness"] == "collaborator_ready"
 
 
 def test_cli_publication_export_bundle_carries_live_acceptance_state(tmp_path: Path):
@@ -130,13 +140,12 @@ def test_cli_publication_export_bundle_carries_live_acceptance_state(tmp_path: P
     (tmp_path / "proofs" / "clm_1" / "proof.tex").write_text("proof text")
     runner.invoke(app, ["node", "request-review", "clm_1", "--root", str(tmp_path), "--requested-by", "agent_a", "--rationale", "scoped correctly"])
     researcher(load_project(tmp_path)).decide_acceptance("clm_1", "accept")  # in the review app
-    runner.invoke(
-        app,
-        [
-            "publication", "set", "clm_1", "paper_ready", "--root", str(tmp_path),
-            "--object-type", "proof_map_node",
-        ],
-    )
+    for step in ("collaborator_ready", "supplement_ready", "paper_ready"):
+        result = runner.invoke(
+            app,
+            ["publication", "set", "clm_1", step, "--root", str(tmp_path), "--object-type", "proof_map_node"],
+        )
+        assert result.exit_code == 0, result.output
 
     export_result = runner.invoke(app, ["publication", "export", "--root", str(tmp_path), "--format", "bundle"])
     assert export_result.exit_code == 0
