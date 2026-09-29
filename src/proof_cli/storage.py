@@ -214,7 +214,8 @@ CREATE TABLE IF NOT EXISTS review_history (
 _REVIEW_HISTORY_ADDED_COLUMNS = {"prev_row_hash": "TEXT", "signed_decision": "TEXT", "payload_hash": "TEXT"}
 _CHALLENGE_ADDED_COLUMNS = {"resolution_review_id": "TEXT"}
 _CLAIM_DROPPED_COLUMNS = ("token_hash",)  # the #37 claim token, gone with ADR-0010
-_CANDIDATE_PROOF_ADDED_COLUMNS = {"sha256": "TEXT"}  # a Review snapshot's hash (ADR-0010)
+# a Review snapshot's hash (ADR-0010), and the node's dependencies as the snapshot was requested (#96, JSON)
+_CANDIDATE_PROOF_ADDED_COLUMNS = {"sha256": "TEXT", "dependencies": "TEXT"}
 
 REVIEW_HISTORY_TRIGGERS = """
 CREATE INDEX IF NOT EXISTS idx_review_history_object ON review_history(object_type, object_id, seq);
@@ -1029,8 +1030,9 @@ def update_proof_map_node(store: ProjectStore, node: ProofMapNode, *, conn: sqli
 
     Its callers are the node's sanctioned edits: Promote (issue #22)
     changing `kind` from `claim` to `lemma`, Split (issue #26) appending
-    children to `dependencies`, and moving dependents off a withdrawn
-    imported result (issue #20) swapping one dependency for its correction.
+    children to `dependencies`, moving dependents off a withdrawn
+    imported result (issue #20) swapping one dependency for its correction,
+    and adding, removing or moving one dependency edge (issue #96).
     """
     with _writing(store, conn) as conn:
         conn.execute(
@@ -1144,6 +1146,7 @@ def _row_to_candidate_proof(row: sqlite3.Row) -> CandidateProofRecord:
         scoping_rationale=row["scoping_rationale"],
         interface_fingerprint=row["interface_fingerprint"],
         sha256=row["sha256"],
+        dependencies=json.loads(row["dependencies"]) if row["dependencies"] is not None else None,
         created_at=row["created_at"],
     )
 
@@ -1172,8 +1175,8 @@ def insert_candidate_proof(
         conn.execute("UPDATE candidate_proofs SET is_current = 0 WHERE node_id = ?", (record.node_id,))
         conn.execute(
             """
-            INSERT INTO candidate_proofs(id, node_id, version, file_path, is_current, review_record_id, submitted_by, scoping_rationale, interface_fingerprint, sha256, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO candidate_proofs(id, node_id, version, file_path, is_current, review_record_id, submitted_by, scoping_rationale, interface_fingerprint, sha256, dependencies, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record.id,
@@ -1186,6 +1189,7 @@ def insert_candidate_proof(
                 record.scoping_rationale,
                 record.interface_fingerprint,
                 record.sha256,
+                json.dumps(record.dependencies) if record.dependencies is not None else None,
                 record.created_at.isoformat(),
             ),
         )
