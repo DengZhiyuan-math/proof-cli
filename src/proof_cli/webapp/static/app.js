@@ -78,6 +78,7 @@ function showHome() {
     // a local node is reviewed in its studio (#71); an imported result on its own page
     const link = el("a", item.node_id, { href: item.kind === "reference_review" ? `#/node/${encodeURIComponent(item.node_id)}` : `/studio/${encodeURIComponent(item.node_id)}/#review` });
     const statement = el("div", item.statement);
+    if (item.citation) statement.append(citationLine(item.citation));
     if (item.candidate_proof && item.candidate_proof.id) {
       // shown in full: recording the decision is about exactly this text
       statement.append(el("p", `snapshot v${item.candidate_proof.version} · SHA-256 ${item.candidate_proof.sha256}`, { class: "hint" }), el("pre", item.candidate_proof.text));
@@ -96,6 +97,30 @@ function showHome() {
   $("rail-review").textContent = state.pending.length ? pending : "";
   $("rail-review").className = state.pending.length ? "n hot" : "n";
   $("rail-warnings").textContent = state.warnings.length ? String(state.warnings.length) : "";
+}
+
+// The ReferenceRecord an imported result links (issue #91): what a Reference review is about.
+// Its text may be edited later without touching the review; a missing one is marked, never hidden.
+function citationMissing(c) {
+  return el("p", `citation missing: reference ${c.reference_id} doesn't exist in this project`, { class: "citation warning" });
+}
+
+function citationLine(c) {
+  if (c.missing) return citationMissing(c);
+  const who = c.authors.length ? ` — ${c.authors.join(", ")}` : "";
+  return el("p", `cites ${c.reference_id}: ${c.title}${who}${c.year ? ` (${c.year})` : ""} · ${c.locator} · ${c.version}`, { class: "hint citation" });
+}
+
+function citationBlock(c) {
+  const block = el("div", null, { class: "citation-block" });
+  block.append(el("h3", "Citation"));
+  if (c.missing) { block.append(citationMissing(c)); return block; }
+  block.append(el("p", c.title, { class: "citation title" }));
+  block.append(el("p", `${c.authors.join(", ") || "no authors listed"}${c.year ? ` · ${c.year}` : ""}`, { class: "citation" }));
+  const where = [c.identifier, c.url].filter(Boolean).join(" · ");
+  if (where) block.append(el("p", where, { class: "citation mono" }));
+  block.append(el("p", `reference ${c.reference_id} · cited at ${c.locator} · ${c.version}`, { class: "hint citation" }));
+  return block;
 }
 
 // what each decision means, in the researcher's words
@@ -480,6 +505,7 @@ async function showNode(nodeId) {
   $("node-folder").replaceChildren();
   if (view.studio) $("node-folder").append(el("a", "Open the node's studio", { href: view.studio }), " · proof folder ", el("code", view.folder));
   $("node-source").replaceChildren(...(view.source ? [el("h3", "Source"), el("p", `${view.source.locator} · ${view.source.version}${view.source.trust_level ? ` · ${view.source.trust_level}` : ""}`)] : []));
+  if (view.citation) $("node-source").append(citationBlock(view.citation));
   $("node-dependents").textContent = view.dependents.length ? `Used by: ${view.dependents.join(", ")}` : "Nothing depends on this node yet.";
   const pdfs = [];
   if (view.pdfs.snapshot) pdfs.push(el("a", "PDF archived with this snapshot", { href: `/api/node/${encodeURIComponent(node.id)}/pdf/snapshot`, target: "_blank", rel: "noopener" }));
