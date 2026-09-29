@@ -25,11 +25,10 @@ from .commands import (
     cmd_branch_list,
     cmd_branch_merge,
     cmd_export,
+    cmd_exchange_export,
     cmd_comment_add,
     cmd_comment_list,
     cmd_contributor_list,
-    cmd_exchange_export,
-    cmd_exchange_import,
     cmd_proof_asset_list,
     cmd_proof_asset_publish,
     cmd_proof_asset_review,
@@ -75,7 +74,6 @@ from .commands import (
     cmd_review_request,
     cmd_role_show,
     cmd_handoff_create,
-    cmd_handoff_inspect,
     cmd_proof_reuse_show,
     cmd_goal_list,
     cmd_goal_open,
@@ -118,8 +116,17 @@ from .commands import (
 )
 from .envelope import dump_envelope, error_envelope, success_envelope
 from .contract import ProofGroup
+from .theorems import LEGACY_TRUST_NOTICE
 from .collaboration import summarize_review_record
 from .storage import read_scoped
+from .exchange import (
+    export_exchange_bundle,
+    import_exchange_bundle,
+    inspect_exchange_bundle,
+    parse_bundle,
+    summarize_import_report,
+    summarize_inspect_report,
+)
 from .proof_map import (
     ProofMapError,
     add_dependency,
@@ -1644,15 +1651,65 @@ def branch_merge(
     typer.echo(cmd_branch_merge(branch_id, _root(root), into_branch_id=into_branch_id, reviewer_id=reviewer_id, rationale=rationale))
 
 
+def _read_bundle(source: str) -> str:
+    """A bundle's text: from the file `source`, or stdin for "-" (a bundle is too big for an argument)."""
+    if source == "-":
+        return sys.stdin.read()
+    try:
+        return Path(source).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ProofMapError("BUNDLE_UNREADABLE", f"can't read the bundle {source}: {exc}", details={"path": source}) from None
+
+
+def _emit_exchange_error(exc: ProofMapError, json_output: bool, *, command: str) -> None:
+    if json_output:
+        typer.echo(dump_envelope(error_envelope(command, exc.code, exc.message, details=exc.details or None)))
+        return
+    typer.echo(f"Error: {exc.message}")
+    for problem in exc.details.get("problems", [])[1:]:
+        typer.echo(f"  - {problem.get('code')}: {problem.get('message') or problem.get('at')}")
+
+
 @exchange_app.command("export")
-def exchange_export(root: str = ROOT_OPTION, note: str = "", json_output: bool = typer.Option(False, "--json")) -> None:
-    """Export an exchange bundle. Its contracts' and references' trust fields are legacy (ADR-0012)."""
-    _emit_legacy_json("exchange.export", json_output, lambda: cmd_exchange_export(_root(root), note=note))
+def exchange_export(
+    root: str = ROOT_OPTION,
+    note: str = "",
+    output: str = typer.Option("", "--output", "-o", help="Write the bundle to this file instead of stdout"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """The project as one bundle: the proof map, its Proof vault files and its side state (#31).
+    Its contracts' and references' trust fields are legacy (ADR-0012); an importer resets them."""
+    bundle_json = cmd_exchange_export(_root(root), note=note)  # led by the legacy notice
+    if output:
+        Path(output).write_text(bundle_json + "\n", encoding="utf-8")
+        bundle = parse_bundle(bundle_json)
+        counts = inspect_exchange_bundle(bundle).section_counts
+        summary = {"legacy_notice": LEGACY_TRUST_NOTICE, "path": output, "bundle_id": bundle.id, "section_counts": counts}
+        if json_output:
+            typer.echo(dump_envelope(success_envelope("exchange.export", summary)))
+        else:
+            typer.echo(f"Wrote bundle {bundle.id} to {output}: {counts['proof_map_nodes']} node(s), {counts['vault_files']} vault file(s)")
+        return
+    _emit_legacy_json("exchange.export", json_output, lambda: bundle_json)
 
 
 @exchange_app.command("import")
-def exchange_import(bundle_json: str, root: str = ROOT_OPTION) -> None:
-    typer.echo(cmd_exchange_import(bundle_json, _root(root)))
+def exchange_import(
+    bundle_file: str = typer.Argument("-", help="The bundle file (`exchange export`'s output, with or without --json); - reads stdin"),
+    root: str = ROOT_OPTION,
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Merge a bundle into this project: validated whole first, then written in one transaction (#31)."""
+    try:
+        bundle = parse_bundle(_read_bundle(bundle_file))
+        report = import_exchange_bundle(get_store(_root(root)), bundle)
+    except ProofMapError as exc:
+        _emit_exchange_error(exc, json_output, command="exchange.import")
+        raise typer.Exit(code=1)
+    if json_output:
+        typer.echo(dump_envelope(success_envelope("exchange.import", report.model_dump(mode="json"))))
+    else:
+        typer.echo(summarize_import_report(report))
 
 
 @handoff_app.command("create")
@@ -1671,8 +1728,22 @@ def handoff_create(
 
 
 @handoff_app.command("inspect")
-def handoff_inspect(bundle_json: str = "", root: str = ROOT_OPTION) -> None:
-    typer.echo(cmd_handoff_inspect(bundle_json, _root(root)))
+def handoff_inspect(
+    bundle_file: str = typer.Argument("", help="A bundle file, or - for stdin; omitted, this project's own"),
+    root: str = ROOT_OPTION,
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """What importing a bundle would carry over."""
+    try:
+        bundle = parse_bundle(_read_bundle(bundle_file)) if bundle_file else export_exchange_bundle(get_store(_root(root)))
+    except ProofMapError as exc:
+        _emit_exchange_error(exc, json_output, command="handoff.inspect")
+        raise typer.Exit(code=1)
+    report = inspect_exchange_bundle(bundle)
+    if json_output:
+        typer.echo(dump_envelope(success_envelope("handoff.inspect", report.model_dump(mode="json"))))
+    else:
+        typer.echo(summarize_inspect_report(report))
 
 
 @trace_app.command("dependency")

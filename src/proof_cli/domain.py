@@ -191,10 +191,11 @@ class CandidateProofRecord(BaseModel):
     """One immutable, versioned proof attempt for a ProofMapNode.
 
     Its file is the source of truth for the proof text; this record is the
-    SQLite index over it. Since ADR-0010 that file is a Review snapshot,
-    `proofs/<node_id>/snapshots/v<version>.tex`, a copy of the node's working
-    `proof.tex`, with its SHA-256 recorded in `sha256`; older attempts are
-    ADR-0003 Markdown files, `proofs/<node_id>/v<version>.md`, with none. `id`
+    SQLite index over it. That file is a Review snapshot: since ADR-0011 a
+    folder, `proofs/<node_id>/snapshots/v<version>/`, whose `manifest.json`
+    is `file_path` and whose manifest digest is `sha256`; before it (ADR-0010)
+    a single `snapshots/v<version>.tex`, with its SHA-256. Attempts from before
+    ADR-0010 are read-only history files with no `sha256`. `id`
     is stable and independent of `file_path` — a review record references a
     submission by `id`, never by where its file happens to live. See ADR
     (candidate proof storage) and ProofMapNode.
