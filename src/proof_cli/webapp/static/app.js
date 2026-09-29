@@ -14,10 +14,15 @@ async function api(path, body) {
   return json.data;
 }
 
+// A message in the corner: successes fade on their own, errors stay until dismissed.
 function say(text, kind) {
-  const box = $("message");
-  box.textContent = text;
-  box.className = kind || "";
+  const toast = el("div", null, { class: `toast ${kind || ""}`, role: kind === "error" ? "alert" : "status" });
+  const close = el("button", "×", { type: "button", "aria-label": "Dismiss" });
+  close.onclick = () => toast.remove();
+  toast.append(el("span", text), close);
+  $("toasts").append(toast);
+  while ($("toasts").children.length > 3) $("toasts").firstChild.remove();
+  if (kind !== "error") setTimeout(() => toast.remove(), 6000);
 }
 
 function el(tag, text, attrs) {
@@ -37,11 +42,31 @@ function row(cells) {
   return tr;
 }
 
+// One status per node, in words: the thing a reader needs to know first (ADR-0008: the frontier
+// before the axes; a warning before anything else). The full three axes are on the node's page.
+function statusOf(n) {
+  if (n.integrity_state === "challenged") return { text: "challenged", tone: "warn" };
+  if (n.integrity_state === "potentially-stale") return { text: "may be stale", tone: "warn" };
+  if (n.acceptance_state === "unverifiable") return { text: "unverifiable", tone: "warn" };
+  if (["rejected", "no-longer-callable"].includes(n.acceptance_state)) return { text: n.acceptance_state.replace(/-/g, " "), tone: "rejected" };
+  if (n.workflow_state === "review-needed") return { text: "awaiting review", tone: "review" };
+  if (["accepted", "reviewed"].includes(n.acceptance_state)) return { text: n.acceptance_state, tone: "accepted" };
+  if (n.frontier) return { text: "ready to claim", tone: "frontier" };
+  if (n.assignee) return { text: `claimed by ${n.assignee}`, tone: "" };
+  return { text: n.workflow_state, tone: "" };
+}
+
+function statusChip(n) {
+  const s = statusOf(n);
+  return el("span", s.text, { class: `status ${s.tone}` });
+}
+
 // Show exactly what will be recorded, then record it.
 function confirmDecisions(decisions) {
   return new Promise((resolve, reject) => {
+    $("confirm-reviewer").textContent = state ? state.reviewer : "this process's git identity";
     $("confirm-decisions").replaceChildren(...decisions.map((d) => el("li",
-      `${DECISION_LABELS[`${d.kind}:${d.decision}`] || `${d.kind}: ${d.decision}`} — ${d.target_id}${d.dependency_id ? ` (${d.kind === "dependent_migration" ? "onto" : "dependency"} ${d.dependency_id})` : ""}` +
+      `${labelOf(d)} — ${d.target_id}${d.dependency_id ? ` (${d.kind === "dependent_migration" ? "onto" : "dependency"} ${d.dependency_id})` : ""}` +
       `${d.viewed_candidate_proof_sha256 ? ` · snapshot SHA-256 ${d.viewed_candidate_proof_sha256}` : ""} · rationale: ${d.rationale || "none"}`)));
     for (const id of ["home", "node-page"]) $(id).hidden = true;
     $("confirm").hidden = false;
@@ -68,28 +93,86 @@ function showWarnings(list, into) {
   if (!list.length) into.append(el("li", "None."));
 }
 
-function showHome() {
-  const body = $("pending").querySelector("tbody");
-  body.replaceChildren(...state.pending.map((item) => {
-    const box = el("input", null, { type: "checkbox" });
-    const choice = el("select");
-    for (const decision of item.decisions) choice.append(el("option", decision));
-    const rationale = el("input", null, { placeholder: "why" });
-    // a local node is reviewed in its studio (#71); an imported result on its own page
-    const link = el("a", item.node_id, { href: item.kind === "reference_review" ? `#/node/${encodeURIComponent(item.node_id)}` : `/studio/${encodeURIComponent(item.node_id)}/#review` });
-    const statement = el("div", item.statement);
-    if (item.candidate_proof && item.candidate_proof.id) {
-      // shown in full: recording the decision is about exactly this text
-      statement.append(el("p", `snapshot v${item.candidate_proof.version} · SHA-256 ${item.candidate_proof.sha256}`, { class: "hint" }), el("pre", item.candidate_proof.text));
+// the home page's warnings, each linked to the page of the node it is about
+function warningItems(list) {
+  return list.map((w) => {
+    const li = el("li");
+    li.append(el("span", w.code, { class: "warn-code" }), w.message);
+    const nodeId = w.details && (w.details.node_id || w.details.target_node_id);
+    if (nodeId) {
+      const n = (mapData && mapData.nodes.find((m) => m.id === nodeId)) || { id: nodeId };
+      li.append(" ", el("a", nodeId, { href: pageOf(n) }));
     }
-    const tr = row([box, link, statement, choice, rationale]);
-    tr.dataset.kind = item.kind; tr.dataset.target = item.node_id;
-    if (item.candidate_proof && item.candidate_proof.sha256) tr.dataset.viewed = item.candidate_proof.sha256;
-    tr.dataset.bindings = JSON.stringify(item.bindings || {});
-    return tr;
-  }));
-  if (!state.pending.length) body.append(row(["", "Nothing is awaiting review.", "", "", ""]));
-  showWarnings(state.warnings, $("warnings"));
+    return li;
+  });
+}
+
+function pendingItem(item) {
+  const card = el("div", null, { class: "pending" });
+  card.dataset.kind = item.kind; card.dataset.target = item.node_id;
+  if (item.candidate_proof && item.candidate_proof.sha256) card.dataset.viewed = item.candidate_proof.sha256;
+  card.dataset.bindings = JSON.stringify(item.bindings || {});
+  const box = el("input", null, { type: "checkbox", class: "pick", "aria-label": `Decide on ${item.node_id}` });
+  const body = el("div");
+  const what = el("div", null, { class: "what" });
+  // a local node is reviewed in its studio (#71); an imported result on its own page
+  const href = item.kind === "reference_review" ? `#/node/${encodeURIComponent(item.node_id)}` : `/studio/${encodeURIComponent(item.node_id)}/#review`;
+  what.append(el("a", item.node_id, { href }), item.statement);
+  body.append(what);
+  const controls = el("div", null, { class: "controls" });
+  const choice = el("select", null, { class: "choice", "aria-label": `Outcome for ${item.node_id}` });
+  for (const decision of item.decisions) choice.append(el("option", labelOf({ kind: item.kind, decision }), { value: decision }));
+  const rationale = el("input", null, { class: "rationale", placeholder: "Rationale", "aria-label": `Rationale for ${item.node_id}` });
+  controls.append(choice, rationale);
+  body.append(controls);
+  if (item.candidate_proof && item.candidate_proof.id) {
+    // exactly the text the decision is about, one click away
+    const details = el("details");
+    details.append(el("summary", `Snapshot v${item.candidate_proof.version} · SHA-256 ${item.candidate_proof.sha256}`), el("pre", item.candidate_proof.text));
+    body.append(details);
+  }
+  card.append(box, body);
+  box.addEventListener("change", updateSelection);
+  // choosing an outcome or writing a rationale means this one is being decided
+  choice.addEventListener("change", () => { box.checked = true; updateSelection(); });
+  rationale.addEventListener("input", () => { if (rationale.value) { box.checked = true; updateSelection(); } });
+  return card;
+}
+
+function pendingCards() { return [...$("pending").querySelectorAll(".pending")]; }
+
+// the batch button records only what is ticked: with nothing ticked there is nothing to press
+function updateSelection() {
+  const picked = pendingCards().filter((card) => card.querySelector(".pick").checked).length;
+  $("selected-count").textContent = picked ? `${picked} selected` : "Tick the ones to record";
+  $("decide-batch").disabled = picked === 0;
+}
+
+// the decisions the ticked cards will record
+function pickedDecisions() {
+  return pendingCards()
+    .filter((card) => card.querySelector(".pick").checked)
+    .map((card) => {
+      const decision = card.querySelector(".choice").value;
+      return {
+        kind: card.dataset.kind, target_id: card.dataset.target, decision,
+        rationale: card.querySelector(".rationale").value,
+        // the snapshot shown on this card: the server refuses the decision if it changed since
+        ...(card.dataset.viewed ? { viewed_candidate_proof_sha256: card.dataset.viewed } : {}),
+        // everything else the card showed it is made on (dependencies, interface, …): refused too if it changed
+        binding: JSON.parse(card.dataset.bindings || "{}")[decision] ?? null,
+      };
+    });
+}
+
+// a section shows only when it has something in it
+function showHome() {
+  $("review").hidden = !state.pending.length;
+  $("pending").replaceChildren(...state.pending.map(pendingItem));
+  $("pending-count").textContent = state.pending.length ? `${state.pending.length} pending` : "";
+  updateSelection();
+  $("warnings").replaceChildren(...warningItems(state.warnings));
+  $("warnings-block").hidden = !state.warnings.length;
 }
 
 // what each decision means, in the researcher's words
@@ -107,10 +190,12 @@ const DECISION_LABELS = {
   "dependent_migration:superseded": "Move every dependent onto this corrected source (Accepted ones need re-Accepting)",
 };
 
+const labelOf = (d) => DECISION_LABELS[`${d.kind}:${d.decision}`] || `${d.kind}: ${d.decision}`;
+
 function showError(error) { if (error.message !== "cancelled") say(error.code ? `${error.code}: ${error.message}` : error.message, "error"); }
 
 function decisionRow(decision, proof) {
-  const label = DECISION_LABELS[`${decision.kind}:${decision.decision}`] || `${decision.kind}: ${decision.decision}`;
+  const label = labelOf(decision);
   const on = decision.kind === "dependent_migration" ? `onto ${decision.dependency_id}`
     : decision.dependency_id ? `dependency ${decision.dependency_id}` : decision.target_id;
   const rationale = el("input", null, { placeholder: "why" });
@@ -128,7 +213,7 @@ function decisionRow(decision, proof) {
 let mapData = null;
 let mapView = "dag";
 const SVG_NS = "http://www.w3.org/2000/svg";
-const BOX = { w: 176, h: 58, gapX: 28, gapY: 74, pad: 24 };
+const BOX = { w: 204, h: 52, gapX: 24, gapY: 56, pad: 24 };
 
 function svg(tag, attrs) {
   const node = document.createElementNS(SVG_NS, tag);
@@ -143,7 +228,7 @@ function toneOf(n) {
   return "none";
 }
 
-// which warning a node carries, each drawn differently: challenged, potentially stale, or a decision that no longer applies
+// which warning a node carries: challenged, potentially stale, or a decision that no longer applies
 function warningOf(n) {
   if (n.integrity_state === "challenged") return "challenged";
   if (n.integrity_state === "potentially-stale") return "stale";
@@ -152,6 +237,13 @@ function warningOf(n) {
 }
 
 function short(text, length) { return text.length > length ? text.slice(0, length - 1) + "…" : text; }
+
+// the find box: which nodes to pick out, by id, label or statement (null when nothing is being looked for)
+function mapMatcher() {
+  const query = $("map-filter").value.trim().toLowerCase();
+  if (!query) return null;
+  return (n) => [n.id, n.kind, n.display_label || "", n.statement, n.assignee || ""].some((field) => field.toLowerCase().includes(query));
+}
 
 // Layers by longest path from the top (a node sits below everything that depends on it),
 // then a few barycenter sweeps to cut crossings. Enough for tens to hundreds of nodes.
@@ -193,15 +285,16 @@ function layers(nodes) {
 function drawDag(nodes) {
   const box = $("dag-svg");
   box.replaceChildren();
+  box.classList.remove("tracing", "filtering");
   if (!nodes.length) {
-    box.setAttribute("width", 400); box.setAttribute("height", 60);
-    box.append(Object.assign(svg("text", { x: 16, y: 34 }), { textContent: "No nodes yet: create the first one below." }));
+    box.setAttribute("width", 420); box.setAttribute("height", 60); box.setAttribute("viewBox", "0 0 420 60");
+    box.append(Object.assign(svg("text", { x: 18, y: 35, class: "empty" }), { textContent: "No nodes yet: create the first one below." }));
     return;
   }
   const rows = layers(nodes);
   const widest = Math.max(...rows.map((row) => row.length));
   const width = BOX.pad * 2 + widest * BOX.w + (widest - 1) * BOX.gapX;
-  const height = BOX.pad * 2 + rows.length * BOX.h + (rows.length - 1) * BOX.gapY + 16;
+  const height = BOX.pad * 2 + rows.length * BOX.h + (rows.length - 1) * BOX.gapY;
   box.setAttribute("width", width); box.setAttribute("height", height);
   box.setAttribute("viewBox", `0 0 ${width} ${height}`);
   const at = new Map();
@@ -210,40 +303,58 @@ function drawDag(nodes) {
     at.set(id, { x: (width - rowWidth) / 2 + i * (BOX.w + BOX.gapX) + BOX.w / 2, y: BOX.pad + r * (BOX.h + BOX.gapY) + BOX.h / 2 });
   }));
   const defs = svg("defs");
-  const marker = svg("marker", { id: "arrow", viewBox: "0 0 10 10", refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: "auto-start-reverse" });
-  marker.append(svg("path", { d: "M0,0 L10,5 L0,10 z", fill: "var(--map-edge)" }));
+  const marker = svg("marker", { id: "arrow", viewBox: "0 0 10 10", refX: 9, refY: 5, markerWidth: 6, markerHeight: 6, orient: "auto-start-reverse" });
+  marker.append(svg("path", { class: "arrowhead", d: "M0,0 L10,5 L0,10 z" }));
   defs.append(marker);
   box.append(defs);
+  const edges = [];
   for (const n of nodes) for (const d of n.dependencies) {
     const from = at.get(n.id), to = at.get(d);
     if (!from || !to) continue;
     const y1 = from.y + BOX.h / 2, y2 = to.y - BOX.h / 2;
-    box.append(svg("path", { class: "edge", "marker-end": "url(#arrow)", d: `M${from.x},${y1} C${from.x},${y1 + 34} ${to.x},${y2 - 34} ${to.x},${y2}` }));
+    const path = svg("path", { class: "edge", "marker-end": "url(#arrow)", d: `M${from.x},${y1} C${from.x},${y1 + 28} ${to.x},${y2 - 28} ${to.x},${y2}` });
+    edges.push({ path, from: n.id, to: d });
+    box.append(path);
   }
+  const groups = new Map();
+  // hovering or focusing a node traces what it depends on and what depends on it
+  const trace = (id) => {
+    box.classList.toggle("tracing", id !== null);
+    const near = new Set(id === null ? [] : [id]);
+    for (const edge of edges) {
+      const touches = id !== null && (edge.from === id || edge.to === id);
+      edge.path.classList.toggle("near", touches);
+      if (touches) { near.add(edge.from); near.add(edge.to); }
+    }
+    for (const [nodeId, g] of groups) g.classList.toggle("near", near.has(nodeId));
+  };
+  const matches = mapMatcher();
+  box.classList.toggle("filtering", !!matches);
   for (const n of nodes) {
     const { x, y } = at.get(n.id);
-    const classes = ["node", n.frontier ? "frontier" : "", warningOf(n)].filter(Boolean).join(" ");
-    const g = svg("g", { class: classes, tabindex: 0, role: "link", "aria-label": `${n.kind} ${n.id}: ${n.acceptance_state}, ${n.workflow_state}, ${n.integrity_state}${n.assignee ? `, claimed by ${n.assignee}` : ""}${n.frontier ? ", on the frontier" : ""}` });
-    g.append(svg("rect", { class: "box", x: x - BOX.w / 2, y: y - BOX.h / 2, width: BOX.w, height: BOX.h, rx: 8 }));
-    g.append(svg("rect", { class: `bar ${toneOf(n)}`, x: x - BOX.w / 2, y: y - BOX.h / 2, width: 5, height: BOX.h, rx: 2 }));
-    const kind = svg("text", { class: "kind", x: x - BOX.w / 2 + 12, y: y - BOX.h / 2 + 15 });
-    kind.textContent = `${n.kind} · ${n.id}`;
-    const label = svg("text", { x: x - BOX.w / 2 + 12, y: y + 3 });
-    label.textContent = short(n.display_label || n.statement, 24);
-    const meta = svg("text", { class: "meta", x: x - BOX.w / 2 + 12, y: y + BOX.h / 2 - 9 });
-    meta.textContent = [n.acceptance_state, n.workflow_state, n.integrity_state !== "current" ? n.integrity_state : "", n.assignee ? `@${n.assignee}` : ""].filter(Boolean).join(" · ");
-    g.append(kind, label, meta);
-    if (n.frontier) {
-      const tag = svg("text", { class: "tag", x: x, y: y + BOX.h / 2 + 13, "text-anchor": "middle" });
-      tag.textContent = "ready to claim";
-      g.append(tag);
-    }
+    const status = statusOf(n);
+    const classes = ["node", n.frontier ? "frontier" : "", warningOf(n), matches && matches(n) ? "match" : ""].filter(Boolean).join(" ");
+    const g = svg("g", { class: classes, tabindex: 0, role: "link", "aria-label": `${n.kind} ${n.id}: ${status.text}` });
+    g.append(svg("rect", { class: "box", x: x - BOX.w / 2, y: y - BOX.h / 2, width: BOX.w, height: BOX.h, rx: 1 }));
+    g.append(svg("rect", { class: `bar ${toneOf(n)}`, x: x - BOX.w / 2, y: y - BOX.h / 2, width: 3, height: BOX.h }));
+    const label = svg("text", { x: x - BOX.w / 2 + 12, y: y - 3 });
+    label.textContent = short(n.display_label || n.statement, 27);
+    // the id on the left, the status right-aligned; a claim shows its assignee in the tooltip
+    const id = svg("text", { class: "sub", x: x - BOX.w / 2 + 12, y: y + 15 });
+    id.textContent = short(n.id, 13);
+    const sub = svg("text", { class: `sub ${status.tone}`, x: x + BOX.w / 2 - 10, y: y + 15, "text-anchor": "end" });
+    sub.textContent = n.assignee && !status.tone ? "claimed" : short(status.text, 15);
     const title = svg("title");
-    title.textContent = n.statement;
-    g.append(title);
+    title.textContent = `${n.id} (${n.kind})\n${n.statement}\n\n${n.workflow_state}${n.blocked_reason ? ` (${n.blocked_reason})` : ""} · ${n.acceptance_state} · ${n.integrity_state}${n.assignee ? ` · claimed by ${n.assignee}` : ""}`;
+    g.append(label, id, sub, title);
     const open = () => { location.href = pageOf(n); };
     g.addEventListener("click", open);
     g.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); } });
+    g.addEventListener("mouseenter", () => trace(n.id));
+    g.addEventListener("mouseleave", () => trace(null));
+    g.addEventListener("focus", () => trace(n.id));
+    g.addEventListener("blur", () => trace(null));
+    groups.set(n.id, g);
     box.append(g);
   }
 }
@@ -257,19 +368,19 @@ function drawTree(nodes) {
   const select = $("tree-root");
   const roots = [...nodes.filter((n) => !parents.has(n.id)), ...nodes.filter((n) => parents.has(n.id))];
   const chosen = select.value && byId.has(select.value) ? select.value : (roots[0] || {}).id;
-  select.replaceChildren(...roots.map((n) => el("option", `${n.id} (${n.kind})`, { value: n.id })));
+  select.replaceChildren(...roots.map((n) => el("option", `rooted at ${n.id}`, { value: n.id })));
   if (chosen) select.value = chosen;
+  const matches = mapMatcher();
   const item = (id, ancestors) => {
     const n = byId.get(id);
     const li = el("li");
-    if (!n) { li.append(el("span", `${id} (missing)`, { class: "warning" })); return li; }
-    li.append(el("a", n.id, { href: pageOf(n) }), ` — ${short(n.display_label || n.statement, 60)}`);
-    li.append(el("span", n.acceptance_state, { class: "state-chip" }), el("span", n.workflow_state, { class: "state-chip" }));
-    li.append(el("span", n.integrity_state, { class: `state-chip${n.integrity_state === "current" ? "" : " warn-chip"}` }));
-    if (n.assignee) li.append(el("span", `@${n.assignee}`, { class: "state-chip" }));
-    if (n.frontier) li.append(el("span", "ready to claim", { class: "state-chip" }));
-    if ((parents.get(id) || 0) > 1) li.append(el("span", "shared", { class: "state-chip shared-chip", title: `used by ${parents.get(id)} nodes; see the DAG` }));
-    if (ancestors.has(id)) { li.append(" (cycle: not expanded again)"); return li; }
+    if (!n) { li.append(el("span", `${id} (missing)`, { class: "bad" })); return li; }
+    if (matches && !matches(n)) li.classList.add("dim");
+    const line = el("div", null, { class: "line" });
+    const shared = (parents.get(id) || 0) > 1 ? ` · shared by ${parents.get(id)}` : "";
+    line.append(el("a", short(n.display_label || n.statement, 70), { href: pageOf(n), title: n.statement }), el("span", `${n.id}${shared}`, { class: "muted small" }), statusChip(n));
+    li.append(line);
+    if (ancestors.has(id)) { line.append(el("span", "(cycle)", { class: "muted small" })); return li; }
     if (n.dependencies.length) {
       const below = new Set(ancestors).add(id);
       const ul = el("ul");
@@ -280,16 +391,21 @@ function drawTree(nodes) {
   };
   const tree = el("ul");
   if (chosen) tree.append(item(chosen, new Set()));
+  else tree.append(el("li", "No nodes yet: create the first one below.", { class: "muted" }));
   $("map-tree").replaceChildren(tree);
 }
 
 function showMap() {
   const nodes = mapData.nodes;
   const frontier = nodes.filter((n) => n.frontier).length;
-  $("map-caption").textContent = `${nodes.length} node(s) · ${frontier} on the frontier · click a node to open it`;
+  const matches = mapMatcher();
+  const found = matches ? nodes.filter(matches).length : null;
+  $("map-caption").textContent = found === null
+    ? `${nodes.length} nodes · ${frontier} ready to claim`
+    : `${found} of ${nodes.length} match${found ? " · Enter opens the first" : ""}`;
   $("map-dag").hidden = mapView !== "dag";
   $("map-tree").hidden = mapView !== "tree";
-  $("tree-root-label").hidden = mapView !== "tree";
+  $("tree-root").hidden = mapView !== "tree";
   $("view-dag").setAttribute("aria-pressed", String(mapView === "dag"));
   $("view-tree").setAttribute("aria-pressed", String(mapView === "tree"));
   if (mapView === "dag") drawDag(nodes); else drawTree(nodes);
@@ -330,6 +446,7 @@ function showNewNodeKind() {
 async function showNode(nodeId) {
   const view = await api(`/api/node/${encodeURIComponent(nodeId)}`);
   const node = view.node;
+  document.title = `${node.id} · Proof map`;
   $("node-title").textContent = `${node.id} — ${node.kind}`;
   $("node-axes").textContent = `workflow: ${view.workflow_state} · acceptance: ${view.acceptance_state} · integrity: ${view.integrity_state}`;
   const nodeWarnings = el("ul");
@@ -378,16 +495,19 @@ async function route() {
   $("home").hidden = !!match;
   $("node-page").hidden = !match;
   if (match) {
-    try { await showNode(decodeURIComponent(match[1])); } catch (error) { say(error.message, "error"); }
+    try { await showNode(decodeURIComponent(match[1])); } catch (error) { showError(error); }
+  } else {
+    document.title = "Proof map";
   }
 }
 
 async function refresh() {
   state = await api("/api/state");
   mapData = await api("/api/map");
-  $("project").textContent = `· ${state.project_id} · ${state.origin}`;
+  $("project").textContent = state.project_id;
+  $("project").title = state.origin;
   $("new-dependencies").replaceChildren(...mapData.nodes.map((n) => el("option", `${n.id} (${n.kind})`, { value: n.id })));
-  $("reviewer").textContent = `Decisions are recorded as ${state.reviewer}.`;
+  $("reviewer").textContent = `Decisions are committed to git with their snapshot, as ${state.reviewer}.`;
   showHome();
   showMap();
   await route();
@@ -395,24 +515,24 @@ async function refresh() {
 
 document.addEventListener("DOMContentLoaded", () => {
   $("decide-batch").addEventListener("click", async () => {
-    const decisions = [...$("pending").querySelectorAll("tbody tr")]
-      .filter((tr) => tr.querySelector("input[type=checkbox]")?.checked)
-      .map((tr) => ({
-        kind: tr.dataset.kind, target_id: tr.dataset.target, decision: tr.querySelector("select").value,
-        rationale: tr.querySelectorAll("input")[1].value,
-        // the snapshot shown in this row: the server refuses the decision if it changed since
-        ...(tr.dataset.viewed ? { viewed_candidate_proof_sha256: tr.dataset.viewed } : {}),
-        // everything else the row showed it is made on (dependencies, interface, …): refused too if it changed
-        binding: JSON.parse(tr.dataset.bindings || "{}")[tr.querySelector("select").value] ?? null,
-      }));
+    const decisions = pickedDecisions();
     if (!decisions.length) return say("Tick at least one decision.", "error");
     try { await decide(decisions); } catch (error) { showError(error); }
   });
   $("view-dag").addEventListener("click", () => { mapView = "dag"; showMap(); });
   $("view-tree").addEventListener("click", () => { mapView = "tree"; showMap(); });
   $("tree-root").addEventListener("change", showMap);
+  $("map-filter").addEventListener("input", () => mapData && showMap());
+  $("map-filter").addEventListener("keydown", (event) => {
+    if (event.key === "Escape") { event.target.value = ""; if (mapData) showMap(); }
+    if (event.key === "Enter" && mapData) {
+      const matches = mapMatcher();
+      const first = matches && mapData.nodes.find(matches);
+      if (first) location.href = pageOf(first);
+    }
+  });
   $("new-node").addEventListener("submit", createNode);
   $("new-kind").addEventListener("change", showNewNodeKind);
   window.addEventListener("hashchange", route);
-  refresh().catch((error) => say(error.message, "error"));
+  refresh().catch(showError);
 });

@@ -8,66 +8,88 @@
   <script src="/static/app.js" defer></script>
 </head>
 <body>
-  <header>
-    <h1><a href="#/">Proof map</a> <span id="project"></span></h1>
-    <p id="reviewer" class="hint"></p>
+  <header class="appbar">
+    <h1><a href="#/">Proof map</a></h1>
+    <span id="project" class="muted"></span>
   </header>
+
+  <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+
   <main>
-    <div id="message" role="status"></div>
     <section id="home">
-      <div class="map-head">
-        <h2>Map</h2>
-        <div class="view-switch" role="group" aria-label="View">
-          <button id="view-dag" type="button" aria-pressed="true">DAG</button>
-          <button id="view-tree" type="button" aria-pressed="false">Tree</button>
+      <section class="block">
+        <div class="block-head">
+          <h2><span class="idx">01</span>Map</h2>
+          <div class="segmented" role="group" aria-label="View">
+            <button id="view-dag" type="button" aria-pressed="true">DAG</button>
+            <button id="view-tree" type="button" aria-pressed="false">Tree</button>
+          </div>
+          <select id="tree-root" aria-label="Root of the tree" hidden></select>
+          <span class="spacer"></span>
+          <input id="map-filter" type="search" placeholder="Find a node" aria-label="Find a node by id, label or statement">
         </div>
-        <label id="tree-root-label" hidden>rooted at <select id="tree-root"></select></label>
-      </div>
-      <p class="hint" id="map-caption"></p>
-      <ul class="legend">
-        <li><span class="swatch frontier"></span>on the frontier: open, unblocked, unclaimed</li>
-        <li><span class="swatch accepted"></span>accepted / reviewed</li>
-        <li><span class="swatch review"></span>awaiting review</li>
-        <li><span class="swatch rejected"></span>rejected / no longer callable</li>
-        <li><span class="swatch challenged"></span>challenged</li>
-        <li><span class="swatch stale"></span>potentially stale (a dependency moved)</li>
-        <li><span class="swatch unverifiable"></span>unverifiable (a decision no longer applies)</li>
-      </ul>
-      <div id="map-dag" class="map-scroll"><svg id="dag-svg" role="img" aria-label="Dependency graph of the proof map"></svg></div>
-      <div id="map-tree" hidden></div>
-      <h2>New node</h2>
-      <p class="hint">A theorem, lemma or claim opens in its own LaTeX studio; an imported result cites an external source. A corrected source is a new imported result.</p>
-      <form id="new-node">
-        <label>Kind <select id="new-kind">
-          <option value="claim">claim</option><option value="lemma">lemma</option>
-          <option value="theorem">theorem</option><option value="imported_result">imported result</option>
-        </select></label>
-        <label>Id <input id="new-id" required pattern="[A-Za-z0-9_\-][A-Za-z0-9._\-]*" placeholder="clm_bound"></label>
-        <label class="wide">Statement <textarea id="new-statement" required rows="2"></textarea></label>
-        <label class="wide">Assumptions, one per line <textarea id="new-assumptions" rows="2"></textarea></label>
-        <label class="wide">Depends on <select id="new-dependencies" multiple size="4"></select></label>
-        <fieldset id="new-source" hidden>
-          <legend>Source</legend>
-          <label>Locator <input id="new-locator" placeholder="doi:10.1000/xyz, arXiv:2501.01234"></label>
-          <label>Version <input id="new-version" placeholder="v2, published 2024"></label>
-          <label>Trust level <select id="new-trust">
-            <option value="">—</option><option value="external_reference">external reference</option>
-            <option value="foundational">foundational</option><option value="project_verified">project verified</option>
-            <option value="temporary_admit">temporary admit</option>
+        <p class="muted small" id="map-caption"></p>
+        <div id="map-dag" class="map-scroll"><svg id="dag-svg" role="img" aria-label="Dependency graph of the proof map"></svg></div>
+        <div id="map-tree" class="map-tree" hidden></div>
+        <details class="legend">
+          <summary>Legend</summary>
+          <ul>
+            <li><span class="swatch frontier"></span>ready to claim</li>
+            <li><span class="swatch accepted"></span>accepted</li>
+            <li><span class="swatch review"></span>awaiting review</li>
+            <li><span class="swatch rejected"></span>rejected</li>
+            <li><span class="swatch warn"></span>challenged, stale or unverifiable</li>
+            <li class="muted">Arrows point to what a node depends on.</li>
+          </ul>
+        </details>
+      </section>
+
+      <section class="block">
+        <div class="block-head"><h2><span class="idx">02</span>New node</h2></div>
+        <p class="muted small">A theorem, lemma or claim opens in its own LaTeX studio; an imported result cites an external source. A corrected source is a new imported result.</p>
+        <form id="new-node">
+          <label>Kind <select id="new-kind">
+            <option value="claim">claim</option><option value="lemma">lemma</option>
+            <option value="theorem">theorem</option><option value="imported_result">imported result</option>
           </select></label>
-        </fieldset>
-        <button type="submit">Create</button>
-      </form>
-      <h2>Awaiting review</h2>
-      <p class="hint">Tick the decisions to make, choose each outcome and rationale, then record them. Each decision is committed to git with its snapshot, as the identity shown above.</p>
-      <table id="pending"><thead><tr><th></th><th>Node</th><th>Statement and snapshot</th><th>Decision</th><th>Rationale</th></tr></thead><tbody></tbody></table>
-      <button id="decide-batch" type="button">Record selected decisions</button>
-      <h2>Warnings</h2>
-      <ul id="warnings"></ul>
+          <label>Id <input id="new-id" required pattern="[A-Za-z0-9_\-][A-Za-z0-9._\-]*" placeholder="clm_bound"></label>
+          <label class="wide">Statement <textarea id="new-statement" required rows="2"></textarea></label>
+          <label class="wide">Assumptions, one per line <textarea id="new-assumptions" rows="2"></textarea></label>
+          <label class="wide">Depends on <select id="new-dependencies" multiple size="4"></select></label>
+          <fieldset id="new-source" hidden>
+            <legend>Source</legend>
+            <label>Locator <input id="new-locator" placeholder="doi:10.1000/xyz, arXiv:2501.01234"></label>
+            <label>Version <input id="new-version" placeholder="v2, published 2024"></label>
+            <label>Trust level <select id="new-trust">
+              <option value="">—</option><option value="external_reference">external reference</option>
+              <option value="foundational">foundational</option><option value="project_verified">project verified</option>
+              <option value="temporary_admit">temporary admit</option>
+            </select></label>
+          </fieldset>
+          <button type="submit" class="primary">Create</button>
+        </form>
+      </section>
+
+      <section class="block" id="review" hidden>
+        <div class="block-head"><h2><span class="idx">03</span>Awaiting review</h2><span id="pending-count" class="muted"></span></div>
+        <p class="muted small">Tick the decisions to make, choose each outcome and rationale, then record them. <span id="reviewer"></span></p>
+        <div id="pending"></div>
+        <div class="batch-bar">
+          <span class="muted small" id="selected-count"></span>
+          <button id="decide-batch" type="button" class="primary" disabled>Record</button>
+        </div>
+      </section>
+
+      <section class="block" id="warnings-block" hidden>
+        <div class="block-head"><h2><span class="idx">04</span>Warnings</h2></div>
+        <ul id="warnings" class="rows"></ul>
+      </section>
     </section>
+
     <section id="node-page" hidden>
-      <h2 id="node-title"></h2>
-      <p id="node-axes"></p>
+      <a href="#/" class="back">← Map</a>
+      <h2 id="node-title" class="node-title"></h2>
+      <p id="node-axes" class="muted small"></p>
       <div id="node-warnings"></div>
       <h3>Statement</h3>
       <div id="node-statement" class="statement"></div>
@@ -77,27 +99,30 @@
       <div id="node-source"></div>
       <p id="node-dependents"></p>
       <h3>Dependencies and pins</h3>
-      <table id="node-deps"><thead><tr><th>Dependency</th><th>Pinned version</th><th>Accepted version now</th><th>Pinned interface</th><th>Current?</th></tr></thead><tbody></tbody></table>
+      <div class="table-scroll"><table id="node-deps"><thead><tr><th>Dependency</th><th>Pinned version</th><th>Accepted version now</th><th>Pinned interface</th><th>Current?</th></tr></thead><tbody></tbody></table></div>
       <h3>Challenges</h3>
-      <ul id="node-challenges"></ul>
+      <ul id="node-challenges" class="rows"></ul>
       <h3>Review snapshot</h3>
-      <p id="node-proof-meta"></p>
-      <p class="hint">Exactly the LaTeX being decided on; its SHA-256 is recorded with the decision. The node's studio shows its compiled PDF.</p>
-      <p id="node-pdfs"></p>
-      <pre id="node-proof-exact"></pre>
+      <p id="node-proof-meta" class="muted small"></p>
+      <p class="muted small">Exactly the LaTeX being decided on; its SHA-256 is recorded with the decision. The node's studio shows its compiled PDF.</p>
+      <p id="node-pdfs" class="small"></p>
+      <pre id="node-proof-exact" class="proof-text"></pre>
       <h3>Evidence checks</h3>
-      <ul id="node-evidence"></ul>
+      <ul id="node-evidence" class="rows"></ul>
       <h3>Decisions you can make here</h3>
-      <table id="node-decisions"><thead><tr><th>Decision</th><th>On</th><th>Rationale</th><th></th></tr></thead><tbody></tbody></table>
+      <div class="table-scroll"><table id="node-decisions"><thead><tr><th>Decision</th><th>On</th><th>Rationale</th><th></th></tr></thead><tbody></tbody></table></div>
       <h3>Review history</h3>
-      <ul id="node-history"></ul>
+      <ul id="node-history" class="rows"></ul>
     </section>
+
     <section id="confirm" hidden>
       <h2>You are about to record</h2>
-      <p class="hint">Each of these is written to the node's reviews.jsonl and committed with its snapshot, as the identity shown above.</p>
-      <ul id="confirm-decisions"></ul>
-      <button id="confirm-record" type="button">Record</button>
-      <button id="confirm-cancel" type="button">Cancel</button>
+      <p class="muted small">Each of these is written to the node's reviews.jsonl and committed with its snapshot, as <span id="confirm-reviewer"></span>.</p>
+      <ul id="confirm-decisions" class="rows"></ul>
+      <div class="dialog-actions">
+        <button id="confirm-cancel" type="button">Cancel</button>
+        <button id="confirm-record" type="button" class="primary">Record</button>
+      </div>
     </section>
   </main>
 </body>
