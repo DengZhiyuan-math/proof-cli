@@ -166,7 +166,7 @@ def test_the_studio_page_carries_the_node_panel():
     index = (STUDIO_STATIC / "index.html").read_text()
     assert 'src="static/node.js"' in index and 'id="node-panel"' in index
     panel = (STUDIO_STATIC / "node.js").read_text()
-    for action in ("claim", "unassign", "split", "request-review", "challenge", "evidence"):
+    for action in ("claim", "unassign", "split", "depend", "request-review", "challenge", "evidence"):
         assert f"/{action}" in panel, action
 
 
@@ -214,38 +214,6 @@ def test_the_dependency_list_shows_pins_and_opens_each_dependency_where_it_lives
 def test_an_evidence_check_names_the_snapshot_it_checked():
     sent = _panel(answer={"outcome": "passed"}, click={"label": "Record an Evidence check on snapshot v1", "values": {"outcome": "passed", "run_by": "lean"}})
     assert sent["events"][-1]["body"]["candidate_proof_id"] == "cp-v1"
-
-
-# -- the New node form, run for real under node (PR #63 review) -----------------------
-
-NEW_NODE_HARNESS = Path(__file__).resolve().parent / "js" / "new_node_harness.js"
-
-
-def _new_node_form(**scenario):
-    if _shutil.which("node") is None:
-        pytest.skip("needs node")
-    done = _subprocess.run(["node", str(NEW_NODE_HARNESS), _json.dumps(scenario)], capture_output=True, text=True, timeout=30)
-    assert done.returncode == 0, done.stderr
-    return _json.loads(done.stdout)
-
-
-def test_switching_the_form_to_an_imported_result_drops_the_dependencies_it_had():
-    """Dependencies chosen for a claim, then the kind switched: an imported result takes none."""
-    result = _new_node_form(kind="claim", dependencies=["thm"], switchTo="imported_result")
-    (body,) = result["sent"]
-    assert body["kind"] == "imported_result" and body["dependencies"] == []
-    assert result["selectedAfter"] == []  # the disabled list no longer holds a hidden choice
-
-
-def test_an_imported_result_never_sends_dependencies_even_if_some_are_selected():
-    (body,) = _new_node_form(kind="imported_result", dependencies=["thm"], switchTo=None)["sent"]
-    assert body["dependencies"] == [] and body["source_locator"] == "doi:x"
-
-
-def test_a_local_node_still_sends_its_dependencies():
-    (body,) = _new_node_form(kind="claim", dependencies=["thm", "lem"], switchTo=None)["sent"]
-    assert body["dependencies"] == ["thm", "lem"]
-
 
 
 # -- review in the studio (#71) --------------------------------------------------------

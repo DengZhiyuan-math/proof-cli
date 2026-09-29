@@ -8,7 +8,6 @@ from proof_cli.obligations import add_obligation
 from proof_cli.blockers import add_blocker
 from proof_cli.proof_state import set_current_context, set_current_theorem
 from proof_cli.retrieval import RetrievalSourceKind, retrieve_candidates
-from proof_cli.services import workspace_retrieval
 from proof_cli.storage import ensure_project
 from proof_cli.theorems import add_theorem
 
@@ -68,7 +67,7 @@ def test_retrieval_orders_project_local_before_external(tmp_path: Path):
     assert report.candidates[0].payload["id"] == "local_1"
 
 
-def test_workspace_retrieval_uses_current_context_and_serializes_payload(tmp_path: Path):
+def test_retrieval_uses_current_context_and_serializes_payload(tmp_path: Path):
     store = ensure_project(tmp_path)
     add_theorem(
         store,
@@ -85,8 +84,8 @@ def test_workspace_retrieval_uses_current_context_and_serializes_payload(tmp_pat
     set_current_theorem(store, "local_2")
     set_current_context(store, ["A", "B"])
 
-    report = workspace_retrieval(
-        tmp_path,
+    report = retrieve_candidates(
+        store,
         external_candidates=[
             {
                 "id": "ext_2",

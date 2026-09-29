@@ -122,6 +122,42 @@ def test_a_release_with_different_ddl_reapplies_it(tmp_path: Path, monkeypatch, 
     assert any(statement.lstrip().upper().startswith("CREATE TABLE") for statement in statements)
 
 
+def test_a_project_stamped_before_snapshot_dependencies_gains_the_column(tmp_path: Path):
+    """A project an older release migrated and stamped, before #96's `candidate_proofs.dependencies`,
+    gets the column on its next connect: the added columns are part of the DDL fingerprint."""
+    store = ensure_project(tmp_path)
+    raw = sqlite3.connect(store.db_path)
+    raw.execute("ALTER TABLE candidate_proofs DROP COLUMN dependencies")
+    raw.commit()
+    cookie = raw.execute("PRAGMA schema_version").fetchone()[0]
+    older_digest = storage._SCHEMA_DDL_DIGEST ^ 1  # the older release's DDL, without the column
+    raw.execute(f"PRAGMA user_version = {(older_digest ^ cookie) & 0x7FFFFFFF}")  # current, as that release saw it
+    raw.commit()
+    raw.close()
+
+    with store.connect() as conn:
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(candidate_proofs)")}
+    assert "dependencies" in columns
+
+
+def test_a_project_stamped_before_side_documents_gains_the_table(tmp_path: Path):
+    """A project an older release migrated and stamped, before #39's `side_documents` table,
+    gets the table on its next connect: its DDL is part of the fingerprint."""
+    store = ensure_project(tmp_path)
+    raw = sqlite3.connect(store.db_path)
+    raw.execute("DROP TABLE side_documents")
+    raw.commit()
+    cookie = raw.execute("PRAGMA schema_version").fetchone()[0]
+    older_digest = storage._SCHEMA_DDL_DIGEST ^ 1  # the older release's DDL, without the table
+    raw.execute(f"PRAGMA user_version = {(older_digest ^ cookie) & 0x7FFFFFFF}")  # current, as that release saw it
+    raw.commit()
+    raw.close()
+
+    with store.connect() as conn:
+        tables = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    assert "side_documents" in tables
+
+
 # -- reads stay linear -----------------------------------------------------------------
 
 
@@ -231,8 +267,9 @@ def _scaled_dag(root: Path, copies: int):
 
         I<k> (imported, Reference-reviewed) <- A<k> <- B<k> <- D<k> <- E<k> (review-needed) <- F<k>
                                      D<k-1> <-'   '-- C<k> <-'  '-- R<k> (Rejected)
-                                         B<k> <- G<k>, I<k> <- H<k> (open claims)
-    An open Challenge on B2, B5, ..., and the second gadget's I found no longer callable.
+                                         B<k> <- G<k>, I<k> <- H<k> <- J<k> (open claims)
+    An open Challenge on B2, B5, ..., the second gadget's I found no longer callable, and A0
+    revised and re-Accepted, so the pins on it lag.
 
     Stands in for the sample proof map fixture of #98 (PR #104) with `copies=n`, which isn't on
     this branch's base yet; it can replace this once both land.
@@ -258,36 +295,42 @@ def _scaled_dag(root: Path, copies: int):
         node(f"F{k}", "claim", [f"E{k}"])
         node(f"G{k}", "claim", [f"B{k}"])
         node(f"H{k}", "claim", [f"I{k}"])
+        node(f"J{k}", "claim", [f"H{k}"])
         node(f"R{k}", "claim", [f"D{k}"], "reject")
     for k in range(2, copies, 3):
         open_challenge(store, f"B{k}", opened_by="agent_b", rationale="a hypothesis may be missing")
     if copies > 1:
         decide.decide_reference_review("I1", "no-longer-callable", rationale="the source has a gap")
+    # a proof-only revision of A0: B0's and C0's pins now lag its accepted version (#23)
+    submit_proof(store, "A0", claimant_id="agent_a", scoping_rationale="r", content="proof of A0, shorter")
+    decide.decide_acceptance("A0", "accept")
     return store
 
 
-def _walk_per_node(store, node_id: str) -> bool:
-    """The derivation before #108: a fresh reachability walk for every node asked about."""
+def _walk_per_node(store, node_id: str) -> str | None:
+    """The derivation before #108: a fresh reachability walk for every node asked about,
+    reporting a Challenge over a stale or lagging pin."""
     visited: set[str] = set()
     pending = [node_id]
+    found = None
     while pending:
         current_id = pending.pop()
         if current_id in visited:
             continue
         visited.add(current_id)
         if proof_map.has_open_challenge(store, current_id):
-            return True
+            return "challenged"
         node = proof_map.get_node(store, current_id)
         if node is None:
             continue
         if node.kind.value == "imported_result" and proof_map._no_longer_callable(store, current_id):
-            return True
+            return "challenged"
         for dependency_id in node.dependencies:
             pin = proof_map.get_dependency_pin(store, current_id, dependency_id)
-            if pin is not None and not proof_map.dependency_pin_is_current(store, pin):
-                return True
+            if pin is not None and (not proof_map.dependency_pin_is_current(store, pin) or proof_map.dependency_pin_lags(store, pin)):
+                found = "stale"
             pending.append(dependency_id)
-    return False
+    return found
 
 
 def _axes(store, node) -> tuple:
@@ -308,7 +351,7 @@ def test_the_one_pass_derives_exactly_what_a_walk_per_node_does(tmp_path: Path, 
         frontier = [node.id for node in get_frontier(store)]
 
     with monkeypatch.context() as patched:
-        patched.setattr(proof_map, "_is_downstream_of_challenge_or_stale_pin", _walk_per_node)
+        patched.setattr(proof_map, "_upstream_cause", _walk_per_node)
         per_node = {node.id: _axes(store, node) for node in list_nodes(store)}  # no scope: nothing shared
         per_node_frontier = [node.id for node in get_frontier(store)]
 
@@ -316,7 +359,7 @@ def test_the_one_pass_derives_exactly_what_a_walk_per_node_does(tmp_path: Path, 
     assert frontier == per_node_frontier
     # the scaled map exercises every value the pass derives
     assert {axes[3] for axes in one_pass.values()} == {"current", "potentially-stale", "challenged"}
-    assert {axes[1] for axes in one_pass.values()} >= {None, "not-accepted", "dependency-challenged", "dependency-not-callable"}
+    assert {axes[1] for axes in one_pass.values()} >= {None, "not-accepted", "dependency-challenged", "dependency-stale", "dependency-not-callable"}
 
 
 def test_a_dependency_cycle_is_answered_by_plain_reachability(tmp_path: Path):
