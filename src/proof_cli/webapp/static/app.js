@@ -544,11 +544,16 @@ async function showNode(nodeId) {
 }
 
 async function route() {
+  // four pages: the map (#/), the review list (#/review), the warnings (#/warnings), a node (#/node/<id>)
   const match = location.hash.match(/^#\/node\/(.+)$/);
-  $("home").hidden = !!match;
-  $("node-page").hidden = !match;
-  if (!match && view.content && !view.fitted) fitView();  // drawn while the map was hidden
-  for (const link of document.querySelectorAll(".rail a[data-nav]")) link.classList.toggle("on", !match && (link.dataset.nav === "map" ? !location.hash.startsWith("#sec-") : location.hash === link.getAttribute("href")));
+  const page = match ? "node" : { "#/review": "review", "#/warnings": "warnings" }[location.hash] || "map";
+  document.body.dataset.page = page;
+  $("home").hidden = page !== "map";
+  $("review-page").hidden = page !== "review";
+  $("warnings-page").hidden = page !== "warnings";
+  $("node-page").hidden = page !== "node";
+  if (page === "map" && view.content && !view.fitted) fitView();  // drawn while the map was hidden
+  for (const link of document.querySelectorAll(".rail a[data-nav]")) link.classList.toggle("on", link.dataset.nav === page);
   if (match) {
     try { await showNode(decodeURIComponent(match[1])); } catch (error) { say(error.message, "error"); }
   }

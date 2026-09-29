@@ -1,6 +1,6 @@
 /* The proof map page (ADR-0008, ADR-0010), in Apple's design language: the system font,
    a unified toolbar, a translucent source-list sidebar that hides, a Freeform-style canvas
-   for the map, rounded cards with soft shadows, and grouped inset sections below.
+   for the map, rounded cards with soft shadows; the review list and the warnings on pages of their own.
    Four system colours, one job each: blue (the frontier, the primary action, the selected
    thing), green (accepted), orange (waits for the researcher), red (rejected, failed).
    Everything else is a label or fill grey. Light and dark follow the system. */
@@ -216,14 +216,19 @@ main { flex: 1; min-width: 0; overflow: auto; }
 #map-tree li { margin: 7px 0; }
 #map-tree a { font-family: var(--mono); font-size: 12px; }
 
-/* ---------- grouped inset sections */
-.below { max-width: 1040px; margin: 0 auto; padding: 28px 24px 56px; display: grid; gap: 28px; }
+/* ---------- the review and warnings pages, and grouped inset sections */
+.page { max-width: 1080px; margin: 0 auto; padding: 28px 24px 56px; display: grid; gap: 12px; align-content: start; }
+.page-title { font-size: 26px; font-weight: 700; letter-spacing: -.02em; display: flex; align-items: baseline; gap: 10px; }
+.page-title .n { font-size: 17px; font-weight: 500; color: var(--label-3); }
+.page > .hint { margin: 0 0 8px; max-width: 70ch; }
+/* the map's own controls show only on the map */
+body:not([data-page="map"]) .segmented, body:not([data-page="map"]) #tree-root-label { display: none; }
+a.badge:hover { text-decoration: none; background: var(--fill-2); }
 .group-head { font-size: 13px; font-weight: 600; color: var(--label-2); margin: 0 4px 8px; display: flex; align-items: baseline; gap: 8px; }
 .group-head .n { color: var(--label-3); font-weight: 400; }
 .card { background: var(--surface); border-radius: 12px; box-shadow: var(--shadow-card); overflow: hidden; }
 .card.pb, .pb { padding: 14px 16px; }
 .card-foot { display: flex; justify-content: flex-end; padding: 10px 14px; border-top: .5px solid var(--sep); }
-.hint.pad { padding: 12px 16px 0; margin: 0; }
 .warning { color: var(--orange); } .warning code { font-weight: 600; }
 #warnings, #node-warnings ul, #node-challenges, #node-evidence, #node-history, #confirm-decisions { margin: 0; padding-left: 18px; }
 #warnings li, #node-warnings li, #node-challenges li, #node-evidence li, #node-history li, #confirm-decisions li { margin: 5px 0; }
