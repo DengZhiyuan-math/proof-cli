@@ -800,6 +800,26 @@ async function chatSend() {
   $("#chat-input").value = ""; updateScope();
   const extra = [provLabel(), C.model, C.effort && "effort " + C.effort].filter(Boolean).join(" · ");
   chatAppend(`${mentionHtml(text)}<span class="ctx">${esc(describeScope(mentions, mode))}${extra ? " · " + esc(extra) : ""}</span>`, "msg user");
+  await followTurn(r, mode, provider);
+}
+
+// The proof agent drafts the node's missing key-ideas.md (ADR-0013) from proof.tex and the
+// dependencies, in one edit turn that may write only that file; the author then edits it, and
+// requesting review confirms it. Called from the node panel; the turn shows in the agent panel.
+async function draftKeyIdeas() {
+  if (C.job) throw Object.assign(new Error("The agent is still working on the previous message."), { code: "AGENT_BUSY" });
+  if (!(await saveAll())) throw Object.assign(new Error("Resolve the save conflict before asking the agent."), { code: "SAVE_CONFLICT" });
+  const provider = C.provider;
+  const r = await api("/api/key-ideas/draft", { session_id: C.session, model: C.model, effort: C.effort, provider });
+  if (r.error) throw Object.assign(new Error(r.error), { code: "DRAFT_REFUSED" });
+  chatHidden(false);
+  chatAppend(`Draft key-ideas.md from proof.tex and the dependencies<span class="ctx">may change only key-ideas.md · ${esc(provLabel())}</span>`, "msg user");
+  await followTurn(r, "edit", provider);
+  if (S.files.some((f) => f.path === "key-ideas.md")) await openFile("key-ideas.md");  // for the author to read and edit
+}
+
+// Follow one agent turn's events into the chat log until it is done.
+async function followTurn(r, mode, provider) {
   C.job = r.job; C.cur = null;
   C.editTurn = mode === "edit"; C.heldNote = false;       // saves wait for the turn (see saveTab)
   const tools = new Map();

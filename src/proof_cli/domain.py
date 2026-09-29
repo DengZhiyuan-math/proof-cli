@@ -225,6 +225,10 @@ class CandidateProofRecord(BaseModel):
     # (missing or unreadable) snapshot this one re-takes from an unchanged working proof (#99).
     # The `proof_map_review_requested` event is its lasting record.
     resnapshot_after_loss: int | None = None
+    # who wrote the key-ideas summary this snapshot froze (ADR-0013), derived at request-review
+    # from the drafts the studio recorded: key_ideas.AUTHOR, AGENT_CONFIRMED or AGENT_EDITED.
+    # Every decision on the snapshot carries it in its bound payload. None for an older snapshot.
+    key_ideas_drafted_by: str | None = None
 
 
 class DependencyPin(BaseModel):

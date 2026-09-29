@@ -1,6 +1,6 @@
 // Runs the studio's real node panel (src/proof_cli/studio/static/node.js) against a minimal DOM.
 // argv[2]: JSON {view, saveAll: true|false|null, click: {label, values}, press: button label,
-// answer, confirm}. Prints what happened.
+// answer, confirm}. Prints what happened: the events, the review section's text, links and buttons.
 const fs = require("fs"), path = require("path"), vm = require("vm");
 
 class El {
@@ -23,13 +23,18 @@ class El {
     location: {},
     confirm: () => { events.push("confirm"); return scenario.confirm !== false; },
     openReadOnly: (name, text) => { events.push({ openReadOnly: name, text }); },
+    draftKeyIdeas: async () => { events.push("draftKeyIdeas"); },
     fetch: async (url, options = {}) => {
       if (options.method === "POST") events.push({ post: url, body: JSON.parse(options.body) });
       return { json: async () => ({ ok: true, data: options.method === "POST" ? (scenario.answer || { version: 2 }) : scenario.view }) };
     },
   };
   if (scenario.saveAll !== null) context.saveAll = async () => { events.push("saveAll"); return scenario.saveAll; };
+  // the studio page's KaTeX and mathtext.js (ADR-0013), unless the scenario leaves KaTeX out
+  const katexCalls = [];
+  if (scenario.katex !== false) context.katex = require("./katex_stub.js")(katexCalls);
   vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "../../src/proof_cli/studio/static/mathtext.js"), "utf8"), context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, "../../src/proof_cli/studio/static/node.js"), "utf8"), context);
   await new Promise(setImmediate);
   const out = { events, deps: null, links: [], note: "" };
@@ -53,6 +58,14 @@ class El {
     await button.onclick();
     out.note = panel.querySelector(".node-note").textContent;
   }
-  out.review = (panel.querySelector(".node-review") || { text: () => "" }).text();
+  const review = panel.querySelector(".node-review") || { text: () => "", all: () => [] };
+  out.review = review.text();
+  out.reviewLinks = review.all().filter((x) => x.tag === "a").map((x) => x.attrs.href);
+  out.reviewButtons = review.all().filter((x) => x.tag === "button").map((x) => x.textContent);
+  out.buttons = panel.all().filter((x) => x.tag === "button").map((x) => x.textContent);
+  out.text = panel.text();
+  out.katex = katexCalls;
+  // every maths span in the review section: its class and its text
+  out.math = review.all().filter((x) => x.tag === "span" && String(x.attrs.class || "").startsWith("math")).map((x) => ({ class: x.attrs.class, text: x.textContent, title: x.attrs.title || null }));
   console.log(JSON.stringify(out));
 })();

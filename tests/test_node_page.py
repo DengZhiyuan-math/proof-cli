@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from _proofs import KEY_IDEAS, write_key_ideas
 from _review_client import DirectClient
 from proof_cli.proof_map import claim_node, get_active_claim, get_node, get_workflow_state, list_nodes
 from proof_cli.storage import ensure_project
@@ -126,6 +127,8 @@ def test_request_review_from_the_node_panel(page):
     store, client = page
     _ok(client.post("/api/nodes", {"node_id": "c1", "kind": "claim", "statement": "C"}))
     assert _refused(client.post("/api/node/c1/request-review", {"rationale": "  "})) == "SCOPING_RATIONALE_REQUIRED"
+    assert _refused(client.post("/api/node/c1/request-review", {"rationale": "a single computation"})) == "KEY_IDEAS_REQUIRED"
+    write_key_ideas(store, "c1")
     snapshot = _ok(client.post("/api/node/c1/request-review", {"rationale": "a single computation"}))
     assert snapshot["version"] == 1 and get_workflow_state(store, "c1") == "review-needed"
     assert _refused(client.post("/api/node/c1/request-review", {"rationale": "again"})) == "WORKING_PROOF_UNCHANGED"
@@ -140,6 +143,7 @@ def test_a_challenge_and_an_evidence_check_from_the_node_panel(page):
     _ok(client.post("/api/nodes", {"node_id": "c1", "kind": "claim", "statement": "C"}))
     assert _refused(client.post("/api/node/c1/challenge", {"rationale": "missing assumption"})) == "TARGET_NOT_ACCEPTED"
     assert _refused(client.post("/api/node/c1/evidence", {"outcome": "passed"})) == "INVALID_REQUEST"  # which snapshot?
+    write_key_ideas(store, "c1")
     v1 = _ok(client.post("/api/node/c1/request-review", {"rationale": "scoped"}))
     (store.root / "proofs" / "c1" / "proof.tex").write_text("a second version\n")
     v2 = _ok(client.post("/api/node/c1/request-review", {"rationale": "scoped"}))
@@ -218,20 +222,73 @@ def test_an_evidence_check_names_the_snapshot_it_checked():
 
 # -- review in the studio (#71) --------------------------------------------------------
 
+SUMMARY = {
+    "text": KEY_IDEAS,
+    "fields": {"core_idea": "CORE: compactness of $[0, 1]$", "main_steps": "STEPS: 1. cover (uses lem)", "difficulties": "HARD: the subcover", "not_covered": "OPEN: 无"},
+    "drafted_by": None,
+}
 REVIEW_VIEW = {
     **VIEW,
     "workflow_state": "review-needed",
     "candidate_proof": {"id": "cp-v2", "version": 2, "sha256": "d" * 64, "text": "MAIN",
-                        "files": {"proof.tex": "MAIN", "body.tex": "BODY", "../preamble.tex": "PRE"}},
+                        "files": {"proof.tex": "MAIN", "body.tex": "BODY", "key-ideas.md": KEY_IDEAS, "../preamble.tex": "PRE"},
+                        "key_ideas": SUMMARY},
     "pdfs": {"snapshot": True, "build": True},
     "decisions": [{"kind": "acceptance", "target_id": "A", "decision": "accept", "binding": "b" * 64}],
+    "key_ideas_working": {"exists": True, "missing": []},
 }
 
 
-def test_the_review_section_opens_every_frozen_file_read_only():
-    shown = _panel(view=REVIEW_VIEW, press="body.tex")
-    assert {"openReadOnly": "v2 · body.tex", "text": "BODY"} in shown["events"]
-    assert "Snapshot v2" in shown["review"] and "archived" in shown["review"]
+def test_the_review_view_shows_only_the_summary_and_the_decision_controls():
+    shown = _panel(view=REVIEW_VIEW)
+    review = shown["review"]
+    assert "Snapshot v2" in review
+    for title, text in (("核心思路", "CORE: compactness of"), ("主要步骤", "STEPS"), ("难点", "HARD"), ("未覆盖", "OPEN")):
+        assert title in review and text in review
+    assert "Accept this snapshot" in shown["reviewButtons"]
+    # no LaTeX source and no PDF: neither a frozen file's text, nor its name, nor the archived PDF
+    for source in ("MAIN", "BODY", "PRE", "body.tex", "proof.tex", "preamble.tex"):
+        assert source not in review, source
+    assert not [href for href in shown["reviewLinks"] if "pdf" in href]
+    assert shown["reviewButtons"] == ["Accept this snapshot"]
+    # the frozen sources and the PDF are a link away, on the node's page
+    assert "/#/node/A" in shown["reviewLinks"]
+
+
+@pytest.mark.parametrize("provenance, shown_as", [
+    ("agent (confirmed by author at request-review)", "由 agent 起草、作者确认"),
+    ("agent draft, edited by author", "由 agent 起草、作者修改"),
+    ("author", "作者撰写"),
+])
+def test_the_review_view_says_who_wrote_the_summary(provenance, shown_as):
+    view = {**REVIEW_VIEW, "candidate_proof": {**REVIEW_VIEW["candidate_proof"], "key_ideas": {**SUMMARY, "drafted_by": provenance}}}
+    assert shown_as in _panel(view=view)["review"]
+    assert "由 agent 起草" not in _panel(view=REVIEW_VIEW)["review"]  # an older record says nothing
+
+
+def test_an_old_snapshot_without_a_summary_is_reviewed_with_a_note_and_a_link():
+    old = {**REVIEW_VIEW, "candidate_proof": {**REVIEW_VIEW["candidate_proof"], "files": {"proof.tex": "MAIN"}, "key_ideas": None}}
+    shown = _panel(view=old)
+    assert "这个 snapshot 没有关键思路摘要" in shown["review"]
+    assert "/#/node/A" in shown["reviewLinks"]
+    assert shown["reviewButtons"] == ["Accept this snapshot"]  # still decided as before
+    assert "MAIN" not in shown["review"]
+
+
+def test_the_panel_offers_the_proof_agents_draft_when_the_node_has_no_summary():
+    missing = {**VIEW, "key_ideas_working": {"exists": False, "missing": ["key-ideas.md"]}}
+    drafted = _panel(view=missing, press="Draft key ideas with the proof agent")
+    assert "draftKeyIdeas" in drafted["events"]
+    assert "request review to confirm" in drafted["note"]
+    # with a summary in place there is nothing to draft; an incomplete one says what it lacks
+    assert "Draft key ideas with the proof agent" not in _panel(view=REVIEW_VIEW)["buttons"]
+    partial = _panel(view={**VIEW, "key_ideas_working": {"exists": True, "missing": ["主要步骤"]}})
+    assert "主要步骤" in partial["text"] and "Draft key ideas with the proof agent" not in partial["buttons"]
+
+
+def test_the_studio_page_can_draft_key_ideas_through_the_agent_panel():
+    app = (STUDIO_STATIC / "app.js").read_text()
+    assert "async function draftKeyIdeas()" in app and '"/api/key-ideas/draft"' in app
 
 
 def test_a_decision_from_the_studio_carries_its_binding_and_the_snapshot_it_showed():
@@ -254,9 +311,10 @@ def test_deciding_on_a_snapshot_the_page_no_longer_shows_is_refused(page):
     _ok(client.post("/api/nodes", {"node_id": "c1", "kind": "claim", "statement": "C"}))
     folder = store.root / "proofs" / "c1"
     (folder / "body.tex").write_text("first\n")
+    write_key_ideas(store, "c1")
     _ok(client.post("/api/node/c1/request-review", {"rationale": "scoped"}))
     view = _ok(client.get("/api/node/c1"))
-    assert set(view["candidate_proof"]["files"]) == {"proof.tex", "body.tex", "../preamble.tex"}
+    assert set(view["candidate_proof"]["files"]) == {"proof.tex", "body.tex", "key-ideas.md", "../preamble.tex"}
     accept = next(d for d in view["decisions"] if d["decision"] == "accept")
 
     (folder / "body.tex").write_text("second\n")
@@ -280,3 +338,46 @@ def test_a_damaged_snapshot_shows_as_such_in_the_review_section():
     broken = {**REVIEW_VIEW, "candidate_proof": {"id": "cp-v2", "version": 2, "sha256": None, "text": "", "files": {}, "unreadable": True}}
     shown = _panel(view=broken)
     assert "can't be read" in shown["review"]
+
+
+
+# -- maths in the summary is typeset with the vendored KaTeX (ADR-0013) ---------------------
+
+
+def _review_with(core, **scenario):
+    view = {**REVIEW_VIEW, "candidate_proof": {**REVIEW_VIEW["candidate_proof"], "key_ideas": {**SUMMARY, "fields": {**SUMMARY["fields"], "core_idea": core}}}}
+    return _panel(view=view, **scenario)
+
+
+def test_the_review_view_renders_inline_and_display_maths():
+    shown = _review_with("By $[0, 1]$ compact, $$\\sup_{x} f(x) < \\infty.$$ Costs \\$5.")
+    assert {"tex": "[0, 1]", "displayMode": False} in shown["katex"]
+    assert {"tex": "\\sup_{x} f(x) < \\infty.", "displayMode": True} in shown["katex"]
+    assert {"class": "math", "text": "[katex: [0, 1]]", "title": None} in shown["math"]
+    assert {"class": "math display", "text": "[katex display: \\sup_{x} f(x) < \\infty.]", "title": None} in shown["math"]
+    assert "Costs \\$5." in shown["review"]  # an escaped dollar is a dollar
+
+
+def test_a_malformed_formula_in_the_review_view_shows_as_text_and_never_throws():
+    shown = _review_with("Broken $\\frac{1}{$ but $\\alpha$ is fine; an unclosed $ stays text.")
+    (bad,) = [m for m in shown["math"] if m["class"] == "math unrendered"]
+    assert bad["text"] == "$\\frac{1}{$" and bad["title"]  # KaTeX's parse error, on hover
+    assert {"class": "math", "text": "[katex: \\alpha]", "title": None} in shown["math"]
+    assert "an unclosed $ stays text." in shown["review"]
+    assert shown["reviewButtons"] == ["Accept this snapshot"]  # the panel still rendered whole
+
+
+def test_without_katex_the_maths_shows_as_written():
+    shown = _review_with("By $[0, 1]$ compact.", katex=False)
+    assert shown["katex"] == [] and "$[0, 1]$" in shown["review"]
+
+
+def test_the_studio_page_loads_the_vendored_katex_before_the_node_panel():
+    index = (STUDIO_STATIC / "index.html").read_text()
+    assert 'href="static/vendor/katex.min.css"' in index
+    assert index.index('src="static/vendor/katex.min.js"') < index.index('src="static/mathtext.js"') < index.index('src="static/node.js"')
+    vendor = STUDIO_STATIC / "vendor"
+    assert (vendor / "LICENSE-katex").read_text().startswith("The MIT License")
+    assert len(list((vendor / "fonts").glob("KaTeX_*.woff2"))) == 20
+    css = (vendor / "katex.min.css").read_text()
+    assert "url(fonts/KaTeX_Main-Regular.woff2)" in css and "http" not in css  # every font is local

@@ -216,7 +216,7 @@ _REVIEW_HISTORY_ADDED_COLUMNS = {"prev_row_hash": "TEXT", "signed_decision": "TE
 _CHALLENGE_ADDED_COLUMNS = {"resolution_review_id": "TEXT"}
 _CLAIM_DROPPED_COLUMNS = ("token_hash",)  # the #37 claim token, gone with ADR-0010
 # a Review snapshot's hash (ADR-0010), and the node's dependencies as the snapshot was requested (#96, JSON)
-_CANDIDATE_PROOF_ADDED_COLUMNS = {"sha256": "TEXT", "dependencies": "TEXT"}
+_CANDIDATE_PROOF_ADDED_COLUMNS = {"sha256": "TEXT", "dependencies": "TEXT", "key_ideas_drafted_by": "TEXT"}
 
 REVIEW_HISTORY_TRIGGERS = """
 CREATE INDEX IF NOT EXISTS idx_review_history_object ON review_history(object_type, object_id, seq);
@@ -1099,6 +1099,22 @@ def get_contract(store: ProjectStore, contract_id: str) -> TheoremContract | Non
     return THEOREM_ADAPTER.validate_json(row["data"]) if row else None
 
 
+def latest_event(store: ProjectStore, kind: str, entity_id: str, *, conn: sqlite3.Connection | None = None) -> EventRecord | None:
+    """The newest event of `kind` about `entity_id`, or None."""
+    with _reading(store, conn) as conn:
+        row = conn.execute(
+            "SELECT id, kind, entity_id, message, payload, created_at FROM events WHERE kind = ? AND entity_id = ? "
+            "ORDER BY created_at DESC, rowid DESC LIMIT 1",
+            (kind, entity_id),
+        ).fetchone()
+    if row is None:
+        return None
+    return EventRecord(
+        id=row["id"], kind=row["kind"], entity_id=row["entity_id"], message=row["message"],
+        payload=json.loads(row["payload"]), created_at=row["created_at"],
+    )
+
+
 def list_events(store: ProjectStore) -> list[EventRecord]:
     with store.connect() as conn:
         rows = conn.execute("SELECT id, kind, entity_id, message, payload, created_at FROM events ORDER BY created_at").fetchall()
@@ -1406,6 +1422,7 @@ def _row_to_candidate_proof(row: sqlite3.Row) -> CandidateProofRecord:
         interface_fingerprint=row["interface_fingerprint"],
         sha256=row["sha256"],
         dependencies=json.loads(row["dependencies"]) if row["dependencies"] is not None else None,
+        key_ideas_drafted_by=row["key_ideas_drafted_by"],
         created_at=row["created_at"],
     )
 
@@ -1434,8 +1451,8 @@ def insert_candidate_proof(
         conn.execute("UPDATE candidate_proofs SET is_current = 0 WHERE node_id = ?", (record.node_id,))
         conn.execute(
             """
-            INSERT INTO candidate_proofs(id, node_id, version, file_path, is_current, review_record_id, submitted_by, scoping_rationale, interface_fingerprint, sha256, dependencies, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO candidate_proofs(id, node_id, version, file_path, is_current, review_record_id, submitted_by, scoping_rationale, interface_fingerprint, sha256, dependencies, key_ideas_drafted_by, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record.id,
@@ -1449,6 +1466,7 @@ def insert_candidate_proof(
                 record.interface_fingerprint,
                 record.sha256,
                 json.dumps(record.dependencies) if record.dependencies is not None else None,
+                record.key_ideas_drafted_by,
                 record.created_at.isoformat(),
             ),
         )

@@ -5,6 +5,7 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
+from _proofs import ensure_key_ideas
 from _researcher import researcher
 from proof_cli.storage import load_project
 
@@ -22,7 +23,8 @@ def _claim_via_cli(tmp_path: Path, node_id: str, claimant: str) -> None:
 def _request_review_via_cli(tmp_path: Path, node_id: str, by: str, *, content: str = "proof text", rationale: str = "scoped correctly", json_output: bool = False):
     """Write the node's working proof.tex and request review of it, as an agent does (ADR-0010)."""
     (tmp_path / "proofs" / node_id / "proof.tex").write_text(content)
-    args = ["node", "request-review", node_id, "--root", str(tmp_path), "--requested-by", by, "--rationale", rationale]
+    ensure_key_ideas(tmp_path, node_id)
+    args =["node", "request-review", node_id, "--root", str(tmp_path), "--requested-by", by, "--rationale", rationale]
     return runner.invoke(app, args + (["--json"] if json_output else []))
 
 

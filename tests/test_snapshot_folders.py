@@ -14,6 +14,8 @@ from pathlib import Path
 
 import pytest
 
+from _proofs import ensure_key_ideas
+
 from _researcher import researcher
 from proof_cli.authority import candidate_proof_sha256
 from proof_cli.proof_map import (
@@ -37,6 +39,7 @@ def _node(tmp_path: Path, node_id: str = "clm_1"):
     folder = store.root / "proofs" / node_id
     (folder / "proof.tex").write_text(MAIN)
     (folder / "body.tex").write_text("By the lemma, $x > 0$.\n")
+    ensure_key_ideas(store, node_id)
     return store, folder
 
 
@@ -59,10 +62,10 @@ def test_a_snapshot_is_a_folder_of_every_input_with_a_manifest_whose_hash_is_the
     snapshot = folder / "snapshots" / "v1"
     assert record.file_path == "proofs/clm_1/snapshots/v1/manifest.json"
     stored = sorted(p.relative_to(snapshot).as_posix() for p in snapshot.rglob("*") if p.is_file())
-    assert stored == ["manifest.json", "node/body.tex", "node/proof.tex", "node/refs.bib", "shared/preamble.tex"]
+    assert stored == ["manifest.json", "node/body.tex", "node/key-ideas.md", "node/proof.tex", "node/refs.bib", "shared/preamble.tex"]
     manifest = json.loads((snapshot / "manifest.json").read_text())
     assert manifest["files"] == {
-        name: hashlib.sha256((folder / name).read_bytes()).hexdigest() for name in ("body.tex", "proof.tex", "refs.bib")
+        name: hashlib.sha256((folder / name).read_bytes()).hexdigest() for name in ("body.tex", "key-ideas.md", "proof.tex", "refs.bib")
     } | {"../preamble.tex": hashlib.sha256((store.root / "proofs" / "preamble.tex").read_bytes()).hexdigest()}
     canonical = json.dumps(manifest["files"], sort_keys=True, separators=(",", ":")).encode()
     assert record.sha256 == hashlib.sha256(canonical).hexdigest() == candidate_proof_sha256(store, record.id)
@@ -160,6 +163,7 @@ def test_an_old_single_file_snapshot_and_its_decision_read_as_before(tmp_path: P
 
     # the next request freezes the whole source set as v2, next to the old file
     (store.root / "proofs" / "old" / "proof.tex").write_text("new text\n")
+    ensure_key_ideas(store, "old")  # a new snapshot needs its summary; the old one never had one (ADR-0013)
     second = request_review(store, "old", requested_by="agent_a", rationale="scoped")
     assert second.version == 2 and second.file_path.endswith("snapshots/v2/manifest.json")
     assert [p.version for p in list_candidate_proofs(store, "old")] == [1, 2]
@@ -212,7 +216,7 @@ def test_a_nodes_files_named_like_the_snapshots_own_are_frozen_without_colliding
 
     snapshot = folder / "snapshots" / "v1"
     manifest = json.loads((snapshot / "manifest.json").read_text())
-    assert set(manifest["files"]) == {"proof.tex", "body.tex", "manifest.json", "_shared/preamble.tex", "shared/preamble.tex", "../preamble.tex"}
+    assert set(manifest["files"]) == {"proof.tex", "body.tex", "key-ideas.md", "manifest.json", "_shared/preamble.tex", "shared/preamble.tex", "../preamble.tex"}
     assert (snapshot / "node" / "manifest.json").read_text() == (folder / "manifest.json").read_text()
     assert (snapshot / "node" / "shared" / "preamble.tex").read_text() == "a node file at shared/preamble.tex\n"
     assert (snapshot / "shared" / "preamble.tex").read_bytes() == (store.root / "proofs" / "preamble.tex").read_bytes()
