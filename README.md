@@ -1,6 +1,6 @@
 # Mathematical Proof CLI
 
-Mathematical Proof CLI is a local-first research proof operating system for human–machine collaboration. A project is a proof map: nodes (theorems, lemmas, claims, and imported results) joined by their dependencies. Each local node has its own LaTeX proof, and the researcher accepts or rejects it on the proof map page. Agents claim nodes from the frontier, split nodes that are too large, and request review. Every decision stays explicit and auditable in git. The `theorem`, `obligation`, `blocker`, `goal` and `verify` command groups come from the model before the proof map, and `proof --help` lists them under Legacy.
+Mathematical Proof CLI is a local-first research proof operating system for human–machine collaboration. A project is a proof map: nodes (theorems, lemmas, claims, and imported results) joined by their dependencies. Each local node has its own LaTeX proof, and the researcher accepts or rejects it on the proof map page. Agents claim nodes from the frontier, split nodes that are too large, and request review. Every decision stays explicit and auditable in git. What can be called is answered only by the proof map's nodes: an Accepted theorem, lemma or claim, or an imported result with a Reference review (ADR-0012). The `theorem`, `obligation`, `blocker`, `goal` and `verify` command groups come from the model before the proof map, and `proof --help` lists them under Legacy. Their callable, trust and review states are marked as legacy, not a trust source; a reference is only a citation.
 
 The project is designed to support rigorous research workflows without replacing the mathematician or attempting to provide a full formal kernel. Final acceptance remains with the researcher.
 
@@ -80,7 +80,7 @@ Proof state is persisted locally. Generated workspace state under `.proof/` is i
 ## Project principles
 
 - Human-in-the-loop: the system suggests and checks; researchers make final trust decisions.
-- Retrieval-first: existing project results and trusted references are checked before new proof search.
+- Retrieval-first: the proof map's Accepted nodes and Reference-reviewed imported results are checked before new proof search.
 - Local-state-first: long-running work survives context loss through persisted project state.
 - CLI-first: the initial workflow is terminal-native.
 - No full kernel in v1: explicit contracts, checks, and review boundaries come first.
