@@ -2,6 +2,7 @@
 // argv[2]: JSON {state, map, steps: [...]}. Each step acts on the page, then the page is read back;
 // prints one reading per step. Steps: {view: "dag"|"tree"}, {root: node_id} (the tree's root),
 // {tick: node_id, on: bool}, {choose: node_id, value}, {record: true} (presses Record, then confirms),
+// {open: node_id} (follows the node's link to its own page, served from scenario.nodes[node_id]),
 // {find: text} (types into the search box), {key: "Enter"|"Escape"|"/"|"f"} (a key pressed where the focus
 // is: the focused element hears it first, then the document), {blur: true} (the focus goes back to the page).
 const fs = require("fs"), path = require("path"), vm = require("vm");
@@ -85,14 +86,18 @@ class FakeElement {
     "home", "node-page", "confirm", "confirm-decisions", "confirm-record", "confirm-cancel",
     "pending", "pending-count", "decide-batch", "warnings",
     "view-dag", "view-tree", "tree-root", "tree-root-label", "map-caption", "map-dag", "map-tree", "dag-svg",
-    "zoom-in", "zoom-out", "zoom-fit", "zoom-tidy", "zoom-level", "map-find", "map-find-count"];
-  const tags = { "tree-root": "select", "dag-svg": "svg", "decide-batch": "button", pending: "table", warnings: "ul", "map-find": "input" };
+    "zoom-in", "zoom-out", "zoom-fit", "zoom-tidy", "zoom-level", "map-find", "map-find-count",
+    "node-title", "node-axes", "node-warnings", "node-statement", "node-assumptions", "node-claim", "node-folder", "node-source",
+    "node-dependents", "node-pdfs", "node-deps", "node-challenges", "node-proof-meta", "node-proof-exact", "node-evidence",
+    "node-decisions", "node-history"];
+  const tags = { "tree-root": "select", "dag-svg": "svg", "decide-batch": "button", pending: "table", warnings: "ul", "map-find": "input",
+    "node-deps": "table", "node-decisions": "table", "node-challenges": "ul", "node-evidence": "ul", "node-history": "ul" };
   const elements = Object.fromEntries(ids.map((id) => [id, new FakeElement(tags[id] || "div")]));
   Object.assign(elements["map-dag"], { clientWidth: 800, clientHeight: 600 });  // the canvas has a size, so it can be fitted and panned
   focus.body = focus.on = new FakeElement("body");
   // an element the page drew itself (the DAG's <g id="dag-view">) is found by its id too
   const byId = (id) => elements[id] || Object.values(elements).flatMap((e) => e._all()).find((n) => n.getAttribute("id") === id) || null;
-  elements.pending.append(new FakeElement("thead"), new FakeElement("tbody"));
+  for (const table of ["pending", "node-deps", "node-decisions"]) elements[table].append(new FakeElement("thead"), new FakeElement("tbody"));
   elements.confirm.hidden = true;
   const listeners = {};
   const hear = (type, fn) => { (listeners[type] ||= []).push(fn); };
@@ -107,10 +112,11 @@ class FakeElement {
       addEventListener: hear,
       querySelectorAll: () => [],
     },
-    window: { addEventListener() {}, removeEventListener() {} },
+    window: { addEventListener: (type, fn) => { listeners[`window:${type}`] = fn; }, removeEventListener() {} },
     fetch: async (url, init = {}) => {
       if (init.method === "POST") posted.push({ url, body: JSON.parse(init.body) });
-      const data = url === "/api/state" ? scenario.state : url === "/api/map" ? scenario.map : { results: [] };
+      const node = url.startsWith("/api/node/") ? (scenario.nodes || {})[decodeURIComponent(url.slice("/api/node/".length))] : undefined;
+      const data = url === "/api/state" ? scenario.state : url === "/api/map" ? scenario.map : node || { results: [] };
       return { json: async () => ({ ok: true, data }) };
     },
   };
@@ -151,6 +157,13 @@ class FakeElement {
     pendingCount: elements["pending-count"].textContent,
     warnings: elements.warnings.querySelectorAll("li").map((li) => li.textContent),
     message: elements.message.textContent,
+    // the node's own page, once one is open: its source block, which carries the citation
+    nodePageShown: !elements["node-page"].hidden,
+    nodeSource: elements["node-source"].textContent,
+    nodeSourceWarnings: elements["node-source"].querySelectorAll(".warning").map((w) => w.textContent),
+    // each review card's citation line, and whether it is marked missing
+    pendingCitations: elements.pending.querySelectorAll("tbody tr").map((tr) => tr.querySelectorAll(".citation").map((c) => c.textContent).join(" ")),
+    pendingCitationMissing: elements.pending.querySelectorAll("tbody tr").map((tr) => tr.querySelectorAll(".citation.warning").length > 0),
     confirmShown: !elements.confirm.hidden,
     posted,
   });
@@ -169,6 +182,7 @@ class FakeElement {
     if (step.blur) focus.on = focus.body;
     if (step.view) await elements[`view-${step.view}`].dispatch("click");
     if (step.root) { elements["tree-root"].value = step.root; await elements["tree-root"].dispatch("change"); }
+    if (step.open) { location.hash = `#/node/${encodeURIComponent(step.open)}`; await listeners["window:hashchange"](); }
     if (step.tick) { pendingRow(step.tick).querySelector("input[type=checkbox]").checked = step.on !== false; }
     if (step.choose) { pendingRow(step.choose).querySelector("select").value = step.value; }
     if (step.record) {

@@ -143,6 +143,11 @@ class ProofMapNode(BaseModel):
     `derived_from` is set by Split: which node a purpose-built subclaim was
     split from, distinguishing it from a coincidentally-shared Lemma. `None`
     for a node that wasn't produced by a split.
+
+    `reference_id` links an `imported_result` to the `ReferenceRecord` it
+    cites (issue #91, ADR-0012): set only at creation, to a reference that
+    exists then, and immutable like the rest of an imported result. `None`
+    for every other node, and for an imported result that links none.
     """
 
     id: str
@@ -154,6 +159,7 @@ class ProofMapNode(BaseModel):
     source_locator: str | None = None
     source_version: str | None = None
     trust_level: TrustLevel | None = None
+    reference_id: str | None = None
     derived_from: str | None = None
     created_by: str = "human"
     updated_by: str = "human"
@@ -309,6 +315,8 @@ class ProjectSnapshot(BaseModel):
     project_id: str
     active_theorem: str | None = None
     current_goals: list[str] = Field(default_factory=list)
+    # legacy (ADR-0012): verify and theorem-usage history, not a trust source;
+    # a handoff's `proof_map.accepted` is what can be called
     validated_results: list[str] = Field(default_factory=list)
     open_obligations: list[str] = Field(default_factory=list)
     active_blockers: list[str] = Field(default_factory=list)

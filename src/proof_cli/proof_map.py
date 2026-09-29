@@ -19,6 +19,7 @@ from .authority import (
     challenge_resolution,
     decision_rows,
     list_authority_warnings,
+    list_decisions,
     record_decision,
     snapshot_matches,
     verify_decision_row,
@@ -54,6 +55,7 @@ from .storage import (
     get_dependency_pin as _get_dependency_pin,
     get_evidence_check as _get_evidence_check,
     get_proof_map_node,
+    get_reference,
     insert_challenge,
     insert_claim,
     insert_candidate_proof,
@@ -213,6 +215,7 @@ def create_node(
     source_version: str | None = None,
     trust_level: TrustLevel | str | None = None,
     derived_from: str | None = None,
+    reference_id: str | None = None,
 ) -> ProofMapNode:
     if not _SAFE_NODE_ID.fullmatch(node_id):
         # the id names the node's folder under proofs/ (ADR-0010), so it must be a plain folder name
@@ -265,6 +268,18 @@ def create_node(
                 "an imported_result node requires both a source_locator and a source_version",
             )
 
+    if reference_id is not None:
+        # the citation an imported result links (issue #91, ADR-0012): only there, and only one that exists
+        if resolved_kind != ProofMapNodeKind.imported_result:
+            raise ProofMapError(
+                "REFERENCE_ID_NOT_IMPORTED_RESULT",
+                f"only an imported_result links a reference; a {resolved_kind.value} has no citation",
+            )
+        if get_reference(store, reference_id) is None:
+            raise ProofMapError(
+                "REFERENCE_NOT_FOUND", f"reference {reference_id} does not exist; import it first with `proof reference import`"
+            )
+
     node = ProofMapNode(
         id=node_id,
         kind=resolved_kind,
@@ -275,6 +290,7 @@ def create_node(
         source_locator=source_locator,
         source_version=source_version,
         trust_level=resolved_trust_level,
+        reference_id=reference_id,
         derived_from=derived_from,
         created_by=created_by,
         updated_by=created_by,
@@ -1120,11 +1136,12 @@ def _interface_of(node: ProofMapNode) -> str:
 
     A local node: its interface fingerprint. An imported result: its
     statement and source, so a Reference review can't be carried over to a
-    different citation behind the same id (#35 C)."""
+    different citation behind the same id (#35 C), and the ReferenceRecord it
+    links, by id only: editing that record's text leaves the review standing
+    (issue #91). A node that links none is spelled as before the link existed."""
     if node.kind == ProofMapNodeKind.imported_result:
-        return _digest(
-            ["imported_result", _normalize_whitespace(node.statement), node.source_locator or "", node.source_version or ""]
-        )
+        fields = ["imported_result", _normalize_whitespace(node.statement), node.source_locator or "", node.source_version or ""]
+        return _digest(fields + ([node.reference_id] if node.reference_id is not None else []))
     return compute_interface_fingerprint(node.statement, node.assumptions)
 
 
@@ -1687,6 +1704,30 @@ def get_acceptance_state(store: ProjectStore, node_id: str) -> str:
     return _acceptance(store, require_node(store, node_id))[0]
 
 
+def acceptance_overview(store: ProjectStore) -> list[tuple[ProofMapNode, str, str | None]]:
+    """(node, acceptance_state, why its newest decision doesn't count) for every node, by id.
+
+    The same computation as `get_acceptance_state`, done once per node: what a
+    handoff reports as accepted is exactly what the map calls accepted (#45).
+    """
+    overview = []
+    for node in sorted(list_nodes(store), key=lambda node: node.id):
+        state, _, reason = _acceptance(store, node)
+        overview.append((node, state, reason))
+    return overview
+
+
+def decision_node_id(store: ProjectStore, review_id: str) -> str | None:
+    """The node whose reviews.jsonl records Human Review decision `review_id`, or None if there's no such decision."""
+    row = next((row for row in list_decisions(store) if row["id"] == review_id), None)
+    if row is None:
+        return None
+    try:
+        return _node_folder(store, row["object_type"], row["object_id"])
+    except ProofMapError:
+        return None
+
+
 def promote_to_lemma(
     store: ProjectStore, node_id: str, *, reviewer: str | None = None, rationale: str = "", viewed_binding: str | None = None
 ) -> ProofMapNode:
@@ -1771,6 +1812,11 @@ def decide_reference_review(
             f"{node_id} is no longer callable, and that is final; cite a corrected source as a new imported_result node",
         )
     not_callable = decision == REFERENCE_NOT_CALLABLE_DECISION
+    if not not_callable and _citation_missing(store, node):
+        raise ProofMapError(
+            "REFERENCE_NOT_FOUND",
+            f"{node_id} cites reference {node.reference_id}, which does not exist here; a review of it couldn't count",
+        )
 
     with store.transaction() as conn:
         decided = _decide(store, kind=DecisionKind.reference_review, target_id=node_id, decision=decision, reviewer=reviewer, rationale=rationale, viewed_binding=viewed_binding)
@@ -1879,6 +1925,33 @@ def _no_longer_callable(store: ProjectStore, node_id: str) -> bool:
     )
 
 
+def _citation_missing(store: ProjectStore, node: ProofMapNode) -> bool:
+    return node.reference_id is not None and get_reference(store, node.reference_id) is None
+
+
+def node_citation(store: ProjectStore, node: ProofMapNode) -> dict[str, Any] | None:
+    """The citation an imported result links, as its page, review card and `node show` show it (issue #91).
+
+    The ReferenceRecord's title, authors, year, identifier and url, beside the
+    node's own source locator and version. `missing` when the linked record
+    doesn't exist here (deleted, or not carried by an exchange bundle).
+    `None` for a node that links no reference."""
+    if node.reference_id is None:
+        return None
+    reference = get_reference(store, node.reference_id)
+    return {
+        "reference_id": node.reference_id,
+        "missing": reference is None,
+        "title": reference.title if reference else None,
+        "authors": list(reference.authors) if reference else [],
+        "year": reference.year if reference else None,
+        "identifier": reference.identifier if reference else None,
+        "url": reference.url if reference else None,
+        "locator": node.source_locator,
+        "version": node.source_version,
+    }
+
+
 @memoized_read
 @read_scoped
 def get_reference_review_state(store: ProjectStore, node_id: str) -> str:
@@ -1895,6 +1968,9 @@ def get_reference_review_state(store: ProjectStore, node_id: str) -> str:
     if latest is None:
         return "unreviewed"
     if latest.verdict.status != "verified" or latest.verdict.payload.interface_fingerprint != _interface_of(node):
+        return "unverifiable"
+    if _citation_missing(store, node):
+        # the review was made on a citation that is gone (issue #91)
         return "unverifiable"
     return "reviewed" if latest.decision == ReviewGovernanceState.approved else "unreviewed"
 
