@@ -4,9 +4,18 @@ import json
 import sys
 from pathlib import Path
 
+import click
 import typer
 
 from .commands import (
+    bug_scan_data,
+    explain_apply_data,
+    export_data,
+    provenance_show_data,
+    reference_list_data,
+    theorem_apply_data,
+    theorem_extract_data,
+    theorem_list_data,
     cmd_blocker_add,
     cmd_blocker_list,
     cmd_branch_compare,
@@ -51,6 +60,10 @@ from .commands import (
     cmd_proof_verify_run,
     cmd_proof_verify_stale,
     cmd_proof_verify_status,
+    cmd_proof_pack_install,
+    cmd_proof_pack_list,
+    cmd_proof_pack_show,
+    cmd_proof_pack_update,
     cmd_proof_policy_list,
     cmd_proof_policy_set,
     cmd_proof_recommend,
@@ -79,6 +92,13 @@ from .commands import (
     cmd_publication_show,
     cmd_publication_view,
     cmd_publication_withdraw,
+    publication_export_json,
+    publication_list_data,
+    publication_release_data,
+    publication_set_data,
+    publication_show_data,
+    publication_view_data,
+    publication_withdraw_data,
     cmd_proof_provenance_show,
     cmd_reference_import,
     cmd_reference_list,
@@ -97,10 +117,14 @@ from .commands import (
 from .envelope import dump_envelope, error_envelope, success_envelope
 from .contract import ProofGroup
 from .collaboration import summarize_review_record
+from .storage import read_scoped
 from .proof_map import (
     ProofMapError,
+    add_dependency,
     claim_node,
     create_node,
+    move_dependency,
+    remove_dependency,
     get_acceptance_state,
     get_blocked_reason,
     get_frontier,
@@ -196,8 +220,9 @@ def status(root: str = ROOT_OPTION) -> None:
 
 
 @app.command()
-def snapshot(root: str = ROOT_OPTION, note: str = "") -> None:
-    typer.echo(cmd_snapshot(_root(root), handoff_note=note))
+def snapshot(root: str = ROOT_OPTION, note: str = "", json_output: bool = typer.Option(False, "--json")) -> None:
+    """A snapshot of the project state. Its trust-sensitive calls are legacy (ADR-0012)."""
+    _emit_legacy_json("snapshot", json_output, lambda: cmd_snapshot(_root(root), handoff_note=note))
 
 
 @app.command()
@@ -206,8 +231,9 @@ def history(root: str = ROOT_OPTION) -> None:
 
 
 @app.command()
-def export(root: str = ROOT_OPTION) -> None:
-    typer.echo(cmd_export(_root(root)))
+def export(root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
+    """Export the project's state as text. Its callable, trust and review states are legacy (ADR-0012)."""
+    _emit_legacy("export", json_output, lambda: cmd_export(_root(root)), lambda: export_data(_root(root)))
 
 
 @app.command()
@@ -216,8 +242,9 @@ def search(query: str, root: str = ROOT_OPTION, limit: int = 10) -> None:
 
 
 @app.command()
-def retrieve(query: str, root: str = ROOT_OPTION, limit: int = 10) -> None:
-    typer.echo(cmd_proof_retrieve(query, _root(root), limit=limit))
+def retrieve(query: str, root: str = ROOT_OPTION, limit: int = 10, json_output: bool = typer.Option(False, "--json")) -> None:
+    """Rank what the project holds for QUERY. A candidate's trust level is legacy (ADR-0012)."""
+    _emit_legacy_json("retrieve", json_output, lambda: cmd_proof_retrieve(query, _root(root), limit=limit))
 
 
 @app.command()
@@ -226,6 +253,7 @@ def reason(theorem_id: str, root: str = ROOT_OPTION, notes: str = "") -> None:
 
 
 @app.command(rich_help_panel=PROOF_MAP_PANEL)
+@read_scoped
 def frontier(root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
     """The open, unblocked, unclaimed nodes: what an agent could claim right now."""
     store = get_store(_root(root))
@@ -254,6 +282,37 @@ def revalidate(source_id: str, root: str = ROOT_OPTION, backend_target: str = ""
             cmd_proof_revalidate(source_id, _root(root), backend_target=backend_target, notes=notes),
         )
     )
+
+
+def _emit_legacy(command: str, json_output: bool, text, data) -> None:
+    """A frozen legacy command's output (ADR-0012): its text, or under --json its data in one
+    envelope. Either way it carries the legacy notice; a missing target is NOT_FOUND."""
+    if not json_output:
+        typer.echo(text())
+        return
+    payload = data()
+    if payload is None:
+        typer.echo(dump_envelope(error_envelope(command, "NOT_FOUND", text())))
+        raise typer.Exit(code=1)
+    typer.echo(dump_envelope(success_envelope(command, payload)))
+
+
+def _legacy_input_error(command: str, exc: ValueError, json_output: bool) -> None:
+    if json_output:
+        typer.echo(dump_envelope(error_envelope(command, "INVALID_INPUT", str(exc))))
+    else:
+        typer.echo(f"Error: {exc}")
+    raise typer.Exit(code=1)
+
+
+def _emit_legacy_json(command: str, json_output: bool, text) -> None:
+    """`_emit_legacy` for a command whose text is already its JSON: under --json, that JSON is the data."""
+    output = text()
+    try:
+        data = json.loads(output) if json_output else None
+    except ValueError:
+        data = None
+    _emit_legacy(command, json_output, lambda: output, lambda: data)
 
 
 def _emit_node(node, json_output: bool, *, command: str) -> None:
@@ -340,6 +399,7 @@ def node_create(
 
 
 @node_app.command("show")
+@read_scoped
 def node_show(
     node_id: str,
     root: str = ROOT_OPTION,
@@ -544,6 +604,52 @@ def node_split(
         )
     else:
         typer.echo(render_proof_map_node_list(children))
+
+
+@node_app.command("depend")
+def node_depend(
+    node_id: str,
+    add: str = typer.Option("", "--add", help="Make the node rest on this node too"),
+    remove: str = typer.Option("", "--remove", help="Stop the node resting on this dependency"),
+    move: str = typer.Option("", "--move", help="Move this dependency down onto the node given by --to"),
+    to: str = typer.Option("", "--to", help="With --move: one of the node's own dependencies, e.g. a split child"),
+    by: str = typer.Option("human", "--by", help="Who is editing (an agent or person name)"),
+    reassign: bool = typer.Option(False, "--reassign", help="Take the claim over from whoever holds it (recorded as `claim --reassign` records it)"),
+    root: str = ROOT_OPTION,
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Add, remove or move one of node_id's dependencies. Ungated, like split (#96).
+
+    A node someone else holds is theirs to edit unless --reassign; an Accepted
+    node only under an open Challenge. Pins are taken at the next request-review."""
+    named = [flag for flag, value in (("--add", add), ("--remove", remove), ("--move", move)) if value]
+    if len(named) != 1:
+        raise click.UsageError("name exactly one of --add, --remove or --move")
+    if bool(to) != bool(move):
+        raise click.UsageError("--move and --to go together: --move <dependency> --to <child>")
+    store = get_store(_root(root))
+    try:
+        if add:
+            edit = add_dependency(store, node_id, add, edited_by=by, reassign=reassign)
+        elif remove:
+            edit = remove_dependency(store, node_id, remove, edited_by=by, reassign=reassign)
+        else:
+            edit = move_dependency(store, node_id, move, to=to, edited_by=by, reassign=reassign)
+    except ProofMapError as exc:
+        _emit_node_error(exc, json_output, command="node.depend")
+        raise typer.Exit(code=1)
+    if json_output:
+        typer.echo(dump_envelope(success_envelope("node.depend", edit.as_json())))
+        return
+    summary = {
+        "add": f"{node_id} now rests on {edit.dependency_id}",
+        "remove": f"{node_id} no longer rests on {edit.dependency_id}",
+        "move": f"moved dependency {edit.dependency_id} of {node_id} onto {to}",
+    }[edit.op]
+    typer.echo(summary + "; pins are taken at the next request-review")
+    typer.echo(render_proof_map_node(edit.node))
+    if edit.to is not None:
+        typer.echo(render_proof_map_node(edit.to))
 
 
 def _emit_challenge(challenge, json_output: bool, *, command: str) -> None:
@@ -979,9 +1085,11 @@ def theorem_add(
     updated_by: str = "human",
     contributor: list[str] = typer.Option(None, "--contributor"),
     notes: str = "",
+    json_output: bool = typer.Option(False, "--json"),
 ) -> None:
+    """(legacy) Add a contract. Its trust and review fields are legacy (ADR-0012)."""
     try:
-        typer.echo(
+        output = (
             cmd_theorem_add(
                 theorem_id=theorem_id,
                 name=name,
@@ -998,28 +1106,40 @@ def theorem_add(
             )
         )
     except ValueError as exc:
-        typer.echo(f"Error: {exc}")
-        raise typer.Exit(code=1)
+        _legacy_input_error("theorem.add", exc, json_output)
+    _emit_legacy_json("theorem.add", json_output, lambda: output)
 
 
 @theorem_app.command("show")
-def theorem_show(theorem_id: str, root: str = ROOT_OPTION) -> None:
-    typer.echo(cmd_theorem_show(theorem_id, root=_root(root)))
+def theorem_show(theorem_id: str, root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
+    """(legacy) A contract, with its legacy trust and review fields: not a trust source (ADR-0012)."""
+    _emit_legacy_json("theorem.show", json_output, lambda: cmd_theorem_show(theorem_id, root=_root(root)))
 
 
 @theorem_app.command("extract")
-def theorem_extract(theorem_id: str, root: str = ROOT_OPTION) -> None:
-    typer.echo(cmd_theorem_extract(theorem_id, root=_root(root)))
+def theorem_extract(theorem_id: str, root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
+    """(legacy) A contract with its legacy callability: not a trust source (ADR-0012)."""
+    _emit_legacy(
+        "theorem.extract",
+        json_output,
+        lambda: cmd_theorem_extract(theorem_id, root=_root(root)),
+        lambda: theorem_extract_data(theorem_id, root=_root(root)),
+    )
 
 
 @theorem_app.command("list")
-def theorem_list(root: str = ROOT_OPTION) -> None:
-    typer.echo(cmd_theorem_list(_root(root)))
+def theorem_list(root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
+    """(legacy) The contracts, with their legacy status: not a trust source (ADR-0012)."""
+    _emit_legacy("theorem.list", json_output, lambda: cmd_theorem_list(_root(root)), lambda: theorem_list_data(_root(root)))
 
 
 @theorem_app.command("apply")
-def theorem_apply(theorem_id: str, root: str = ROOT_OPTION) -> None:
-    typer.echo(cmd_theorem_apply(theorem_id, root=_root(root)))
+def theorem_apply(theorem_id: str, root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
+    """(legacy) Record a use of a contract, if its legacy callability allows: not a trust source (ADR-0012)."""
+    if json_output:
+        typer.echo(dump_envelope(success_envelope("theorem.apply", theorem_apply_data(theorem_id, root=_root(root)))))
+    else:
+        typer.echo(cmd_theorem_apply(theorem_id, root=_root(root)))
 
 
 @theorem_app.command("ground")
@@ -1044,12 +1164,6 @@ def obligation_list(root: str = ROOT_OPTION) -> None:
     typer.echo(cmd_obligation_list(_root(root)))
 
 
-@obligation_app.command("resolve")
-def obligation_resolve(obligation_id: str, root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
-    """Retired (ADR-0001, #37): a proof obligation is discharged by an Accepted proof-map node, not by a command."""
-    human_review_required(root, command="obligation.resolve", kind="obligation_resolution", target_id=obligation_id, node_id=None, json_output=json_output)
-
-
 @obligation_app.command("derive")
 def obligation_derive(theorem_id: str, root: str = ROOT_OPTION, notes: str = "") -> None:
     typer.echo(cmd_proof_obligation_derive(theorem_id, _root(root), notes=notes))
@@ -1066,13 +1180,15 @@ def blocker_list(root: str = ROOT_OPTION) -> None:
 
 
 @reference_app.command("list")
-def reference_list(root: str = ROOT_OPTION) -> None:
-    typer.echo(cmd_reference_list(_root(root)))
+def reference_list(root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
+    """The project's references: citations. Their review status and callable flag are legacy (ADR-0012)."""
+    _emit_legacy("reference.list", json_output, lambda: cmd_reference_list(_root(root)), lambda: reference_list_data(_root(root)))
 
 
 @reference_app.command("show")
-def reference_show(reference_id: str, root: str = ROOT_OPTION) -> None:
-    typer.echo(cmd_reference_show(reference_id, root=_root(root)))
+def reference_show(reference_id: str, root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
+    """A reference: a citation. Its review status, trust level and callable flag are legacy (ADR-0012)."""
+    _emit_legacy_json("reference.show", json_output, lambda: cmd_reference_show(reference_id, root=_root(root)))
 
 
 @reference_app.command("import")
@@ -1088,9 +1204,11 @@ def reference_import(
     identifier: str = "",
     url: str = "",
     notes: str = "",
+    json_output: bool = typer.Option(False, "--json"),
 ) -> None:
+    """Import a reference as a citation. Its legacy trust fields are not a trust source (ADR-0012)."""
     try:
-        typer.echo(
+        output = (
             cmd_reference_import(
                 reference_id,
                 title,
@@ -1106,14 +1224,10 @@ def reference_import(
             )
         )
     except ValueError as exc:
-        typer.echo(f"Error: {exc}")
-        raise typer.Exit(code=1)
+        _legacy_input_error("reference.import", exc, json_output)
+    _emit_legacy_json("reference.import", json_output, lambda: output)
 
 
-@reference_app.command("review")
-def reference_review(reference_id: str, action: str = typer.Argument(""), root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
-    """Retired (ADR-0001, #37): a reference is trusted by Reference-reviewing its imported_result node, on the proof map page."""
-    human_review_required(root, command="reference.review", kind="reference_review", target_id=reference_id, node_id=None, json_output=json_output)
 
 
 @memory_app.command("list")
@@ -1167,14 +1281,44 @@ def memory_add(
     )
 
 
+def _publication(command: str, json_output: bool, data, human) -> None:
+    """Run one publication command: an ADR-0006 envelope under --json, text otherwise.
+
+    Publication is editorial (issue #30): agents may run these, and none is a
+    Human Review decision. A refused write is a stable error code, exit 1.
+    """
+    try:
+        if json_output:
+            typer.echo(dump_envelope(success_envelope(command, data())))
+        else:
+            typer.echo(human())
+    except ProofMapError as exc:
+        _emit_node_error(exc, json_output, command=command)
+        raise typer.Exit(code=1)
+
+
 @publication_app.command("list")
-def publication_list(root: str = ROOT_OPTION, object_type: str = "") -> None:
-    typer.echo(cmd_publication_list(_root(root), object_type=object_type))
+def publication_list(root: str = ROOT_OPTION, object_type: str = "", json_output: bool = typer.Option(False, "--json")) -> None:
+    """List publication claims: editorial readiness beside each node's live acceptance and integrity."""
+    _publication(
+        "publication.list",
+        json_output,
+        lambda: publication_list_data(_root(root), object_type=object_type),
+        lambda: cmd_publication_list(_root(root), object_type=object_type),
+    )
 
 
 @publication_app.command("show")
-def publication_show(object_id: str, root: str = ROOT_OPTION) -> None:
-    typer.echo(cmd_publication_show(object_id, _root(root)))
+def publication_show(
+    object_id: str, root: str = ROOT_OPTION, object_type: str = "", json_output: bool = typer.Option(False, "--json")
+) -> None:
+    """Show a claim's editorial record and its node's live acceptance and integrity."""
+    _publication(
+        "publication.show",
+        json_output,
+        lambda: publication_show_data(object_id, _root(root), object_type=object_type),
+        lambda: cmd_publication_show(object_id, _root(root), object_type=object_type),
+    )
 
 
 @publication_app.command("set")
@@ -1182,7 +1326,7 @@ def publication_set(
     object_id: str,
     readiness: str,
     root: str = ROOT_OPTION,
-    object_type: str = "theorem_contract",
+    object_type: str = "proof_map_node",
     display_name: str = "",
     title: str = "",
     section_placement: str = "",
@@ -1192,38 +1336,59 @@ def publication_set(
     editorial_note: list[str] = typer.Option(None, "--editorial-note"),
     supporting_reference_id: list[str] = typer.Option(None, "--supporting-reference-id"),
     supporting_theorem_id: list[str] = typer.Option(None, "--supporting-theorem-id"),
-    release_status: str = "draft",
+    release_status: str = typer.Option("", help="approved, corrected or withdrawn; left unset, no release is recorded"),
     release_notes: str = "",
+    json_output: bool = typer.Option(False, "--json"),
 ) -> None:
-    typer.echo(
-        cmd_publication_set(
-            object_id,
-            readiness,
-            _root(root),
-            object_type=object_type,
-            display_name=display_name,
-            title=title,
-            section_placement=section_placement,
-            reason=reason,
-            citation_kind=citation_kind,
-            internal_only=internal_only,
-            editorial_note=editorial_note,
-            supporting_reference_id=supporting_reference_id,
-            supporting_theorem_id=supporting_theorem_id,
-            release_status=release_status,
-            release_notes=release_notes,
-        )
+    """Set a claim's editorial readiness (editorial, not a Human Review decision).
+
+    internal_draft -> collaborator_ready -> supplement_ready -> paper_ready, one
+    step at a time, and withdrawn from anywhere; supplement_ready and paper_ready
+    need a node that is accepted · current.
+    """
+    options = dict(
+        object_type=object_type,
+        display_name=display_name,
+        title=title,
+        section_placement=section_placement,
+        reason=reason,
+        citation_kind=citation_kind,
+        internal_only=internal_only,
+        editorial_note=editorial_note,
+        supporting_reference_id=supporting_reference_id,
+        supporting_theorem_id=supporting_theorem_id,
+        release_status=release_status,
+        release_notes=release_notes,
+    )
+    _publication(
+        "publication.set",
+        json_output,
+        lambda: publication_set_data(object_id, readiness, _root(root), **options),
+        lambda: cmd_publication_set(object_id, readiness, _root(root), **options),
     )
 
 
 @publication_app.command("view")
-def publication_view(root: str = ROOT_OPTION, audience: str = "paper") -> None:
-    typer.echo(cmd_publication_view(_root(root), audience=audience))
+def publication_view(root: str = ROOT_OPTION, audience: str = "paper", json_output: bool = typer.Option(False, "--json")) -> None:
+    _publication(
+        "publication.view",
+        json_output,
+        lambda: publication_view_data(_root(root), audience=audience),
+        lambda: cmd_publication_view(_root(root), audience=audience),
+    )
 
 
 @publication_app.command("export")
-def publication_export(root: str = ROOT_OPTION, audience: str = "paper", format: str = "paper") -> None:
-    typer.echo(cmd_publication_export(_root(root), audience=audience, format=format))
+def publication_export(
+    root: str = ROOT_OPTION, audience: str = "paper", format: str = "paper", json_output: bool = typer.Option(False, "--json")
+) -> None:
+    """Export for an audience. A ready claim whose node is no longer accepted · current is withheld and flagged."""
+    _publication(
+        "publication.export",
+        json_output,
+        lambda: publication_export_json(_root(root), audience=audience, format=format),
+        lambda: cmd_publication_export(_root(root), audience=audience, format=format),
+    )
 
 
 @publication_app.command("release")
@@ -1234,16 +1399,15 @@ def publication_release(
     approved_by: list[str] = typer.Option(None, "--approved-by"),
     rationale: str = "",
     note: str = "",
+    json_output: bool = typer.Option(False, "--json"),
 ) -> None:
-    typer.echo(
-        cmd_publication_release(
-            _root(root),
-            audience=audience,
-            status=status,
-            approved_by=approved_by,
-            rationale=rationale,
-            note=note,
-        )
+    """Record a release (editorial; the sign-off on record is the release commit's git author)."""
+    options = dict(audience=audience, status=status, approved_by=approved_by, rationale=rationale, note=note)
+    _publication(
+        "publication.release",
+        json_output,
+        lambda: publication_release_data(_root(root), **options),
+        lambda: cmd_publication_release(_root(root), **options),
     )
 
 
@@ -1253,18 +1417,36 @@ def publication_withdraw(
     root: str = ROOT_OPTION,
     approved_by: list[str] = typer.Option(None, "--approved-by"),
     rationale: str = "",
+    json_output: bool = typer.Option(False, "--json"),
 ) -> None:
-    typer.echo(cmd_publication_withdraw(release_id, _root(root), rationale=rationale, approved_by=approved_by))
+    """Withdraw a release, named by its release id or bundle id (editorial)."""
+    options = dict(rationale=rationale, approved_by=approved_by)
+    _publication(
+        "publication.withdraw",
+        json_output,
+        lambda: publication_withdraw_data(release_id, _root(root), **options),
+        lambda: cmd_publication_withdraw(release_id, _root(root), **options),
+    )
 
 
 @provenance_app.command("show")
-def provenance_show(target_id: str, root: str = ROOT_OPTION) -> None:
-    typer.echo(cmd_proof_provenance_show(target_id, root=_root(root)))
+def provenance_show(target_id: str, root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
+    """A contract's or reference's provenance, with its legacy trust fields: not a trust source (ADR-0012)."""
+    _emit_legacy(
+        "provenance.show",
+        json_output,
+        lambda: cmd_proof_provenance_show(target_id, root=_root(root)),
+        lambda: provenance_show_data(target_id, root=_root(root)),
+    )
 
 
 @bug_app.command("scan")
-def bug_scan(theorem_id: str, root: str = ROOT_OPTION) -> None:
-    typer.echo(cmd_proof_bug_scan(theorem_id, _root(root)))
+def bug_scan(theorem_id: str, root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
+    """Scan a contract for proof bugs. Its callability checks are legacy (ADR-0012)."""
+    if json_output:
+        typer.echo(dump_envelope(success_envelope("bug.scan", bug_scan_data(theorem_id, _root(root)))))
+    else:
+        typer.echo(cmd_proof_bug_scan(theorem_id, _root(root)))
 
 
 @bug_app.command("list")
@@ -1422,8 +1604,9 @@ def branch_merge(
 
 
 @exchange_app.command("export")
-def exchange_export(root: str = ROOT_OPTION, note: str = "") -> None:
-    typer.echo(cmd_exchange_export(_root(root), note=note))
+def exchange_export(root: str = ROOT_OPTION, note: str = "", json_output: bool = typer.Option(False, "--json")) -> None:
+    """Export an exchange bundle. Its contracts' and references' trust fields are legacy (ADR-0012)."""
+    _emit_legacy_json("exchange.export", json_output, lambda: cmd_exchange_export(_root(root), note=note))
 
 
 @exchange_app.command("import")
@@ -1432,8 +1615,9 @@ def exchange_import(bundle_json: str, root: str = ROOT_OPTION) -> None:
 
 
 @handoff_app.command("create")
-def handoff_create(root: str = ROOT_OPTION, note: str = "") -> None:
-    typer.echo(cmd_handoff_create(_root(root), note=note))
+def handoff_create(root: str = ROOT_OPTION, note: str = "", json_output: bool = typer.Option(False, "--json")) -> None:
+    """Snapshot the project and export a handoff bundle. Its trust fields are legacy (ADR-0012)."""
+    _emit_legacy_json("handoff.create", json_output, lambda: cmd_handoff_create(_root(root), note=note))
 
 
 @handoff_app.command("inspect")
@@ -1442,8 +1626,9 @@ def handoff_inspect(bundle_json: str = "", root: str = ROOT_OPTION) -> None:
 
 
 @trace_app.command("dependency")
-def trace_dependency(target_id: str, root: str = ROOT_OPTION) -> None:
-    typer.echo(cmd_proof_trace_dependency(target_id, _root(root)))
+def trace_dependency(target_id: str, root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
+    """(legacy) A contract's dependencies, obligations and blockers. Its trust fields are legacy (ADR-0012)."""
+    _emit_legacy_json("trace.dependency", json_output, lambda: cmd_proof_trace_dependency(target_id, _root(root)))
 
 
 @trace_app.command("machine-check")
@@ -1452,8 +1637,14 @@ def trace_machine_check(source_id: str, root: str = ROOT_OPTION) -> None:
 
 
 @explain_app.command("apply")
-def explain_apply(theorem_id: str, root: str = ROOT_OPTION) -> None:
-    typer.echo(cmd_proof_explain_apply(theorem_id, _root(root)))
+def explain_apply(theorem_id: str, root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
+    """(legacy) Why a contract is or isn't callable under the legacy rules: not a trust source (ADR-0012)."""
+    _emit_legacy(
+        "explain.apply",
+        json_output,
+        lambda: cmd_proof_explain_apply(theorem_id, _root(root)),
+        lambda: explain_apply_data(theorem_id, _root(root)),
+    )
 
 
 @formalize_app.command("recommend")
