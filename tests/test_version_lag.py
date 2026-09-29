@@ -1,0 +1,88 @@
+"""A pin that lags its dependency's accepted version reads stale (#23).
+
+L is accepted at v1 and M pins it; L is revised to v2 with the same interface and accepted.
+M's pin says v1 while L's accepted version is 2: M reads `potentially-stale` (and the page
+offers M a Lightweight re-review for exactly that), and a new node resting on M is blocked
+with `dependency-stale`, distinct from `dependency-challenged`.
+"""
+
+from pathlib import Path
+
+from _proofs import submit_proof
+from _researcher import researcher
+from proof_cli.proof_map import (
+    claim_node,
+    create_node,
+    dependency_pin_is_current,
+    dependency_pin_lags,
+    get_accepted_version,
+    get_blocked_reason,
+    get_dependency_pin,
+    get_integrity_state,
+    get_workflow_state,
+    open_challenge,
+)
+from proof_cli.storage import ensure_project
+
+
+def _accept(store, node_id: str, content: str) -> None:
+    submit_proof(store, node_id, claimant_id="agent_a", scoping_rationale="scoped", content=content)
+    researcher(store).decide_acceptance(node_id, "accept")
+
+
+def _lagging(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="L", kind="lemma", statement="L holds")
+    _accept(store, "L", "proof of L, v1")
+    create_node(store, node_id="M", kind="claim", statement="M holds, given L", dependencies=["L"])
+    _accept(store, "M", "proof of M")
+    assert get_integrity_state(store, "M") == "current"
+    # a proof-only revision of L: same statement, a new accepted version
+    _accept(store, "L", "proof of L, v2, shorter")
+    return store
+
+
+def test_a_pin_behind_the_dependencys_accepted_version_lags_though_the_interface_is_the_same(tmp_path: Path):
+    store = _lagging(tmp_path)
+    pin = get_dependency_pin(store, "M", "L")
+    assert (pin.pinned_version, get_accepted_version(store, "L")) == (1, 2)
+    assert dependency_pin_is_current(store, pin)  # the interface didn't change …
+    assert dependency_pin_lags(store, pin)  # … but M was checked against v1
+
+
+def test_an_accepted_dependent_with_a_lagging_pin_reads_potentially_stale(tmp_path: Path):
+    store = _lagging(tmp_path)
+    assert get_integrity_state(store, "M") == "potentially-stale"
+
+
+def test_a_new_node_resting_on_it_is_blocked_as_dependency_stale_not_challenged(tmp_path: Path):
+    store = _lagging(tmp_path)
+    create_node(store, node_id="N", kind="claim", statement="N holds, given M", dependencies=["M"])
+    assert (get_workflow_state(store, "N"), get_blocked_reason(store, "N")) == ("blocked", "dependency-stale")
+
+
+def test_a_challenge_upstream_still_reads_as_dependency_challenged(tmp_path: Path):
+    store = _lagging(tmp_path)
+    open_challenge(store, "L", opened_by="agent_x", rationale="a gap")
+    create_node(store, node_id="N", kind="claim", statement="N holds, given M", dependencies=["M"])
+    assert get_blocked_reason(store, "N") == "dependency-challenged"  # a Challenge outranks a lag
+
+
+def test_a_pin_that_matches_the_accepted_version_does_not_lag(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="L", kind="lemma", statement="L holds")
+    _accept(store, "L", "proof of L")
+    create_node(store, node_id="M", kind="claim", statement="M holds, given L", dependencies=["L"])
+    _accept(store, "M", "proof of M")
+    assert not dependency_pin_lags(store, get_dependency_pin(store, "M", "L"))
+    assert get_integrity_state(store, "M") == "current"
+
+
+def test_the_core_and_the_page_agree_on_the_lag(tmp_path: Path):
+    from _review_client import DirectClient
+
+    store = _lagging(tmp_path)
+    view = DirectClient(store).get("/api/node/M")[1]["data"]
+    (dependency,) = view["dependencies"]
+    assert dependency["remedy"] == "lightweight-re-review"
+    assert view["integrity_state"] == "potentially-stale"
