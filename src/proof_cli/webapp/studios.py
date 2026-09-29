@@ -44,6 +44,7 @@ _TYPES = {
     ".json": "application/json",
     ".svg": "image/svg+xml",
     ".png": "image/png",
+    ".woff2": "font/woff2",  # KaTeX's fonts (ADR-0013)
 }
 _PAGES = {"": "index.html", "index.html": "index.html", "viewer": "viewer.html"}
 
@@ -97,7 +98,10 @@ class StudioHub:
                     folder, fixed_build=NODE_BUILD, hidden=NODE_HIDDEN, agent_scratch="scratch",
                     # the node's proof agent: rooted at the project, reading its library (ADR-0011 point 8),
                     # and knowing the node's dependencies as of each turn, to draft its key ideas (ADR-0013)
-                    agent_context=lambda: ProofAgentContext(node_id, root, library_folders(root), dependencies=self._dependencies(node_id)),
+                    agent_context=lambda: ProofAgentContext(
+                        node_id, root, library_folders(root), dependencies=self._dependencies(node_id),
+                        on_drafted=lambda agent, data: proof_map.record_key_ideas_draft(self.store, node_id, agent=agent, content=data),
+                    ),
                 )
             return self._studios[node.id]
 

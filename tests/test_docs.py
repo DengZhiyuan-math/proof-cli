@@ -74,3 +74,10 @@ def test_adr_0013_puts_a_key_ideas_summary_in_every_snapshot():
         text = (REPO / doc).read_text()
         assert "key-ideas.md" in text and "KEY_IDEAS_REQUIRED" in text, doc
     assert "opens each frozen file read-only" not in (REPO / "README.md").read_text()
+
+
+def test_adr_0013_records_provenance_in_project_state_and_typesets_maths_with_katex():
+    adr = next(ADR.glob("0013-*.md")).read_text()
+    assert "proof_map_key_ideas_drafted" in adr and "agent draft, edited by author" in adr and "binding covers" in adr
+    assert "KaTeX" in adr and "0.18.9" in adr and "the page ships no maths renderer" not in adr
+    assert "0.18.9" in (REPO / "src" / "proof_cli" / "studio" / "README.md").read_text()

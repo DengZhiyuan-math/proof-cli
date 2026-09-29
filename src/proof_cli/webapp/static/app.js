@@ -100,15 +100,29 @@ function showHome() {
   $("rail-warnings").textContent = state.warnings.length ? String(state.warnings.length) : "";
 }
 
+// who wrote a snapshot's key ideas, as its record says (ADR-0013): recorded by the studio, never read from the file
+const KEY_IDEAS_BY = {
+  "agent (confirmed by author at request-review)": "由 agent 起草、作者确认 · drafted by the proof agent, confirmed by the author",
+  "agent draft, edited by author": "由 agent 起草、作者修改 · the proof agent's draft, edited by the author",
+  "author": "作者撰写 · written by the author",
+};
+
+// a field's text with its $…$ and $$…$$ typeset (static/mathtext.js, KaTeX); plain text without it
+const withMath = (node, text) => {
+  if (typeof renderMathText === "function") return renderMathText(node, text);
+  node.textContent = String(text);
+  return node;
+};
+
 // A review card's key ideas (ADR-0013): 核心思路 and 难点 only, as text (`$…$` stays as written).
 function keyIdeasCard(summary) {
   const block = el("div", null, { class: "key-ideas" });
   if (!summary) { block.append(el("p", "这个 snapshot 没有关键思路摘要 · no key-ideas summary: read it in the studio", { class: "hint" })); return block; }
   for (const [key, title] of [["core_idea", "核心思路"], ["difficulties", "难点"]]) {
     const text = (summary.fields || {})[key];
-    if (text) block.append(el("span", title, { class: "lbl" }), el("p", text, { class: `key-idea ${key}` }));
+    if (text) block.append(el("span", title, { class: "lbl" }), withMath(el("p", null, { class: `key-idea ${key}` }), text));
   }
-  if (summary.drafted_by) block.append(el("p", "由 agent 起草、作者确认", { class: "hint" }));
+  if (summary.drafted_by) block.append(el("p", KEY_IDEAS_BY[summary.drafted_by] || summary.drafted_by, { class: "hint" }));
   return block;
 }
 
@@ -626,7 +640,7 @@ async function showNode(nodeId) {
   const decisions = $("node-decisions").querySelector("tbody");
   decisions.replaceChildren(...view.decisions.map((d) => decisionRow(d, proof)));
   if (!view.decisions.length) decisions.append(row(["No decision to make on this node right now.", "", "", ""]));
-  $("node-history").replaceChildren(...view.history.filter((r) => r.kind).map((r) => el("li", `${r.updated_at} · ${r.kind} · ${r.decision} · ${r.reviewer_id}${r.key_ideas_drafted_by ? ` · key ideas 由 agent 起草、作者确认 (${r.key_ideas_drafted_by})` : ""}${r.rationale ? ` — ${r.rationale}` : ""}`)));
+  $("node-history").replaceChildren(...view.history.filter((r) => r.kind).map((r) => el("li", `${r.updated_at} · ${r.kind} · ${r.decision} · ${r.reviewer_id}${r.key_ideas_drafted_by ? ` · key ideas: ${KEY_IDEAS_BY[r.key_ideas_drafted_by] || r.key_ideas_drafted_by}` : ""}${r.rationale ? ` — ${r.rationale}` : ""}`)));
 }
 
 async function route() {

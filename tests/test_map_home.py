@@ -322,8 +322,9 @@ def test_the_map_bar_wraps_at_phone_width_rather_than_scrolling_sideways():
 def test_a_review_card_shows_the_core_idea_and_the_difficulties_not_the_latex():
     (shown,) = _home()
     card = shown["pendingKeyIdeas"][0]
-    assert "核心思路" in card and "CORE: each partial sum is at most $\\sum 2^{-n}$" in card
-    assert "难点" in card and "HARD: the comparison needs $a_n \\ge 0$" in card
+    # the maths is typeset by KaTeX (ADR-0013): the harness's KaTeX parses it and marks what it rendered
+    assert "核心思路" in card and "CORE: each partial sum is at most [katex: \\sum 2^{-n}]" in card
+    assert "难点" in card and "HARD: the comparison needs [katex: a_n \\ge 0]" in card
     assert "STEPS" not in card and "OPEN" not in card  # the whole summary is in the studio's review view
     assert "Direct." not in shown["pendingRows"][0]  # the snapshot's LaTeX isn't pasted on the card
     assert shown["pendingKeyIdeas"][1] == ""  # an imported result's card has no summary
@@ -344,3 +345,37 @@ def test_hovering_a_map_node_shows_its_core_idea_and_nothing_else_of_the_summary
     assert "核心思路" in hover and "CORE: compare with a geometric series" in hover
     assert "难点" not in hover and "主要步骤" not in hover
     assert shown["dag"]["lem_open"]["title"] == "Not yet reviewed"  # no summary yet: the statement, as before
+
+
+def _card_with(core):
+    item = {**PENDING[0], "candidate_proof": {**PENDING[0]["candidate_proof"], "key_ideas": {**SUMMARY, "fields": {**SUMMARY["fields"], "core_idea": core}}}}
+    (shown,) = _home(state=_state([item]))
+    return shown
+
+
+def test_a_review_cards_maths_is_rendered_inline_and_on_display():
+    shown = _card_with("Inline $x^2$ and shown $$\\int_0^1 f$$ too.")
+    assert {"tex": "x^2", "displayMode": False} in shown["katex"] and {"tex": "\\int_0^1 f", "displayMode": True} in shown["katex"]
+    assert {"class": "math", "text": "[katex: x^2]"} in shown["pendingMath"][0]
+    assert {"class": "math display", "text": "[katex display: \\int_0^1 f]"} in shown["pendingMath"][0]
+
+
+def test_a_malformed_formula_on_a_review_card_shows_as_the_text_it_was_written_as():
+    shown = _card_with("Broken $\\frac{1}{$ here, fine $y$.")
+    maths = shown["pendingMath"][0]
+    assert {"class": "math unrendered", "text": "$\\frac{1}{$"} in maths
+    assert {"class": "math", "text": "[katex: y]"} in maths  # the rest still renders
+    assert "Broken $\\frac{1}{$ here" in shown["pendingKeyIdeas"][0]
+
+
+def test_the_map_page_loads_the_vendored_katex_and_serves_only_it_from_the_studio():
+    from proof_cli.webapp.server import shared_asset
+
+    html = (STATIC / "index.html").read_text()
+    for src in ("/static/shared/vendor/katex.min.css", "/static/shared/vendor/katex.min.js", "/static/shared/mathtext.js"):
+        assert src in html, src
+    assert html.index("katex.min.js") < html.index("mathtext.js") < html.index("/static/app.js")
+    assert "http" not in html.split("<body")[0].replace("http-equiv", "")  # nothing from the network
+    assert shared_asset("vendor/katex.min.js") and shared_asset("vendor/fonts/KaTeX_Main-Regular.woff2")
+    for refused in ("app.js", "vendor/codemirror.js", "../studio/server.py", "vendor/fonts/../../server.py", "mathtext.js/../app.js"):
+        assert shared_asset(refused) is None, refused

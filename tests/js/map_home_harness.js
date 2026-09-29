@@ -120,7 +120,11 @@ class FakeElement {
       return { json: async () => ({ ok: true, data }) };
     },
   };
+  // the map page's KaTeX and mathtext.js (ADR-0013)
+  const katexCalls = [];
+  context.katex = require("./katex_stub.js")(katexCalls);
   vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "../../src/proof_cli/studio/static/mathtext.js"), "utf8"), context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, "../../src/proof_cli/webapp/static/app.js"), "utf8"), context);
   listeners.DOMContentLoaded.forEach((fn) => fn());
   await new Promise((resolve) => setImmediate(resolve));
@@ -167,6 +171,9 @@ class FakeElement {
     pendingCitationMissing: elements.pending.querySelectorAll("tbody tr").map((tr) => tr.querySelectorAll(".citation.warning").length > 0),
     // each review card's key ideas (ADR-0013): the text of its .key-ideas block
     pendingKeyIdeas: elements.pending.querySelectorAll("tbody tr").map((tr) => tr.querySelectorAll(".key-ideas").map((k) => k.textContent).join(" ")),
+    // the maths spans on the review cards, and every formula handed to KaTeX so far
+    pendingMath: elements.pending.querySelectorAll("tbody tr").map((tr) => tr.querySelectorAll("span.math").map((m) => ({ class: m.className, text: m.textContent }))),
+    katex: katexCalls,
     confirmShown: !elements.confirm.hidden,
     posted,
   });

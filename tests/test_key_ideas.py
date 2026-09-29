@@ -23,6 +23,7 @@ from proof_cli.domain import CandidateProofRecord
 from proof_cli.errors import ERROR_CODES
 from proof_cli.proof_map import (
     ProofMapError,
+    record_key_ideas_draft,
     create_node,
     get_acceptance_state,
     get_workflow_state,
@@ -64,7 +65,7 @@ def test_the_four_fields_are_read_from_their_headings():
     assert parsed.fields["main_steps"].startswith("1. Cover the interval (uses lem_cover).")
     assert parsed.fields["difficulties"].startswith("The subcover's size")
     assert parsed.fields["not_covered"] == "无"
-    assert parsed.missing == [] and parsed.drafted_by is None
+    assert parsed.missing == []
 
 
 def test_a_template_with_only_its_prompts_leaves_both_required_fields_empty():
@@ -74,10 +75,20 @@ def test_a_template_with_only_its_prompts_leaves_both_required_fields_empty():
     assert key_ideas.parse("# 核心思路\nWhy.\n### 主要步骤\n1. a\n").missing == []
 
 
-def test_a_summary_the_agent_drafted_says_so_on_its_first_line():
-    drafted = key_ideas.drafted_marker("studio-agent") + "\n" + KEY_IDEAS
-    parsed = key_ideas.parse(drafted)
-    assert parsed.drafted_by == "studio-agent" and parsed.missing == []
+OLD_MARKER = "<!-- key-ideas drafted-by: studio-agent -->"
+
+
+def test_a_summary_with_the_old_drafted_marker_still_parses():
+    """An earlier draft of ADR-0013 wrote this first line; it is now just a comment."""
+    parsed = key_ideas.parse(OLD_MARKER + "\n" + KEY_IDEAS)
+    assert parsed.missing == [] and parsed.fields == key_ideas.parse(KEY_IDEAS).fields
+
+
+def test_provenance_compares_the_frozen_summary_with_the_recorded_draft():
+    draft = KEY_IDEAS.encode()
+    assert key_ideas.provenance(draft, None) == key_ideas.AUTHOR
+    assert key_ideas.provenance(draft, key_ideas.digest(draft)) == key_ideas.AGENT_CONFIRMED
+    assert key_ideas.provenance(draft + b"edited\n", key_ideas.digest(draft)) == key_ideas.AGENT_EDITED
 
 
 # -- request_review needs it ---------------------------------------------------------------
@@ -224,7 +235,7 @@ def test_the_node_view_carries_the_frozen_summary(client):
     summary = view["candidate_proof"]["key_ideas"]
     assert summary["fields"]["core_idea"] == "The bound follows from compactness of $[0, 1]$."
     assert summary["fields"]["difficulties"].startswith("The subcover's size")
-    assert summary["drafted_by"] is None
+    assert summary["drafted_by"] == key_ideas.AUTHOR
     # the working summary is shown apart, so the panel knows whether one must still be written
     assert view["key_ideas_working"] == {"exists": True, "missing": ["主要步骤"]}
 
@@ -290,35 +301,93 @@ def test_an_old_snapshot_without_a_summary_is_still_reviewable(tmp_path: Path):
     assert pending == []  # decided: no longer awaiting review
 
 
-# -- drafted by the agent, confirmed by the author --------------------------------------------------
+# -- who wrote it: recorded in project state, not in the file ----------------------------------------
 
 
-def test_a_drafted_summary_is_recorded_as_drafted_by_the_agent_and_confirmed_by_the_author(tmp_path: Path):
-    store, folder = _node(tmp_path, summary=key_ideas.drafted_marker("studio-agent") + "\n" + KEY_IDEAS)
+def _draft(store, text: str = KEY_IDEAS, node_id: str = "clm"):
+    """The proof agent writes the working summary, and the studio records it."""
+    write_key_ideas(store, node_id, text)
+    record_key_ideas_draft(store, node_id, agent="studio-agent", content=text.encode())
+
+
+def _accept_and_read(store, folder):
+    researcher(store).decide_acceptance("clm", "accept")
+    (decision,) = [row for row in list_decisions(store) if row["kind"] == "acceptance"]
+    line = json.loads((folder / "reviews.jsonl").read_text().splitlines()[-1])
+    return decision, line
+
+
+def test_an_untouched_agent_draft_is_the_agents_confirmed_by_the_author(tmp_path: Path):
+    store, folder = _node(tmp_path, summary=None)
+    _draft(store)
 
     record = _request(store)
-    assert record.key_ideas_drafted_by == "studio-agent"
-    researcher(store).decide_acceptance("clm", "accept")
+    assert record.key_ideas_drafted_by == key_ideas.AGENT_CONFIRMED
+    assert list_candidate_proofs(store, "clm")[0].key_ideas_drafted_by == key_ideas.AGENT_CONFIRMED  # on the snapshot's record
 
-    (decision,) = [row for row in list_decisions(store) if row["kind"] == "acceptance"]
-    assert decision["key_ideas_drafted_by"] == "studio-agent"
-    line = json.loads((folder / "reviews.jsonl").read_text().splitlines()[-1])
-    assert line["key_ideas_drafted_by"] == "studio-agent"
+    decision, line = _accept_and_read(store, folder)
+    assert line["key_ideas_drafted_by"] == key_ideas.AGENT_CONFIRMED
+    assert line["payload"]["key_ideas_drafted_by"] == key_ideas.AGENT_CONFIRMED  # in what the binding covers
+    assert decision["payload"].key_ideas_drafted_by == key_ideas.AGENT_CONFIRMED
 
     client = DirectClient(store)
     try:
         view = _data(client.get("/api/node/clm"))
     finally:
         client.app.close()
-    assert view["candidate_proof"]["key_ideas"]["drafted_by"] == "studio-agent"
+    assert view["candidate_proof"]["key_ideas"]["drafted_by"] == key_ideas.AGENT_CONFIRMED
     (history,) = [r for r in view["history"] if r.get("kind") == "acceptance"]
-    assert history["key_ideas_drafted_by"] == "studio-agent"
+    assert history["key_ideas_drafted_by"] == key_ideas.AGENT_CONFIRMED
 
 
-def test_a_summary_the_author_wrote_records_no_drafter(tmp_path: Path):
+def test_an_agent_draft_the_author_edited_says_so(tmp_path: Path):
+    store, folder = _node(tmp_path, summary=None)
+    _draft(store)
+    write_key_ideas(store, "clm", KEY_IDEAS.replace("compactness", "compactness and continuity"))
+    assert _request(store).key_ideas_drafted_by == key_ideas.AGENT_EDITED
+
+
+def test_a_summary_only_the_author_wrote_is_the_authors(tmp_path: Path):
     store, folder = _node(tmp_path)
+    assert _request(store).key_ideas_drafted_by == key_ideas.AUTHOR
+    decision, line = _accept_and_read(store, folder)
+    assert line["key_ideas_drafted_by"] == key_ideas.AUTHOR and line["payload"]["key_ideas_drafted_by"] == key_ideas.AUTHOR
+
+
+def test_the_old_marker_line_no_longer_decides_the_provenance(tmp_path: Path):
+    # a marker line with no recorded draft: the author's
+    store, folder = _node(tmp_path, summary=OLD_MARKER + "\n" + KEY_IDEAS)
+    assert _request(store).key_ideas_drafted_by == key_ideas.AUTHOR
+    # a recorded draft whose marker line the author then deletes: still the agent's draft, edited
+    other, _ = _node(tmp_path / "other", summary=None)
+    _draft(other, OLD_MARKER + "\n" + KEY_IDEAS)
+    write_key_ideas(other, "clm", KEY_IDEAS)
+    assert _request(other).key_ideas_drafted_by == key_ideas.AGENT_EDITED
+
+
+def test_every_decision_on_a_snapshot_carries_its_provenance(tmp_path: Path):
+    from proof_cli.proof_map import record_evidence_check
+
+    store, folder = _node(tmp_path, summary=None)
+    _draft(store)
     record = _request(store)
-    assert record.key_ideas_drafted_by is None
+    check = record_evidence_check(store, record.id, "passed", notes="lean", run_by="lean")
+    researcher(store).decide_evidence_review(check.id, "trusted")
+    researcher(store).decide_acceptance("clm", "revision-requested")
+    lines = [json.loads(line) for line in (folder / "reviews.jsonl").read_text().splitlines()]
+    assert [line["kind"] for line in lines] == ["evidence_review", "acceptance"]
+    assert all(line["key_ideas_drafted_by"] == key_ideas.AGENT_CONFIRMED for line in lines)
+    assert all(line["payload"]["key_ideas_drafted_by"] == key_ideas.AGENT_CONFIRMED for line in lines)
+
+
+def test_changing_the_recorded_provenance_after_an_accept_makes_it_unverifiable(tmp_path: Path):
+    store, folder = _node(tmp_path, summary=None)
+    _draft(store)
+    record = _request(store)
     researcher(store).decide_acceptance("clm", "accept")
-    line = json.loads((folder / "reviews.jsonl").read_text().splitlines()[-1])
-    assert line.get("key_ideas_drafted_by") is None
+    assert get_acceptance_state(store, "clm") == "accepted"
+
+    with store.transaction() as conn:
+        conn.execute("UPDATE candidate_proofs SET key_ideas_drafted_by = ? WHERE id = ?", (key_ideas.AUTHOR, record.id))
+
+    assert get_acceptance_state(store, "clm") == "unverifiable"

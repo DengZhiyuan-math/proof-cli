@@ -174,7 +174,7 @@ def test_a_decision_over_http_counts(http_app):
 def test_the_page_and_its_script_are_served_with_a_strict_policy(http_app):
     _, client = http_app
     port = urlsplit(client.origin).port
-    for path in ("/", "/static/app.js"):
+    for path in ("/", "/static/app.js", "/static/shared/mathtext.js", "/static/shared/vendor/katex.min.js", "/static/shared/vendor/fonts/KaTeX_Main-Regular.woff2"):
         conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
         conn.request("GET", path, headers={"Host": client.netloc})
         response = conn.getresponse()
