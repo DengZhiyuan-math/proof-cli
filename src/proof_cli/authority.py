@@ -104,6 +104,13 @@ def candidate_proof_sha256(store: ProjectStore, candidate_proof_id: str) -> str 
     return hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else None
 
 
+def snapshot_matches(recorded: str | None, current: str | None) -> bool:
+    """Whether a decision's recorded snapshot SHA-256 names the snapshot as it is on disk now.
+    A missing or unreadable snapshot hashes to None, and None matches nothing, not even a
+    recorded None (#92): a decision on a snapshot that isn't there never counts."""
+    return recorded is not None and current is not None and recorded == current
+
+
 def build_decision_payload(
     store: ProjectStore,
     kind: DecisionKind,
@@ -412,5 +419,6 @@ __all__ = [
     "list_decisions",
     "record_decision",
     "reviews_path",
+    "snapshot_matches",
     "verify_decision_row",
 ]
