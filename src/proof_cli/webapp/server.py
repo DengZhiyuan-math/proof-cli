@@ -31,7 +31,8 @@ from ..collaboration import list_review_records
 from ..domain import ProofMapNodeKind
 from ..reviews import git_identity
 from ..storage import ProjectStore, get_active_claim, get_current_candidate_proof, read_project_instance_id, read_state
-from ..vault import build_pdf_path, node_folder
+from ..authority import candidate_proof_sha256
+from ..vault import SNAPSHOT_MANIFEST, archived_pdf_path, build_pdf_path, node_folder, snapshot_folder_files
 from .studios import StudioHub
 
 
@@ -61,11 +62,27 @@ class RequestError(Exception):
 
 
 def _proof_view(store: ProjectStore, proof) -> dict | None:
-    """A Candidate proof as the page shows it: the exact bytes whose SHA-256 a signature binds."""
+    """A Candidate proof as the page shows it: every frozen file, exactly, and the SHA-256 a decision binds.
+
+    A folder snapshot (ADR-0011) shows each file it froze, by its path from the node folder,
+    with `text` its proof.tex; an old single-file snapshot is its one file."""
     if proof is None:
         return None
-    raw = (store.root / proof.file_path).read_bytes()
-    return {"id": proof.id, "version": proof.version, "text": raw.decode("utf-8", errors="replace"), "sha256": hashlib.sha256(raw).hexdigest()}
+    path = store.root / proof.file_path
+    if path.name == SNAPSHOT_MANIFEST:
+        frozen = snapshot_folder_files(path.parent)
+    else:
+        frozen = {"proof.tex": path.read_bytes()} if path.is_file() else None
+    # a damaged or missing snapshot still shows: its page, its (now void) decisions, its warnings
+    files = {rel: data.decode("utf-8", errors="replace") for rel, data in (frozen or {}).items()}
+    return {
+        "id": proof.id,
+        "version": proof.version,
+        "text": files.get("proof.tex", ""),
+        "files": files,
+        "unreadable": frozen is None,
+        "sha256": candidate_proof_sha256(store, proof.id),
+    }
 
 
 def _warnings_for(warnings: list, *ids: str) -> list[dict]:
@@ -201,7 +218,7 @@ class ReviewApp:
 
     def _pdfs(self, node_id: str, proof) -> dict:
         """The compiled PDFs a reader can open: the one archived with the snapshot, and the studio's current build."""
-        snapshot_pdf = (self.store.root / proof.file_path).with_suffix(".pdf") if proof is not None else None
+        snapshot_pdf = archived_pdf_path(self.store.root, node_id, proof.version) if proof is not None else None
         return {
             "snapshot": snapshot_pdf is not None and snapshot_pdf.is_file(),
             "build": build_pdf_path(self.store.root, node_id).is_file(),
@@ -211,7 +228,7 @@ class ReviewApp:
         proof_map.require_node(self.store, node_id)  # a known node id: a plain folder name, never a path
         if which == "snapshot":
             proof = get_current_candidate_proof(self.store, node_id)
-            path = (self.store.root / proof.file_path).with_suffix(".pdf") if proof is not None else None
+            path = archived_pdf_path(self.store.root, node_id, proof.version) if proof is not None else None
         else:
             path = build_pdf_path(self.store.root, node_id)
         if path is None or not path.is_file():

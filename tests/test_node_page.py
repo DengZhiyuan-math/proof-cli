@@ -245,3 +245,70 @@ def test_an_imported_result_never_sends_dependencies_even_if_some_are_selected()
 def test_a_local_node_still_sends_its_dependencies():
     (body,) = _new_node_form(kind="claim", dependencies=["thm", "lem"], switchTo=None)["sent"]
     assert body["dependencies"] == ["thm", "lem"]
+
+
+
+# -- review in the studio (#71) --------------------------------------------------------
+
+REVIEW_VIEW = {
+    **VIEW,
+    "workflow_state": "review-needed",
+    "candidate_proof": {"id": "cp-v2", "version": 2, "sha256": "d" * 64, "text": "MAIN",
+                        "files": {"proof.tex": "MAIN", "body.tex": "BODY", "../preamble.tex": "PRE"}},
+    "pdfs": {"snapshot": True, "build": True},
+    "decisions": [{"kind": "acceptance", "target_id": "A", "decision": "accept", "binding": "b" * 64}],
+}
+
+
+def test_the_review_section_opens_every_frozen_file_read_only():
+    shown = _panel(view=REVIEW_VIEW, press="body.tex")
+    assert {"openReadOnly": "v2 · body.tex", "text": "BODY"} in shown["events"]
+    assert "Snapshot v2" in shown["review"] and "archived" in shown["review"]
+
+
+def test_a_decision_from_the_studio_carries_its_binding_and_the_snapshot_it_showed():
+    sent = _panel(view=REVIEW_VIEW, press="Accept this snapshot", rationale="every step checked",
+                  answer={"results": [{"ok": True}]})
+    posted = [e for e in sent["events"] if isinstance(e, dict) and e.get("post") == "/api/decide"]
+    (decision,) = posted[0]["body"]["decisions"]
+    assert decision["binding"] == "b" * 64 and decision["viewed_candidate_proof_sha256"] == "d" * 64
+    assert decision["rationale"] == "every step checked" and "confirm" in sent["events"]
+
+
+def test_a_refused_confirmation_records_nothing():
+    sent = _panel(view=REVIEW_VIEW, press="Accept this snapshot", confirm=False)
+    assert not [e for e in sent["events"] if isinstance(e, dict) and e.get("post")]
+
+
+def test_deciding_on_a_snapshot_the_page_no_longer_shows_is_refused(page):
+    """The page showed v1; v2 (a changed \\input file) came since: the Accept it offered is STALE_VIEW."""
+    store, client = page
+    _ok(client.post("/api/nodes", {"node_id": "c1", "kind": "claim", "statement": "C"}))
+    folder = store.root / "proofs" / "c1"
+    (folder / "body.tex").write_text("first\n")
+    _ok(client.post("/api/node/c1/request-review", {"rationale": "scoped"}))
+    view = _ok(client.get("/api/node/c1"))
+    assert set(view["candidate_proof"]["files"]) == {"proof.tex", "body.tex", "../preamble.tex"}
+    accept = next(d for d in view["decisions"] if d["decision"] == "accept")
+
+    (folder / "body.tex").write_text("second\n")
+    _ok(client.post("/api/node/c1/request-review", {"rationale": "scoped"}))
+    stale = {**accept, "viewed_candidate_proof_sha256": view["candidate_proof"]["sha256"]}
+    result = _ok(client.post("/api/decide", {"decisions": [stale]}))["results"][0]
+    assert result["error"]["code"] == "STALE_VIEW"
+
+    fresh_view = _ok(client.get("/api/node/c1"))
+    fresh = {**next(d for d in fresh_view["decisions"] if d["decision"] == "accept"), "viewed_candidate_proof_sha256": fresh_view["candidate_proof"]["sha256"]}
+    assert _ok(client.post("/api/decide", {"decisions": [fresh]}))["results"][0]["ok"]
+
+
+def test_the_pending_list_sends_a_local_node_to_its_studios_review():
+    text = (WEBAPP / "static" / "app.js").read_text()
+    assert "`/studio/${encodeURIComponent(item.node_id)}/#review`" in text
+
+
+
+def test_a_damaged_snapshot_shows_as_such_in_the_review_section():
+    broken = {**REVIEW_VIEW, "candidate_proof": {"id": "cp-v2", "version": 2, "sha256": None, "text": "", "files": {}, "unreadable": True}}
+    shown = _panel(view=broken)
+    assert "can't be read" in shown["review"]

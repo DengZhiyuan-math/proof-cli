@@ -1,5 +1,6 @@
 // Runs the studio's real node panel (src/proof_cli/studio/static/node.js) against a minimal DOM.
-// argv[2]: JSON {view, saveAll: true|false|null, click: {label, values}}. Prints what happened.
+// argv[2]: JSON {view, saveAll: true|false|null, click: {label, values}, press: button label,
+// answer, confirm}. Prints what happened.
 const fs = require("fs"), path = require("path"), vm = require("vm");
 
 class El {
@@ -20,6 +21,8 @@ class El {
     NODE: scenario.view.node.id,
     document: { getElementById: (id) => (id === "node-panel" ? panel : name), createElement: (tag) => new El(tag) },
     location: {},
+    confirm: () => { events.push("confirm"); return scenario.confirm !== false; },
+    openReadOnly: (name, text) => { events.push({ openReadOnly: name, text }); },
     fetch: async (url, options = {}) => {
       if (options.method === "POST") events.push({ post: url, body: JSON.parse(options.body) });
       return { json: async () => ({ ok: true, data: options.method === "POST" ? (scenario.answer || { version: 2 }) : scenario.view }) };
@@ -41,5 +44,15 @@ class El {
     await box.children[0].onclick();
     out.note = panel.querySelector(".node-note").textContent;
   }
+  if (scenario.press) {  // any button, by its label: a review file, a decision
+    const button = panel.all().find((x) => x.tag === "button" && x.textContent === scenario.press);
+    if (!button) throw new Error(`no button ${scenario.press}`);
+    const row = panel.all().find((x) => x.children && x.children.includes(button));
+    const why = row && row.children.find((x) => x.tag === "input");
+    if (why && scenario.rationale) why.value = scenario.rationale;
+    await button.onclick();
+    out.note = panel.querySelector(".node-note").textContent;
+  }
+  out.review = (panel.querySelector(".node-review") || { text: () => "" }).text();
   console.log(JSON.stringify(out));
 })();
