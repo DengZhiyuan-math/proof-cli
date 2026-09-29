@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import sqlite3
@@ -14,7 +15,7 @@ from typing import Iterator, NamedTuple
 
 from pydantic import TypeAdapter
 
-from .db import connect, initialize
+from .db import SCHEMA, connect, initialize
 from .domain import (
     BlockerRecord,
     CandidateProofRecord,
@@ -435,6 +436,57 @@ def read_only() -> Iterator[None]:
         _READ_ONLY.reset(token)
 
 
+# Schema DDL, as one fingerprint: a release that changes any of it re-runs it on every project.
+_SCHEMA_DDL_DIGEST = int.from_bytes(
+    hashlib.sha256(
+        json.dumps(
+            [
+                SCHEMA,
+                REFERENCE_SCHEMA,
+                PROOF_MAP_SCHEMA,
+                REVIEW_HISTORY_SCHEMA,
+                REVIEW_HISTORY_TRIGGERS,
+                REVIEWER_KEYS_SCHEMA,
+                PROOF_LEDGER_SCHEMA,
+                _REVIEW_HISTORY_ADDED_COLUMNS,
+                _CHALLENGE_ADDED_COLUMNS,
+                _CLAIM_DROPPED_COLUMNS,
+                _CANDIDATE_PROOF_ADDED_COLUMNS,
+            ]
+        ).encode("utf-8")
+    ).digest()[:4],
+    "big",
+)
+
+
+def _schema_stamp(conn: sqlite3.Connection) -> int:
+    """What `PRAGMA user_version` holds once this release's schema is applied (#43).
+
+    It mixes the DDL fingerprint with SQLite's schema cookie, which moves on
+    any DDL at all: a project another release migrated, or one whose trigger
+    or column someone dropped or added by hand, no longer matches, so the
+    next connect re-runs the (idempotent) DDL instead of trusting it."""
+    cookie = conn.execute("PRAGMA schema_version").fetchone()[0]
+    return (_SCHEMA_DDL_DIGEST ^ cookie) & 0x7FFFFFFF
+
+
+def _apply_schema(conn: sqlite3.Connection) -> None:
+    initialize(conn)
+    conn.executescript(REFERENCE_SCHEMA)
+    conn.executescript(PROOF_MAP_SCHEMA)
+    conn.executescript(REVIEW_HISTORY_SCHEMA)
+    _add_missing_columns(conn, "review_history", _REVIEW_HISTORY_ADDED_COLUMNS)
+    _add_missing_columns(conn, "challenges", _CHALLENGE_ADDED_COLUMNS)
+    _drop_columns(conn, "claims", _CLAIM_DROPPED_COLUMNS)
+    _add_missing_columns(conn, "candidate_proofs", _CANDIDATE_PROOF_ADDED_COLUMNS)
+    conn.executescript(REVIEW_HISTORY_TRIGGERS)
+    conn.executescript(REVIEWER_KEYS_SCHEMA)
+    conn.executescript(PROOF_LEDGER_SCHEMA)
+    conn.commit()
+    conn.execute(f"PRAGMA user_version = {_schema_stamp(conn)}")  # leaves the schema cookie alone
+    conn.commit()
+
+
 @dataclass
 class ProjectStore:
     root: Path
@@ -447,18 +499,8 @@ class ProjectStore:
         if _READ_ONLY.get() and not self.db_path.exists():
             raise ProjectNotFoundError(self.root)
         conn = connect(self.db_path)
-        initialize(conn)
-        conn.executescript(REFERENCE_SCHEMA)
-        conn.executescript(PROOF_MAP_SCHEMA)
-        conn.executescript(REVIEW_HISTORY_SCHEMA)
-        _add_missing_columns(conn, "review_history", _REVIEW_HISTORY_ADDED_COLUMNS)
-        _add_missing_columns(conn, "challenges", _CHALLENGE_ADDED_COLUMNS)
-        _drop_columns(conn, "claims", _CLAIM_DROPPED_COLUMNS)
-        _add_missing_columns(conn, "candidate_proofs", _CANDIDATE_PROOF_ADDED_COLUMNS)
-        conn.executescript(REVIEW_HISTORY_TRIGGERS)
-        conn.executescript(REVIEWER_KEYS_SCHEMA)
-        conn.executescript(PROOF_LEDGER_SCHEMA)
-        conn.commit()
+        if conn.execute("PRAGMA user_version").fetchone()[0] != _schema_stamp(conn):
+            _apply_schema(conn)
         return conn
 
     @contextmanager
@@ -494,6 +536,7 @@ class ProjectStore:
                 raise
             joined.execute(f"RELEASE {savepoint}")
             return
+        forget_reads()
         conn = self.connect()
         active = _ActiveTransaction(self.db_path.resolve(), threading.get_ident(), conn, [], [], [])
         token = _ACTIVE_TRANSACTION.set(active)
@@ -513,6 +556,7 @@ class ProjectStore:
         finally:
             _ACTIVE_TRANSACTION.reset(token)
             conn.close()
+            forget_reads()
         for callback in active.after_commit:
             callback()
 
@@ -579,6 +623,84 @@ def active_transaction(store: ProjectStore) -> sqlite3.Connection | None:
     return None
 
 
+# -- one read, one pass (#43) --------------------------------------------------------
+
+# The read scope this thread is in, if any: its memo {(function, root, args): result},
+# and the write transaction it was opened in (None outside one).
+class _ReadScope(NamedTuple):
+    memo: dict
+    transaction: _ActiveTransaction | None
+
+
+_READ_SCOPE: ContextVar[_ReadScope | None] = ContextVar("proof_cli_read_scope", default=None)
+
+
+@contextmanager
+def read_scope() -> Iterator[None]:
+    """Answer each `memoized_read` once for the duration, however many nodes ask.
+
+    For one read of the project (the frontier, a node's axes, the map, a
+    decision's precondition check): nothing is written during it, so a
+    dependency walk or a review lookup asked for every node is computed
+    once. A scope belongs to the write transaction it was opened in: one
+    opened outside a transaction does nothing inside a later one, which
+    sees what it writes. Any write inside the scope drops what was
+    remembered. A nested scope in the same transaction joins the outer one.
+    """
+    transaction = _ACTIVE_TRANSACTION.get()
+    current = _READ_SCOPE.get()
+    if current is not None and current.transaction is transaction:
+        yield
+        return
+    token = _READ_SCOPE.set(_ReadScope({}, transaction))
+    try:
+        yield
+    finally:
+        _READ_SCOPE.reset(token)
+
+
+def forget_reads() -> None:
+    """Drop what the current read scope remembered: something was just written."""
+    scope = _READ_SCOPE.get()
+    if scope is not None:
+        scope.memo.clear()
+
+
+def memoized_read(func):
+    """Remember `func(store_or_root, *args)` inside a `read_scope`; outside one, just call it.
+
+    For pure reads only. Callers treat the result as read-only: it is shared
+    with every other caller in the scope."""
+
+    @functools.wraps(func)
+    def wrapper(first, *args, **kwargs):
+        scope = _READ_SCOPE.get()
+        if scope is None or kwargs or scope.transaction is not _ACTIVE_TRANSACTION.get():
+            return func(first, *args, **kwargs)
+        root = first.root if isinstance(first, ProjectStore) else first
+        try:
+            key = (func, root, args)
+            hash(key)
+        except TypeError:
+            return func(first, *args)
+        if key not in scope.memo:
+            scope.memo[key] = func(first, *args)
+        return scope.memo[key]
+
+    return wrapper
+
+
+def read_scoped(func):
+    """Run the whole of `func` inside one `read_scope`."""
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        with read_scope():
+            return func(*args, **kwargs)
+
+    return wrapper
+
+
 LEDGER_ADOPTED_KEY = "ledger_adopted"
 
 
@@ -603,12 +725,14 @@ def _writing(store: ProjectStore, conn: sqlite3.Connection | None) -> Iterator[s
     if conn is not None:
         yield conn
         return
+    forget_reads()
     own = store.connect()
     try:
         yield own
         own.commit()
     finally:
         own.close()
+        forget_reads()
 
 
 @contextmanager
@@ -1101,6 +1225,7 @@ def insert_claim(store: ProjectStore, claim: ClaimRecord, *, conn: sqlite3.Conne
     return claim
 
 
+@memoized_read
 def get_active_claim(store: ProjectStore, node_id: str, *, conn: sqlite3.Connection | None = None) -> ClaimRecord | None:
     """`conn`: read inside the caller's `store.transaction()`, so the answer holds until it commits."""
     with _reading(store, conn) as conn:
@@ -1224,6 +1349,7 @@ def set_candidate_proof_review_record_id(
         )
 
 
+@memoized_read
 def get_candidate_proof(store: ProjectStore, candidate_proof_id: str) -> CandidateProofRecord | None:
     with store.connect() as conn:
         row = conn.execute(
@@ -1242,6 +1368,7 @@ def list_candidate_proofs_for_node(store: ProjectStore, node_id: str) -> list[Ca
     return [_row_to_candidate_proof(row) for row in rows]
 
 
+@memoized_read
 def get_current_candidate_proof(
     store: ProjectStore, node_id: str, *, conn: sqlite3.Connection | None = None
 ) -> CandidateProofRecord | None:

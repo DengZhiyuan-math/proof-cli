@@ -20,17 +20,26 @@ from __future__ import annotations
 
 import hashlib
 import json
+from contextlib import contextmanager
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 from urllib.parse import unquote, urlsplit
 
 from .. import proof_map
 from ..collaboration import list_review_records
 from ..domain import ProofMapNodeKind
 from ..reviews import git_identity
-from ..storage import ProjectStore, get_active_claim, get_current_candidate_proof, read_project_instance_id, read_state
+from ..storage import (
+    ProjectStore,
+    get_active_claim,
+    get_current_candidate_proof,
+    read_project_instance_id,
+    read_scope,
+    read_scoped,
+    read_state,
+)
 from ..authority import candidate_proof_sha256
 from ..vault import SNAPSHOT_MANIFEST, archived_pdf_path, build_pdf_path, node_folder, snapshot_folder_files
 from .studios import StudioHub
@@ -170,11 +179,14 @@ class ReviewApp:
     def health(self) -> dict:
         return {"project_id": read_state(self.store).project_id, "instance": read_project_instance_id(self.store), "origin": self.origin}
 
-    def _one_state(self):
+    @contextmanager
+    def _one_state(self) -> Iterator[None]:
         """Hold the project's write lock while a page is read (PR #63 audit): no decision or other
         write can land between reading what the page shows and computing the bindings it sends
-        back, so both describe one state. Writers wait for the read; it takes milliseconds."""
-        return self.store.transaction()
+        back, so both describe one state. Writers wait for the read; it takes milliseconds.
+        One read scope (#43): each node's axes are worked out once for the whole page."""
+        with self.store.transaction(), read_scope():
+            yield
 
     def state(self) -> dict:
         with self._one_state():
@@ -191,6 +203,7 @@ class ReviewApp:
             "pending": self._pending(),
         }
 
+    @read_scoped
     def map(self) -> dict:
         """The whole proof map: every node with its three axes, its assignee, and whether it's on the frontier (ADR-0008)."""
         frontier = {node.id for node in proof_map.get_frontier(self.store)}
