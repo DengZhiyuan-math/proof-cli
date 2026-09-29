@@ -20,7 +20,7 @@ So the project answered "what can be called?" in two places, and one of them cou
 1. **Only proof-map nodes answer "what can be called".** A local node can be depended on once it is Accepted, and an imported_result once it has a Reference review (ADR-0004, ADR-0010). The trust and status fields of `TheoremContract`, `ProofObligation`, `BlockerRecord` and `ReferenceRecord` are no longer the basis of any decision. An obligation or a blocker is an informational note, and there is no longer any "resolve".
 
 2. **The legacy commands are frozen and labelled, not deleted.**
-   - `theorem apply`, `theorem extract`, `theorem ground`, `explain apply`, `bug scan` (whose checks call `theorem_callability`), `provenance show`, `reference list` and `export` stay in the Legacy group, or where they were.
+   - `theorem add`, `theorem show`, `theorem list`, `theorem apply`, `theorem extract`, `theorem ground`, `explain apply`, `bug scan` (whose checks call `theorem_callability`), `trace dependency`, `provenance show`, `reference import`, `reference show`, `reference list`, `retrieve`, `snapshot`, `export`, `exchange export` and `handoff create` stay in the Legacy group, or where they were. Each of them except `theorem ground` prints a legacy callable, trust or review field.
    - Every place one of them reports a callable, trust or review state says so: *legacy — not a trust source; what can be called is answered by the proof map*. The text output prints that notice. Under `--json`, the envelope's data carries it as `legacy_notice`.
    - `theorem ground` no longer files an obligation when it fails; it only reports the failure.
    - `project analyze` no longer suggests resolving an obligation. It suggests stating it as a Claim node on the proof map.
