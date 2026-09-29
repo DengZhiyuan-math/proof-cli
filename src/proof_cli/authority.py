@@ -92,16 +92,19 @@ def human_review_required(kind: DecisionKind | str, target_id: str) -> Authority
 
 
 def candidate_proof_sha256(store: ProjectStore, candidate_proof_id: str) -> str | None:
-    """SHA-256 of a Candidate proof (a Review snapshot) as it is on disk now, or None if it's missing:
-    a folder snapshot's manifest digest recomputed from its stored files (ADR-0011), an old
-    single-file snapshot's file."""
+    """SHA-256 of a Candidate proof (a Review snapshot) as it is on disk now, or None if it's missing
+    or can't be read: a folder snapshot's manifest digest recomputed from its stored files
+    (ADR-0011), an old single-file snapshot's file."""
     record = get_candidate_proof(store, candidate_proof_id)
     if record is None:
         return None
     path = store.root / record.file_path
     if path.name == SNAPSHOT_MANIFEST:
         return snapshot_folder_digest(path.parent)
-    return hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else None
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:  # gone, or not readable by this process: either way it names nothing (#92)
+        return None
 
 
 def snapshot_matches(recorded: str | None, current: str | None) -> bool:
