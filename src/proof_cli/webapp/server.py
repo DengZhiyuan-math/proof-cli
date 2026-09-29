@@ -20,19 +20,29 @@ from __future__ import annotations
 
 import hashlib
 import json
+from contextlib import contextmanager
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 from urllib.parse import unquote, urlsplit
 
 from .. import proof_map
 from ..collaboration import list_review_records
 from ..domain import ProofMapNodeKind
 from ..reviews import git_identity
-from ..storage import ProjectStore, get_active_claim, get_current_candidate_proof, read_project_instance_id, read_state
+from ..storage import (
+    ProjectStore,
+    get_active_claim,
+    get_current_candidate_proof,
+    read_project_instance_id,
+    read_scope,
+    read_scoped,
+    read_state,
+)
 from ..authority import candidate_proof_sha256
-from ..vault import SNAPSHOT_MANIFEST, archived_pdf_path, build_pdf_path, node_folder, snapshot_folder_files
+from .. import key_ideas
+from ..vault import SNAPSHOT_MANIFEST, archived_pdf_path, build_pdf_path, frozen_key_ideas, node_folder, snapshot_folder_files
 from .studios import StudioHub
 
 
@@ -51,7 +61,9 @@ def project_origin(store: ProjectStore) -> str:
 
 
 _STATIC = resources.files("proof_cli.webapp") / "static"
-_CONTENT_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8"}
+_CONTENT_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".woff2": "font/woff2"}
+# what the map page shares with the studio's static folder: the maths renderer and vendored KaTeX (ADR-0013)
+_SHARED_PREFIXES = ("mathtext.js", "vendor/katex.min.", "vendor/fonts/KaTeX_")
 _MAX_BODY_BYTES = 2_000_000
 
 
@@ -72,9 +84,15 @@ def _proof_view(store: ProjectStore, proof) -> dict | None:
     if path.name == SNAPSHOT_MANIFEST:
         frozen = snapshot_folder_files(path.parent)
     else:
-        frozen = {"proof.tex": path.read_bytes()} if path.is_file() else None
+        try:
+            frozen = {"proof.tex": path.read_bytes()}
+        except OSError:  # gone, or not readable by this process
+            frozen = None
     # a damaged or missing snapshot still shows: its page, its (now void) decisions, its warnings
     files = {rel: data.decode("utf-8", errors="replace") for rel, data in (frozen or {}).items()}
+    summary = key_ideas.view((frozen or {}).get(key_ideas.KEY_IDEAS_FILE))
+    if summary is not None:  # who wrote it, as the snapshot's record says (never read from the file)
+        summary["drafted_by"] = proof.key_ideas_drafted_by
     return {
         "id": proof.id,
         "version": proof.version,
@@ -82,7 +100,28 @@ def _proof_view(store: ProjectStore, proof) -> dict | None:
         "files": files,
         "unreadable": frozen is None,
         "sha256": candidate_proof_sha256(store, proof.id),
+        # what review starts from (ADR-0013): the key-ideas summary the snapshot froze, its four
+        # fields and who drafted it; None for an older snapshot that froze none
+        "key_ideas": summary,
     }
+
+
+def _working_key_ideas(store: ProjectStore, node_id: str) -> dict:
+    """Whether the node's working key-ideas.md exists, and what it still lacks before review can be requested."""
+    try:
+        data = (node_folder(store.root, node_id) / key_ideas.KEY_IDEAS_FILE).read_bytes()
+    except OSError:
+        return {"exists": False, "missing": [key_ideas.KEY_IDEAS_FILE]}
+    return {"exists": True, "missing": key_ideas.parse(data.decode("utf-8", errors="replace")).missing}
+
+
+def _core_idea(store: ProjectStore, node_id: str) -> str | None:
+    """The 核心思路 of the node's current snapshot, for the map's hover; None when it froze no summary."""
+    proof = get_current_candidate_proof(store, node_id)
+    data = frozen_key_ideas(store.root, proof.file_path) if proof is not None else None
+    if data is None:
+        return None
+    return key_ideas.parse(data.decode("utf-8", errors="replace")).fields.get("core_idea") or None
 
 
 def _warnings_for(warnings: list, *ids: str) -> list[dict]:
@@ -92,18 +131,6 @@ def _warnings_for(warnings: list, *ids: str) -> list[dict]:
         for warning in warnings
         if wanted & {str(value) for value in warning.details.values() if isinstance(value, str)}
     ]
-
-
-def _remedy(dependency: dict) -> str | None:
-    """What a lagging or changed pin needs: a Lightweight re-review, or a new Candidate proof (#23, #24)."""
-    pin = dependency["pin"]
-    if pin is None:
-        return None
-    if dependency["current"] is False:
-        return "new-candidate-proof"
-    if dependency["accepted_version"] is not None and pin["pinned_version"] != dependency["accepted_version"]:
-        return "lightweight-re-review"
-    return None
 
 
 def _available_decisions(store: ProjectStore, node, *, claim, proof, dependencies: list[dict], challenges: list) -> list[dict]:
@@ -141,7 +168,19 @@ def _available_decisions(store: ProjectStore, node, *, claim, proof, dependencie
     for challenge in challenges:
         if challenge.status.value == "open":
             offered.append({"kind": "challenge_resolution", "target_id": challenge.id, "decision": "dismissed"})
+    # a decision on a snapshot that is missing or can't be read would be refused (SNAPSHOT_UNREADABLE, #92):
+    # it isn't offered, and the review section says the snapshot can't be read
+    offered = [item for item in offered if not _on_unreadable_snapshot(store, item)]
     return [{**item, "binding": _binding(store, item["kind"], item["target_id"], item["decision"], item.get("dependency_id"))} for item in offered]
+
+
+def _on_unreadable_snapshot(store: ProjectStore, item: dict) -> bool:
+    """Whether the decision offered as `item` would be made on a snapshot that is missing or can't be read."""
+    try:
+        payload = proof_map.prepare_decision(store, item["kind"], item["target_id"], item["decision"], dependency_id=item.get("dependency_id"))
+    except proof_map.ProofMapError:
+        return False
+    return payload.candidate_proof_id is not None and payload.candidate_proof_sha256 is None
 
 
 def _binding(store: ProjectStore, kind: str, target_id: str, decision: str, dependency_id: str | None = None) -> str | None:
@@ -170,11 +209,14 @@ class ReviewApp:
     def health(self) -> dict:
         return {"project_id": read_state(self.store).project_id, "instance": read_project_instance_id(self.store), "origin": self.origin}
 
-    def _one_state(self):
+    @contextmanager
+    def _one_state(self) -> Iterator[None]:
         """Hold the project's write lock while a page is read (PR #63 audit): no decision or other
         write can land between reading what the page shows and computing the bindings it sends
-        back, so both describe one state. Writers wait for the read; it takes milliseconds."""
-        return self.store.transaction()
+        back, so both describe one state. Writers wait for the read; it takes milliseconds.
+        One read scope (#43): each node's axes are worked out once for the whole page."""
+        with self.store.transaction(), read_scope():
+            yield
 
     def state(self) -> dict:
         with self._one_state():
@@ -191,6 +233,7 @@ class ReviewApp:
             "pending": self._pending(),
         }
 
+    @read_scoped
     def map(self) -> dict:
         """The whole proof map: every node with its three axes, its assignee, and whether it's on the frontier (ADR-0008)."""
         frontier = {node.id for node in proof_map.get_frontier(self.store)}
@@ -212,6 +255,8 @@ class ReviewApp:
                     "integrity_state": proof_map.get_integrity_state(self.store, node.id),
                     "assignee": claim.claimant_id if claim else None,
                     "frontier": node.id in frontier,
+                    # the hover shows the current snapshot's 核心思路 (ADR-0013)
+                    "core_idea": None if imported else _core_idea(self.store, node.id),
                 }
             )
         return {"nodes": nodes}
@@ -267,6 +312,7 @@ class ReviewApp:
             source_locator=body.get("source_locator") or None,
             source_version=body.get("source_version") or None,
             trust_level=body.get("trust_level") or None,
+            reference_id=body.get("reference_id") or None,
         )
         return {**node.model_dump(mode="json"), "page": self.page_of(node)}
 
@@ -282,6 +328,18 @@ class ReviewApp:
                 raise RequestError(HTTPStatus.BAD_REQUEST, "INVALID_CHILD_SPEC", "each child needs an id and a statement")
             made = proof_map.split_node(self.store, node_id, children, created_by=actor, reassign=bool(body.get("reassign")))
             return {"children": [child.model_dump(mode="json") for child in made], "next": self.page_of(made[0]) if made else None}
+        if action == "depend":
+            op, dependency, to = body.get("op"), str(body.get("dependency") or "").strip(), str(body.get("to") or "").strip()
+            if op not in ("add", "remove", "move") or not dependency or (op == "move") != bool(to):
+                raise RequestError(
+                    HTTPStatus.BAD_REQUEST, "INVALID_REQUEST", "a dependency edit is op add, remove or move, a dependency, and for a move where to (to)"
+                )
+            who = {"edited_by": actor, "reassign": bool(body.get("reassign"))}
+            if op == "add":
+                return proof_map.add_dependency(self.store, node_id, dependency, **who).as_json()
+            if op == "remove":
+                return proof_map.remove_dependency(self.store, node_id, dependency, **who).as_json()
+            return proof_map.move_dependency(self.store, node_id, dependency, to=to, **who).as_json()
         if action == "request-review":
             return proof_map.request_review(self.store, node_id, requested_by=actor, rationale=str(body.get("rationale") or "")).model_dump(mode="json")
         if action == "challenge":
@@ -314,16 +372,20 @@ class ReviewApp:
                             "decisions": decisions,
                             "bindings": {d: _binding(self.store, "reference_review", node.id, d) for d in decisions},
                             "statement": node.statement,
+                            # the linked ReferenceRecord, so the review card shows what is cited (issue #91)
+                            "citation": proof_map.node_citation(self.store, node),
                         }
                     )
                 continue
             if proof_map.get_workflow_state(self.store, node.id) == "review-needed":
                 proof = get_current_candidate_proof(self.store, node.id)
+                # still listed as awaiting review, but nothing is offered on a snapshot that can't be read (#92)
+                readable = proof is None or candidate_proof_sha256(self.store, proof.id) is not None
                 pending.append(
                     {
                         "node_id": node.id,
                         "kind": "acceptance",
-                        "decisions": [decision.value for decision in proof_map.AcceptanceDecision],
+                        "decisions": [decision.value for decision in proof_map.AcceptanceDecision] if readable else [],
                         "bindings": {d.value: _binding(self.store, "acceptance", node.id, d.value) for d in proof_map.AcceptanceDecision},
                         "statement": node.statement,
                         "acceptance_state": proof_map.get_acceptance_state(self.store, node.id),
@@ -343,23 +405,7 @@ class ReviewApp:
             raise RequestError(HTTPStatus.NOT_FOUND, "NODE_NOT_FOUND", f"proof map node {node_id} not found")
         proof = get_current_candidate_proof(store, node_id)
         checks = [check.model_dump(mode="json") for check in proof_map.list_evidence_checks(store, proof.id)] if proof else []
-        dependencies = []
-        for dependency_id in node.dependencies:
-            pin = proof_map.get_dependency_pin(store, node_id, dependency_id)
-            dependency = proof_map.get_node(store, dependency_id)
-            dependencies.append(
-                {
-                    "node_id": dependency_id,
-                    "statement": dependency.statement if dependency else None,
-                    # where the dependency opens: a studio, or an imported result's own page
-                    "kind": dependency.kind.value if dependency else None,
-                    "pin": pin.model_dump(mode="json") if pin else None,
-                    # the pin lag a Lightweight re-review is about (#23/#24)
-                    "accepted_version": proof_map.get_accepted_version(store, dependency_id),
-                    "current": proof_map.dependency_pin_is_current(store, pin) if pin else None,
-                }
-            )
-            dependencies[-1]["remedy"] = _remedy(dependencies[-1])
+        dependencies = proof_map.dependency_details(store, node_id)
         challenges = proof_map.list_challenges(store, target_node_id=node_id)
         warnings = proof_map.list_integrity_warnings(store)
         claim = get_active_claim(store, node_id)
@@ -375,6 +421,8 @@ class ReviewApp:
             ),
             "integrity_state": proof_map.get_integrity_state(store, node_id),
             "candidate_proof": _proof_view(store, proof),
+            # the working summary: whether review can be requested yet, or the proof agent should draft it (ADR-0013)
+            "key_ideas_working": _working_key_ideas(store, node_id) if node.kind != ProofMapNodeKind.imported_result else None,
             "folder": str(node_folder(store.root, node_id)) if node.kind != ProofMapNodeKind.imported_result else None,
             # where the node is worked on: a local node's studio (ADR-0011), or nothing for an imported result
             "studio": self.page_of(node) if node.kind != ProofMapNodeKind.imported_result else None,
@@ -382,6 +430,7 @@ class ReviewApp:
                 {"locator": node.source_locator, "version": node.source_version, "trust_level": node.trust_level.value if node.trust_level else None}
                 if node.kind == ProofMapNodeKind.imported_result else None
             ),
+            "citation": proof_map.node_citation(store, node),
             "dependents": sorted(other.id for other in proof_map.list_nodes(store) if node_id in other.dependencies),
             "pdfs": self._pdfs(node_id, proof),
             "evidence_checks": checks,
@@ -502,6 +551,8 @@ class _Handler(BaseHTTPRequestHandler):
             return self._studio("GET")
         if path in ("/", "/index.html"):
             return self._static("index.html")
+        if path.startswith("/static/shared/"):
+            return self._shared(path.removeprefix("/static/shared/"))
         if path.startswith("/static/"):
             return self._static(path.removeprefix("/static/"))
         if path == "/api/health":
@@ -568,6 +619,25 @@ class _Handler(BaseHTTPRequestHandler):
             return self._error(HTTPStatus.NOT_FOUND, "NOT_FOUND", name)
         suffix = "." + name.rsplit(".", 1)[-1]
         self._send(HTTPStatus.OK, asset.read_bytes(), _CONTENT_TYPES.get(suffix, "application/octet-stream"))
+
+
+    def _shared(self, rel: str) -> None:
+        """One of the studio's static files the map page uses too (KaTeX, mathtext.js), never another."""
+        asset = shared_asset(rel)
+        if asset is None:
+            return self._error(HTTPStatus.NOT_FOUND, "NOT_FOUND", rel)
+        self._send(HTTPStatus.OK, asset.read_bytes(), _CONTENT_TYPES.get(asset.suffix, "application/octet-stream"))
+
+
+def shared_asset(rel: str):
+    """The studio static file at `rel` if the map page may load it (KaTeX, mathtext.js), else None."""
+    from .studios import STUDIO_STATIC
+
+    asset = (STUDIO_STATIC / rel).resolve()
+    if STUDIO_STATIC not in asset.parents or not asset.is_file():
+        return None
+    # judged by where the path lands, not how it is spelt: "mathtext.js/../app.js" is app.js
+    return asset if asset.relative_to(STUDIO_STATIC).as_posix().startswith(_SHARED_PREFIXES) else None
 
 
 class ReviewServer(ThreadingHTTPServer):

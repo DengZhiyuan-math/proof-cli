@@ -65,6 +65,7 @@ def render_proof_map_node(
     blocked_reason: str | None = None,
     working_proof: str | None = None,
     snapshots: list[dict] | None = None,
+    citation: dict | None = None,
 ) -> str:
     console = _console()
     console.rule(f"Proof Map Node: {node.id}")
@@ -83,6 +84,19 @@ def render_proof_map_node(
         table.add_row("Source version", node.source_version)
     if node.trust_level:
         table.add_row("Trust level", node.trust_level.value)
+    if citation is not None:
+        # the ReferenceRecord this imported result links (issue #91)
+        if citation["missing"]:
+            table.add_row("Reference", f"{citation['reference_id']} (citation missing: no such reference here)")
+        else:
+            table.add_row("Reference", citation["reference_id"])
+            table.add_row("Citation title", citation["title"])
+            table.add_row("Citation authors", ", ".join(citation["authors"]) or "none")
+            if citation["year"]:
+                table.add_row("Citation year", str(citation["year"]))
+            for label, key in (("Citation identifier", "identifier"), ("Citation url", "url")):
+                if citation[key]:
+                    table.add_row(label, citation[key])
     if node.derived_from:
         table.add_row("Derived from", node.derived_from)
     # Three independent, computed signals — never folded into one status word.
@@ -153,6 +167,10 @@ def render_candidate_proof(record: CandidateProofRecord) -> str:
     table.add_row("Submitted by", record.submitted_by)
     table.add_row("Submitted at", record.created_at.isoformat())
     table.add_row("Scoping rationale", record.scoping_rationale)
+    if record.resnapshot_after_loss is not None:
+        table.add_row("Note", f"re-snapshot after loss of v{record.resnapshot_after_loss}; it needs its own review")
+    if record.key_ideas_drafted_by is not None:
+        table.add_row("Key ideas by", record.key_ideas_drafted_by)
     console.print(table)
     return console.export_text()
 

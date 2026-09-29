@@ -27,6 +27,9 @@
 
   const note = h("p", "", { class: "node-note", role: "status" });
   function tell(text, bad) { note.textContent = text; note.classList.toggle("bad", !!bad); }
+  // what a decision did, under the review sheet
+  const reviewNote = h("p", "", { class: "node-note", role: "status" });
+  function tellReview(text, bad) { reviewNote.textContent = text; reviewNote.classList.toggle("bad", !!bad); }
 
   // where a node opens: a theorem, lemma or claim in its studio, an imported result on its own page
   const pageOf = (id, kind) => (kind === "imported_result" ? `/#/node/${encodeURIComponent(id)}` : `/studio/${encodeURIComponent(id)}/`);
@@ -44,12 +47,40 @@
     "challenge_resolution:dismissed": "Dismiss this Challenge (a false alarm)",
   };
 
-  // Review in the studio (#71): a sheet over the agent panel, opened from its "+" menu when a
-  // snapshot awaits review. The snapshot, its frozen files (read-only) and whether a PDF was
-  // archived, folded away; then the decisions on offer as one choice, one rationale and one
-  // Record. The decision is the researcher's own (ADR-0010): it goes straight to the proof map as
-  // this page's identity, never through the agent. Each is sent with the binding of what this page
-  // showed, so a change since is refused (STALE_VIEW).
+  // The four fields of a key-ideas summary (ADR-0013), in order. Shown as text: `$…$` stays as written.
+  const KEY_IDEAS = [["core_idea", "核心思路"], ["main_steps", "主要步骤"], ["difficulties", "难点"], ["not_covered", "未覆盖"]];
+
+// who wrote a snapshot's key ideas, as its record says (ADR-0013): recorded by the studio, never read from the file
+  const KEY_IDEAS_BY = {
+    "agent (confirmed by author at request-review)": "由 agent 起草、作者确认 · drafted by the proof agent, confirmed by the author",
+    "agent draft, edited by author": "由 agent 起草、作者修改 · the proof agent's draft, edited by the author",
+    "author": "作者撰写 · written by the author",
+  };
+
+// a field's text with its $…$ and $$…$$ typeset (static/mathtext.js, KaTeX); plain text without it
+  const withMath = (node, text) => {
+    if (typeof renderMathText === "function") return renderMathText(node, text);
+    node.textContent = String(text);
+    return node;
+  };
+
+  function keyIdeasBlock(summary) {
+    const block = h("div", null, { class: "key-ideas" });
+    for (const [key, title] of KEY_IDEAS) {
+      const text = (summary.fields || {})[key];
+      if (!text) continue;
+      block.append(h("h5", title), withMath(h("p", null, { class: `key-idea ${key}` }), text));
+    }
+    if (summary.drafted_by) block.append(h("p", KEY_IDEAS_BY[summary.drafted_by] || summary.drafted_by, { class: "node-hint drafted" }));
+    return block;
+  }
+
+  // Review in the studio (ADR-0013, amending #71): a sheet over the agent panel, opened from its
+  // "+" menu when a snapshot awaits review. The snapshot is read from its key-ideas summary; its
+  // frozen LaTeX and archived PDF are a link away, on the node's page. The decisions on offer are
+  // one choice, one rationale and one Record. The decision is the researcher's own (ADR-0010): it
+  // goes straight to the proof map as this page's identity, never through the agent. Each is sent
+  // with the binding of what this page showed, so a change since is refused (STALE_VIEW).
   function reviewSection(view, close) {
     const box = h("div", null, { class: "node-review", id: "node-review" });
     const proof = view.candidate_proof;
@@ -63,19 +94,15 @@
     if (proof.unreadable || !proof.sha256) {
       // damaged or missing on disk: every decision on it has stopped counting (see the warnings)
       box.append(h("p", `Snapshot v${proof.version} can't be read: its files or manifest were changed or removed.`, { class: "node-note bad" }));
+    } else {
+      box.append(h("p", `Snapshot v${proof.version} · SHA-256 ${proof.sha256.slice(0, 12)}…`, { class: "review-snap", title: proof.sha256 }));
+      if (proof.key_ideas) box.append(keyIdeasBlock(proof.key_ideas));
+      // an older snapshot, frozen before summaries: reviewed as before, from its files
+      else box.append(h("p", "这个 snapshot 没有关键思路摘要 · this snapshot has no key-ideas summary: read its frozen files on the node's page.", { class: "node-note no-key-ideas" }));
     }
-    const more = h("details", null, { class: "review-files" });
-    more.append(h("summary", proof.sha256 ? `Files · ${proof.sha256.slice(0, 12)}…` : "Files"));
-    const files = h("p", null, { class: "node-files" });
-    for (const [rel, text] of Object.entries(proof.files || {})) {
-      const open = h("button", rel, { type: "button", title: "Open read-only" });
-      open.onclick = () => (typeof openReadOnly === "function" ? openReadOnly(`v${proof.version} · ${rel}`, text) : null);
-      files.append(open);
-    }
-    more.append(files);
-    if (view.pdfs && view.pdfs.snapshot) more.append(h("a", "PDF archived with this snapshot", { href: `${base}/pdf/snapshot`, target: "_blank", rel: "noopener" }));
-    else more.append(h("p", "No PDF was archived with this snapshot; the PDF pane shows the working build.", { class: "node-hint" }));
-    box.append(more);
+    const links = h("p", null, { class: "node-review-links" });
+    links.append(h("a", `v${proof.version} 的冻结源文件和 PDF · the frozen LaTeX and PDF, on the node's page`, { href: `/#/node/${encodeURIComponent(NODE)}`, class: "node-frozen" }));
+    box.append(links);
 
     const offered = view.decisions || [];
     if (!offered.length) { box.append(h("p", "No decision to make on this node right now.", { class: "node-hint" })); return box; }
@@ -104,9 +131,9 @@
       try {
         const outcome = await call("/api/decide", { decisions: [item] });
         const result = outcome.results[0];
-        if (result.ok) tell(`Recorded: ${label}.`);
-        else tell(`${result.error.code}: ${result.error.message}${result.error.code === "STALE_VIEW" ? " (the panel has been reloaded)" : ""}`, true);
-      } catch (error) { tell(`${error.code || "error"}: ${error.message}`, true); }
+        if (result.ok) tellReview(`Recorded: ${label}.`);
+        else tellReview(`${result.error.code}: ${result.error.message}${result.error.code === "STALE_VIEW" ? " (the panel has been reloaded)" : ""}`, true);
+      } catch (error) { tellReview(`${error.code || "error"}: ${error.message}`, true); }
       await render();
     };
     const send = h("div", null, { class: "review-send" });
@@ -182,22 +209,44 @@
     if (!view.dependencies.length) deps.append(h("li", "no dependencies"));
     const claimed = view.claim ? `claimed by ${view.claim.claimant_id}` : "unclaimed";
     const proof = view.candidate_proof;
+    // the working key-ideas.md a review request needs (ADR-0013): drafted by the proof agent when
+    // there is none; the author edits it, and requesting review confirms it
+    const working = view.key_ideas_working;
+    const summary = [];
+    const needsDraft = !!(working && !working.exists);
+    if (needsDraft) {
+      summary.push(h("p", "No key-ideas.md yet: a review request needs one (核心思路, 主要步骤, 难点, 未覆盖). Draft it with the proof agent from its \"+\" menu.", { class: "node-hint" }));
+    } else if (working && working.missing.length) {
+      summary.push(h("p", `key-ideas.md still leaves ${working.missing.join(" and ")} empty: fill it in before requesting review.`, { class: "node-hint" }));
+    }
     panel.replaceChildren(
       h("p", node.statement, { class: "node-statement" }),
       ...node.assumptions.map((a) => h("p", `assuming ${a}`, { class: "node-assumption" })),
       axes(view, claimed),
       h("h4", "Depends on"), deps,
+      // what the node needs before review (ADR-0013); drafting it is the proof agent's, from its "+" menu
+      ...summary,
+      note,
     );
     // the review is a sheet over the agent panel, opened from its "+" menu; the note under it
     // reports what a decision did. The "+" carries a dot while a snapshot awaits a decision.
     const card = document.getElementById("review-card");
     const reviewable = !!(proof && (view.decisions || []).length);
     if (card) {
-      card.replaceChildren(reviewSection(view, () => { card.hidden = true; }), note);
+      card.replaceChildren(reviewSection(view, () => { card.hidden = true; }), reviewNote);
       if (!proof) card.hidden = true;
     }
     const plus = document.getElementById("chat-plus");
     if (plus && plus.classList) plus.classList.toggle("has-review", reviewable);
+    // the "+" menu offers the proof agent's draft of key-ideas.md while the node has none
+    globalThis.studioKeyIdeas = () => (needsDraft ? {
+      draft: async () => {
+        if (typeof draftKeyIdeas !== "function") { tell("The agent panel isn't available on this page.", true); return; }
+        try { await draftKeyIdeas(); tell("The proof agent drafted key-ideas.md: read and edit it, then request review to confirm it."); }
+        catch (error) { tell(`${error.code || "error"}: ${error.message}`, true); }
+        await render();
+      },
+    } : null);
     globalThis.studioReview = () => (reviewable ? {
       version: proof.version,
       check: `Check snapshot v${proof.version} of this node before I decide: read every frozen file, verify each step against the dependencies it cites, and report what does not hold. Change nothing.`,

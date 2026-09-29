@@ -36,7 +36,16 @@ from .export import build_export
 from .evidence import EvidenceChain, build_evidence_chains
 from .formal_bridge import FormalBridgeProofStep, machine_check_trace, translate_selection
 from .formalization_recommendations import FormalizationRecommendation, rank_formalization_candidates
+from .proof_map import ProofMapError
 from .publication import (
+    EDITORIAL_LABEL,
+    build_publication_view,
+    claim_payload,
+    parse_audience,
+    publication_export_data,
+    record_publication_release,
+    summarize_claim_with_axes,
+    withdraw_release,
     PublicationCitationKind,
     PublicationReleaseStatus,
     PublicationReadiness,
@@ -148,7 +157,7 @@ from .collaboration import (
     summarize_state as summarize_collaboration_state,
     upsert_contributor,
 )
-from .memory import MemoryArtifact, MemoryLayer, list_memory_artifacts, record_memory
+from .memory import MemoryArtifact, MemoryLayer, append_memory_artifact, list_memory_artifacts
 from .recommendations import recommend_cross_project_assets
 from .proof_state import (
     add_blocker,
@@ -195,10 +204,22 @@ from .theorems import (
     apply_theorem,
     get_contract,
     list_theorems,
+    LEGACY_TRUST_NOTICE,
     show_theorem,
     theorem_callability,
     update_theorem,
 )
+
+
+def _dump_legacy(payload: dict) -> str:
+    # ensure_ascii off, so the notice reads as written (ADR-0012)
+    return json.dumps(payload, indent=2, ensure_ascii=False)
+
+
+def _labelled(record) -> str:
+    """A record that carries legacy trust fields, as JSON led by the legacy notice (ADR-0012)."""
+    payload = record.model_dump(mode="json") if hasattr(record, "model_dump") else dict(record)
+    return _dump_legacy({"legacy_notice": LEGACY_TRUST_NOTICE, **payload})
 
 
 def get_store(root: str | Path = ".") -> ProjectStore:
@@ -219,10 +240,6 @@ def _load_model_json_list(values: list[str] | None, model: type[object]) -> list
     return [model.model_validate_json(value) for value in values or []]  # type: ignore[attr-defined]
 
 
-def _next_obligation_id(*parts: str) -> str:
-    return f"obl_{abs(hash(parts)) % 100000}"
-
-
 def _format_candidate_line(rank: int, title: str, source_kind: str, score: float, candidate_id: str) -> str:
     return f"{rank}. {candidate_id}: {title} [{source_kind}] score={score:g}"
 
@@ -237,6 +254,13 @@ def _format_reference_line(reference: ReferenceRecord) -> str:
 
 def _format_memory_line(artifact: MemoryArtifact) -> str:
     scope_bits = []
+    if artifact.scope.node_id:
+        scope_bits.append(f"node={artifact.scope.node_id}")
+    if artifact.scope.candidate_proof_id:
+        scope_bits.append(f"candidate_proof={artifact.scope.candidate_proof_id}")
+    if artifact.scope.review_id:
+        scope_bits.append(f"review={artifact.scope.review_id}")
+    # legacy scope (ADR-0012): read-only, shown for older entries
     if artifact.scope.theorem_id:
         scope_bits.append(f"theorem={artifact.scope.theorem_id}")
     if artifact.scope.goal_id:
@@ -745,6 +769,22 @@ def _find_memory_artifact(store: ProjectStore, artifact_id: str) -> MemoryArtifa
     return None
 
 
+_RETRIEVAL_PAST = {"search": "searched", "retrieve": "retrieved"}
+
+
+def _retrieval_report(
+    verb: str,
+    query: str,
+    root: str | Path,
+    *,
+    external_candidates: list[dict[str, object]] | None,
+    limit: int,
+):
+    store = get_store(root)
+    _append_history(store, f"{verb}:{query}", message=f"{_RETRIEVAL_PAST[verb]} {query}")
+    return retrieve_candidates(store, query=query, external_candidates=external_candidates, limit=limit)
+
+
 def cmd_proof_search(
     query: str,
     root: str | Path = ".",
@@ -752,15 +792,13 @@ def cmd_proof_search(
     external_candidates: list[dict[str, object]] | None = None,
     limit: int = 10,
 ) -> str:
-    store = get_store(root)
-    _append_history(store, f"search:{query}", message=f"searched {query}")
-    report = retrieve_candidates(
-        store,
-        query=query,
-        external_candidates=external_candidates,
-        limit=limit,
-    )
-    return _render_retrieval_report(report)
+    return _render_retrieval_report(_retrieval_report("search", query, root, external_candidates=external_candidates, limit=limit))
+
+
+def search_data(query: str, root: str | Path = ".", *, limit: int = 10) -> dict:
+    """`search`'s ranked candidates, for its --json envelope: a candidate's trust level is legacy (ADR-0012)."""
+    report = _retrieval_report("search", query, root, external_candidates=None, limit=limit)
+    return {"legacy_notice": LEGACY_TRUST_NOTICE, **report.model_dump(mode="json")}
 
 
 def cmd_proof_retrieve(
@@ -770,15 +808,7 @@ def cmd_proof_retrieve(
     external_candidates: list[dict[str, object]] | None = None,
     limit: int = 10,
 ) -> str:
-    store = get_store(root)
-    _append_history(store, f"retrieve:{query}", message=f"retrieved {query}")
-    report = retrieve_candidates(
-        store,
-        query=query,
-        external_candidates=external_candidates,
-        limit=limit,
-    )
-    return report.model_dump_json(indent=2)
+    return _labelled(_retrieval_report("retrieve", query, root, external_candidates=external_candidates, limit=limit))
 
 
 def cmd_project_analyze(root: str | Path = ".", *, query: str = "", limit: int = 5) -> str:
@@ -788,6 +818,11 @@ def cmd_project_analyze(root: str | Path = ".", *, query: str = "", limit: int =
     return render_json(report)
 
 
+def reference_list_data(root: str | Path = ".") -> dict:
+    references = list_references(get_store(root))
+    return {"legacy_notice": LEGACY_TRUST_NOTICE, "references": [reference.model_dump(mode="json") for reference in references]}
+
+
 def cmd_reference_list(root: str | Path = ".") -> str:
     references = list_references(get_store(root))
     if not references:
@@ -795,12 +830,13 @@ def cmd_reference_list(root: str | Path = ".") -> str:
     lines = ["References:"]
     for reference in references:
         lines.append(f"- {_format_reference_line(reference)}")
+    lines.append(f"(review status and callable: {LEGACY_TRUST_NOTICE})")
     return "\n".join(lines)
 
 
 def cmd_reference_show(reference_id: str, root: str | Path = ".") -> str:
     reference = get_reference(get_store(root), reference_id)
-    return reference.model_dump_json(indent=2) if reference else f"Reference not found: {reference_id}"
+    return _labelled(reference) if reference else f"Reference not found: {reference_id}"
 
 
 def cmd_reference_import(
@@ -833,7 +869,7 @@ def cmd_reference_import(
     )
     stored = import_reference(store, reference)
     _append_history(store, f"reference_import:{reference_id}", message=f"imported reference {reference_id}")
-    return stored.model_dump_json(indent=2)
+    return _labelled(stored)
 
 
 def cmd_proof_ground(
@@ -851,31 +887,18 @@ def cmd_proof_ground(
     _append_history(store, f"ground:{theorem_id}:{','.join(reference_ids)}", message=f"ground request for {theorem_id}")
     approved: list[str] = []
     missing: list[str] = []
-    blocked_reference_ids: list[str] = []
     for reference_id in reference_ids:
         reference = get_reference(store, reference_id)
         if reference is None:
             missing.append(f"reference {reference_id} not found")
-            blocked_reference_ids.append(reference_id)
             continue
         if not reference.is_callable:
             missing.append(f"reference {reference_id} is not callable")
-            blocked_reference_ids.append(reference_id)
             continue
         approved.append(reference_id)
 
     if missing:
-        add_obligation(
-            store,
-            ProofObligation(
-                id=_next_obligation_id(theorem_id, *reference_ids, "ground"),
-                goal_statement=f"ground {theorem_id}",
-                required_for=theorem_id,
-                blocking_reason="; ".join(missing),
-            ),
-            failed_reference_ids=blocked_reference_ids,
-            route_notes=notes or "grounding check failed",
-        )
+        # a failed ground is only reported; it no longer files an obligation nobody can resolve (ADR-0012)
         append_event(
             store,
             "dsl_ground_blocked",
@@ -952,10 +975,14 @@ def cmd_proof_obligation_derive(theorem_id: str, root: str | Path = ".", *, note
     return json.dumps(payload, indent=2)
 
 
-def cmd_proof_bug_scan(theorem_id: str, root: str | Path = ".") -> str:
+def bug_scan_data(theorem_id: str, root: str | Path = ".") -> dict:
     store = get_store(root)
     scan = _scan_and_store_bugs(store, theorem_id)
-    return scan.model_dump_json(indent=2)
+    return {"legacy_notice": LEGACY_TRUST_NOTICE, **scan.model_dump(mode="json")}
+
+
+def cmd_proof_bug_scan(theorem_id: str, root: str | Path = ".") -> str:
+    return _dump_legacy(bug_scan_data(theorem_id, root))
 
 
 def cmd_proof_bug_list(root: str | Path = ".", *, theorem_id: str = "") -> str:
@@ -1100,7 +1127,7 @@ def cmd_proof_trace_dependency(target_id: str, root: str | Path = ".") -> str:
         "recent_theorem_usage": list(load_state(store).recent_theorem_usage),
         "session_history": list(load_state(store).session_history[-10:]),
     }
-    return json.dumps(payload, indent=2)
+    return _labelled(payload)
 
 
 def cmd_proof_formalize_recommend(source_id: str, root: str | Path = ".", *, backend_target: str = "", notes: str = "") -> str:
@@ -1455,10 +1482,15 @@ def cmd_proof_trace_machine_check(source_id: str, root: str | Path = ".") -> str
 
 
 def cmd_proof_explain_apply(theorem_id: str, root: str | Path = ".") -> str:
+    data = explain_apply_data(theorem_id, root)
+    return _dump_legacy(data) if data is not None else f"explain:apply:blocked:theorem {theorem_id} not found"
+
+
+def explain_apply_data(theorem_id: str, root: str | Path = ".") -> dict | None:
     store = get_store(root)
     contract = get_contract(store, theorem_id)
     if contract is None:
-        return f"explain:apply:blocked:theorem {theorem_id} not found"
+        return None
     ok, reason = theorem_callability(store, theorem_id)
     state = load_state(store)
     open_obligations = [
@@ -1470,6 +1502,7 @@ def cmd_proof_explain_apply(theorem_id: str, root: str | Path = ".") -> str:
         or (obligation.required_for or "").startswith(f"use_{theorem_id}")
     ]
     payload = {
+        "legacy_notice": LEGACY_TRUST_NOTICE,
         "theorem_id": theorem_id,
         "callable": ok,
         "callability_reason": reason,
@@ -1485,15 +1518,21 @@ def cmd_proof_explain_apply(theorem_id: str, root: str | Path = ".") -> str:
         "local_usage_notes": list(contract.local_usage_notes),
         "imported_usage_notes": list(contract.imported_usage_notes),
     }
-    return json.dumps(payload, indent=2)
+    return payload
 
 
 def cmd_proof_provenance_show(target_id: str, root: str | Path = ".") -> str:
+    data = provenance_show_data(target_id, root)
+    return _dump_legacy(data) if data is not None else f"provenance:not-found:{target_id}"
+
+
+def provenance_show_data(target_id: str, root: str | Path = ".") -> dict | None:
     store = get_store(root)
     theorem = get_contract(store, target_id)
     if theorem is not None:
         ok, reason = theorem_callability(store, target_id)
-        payload = {
+        return {
+            "legacy_notice": LEGACY_TRUST_NOTICE,
             "kind": "theorem",
             "id": target_id,
             "source_ref": theorem.source_ref,
@@ -1507,12 +1546,11 @@ def cmd_proof_provenance_show(target_id: str, root: str | Path = ".") -> str:
             "imported_usage_notes": theorem.imported_usage_notes,
             "notes": theorem.notes,
         }
-        return json.dumps(payload, indent=2)
 
     reference = get_reference(store, target_id)
     if reference is not None:
-        return json.dumps(
-            {
+        return {
+                "legacy_notice": LEGACY_TRUST_NOTICE,
                 "kind": "reference",
                 "id": target_id,
                 "review_status": reference.review_status.value,
@@ -1523,11 +1561,25 @@ def cmd_proof_provenance_show(target_id: str, root: str | Path = ".") -> str:
                 "identifier": reference.identifier,
                 "url": reference.url,
                 "notes": reference.notes,
-            },
-            indent=2,
-        )
+            }
+    return None
 
-    return f"provenance:not-found:{target_id}"
+
+# -- publication: the editorial track (issue #30) ------------------------------------------
+#
+# Every publication command is editorial: agents may run it, and none is a Human
+# Review decision or changes acceptance. Each has a `*_data` function the CLI's
+# `--json` envelope carries, and a `cmd_*` function that renders it for people.
+# A refused write raises ProofMapError with a stable code (src/proof_cli/errors.py).
+
+
+def _editorial_line(what: str) -> str:
+    return f"{what} ({EDITORIAL_LABEL})"
+
+
+def publication_list_data(root: str | Path = ".", *, object_type: str = "") -> list[dict]:
+    store = get_store(root)
+    return [claim_payload(store, record) for record in list_publication_state_records(store, object_type=object_type)]
 
 
 def cmd_publication_list(root: str | Path = ".", *, object_type: str = "") -> str:
@@ -1535,25 +1587,54 @@ def cmd_publication_list(root: str | Path = ".", *, object_type: str = "") -> st
     records = list_publication_state_records(store, object_type=object_type)
     if not records:
         return "No publication claims"
-    lines = ["Publication claims:"]
-    lines.extend(f"- {summarize_publication_state(record)}" for record in records)
+    lines = [_editorial_line("Publication claims, readiness") + ":"]
+    lines.extend(f"- {summarize_claim_with_axes(store, record)}" for record in records)
     return "\n".join(lines)
 
 
-def cmd_publication_show(object_id: str, root: str | Path = ".") -> str:
+def publication_show_data(object_id: str, root: str | Path = ".", *, object_type: str = "") -> list[dict]:
     store = get_store(root)
-    records = list_publication_state_records(store, object_id=object_id)
+    records = list_publication_state_records(store, object_type=object_type, object_id=object_id)
     if not records:
-        return f"Publication claim not found: {object_id}"
-    return json.dumps([record.model_dump(mode="json") for record in records], indent=2)
+        raise ProofMapError(
+            "PUBLICATION_CLAIM_NOT_FOUND", f"no publication claim for {object_id!r}", details={"object_id": object_id}
+        )
+    return [claim_payload(store, record) for record in records]
 
 
-def cmd_publication_set(
+def _render_claim_payload(payload: dict) -> list[str]:
+    axes = (
+        f"acceptance={payload['acceptance_state']} integrity={payload['integrity_state']}"
+        if payload["acceptance_state"] is not None
+        else "acceptance=none integrity=none (no acceptance axis)"
+    )
+    lines = [
+        f"{payload['object_type']}/{payload['object_id']}: {payload['display_name'] or payload['title'] or payload['object_id']}",
+        f"  readiness: {payload['readiness']} ({EDITORIAL_LABEL})",
+        f"  node: {axes}",
+    ]
+    if payload.get("section_placement"):
+        lines.append(f"  section: {payload['section_placement']}")
+    if payload.get("release_status"):
+        lines.append(f"  release status: {payload['release_status']} (editorial)")
+    if payload.get("migrated_from"):
+        lines.append(f"  migrated from retired readiness: {payload['migrated_from']}")
+    return lines
+
+
+def cmd_publication_show(object_id: str, root: str | Path = ".", *, object_type: str = "") -> str:
+    lines: list[str] = []
+    for payload in publication_show_data(object_id, root, object_type=object_type):
+        lines.extend(_render_claim_payload(payload))
+    return "\n".join(lines)
+
+
+def publication_set_data(
     object_id: str,
     readiness: str,
     root: str | Path = ".",
     *,
-    object_type: str = "theorem_contract",
+    object_type: str = "proof_map_node",
     display_name: str = "",
     title: str = "",
     section_placement: str = "",
@@ -1563,26 +1644,25 @@ def cmd_publication_set(
     editorial_note: list[str] | None = None,
     supporting_reference_id: list[str] | None = None,
     supporting_theorem_id: list[str] | None = None,
-    release_status: str = "draft",
+    release_status: str = "",
     release_notes: str = "",
-) -> str:
+) -> dict:
     store = get_store(root)
-    release_status_value = PublicationReleaseStatus.approved if release_status == "draft" else PublicationReleaseStatus(release_status)
     state_record = set_publication_state(
         store,
         object_id,
-        PublicationReadiness(readiness),
+        readiness,
         object_type=object_type,
         display_name=display_name,
         title=title,
         section_placement=section_placement,
         reason=reason,
-        citation_kind=PublicationCitationKind(citation_kind) if citation_kind else None,
+        citation_kind=citation_kind or None,
         internal_only=internal_only,
         editorial_notes=editorial_note,
         supporting_reference_ids=supporting_reference_id,
         supporting_theorem_ids=supporting_theorem_id,
-        release_status=release_status_value,
+        release_status=release_status or None,
         release_notes=release_notes,
         updated_by=display_name or "human",
     )
@@ -1597,7 +1677,7 @@ def cmd_publication_set(
         view_visibility = PublicationVisibility.internal_only
     if internal_only:
         view_visibility = PublicationVisibility.internal_only
-    if title or section_placement or citation_kind or editorial_note or supporting_reference_id or supporting_theorem_id or release_notes:
+    if title or section_placement or citation_kind or editorial_note or supporting_reference_id or supporting_theorem_id or release_notes or release_status:
         view = create_publication_view(
             store,
             name=title or display_name or object_id,
@@ -1615,23 +1695,41 @@ def cmd_publication_set(
         if supporting_theorem_id:
             for theorem_id in supporting_theorem_id:
                 record_citation_provenance(store, theorem_id, object_id, usage_type=citation_kind or "project-original", citation_note=reason)
-        if release_status and release_status != "draft":
-            release_enum = PublicationReleaseStatus(release_status)
-            if release_enum == PublicationReleaseStatus.withdrawn:
+        # a release is recorded only when a release status is given explicitly (issue #30)
+        if release_status:
+            if state_record.release_status == PublicationReleaseStatus.withdrawn:
                 record_release_withdrawal(store, view.id, withdrawn_by=[display_name] if display_name else [], reason=release_notes or reason)
             else:
-                record_release_approval(store, view.id, approved_by=[display_name] if display_name else [], notes=release_notes or reason, status=release_enum)
-    return state_record.model_dump_json(indent=2)
+                record_release_approval(
+                    store,
+                    view.id,
+                    approved_by=[display_name] if display_name else [],
+                    notes=release_notes or reason,
+                    status=state_record.release_status,
+                    audience=view_audience,
+                )
+    return claim_payload(store, state_record)
+
+
+def cmd_publication_set(object_id: str, readiness: str, root: str | Path = ".", **options) -> str:
+    payload = publication_set_data(object_id, readiness, root, **options)
+    return "\n".join([_editorial_line(f"Readiness set to {payload['readiness']}"), *_render_claim_payload(payload)])
+
+
+def publication_view_data(root: str | Path = ".", *, audience: str = "paper") -> dict:
+    store = get_store(root)
+    return build_publication_view(store, parse_audience(audience or "paper")).model_dump(mode="json")
 
 
 def cmd_publication_view(root: str | Path = ".", *, audience: str = "paper") -> str:
     store = get_store(root)
+    if audience:
+        parse_audience(audience)
     state_records = list_publication_state_records(store)
     views = [view for view in list_publication_views(store) if audience == "" or view.visibility.value == audience or audience == "paper" and view.visibility == PublicationVisibility.paper]
-    lines = ["Publication workspace:"]
-    lines.append("State records:")
+    lines = ["Publication workspace:", f"Readiness is {EDITORIAL_LABEL}.", "State records:"]
     if state_records:
-        lines.extend(f"- {summarize_publication_state(record)}" for record in state_records)
+        lines.extend(f"- {summarize_claim_with_axes(store, record)}" for record in state_records)
     else:
         lines.append("- none")
     lines.append("Views:")
@@ -1642,20 +1740,59 @@ def cmd_publication_view(root: str | Path = ".", *, audience: str = "paper") -> 
     return "\n".join(lines)
 
 
+PUBLICATION_EXPORT_FORMATS = ("paper", "supplement", "bundle", "manifest")
+
+
+def _check_export_format(format: str) -> None:
+    if format not in PUBLICATION_EXPORT_FORMATS:
+        raise ProofMapError(
+            "UNSUPPORTED_FORMAT",
+            f"not a publication export format: {format!r}",
+            details={"format": format, "allowed": list(PUBLICATION_EXPORT_FORMATS)},
+        )
+
+
+def publication_export_json(root: str | Path = ".", *, audience: str = "paper", format: str = "paper") -> dict:
+    """What `publication export --json` carries. `paper` and `supplement` fix their own audience;
+    `bundle` and `manifest` use `--audience`."""
+    _check_export_format(format)
+    store = get_store(root)
+    if format in ("paper", "supplement"):
+        return {"format": format, **publication_export_data(store, format)}
+    audience_enum = parse_audience(audience)
+    if format == "bundle":
+        return build_publication_bundle(store, audience=audience_enum)
+    return build_publication_manifest(store, audience=audience_enum)
+
+
 def cmd_publication_export(root: str | Path = ".", *, audience: str = "paper", format: str = "paper") -> str:
+    _check_export_format(format)
     store = get_store(root)
     if format == "paper":
         return publication_paper_export(store)
     if format == "supplement":
         return publication_supplement_export(store)
-    if format == "bundle":
-        return render_publication_bundle(build_publication_bundle(store))
-    if format == "manifest":
-        return json.dumps(build_publication_manifest(store), indent=2, sort_keys=True)
-    return f"publication:unsupported-format:{format}"
+    return json.dumps(publication_export_json(root, audience=audience, format=format), indent=2, sort_keys=True)
 
 
-def cmd_publication_release(
+def _release_payload(record) -> dict:
+    return {**record.model_dump(mode="json"), "track": "editorial"}
+
+
+def _render_release(payload: dict, what: str) -> str:
+    approvers = ",".join(payload["approved_by"]) or "none"
+    withdrawn = ",".join(payload["withdrawn_by"]) or "none"
+    return "\n".join(
+        [
+            _editorial_line(what),
+            f"{payload['id']}: {payload['bundle_id']} {payload['status']} [{payload['audience']}] "
+            f"approved_by={approvers} withdrawn_by={withdrawn}",
+            "A release sign-off on record is the author of the git commit that releases it.",
+        ]
+    )
+
+
+def publication_release_data(
     root: str | Path = ".",
     *,
     audience: str = "paper",
@@ -1663,21 +1800,30 @@ def cmd_publication_release(
     approved_by: list[str] | None = None,
     rationale: str = "",
     note: str = "",
-) -> str:
+) -> dict:
     store = get_store(root)
-    record = record_release_approval(store, bundle_id=audience, approved_by=approved_by, notes=note or rationale, status=PublicationReleaseStatus(status))
-    return record.model_dump_json(indent=2)
+    record = record_publication_release(
+        store, audience=parse_audience(audience), status=status, approved_by=approved_by, rationale=rationale, note=note or rationale
+    )
+    return _release_payload(record)
 
 
-def cmd_publication_withdraw(
+def cmd_publication_release(root: str | Path = ".", **options) -> str:
+    return _render_release(publication_release_data(root, **options), "Release recorded")
+
+
+def publication_withdraw_data(
     release_id: str,
     root: str | Path = ".",
     *,
     rationale: str = "",
     approved_by: list[str] | None = None,
-) -> str:
-    release = record_release_withdrawal(get_store(root), release_id, withdrawn_by=approved_by, reason=rationale)
-    return release.model_dump_json(indent=2)
+) -> dict:
+    return _release_payload(withdraw_release(get_store(root), release_id, withdrawn_by=approved_by, reason=rationale))
+
+
+def cmd_publication_withdraw(release_id: str, root: str | Path = ".", **options) -> str:
+    return _render_release(publication_withdraw_data(release_id, root, **options), "Release withdrawn")
 
 
 def cmd_init(root: str | Path = ".") -> str:
@@ -1729,34 +1875,48 @@ def cmd_theorem_add(
         contributors=contributor,
         notes=notes,
     )
-    return contract.model_dump_json(indent=2)
+    return _labelled(contract)
 
 
 def cmd_theorem_show(theorem_id: str, root: str | Path = ".") -> str:
     contract = show_theorem(get_store(root), theorem_id)
-    return contract.model_dump_json(indent=2) if contract else "Theorem not found"
+    return _labelled(contract) if contract else "Theorem not found"
 
 
-def cmd_theorem_extract(theorem_id: str, root: str | Path = ".") -> str:
+def theorem_extract_data(theorem_id: str, root: str | Path = ".") -> dict | None:
     store = get_store(root)
     contract = show_theorem(store, theorem_id)
     if contract is None:
-        return f"Theorem not found: {theorem_id}"
+        return None
     ok, reason = theorem_callability(store, theorem_id)
-    payload = contract.model_dump(mode="json")
-    payload["callable"] = ok
-    payload["callability_reason"] = reason
-    return json.dumps(payload, indent=2)
+    return {"legacy_notice": LEGACY_TRUST_NOTICE, **contract.model_dump(mode="json"), "callable": ok, "callability_reason": reason}
+
+
+def cmd_theorem_extract(theorem_id: str, root: str | Path = ".") -> str:
+    data = theorem_extract_data(theorem_id, root)
+    return _dump_legacy(data) if data is not None else f"Theorem not found: {theorem_id}"
+
+
+def theorem_list_data(root: str | Path = ".") -> dict:
+    return {"legacy_notice": LEGACY_TRUST_NOTICE, "theorems": [item.model_dump(mode="json") for item in list_theorems(get_store(root))]}
 
 
 def cmd_theorem_list(root: str | Path = ".") -> str:
     items = list_theorems(get_store(root))
-    return "\n".join([f"{item.id}: {item.name} [{item.status.value}]" for item in items]) or "No theorems"
+    if not items:
+        return "No theorems"
+    lines = [f"{item.id}: {item.name} [{item.status.value}]" for item in items]
+    return "\n".join([*lines, f"(status: {LEGACY_TRUST_NOTICE})"])
+
+
+def theorem_apply_data(theorem_id: str, root: str | Path = ".") -> dict:
+    ok, reason = apply_theorem(get_store(root), theorem_id)
+    return {"legacy_notice": LEGACY_TRUST_NOTICE, "theorem_id": theorem_id, "applied": ok, "reason": reason}
 
 
 def cmd_theorem_apply(theorem_id: str, root: str | Path = ".") -> str:
-    ok, reason = apply_theorem(get_store(root), theorem_id)
-    return f"{theorem_id}: {reason}"
+    data = theorem_apply_data(theorem_id, root)
+    return f"{theorem_id}: {data['reason']}\n({LEGACY_TRUST_NOTICE})"
 
 
 def cmd_theorem_ground(theorem_id: str, reference_ids: list[str], root: str | Path = ".", *, notes: str = "") -> str:
@@ -1798,10 +1958,6 @@ def cmd_memory_add(
     node_id: str = "",
     candidate_proof_id: str = "",
     review_id: str = "",
-    theorem_id: str = "",
-    goal_id: str = "",
-    obligation_id: str = "",
-    blocker_id: str = "",
     route_id: str = "",
     importance: str = "medium",
     status: str = "",
@@ -1809,18 +1965,20 @@ def cmd_memory_add(
     tag: list[str] | None = None,
     notes: str = "",
 ) -> str:
+    """Write one memory entry, node-scoped and checked against the proof map (#45).
+
+    Raises `ProofMapError` for a scope that doesn't check out; nothing is
+    written then. The legacy theorem/goal/obligation/blocker scope is
+    read-only (ADR-0012), so this takes none of it.
+    """
     store = get_store(root)
-    artifact = record_memory(
+    artifact = append_memory_artifact(
         store,
         layer,
         content,
         node_id=node_id or None,
         candidate_proof_id=candidate_proof_id or None,
         review_id=review_id or None,
-        theorem_id=theorem_id or None,
-        goal_id=goal_id or None,
-        obligation_id=obligation_id or None,
-        blocker_id=blocker_id or None,
         route_id=route_id or None,
         importance=importance,
         status=status or None,
@@ -1831,11 +1989,36 @@ def cmd_memory_add(
     return artifact.model_dump_json(indent=2)
 
 
+def memory_list_data(
+    root: str | Path = ".",
+    *,
+    layer: str = "",
+    node_id: str = "",
+    candidate_proof_id: str = "",
+    review_id: str = "",
+    theorem_id: str = "",
+    goal_id: str = "",
+) -> dict:
+    """`memory list` for its --json envelope. An unknown layer is a ValueError."""
+    artifacts = list_memory_artifacts(
+        get_store(root),
+        layer=layer or None,
+        node_id=node_id or None,
+        candidate_proof_id=candidate_proof_id or None,
+        review_id=review_id or None,
+        theorem_id=theorem_id or None,
+        goal_id=goal_id or None,
+    )
+    return {"memory": [artifact.model_dump(mode="json") for artifact in artifacts]}
+
+
 def cmd_memory_list(
     root: str | Path = ".",
     *,
     layer: str = "",
     node_id: str = "",
+    candidate_proof_id: str = "",
+    review_id: str = "",
     theorem_id: str = "",
     goal_id: str = "",
 ) -> str:
@@ -1843,6 +2026,8 @@ def cmd_memory_list(
         get_store(root),
         layer=layer or None,
         node_id=node_id or None,
+        candidate_proof_id=candidate_proof_id or None,
+        review_id=review_id or None,
         theorem_id=theorem_id or None,
         goal_id=goal_id or None,
     )
@@ -1861,7 +2046,7 @@ def cmd_memory_show(artifact_id: str, root: str | Path = ".") -> str:
 
 def cmd_snapshot(root: str | Path = ".", handoff_note: str = "") -> str:
     snapshot = build_snapshot(get_store(root), handoff_note=handoff_note)
-    return snapshot.model_dump_json(indent=2)
+    return _labelled(snapshot)
 
 
 def cmd_history(root: str | Path = ".") -> str:
@@ -1873,8 +2058,13 @@ def cmd_export(root: str | Path = ".") -> str:
     return build_export(get_store(root))
 
 
+def export_data(root: str | Path = ".") -> dict:
+    return {"legacy_notice": LEGACY_TRUST_NOTICE, "export": cmd_export(root)}
+
+
 def cmd_exchange_export(root: str | Path = ".", *, note: str = "") -> str:
-    return bundle_to_json(export_exchange_bundle(get_store(root), note=note))
+    # an importer ignores the notice: the bundle model drops unknown fields (ADR-0012)
+    return _labelled(json.loads(bundle_to_json(export_exchange_bundle(get_store(root), note=note))))
 
 
 def cmd_exchange_import(bundle_json: str, root: str | Path = ".") -> str:
@@ -1882,10 +2072,10 @@ def cmd_exchange_import(bundle_json: str, root: str | Path = ".") -> str:
     return report_to_json(report)
 
 
-def cmd_handoff_create(root: str | Path = ".", *, note: str = "") -> str:
-    snapshot = create_snapshot(get_store(root), note=note)
+def cmd_handoff_create(root: str | Path = ".", *, note: str = "", node_id: str = "") -> str:
+    snapshot = create_snapshot(get_store(root), note=note, node_id=node_id or None)
     bundle = export_exchange_bundle(get_store(root), note=note or snapshot.handoff_note)
-    return bundle_to_json(bundle)
+    return _labelled(json.loads(bundle_to_json(bundle)))
 
 
 def cmd_handoff_inspect(bundle_json: str = "", root: str | Path = ".") -> str:

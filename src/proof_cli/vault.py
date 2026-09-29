@@ -4,6 +4,9 @@ import hashlib
 import json
 import shutil
 from pathlib import Path
+from typing import Callable
+
+from .key_ideas import KEY_IDEAS_FILE
 
 
 def vault_dir(root: Path) -> Path:
@@ -110,13 +113,30 @@ def write_snapshot_folder(folder: Path, contents: dict[str, bytes]) -> dict[str,
 
 def snapshot_folder_files(folder: Path) -> dict[str, bytes] | None:
     """The files a snapshot folder froze, by their path from the node folder, as stored now;
-    None when its manifest is missing or unreadable (a damaged snapshot, shown as such)."""
+    None when its manifest or any file it names can't be read (a damaged snapshot, shown as such)."""
     try:
         manifest = json.loads((folder / SNAPSHOT_MANIFEST).read_text(encoding="utf-8"))
         names = list(manifest["files"])
+        return {rel: (folder / _stored(rel)).read_bytes() for rel in names if isinstance(rel, str) and (folder / _stored(rel)).is_file()}
     except (OSError, ValueError, KeyError, TypeError):
         return None
-    return {rel: (folder / _stored(rel)).read_bytes() for rel in names if isinstance(rel, str) and (folder / _stored(rel)).is_file()}
+
+
+def snapshot_folder_file(folder: Path, rel: str) -> bytes | None:
+    """One file a snapshot folder froze, by its path from the node folder, as stored now; None
+    when the snapshot didn't freeze it, or it can't be read. Reads only that file and the manifest."""
+    try:
+        manifest = json.loads((folder / SNAPSHOT_MANIFEST).read_text(encoding="utf-8"))
+        return (folder / _stored(rel)).read_bytes() if rel in manifest["files"] else None
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def frozen_key_ideas(root: Path, file_path: str) -> bytes | None:
+    """The key-ideas summary a Review snapshot froze (ADR-0013), by the snapshot's `file_path`;
+    None for one that froze none: an older snapshot, a single-file one, or one that can't be read."""
+    path = root / file_path
+    return snapshot_folder_file(path.parent, KEY_IDEAS_FILE) if path.name == SNAPSHOT_MANIFEST else None
 
 
 def snapshot_folder_digest(folder: Path) -> str | None:
@@ -128,6 +148,44 @@ def snapshot_folder_digest(folder: Path) -> str | None:
     except (OSError, ValueError, KeyError, TypeError):
         return None
     return manifest_digest(entries)
+
+
+def snapshot_digest_of(manifest: bytes | None, stored: Callable[[str], bytes | None]) -> str | None:
+    """`snapshot_folder_digest` over files that aren't on disk (an exchange bundle's, say):
+    `manifest` is the snapshot's manifest.json and `stored(path)` a file by its path inside
+    the snapshot folder. None when the manifest is unreadable or a file it names is missing."""
+    try:
+        names = list(json.loads((manifest or b"").decode("utf-8"))["files"])
+    except (ValueError, KeyError, TypeError, UnicodeDecodeError):
+        return None
+    entries: dict[str, str] = {}
+    for rel in names:
+        data = stored(_stored(rel)) if isinstance(rel, str) else None
+        if data is None:
+            return None
+        entries[rel] = hashlib.sha256(data).hexdigest()
+    return manifest_digest(entries)
+
+
+# what an exchange bundle leaves out of a node folder: regenerated output, the agent's scratch,
+# and the node's recorded decisions, which count only where they were made (ADR-0010, #31)
+_NOT_EXCHANGED = {"build", "scratch"}
+
+
+def exchanged_files(root: Path, node_id: str) -> dict[str, Path]:
+    """The files an exchange bundle carries for a node, by their path from the project root:
+    its working sources, snapshots and archived PDFs, never its build output, scratch folder,
+    hidden files or `reviews.jsonl`."""
+    folder = node_folder(root, node_id)
+    found: dict[str, Path] = {}
+    for path in sorted(folder.rglob("*")) if folder.is_dir() else ():
+        rel = path.relative_to(folder)
+        if not path.is_file() or path.is_symlink() or rel.parts[0] in _NOT_EXCHANGED or rel.name == "reviews.jsonl":
+            continue
+        if any(part.startswith(".") for part in rel.parts):
+            continue
+        found[path.relative_to(root).as_posix()] = path
+    return found
 
 
 def remove_snapshot(path: Path) -> None:
@@ -149,12 +207,15 @@ def node_folder(root: Path, node_id: str) -> Path:
 
 def build_is_current(root: Path, node_id: str) -> bool:
     """Whether the studio's build/proof.pdf is at least as new as every input a snapshot freezes
-    (`working_inputs`): the node's working sources and the shared preamble."""
+    (`working_inputs`) that goes into the PDF: the node's working sources and the shared
+    preamble, but not its key-ideas summary."""
     pdf = build_pdf_path(root, node_id)
     if not pdf.is_file():
         return False
     built = pdf.stat().st_mtime
-    return all(source.stat().st_mtime <= built for source in working_inputs(root, node_id).values() if source.exists())
+    # the key-ideas summary is frozen with the proof but isn't compiled into its PDF (ADR-0013)
+    inputs = {rel: path for rel, path in working_inputs(root, node_id).items() if rel != KEY_IDEAS_FILE}
+    return all(source.stat().st_mtime <= built for source in inputs.values() if source.exists())
 
 
 def write_working_proof(root: Path, *, node_id: str, kind: str, statement: str) -> None:

@@ -9,6 +9,8 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
+
+from _proofs import ensure_key_ideas
 from typer.testing import CliRunner
 
 from proof_cli.cli import app
@@ -35,6 +37,7 @@ def _working(store, node_id: str) -> Path:
 def _write_proof(store, node_id: str, body: str) -> None:
     path = _working(store, node_id)
     path.write_text(path.read_text().replace("% Write the proof here.", body))
+    ensure_key_ideas(store, node_id)
 
 
 def test_a_local_node_gets_a_standalone_latex_working_file(tmp_path: Path):

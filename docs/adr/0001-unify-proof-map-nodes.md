@@ -1,6 +1,6 @@
 # Unify proof map nodes into one entity with a `kind` field
 
-**Status**: accepted
+**Status**: accepted. Amended by ADR-0012: obligations and blockers are legacy informational notes, and a `BlockerRecord` is not attached to proof map nodes.
 
 The Proof Wayfinder redesign needs a single dependency graph — Theorem, Lemma, Claim, and Imported result all need to sit on equal footing so that frontier, claim, submit, review, and accept can operate uniformly across the whole map. The existing model splits this across two structures: `TheoremContract` (with a `kind` of theorem/lemma/proposition/corollary/result) and `ProofObligation` (a separate, more lightweight obligation record linked back to a contract via `required_for`), plus a free-floating `ProjectState.open_goals` string list with no identity or status of its own.
 

@@ -11,6 +11,8 @@ import re
 from pathlib import Path
 
 import pytest
+
+from _proofs import ensure_key_ideas
 from typer.testing import CliRunner
 
 from proof_cli import errors
@@ -119,6 +121,7 @@ def test_only_the_commands_that_start_a_project_create_one(tmp_path: Path):
     import typer
 
     walked = 0
+    crashed = []
     for path, command in _leaves(typer.main.get_command(app)):
         full = " ".join(path)
         if full in STARTS_A_PROJECT:
@@ -126,10 +129,19 @@ def test_only_the_commands_that_start_a_project_create_one(tmp_path: Path):
         if not any("--root" in p.opts for p in command.params if isinstance(p, click.Option)):
             continue  # takes no root: touches no project
         root = tmp_path / full.replace(" ", "_") / "missing"
-        runner.invoke(app, [*path, *_placeholder_args(command), "--root", str(root)])
+        result = runner.invoke(app, [*path, *_placeholder_args(command), "--root", str(root)])
         walked += 1
         assert not root.exists(), full
+        if not isinstance(result.exception, (type(None), *EXPECTED_WALK_FAILURES)):
+            crashed.append((full, repr(result.exception)))
     assert walked > 80
+    assert not crashed, crashed  # e.g. a command function cli.py never imported (#44)
+
+
+# What the walk may end in: a usage error or a missing project (both exit through
+# SystemExit), or the placeholder "X" rejected as input (a ValueError, pydantic's
+# ValidationError included). Anything else -- a NameError above all -- is a bug.
+EXPECTED_WALK_FAILURES = (SystemExit, ValueError)
 
 
 def test_the_starting_list_names_real_commands():
@@ -211,6 +223,23 @@ def test_no_module_defines_a_function_twice():
             node.name for node in ast.parse(path.read_text()).body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
         )
         assert not [name for name, count in names.items() if count > 1], path.name
+
+
+def test_no_module_uses_an_undefined_name():
+    """An unimported name is a NameError waiting for its first call: `proof pack` sat broken for months (#44)."""
+    import shutil
+    import subprocess
+    import sys
+
+    ruff = shutil.which("ruff")
+    command = [ruff] if ruff else [sys.executable, "-m", "ruff"]
+    try:
+        result = subprocess.run([*command, "check", "--select", "F821", "--no-cache", str(SRC)], capture_output=True, text=True)
+    except FileNotFoundError:
+        pytest.skip("ruff is not installed (pip install -e '.[dev]')")
+    if result.returncode != 0 and "No module named ruff" in result.stderr:
+        pytest.skip("ruff is not installed (pip install -e '.[dev]')")
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 # -- one agent entry: `proof`, rooted by PROOF_ROOT (ADR-0011, #67) ---------------------
@@ -303,5 +332,7 @@ def test_the_skills_node_workflow_runs_as_written(tmp_path: Path):
         ["node", "request-review", "P1", "--rationale", "one computation", "--requested-by", "agent_a", "--root", root],
     ]
     for args in steps:
+        if args[:2] == ["node", "request-review"]:
+            ensure_key_ideas(tmp_path, args[2])  # what the agent writes beside proof.tex before it asks (ADR-0013)
         result = runner.invoke(app, [*args, "--json"])
         assert result.exit_code == 0 and _envelope(result)["ok"], (args, result.output)

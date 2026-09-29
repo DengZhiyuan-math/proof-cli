@@ -45,6 +45,7 @@ from .reviews import (
 )
 from .storage import (
     ProjectStore,
+    memoized_read,
     active_transaction,
     after_commit,
     before_commit,
@@ -91,17 +92,28 @@ def human_review_required(kind: DecisionKind | str, target_id: str) -> Authority
     )
 
 
+@memoized_read
 def candidate_proof_sha256(store: ProjectStore, candidate_proof_id: str) -> str | None:
-    """SHA-256 of a Candidate proof (a Review snapshot) as it is on disk now, or None if it's missing:
-    a folder snapshot's manifest digest recomputed from its stored files (ADR-0011), an old
-    single-file snapshot's file."""
+    """SHA-256 of a Candidate proof (a Review snapshot) as it is on disk now, or None if it's missing
+    or can't be read: a folder snapshot's manifest digest recomputed from its stored files
+    (ADR-0011), an old single-file snapshot's file."""
     record = get_candidate_proof(store, candidate_proof_id)
     if record is None:
         return None
     path = store.root / record.file_path
     if path.name == SNAPSHOT_MANIFEST:
         return snapshot_folder_digest(path.parent)
-    return hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else None
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:  # gone, or not readable by this process: either way it names nothing (#92)
+        return None
+
+
+def snapshot_matches(recorded: str | None, current: str | None) -> bool:
+    """Whether a decision's recorded snapshot SHA-256 names the snapshot as it is on disk now.
+    A missing or unreadable snapshot hashes to None, and None matches nothing, not even a
+    recorded None (#92): a decision on a snapshot that isn't there never counts."""
+    return recorded is not None and current is not None and recorded == current
 
 
 def build_decision_payload(
@@ -118,6 +130,7 @@ def build_decision_payload(
     migrated_dependents: list[str] | None = None,
 ) -> DecisionPayload:
     """What a decision of `kind` on `target_id` is made on, as of now."""
+    proof = get_candidate_proof(store, candidate_proof_id) if candidate_proof_id else None
     return DecisionPayload(
         kind=kind,
         target_id=target_id,
@@ -129,6 +142,7 @@ def build_decision_payload(
         dependency_pins=list(dependency_pins or []),
         resolves_challenges=list(resolves_challenges or []),
         migrated_dependents=list(migrated_dependents or []),
+        key_ideas_drafted_by=proof.key_ideas_drafted_by if proof is not None else None,
     )
 
 
@@ -151,6 +165,7 @@ def _row(entry: ReviewEntry) -> dict:
         "created_at": entry.decided_at.isoformat(),
         "payload": entry.payload,
         "migrated": entry.migrated,
+        "key_ideas_drafted_by": entry.key_ideas_drafted_by,
     }
 
 
@@ -164,6 +179,7 @@ def list_decisions(store: ProjectStore) -> list[dict]:
     return [_row(entry) for entry in _entries(store)[0]]
 
 
+@memoized_read
 def decision_rows(store: ProjectStore, object_type: str, object_id: str, kind: str) -> list[dict]:
     """The decisions on one object and kind, oldest first."""
     return [
@@ -173,6 +189,7 @@ def decision_rows(store: ProjectStore, object_type: str, object_id: str, kind: s
     ]
 
 
+@memoized_read
 def verify_decision_row(store: ProjectStore, row_id: str | None) -> RowVerdict:
     """Whether the decision `row_id` counts: recorded, and made on something (its payload)."""
     if row_id is None:
@@ -264,6 +281,7 @@ def record_decision(
         reviewer=reviewer or git_identity(store.root),
         rationale=rationale,
         payload=payload,
+        key_ideas_drafted_by=payload.key_ideas_drafted_by,
     )
     paths = [reviews_path(store.root, node_id)]
     if payload.candidate_proof_id:
@@ -412,5 +430,6 @@ __all__ = [
     "list_decisions",
     "record_decision",
     "reviews_path",
+    "snapshot_matches",
     "verify_decision_row",
 ]

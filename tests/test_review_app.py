@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 
 import pytest
 
+from _proofs import ensure_key_ideas
 from _researcher import researcher
 from _review_client import DirectClient, decide, serving
 from proof_cli.proof_map import create_node, get_acceptance_state, request_review
@@ -36,6 +37,7 @@ def _awaiting(store, node_id="clm_1"):
     create_node(store, node_id=node_id, kind="claim", statement=r"$(f * g) * h = f * (g * h)$")
     working = store.root / "proofs" / node_id / "proof.tex"
     working.write_text(working.read_text().replace("% Write the proof here.", "- x^2 \\le 0 fails; take $(f * g) * h$."))
+    ensure_key_ideas(store, node_id)
     return request_review(store, node_id, requested_by="agent_a", rationale="scoped")
 
 
@@ -172,7 +174,7 @@ def test_a_decision_over_http_counts(http_app):
 def test_the_page_and_its_script_are_served_with_a_strict_policy(http_app):
     _, client = http_app
     port = urlsplit(client.origin).port
-    for path in ("/", "/static/app.js"):
+    for path in ("/", "/static/app.js", "/static/shared/mathtext.js", "/static/shared/vendor/katex.min.js", "/static/shared/vendor/fonts/KaTeX_Main-Regular.woff2"):
         conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
         conn.request("GET", path, headers={"Host": client.netloc})
         response = conn.getresponse()
