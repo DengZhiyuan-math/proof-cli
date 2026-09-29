@@ -180,8 +180,8 @@ const STATUS_GLYPHS = {
   attention: [["path", { d: "M8 5.6v3.9", class: "glyph" }], ["circle", { cx: 8, cy: 12, r: 1, class: "glyph-fill" }]],
   open: [],
 };
-function statusIcon(kind, x, y) {
-  const icon = svg("g", { class: `status-icon ${kind}`, transform: `translate(${x - 8},${y - 8})` });
+function statusIcon(kind, x, y, size = 16) {
+  const icon = svg("g", { class: `status-icon ${kind}`, transform: `translate(${x - size / 2},${y - size / 2}) scale(${size / 16})` });
   // a warning is a triangle, like the system's; every other state a disc
   icon.append(kind === "attention" ? svg("path", { d: "M8 1.1c.5 0 .95.27 1.2.72l6.1 10.9c.52.93-.15 2.08-1.2 2.08H1.9c-1.05 0-1.72-1.15-1.2-2.08L6.8 1.82C7.05 1.37 7.5 1.1 8 1.1z", class: "disc" }) : svg("circle", { cx: 8, cy: 8, r: 8, class: "disc" }));
   for (const [tag, attrs] of STATUS_GLYPHS[kind] || []) icon.append(svg(tag, attrs));
@@ -363,22 +363,23 @@ function drawDag(nodes) {
     place();
     g.append(svg("rect", { class: "box", x: left, y: top, width: BOX.w, height: BOX.h, rx: BOX.radius }));
     const kind = svg("text", { class: "kind", x: left + 14, y: top + 21 });
-    kind.textContent = KIND_LABEL[n.kind] || capitalised(n.kind.replace("_", " "));
-    const id = svg("text", { class: "id", x: left + BOX.w - 14, y: top + 21, "text-anchor": "end" });
+    kind.textContent = `${KIND_LABEL[n.kind] || capitalised(n.kind.replace("_", " "))}  `;
+    const id = svg("tspan", { class: "id" });
     id.textContent = short(n.id, 18);
+    kind.append(id);
     const label = svg("text", { x: left + 14, y: top + 41 });
     label.textContent = short(n.display_label || n.statement, 22);
     const meta = svg("text", { class: "meta", x: left + 14, y: top + 58 });
     meta.textContent = n.display_label ? short(n.statement, 30) : "";
-    g.append(kind, id, label, meta);
+    g.append(kind, label, meta);
     // the node's one state, as a capsule along the bottom
     const [tagText, statusKind] = tagOf(n);
     const status = svg("g", { class: `status ${statusKind}` });
-    status.append(statusIcon(statusKind, left + 22, top + BOX.h - 18));
-    const tag = svg("text", { class: "tag", x: left + 36, y: top + BOX.h - 14 });
+    const tag = svg("text", { class: "tag", x: left + 14, y: top + BOX.h - 13 });
     tag.textContent = capitalised(short(tagText, 24));
     status.append(tag);
-    g.append(status);
+    // the state's icon, large, as a badge on the card's top-right corner
+    g.append(status, statusIcon(statusKind, left + BOX.w - 6, top + 6, 30));
     const title = svg("title");
     title.textContent = n.statement;
     g.append(title);
