@@ -22,6 +22,7 @@ from urllib.parse import parse_qs, unquote
 from .. import proof_map
 from ..domain import ProofMapNodeKind
 from ..storage import ProjectStore
+from ..studio.proof_agent import ProofAgentContext, library_folders
 from ..studio.server import Studio
 from ..vault import node_folder
 
@@ -91,7 +92,12 @@ class StudioHub:
             if self._closed:
                 raise NoStudio("STUDIO_CLOSED", "the proof map's server is shutting down")
             if node.id not in self._studios:
-                self._studios[node.id] = Studio(folder, fixed_build=NODE_BUILD, hidden=NODE_HIDDEN, agent_scratch="scratch")
+                root, node_id = self.store.root, node.id
+                self._studios[node.id] = Studio(
+                    folder, fixed_build=NODE_BUILD, hidden=NODE_HIDDEN, agent_scratch="scratch",
+                    # the node's proof agent: rooted at the project, reading its library (ADR-0011 point 8)
+                    agent_context=lambda: ProofAgentContext(node_id, root, library_folders(root)),
+                )
             return self._studios[node.id]
 
     def close(self) -> None:

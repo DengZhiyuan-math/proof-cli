@@ -29,11 +29,14 @@ MAX_TURNS = 50          # turns kept in memory for their events and Undo
 class AgentManager:
     def __init__(self, root_fn: Callable[[], Path], files_fn: Callable[[], list[str]],
                  writable_fn: Callable[[str], object] | None = None,
-                 backends: tuple[dict[str, Backend], str, str | None] | None = None):
+                 backends: tuple[dict[str, Backend], str, str | None] | None = None,
+                 context_fn: Callable[[], object] | None = None):
         self.root_fn = root_fn        # current repository root
         self.files_fn = files_fn      # editable files (repo-relative)
         # Raises ValueError for a path an agent may not write (server.resolve).
         self.writable_fn = writable_fn
+        # a node's proof agent context, fresh each turn (proof_agent.py); None outside a proof map
+        self.context_fn = context_fn
         self.backends, self.default, self.config_error = backends or load_backends()
         self.jobs: dict[int, Job] = {}
         self.turns: dict[int, Job] = {}
@@ -46,8 +49,12 @@ class AgentManager:
         return self.backends.get(provider or self.default)
 
     def info(self) -> dict:
-        return {"default": self.default, "config_error": self.config_error,
-                "providers": [b.info() for b in self.backends.values()]}
+        providers = [b.info() for b in self.backends.values()]
+        if self.context_fn:  # a node's proof agent: what each backend can do in v1 (ADR-0011 point 8)
+            for p in providers:
+                p["proof_agent"] = "limited" if p["kind"] == "openai" else "full"
+        return {"default": self.default, "config_error": self.config_error, "providers": providers,
+                "proof_agent": bool(self.context_fn)}
 
     # ------------------------------------------------------------ snapshots
     # Files are kept as bytes: Undo puts back exactly what was there (line ends, encoding),
@@ -129,6 +136,7 @@ class AgentManager:
         job.provider, job.prompt, job.session_id = backend.id, prompt, session_id
         job.mode, job.model, job.effort = mode if mode in ("edit", "ask") else "ask", model, effort
         job.root, job.files = self.root_fn(), self.files_fn
+        job.context = self.context_fn() if self.context_fn else None
         job.writable = lambda rel: self._writable(job, rel)
         job.before = self._snapshot()
         threading.Thread(target=self._run, args=(job, backend), daemon=True).start()

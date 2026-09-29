@@ -1,0 +1,243 @@
+"""The studio's agent panel is the node's proof agent (ADR-0011 point 8, #72).
+
+A stub Claude Code (tests/js is not needed here: a small Python script on CLAUDE_BIN) records
+how the studio started it and runs the `proof` commands a turn would, so the tests check the
+real launch: its cwd, PROOF_ROOT, its permissions, and what Undo does and doesn't restore.
+"""
+
+import json
+import os
+import stat
+import sys
+import time
+from pathlib import Path
+
+import pytest
+
+from proof_cli.proof_map import create_node, get_acceptance_state, get_active_claim, get_node, list_candidate_proofs
+from proof_cli.storage import ensure_project
+from proof_cli.studio.backends import Job
+from proof_cli.studio.backend_codex import Codex
+from proof_cli.studio.proof_agent import ProofAgentContext, library_folders
+from proof_cli.webapp.studios import StudioHub
+
+SRC = Path(__file__).resolve().parents[1] / "src"
+
+FAKE_CLAUDE = r'''#!{python}
+import json, os, subprocess, sys
+if sys.argv[1:3] == ["auth", "status"]:
+    print(json.dumps({{"loggedIn": True, "email": "stub@example.org"}})); sys.exit(0)
+prompt = sys.stdin.read()
+log = {{"argv": sys.argv[1:], "cwd": os.getcwd(), "PROOF_ROOT": os.environ.get("PROOF_ROOT"), "ran": []}}
+for command in json.loads(os.environ.get("FAKE_SCRIPT", "[]")):
+    if command[0] == "write":
+        path = os.path.join(os.getcwd(), command[1]); os.makedirs(os.path.dirname(path), exist_ok=True)
+        open(path, "w").write(command[2]); continue
+    done = subprocess.run(command, capture_output=True, text=True)
+    log["ran"].append({{"argv": command, "code": done.returncode, "out": done.stdout[-2000:], "err": done.stderr[-2000:]}})
+open(os.environ["FAKE_LOG"], "w").write(json.dumps(log))
+print(json.dumps({{"type": "system", "subtype": "init", "session_id": "stub-session", "model": "stub"}}))
+print(json.dumps({{"type": "result", "session_id": "stub-session", "is_error": False, "subtype": "success"}}))
+'''
+
+
+def _executable(path: Path, text: str) -> Path:
+    path.write_text(text)
+    path.chmod(path.stat().st_mode | stat.S_IEXEC)
+    return path
+
+
+@pytest.fixture
+def studio(tmp_path: Path, monkeypatch):
+    """A project with node A, a stub Claude Code, and `proof` running this checkout."""
+    project = tmp_path / "project"
+    store = ensure_project(project)
+    create_node(store, node_id="A", kind="claim", statement="a claim")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _executable(bin_dir / "claude", FAKE_CLAUDE.format(python=sys.executable))
+    _executable(bin_dir / "proof", f'#!/bin/sh\nexec "{sys.executable}" -m proof_cli.cli "$@"\n')
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("PYTHONPATH", f"{SRC}{os.pathsep}{os.environ.get('PYTHONPATH', '')}")
+    monkeypatch.setenv("CLAUDE_BIN", str(bin_dir / "claude"))
+    monkeypatch.delenv("PROOF_ROOT", raising=False)
+    monkeypatch.delenv("PROOF_CLAUDE_ACCOUNT", raising=False)
+    log = tmp_path / "claude-log.json"
+    monkeypatch.setenv("FAKE_LOG", str(log))
+    hub = StudioHub(store)
+    yield store, hub, log, monkeypatch
+    hub.close()
+
+
+def _turn(hub, monkeypatch, script, mode="edit"):
+    monkeypatch.setenv("FAKE_SCRIPT", json.dumps(script))
+    agent = hub.studio("A").agent
+    started = agent.start("prove the node", None, mode, provider="claude")
+    assert "job" in started, started
+    job = agent.jobs[started["job"]]
+    deadline = time.monotonic() + 60
+    while not job.done and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert job.done
+    return started["job"]
+
+
+def _log(log: Path) -> dict:
+    return json.loads(log.read_text())
+
+
+# -- rooted at the project -------------------------------------------------------------
+
+
+def test_a_turn_runs_in_the_node_folder_and_its_proof_calls_act_on_the_project(studio):
+    store, hub, log, monkeypatch = studio
+    _turn(hub, monkeypatch, [["proof", "node", "claim", "A", "--assignee", "studio-agent", "--json"]])
+
+    ran = _log(log)
+    assert Path(ran["cwd"]).resolve() == (store.root / "proofs" / "A").resolve()
+    assert ran["PROOF_ROOT"] == str(store.root)
+    assert ran["ran"][0]["code"] == 0, ran["ran"][0]
+    assert get_active_claim(store, "A").claimant_id == "studio-agent"
+    assert not (store.root / "proofs" / "A" / ".proof").exists()  # never a nested project
+
+
+def test_no_agent_turn_can_record_a_human_review_decision(studio):
+    store, hub, log, monkeypatch = studio
+    (store.root / "proofs" / "A" / "proof.tex").write_text("a proof\n")
+    _turn(hub, monkeypatch, [
+        ["proof", "node", "request-review", "A", "--rationale", "scoped", "--requested-by", "studio-agent", "--json"],
+        ["proof", "node", "review", "A", "accept", "--json"],
+    ])
+    review = _log(log)["ran"][1]
+    assert json.loads(review["out"])["error"]["code"] == "HUMAN_REVIEW_REQUIRED"
+    assert get_acceptance_state(store, "A") == "unreviewed"
+
+
+# -- explicit permissions, not inherited ------------------------------------------------
+
+
+def test_claude_code_gets_the_proof_agents_permissions_and_none_of_the_repositorys(studio, tmp_path):
+    store, hub, log, monkeypatch = studio
+    papers = tmp_path / "papers"
+    papers.mkdir()
+    (store.root / "proof.toml").write_text(f'[studio]\nlibrary = ["{papers}"]\n')
+    _turn(hub, monkeypatch, [])
+
+    argv = _log(log)["argv"]
+    value = lambda flag: argv[argv.index(flag) + 1]  # noqa: E731
+    assert value("--setting-sources") == "user"  # not the project's settings or Bash allowlist
+    assert value("--permission-prompts") == "none"  # nobody is there to approve: refused, never hung
+    excluded = json.loads(value("--settings"))["claudeMdExcludes"]  # nor the repository's CLAUDE.md
+    for name in ("CLAUDE.md", "AGENTS.md"):
+        assert f"{store.root}/{name}" in excluded and f"{store.root}/**/{name}" in excluded
+        assert f"{store.root.parent}/{name}" in excluded
+    assert not [path for path in excluded if path.endswith("/.claude/CLAUDE.md") and not path.startswith(str(store.root))]
+    assert value("--permission-mode") == "default"  # a headless run refuses whatever no rule allows
+    add = argv[argv.index("--add-dir") + 1:argv.index("--allowedTools")]
+    assert add == [str(store.root), str(papers)]
+    allowed = argv[argv.index("--allowedTools") + 1:argv.index("--disallowedTools")]
+    for rule in ("WebSearch", "WebFetch", "Bash(proof *)", "Bash(python *)", "Bash(sage *)", "Bash(lean *)", "Edit(./**)", "Write(./**)"):
+        assert rule in allowed, rule
+    denied = argv[argv.index("--disallowedTools") + 1:]
+    for rule in ("Edit(./snapshots/**)", "Write(./build/**)", "Edit(./reviews.jsonl)"):
+        assert rule in denied, rule
+    brief = value("--append-system-prompt")
+    assert "Retrieval first" in brief and "request-review A" in brief and str(papers) in brief
+
+
+def test_an_ask_turn_can_read_and_search_but_not_edit(studio):
+    store, hub, log, monkeypatch = studio
+    _turn(hub, monkeypatch, [], mode="ask")
+    argv = _log(log)["argv"]
+    allowed = argv[argv.index("--allowedTools") + 1:argv.index("--disallowedTools")]
+    assert argv[argv.index("--permission-mode") + 1] == "plan"
+    assert "WebSearch" in allowed and not [rule for rule in allowed if rule.startswith(("Edit", "Write"))]
+
+
+def test_codex_gets_web_search_the_project_and_the_network(tmp_path):
+    job = Job(1)
+    job.mode, job.prompt = "edit", "prove it"
+    job.context = ProofAgentContext("A", tmp_path, [])
+    argv, prompt = Codex("codex").command(job)
+    assert argv[1:3] == ["--search", "exec"]  # a global flag, before the subcommand
+    assert argv[argv.index("--add-dir") + 1] == str(tmp_path)  # proof writes the project database
+    assert "sandbox_workspace_write.network_access=true" in argv
+    assert "Retrieval first" in prompt
+
+
+# -- the library is read, never written -------------------------------------------------
+
+
+def test_a_library_folder_is_listed_readable_and_never_writable(studio, tmp_path):
+    store, hub, log, monkeypatch = studio
+    papers = tmp_path / "papers"
+    papers.mkdir()
+    (store.root / "proof.toml").write_text('[studio]\nlibrary = ["../papers", "/does/not/exist"]\n')
+    assert library_folders(store.root) == [papers.resolve()]
+    studio_a = hub.studio("A")
+    with pytest.raises(ValueError):
+        studio_a.agent_writable(str(Path("..") / ".." / ".." / "papers" / "x.tex"))
+    context = ProofAgentContext("A", store.root, library_folders(store.root))
+    assert not [rule for rule in context.claude_args(True) if str(papers) in rule and rule.startswith(("Edit", "Write"))]
+
+
+def test_an_api_model_reads_the_project_and_writes_only_its_node(studio):
+    from proof_cli.studio.backend_openai import OpenAICompat, ToolError
+
+    store, hub, log, monkeypatch = studio
+    create_node(store, node_id="B", kind="lemma", statement="b")
+    (store.root / "proofs" / "B" / "proof.tex").write_text("B's proof\n")
+    job = Job(1)
+    job.mode, job.root = "edit", store.root / "proofs" / "A"
+    job.context = ProofAgentContext("A", store.root, [])
+    job.writable = lambda rel: hub.studio("A").agent_writable(rel) is not None
+    api = OpenAICompat("api", {"base_url": "http://127.0.0.1:9", "api_key_env": "NONE"})
+    assert "B's proof" in api.tool(job, "read_file", {"path": "../B/proof.tex"}, [])
+    with pytest.raises(ToolError):
+        api.tool(job, "write_file", {"path": "../B/proof.tex", "content": "overwritten"}, [])
+    with pytest.raises(ToolError):
+        api.tool(job, "read_file", {"path": "../../outside.txt"}, [])
+    assert "file tools only" in api.system_prompt(job.root, job.context)
+
+
+# -- Undo covers files only ---------------------------------------------------------------
+
+
+def test_undo_restores_the_turns_files_and_leaves_its_split(studio):
+    store, hub, log, monkeypatch = studio
+    folder = store.root / "proofs" / "A"
+    before = (folder / "proof.tex").read_text()
+    turn = _turn(hub, monkeypatch, [
+        ["write", "proof.tex", "the agent's proof\n"],
+        ["write", "scratch/check.py", "print(2 + 2)\n"],
+        ["proof", "node", "split", "A", "--child", "A1=a smaller claim", "--created-by", "studio-agent", "--json"],
+    ])
+    assert get_node(store, "A").dependencies == ["A1"]
+
+    undone = hub.studio("A").agent.undo(turn)
+
+    assert sorted(undone["restored"]) == ["proof.tex", "scratch/check.py"]
+    assert (folder / "proof.tex").read_text() == before and not (folder / "scratch" / "check.py").exists()
+    assert get_node(store, "A").dependencies == ["A1"] and get_node(store, "A1") is not None  # the split stays
+
+
+def test_the_panel_says_undo_covers_files_and_which_backends_are_the_full_agent(studio):
+    store, hub, log, monkeypatch = studio
+    app_js = (SRC / "proof_cli" / "studio" / "static" / "app.js").read_text()
+    assert "Undo this turn's file changes" in app_js and "does not undo a claim, a split" in app_js
+    info = hub.studio("A").agent.info()
+    kinds = {p["kind"]: p["proof_agent"] for p in info["providers"]}
+    assert info["proof_agent"] and kinds["claude"] == kinds["codex"] == "full"
+
+
+def test_scratch_files_are_not_part_of_a_snapshot(studio):
+    from proof_cli.proof_map import request_review
+
+    store, hub, log, monkeypatch = studio
+    folder = store.root / "proofs" / "A"
+    (folder / "scratch").mkdir()
+    (folder / "scratch" / "check.py").write_text("print(1)\n")
+    record = request_review(store, "A", requested_by="studio-agent", rationale="scoped")
+    manifest = json.loads((store.root / record.file_path).read_text()) if record.file_path.endswith(".json") else {"files": {}}
+    assert not [name for name in manifest.get("files", {}) if name.startswith("scratch/")]
+    assert [p.version for p in list_candidate_proofs(store, "A")] == [1]

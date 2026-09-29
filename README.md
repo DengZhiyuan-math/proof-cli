@@ -43,6 +43,19 @@ This copies the working file to an immutable snapshot, `proofs/<id>/snapshots/v<
 - **New node** creates a theorem, lemma or claim (with its assumptions and dependencies), or an imported result with its source. That covers the first node of an empty map, and a corrected source that replaces a withdrawn one.
 - **A theorem, lemma or claim opens in its studio** (ADR-0011), a LaTeX workspace built from prism-local's code: editor, compile, PDF with SyncTeX both ways, and the agent panel. Beside them, the **node panel** shows the node's statement, state axes, assignee and dependencies, and offers claim or unassign, split into Claims, request review, open a Challenge, and record an Evidence check, as the page's git identity.
 - **A node's review page** shows the exact LaTeX of the snapshot under review, with its dependencies and pins, Challenges, Evidence checks and history, and the decisions to make. It links the compiled PDF when there is one: the PDF archived with the snapshot, or the studio's current `build/proof.pdf`.
+- **The agent panel is the node's proof agent** (ADR-0011): it researches, reasons and proves, and writes the result into the node.
+  - **It reads** the whole project, the library folders listed in `proof.toml`, and the web.
+  - **It runs** `proof` (retrieval, claim, split, request review, Evidence checks) and computation such as Python, SageMath and Lean.
+  - **It writes** files only in the node's sources and its `scratch/` folder, and changes project state only through `proof`. It never makes a Human Review decision.
+  - **It is rooted at the project:** it runs in `proofs/<id>/` with `PROOF_ROOT` set to the project.
+  - **Backends:** Claude Code and Codex are the full proof agent; an API model is a limited assistant with file tools only.
+  - **Undo** restores the turn's files, not a claim, a split, a snapshot or a decision.
+
+  ```toml
+  # proof.toml, at the project root
+  [studio]
+  library = ["~/papers", "../lecture-notes"]
+  ```
 - **An imported result's page** shows its source, trust level and dependents, and its Reference review.
 
 When you request review after compiling in the studio, the fresh `build/proof.pdf` is archived as `snapshots/v<N>.pdf` next to the snapshot and committed with the decision. `proofs/.gitignore` keeps `build/` out of git. Compiling needs a TeX distribution or Tectonic; without one, the studio still edits and requests review.

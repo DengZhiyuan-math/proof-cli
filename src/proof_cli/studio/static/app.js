@@ -920,7 +920,7 @@ function renderTurnCard(e) {
   let h = "";
   if (e.changed && e.changed.length) {
     h += `<div class="row"><b>Changed ${e.changed.length} file${e.changed.length > 1 ? "s" : ""}</b>
-      <button class="tiny sp" data-undo="${e.turn}">Undo this turn</button>
+      <button class="tiny sp" data-undo="${e.turn}" title="Restores the files this turn changed. It does not undo a claim, a split, a new node, a snapshot, anything in the project database, or a decision.">Undo this turn's file changes</button>
       <button class="tiny" data-compile="1">Compile</button></div>`;
     for (const c of e.changed) {
       const add = (c.diff.match(/^\+(?!\+\+)/gm) || []).length, del = (c.diff.match(/^-(?!--)/gm) || []).length;
@@ -941,7 +941,7 @@ function renderTurnCard(e) {
   if (other.length)
     h += `<div class="warn">Not permitted here: ${esc(other.join(", "))}. Run that step from the terminal session if it is needed.</div>`;
   if (e.out_of_scope && e.out_of_scope.length)
-    h += `<div class="warn">Changed outside the @-mentioned files: ${esc(e.out_of_scope.join(", "))}. Use Undo this turn if that was not wanted.</div>`;
+    h += `<div class="warn">Changed outside the @-mentioned files: ${esc(e.out_of_scope.join(", "))}. Use "Undo this turn's file changes" if that was not wanted.</div>`;
   if (e.exit !== 0 || e.is_error)
     h += `<div class="err">${esc((P.byId[e.provider] || {}).label || "The agent")}: ${esc(e.subtype || "exit " + e.exit)}.${e.stderr ? "\n" + esc(e.stderr) : ""}</div>`;
   const tokens = e.usage && (e.usage.in || e.usage.out) ? `${e.usage.in || 0} in / ${e.usage.out || 0} out tokens` : "";
@@ -1070,8 +1070,13 @@ function renderProviders(info) {
       Prism page for this project, wait about 10 seconds, and open it again to restart it.</div>`, "card");
     return;
   }
+  // On a proof map node: which backends are the full proof agent, which a limited assistant (#72)
+  const CAPABILITY = {
+    full: "proof agent: reads the project, its library and the web; runs proof and computation; edits this node",
+    limited: "limited assistant: reads the project and edits this node; no commands or web search",
+  };
   $("#chat-provider").innerHTML = P.list.map((p) =>
-    `<option value="${esc(p.id)}"${p.available ? "" : " disabled"} title="${esc(p.reason || "")}">${esc(p.label)}${p.available ? "" : " (not set up)"}</option>`).join("");
+    `<option value="${esc(p.id)}"${p.available ? "" : " disabled"} title="${esc(p.reason || CAPABILITY[p.proof_agent] || "")}">${esc(p.label)}${p.proof_agent === "limited" ? " (limited)" : ""}${p.available ? "" : " (not set up)"}</option>`).join("");
   let id = C.provider;
   if (!P.byId[id] || !P.byId[id].available) id = info.default;
   if (!P.byId[id] || !P.byId[id].available) id = (P.list.find((p) => p.available) || P.list[0] || {}).id;
