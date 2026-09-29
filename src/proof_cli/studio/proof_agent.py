@@ -125,10 +125,12 @@ class ProofAgentContext:
         return [f"{folder}/{name}" for folder in (root, *root.parents) for name in names] + inside
 
     def codex_args(self, sandbox: str) -> tuple[list[str], list[str]]:
-        """Codex's (before `exec`, after it): live web search, the project writable because
+        """Codex's (before `exec`, after it): no project AGENTS.md, live web search, the project writable because
         `proof` writes its database and new nodes' folders, and the network for computation.
         Codex can't confine its file writes to this folder: the brief is the contract there."""
-        exec_args = ["--sandbox", sandbox]
+        # project_doc_max_bytes=0: none of the repository's AGENTS.md, which Codex would load from
+        # the project on its own (PR #79 review); the researcher's ~/.codex/AGENTS.md is separate
+        exec_args = ["--sandbox", sandbox, "-c", "project_doc_max_bytes=0"]
         if sandbox == "workspace-write":
             exec_args += ["--add-dir", str(self.project_root), "-c", "sandbox_workspace_write.network_access=true"]
         return ["--search"], exec_args
