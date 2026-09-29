@@ -78,6 +78,67 @@
   const pageOf = (id, kind) => (kind === "imported_result" ? `/#/node/${encodeURIComponent(id)}` : `/studio/${encodeURIComponent(id)}/`);
   const version = (v) => (v === null || v === undefined ? "—" : `v${v}`);
 
+  // what each Human Review decision means, in the researcher's words
+  const DECISIONS = {
+    "acceptance:accept": "Accept this snapshot",
+    "acceptance:revision-requested": "Request a revision",
+    "acceptance:reject": "Reject (final)",
+    "promote:promote": "Promote this Claim to a Lemma",
+    "dependency_revalidation:reaffirmed": "Lightweight re-review: the proof still holds against the new version",
+    "evidence_review:trusted": "Trust this Evidence check",
+    "evidence_review:unusable": "Mark this Evidence check unusable",
+    "challenge_resolution:dismissed": "Dismiss this Challenge (a false alarm)",
+  };
+
+  // Review in the studio (#71): the snapshot under review, every frozen file read-only, its
+  // archived PDF apart from the working build, and the decisions this node offers — each sent
+  // with the binding of what this page showed, so a change since is refused (STALE_VIEW).
+  function reviewSection(view) {
+    const box = h("div", null, { class: "node-review", id: "node-review" });
+    box.append(h("h4", "Review"));
+    const proof = view.candidate_proof;
+    if (!proof) { box.append(h("p", "No snapshot has been requested for review yet.", { class: "node-hint" })); return box; }
+    if (proof.unreadable || !proof.sha256) {
+      // damaged or missing on disk: every decision on it has stopped counting (see the warnings)
+      box.append(h("p", `Snapshot v${proof.version} can't be read: its files or manifest were changed or removed.`, { class: "node-note bad" }));
+    } else {
+      box.append(h("p", `Snapshot v${proof.version} · SHA-256 ${proof.sha256.slice(0, 12)}…`, { title: proof.sha256 }));
+    }
+    const files = h("p", null, { class: "node-files" });
+    for (const [rel, text] of Object.entries(proof.files || {})) {
+      const open = h("button", rel, { type: "button", title: "Open read-only" });
+      open.onclick = () => (typeof openReadOnly === "function" ? openReadOnly(`v${proof.version} · ${rel}`, text) : null);
+      files.append(open);
+    }
+    box.append(files);
+    if (view.pdfs && view.pdfs.snapshot) box.append(h("a", "PDF archived with this snapshot", { href: `${base}/pdf/snapshot`, target: "_blank", rel: "noopener" }));
+    else box.append(h("p", "No PDF was archived with this snapshot (the build wasn't current when review was requested).", { class: "node-hint" }));
+    box.append(h("p", "The PDF pane shows the working build, which may be newer than this snapshot.", { class: "node-hint" }));
+    for (const d of view.decisions || []) {
+      const row = h("div", null, { class: "node-decision" });
+      const label = DECISIONS[`${d.kind}:${d.decision}`] || `${d.kind}: ${d.decision}`;
+      const why = h("input", null, { placeholder: "why" });
+      const record = h("button", label, { type: "button" });
+      record.onclick = async () => {
+        const on = d.dependency_id ? `${d.target_id} (${d.dependency_id})` : d.target_id;
+        if (!confirm(`${label} — on ${on}.\nIt is recorded in the node's reviews.jsonl and committed to git as your identity.`)) return;
+        const binds = ["acceptance", "promote", "dependency_revalidation"].includes(d.kind);
+        const item = { ...d, rationale: why.value, ...(binds ? { viewed_candidate_proof_sha256: proof.sha256 } : {}) };
+        try {
+          const outcome = await call("/api/decide", { decisions: [item] });
+          const result = outcome.results[0];
+          if (result.ok) tell(`Recorded: ${label}.`);
+          else tell(`${result.error.code}: ${result.error.message}${result.error.code === "STALE_VIEW" ? " (the panel has been reloaded)" : ""}`, true);
+        } catch (error) { tell(`${error.code || "error"}: ${error.message}`, true); }
+        await render();
+      };
+      row.append(record, why);
+      box.append(row);
+    }
+    if (!(view.decisions || []).length) box.append(h("p", "No decision to make on this node right now.", { class: "node-hint" }));
+    return box;
+  }
+
   const children = (text) => text.split("\n").map((line) => line.trim()).filter(Boolean).map((line) => {
     const [id, ...rest] = line.split("=");
     return { id: id.trim(), statement: rest.join("=").trim() };
@@ -123,11 +184,17 @@
         (v) => ({ candidate_proof_id: proof.id, outcome: v.outcome, run_by: v.run_by, notes: v.notes }),
         (check) => { tell(`Evidence check ${check.outcome} recorded on snapshot v${proof.version}.`); return render(); })]
         : [h("p", "No snapshot to run an Evidence check on yet.", { class: "node-hint" })]),
+      reviewSection(view),
       note,
       h("p", null, { class: "node-links" }),
     );
+    if (location.hash === "#review" && !render.scrolled) {
+      render.scrolled = true;
+      const review = panel.querySelector(".node-review");
+      if (review && review.scrollIntoView) review.scrollIntoView();
+    }
     const links = panel.querySelector(".node-links");
-    links.append(h("a", "Review and decisions", { href: `/#/node/${encodeURIComponent(node.id)}` }), " · ", h("a", "Proof map", { href: "/" }));
+    links.append(h("a", "Review history and details", { href: `/#/node/${encodeURIComponent(node.id)}` }), " · ", h("a", "Proof map", { href: "/" }));
   }
 
   render();
