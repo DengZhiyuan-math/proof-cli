@@ -130,6 +130,7 @@ def build_decision_payload(
     migrated_dependents: list[str] | None = None,
 ) -> DecisionPayload:
     """What a decision of `kind` on `target_id` is made on, as of now."""
+    proof = get_candidate_proof(store, candidate_proof_id) if candidate_proof_id else None
     return DecisionPayload(
         kind=kind,
         target_id=target_id,
@@ -141,6 +142,7 @@ def build_decision_payload(
         dependency_pins=list(dependency_pins or []),
         resolves_challenges=list(resolves_challenges or []),
         migrated_dependents=list(migrated_dependents or []),
+        key_ideas_drafted_by=proof.key_ideas_drafted_by if proof is not None else None,
     )
 
 
@@ -163,6 +165,7 @@ def _row(entry: ReviewEntry) -> dict:
         "created_at": entry.decided_at.isoformat(),
         "payload": entry.payload,
         "migrated": entry.migrated,
+        "key_ideas_drafted_by": entry.key_ideas_drafted_by,
     }
 
 
@@ -278,6 +281,7 @@ def record_decision(
         reviewer=reviewer or git_identity(store.root),
         rationale=rationale,
         payload=payload,
+        key_ideas_drafted_by=payload.key_ideas_drafted_by,
     )
     paths = [reviews_path(store.root, node_id)]
     if payload.candidate_proof_id:

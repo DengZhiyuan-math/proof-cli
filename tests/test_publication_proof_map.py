@@ -21,7 +21,7 @@ from proof_cli.publication import (
     set_publication_claim,
 )
 from proof_cli.storage import ensure_project, load_project
-from _proofs import submit_proof
+from _proofs import ensure_key_ideas, submit_proof
 
 runner = CliRunner()
 
@@ -138,6 +138,7 @@ def test_cli_publication_export_bundle_carries_live_acceptance_state(tmp_path: P
     runner.invoke(app, ["node", "create", "clm_1", "claim", "A claim", "--root", str(tmp_path)])
     runner.invoke(app, ["node", "claim", "clm_1", "--root", str(tmp_path), "--claimant", "agent_a", "--json"])
     (tmp_path / "proofs" / "clm_1" / "proof.tex").write_text("proof text")
+    ensure_key_ideas(tmp_path, "clm_1")
     runner.invoke(app, ["node", "request-review", "clm_1", "--root", str(tmp_path), "--requested-by", "agent_a", "--rationale", "scoped correctly"])
     researcher(load_project(tmp_path)).decide_acceptance("clm_1", "accept")  # in the review app
     for step in ("collaborator_ready", "supplement_ready", "paper_ready"):

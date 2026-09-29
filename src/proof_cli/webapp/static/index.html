@@ -4,7 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Proof map</title>
+  <link rel="stylesheet" href="/static/shared/vendor/katex.min.css">
   <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/shared/vendor/katex.min.js" defer></script>
+  <script src="/static/shared/mathtext.js" defer></script>
   <script src="/static/app.js" defer></script>
 </head>
 <body>
@@ -61,7 +64,7 @@
           <div class="panel" id="sec-review">
             <h2 class="ph">Awaiting review <span class="n" id="pending-count"></span></h2>
             <p class="hint pad">Tick the decisions to make, choose each outcome and rationale, then record them. Each decision is committed to git with its snapshot, as the identity shown above.</p>
-            <table id="pending"><thead><tr><th></th><th>Node</th><th>Statement and snapshot</th><th>Decision</th><th>Rationale</th></tr></thead><tbody></tbody></table>
+            <table id="pending"><thead><tr><th></th><th>Node</th><th>Statement and key ideas</th><th>Decision</th><th>Rationale</th></tr></thead><tbody></tbody></table>
             <button id="decide-batch" type="button" class="primary">Record selected decisions</button>
           </div>
           <div class="panel" id="sec-warnings">

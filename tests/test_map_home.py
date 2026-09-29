@@ -1,5 +1,7 @@
 """The proof map page's home (PR #107's instrument panel), run for real under node (issue #112).
 
+A review card shows its snapshot's 核心思路 and 难点, and a map node's hover its 核心思路 (ADR-0013).
+
 The frontier is its own, strongest signal (ADR-0008): a warning is shown beside it, never in
 its place. Tree lines name their node and how many parents share it in data attributes.
 The search box picks nodes out on the canvas and the tree (issue #116).
@@ -29,9 +31,13 @@ MAP = {"nodes": [
     _node("lem_bound", "lemma", "The partial sums are bounded", frontier=True),
     _node("ref_bw", "imported_result", "Bolzano-Weierstrass"),
 ]}
+SUMMARY = {"text": "", "drafted_by": None, "fields": {
+    "core_idea": "CORE: each partial sum is at most $\\sum 2^{-n}$", "main_steps": "STEPS: 1. compare termwise",
+    "difficulties": "HARD: the comparison needs $a_n \\ge 0$", "not_covered": "OPEN: 无"}}
 PENDING = [
     {"kind": "acceptance", "node_id": "lem_bound", "statement": "The partial sums are bounded", "decisions": ["accept", "reject"],
-     "candidate_proof": {"id": "cp-v1", "version": 1, "sha256": "a" * 64, "text": "Direct."}, "bindings": {"accept": "b" * 64, "reject": "c" * 64}},
+     "candidate_proof": {"id": "cp-v1", "version": 1, "sha256": "a" * 64, "text": "Direct.", "key_ideas": SUMMARY},
+     "bindings": {"accept": "b" * 64, "reject": "c" * 64}},
     {"kind": "reference_review", "node_id": "ref_bw", "statement": "Bolzano-Weierstrass", "decisions": ["reference-review"], "candidate_proof": None, "bindings": {}},
 ]
 
@@ -308,3 +314,68 @@ def test_the_map_bar_wraps_at_phone_width_rather_than_scrolling_sideways():
     assert "min-width: 0" in find[:find.index("}")]
     box = phone[phone.index(".find input"):]
     assert "width: 100%" in box[:box.index("}")]
+
+
+# -- the key ideas on the review card and the map (ADR-0013) ------------------------------
+
+
+def test_a_review_card_shows_the_core_idea_and_the_difficulties_not_the_latex():
+    (shown,) = _home()
+    card = shown["pendingKeyIdeas"][0]
+    # the maths is typeset by KaTeX (ADR-0013): the harness's KaTeX parses it and marks what it rendered
+    assert "核心思路" in card and "CORE: each partial sum is at most [katex: \\sum 2^{-n}]" in card
+    assert "难点" in card and "HARD: the comparison needs [katex: a_n \\ge 0]" in card
+    assert "STEPS" not in card and "OPEN" not in card  # the whole summary is in the studio's review view
+    assert "Direct." not in shown["pendingRows"][0]  # the snapshot's LaTeX isn't pasted on the card
+    assert shown["pendingKeyIdeas"][1] == ""  # an imported result's card has no summary
+
+
+def test_a_review_card_of_an_old_snapshot_says_it_has_no_summary():
+    old = {**PENDING[0], "candidate_proof": {**PENDING[0]["candidate_proof"], "key_ideas": None}}
+    (shown,) = _home(state=_state([old]))
+    assert "这个 snapshot 没有关键思路摘要" in shown["pendingRows"][0]
+    assert "Direct." not in shown["pendingRows"][0]
+
+
+def test_hovering_a_map_node_shows_its_core_idea_and_nothing_else_of_the_summary():
+    with_idea = {"nodes": [_node("lem_bound", "lemma", "The partial sums are bounded", core_idea="CORE: compare with a geometric series"),
+                           _node("lem_open", "lemma", "Not yet reviewed", core_idea=None)]}
+    (shown,) = _home(map_=with_idea)
+    hover = shown["dag"]["lem_bound"]["title"]
+    assert "核心思路" in hover and "CORE: compare with a geometric series" in hover
+    assert "难点" not in hover and "主要步骤" not in hover
+    assert shown["dag"]["lem_open"]["title"] == "Not yet reviewed"  # no summary yet: the statement, as before
+
+
+def _card_with(core):
+    item = {**PENDING[0], "candidate_proof": {**PENDING[0]["candidate_proof"], "key_ideas": {**SUMMARY, "fields": {**SUMMARY["fields"], "core_idea": core}}}}
+    (shown,) = _home(state=_state([item]))
+    return shown
+
+
+def test_a_review_cards_maths_is_rendered_inline_and_on_display():
+    shown = _card_with("Inline $x^2$ and shown $$\\int_0^1 f$$ too.")
+    assert {"tex": "x^2", "displayMode": False} in shown["katex"] and {"tex": "\\int_0^1 f", "displayMode": True} in shown["katex"]
+    assert {"class": "math", "text": "[katex: x^2]"} in shown["pendingMath"][0]
+    assert {"class": "math display", "text": "[katex display: \\int_0^1 f]"} in shown["pendingMath"][0]
+
+
+def test_a_malformed_formula_on_a_review_card_shows_as_the_text_it_was_written_as():
+    shown = _card_with("Broken $\\frac{1}{$ here, fine $y$.")
+    maths = shown["pendingMath"][0]
+    assert {"class": "math unrendered", "text": "$\\frac{1}{$"} in maths
+    assert {"class": "math", "text": "[katex: y]"} in maths  # the rest still renders
+    assert "Broken $\\frac{1}{$ here" in shown["pendingKeyIdeas"][0]
+
+
+def test_the_map_page_loads_the_vendored_katex_and_serves_only_it_from_the_studio():
+    from proof_cli.webapp.server import shared_asset
+
+    html = (STATIC / "index.html").read_text()
+    for src in ("/static/shared/vendor/katex.min.css", "/static/shared/vendor/katex.min.js", "/static/shared/mathtext.js"):
+        assert src in html, src
+    assert html.index("katex.min.js") < html.index("mathtext.js") < html.index("/static/app.js")
+    assert "http" not in html.split("<body")[0].replace("http-equiv", "")  # nothing from the network
+    assert shared_asset("vendor/katex.min.js") and shared_asset("vendor/fonts/KaTeX_Main-Regular.woff2")
+    for refused in ("app.js", "vendor/codemirror.js", "../studio/server.py", "vendor/fonts/../../server.py", "mathtext.js/../app.js"):
+        assert shared_asset(refused) is None, refused

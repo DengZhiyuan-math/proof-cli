@@ -28,4 +28,9 @@ This package still serves one folder per process, through module globals. #69 ma
 
 ## Licences
 
-prism-local is MIT, © 2026 Zhiyuan Deng (`LICENSE`). The vendored libraries keep their own licences: CodeMirror (MIT, `static/vendor/LICENSE-codemirror`) and PDF.js (Apache-2.0, `static/vendor/LICENSE-pdfjs`).
+prism-local is MIT, © 2026 Zhiyuan Deng (`LICENSE`). The vendored libraries keep their own licences: CodeMirror (MIT, `static/vendor/LICENSE-codemirror`), PDF.js (Apache-2.0, `static/vendor/LICENSE-pdfjs`) and KaTeX (MIT, `static/vendor/LICENSE-katex`).
+
+## KaTeX
+
+The key-ideas summaries (ADR-0013) typeset their `$…$` and `$$…$$` with [KaTeX](https://katex.org) **0.18.9**, vendored from the npm tarball `katex-0.18.9.tgz` (integrity `sha512-8ad9RyoKsb/g8/yLFE+KAlP+DhbCTRUNi/V9XGsxn0R+trJJltNwzcDNo0q/DEkOy5fQUQTAQyCXCYSE+OakTQ==`):
+`dist/katex.min.js` and `dist/katex.min.css` as `static/vendor/katex.min.*`, and the twenty `dist/fonts/*.woff2` as `static/vendor/fonts/`. The `.woff` and `.ttf` fallbacks the stylesheet also names are left out; every browser the studio supports loads `.woff2`. `static/mathtext.js` calls it; the map page loads the same files from `/static/shared/`. Nothing is fetched from the network. To update, replace those files from a newer tarball and change the version here.

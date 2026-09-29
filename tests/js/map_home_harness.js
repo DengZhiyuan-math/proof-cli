@@ -120,7 +120,11 @@ class FakeElement {
       return { json: async () => ({ ok: true, data }) };
     },
   };
+  // the map page's KaTeX and mathtext.js (ADR-0013)
+  const katexCalls = [];
+  context.katex = require("./katex_stub.js")(katexCalls);
   vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "../../src/proof_cli/studio/static/mathtext.js"), "utf8"), context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, "../../src/proof_cli/webapp/static/app.js"), "utf8"), context);
   listeners.DOMContentLoaded.forEach((fn) => fn());
   await new Promise((resolve) => setImmediate(resolve));
@@ -143,6 +147,7 @@ class FakeElement {
       texts: g.querySelectorAll("text").map((t) => t.textContent),
       tags: g.querySelectorAll("text.tag").map((t) => ({ text: t.textContent, classes: t.className.split(" ") })),
       label: g.attributes["aria-label"],
+      title: (g.querySelector("title") || { textContent: null }).textContent,  // what hovering it shows
     }])),
     // each tree line in drawing order
     tree: elements["map-tree"].querySelectorAll("li").map(treeLine),
@@ -164,6 +169,11 @@ class FakeElement {
     // each review card's citation line, and whether it is marked missing
     pendingCitations: elements.pending.querySelectorAll("tbody tr").map((tr) => tr.querySelectorAll(".citation").map((c) => c.textContent).join(" ")),
     pendingCitationMissing: elements.pending.querySelectorAll("tbody tr").map((tr) => tr.querySelectorAll(".citation.warning").length > 0),
+    // each review card's key ideas (ADR-0013): the text of its .key-ideas block
+    pendingKeyIdeas: elements.pending.querySelectorAll("tbody tr").map((tr) => tr.querySelectorAll(".key-ideas").map((k) => k.textContent).join(" ")),
+    // the maths spans on the review cards, and every formula handed to KaTeX so far
+    pendingMath: elements.pending.querySelectorAll("tbody tr").map((tr) => tr.querySelectorAll("span.math").map((m) => ({ class: m.className, text: m.textContent }))),
+    katex: katexCalls,
     confirmShown: !elements.confirm.hidden,
     posted,
   });

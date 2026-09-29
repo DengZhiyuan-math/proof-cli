@@ -75,6 +75,8 @@ class DecisionPayload(BaseModel):
     resolves_challenges: list[str] = Field(default_factory=list)
     # a dependent_migration: the nodes it moved off the withdrawn citation (#20)
     migrated_dependents: list[str] = Field(default_factory=list)
+    # who wrote the key-ideas summary of the snapshot decided on (ADR-0013), as its record says
+    key_ideas_drafted_by: str | None = None
 
 
 class ReviewEntry(BaseModel):
@@ -92,6 +94,9 @@ class ReviewEntry(BaseModel):
     payload: DecisionPayload | None = None
     # moved here from the SQLite review_history table (ADR-0010)
     migrated: bool = False
+    # the key-ideas provenance of the snapshot decided on (ADR-0013), copied from the payload,
+    # which the decision's binding covers; None for a decision on no snapshot
+    key_ideas_drafted_by: str | None = None
 
 
 # (kind, decision value) -> (object_type, recorded state)
