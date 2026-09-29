@@ -134,14 +134,12 @@ main { flex: 1; min-width: 0; overflow: auto; }
   display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px; border-radius: 11px;
   font-size: 11.5px; font-weight: 500; color: var(--label-2); background: var(--fill); white-space: nowrap; vertical-align: middle;
 }
-.chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; opacity: .9; }
-.state-chip { margin-left: 4px; height: 19px; font-size: 11px; padding: 0 7px; }
-.chip.frontier { color: var(--blue); background: color-mix(in srgb, var(--blue) 12%, transparent); }
-.chip.accepted, .chip.reviewed { color: var(--green); background: color-mix(in srgb, var(--green) 12%, transparent); }
-.chip.review-needed, .chip.revision-requested, .chip.potentially-stale, .chip.challenged, .chip.unverifiable, .warn-chip { color: var(--orange); background: color-mix(in srgb, var(--orange) 13%, transparent); }
-.chip.rejected, .chip.no-longer-callable { color: var(--red); background: color-mix(in srgb, var(--red) 11%, transparent); }
-.chip.claimed { color: var(--label-2); }
-.chip.blocked, .chip.current, .chip.unreviewed, .chip.open { color: var(--label-3); }
+.state-chip { margin-left: 4px; height: 20px; font-size: 11px; padding: 0 7px 0 3px; }
+/* a state chip: the map's icon for the state, its word, its colour */
+.chip[class*="state-"] { gap: 5px; padding-left: 4px; color: var(--c-text); background: color-mix(in srgb, var(--c) 13%, transparent); font-weight: 600; }
+.chip.state-open, .chip.state-blocked { background: var(--fill); font-weight: 500; }
+.chip-icon { width: 16px; height: 16px; flex: none; }
+.state-chip .chip-icon { width: 14px; height: 14px; }
 .shared-chip { font-style: italic; }
 
 /* ---------- the map: a Freeform-style canvas */
