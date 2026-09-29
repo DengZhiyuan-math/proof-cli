@@ -676,11 +676,38 @@ async function showNode(nodeId) {
     $("node-proof-meta").textContent = "No snapshot has been requested for review yet.";
     $("node-proof-exact").textContent = "";
   }
-  $("node-evidence").replaceChildren(...view.evidence_checks.map((c) => el("li", `${c.id}: ${c.outcome} — ${c.notes || "no notes"} (run by ${c.run_by})`)));
+  $("node-evidence").replaceChildren(...view.evidence_checks.map(evidenceItem));
   const decisions = $("node-decisions").querySelector("tbody");
   decisions.replaceChildren(...view.decisions.map((d) => decisionRow(d, proof)));
   if (!view.decisions.length) decisions.append(row(["No decision to make on this node right now.", "", "", ""]));
   $("node-history").replaceChildren(...view.history.filter((r) => r.kind).map((r) => el("li", `${r.updated_at} · ${r.kind} · ${r.decision} · ${r.reviewer_id}${r.key_ideas_drafted_by ? ` · key ideas: ${KEY_IDEAS_BY[r.key_ideas_drafted_by] || r.key_ideas_drafted_by}` : ""}${r.rationale ? ` — ${r.rationale}` : ""}`)));
+}
+
+// An Evidence check names the Review snapshot it checked (issue #122): its version and a short
+// SHA-256 (in full on hover), a link to the snapshot shown above when it is the node's current one,
+// or where it is frozen when it is older, and a warning chip when it is older or can't be read.
+function evidenceItem(c) {
+  const li = el("li", `${c.outcome} — ${c.notes || "no notes"} (run by ${c.run_by}) · `);
+  const s = c.snapshot;
+  if (!s) { li.append(el("span", `on ${c.candidate_proof_id}`, { class: "mono" })); return li; }
+  const hash = s.sha256 ? ` · ${s.sha256.slice(0, 12)}…` : "";
+  const title = `${s.id}${s.sha256 ? ` · SHA-256 ${s.sha256}` : ""}`;
+  if (s.current) {
+    const link = el("a", `snapshot v${s.version}${hash}`, { href: location.hash || "#", class: "mono evidence-snap", title });
+    link.addEventListener("click", (event) => { event.preventDefault(); $("node-snapshot")?.scrollIntoView?.({ behavior: "smooth", block: "start" }); });
+    li.append(link);
+  } else {
+    li.append(el("span", `snapshot v${s.version}${hash}`, { class: "mono evidence-snap", title }), " · frozen at ", el("code", s.location));
+  }
+  const marks = [];
+  if (!s.current) marks.push(`for an older version v${s.version}`);
+  if (s.unreadable) marks.push("snapshot unreadable");
+  for (const text of marks) {
+    const chip = stateChip("unverifiable", text, text);  // the map's attention triangle and colour
+    chip.classList.add("state-chip", "warning");
+    li.append(" ", chip);
+  }
+  return li;
 }
 
 async function route() {

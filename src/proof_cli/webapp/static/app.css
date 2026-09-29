@@ -304,6 +304,9 @@ td a { font-family: var(--mono); font-size: 12px; }
 .statement, .rendered { font-family: var(--serif); font-size: 16px; line-height: 1.5; white-space: pre-wrap; }
 #node-page .card p { margin: 6px 0; }
 #node-folder code { color: var(--label-2); }
+#node-evidence .evidence-snap { font-size: 11.5px; cursor: help; }
+#node-evidence a.evidence-snap { cursor: pointer; }
+#node-evidence code { color: var(--label-2); }
 #node-proof-exact { max-height: 420px; overflow: auto; }
 #node-proof-exact:empty, #node-pdfs:empty, #node-claim:empty { display: none; }
 #node-page .card ul:empty, #warnings:empty { padding-left: 0; }

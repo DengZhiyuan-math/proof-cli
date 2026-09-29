@@ -1,12 +1,14 @@
 """The map page is the one human entry, and a local node's page is its studio (ADR-0011, #70)."""
 
+import shutil
 from pathlib import Path
 
 import pytest
 
 from _proofs import KEY_IDEAS, write_key_ideas
 from _review_client import DirectClient
-from proof_cli.proof_map import claim_node, get_active_claim, get_node, get_workflow_state, list_nodes
+from proof_cli.authority import candidate_proof_sha256
+from proof_cli.proof_map import claim_node, get_active_claim, get_node, get_workflow_state, list_evidence_checks, list_nodes
 from proof_cli.storage import ensure_project
 
 WEBAPP = Path(__file__).resolve().parents[1] / "src" / "proof_cli" / "webapp"
@@ -155,6 +157,54 @@ def test_a_challenge_and_an_evidence_check_from_the_node_panel(page):
     _ok(client.post("/api/nodes", {"node_id": "c2", "kind": "claim", "statement": "other"}))
     assert _refused(client.post("/api/node/c2/evidence", {"candidate_proof_id": v1["id"], "outcome": "passed"})) == "NOT_THIS_NODE"
     assert _refused(client.post("/api/node/c1/frobnicate", {})) == "NOT_FOUND"
+
+
+# -- each Evidence check names the Review snapshot it checked (issue #122) -----------------
+
+
+def _two_snapshots(store, client):
+    _ok(client.post("/api/nodes", {"node_id": "c1", "kind": "claim", "statement": "C"}))
+    write_key_ideas(store, "c1")
+    v1 = _ok(client.post("/api/node/c1/request-review", {"rationale": "scoped"}))
+    (store.root / "proofs" / "c1" / "proof.tex").write_text("a second version\n")
+    v2 = _ok(client.post("/api/node/c1/request-review", {"rationale": "scoped"}))
+    return v1, v2
+
+
+def test_an_evidence_check_names_the_snapshot_it_checked(page):
+    """An Evidence record binds the snapshot it names, and the node's page shows that snapshot's version and hash."""
+    store, client = page
+    v1, v2 = _two_snapshots(store, client)
+    old = _ok(client.post("/api/node/c1/evidence", {"candidate_proof_id": v1["id"], "outcome": "failed", "run_by": "sage"}))
+    new = _ok(client.post("/api/node/c1/evidence", {"candidate_proof_id": v2["id"], "outcome": "passed", "run_by": "lean"}))
+
+    # the record binds the snapshot it was posted with, and only that one
+    assert [c.id for c in list_evidence_checks(store, v1["id"])] == [old["id"]]
+    assert [c.id for c in list_evidence_checks(store, v2["id"])] == [new["id"]]
+
+    checks = {c["id"]: c for c in _ok(client.get("/api/node/c1"))["evidence_checks"]}
+    assert set(checks) == {old["id"], new["id"]}  # a check on an older snapshot is still listed
+    for check, proof, current in ((checks[old["id"]], v1, False), (checks[new["id"]], v2, True)):
+        snapshot = check["snapshot"]
+        assert check["candidate_proof_id"] == snapshot["id"] == proof["id"]
+        assert snapshot["version"] == proof["version"]
+        assert snapshot["sha256"] == candidate_proof_sha256(store, proof["id"]) is not None
+        assert snapshot["current"] is current and snapshot["unreadable"] is False
+        assert snapshot["location"] == f"proofs/c1/snapshots/v{proof['version']}/"
+    assert checks[old["id"]]["snapshot"]["sha256"] != checks[new["id"]]["snapshot"]["sha256"]
+
+
+def test_an_evidence_check_on_an_unreadable_snapshot_still_shows(page):
+    store, client = page
+    v1, _ = _two_snapshots(store, client)
+    check = _ok(client.post("/api/node/c1/evidence", {"candidate_proof_id": v1["id"], "outcome": "passed", "run_by": "lean"}))
+    shutil.rmtree(store.root / "proofs" / "c1" / "snapshots" / "v1")
+
+    status, body = client.get("/api/node/c1")
+    assert status == 200, body
+    (shown,) = [c for c in body["data"]["evidence_checks"] if c["id"] == check["id"]]
+    assert shown["snapshot"]["unreadable"] is True and shown["snapshot"]["version"] == 1
+    assert shown["snapshot"]["sha256"] == v1["sha256"]  # what it was frozen as, still named
 
 
 # -- no more launching prism-local --------------------------------------------------

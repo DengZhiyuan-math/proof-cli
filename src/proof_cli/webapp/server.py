@@ -24,6 +24,7 @@ from contextlib import contextmanager
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
+from pathlib import PurePosixPath
 from typing import Any, Callable, Iterator
 from urllib.parse import unquote, urlsplit
 
@@ -104,6 +105,27 @@ def _proof_view(store: ProjectStore, proof) -> dict | None:
         # fields and who drafted it; None for an older snapshot that froze none
         "key_ideas": summary,
     }
+
+
+def _evidence_checks(store: ProjectStore, node_id: str, current) -> list[dict]:
+    """Every Evidence check on the node's snapshots, newest snapshot first, each naming the snapshot it
+    checked (issue #122): its version, its SHA-256, where it is frozen, whether it is the node's
+    current snapshot and whether it can still be read (#92: a missing or unreadable one is shown, marked)."""
+    checks = []
+    for proof in sorted(proof_map.list_candidate_proofs(store, node_id), key=lambda p: p.version, reverse=True):
+        now = candidate_proof_sha256(store, proof.id)
+        path = PurePosixPath(proof.file_path)
+        snapshot = {
+            "id": proof.id,
+            "version": proof.version,
+            # what it hashes to now, or, once it can't be read, what it was frozen as
+            "sha256": now or proof.sha256,
+            "unreadable": now is None,
+            "current": current is not None and proof.id == current.id,
+            "location": f"{path.parent}/" if path.name == SNAPSHOT_MANIFEST else str(path),
+        }
+        checks += [{**check.model_dump(mode="json"), "snapshot": snapshot} for check in proof_map.list_evidence_checks(store, proof.id)]
+    return checks
 
 
 def _working_key_ideas(store: ProjectStore, node_id: str) -> dict:
@@ -404,7 +426,7 @@ class ReviewApp:
         if node is None:
             raise RequestError(HTTPStatus.NOT_FOUND, "NODE_NOT_FOUND", f"proof map node {node_id} not found")
         proof = get_current_candidate_proof(store, node_id)
-        checks = [check.model_dump(mode="json") for check in proof_map.list_evidence_checks(store, proof.id)] if proof else []
+        checks = _evidence_checks(store, node_id, proof)
         dependencies = proof_map.dependency_details(store, node_id)
         challenges = proof_map.list_challenges(store, target_node_id=node_id)
         warnings = proof_map.list_integrity_warnings(store)
