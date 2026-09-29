@@ -90,8 +90,9 @@ def test_exchange_round_trips_collaboration_state_across_two_users(tmp_path: Pat
     cmd_proof_asset_publish(asset.model_dump_json(), root=source_root, review_action="approve", reviewer="alice", notes="approved for team use")
     cmd_publication_set(
         "thm_main",
-        "paper_ready",
+        "collaborator_ready",  # a theorem contract has no acceptance axis, so it goes no further (#30)
         root=source_root,
+        object_type="theorem_contract",
         title="Publication Claim",
         section_placement="Section 1",
         reason="ready for paper export",
