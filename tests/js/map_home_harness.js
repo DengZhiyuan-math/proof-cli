@@ -1,8 +1,12 @@
 // Runs the proof map page's real home (src/proof_cli/webapp/static/app.js) against a small fake DOM.
 // argv[2]: JSON {state, map, steps: [...]}. Each step acts on the page, then the page is read back;
 // prints one reading per step. Steps: {view: "dag"|"tree"}, {root: node_id} (the tree's root),
-// {tick: node_id, on: bool}, {choose: node_id, value}, {record: true} (presses Record, then confirms).
+// {tick: node_id, on: bool}, {choose: node_id, value}, {record: true} (presses Record, then confirms),
+// {find: text} (types into the search box), {key: "Enter"|"Escape"|"/"|"f"} (a key pressed where the focus
+// is: the focused element hears it first, then the document), {blur: true} (the focus goes back to the page).
 const fs = require("fs"), path = require("path"), vm = require("vm");
+
+const focus = { on: null, body: null };
 
 // one compound selector: tag, .class and [attr=value] parts, e.g. input[type=checkbox] or span.chip
 function matches(node, simple) {
@@ -55,6 +59,9 @@ class FakeElement {
   replaceChildren(...items) { this._text = ""; this.children = this._adopt(items); }
   remove() { if (this.parent) this.parent.children = this.parent.children.filter((c) => c !== this); }
   get firstChild() { return this.children[0]; }
+  focus() { focus.on = this; }
+  blur() { if (focus.on === this) focus.on = focus.body; }
+  select() {}
   addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); }
   dispatch(type, event = {}) { return Promise.all((this.listeners[type] || []).map((fn) => fn({ target: this, preventDefault() {}, stopPropagation() {}, ...event }))); }
   _all() { return this.children.flatMap((c) => [c, ...c._all()]); }
@@ -78,20 +85,26 @@ class FakeElement {
     "home", "node-page", "confirm", "confirm-decisions", "confirm-record", "confirm-cancel",
     "pending", "pending-count", "decide-batch", "warnings",
     "view-dag", "view-tree", "tree-root", "tree-root-label", "map-caption", "map-dag", "map-tree", "dag-svg",
-    "zoom-in", "zoom-out", "zoom-fit", "zoom-tidy", "zoom-level"];
-  const tags = { "tree-root": "select", "dag-svg": "svg", "decide-batch": "button", pending: "table", warnings: "ul" };
+    "zoom-in", "zoom-out", "zoom-fit", "zoom-tidy", "zoom-level", "map-find", "map-find-count"];
+  const tags = { "tree-root": "select", "dag-svg": "svg", "decide-batch": "button", pending: "table", warnings: "ul", "map-find": "input" };
   const elements = Object.fromEntries(ids.map((id) => [id, new FakeElement(tags[id] || "div")]));
+  Object.assign(elements["map-dag"], { clientWidth: 800, clientHeight: 600 });  // the canvas has a size, so it can be fitted and panned
+  focus.body = focus.on = new FakeElement("body");
+  // an element the page drew itself (the DAG's <g id="dag-view">) is found by its id too
+  const byId = (id) => elements[id] || Object.values(elements).flatMap((e) => e._all()).find((n) => n.getAttribute("id") === id) || null;
   elements.pending.append(new FakeElement("thead"), new FakeElement("tbody"));
   elements.confirm.hidden = true;
   const listeners = {};
+  const hear = (type, fn) => { (listeners[type] ||= []).push(fn); };
   const location = { hash: "", href: "" };
   const posted = [];
   const context = {
     console, location, setTimeout() {}, Node: FakeElement,
     document: {
-      title: "", getElementById: (id) => elements[id] || null,
+      title: "", getElementById: byId,
+      get activeElement() { return focus.on; }, get body() { return focus.body; },
       createElement: (tag) => new FakeElement(tag), createElementNS: (_, tag) => new FakeElement(tag),
-      addEventListener: (type, fn) => { listeners[type] = fn; },
+      addEventListener: hear,
       querySelectorAll: () => [],
     },
     window: { addEventListener() {}, removeEventListener() {} },
@@ -103,7 +116,7 @@ class FakeElement {
   };
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, "../../src/proof_cli/webapp/static/app.js"), "utf8"), context);
-  listeners.DOMContentLoaded();
+  listeners.DOMContentLoaded.forEach((fn) => fn());
   await new Promise((resolve) => setImmediate(resolve));
 
   const pendingRow = (id) => elements.pending.querySelectorAll("tbody tr").find((tr) => tr.dataset.target === id);
@@ -111,6 +124,7 @@ class FakeElement {
   // a tree line, read the way PR #104's harness reads it: its attributes, its own chips, its children
   const treeLine = (li) => ({
     id: li.getAttribute("data-node-id"),
+    dim: li.classList.contains("dim"),
     sharedBy: li.getAttribute("data-shared-by"),
     chips: li.children.filter((c) => c.tagName === "SPAN" && c.classList.contains("state-chip")).map((c) => c.textContent),
     children: li.children.filter((c) => c.tagName === "UL").flatMap((ul) => ul.children.filter((c) => c.tagName === "LI").map((c) => c.getAttribute("data-node-id"))),
@@ -126,6 +140,13 @@ class FakeElement {
     }])),
     // each tree line in drawing order
     tree: elements["map-tree"].querySelectorAll("li").map(treeLine),
+    // the search box: what it holds, its count, whether it has the focus
+    find: { value: elements["map-find"].value, count: elements["map-find-count"].textContent, focused: focus.on === elements["map-find"] },
+    // where the canvas looks: the scene's transform, and each node's centre on the scene
+    scene: (byId("dag-view") || { getAttribute: () => null }).getAttribute("transform"),
+    at: Object.fromEntries(elements["dag-svg"].querySelectorAll("g.node").map((g) => [nodeIdOf(g), g.getAttribute("transform")])),
+    filtering: elements["dag-svg"].classList.contains("filtering"),
+    href: location.href,
     pendingRows: elements.pending.querySelectorAll("tbody tr").map((tr) => tr.textContent),
     pendingCount: elements["pending-count"].textContent,
     warnings: elements.warnings.querySelectorAll("li").map((li) => li.textContent),
@@ -134,7 +155,18 @@ class FakeElement {
     posted,
   });
   const readings = [read()];
+  // a key pressed where the focus is: the focused element hears it first, then it bubbles to the document
+  const press = async (key) => {
+    const target = focus.on;
+    const event = { key, target, metaKey: false, ctrlKey: false, altKey: false, defaultPrevented: false,
+      preventDefault() { this.defaultPrevented = true; }, stopPropagation() {} };
+    for (const fn of target.listeners.keydown || []) await fn(event);
+    for (const fn of listeners.keydown || []) await fn(event);
+  };
   for (const step of scenario.steps || []) {
+    if (step.find !== undefined) { elements["map-find"].focus(); elements["map-find"].value = step.find; await elements["map-find"].dispatch("input"); }
+    if (step.key) await press(step.key);
+    if (step.blur) focus.on = focus.body;
     if (step.view) await elements[`view-${step.view}`].dispatch("click");
     if (step.root) { elements["tree-root"].value = step.root; await elements["tree-root"].dispatch("change"); }
     if (step.tick) { pendingRow(step.tick).querySelector("input[type=checkbox]").checked = step.on !== false; }
