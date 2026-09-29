@@ -7,9 +7,11 @@ import shutil
 import sqlite3
 from pathlib import Path
 import uuid
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from typing import Any, Iterator
 
 from .authority import (
     AuthorityWarning,
@@ -45,6 +47,7 @@ from .storage import (
     ProjectStore,
     memoized_read,
     read_scoped,
+    scoped_memo,
     append_event,
     get_active_claim,
     get_candidate_proof as _get_candidate_proof,
@@ -1840,18 +1843,119 @@ def dismiss_challenge(
     )
 
 
-@memoized_read
+@dataclass
+class UpstreamVisits:
+    """How many nodes the integrity walk expanded (read its dependencies) while counted (#108)."""
+
+    count: int = 0
+
+
+_UPSTREAM_VISITS: ContextVar[UpstreamVisits | None] = ContextVar("proof_cli_upstream_visits", default=None)
+
+
+@contextmanager
+def counting_upstream_visits() -> Iterator[UpstreamVisits]:
+    """Count the upstream walk's node visits for the duration: a machine-independent cost of a read."""
+    counter = UpstreamVisits()
+    token = _UPSTREAM_VISITS.set(counter)
+    try:
+        yield counter
+    finally:
+        _UPSTREAM_VISITS.reset(token)
+
+
+def _visited_upstream() -> None:
+    counter = _UPSTREAM_VISITS.get()
+    if counter is not None:
+        counter.count += 1
+
+
+def _own_trust_problem(store: ProjectStore, node_id: str) -> bool:
+    """Whether `node_id` itself starts an integrity problem: an open Challenge on it, an Imported
+    result found no longer callable, or one of its own dependency edges pinned to an interface
+    its target no longer offers. Looks at the node and its own edges only, never further up."""
+    _visited_upstream()
+    if has_open_challenge(store, node_id):
+        return True
+    node = get_node(store, node_id)
+    if node is None:
+        return False
+    if node.kind == ProofMapNodeKind.imported_result and _no_longer_callable(store, node_id):
+        return True  # a citation found wanting: whatever rests on it needs a second look
+    for dependency_id in node.dependencies:
+        pin = get_dependency_pin(store, node_id, dependency_id)
+        if pin is not None and not dependency_pin_is_current(store, pin):
+            return True
+    return False
+
+
+_DOWNSTREAM_OF_PROBLEM = "downstream_of_challenge_or_stale_pin"
+
+
 def _is_downstream_of_challenge_or_stale_pin(store: ProjectStore, node_id: str) -> bool:
     """Whether `node_id` is itself Challenged, or reachable (via dependency edges,
     transitively) from a Challenged node or a dependency edge whose pin no
     longer matches its target's current accepted interface.
 
     Pure graph reachability over persisted Challenge and DependencyPin
-    records — nothing is stored per node. See ADR-0004 point 4. Walked with
-    an explicit worklist, not recursion: a long-running project's dependency
-    chain can run hundreds of nodes deep, well past Python's default
-    recursion limit.
+    records — nothing is stored per node. See ADR-0004 point 4.
+
+    One topological pass per read (#108): a depth-first walk in dependency
+    order that records each node's answer in the read scope's memo, so a
+    dependent asked about later reuses its dependencies' answers instead of
+    walking above them again. Over a whole map, every node is visited once
+    per read. Walked with an explicit stack, not recursion: a long-running
+    project's dependency chain can run hundreds of nodes deep, well past
+    Python's default recursion limit.
     """
+    memo: dict[str, bool] = scoped_memo(store, _DOWNSTREAM_OF_PROBLEM)
+    if node_id in memo:
+        return memo[node_id]
+
+    stack: list[tuple[str, Iterator[str]]] = []  # the path being walked, each with its dependencies still to see
+    on_path: set[str] = set()
+
+    def found() -> bool:
+        for path_id, _ in stack:  # everything on the path rests on the problem just found
+            memo[path_id] = True
+        return True
+
+    def enter(current_id: str) -> bool:
+        """Visit a node; whether its own problem already settles the answer."""
+        if _own_trust_problem(store, current_id):
+            memo[current_id] = True
+            return True
+        node = get_node(store, current_id)
+        stack.append((current_id, iter(node.dependencies if node is not None else [])))
+        on_path.add(current_id)
+        return False
+
+    if enter(node_id):
+        return True
+    while stack:
+        current_id, dependencies = stack[-1]
+        dependency_id = next(dependencies, None)
+        if dependency_id is None:  # nothing above it is a problem
+            stack.pop()
+            on_path.discard(current_id)
+            memo[current_id] = False
+            continue
+        if dependency_id in memo:
+            if memo[dependency_id]:
+                return found()
+            continue
+        if dependency_id in on_path:
+            # A dependency cycle, which no service creates: answer by plain reachability instead.
+            for path_id, _ in stack:
+                memo.pop(path_id, None)
+            return _reaches_trust_problem(store, node_id)
+        if enter(dependency_id):
+            return found()
+    return memo[node_id]
+
+
+def _reaches_trust_problem(store: ProjectStore, node_id: str) -> bool:
+    """Plain reachability from `node_id` to any node with its own trust problem, remembering nothing."""
     visited: set[str] = set()
     pending = [node_id]
     while pending:
@@ -1859,21 +1963,11 @@ def _is_downstream_of_challenge_or_stale_pin(store: ProjectStore, node_id: str) 
         if current_id in visited:
             continue
         visited.add(current_id)
-
-        if has_open_challenge(store, current_id):
+        if _own_trust_problem(store, current_id):
             return True
-
         node = get_node(store, current_id)
-        if node is None:
-            continue
-        if node.kind == ProofMapNodeKind.imported_result and _no_longer_callable(store, current_id):
-            return True  # a citation found wanting: whatever rests on it needs a second look
-
-        for dependency_id in node.dependencies:
-            pin = get_dependency_pin(store, current_id, dependency_id)
-            if pin is not None and not dependency_pin_is_current(store, pin):
-                return True
-            pending.append(dependency_id)
+        if node is not None:
+            pending.extend(node.dependencies)
     return False
 
 
