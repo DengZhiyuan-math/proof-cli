@@ -1109,8 +1109,26 @@ def reference_review(reference_id: str, action: str = typer.Argument(""), root: 
 
 
 @memory_app.command("list")
-def memory_list(root: str = ROOT_OPTION, layer: str = "", node_id: str = "", theorem_id: str = "", goal_id: str = "") -> None:
-    typer.echo(cmd_memory_list(_root(root), layer=layer, node_id=node_id, theorem_id=theorem_id, goal_id=goal_id))
+def memory_list(
+    root: str = ROOT_OPTION,
+    layer: str = "",
+    node_id: str = "",
+    candidate_proof_id: str = "",
+    review_id: str = "",
+    theorem_id: str = typer.Option("", help="Legacy scope (read-only, ADR-0012)"),
+    goal_id: str = typer.Option("", help="Legacy scope (read-only, ADR-0012)"),
+) -> None:
+    typer.echo(
+        cmd_memory_list(
+            _root(root),
+            layer=layer,
+            node_id=node_id,
+            candidate_proof_id=candidate_proof_id,
+            review_id=review_id,
+            theorem_id=theorem_id,
+            goal_id=goal_id,
+        )
+    )
 
 
 @memory_app.command("show")
@@ -1126,29 +1144,27 @@ def memory_add(
     node_id: str = "",
     candidate_proof_id: str = "",
     review_id: str = "",
-    theorem_id: str = "",
-    goal_id: str = "",
-    obligation_id: str = "",
-    blocker_id: str = "",
     route_id: str = "",
     importance: str = "medium",
     status: str = "",
     source: str = "manual",
     tag: list[str] = typer.Option(None, "--tag"),
     notes: str = "",
+    json_output: bool = typer.Option(False, "--json"),
 ) -> None:
-    typer.echo(
-        cmd_memory_add(
+    """Record a memory entry, scoped to a proof-map node (and one of its Candidate proofs or reviews).
+
+    The scope is checked against the map, and a bad one writes nothing. The
+    legacy theorem/goal/obligation/blocker scope is read-only (ADR-0012).
+    """
+    try:
+        output = cmd_memory_add(
             content,
             _root(root),
             layer=layer,
             node_id=node_id,
             candidate_proof_id=candidate_proof_id,
             review_id=review_id,
-            theorem_id=theorem_id,
-            goal_id=goal_id,
-            obligation_id=obligation_id,
-            blocker_id=blocker_id,
             route_id=route_id,
             importance=importance,
             status=status,
@@ -1156,7 +1172,10 @@ def memory_add(
             tag=tag,
             notes=notes,
         )
-    )
+    except ProofMapError as exc:
+        _emit_node_error(exc, json_output, command="memory.add")
+        raise typer.Exit(code=1)
+    typer.echo(dump_envelope(success_envelope("memory.add", json.loads(output))) if json_output else output)
 
 
 @publication_app.command("list")
@@ -1424,8 +1443,17 @@ def exchange_import(bundle_json: str, root: str = ROOT_OPTION) -> None:
 
 
 @handoff_app.command("create")
-def handoff_create(root: str = ROOT_OPTION, note: str = "") -> None:
-    typer.echo(cmd_handoff_create(_root(root), note=note))
+def handoff_create(
+    root: str = ROOT_OPTION,
+    note: str = "",
+    node_id: str = typer.Option("", help="Scope the handoff's memory to this node, its Candidate proofs, reviews and derived_from parent"),
+) -> None:
+    try:
+        output = cmd_handoff_create(_root(root), note=note, node_id=node_id)
+    except ProofMapError as exc:
+        _emit_node_error(exc, False, command="handoff.create")
+        raise typer.Exit(code=1)
+    typer.echo(output)
 
 
 @handoff_app.command("inspect")

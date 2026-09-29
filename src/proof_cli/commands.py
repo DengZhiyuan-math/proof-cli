@@ -148,7 +148,7 @@ from .collaboration import (
     summarize_state as summarize_collaboration_state,
     upsert_contributor,
 )
-from .memory import MemoryArtifact, MemoryLayer, list_memory_artifacts, record_memory
+from .memory import MemoryArtifact, MemoryLayer, append_memory_artifact, list_memory_artifacts
 from .recommendations import recommend_cross_project_assets
 from .proof_state import (
     add_blocker,
@@ -237,6 +237,13 @@ def _format_reference_line(reference: ReferenceRecord) -> str:
 
 def _format_memory_line(artifact: MemoryArtifact) -> str:
     scope_bits = []
+    if artifact.scope.node_id:
+        scope_bits.append(f"node={artifact.scope.node_id}")
+    if artifact.scope.candidate_proof_id:
+        scope_bits.append(f"candidate_proof={artifact.scope.candidate_proof_id}")
+    if artifact.scope.review_id:
+        scope_bits.append(f"review={artifact.scope.review_id}")
+    # legacy scope (ADR-0012): read-only, shown for older entries
     if artifact.scope.theorem_id:
         scope_bits.append(f"theorem={artifact.scope.theorem_id}")
     if artifact.scope.goal_id:
@@ -1798,10 +1805,6 @@ def cmd_memory_add(
     node_id: str = "",
     candidate_proof_id: str = "",
     review_id: str = "",
-    theorem_id: str = "",
-    goal_id: str = "",
-    obligation_id: str = "",
-    blocker_id: str = "",
     route_id: str = "",
     importance: str = "medium",
     status: str = "",
@@ -1809,18 +1812,20 @@ def cmd_memory_add(
     tag: list[str] | None = None,
     notes: str = "",
 ) -> str:
+    """Write one memory entry, node-scoped and checked against the proof map (#45).
+
+    Raises `ProofMapError` for a scope that doesn't check out; nothing is
+    written then. The legacy theorem/goal/obligation/blocker scope is
+    read-only (ADR-0012), so this takes none of it.
+    """
     store = get_store(root)
-    artifact = record_memory(
+    artifact = append_memory_artifact(
         store,
         layer,
         content,
         node_id=node_id or None,
         candidate_proof_id=candidate_proof_id or None,
         review_id=review_id or None,
-        theorem_id=theorem_id or None,
-        goal_id=goal_id or None,
-        obligation_id=obligation_id or None,
-        blocker_id=blocker_id or None,
         route_id=route_id or None,
         importance=importance,
         status=status or None,
@@ -1836,6 +1841,8 @@ def cmd_memory_list(
     *,
     layer: str = "",
     node_id: str = "",
+    candidate_proof_id: str = "",
+    review_id: str = "",
     theorem_id: str = "",
     goal_id: str = "",
 ) -> str:
@@ -1843,6 +1850,8 @@ def cmd_memory_list(
         get_store(root),
         layer=layer or None,
         node_id=node_id or None,
+        candidate_proof_id=candidate_proof_id or None,
+        review_id=review_id or None,
         theorem_id=theorem_id or None,
         goal_id=goal_id or None,
     )
@@ -1882,8 +1891,8 @@ def cmd_exchange_import(bundle_json: str, root: str | Path = ".") -> str:
     return report_to_json(report)
 
 
-def cmd_handoff_create(root: str | Path = ".", *, note: str = "") -> str:
-    snapshot = create_snapshot(get_store(root), note=note)
+def cmd_handoff_create(root: str | Path = ".", *, note: str = "", node_id: str = "") -> str:
+    snapshot = create_snapshot(get_store(root), note=note, node_id=node_id or None)
     bundle = export_exchange_bundle(get_store(root), note=note or snapshot.handoff_note)
     return bundle_to_json(bundle)
 
