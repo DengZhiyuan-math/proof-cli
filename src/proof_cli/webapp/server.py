@@ -72,7 +72,10 @@ def _proof_view(store: ProjectStore, proof) -> dict | None:
     if path.name == SNAPSHOT_MANIFEST:
         frozen = snapshot_folder_files(path.parent)
     else:
-        frozen = {"proof.tex": path.read_bytes()} if path.is_file() else None
+        try:
+            frozen = {"proof.tex": path.read_bytes()}
+        except OSError:  # gone, or not readable by this process
+            frozen = None
     # a damaged or missing snapshot still shows: its page, its (now void) decisions, its warnings
     files = {rel: data.decode("utf-8", errors="replace") for rel, data in (frozen or {}).items()}
     return {

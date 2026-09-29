@@ -324,3 +324,66 @@ def test_the_page_offers_no_decision_on_an_unreadable_snapshot_and_says_why_one_
     (result,) = client.post("/api/decide", {"decisions": [accept]})[1]["data"]["results"]
     assert result["ok"] is False and result["error"]["code"] == "SNAPSHOT_UNREADABLE"
     assert not (folder / "reviews.jsonl").exists()
+
+
+# -- PR #95 review: a snapshot file the process can't read is unreadable, not a crash ----------
+
+needs_permissions = pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0, reason="root reads a chmod 000 file")
+
+
+@pytest.fixture
+def unreadable():
+    """Make a file unreadable (chmod 000) for the test, and readable again after it."""
+    made: list[Path] = []
+
+    def make(path: Path) -> None:
+        path.chmod(0)
+        made.append(path)
+
+    yield make
+    for path in made:
+        path.chmod(0o644)
+
+
+def _old_snapshot(store, text: bytes = b"\\documentclass{amsart}\\begin{document}old\\end{document}\n") -> Path:
+    create_node(store, node_id="old", kind="claim", statement="s")
+    path = store.root / "proofs" / "old" / "snapshots" / "v1.tex"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(text)
+    insert_candidate_proof(store, CandidateProofRecord(
+        id="cp-old", node_id="old", version=1, file_path="proofs/old/snapshots/v1.tex",
+        submitted_by="agent_a", scoping_rationale="scoped", sha256=hashlib.sha256(text).hexdigest(),
+    ))
+    return path
+
+
+@needs_permissions
+def test_an_old_single_file_snapshot_that_cant_be_read_is_refused_and_voids_its_decision(tmp_path: Path, unreadable):
+    store = ensure_project(tmp_path)
+    path = _old_snapshot(store)
+    unreadable(path)
+
+    assert candidate_proof_sha256(store, "cp-old") is None
+    with pytest.raises(ProofMapError) as refused:
+        researcher(store).decide_acceptance("old", "accept")
+    assert refused.value.code == "SNAPSHOT_UNREADABLE"
+
+    path.chmod(0o644)
+    researcher(store).decide_acceptance("old", "accept")
+    unreadable(path)
+    assert get_acceptance_state(store, "old") == "unverifiable"
+
+
+@needs_permissions
+def test_a_folder_snapshot_file_that_cant_be_read_is_refused_and_its_page_still_shows(tmp_path: Path, unreadable):
+    from _review_client import DirectClient
+
+    store, folder = _node(tmp_path)
+    _request(store)
+    researcher(store).decide_acceptance("clm_1", "accept")
+    unreadable(folder / "snapshots" / "v1" / "node" / "body.tex")
+
+    assert get_acceptance_state(store, "clm_1") == "unverifiable"
+    status, body = DirectClient(store).get("/api/node/clm_1")
+    assert status == 200, body
+    assert body["data"]["candidate_proof"]["sha256"] is None
