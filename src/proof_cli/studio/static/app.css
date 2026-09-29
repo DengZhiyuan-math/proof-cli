@@ -22,10 +22,10 @@
 }
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
-    --bg: #eceff3; --panel: #f6f7f9; --panel2: #ffffff; --panel3: #e4e9ef; --border: #c3ccd7; --border2: #d8dee6; --border-hi: #a6b3c2;
-    --text: #182029; --text2: #46525f; --muted: #6f7d8c; --faint: #a7b2be;
-    --accent: #3d7d9b; --accent-text: #ffffff; --accent-dim: rgba(61, 125, 155, .10);
-    --err: #b8433d; --warn: #a9741a; --ok: #2f8a5f; --hl: rgba(61, 125, 155, .25);
+    --bg: #e6eaef; --panel: #f7f8fa; --panel2: #ffffff; --panel3: #dfe5ec; --border: #aab6c4; --border2: #cdd5de; --border-hi: #7f90a3;
+    --text: #10171f; --text2: #35414d; --muted: #566575; --faint: #93a0ad;
+    --accent: #1e6b8e; --accent-text: #ffffff; --accent-dim: rgba(30, 107, 142, .12);
+    --err: #b1332c; --warn: #9a640c; --ok: #1f7a4d; --hl: rgba(61, 125, 155, .25);
     --sel: rgba(61, 125, 155, .18); --cm-bg: #ffffff; --pdf-bg: #d9dee5;
     --vs-text: #1f1f1f; --vs-kw: #0000ff; --vs-type: #267f99; --vs-str: #a31515; --vs-cmt: #008000; --vs-num: #098658; --vs-fn: #795e26;
     --vs-add: rgba(46, 160, 67, .18); --vs-del: rgba(248, 81, 73, .18);
@@ -33,10 +33,10 @@
   }
 }
 :root[data-theme="light"] {
-  --bg: #eceff3; --panel: #f6f7f9; --panel2: #ffffff; --panel3: #e4e9ef; --border: #c3ccd7; --border2: #d8dee6; --border-hi: #a6b3c2;
-  --text: #182029; --text2: #46525f; --muted: #6f7d8c; --faint: #a7b2be;
-  --accent: #3d7d9b; --accent-text: #ffffff; --accent-dim: rgba(61, 125, 155, .10);
-  --err: #b8433d; --warn: #a9741a; --ok: #2f8a5f; --hl: rgba(61, 125, 155, .25);
+  --bg: #e6eaef; --panel: #f7f8fa; --panel2: #ffffff; --panel3: #dfe5ec; --border: #aab6c4; --border2: #cdd5de; --border-hi: #7f90a3;
+  --text: #10171f; --text2: #35414d; --muted: #566575; --faint: #93a0ad;
+  --accent: #1e6b8e; --accent-text: #ffffff; --accent-dim: rgba(30, 107, 142, .12);
+  --err: #b1332c; --warn: #9a640c; --ok: #1f7a4d; --hl: rgba(61, 125, 155, .25);
   --sel: rgba(61, 125, 155, .18); --cm-bg: #ffffff; --pdf-bg: #d9dee5;
   --vs-text: #1f1f1f; --vs-kw: #0000ff; --vs-type: #267f99; --vs-str: #a31515; --vs-cmt: #008000; --vs-num: #098658; --vs-fn: #795e26;
   --vs-add: rgba(46, 160, 67, .18); --vs-del: rgba(248, 81, 73, .18);
