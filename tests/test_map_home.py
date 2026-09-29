@@ -97,6 +97,12 @@ def test_a_frontier_node_shows_the_frontier_and_its_warning_side_by_side_in_the_
     assert tree["tree"]["lem_ch"] == ["ready to claim", "challenged"]
 
 
+def test_each_tree_line_names_its_node_and_how_many_parents_share_it():
+    diamond = {"nodes": [_node("thm", "theorem", "Top", ["a", "b"]), _node("a", dependencies=["base"]), _node("b", dependencies=["base"]), _node("base")]}
+    *_, tree = _home(map_=diamond, steps=[{"view": "tree"}])
+    assert tree["treeLines"] == [["thm", None], ["a", None], ["base", "2"], ["b", None], ["base", "2"]]
+
+
 def test_the_frontier_border_is_never_overridden_by_a_warning_border():
     css = (STATIC / "app.css").read_text()
     frontier = css.index("#dag-svg .node.frontier rect.box")
