@@ -1249,15 +1249,25 @@ def memory_list(
     root: str = ROOT_OPTION,
     layer: str = "",
     node_id: str = "",
-    theorem_id: str = "",
-    goal_id: str = "",
+    candidate_proof_id: str = "",
+    review_id: str = "",
+    theorem_id: str = typer.Option("", help="Legacy scope (read-only, ADR-0012)"),
+    goal_id: str = typer.Option("", help="Legacy scope (read-only, ADR-0012)"),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
+    filters = dict(
+        layer=layer,
+        node_id=node_id,
+        candidate_proof_id=candidate_proof_id,
+        review_id=review_id,
+        theorem_id=theorem_id,
+        goal_id=goal_id,
+    )
     if not json_output:
-        typer.echo(cmd_memory_list(_root(root), layer=layer, node_id=node_id, theorem_id=theorem_id, goal_id=goal_id))
+        typer.echo(cmd_memory_list(_root(root), **filters))
         return
     try:
-        data = memory_list_data(_root(root), layer=layer, node_id=node_id, theorem_id=theorem_id, goal_id=goal_id)
+        data = memory_list_data(_root(root), **filters)
     except ValueError as exc:
         typer.echo(dump_envelope(error_envelope("memory.list", "INVALID_INPUT", str(exc))))
         raise typer.Exit(code=1)
@@ -1277,29 +1287,27 @@ def memory_add(
     node_id: str = "",
     candidate_proof_id: str = "",
     review_id: str = "",
-    theorem_id: str = "",
-    goal_id: str = "",
-    obligation_id: str = "",
-    blocker_id: str = "",
     route_id: str = "",
     importance: str = "medium",
     status: str = "",
     source: str = "manual",
     tag: list[str] = typer.Option(None, "--tag"),
     notes: str = "",
+    json_output: bool = typer.Option(False, "--json"),
 ) -> None:
-    typer.echo(
-        cmd_memory_add(
+    """Record a memory entry, scoped to a proof-map node (and one of its Candidate proofs or reviews).
+
+    The scope is checked against the map, and a bad one writes nothing. The
+    legacy theorem/goal/obligation/blocker scope is read-only (ADR-0012).
+    """
+    try:
+        output = cmd_memory_add(
             content,
             _root(root),
             layer=layer,
             node_id=node_id,
             candidate_proof_id=candidate_proof_id,
             review_id=review_id,
-            theorem_id=theorem_id,
-            goal_id=goal_id,
-            obligation_id=obligation_id,
-            blocker_id=blocker_id,
             route_id=route_id,
             importance=importance,
             status=status,
@@ -1307,7 +1315,10 @@ def memory_add(
             tag=tag,
             notes=notes,
         )
-    )
+    except ProofMapError as exc:
+        _emit_node_error(exc, json_output, command="memory.add")
+        raise typer.Exit(code=1)
+    typer.echo(dump_envelope(success_envelope("memory.add", json.loads(output))) if json_output else output)
 
 
 def _publication(command: str, json_output: bool, data, human) -> None:
@@ -1644,9 +1655,18 @@ def exchange_import(bundle_json: str, root: str = ROOT_OPTION) -> None:
 
 
 @handoff_app.command("create")
-def handoff_create(root: str = ROOT_OPTION, note: str = "", json_output: bool = typer.Option(False, "--json")) -> None:
+def handoff_create(
+    root: str = ROOT_OPTION,
+    note: str = "",
+    node_id: str = typer.Option("", help="Scope the handoff's memory to this node, its Candidate proofs, reviews and derived_from parent"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
     """Snapshot the project and export a handoff bundle. Its trust fields are legacy (ADR-0012)."""
-    _emit_legacy_json("handoff.create", json_output, lambda: cmd_handoff_create(_root(root), note=note))
+    try:
+        _emit_legacy_json("handoff.create", json_output, lambda: cmd_handoff_create(_root(root), note=note, node_id=node_id))
+    except ProofMapError as exc:
+        _emit_node_error(exc, json_output, command="handoff.create")
+        raise typer.Exit(code=1)
 
 
 @handoff_app.command("inspect")

@@ -19,6 +19,7 @@ from .authority import (
     challenge_resolution,
     decision_rows,
     list_authority_warnings,
+    list_decisions,
     record_decision,
     snapshot_matches,
     verify_decision_row,
@@ -1701,6 +1702,30 @@ def get_acceptance_state(store: ProjectStore, node_id: str) -> str:
     reads `review-needed`).
     """
     return _acceptance(store, require_node(store, node_id))[0]
+
+
+def acceptance_overview(store: ProjectStore) -> list[tuple[ProofMapNode, str, str | None]]:
+    """(node, acceptance_state, why its newest decision doesn't count) for every node, by id.
+
+    The same computation as `get_acceptance_state`, done once per node: what a
+    handoff reports as accepted is exactly what the map calls accepted (#45).
+    """
+    overview = []
+    for node in sorted(list_nodes(store), key=lambda node: node.id):
+        state, _, reason = _acceptance(store, node)
+        overview.append((node, state, reason))
+    return overview
+
+
+def decision_node_id(store: ProjectStore, review_id: str) -> str | None:
+    """The node whose reviews.jsonl records Human Review decision `review_id`, or None if there's no such decision."""
+    row = next((row for row in list_decisions(store) if row["id"] == review_id), None)
+    if row is None:
+        return None
+    try:
+        return _node_folder(store, row["object_type"], row["object_id"])
+    except ProofMapError:
+        return None
 
 
 def promote_to_lemma(

@@ -314,6 +314,8 @@ class ProjectSnapshot(BaseModel):
     project_id: str
     active_theorem: str | None = None
     current_goals: list[str] = Field(default_factory=list)
+    # legacy (ADR-0012): verify and theorem-usage history, not a trust source;
+    # a handoff's `proof_map.accepted` is what can be called
     validated_results: list[str] = Field(default_factory=list)
     open_obligations: list[str] = Field(default_factory=list)
     active_blockers: list[str] = Field(default_factory=list)
