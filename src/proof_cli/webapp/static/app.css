@@ -154,7 +154,18 @@ main { flex: 1; min-width: 0; overflow: auto; padding: 16px 20px 48px; }
 .view-switch button[aria-pressed="true"] { color: var(--fg); box-shadow: inset 0 -2px 0 var(--accent); }
 #tree-root-label { font-family: var(--mono); font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
 #tree-root-label select { padding: 3px 6px; font-size: 12px; }
-#map-caption { margin-left: auto; font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+#map-caption { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+/* the search box (issue #116): a chamfered field on the map bar; "/" focuses it */
+.find {
+  display: inline-flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px 0 10px; border: 1px solid var(--line-hi); background: var(--panel);
+  clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);
+}
+.find:focus-within { border-color: var(--accent); }
+.find .lbl { font-size: 9.5px; }
+.find input { width: 200px; min-width: 0; border: 0; background: transparent; padding: 3px 0; font-family: var(--mono); font-size: 12px; }
+.find input::placeholder { color: var(--faint); }
+.find kbd { font-family: var(--mono); font-size: 10px; color: var(--muted); border: 1px solid var(--line-2); padding: 0 5px; line-height: 16px; }
+#map-find-count { white-space: nowrap; color: var(--fg-2); }
 .maphead .zoom { margin-left: 8px; }
 .map-canvas { flex: 1; min-height: 0; overflow: hidden; position: relative; cursor: grab; touch-action: none; user-select: none; background-image: radial-gradient(var(--line-2) 1px, transparent 1px); background-size: 24px 24px; }
 .map-canvas.dragging { cursor: grabbing; }
@@ -204,11 +215,19 @@ main { flex: 1; min-width: 0; overflow: auto; padding: 16px 20px 48px; }
 #dag-svg .node.tone-accepted text.tag { fill: var(--ok); }
 #dag-svg text.tag.accent { fill: var(--accent-2); } #dag-svg text.tag.warn { fill: var(--warn); }
 #dag-svg text.tag.crit { fill: var(--crit); } #dag-svg text.tag.muted { fill: var(--muted); }
+/* what the search box doesn't match fades back; the match Enter brought into view is outlined */
+#dag-svg .node, #dag-svg .edge { transition: opacity .12s; }
+#dag-svg .node.dim { opacity: .25; }
+#dag-svg.filtering .edge { opacity: .35; }
+#dag-svg .node.found .box { stroke: var(--fg); stroke-width: 2.6; }
 #dag-svg text.empty { font-family: var(--mono); font-weight: 400; font-size: 12px; fill: var(--muted); }
 #map-tree { flex: 1; min-height: 0; overflow: auto; padding: 48px 20px 20px; font-size: 13px; }
 #map-tree ul { list-style: none; padding-left: 20px; margin: 0; border-left: 1px solid var(--line-2); }
 #map-tree > ul { border-left: none; padding-left: 0; }
-#map-tree li { margin: 5px 0; }
+#map-tree li { margin: 5px 0; color: var(--fg); }
+#map-tree li.dim { color: var(--faint); }  /* each line sets its own colour, so a dimmed line never dims its children */
+#map-tree li.dim > :not(ul) { opacity: .4; }
+#map-tree li.found > a { outline: 1px solid var(--accent-line); outline-offset: 2px; }
 #map-tree a { font-family: var(--mono); font-size: 12px; text-decoration: none; }
 
 /* ---------- tables (awaiting review, dependencies, decisions) */
@@ -248,4 +267,14 @@ td a { font-family: var(--mono); font-size: 12px; }
   .topbar { gap: 10px; } .stats { display: none; } .actor { display: none; }
   .rail { display: none; } main { padding: 12px; }
   .stage { height: 60vh; }
+  /* the map bar wraps onto a second row (the search box and its count) rather than running off the side */
+  .maphead { height: auto; flex-wrap: wrap; gap: 6px 8px; padding: 6px 10px; }
+  #map-caption { display: none; }
+  #tree-root-label select { min-width: 0; max-width: 40vw; }
+  .maphead .zoom { margin-left: auto; }
+  .find { order: 3; flex: 1 1 60%; min-width: 0; }
+  .find input { width: 100%; }
+  .find kbd { display: none; }
+  #map-find-count { order: 4; }
+  #map-tree { padding-top: 88px; }
 }

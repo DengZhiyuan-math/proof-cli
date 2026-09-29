@@ -24,9 +24,14 @@ from .storage import (
     list_events,
     list_review_history_rows,
     mark_review_history_migrated,
+    one_transaction,
+    read_side_document,
     read_state,
     review_history_row_exists,
+    write_side_document,
 )
+
+COLLABORATION_DOCUMENT = "collaboration"
 
 
 def _new_id(prefix: str) -> str:
@@ -288,10 +293,12 @@ def _write_collaboration_json(path: Path, data: str) -> None:
 
 
 def load_collaboration(store: ProjectStore) -> CollaborationState:
+    """The collaboration state, read on this thread's open transaction if
+    there is one — so a `load_collaboration` → change → `save_collaboration`
+    inside one `store.transaction()` is a single critical section (#39)."""
     _migrate_legacy_review_records(store)
-    path = _collaboration_path(store)
     project_id = _project_id(store)
-    data = _read_collaboration_json(path) or {}
+    data = read_side_document(store, COLLABORATION_DOCUMENT) or {}
     data.pop("review_records", None)
     state = CollaborationState.model_validate({**data, "project_id": data.get("project_id", project_id)})
     state.review_records = list_review_records(store)
@@ -299,16 +306,15 @@ def load_collaboration(store: ProjectStore) -> CollaborationState:
 
 
 def save_collaboration(store: ProjectStore, state: CollaborationState) -> CollaborationState:
-    """Persist the JSON-backed, non-trust-bearing collaboration state.
+    """Persist the non-trust-bearing collaboration state, whole, to SQLite.
 
     `state.review_records` is never written: Human Review history lives
     only in the append-only SQLite table, so no caller — exchange import
     included — can revoke or forge a decision by saving a whole state.
     """
-    path = _collaboration_path(store)
     state.project_id = _project_id(store)
     state.version = 1
-    _write_collaboration_json(path, state.model_dump_json(indent=2, exclude={"review_records"}))
+    write_side_document(store, COLLABORATION_DOCUMENT, state.model_dump_json(exclude={"review_records"}))
     return state
 
 
@@ -325,6 +331,7 @@ def _update_state(
     append_event(store, event_kind, message, entity_id=entity_id, payload=payload or {})
 
 
+@one_transaction
 def upsert_contributor(store: ProjectStore, contributor: Contributor) -> Contributor:
     state = load_collaboration(store)
     contributor.updated_at = utc_now()
@@ -366,6 +373,7 @@ def list_contributors(store: ProjectStore, *, team_id: str = "", status: str = "
     return contributors
 
 
+@one_transaction
 def set_contributor_role(
     store: ProjectStore,
     contributor_id: str,
@@ -398,6 +406,7 @@ def get_policy(store: ProjectStore, *, project_id: str = "") -> CollaborationPol
     return state.policies[-1] if state.policies else None
 
 
+@one_transaction
 def set_policy(store: ProjectStore, policy: CollaborationPolicy) -> CollaborationPolicy:
     state = load_collaboration(store)
     policy.updated_at = utc_now()
@@ -731,12 +740,9 @@ def record_review_decision(
     never modified; the returned record is the review as it now reads.
 
     A trust-bearing review (any `kind`, or an object type a derived axis
-    reads) is refused without a signed decision that verifies under an
-    active Reviewer key: the service layer itself can't append an unsigned
-    decision a derived axis would read (#35 B).
-
-    `signed_decision` is stored on the decision row as-is; the caller has
-    already checked (`authority.authorize`) that it authorizes this decision."""
+    reads) is refused outright: those are Human Review decisions, recorded in
+    the node's reviews.jsonl from the proof map page (ADR-0010), never in
+    this generic, editorial history."""
     _migrate_legacy_review_records(store, conn)
     def _current(tx: sqlite3.Connection) -> ReviewRecord | None:
         rows = list_review_history_rows(store, review_id=review_id, conn=tx)
@@ -896,6 +902,7 @@ def get_review_record(store: ProjectStore, review_id: str) -> ReviewRecord | Non
     return next((record for record in list_review_records(store) if record.id == review_id), None)
 
 
+@one_transaction
 def ensure_comment_thread(
     store: ProjectStore,
     object_type: str,
@@ -921,6 +928,7 @@ def ensure_comment_thread(
     return thread
 
 
+@one_transaction
 def add_comment(
     store: ProjectStore,
     object_type: str,
@@ -936,7 +944,8 @@ def add_comment(
     if thread_id:
         thread = next((item for item in state.comment_threads if item.id == thread_id), None)
     if thread is None:
-        state = load_collaboration(store)
+        # creating the thread and re-reading it share this call's transaction,
+        # so no other process's write can land in between (#39)
         ensure_comment_thread(store, object_type, object_id, created_by=author_id)
         state = load_collaboration(store)
         thread = next((item for item in state.comment_threads if item.object_type == object_type and item.object_id == object_id), None)
@@ -983,6 +992,7 @@ def list_comments(store: ProjectStore, *, thread_id: str = "", object_type: str 
     return comments
 
 
+@one_transaction
 def create_branch(
     store: ProjectStore,
     scope: str,
@@ -1071,6 +1081,7 @@ def compare_branches(store: ProjectStore, left_branch_id: str, right_branch_id: 
     )
 
 
+@one_transaction
 def merge_branch(
     store: ProjectStore,
     branch_id: str,
@@ -1104,6 +1115,7 @@ def merge_branch(
     return source
 
 
+@one_transaction
 def publish_shared_asset(
     store: ProjectStore,
     asset_id: str,
@@ -1145,6 +1157,7 @@ def list_publications(store: ProjectStore, *, asset_id: str = "", published_to: 
     return publications
 
 
+@one_transaction
 def set_collaboration_policy(
     store: ProjectStore,
     *,
