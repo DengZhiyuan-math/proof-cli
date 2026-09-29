@@ -744,13 +744,20 @@ function describeScope(mentions, mode) {
   if (!mentions.length) return "Scope: whole workspace (any file, new files allowed)";
   return "Scope: only " + mentions.map(rangeLabel).join(", ");
 }
+const SCOPE_ICONS = {
+  wide: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5A1.5 1.5 0 0 1 5 6h4.2l1.8 2H19a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5z"/></svg>',
+  narrow: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3.5h6.5L18 8v11a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 19V5a1.5 1.5 0 0 1 1-1.5z"/><path d="M13.5 3.5V8H18"/></svg>',
+  ask: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5.5" y="10.5" width="13" height="9.5" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/></svg>',
+};
 function updateScope() {
   const ms = parseMentions($("#chat-input").value), mode = $("#chat-mode").value;
   const el = $("#chat-scope");
   const scope = describeScope(ms, mode);
-  // shown as a dot beside "+" (its colour says wide, narrow or read-only); the words are its tooltip
-  el.textContent = scope;
-  el.className = mode === "ask" ? "ask" : ms.length ? "narrow" : "wide";
+  // shown as a small grey icon beside "+" (a folder: any file in the project; a page: only the
+  // @-mentioned files; a lock: read-only); the words are its tooltip and its label
+  const kind = mode === "ask" ? "ask" : ms.length ? "narrow" : "wide";
+  el.innerHTML = SCOPE_ICONS[kind];
+  el.className = kind;
   el.setAttribute("aria-label", scope);
   el.title = scope + "\nType @ to point the agent at a file or at the editor selection. "
     + "With @-mentions it may change only those files; without, any file in the project.";
