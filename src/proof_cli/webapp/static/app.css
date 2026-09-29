@@ -120,6 +120,12 @@ main { flex: 1; min-width: 0; overflow: auto; padding: 16px 20px 48px; }
 .below { display: grid; gap: 16px; margin-top: 16px; }
 .hint.pad { padding: 8px 12px 0; }
 .warning { color: var(--warn); font-size: 12.5px; } .warning code { font-weight: 600; }
+/* the ReferenceRecord an imported result cites (issue #91): a hairline-ruled block, the title in the foreground */
+.citation-block { border-left: 2px solid var(--line-hi); padding: 2px 0 2px 12px; margin-top: 10px; }
+.citation-block .citation { margin: 3px 0; color: var(--fg-2); }
+.citation-block .citation.title { color: var(--fg); font-weight: 600; }
+.citation-block .citation.mono { font-size: 12px; word-break: break-all; }
+.citation.warning { border-left: 2px dashed var(--warn); padding-left: 8px; }
 #warnings, #node-warnings ul, #node-challenges, #node-evidence, #node-history, #confirm-decisions { margin: 0; padding-left: 18px; }
 #warnings li, #node-warnings li, #node-challenges li, #node-evidence li, #node-history li, #confirm-decisions li { margin: 4px 0; }
 

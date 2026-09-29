@@ -267,6 +267,7 @@ class ReviewApp:
             source_locator=body.get("source_locator") or None,
             source_version=body.get("source_version") or None,
             trust_level=body.get("trust_level") or None,
+            reference_id=body.get("reference_id") or None,
         )
         return {**node.model_dump(mode="json"), "page": self.page_of(node)}
 
@@ -314,6 +315,8 @@ class ReviewApp:
                             "decisions": decisions,
                             "bindings": {d: _binding(self.store, "reference_review", node.id, d) for d in decisions},
                             "statement": node.statement,
+                            # the linked ReferenceRecord, so the review card shows what is cited (issue #91)
+                            "citation": proof_map.node_citation(self.store, node),
                         }
                     )
                 continue
@@ -382,6 +385,7 @@ class ReviewApp:
                 {"locator": node.source_locator, "version": node.source_version, "trust_level": node.trust_level.value if node.trust_level else None}
                 if node.kind == ProofMapNodeKind.imported_result else None
             ),
+            "citation": proof_map.node_citation(store, node),
             "dependents": sorted(other.id for other in proof_map.list_nodes(store) if node_id in other.dependencies),
             "pdfs": self._pdfs(node_id, proof),
             "evidence_checks": checks,
