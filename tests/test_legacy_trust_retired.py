@@ -5,6 +5,7 @@ state says it is legacy and not a trust source. The commands that only refused a
 """
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -62,34 +63,64 @@ def test_the_refusing_commands_are_gone(tmp_path: Path, command, json_output):
         assert "No such command" in result.output
 
 
+# (the envelope's command, the invocation): every command that prints a legacy callable,
+# trust or review field (is_callable, trust_level, review_status, review_state, callability)
 LABELLED_COMMANDS = [
-    ["theorem", "extract", "thm_main"],
-    ["theorem", "apply", "thm_main"],
-    ["explain", "apply", "thm_main"],
-    ["bug", "scan", "thm_main"],
-    ["provenance", "show", "thm_main"],
-    ["provenance", "show", "ref_std"],
-    ["reference", "list"],
-    ["export"],
+    ("theorem.extract", ["theorem", "extract", "thm_main"]),
+    ("theorem.apply", ["theorem", "apply", "thm_main"]),
+    ("theorem.show", ["theorem", "show", "thm_main"]),
+    ("theorem.list", ["theorem", "list"]),
+    ("theorem.add", ["theorem", "add", "thm_new", "New Result", "B implies D"]),
+    ("explain.apply", ["explain", "apply", "thm_main"]),
+    ("bug.scan", ["bug", "scan", "thm_main"]),
+    ("provenance.show", ["provenance", "show", "thm_main"]),
+    ("provenance.show", ["provenance", "show", "ref_std"]),
+    ("reference.list", ["reference", "list"]),
+    ("reference.show", ["reference", "show", "ref_std"]),
+    ("reference.import", ["reference", "import", "ref_more", "Another Paper", "2025"]),
+    ("retrieve", ["retrieve", "Main"]),
+    ("trace.dependency", ["trace", "dependency", "thm_main"]),
+    ("snapshot", ["snapshot"]),
+    ("export", ["export"]),
+    ("exchange.export", ["exchange", "export"]),
+    ("handoff.create", ["handoff", "create"]),
 ]
+_IDS = [" ".join(args) for _, args in LABELLED_COMMANDS]
 
 
-@pytest.mark.parametrize("command", LABELLED_COMMANDS, ids=" ".join)
-def test_a_legacy_callable_or_trust_output_says_it_is_not_a_trust_source(tmp_path: Path, command):
+@pytest.mark.parametrize(("name", "command"), LABELLED_COMMANDS, ids=_IDS)
+def test_a_legacy_callable_or_trust_output_says_it_is_not_a_trust_source(tmp_path: Path, name, command):
     _seed(tmp_path)
     result = _invoke(tmp_path, *command)
     assert result.exit_code == 0, result.output
     assert LEGACY_TRUST_NOTICE in result.stdout
 
 
-@pytest.mark.parametrize("command", LABELLED_COMMANDS, ids=" ".join)
-def test_its_json_envelope_carries_the_legacy_notice(tmp_path: Path, command):
+@pytest.mark.parametrize(("name", "command"), LABELLED_COMMANDS, ids=_IDS)
+def test_its_json_envelope_carries_the_legacy_notice(tmp_path: Path, name, command):
     _seed(tmp_path)
     result = _invoke(tmp_path, *command, "--json")
     assert result.exit_code == 0, result.output
     envelope = json.loads(result.stdout)
-    assert envelope["ok"] is True and envelope["command"] == ".".join(command[:2] if len(command) > 1 else command)
+    assert envelope["ok"] is True and envelope["command"] == name
     assert envelope["data"]["legacy_notice"] == LEGACY_TRUST_NOTICE
+
+
+LEGACY_FIELDS = re.compile(r"is_callable|trust_level|callab|trust-sensitive|trust_sensitive|\"review_state\": \"(approved|unreviewed|rejected|superseded)")
+# every other read-mostly command an agent might run on an old project
+OTHER_COMMANDS = [
+    ["status"], ["history"], ["search", "Main"], ["reason", "thm_main"], ["bug", "list"], ["debug", "generate", "thm_main"],
+    ["handoff", "inspect"], ["memory", "list"], ["project", "analyze"], ["obligation", "derive", "thm_main"],
+    ["obligation", "list"], ["blocker", "list"], ["publication", "list"], ["review", "list"], ["frontier"], ["node", "list"],
+]
+
+
+@pytest.mark.parametrize("command", OTHER_COMMANDS, ids=" ".join)
+def test_no_other_command_prints_a_legacy_trust_field_unlabelled(tmp_path: Path, command):
+    _seed(tmp_path)
+    result = _invoke(tmp_path, *command)
+    assert result.exit_code == 0, result.output
+    assert not LEGACY_FIELDS.search(result.stdout) or LEGACY_TRUST_NOTICE in result.stdout, command
 
 
 def test_the_notice_says_the_proof_map_answers_what_can_be_called():

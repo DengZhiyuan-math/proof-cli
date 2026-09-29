@@ -207,6 +207,12 @@ def _dump_legacy(payload: dict) -> str:
     return json.dumps(payload, indent=2, ensure_ascii=False)
 
 
+def _labelled(record) -> str:
+    """A record that carries legacy trust fields, as JSON led by the legacy notice (ADR-0012)."""
+    payload = record.model_dump(mode="json") if hasattr(record, "model_dump") else dict(record)
+    return _dump_legacy({"legacy_notice": LEGACY_TRUST_NOTICE, **payload})
+
+
 def get_store(root: str | Path = ".") -> ProjectStore:
     return ensure_project(root)
 
@@ -780,7 +786,7 @@ def cmd_proof_retrieve(
         external_candidates=external_candidates,
         limit=limit,
     )
-    return report.model_dump_json(indent=2)
+    return _labelled(report)
 
 
 def cmd_project_analyze(root: str | Path = ".", *, query: str = "", limit: int = 5) -> str:
@@ -808,7 +814,7 @@ def cmd_reference_list(root: str | Path = ".") -> str:
 
 def cmd_reference_show(reference_id: str, root: str | Path = ".") -> str:
     reference = get_reference(get_store(root), reference_id)
-    return reference.model_dump_json(indent=2) if reference else f"Reference not found: {reference_id}"
+    return _labelled(reference) if reference else f"Reference not found: {reference_id}"
 
 
 def cmd_reference_import(
@@ -841,7 +847,7 @@ def cmd_reference_import(
     )
     stored = import_reference(store, reference)
     _append_history(store, f"reference_import:{reference_id}", message=f"imported reference {reference_id}")
-    return stored.model_dump_json(indent=2)
+    return _labelled(stored)
 
 
 def cmd_proof_ground(
@@ -1099,7 +1105,7 @@ def cmd_proof_trace_dependency(target_id: str, root: str | Path = ".") -> str:
         "recent_theorem_usage": list(load_state(store).recent_theorem_usage),
         "session_history": list(load_state(store).session_history[-10:]),
     }
-    return json.dumps(payload, indent=2)
+    return _labelled(payload)
 
 
 def cmd_proof_formalize_recommend(source_id: str, root: str | Path = ".", *, backend_target: str = "", notes: str = "") -> str:
@@ -1736,12 +1742,12 @@ def cmd_theorem_add(
         contributors=contributor,
         notes=notes,
     )
-    return contract.model_dump_json(indent=2)
+    return _labelled(contract)
 
 
 def cmd_theorem_show(theorem_id: str, root: str | Path = ".") -> str:
     contract = show_theorem(get_store(root), theorem_id)
-    return contract.model_dump_json(indent=2) if contract else "Theorem not found"
+    return _labelled(contract) if contract else "Theorem not found"
 
 
 def theorem_extract_data(theorem_id: str, root: str | Path = ".") -> dict | None:
@@ -1758,9 +1764,16 @@ def cmd_theorem_extract(theorem_id: str, root: str | Path = ".") -> str:
     return _dump_legacy(data) if data is not None else f"Theorem not found: {theorem_id}"
 
 
+def theorem_list_data(root: str | Path = ".") -> dict:
+    return {"legacy_notice": LEGACY_TRUST_NOTICE, "theorems": [item.model_dump(mode="json") for item in list_theorems(get_store(root))]}
+
+
 def cmd_theorem_list(root: str | Path = ".") -> str:
     items = list_theorems(get_store(root))
-    return "\n".join([f"{item.id}: {item.name} [{item.status.value}]" for item in items]) or "No theorems"
+    if not items:
+        return "No theorems"
+    lines = [f"{item.id}: {item.name} [{item.status.value}]" for item in items]
+    return "\n".join([*lines, f"(status: {LEGACY_TRUST_NOTICE})"])
 
 
 def theorem_apply_data(theorem_id: str, root: str | Path = ".") -> dict:
@@ -1875,7 +1888,7 @@ def cmd_memory_show(artifact_id: str, root: str | Path = ".") -> str:
 
 def cmd_snapshot(root: str | Path = ".", handoff_note: str = "") -> str:
     snapshot = build_snapshot(get_store(root), handoff_note=handoff_note)
-    return snapshot.model_dump_json(indent=2)
+    return _labelled(snapshot)
 
 
 def cmd_history(root: str | Path = ".") -> str:
@@ -1892,7 +1905,8 @@ def export_data(root: str | Path = ".") -> dict:
 
 
 def cmd_exchange_export(root: str | Path = ".", *, note: str = "") -> str:
-    return bundle_to_json(export_exchange_bundle(get_store(root), note=note))
+    # an importer ignores the notice: the bundle model drops unknown fields (ADR-0012)
+    return _labelled(json.loads(bundle_to_json(export_exchange_bundle(get_store(root), note=note))))
 
 
 def cmd_exchange_import(bundle_json: str, root: str | Path = ".") -> str:
@@ -1903,7 +1917,7 @@ def cmd_exchange_import(bundle_json: str, root: str | Path = ".") -> str:
 def cmd_handoff_create(root: str | Path = ".", *, note: str = "") -> str:
     snapshot = create_snapshot(get_store(root), note=note)
     bundle = export_exchange_bundle(get_store(root), note=note or snapshot.handoff_note)
-    return bundle_to_json(bundle)
+    return _labelled(json.loads(bundle_to_json(bundle)))
 
 
 def cmd_handoff_inspect(bundle_json: str = "", root: str | Path = ".") -> str:
