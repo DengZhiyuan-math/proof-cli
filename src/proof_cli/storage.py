@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import sqlite3
@@ -296,6 +297,19 @@ BEGIN
 END;
 """
 
+# Whole-document state that used to be a JSON side file under `.proof/`
+# (collaboration.json, memory.json; issue #39). Each document is one row,
+# read, changed and written back inside one `store.transaction()`, so
+# concurrent processes take turns on the SQLite write lock instead of
+# overwriting each other's writes.
+SIDE_DOCUMENTS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS side_documents (
+  name TEXT PRIMARY KEY,
+  data TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+"""
+
 # Unsigned but chained facts an agent may legitimately record — a node's
 # creation (its kind) and a Challenge's opening — kept append-only and
 # hash-linked so they can't be quietly edited or deleted afterwards (#35 C).
@@ -458,6 +472,7 @@ class ProjectStore:
         conn.executescript(REVIEW_HISTORY_TRIGGERS)
         conn.executescript(REVIEWER_KEYS_SCHEMA)
         conn.executescript(PROOF_LEDGER_SCHEMA)
+        conn.executescript(SIDE_DOCUMENTS_SCHEMA)
         conn.commit()
         return conn
 
@@ -515,6 +530,22 @@ class ProjectStore:
             conn.close()
         for callback in active.after_commit:
             callback()
+
+
+def one_transaction(func):
+    """Run `func(store, ...)` inside one `store.transaction()` on its store.
+
+    For a read-modify-write of whole-document state (`side_documents`,
+    #39): its load and its save both join the transaction, so a concurrent
+    writer waits on the write lock instead of landing in between.
+    """
+
+    @functools.wraps(func)
+    def wrapper(store: ProjectStore, *args, **kwargs):
+        with store.transaction():
+            return func(store, *args, **kwargs)
+
+    return wrapper
 
 
 def after_commit(store: ProjectStore, callback) -> None:
@@ -650,6 +681,108 @@ def mark_review_history_migrated(conn: sqlite3.Connection) -> None:
     )
 
 
+# The JSON side files moved into `side_documents` (issue #39), by document name.
+SIDE_DOCUMENT_FILES = {"collaboration": "collaboration.json", "memory": "memory.json"}
+# Top-level keys a side file may hold that are never carried into its
+# document: `collaboration.json`'s review records are Human Review history,
+# which the #33 migration reads from the file itself.
+_SIDE_DOCUMENT_EXCLUDED_KEYS = {"collaboration": ("review_records",), "memory": ()}
+
+
+def _side_document_migrated_key(name: str) -> str:
+    return f"{name}_json_migrated"
+
+
+def _is_side_document_migrated(conn: sqlite3.Connection, name: str) -> bool:
+    key = _side_document_migrated_key(name)
+    return conn.execute("SELECT 1 FROM project_meta WHERE key = ? LIMIT 1", (key,)).fetchone() is not None
+
+
+def _mark_side_document_migrated(conn: sqlite3.Connection, name: str) -> None:
+    conn.execute(
+        "INSERT OR IGNORE INTO project_meta(key, value) VALUES (?, ?)",
+        (_side_document_migrated_key(name), utc_now().isoformat()),
+    )
+
+
+def _migrate_side_document(store: ProjectStore, conn: sqlite3.Connection, name: str) -> None:
+    """Move `.proof/<name>.json` into `side_documents` — once, on `conn`'s transaction.
+
+    The file's JSON is stored as it stands (bar the excluded keys), so the
+    loader's handling of older layouts still applies to it and nothing is
+    lost. The file itself is left where it is, unchanged: it is never read
+    for this document again. A file that isn't valid JSON (a half-written
+    `memory.json` from the old non-atomic save, say) is refused rather than
+    replaced by an empty document; the migration stays pending until the
+    file is fixed or removed.
+    """
+    if _is_side_document_migrated(conn, name):
+        return
+    path = project_proof_dir(store) / SIDE_DOCUMENT_FILES[name]
+    if path.exists():
+        try:
+            data = json.loads(path.read_text())
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"{path} is not valid JSON ({exc}); it moves into the project database once, "
+                "so fix or remove it to continue"
+            ) from exc
+        if not isinstance(data, dict):
+            raise ValueError(f"{path} does not hold a JSON object; fix or remove it to continue")
+        for key in _SIDE_DOCUMENT_EXCLUDED_KEYS[name]:
+            data.pop(key, None)
+        conn.execute(
+            "INSERT OR IGNORE INTO side_documents(name, data, updated_at) VALUES (?, ?, ?)",
+            (name, json.dumps(data), utc_now().isoformat()),
+        )
+        append_event(
+            store,
+            f"{name}_json_migrated",
+            f"moved {path.name} into the project database",
+            payload={"path": str(path)},
+            conn=conn,
+        )
+    _mark_side_document_migrated(conn, name)
+
+
+def _select_side_document(conn: sqlite3.Connection, name: str) -> dict | None:
+    row = conn.execute("SELECT data FROM side_documents WHERE name = ?", (name,)).fetchone()
+    return json.loads(row["data"]) if row is not None else None
+
+
+def read_side_document(store: ProjectStore, name: str, conn: sqlite3.Connection | None = None) -> dict | None:
+    """The stored document `name` (see `SIDE_DOCUMENT_FILES`), or None if none was ever saved.
+
+    Reads on the caller's transaction (`conn`, or the one this thread holds
+    open), so a read-modify-write inside `store.transaction()` sees its own
+    writes and no other process's in between. The first read of a project
+    that still has the JSON side file migrates it.
+    """
+    if conn is None:
+        conn = active_transaction(store)
+    with _reading(store, conn) as reader:
+        if _is_side_document_migrated(reader, name):
+            return _select_side_document(reader, name)
+    with in_transaction(store, conn) as tx:
+        _migrate_side_document(store, tx, name)
+        return _select_side_document(tx, name)
+
+
+def write_side_document(store: ProjectStore, name: str, data: str, conn: sqlite3.Connection | None = None) -> None:
+    """Replace the stored document `name` with `data` (JSON text).
+
+    Joins the caller's transaction if there is one. A read-modify-write must
+    run inside one `store.transaction()` for concurrent writers not to
+    overwrite each other; this call on its own is only atomic.
+    """
+    with _writing(store, conn) as writer:
+        _migrate_side_document(store, writer, name)  # a pending file is never overwritten unread
+        writer.execute(
+            "INSERT OR REPLACE INTO side_documents(name, data, updated_at) VALUES (?, ?, ?)",
+            (name, data, utc_now().isoformat()),
+        )
+
+
 def create_project(root: str | Path, project_id: str) -> ProjectStore:
     store = ProjectStore(Path(root))
     with store.connect() as conn:
@@ -666,6 +799,9 @@ def create_project(root: str | Path, project_id: str) -> ProjectStore:
                 # a brand-new project has no JSON-era review records, so its
                 # one-shot migration is done before it ever starts
                 mark_review_history_migrated(conn)
+            for name, file_name in SIDE_DOCUMENT_FILES.items():
+                if not (project_proof_dir(store) / file_name).exists():
+                    _mark_side_document_migrated(conn, name)  # nothing to move, so it's done
         state_row = conn.execute("SELECT data FROM state WHERE project_id = ?", (project_id,)).fetchone()
         if state_row is None:
             state = ProjectState(project_id=project_id)

@@ -32,7 +32,14 @@ from .domain import (
 from .domain_packs import DomainPack
 from .publication import PublicationWorkspace, list_publication_bundle_snapshots, load_publication_workspace, save_publication_workspace
 from .governance import GovernanceAssetRecord, GovernancePackRecord, GovernancePolicyRecord, list_domain_pack_records, list_policy_records, list_reusable_asset_records
-from .memory import LayeredMemory, HandoffSnapshot, latest_handoff_snapshot, load_memory, save_memory
+from .memory import (
+    LayeredMemory,
+    HandoffSnapshot,
+    latest_handoff_snapshot,
+    load_memory,
+    record_handoff_snapshot,
+    save_memory,
+)
 from .proof_state import load_state, save_state
 from .references import ReferenceRecord, ReferenceReviewRecord, ReferenceReviewStatus
 from .reusable_assets import ReusableAsset
@@ -400,9 +407,8 @@ def import_exchange_bundle(store: ProjectStore, bundle: ExchangeBundle | dict[st
         rejected_sections.append("latest_snapshot")
 
     if bundle.handoff_snapshot is not None:
-        memory = load_memory(store)
-        memory.handoff_snapshots.append(bundle.handoff_snapshot)
-        save_memory(store, memory)
+        # one read-modify-write under the write lock, like every memory write (#39)
+        record_handoff_snapshot(store, bundle.handoff_snapshot)
         imported_sections.append("handoff_snapshot")
     else:
         rejected_sections.append("handoff_snapshot")
