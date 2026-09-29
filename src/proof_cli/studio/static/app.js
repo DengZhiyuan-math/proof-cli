@@ -774,9 +774,11 @@ function insertMention(token, snip, replaceFrom) {
   updateScope(); inp.focus();
 }
 
-/* Suggested actions: what the proof agent does on this node (ADR-0006) — prove it, split it,
-   request review, open a Challenge, record an Evidence check. A click writes the request into
-   the message box, to add to and send; the agent carries it out through `proof`. */
+/* The "+" menu: what the proof agent does on this node (ADR-0006) — prove it, split it, request
+   review, open a Challenge, record an Evidence check — and, when a snapshot awaits review, the
+   researcher's own decision on it (node.js offers it through globalThis.studioReview). An agent
+   item writes its request into the message box, to add to and send; the agent carries it out
+   through `proof`. The decision opens the review sheet and is never the agent's (ADR-0010). */
 const AGENT_ACTIONS = [
   ["Prove it", "Work on this node's proof: retrieval first, then write the proof in proof.tex and compile it."],
   ["Request review", "This node's proof is ready. Compile it, then request review with a rationale for why the node is scoped to prove directly: "],
@@ -784,15 +786,35 @@ const AGENT_ACTIONS = [
   ["Open a Challenge", "Open a Challenge on the dependency that may no longer hold, and say why: "],
   ["Record evidence", "Run a checker on the snapshot under review and record the Evidence check with what it reported: "],
 ];
-$("#agent-actions").replaceChildren(...AGENT_ACTIONS.map(([label, request]) => {
-  const b = document.createElement("button");
-  b.type = "button"; b.textContent = label; b.title = request;
-  b.onclick = () => {
-    const inp = $("#chat-input");
-    inp.value = request; inp.focus(); inp.setSelectionRange(request.length, request.length); updateScope();
+function askAgent(request, mode) {
+  if (mode) { $("#chat-mode").value = mode; store.set("chat.mode", mode); }
+  const inp = $("#chat-input");
+  inp.value = request; inp.focus(); inp.setSelectionRange(request.length, request.length); updateScope();
+}
+function plusMenu(open) {
+  const menu = $("#plus-menu");
+  if (open === undefined) open = menu.hidden;
+  $("#chat-plus").setAttribute("aria-expanded", String(open));
+  if (!open) { menu.hidden = true; return; }
+  const node = (tag, cls, text) => { const e = document.createElement(tag); e.className = cls; if (text) e.textContent = text; return e; };
+  const item = (label, run, title, cls = "") => {
+    const b = node("button", `menu-item ${cls}`.trim(), label);
+    b.type = "button"; b.setAttribute("role", "menuitem"); if (title) b.title = title;
+    b.onclick = () => { plusMenu(false); run(); };
+    return b;
   };
-  return b;
-}));
+  const review = typeof globalThis.studioReview === "function" ? globalThis.studioReview() : null;
+  const rows = [node("div", "menu-head", "Ask the agent to")];
+  if (review) rows.push(item(`Check snapshot v${review.version}`, () => askAgent(review.check, "ask"), "Read-only: the agent reports what does not hold"));
+  for (const [label, request] of AGENT_ACTIONS) rows.push(item(label, () => askAgent(request), request));
+  if (review) rows.push(node("hr", "menu-sep"), node("div", "menu-head", "Your decision"), item(`Review snapshot v${review.version}…`, review.open, "Accept, request a revision or reject: recorded as you", "decide"));
+  $("#review-card").hidden = true;
+  menu.replaceChildren(...rows);
+  menu.hidden = false;
+}
+$("#chat-plus").addEventListener("click", (e) => { e.stopPropagation(); plusMenu(); });
+document.addEventListener("click", (e) => { if (!e.target.closest("#plus-menu, #chat-plus")) plusMenu(false); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") { plusMenu(false); $("#review-card").hidden = true; } });
 
 async function chatSend() {
   if (C.job) return;

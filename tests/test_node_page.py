@@ -165,7 +165,7 @@ def test_no_page_offers_open_in_prism_local():
 def test_the_studio_page_carries_the_node_panel_and_the_agents_actions():
     """The node panel shows the node and who holds it; what the proof agent does is asked of it from its panel."""
     index = (STUDIO_STATIC / "index.html").read_text()
-    assert 'src="static/node.js"' in index and 'id="node-panel"' in index and 'id="agent-actions"' in index
+    assert 'src="static/node.js"' in index and 'id="node-panel"' in index and 'id="chat-plus"' in index and 'id="plus-menu"' in index
     panel = (STUDIO_STATIC / "node.js").read_text()
     for action in ("claim", "unassign", "split", "request-review", "challenge", "evidence"):
         assert f'"/{action}"' not in panel, action  # the agent does these, through `proof`
@@ -236,7 +236,7 @@ REVIEW_VIEW = {
 def test_the_review_section_opens_every_frozen_file_read_only():
     shown = _panel(view=REVIEW_VIEW, press="body.tex")
     assert {"openReadOnly": "v2 · body.tex", "text": "BODY"} in shown["events"]
-    assert "Snapshot v2" in shown["review"] and "archived" in shown["review"]
+    assert "Review snapshot v2" in shown["review"] and "archived" in shown["review"]
 
 
 def test_a_decision_from_the_studio_carries_its_binding_and_the_snapshot_it_showed():
