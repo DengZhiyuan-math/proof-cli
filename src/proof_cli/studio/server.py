@@ -7,7 +7,7 @@ one per node, and `main` below runs a single one for developing the studio itsel
 
 Besides the builds (build.py) it runs only read-only `git status` / `git diff`
 and, for the agent panel, the chosen AI backend (agent.py, backends.py): the
-Claude Code or Codex CLI, or calls to an OpenAI-compatible API such as DeepSeek.
+Claude Code or Codex CLI.
 Optional per-project settings live in PROJECT_DIR/prism.json (see README).
 """
 from __future__ import annotations

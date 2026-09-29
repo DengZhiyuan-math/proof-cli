@@ -1,7 +1,7 @@
-"""Agent sessions for prism-local.
+"""Agent sessions for the studio.
 
-A chat turn runs on one of several AI backends (backends.py): the Claude Code CLI,
-the Codex CLI, or an OpenAI-compatible API such as DeepSeek. This module does the
+A chat turn runs on one of the AI backends (backends.py): the Claude Code CLI or the
+Codex CLI. This module does the
 part that is the same for all of them: it checks the request, states the turn's
 file scope, snapshots the editable files before the turn, reports per-file diffs
 afterwards and can undo the turn.
@@ -49,12 +49,9 @@ class AgentManager:
         return self.backends.get(provider or self.default)
 
     def info(self) -> dict:
-        providers = [b.info() for b in self.backends.values()]
-        if self.context_fn:  # a node's proof agent: what each backend can do in v1 (ADR-0011 point 8)
-            for p in providers:
-                p["proof_agent"] = "limited" if p["kind"] == "openai" else "full"
-        return {"default": self.default, "config_error": self.config_error, "providers": providers,
-                "proof_agent": bool(self.context_fn)}
+        return {"default": self.default, "config_error": self.config_error,
+                "providers": [b.info() for b in self.backends.values()],
+                "proof_agent": bool(self.context_fn)}  # a node's proof agent (ADR-0011 point 8)
 
     # ------------------------------------------------------------ snapshots
     # Files are kept as bytes: Undo puts back exactly what was there (line ends, encoding),

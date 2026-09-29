@@ -48,7 +48,7 @@ This freezes every input of the proof into an immutable snapshot, `proofs/<id>/s
   - **It runs** `proof` (retrieval, claim, split, request review, Evidence checks) and computation such as Python, SageMath and Lean.
   - **It writes** files only in the node's sources and its `scratch/` folder, and changes project state only through `proof`. It never makes a Human Review decision.
   - **It is rooted at the project:** it runs in `proofs/<id>/` with `PROOF_ROOT` set to the project.
-  - **Backends:** Claude Code and Codex are the full proof agent; an API model is a limited assistant with file tools only.
+  - **It runs on the Claude Code or the Codex CLI**, whichever you are logged into; there is no API-model backend.
   - **Undo** restores the turn's files, not a claim, a split, a snapshot or a decision.
 
   ```toml

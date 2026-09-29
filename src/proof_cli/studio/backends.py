@@ -5,17 +5,17 @@ events. The agent manager (agent.py) does everything that does not depend on the
 backend: it checks the request, snapshots the editable files, computes the per-file
 diffs afterwards and undoes turns.
 
-Three kinds ship with prism-local:
+Two kinds ship with the studio, both local CLIs the researcher logs into:
 
 - ``claude`` (backend_claude.py): the local Claude Code CLI.
 - ``codex`` (backend_codex.py): the local OpenAI Codex CLI (``codex exec --json``).
-- ``openai`` (backend_openai.py): any OpenAI-compatible chat-completions API with an
-  API key: DeepSeek, OpenAI, OpenRouter, Qwen, Moonshot, a local Ollama or vLLM.
-  prism-local runs the agent loop itself with a small set of file tools.
+
+prism-local's API-model backend (an OpenAI-compatible API with an API key) is not part of
+proof-cli: the proof agent runs on the CLIs, which search the web and run commands (#72).
 
 To add another backend, subclass `Backend` (or `CliBackend` for a CLI that prints
 JSON lines), implement `run` (or `command` and `handle`), and add its type to
-`kinds` in `load_backends`, which also applies the presets and the user's settings.
+`kinds` in `load_backends`, which also applies the user's settings.
 
 Events a backend emits through ``job.emit`` (the panel understands exactly these):
 
@@ -227,28 +227,6 @@ class CliBackend(Backend):
 
 # ---------------------------------------------------------------- registry
 
-# API presets. The key is read from the named environment variable, never from a file
-# in the project (projects are often shared or committed).
-PRESETS: dict[str, dict] = {
-    "deepseek": {"type": "openai", "label": "DeepSeek", "base_url": "https://api.deepseek.com",
-                 "api_key_env": "DEEPSEEK_API_KEY",
-                 "models": ["deepseek-chat", "deepseek-reasoner"]},
-    "openai": {"type": "openai", "label": "OpenAI API", "base_url": "https://api.openai.com/v1",
-               "api_key_env": "OPENAI_API_KEY", "models": [],
-               "efforts": ["minimal", "low", "medium", "high"]},
-    "openrouter": {"type": "openai", "label": "OpenRouter",
-                   "base_url": "https://openrouter.ai/api/v1",
-                   "api_key_env": "OPENROUTER_API_KEY", "models": []},
-    "qwen": {"type": "openai", "label": "Qwen (DashScope)",
-             "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-             "api_key_env": "DASHSCOPE_API_KEY", "models": ["qwen-plus", "qwen-max"]},
-    "moonshot": {"type": "openai", "label": "Kimi (Moonshot)", "base_url": "https://api.moonshot.cn/v1",
-                 "api_key_env": "MOONSHOT_API_KEY", "models": []},
-    "ollama": {"type": "openai", "label": "Ollama (local)", "base_url": "http://127.0.0.1:11434/v1",
-               "api_key_env": None, "models": []},
-}
-
-
 def config_path() -> Path:
     """User-level agent settings: $PRISM_AGENTS, else ~/.prism-local/agents.json."""
     return Path(os.environ.get("PRISM_AGENTS") or Path.home() / ".prism-local" / "agents.json")
@@ -269,33 +247,28 @@ def read_config(path: Path | None = None) -> tuple[dict, str | None]:
 
 
 def load_backends(path: Path | None = None) -> tuple[dict[str, Backend], str, str | None]:
-    """All backends (built-ins, presets, then the user's settings), the default id,
-    and an error message if the settings file was bad.
+    """All backends (the built-in Claude Code and Codex CLIs, then the user's settings), the
+    default id, and an error message if the settings file was bad.
 
     Settings file (JSON)::
 
         {
-          "default": "deepseek",
+          "default": "codex",
           "providers": {
-            "deepseek": {"default_model": "deepseek-chat"},
             "codex": {"bin": "C:/tools/codex.cmd"},
-            "my-vllm": {"type": "openai", "label": "My vLLM",
-                        "base_url": "http://gpu-box:8000/v1",
-                        "api_key_env": "MY_VLLM_KEY", "models": ["qwen3-32b"]}
+            "claude": {"default_model": "opus"}
           }
         }
 
-    An entry with the id of a built-in or preset changes only the fields it gives.
-    ``"enabled": false`` hides a provider.
+    An entry with the id of a built-in changes only the fields it gives; another entry names
+    its `type` (claude or codex). ``"enabled": false`` hides a provider.
     """
     from .backend_claude import ClaudeCode
     from .backend_codex import Codex
-    from .backend_openai import OpenAICompat
-    kinds = {"claude": ClaudeCode, "codex": Codex, "openai": OpenAICompat}
+    kinds = {"claude": ClaudeCode, "codex": Codex}
 
     data, err = read_config(path)
     specs: dict[str, dict] = {"claude": {"type": "claude"}, "codex": {"type": "codex"}}
-    specs.update({k: dict(v) for k, v in PRESETS.items()})
     user = data.get("providers") or {}
     if not isinstance(user, dict):
         user, err = {}, err or "'providers' must be an object"
@@ -306,9 +279,9 @@ def load_backends(path: Path | None = None) -> tuple[dict[str, Backend], str, st
     for pid, spec in specs.items():
         if spec.get("enabled") is False:
             continue
-        cls = kinds.get(spec.get("type") or "openai")
+        cls = kinds.get(spec.get("type") or pid)
         if cls is None:
-            err = err or f"provider {pid}: unknown type {spec.get('type')!r}"
+            err = err or f"provider {pid}: type {spec.get('type')!r} isn't supported (the studio runs the Claude Code or Codex CLI)"
             continue
         try:
             out[pid] = cls(pid, spec)
