@@ -1549,7 +1549,8 @@ def revalidate_dependency(
     Recorded as a `dependency_revalidation` decision whose pins are exactly
     the refreshed pin this writes (ADR-0010).
 
-    Only available when the target's interface fingerprint hasn't changed
+    Only available when the pin lags the target's accepted version (#23;
+    otherwise `PIN_NOT_LAGGING`), and when the target's interface fingerprint hasn't changed
     since it was last pinned — if it has, the old Candidate proof no longer
     demonstrably accounts for the new premise, and a whole new Candidate
     proof is required instead (`INTERFACE_CHANGED`). Records
@@ -1593,6 +1594,12 @@ def revalidate_dependency(
             "INTERFACE_CHANGED",
             f"{target_node_id}'s accepted interface changed since {node_id} last pinned it; "
             "a new Candidate proof is required, lightweight re-review is not available",
+        )
+    if not dependency_pin_lags(store, pin):
+        # nothing moved since the pin: a re-review would reaffirm nothing (#24)
+        raise ProofMapError(
+            "PIN_NOT_LAGGING",
+            f"{node_id}'s pin on {target_node_id} already names its accepted version; there is nothing to re-review",
         )
 
     refreshed = _refreshed_pin(store, target_node_id)
