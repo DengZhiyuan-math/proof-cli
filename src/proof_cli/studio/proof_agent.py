@@ -25,8 +25,7 @@ import sys
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-
-from .. import key_ideas
+from typing import Callable
 
 PROJECT_CONFIG = "proof.toml"
 # the commands the agent may run besides `proof`: computation in support of its reasoning
@@ -102,7 +101,7 @@ Where the proof is most likely to be wrong: what the reviewer should check harde
 Boundary cases, extra assumptions, or parts not yet handled. Write 「无」 if there are none.
 
 If proof.tex has no proof yet, say so under 核心思路 instead of inventing one. The author edits
-your draft; requesting review is how they confirm it, and the review records that you drafted it.
+your draft; requesting review is how they confirm it, and the studio records that you drafted it.
 """
 
 
@@ -115,21 +114,24 @@ class ProofAgentContext:
     library: list[Path] = field(default_factory=list)
     name: str = "studio-agent"   # the name it claims, splits and requests review under
     dependencies: list[str] = field(default_factory=list)   # the node's, for drafting its key ideas
+    # records a key-ideas draft in project state: (agent name, the bytes it wrote); see record_draft
+    on_drafted: Callable[[str, bytes], None] | None = None
 
     def key_ideas_prompt(self) -> str:
         """The turn that drafts a missing key-ideas.md from proof.tex and the dependencies (ADR-0013)."""
         deps = ", ".join(f"{dep} (../{dep}/)" for dep in self.dependencies) or "none (it has no dependencies)"
         return KEY_IDEAS_BRIEF.format(node=self.node_id, dependencies=deps)
 
-    def mark_drafted(self, path: Path) -> None:
-        """After the drafting turn: the summary's first line records that this agent drafted it,
-        so the review of the snapshot that freezes it notes "drafted by agent, confirmed by author"."""
+    def record_draft(self, path: Path) -> None:
+        """After the drafting turn: record in project state that this agent wrote the summary, and
+        the SHA-256 of what it wrote, so a review request can tell the agent's draft, as confirmed
+        or as edited by the author, from the author's own (ADR-0013). The file itself is untouched."""
         try:
-            text = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
+            data = path.read_bytes()
+        except OSError:
             return  # nothing was drafted
-        if key_ideas.parse(text).drafted_by is None:
-            path.write_text(key_ideas.drafted_marker(self.name) + "\n" + text, encoding="utf-8")
+        if self.on_drafted is not None:
+            self.on_drafted(self.name, data)
 
     def env(self) -> dict[str, str]:
         """The agent's environment: PROOF_ROOT set to the project, and `proof` reachable."""

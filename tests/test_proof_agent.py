@@ -15,7 +15,8 @@ from pathlib import Path
 import pytest
 
 from _proofs import KEY_IDEAS, write_key_ideas
-from proof_cli.key_ideas import drafted_marker
+from proof_cli import key_ideas
+from proof_cli.storage import list_events
 from proof_cli.proof_map import add_dependency, create_node, request_review, get_acceptance_state, get_active_claim, get_node, list_candidate_proofs
 from proof_cli.storage import ensure_project
 from proof_cli.studio.backends import Job
@@ -297,18 +298,19 @@ def test_the_proof_agent_drafts_a_missing_summary_which_the_author_confirms_by_r
     argv = _log(log)["argv"]
     allowed = argv[argv.index("--allowedTools") + 1:argv.index("--disallowedTools")]
     assert "Write(./key-ideas.md)" in allowed and "Write(./**)" not in allowed
-    # its first line records the drafter, as part of the turn (so its Undo removes the draft too)
+    # the file is exactly what the agent wrote; who wrote it is recorded in project state, with its digest
     text = (folder / "key-ideas.md").read_text()
-    assert text == drafted_marker("studio-agent") + "\n" + KEY_IDEAS
-    assert studio_a.agent.turns[started["job"]].after["key-ideas.md"] == text.encode()
+    assert text == KEY_IDEAS
+    (drafted,) = [e for e in list_events(store) if e.kind == "proof_map_key_ideas_drafted"]
+    assert drafted.entity_id == "A" and drafted.payload == {"drafted_by": "studio-agent", "sha256": key_ideas.digest(text.encode())}
 
     # a second draft over an existing summary is refused: it is the author's now
     assert studio_a.post("/api/key-ideas/draft", {"provider": "claude"}).status == 409
 
-    # the author edits it and requests review: that confirms it, and the snapshot records who drafted it
+    # requesting review untouched confirms the agent's draft; an edited one says it was edited
+    assert request_review(store, "A", requested_by="author", rationale="scoped").key_ideas_drafted_by == key_ideas.AGENT_CONFIRMED
     (folder / "key-ideas.md").write_text(text.replace("compactness", "compactness and continuity"))
-    record = request_review(store, "A", requested_by="author", rationale="scoped")
-    assert record.key_ideas_drafted_by == "studio-agent"
+    assert request_review(store, "A", requested_by="author", rationale="scoped").key_ideas_drafted_by == key_ideas.AGENT_EDITED
 
 
 def test_a_drafting_turn_that_writes_nothing_leaves_no_summary(studio):
@@ -317,5 +319,6 @@ def test_a_drafting_turn_that_writes_nothing_leaves_no_summary(studio):
     studio_a = hub.studio("A")
     _wait(studio_a.agent, json.loads(studio_a.post("/api/key-ideas/draft", {"provider": "claude"}).body))
     assert not (store.root / "proofs" / "A" / "key-ideas.md").exists()
+    assert not [e for e in list_events(store) if e.kind == "proof_map_key_ideas_drafted"]  # nothing drafted, nothing recorded
 
 

@@ -93,14 +93,28 @@
   // The four fields of a key-ideas summary (ADR-0013), in order. Shown as text: `$…$` stays as written.
   const KEY_IDEAS = [["core_idea", "核心思路"], ["main_steps", "主要步骤"], ["difficulties", "难点"], ["not_covered", "未覆盖"]];
 
+// who wrote a snapshot's key ideas, as its record says (ADR-0013): recorded by the studio, never read from the file
+  const KEY_IDEAS_BY = {
+    "agent (confirmed by author at request-review)": "由 agent 起草、作者确认 · drafted by the proof agent, confirmed by the author",
+    "agent draft, edited by author": "由 agent 起草、作者修改 · the proof agent's draft, edited by the author",
+    "author": "作者撰写 · written by the author",
+  };
+
+// a field's text with its $…$ and $$…$$ typeset (static/mathtext.js, KaTeX); plain text without it
+  const withMath = (node, text) => {
+    if (typeof renderMathText === "function") return renderMathText(node, text);
+    node.textContent = String(text);
+    return node;
+  };
+
   function keyIdeasBlock(summary) {
     const block = h("div", null, { class: "key-ideas" });
     for (const [key, title] of KEY_IDEAS) {
       const text = (summary.fields || {})[key];
       if (!text) continue;
-      block.append(h("h5", title), h("p", text, { class: `key-idea ${key}` }));
+      block.append(h("h5", title), withMath(h("p", null, { class: `key-idea ${key}` }), text));
     }
-    if (summary.drafted_by) block.append(h("p", `由 agent 起草、作者确认 · drafted by ${summary.drafted_by}, confirmed by the author's review request`, { class: "node-hint drafted" }));
+    if (summary.drafted_by) block.append(h("p", KEY_IDEAS_BY[summary.drafted_by] || summary.drafted_by, { class: "node-hint drafted" }));
     return block;
   }
 
@@ -220,7 +234,7 @@
       action("Request review", "/request-review", [["rationale", "textarea", "why this node is scoped to prove directly"]], (v) => ({ rationale: v.rationale }),
         (snapshot) => { tell(`Snapshot v${snapshot.version} awaits review.` + (snapshot.resnapshot_after_loss == null ? "" :
           ` A re-snapshot after loss of v${snapshot.resnapshot_after_loss}: it needs its own review.`) +
-          (snapshot.key_ideas_drafted_by ? ` Its key ideas, drafted by ${snapshot.key_ideas_drafted_by}, are confirmed as yours.` : "")); return render(); }, savedFirst),
+          (snapshot.key_ideas_drafted_by && snapshot.key_ideas_drafted_by !== "author" ? ` Its key ideas: ${KEY_IDEAS_BY[snapshot.key_ideas_drafted_by] || snapshot.key_ideas_drafted_by}.` : "")); return render(); }, savedFirst),
       action("Split", "/split", [["children", "textarea", "one child per line: id = statement"], ["reassign", "checkbox", "take it over"]],
         (v) => ({ children: children(v.children), reassign: v.reassign }), (result) => { location.href = result.next; }),
       // one dependency edge at a time (#96): a Lemma the proof came to use, or a dependency handed down to a child

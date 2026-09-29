@@ -61,7 +61,9 @@ def project_origin(store: ProjectStore) -> str:
 
 
 _STATIC = resources.files("proof_cli.webapp") / "static"
-_CONTENT_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8"}
+_CONTENT_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".woff2": "font/woff2"}
+# what the map page shares with the studio's static folder: the maths renderer and vendored KaTeX (ADR-0013)
+_SHARED_PREFIXES = ("mathtext.js", "vendor/katex.min.", "vendor/fonts/KaTeX_")
 _MAX_BODY_BYTES = 2_000_000
 
 
@@ -88,6 +90,9 @@ def _proof_view(store: ProjectStore, proof) -> dict | None:
             frozen = None
     # a damaged or missing snapshot still shows: its page, its (now void) decisions, its warnings
     files = {rel: data.decode("utf-8", errors="replace") for rel, data in (frozen or {}).items()}
+    summary = key_ideas.view((frozen or {}).get(key_ideas.KEY_IDEAS_FILE))
+    if summary is not None:  # who wrote it, as the snapshot's record says (never read from the file)
+        summary["drafted_by"] = proof.key_ideas_drafted_by
     return {
         "id": proof.id,
         "version": proof.version,
@@ -97,7 +102,7 @@ def _proof_view(store: ProjectStore, proof) -> dict | None:
         "sha256": candidate_proof_sha256(store, proof.id),
         # what review starts from (ADR-0013): the key-ideas summary the snapshot froze, its four
         # fields and who drafted it; None for an older snapshot that froze none
-        "key_ideas": key_ideas.view((frozen or {}).get(key_ideas.KEY_IDEAS_FILE)),
+        "key_ideas": summary,
     }
 
 
@@ -546,6 +551,8 @@ class _Handler(BaseHTTPRequestHandler):
             return self._studio("GET")
         if path in ("/", "/index.html"):
             return self._static("index.html")
+        if path.startswith("/static/shared/"):
+            return self._shared(path.removeprefix("/static/shared/"))
         if path.startswith("/static/"):
             return self._static(path.removeprefix("/static/"))
         if path == "/api/health":
@@ -612,6 +619,25 @@ class _Handler(BaseHTTPRequestHandler):
             return self._error(HTTPStatus.NOT_FOUND, "NOT_FOUND", name)
         suffix = "." + name.rsplit(".", 1)[-1]
         self._send(HTTPStatus.OK, asset.read_bytes(), _CONTENT_TYPES.get(suffix, "application/octet-stream"))
+
+
+    def _shared(self, rel: str) -> None:
+        """One of the studio's static files the map page uses too (KaTeX, mathtext.js), never another."""
+        asset = shared_asset(rel)
+        if asset is None:
+            return self._error(HTTPStatus.NOT_FOUND, "NOT_FOUND", rel)
+        self._send(HTTPStatus.OK, asset.read_bytes(), _CONTENT_TYPES.get(asset.suffix, "application/octet-stream"))
+
+
+def shared_asset(rel: str):
+    """The studio static file at `rel` if the map page may load it (KaTeX, mathtext.js), else None."""
+    from .studios import STUDIO_STATIC
+
+    asset = (STUDIO_STATIC / rel).resolve()
+    if STUDIO_STATIC not in asset.parents or not asset.is_file():
+        return None
+    # judged by where the path lands, not how it is spelt: "mathtext.js/../app.js" is app.js
+    return asset if asset.relative_to(STUDIO_STATIC).as_posix().startswith(_SHARED_PREFIXES) else None
 
 
 class ReviewServer(ThreadingHTTPServer):

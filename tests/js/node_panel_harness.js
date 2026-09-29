@@ -30,7 +30,11 @@ class El {
     },
   };
   if (scenario.saveAll !== null) context.saveAll = async () => { events.push("saveAll"); return scenario.saveAll; };
+  // the studio page's KaTeX and mathtext.js (ADR-0013), unless the scenario leaves KaTeX out
+  const katexCalls = [];
+  if (scenario.katex !== false) context.katex = require("./katex_stub.js")(katexCalls);
   vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "../../src/proof_cli/studio/static/mathtext.js"), "utf8"), context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, "../../src/proof_cli/studio/static/node.js"), "utf8"), context);
   await new Promise(setImmediate);
   const out = { events, deps: null, links: [], note: "" };
@@ -60,5 +64,8 @@ class El {
   out.reviewButtons = review.all().filter((x) => x.tag === "button").map((x) => x.textContent);
   out.buttons = panel.all().filter((x) => x.tag === "button").map((x) => x.textContent);
   out.text = panel.text();
+  out.katex = katexCalls;
+  // every maths span in the review section: its class and its text
+  out.math = review.all().filter((x) => x.tag === "span" && String(x.attrs.class || "").startsWith("math")).map((x) => ({ class: x.attrs.class, text: x.textContent, title: x.attrs.title || null }));
   console.log(JSON.stringify(out));
 })();

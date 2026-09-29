@@ -243,7 +243,7 @@ def test_the_review_view_shows_only_the_summary_and_the_decision_controls():
     shown = _panel(view=REVIEW_VIEW)
     review = shown["review"]
     assert "Snapshot v2" in review
-    for title, text in (("核心思路", "CORE: compactness of $[0, 1]$"), ("主要步骤", "STEPS"), ("难点", "HARD"), ("未覆盖", "OPEN")):
+    for title, text in (("核心思路", "CORE: compactness of"), ("主要步骤", "STEPS"), ("难点", "HARD"), ("未覆盖", "OPEN")):
         assert title in review and text in review
     assert "Accept this snapshot" in shown["reviewButtons"]
     # no LaTeX source and no PDF: neither a frozen file's text, nor its name, nor the archived PDF
@@ -255,11 +255,15 @@ def test_the_review_view_shows_only_the_summary_and_the_decision_controls():
     assert "/#/node/A" in shown["reviewLinks"]
 
 
-def test_a_summary_the_agent_drafted_says_so_in_the_review_view():
-    drafted = {**REVIEW_VIEW, "candidate_proof": {**REVIEW_VIEW["candidate_proof"], "key_ideas": {**SUMMARY, "drafted_by": "studio-agent"}}}
-    shown = _panel(view=drafted)
-    assert "由 agent 起草、作者确认" in shown["review"] and "studio-agent" in shown["review"]
-    assert "由 agent 起草" not in _panel(view=REVIEW_VIEW)["review"]
+@pytest.mark.parametrize("provenance, shown_as", [
+    ("agent (confirmed by author at request-review)", "由 agent 起草、作者确认"),
+    ("agent draft, edited by author", "由 agent 起草、作者修改"),
+    ("author", "作者撰写"),
+])
+def test_the_review_view_says_who_wrote_the_summary(provenance, shown_as):
+    view = {**REVIEW_VIEW, "candidate_proof": {**REVIEW_VIEW["candidate_proof"], "key_ideas": {**SUMMARY, "drafted_by": provenance}}}
+    assert shown_as in _panel(view=view)["review"]
+    assert "由 agent 起草" not in _panel(view=REVIEW_VIEW)["review"]  # an older record says nothing
 
 
 def test_an_old_snapshot_without_a_summary_is_reviewed_with_a_note_and_a_link():
@@ -334,3 +338,46 @@ def test_a_damaged_snapshot_shows_as_such_in_the_review_section():
     broken = {**REVIEW_VIEW, "candidate_proof": {"id": "cp-v2", "version": 2, "sha256": None, "text": "", "files": {}, "unreadable": True}}
     shown = _panel(view=broken)
     assert "can't be read" in shown["review"]
+
+
+
+# -- maths in the summary is typeset with the vendored KaTeX (ADR-0013) ---------------------
+
+
+def _review_with(core, **scenario):
+    view = {**REVIEW_VIEW, "candidate_proof": {**REVIEW_VIEW["candidate_proof"], "key_ideas": {**SUMMARY, "fields": {**SUMMARY["fields"], "core_idea": core}}}}
+    return _panel(view=view, **scenario)
+
+
+def test_the_review_view_renders_inline_and_display_maths():
+    shown = _review_with("By $[0, 1]$ compact, $$\\sup_{x} f(x) < \\infty.$$ Costs \\$5.")
+    assert {"tex": "[0, 1]", "displayMode": False} in shown["katex"]
+    assert {"tex": "\\sup_{x} f(x) < \\infty.", "displayMode": True} in shown["katex"]
+    assert {"class": "math", "text": "[katex: [0, 1]]", "title": None} in shown["math"]
+    assert {"class": "math display", "text": "[katex display: \\sup_{x} f(x) < \\infty.]", "title": None} in shown["math"]
+    assert "Costs \\$5." in shown["review"]  # an escaped dollar is a dollar
+
+
+def test_a_malformed_formula_in_the_review_view_shows_as_text_and_never_throws():
+    shown = _review_with("Broken $\\frac{1}{$ but $\\alpha$ is fine; an unclosed $ stays text.")
+    (bad,) = [m for m in shown["math"] if m["class"] == "math unrendered"]
+    assert bad["text"] == "$\\frac{1}{$" and bad["title"]  # KaTeX's parse error, on hover
+    assert {"class": "math", "text": "[katex: \\alpha]", "title": None} in shown["math"]
+    assert "an unclosed $ stays text." in shown["review"]
+    assert shown["reviewButtons"] == ["Accept this snapshot"]  # the panel still rendered whole
+
+
+def test_without_katex_the_maths_shows_as_written():
+    shown = _review_with("By $[0, 1]$ compact.", katex=False)
+    assert shown["katex"] == [] and "$[0, 1]$" in shown["review"]
+
+
+def test_the_studio_page_loads_the_vendored_katex_before_the_node_panel():
+    index = (STUDIO_STATIC / "index.html").read_text()
+    assert 'href="static/vendor/katex.min.css"' in index
+    assert index.index('src="static/vendor/katex.min.js"') < index.index('src="static/mathtext.js"') < index.index('src="static/node.js"')
+    vendor = STUDIO_STATIC / "vendor"
+    assert (vendor / "LICENSE-katex").read_text().startswith("The MIT License")
+    assert len(list((vendor / "fonts").glob("KaTeX_*.woff2"))) == 20
+    css = (vendor / "katex.min.css").read_text()
+    assert "url(fonts/KaTeX_Main-Regular.woff2)" in css and "http" not in css  # every font is local

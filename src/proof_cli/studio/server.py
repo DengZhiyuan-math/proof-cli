@@ -645,8 +645,8 @@ class Studio:
 
     def draft_key_ideas(self, body: dict) -> Response:
         """The node's proof agent drafts its missing key-ideas.md (ADR-0013): one edit turn that may
-        write only that file, briefed to summarise proof.tex and the dependencies. Its first line
-        then records the drafter; the author edits it, and requesting review confirms it."""
+        write only that file, briefed to summarise proof.tex and the dependencies. The draft is then
+        recorded in project state; the author edits it, and requesting review confirms it."""
         context = self.agent.context_fn() if self.agent.context_fn else None
         if context is None:
             return _err(404, "only a proof map node's studio drafts key ideas")
@@ -655,7 +655,7 @@ class Studio:
             return _json({"error": f"{KEY_IDEAS_FILE} already exists: edit it, or remove it to have the agent draft it afresh"}, 409)
         r = self.agent.start(context.key_ideas_prompt(), body.get("session_id") or None, "edit",
                              body.get("model") or None, body.get("effort") or None, [KEY_IDEAS_FILE],
-                             body.get("provider") or None, finish=lambda: context.mark_drafted(target))
+                             body.get("provider") or None, finish=lambda: context.record_draft(target))
         return _json(r, 409 if "error" in r else 200)
 
     def _post(self, path, body):

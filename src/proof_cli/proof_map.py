@@ -51,6 +51,7 @@ from .storage import (
     read_scoped,
     scoped_memo,
     append_event,
+    latest_event,
     get_active_claim,
     get_candidate_proof as _get_candidate_proof,
     get_challenge as _get_challenge,
@@ -887,7 +888,7 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
     # The key-ideas summary is one of these inputs (ADR-0013): frozen, listed and hashed with
     # the proof, so a change to it alone is a new version, by the same unchanged-check below
     contents = {rel: path.read_bytes() for rel, path in working_inputs(store.root, node_id).items()}
-    summary = _require_key_ideas(store, node_id, contents.get(key_ideas.KEY_IDEAS_FILE))
+    _require_key_ideas(store, node_id, contents.get(key_ideas.KEY_IDEAS_FILE))
     sha256 =manifest_digest({rel: hashlib.sha256(data).hexdigest() for rel, data in contents.items()})
 
     # The holder check and every write are one SQLite write transaction (#18): a reassignment
@@ -911,6 +912,9 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
                 f"{node_id}'s working proof is unchanged since snapshot v{current.version}, which is already the one under review",
             )
         resnapshot_of = current.version if lost else None
+        # who wrote the summary being frozen, from the drafts the studio recorded (not from the file)
+        draft = latest_event(store, KEY_IDEAS_DRAFTED, node_id, conn=conn)
+        drafted_by = key_ideas.provenance(contents[key_ideas.KEY_IDEAS_FILE], draft.payload.get("sha256") if draft else None)
 
         # past any snapshot already on disk too: one the index never got is an orphan, reported
         # by list_integrity_warnings, and never overwritten
@@ -935,7 +939,7 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
             sha256=sha256,
             dependencies=list(node.dependencies),
             resnapshot_after_loss=resnapshot_of,
-            key_ideas_drafted_by=summary.drafted_by,
+            key_ideas_drafted_by=drafted_by,
         )
         try:
             insert_candidate_proof(store, record, conn=conn)
@@ -958,12 +962,29 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
                 "sha256": sha256,
                 "requested_by": requested_by,
                 "resnapshot_after_loss": resnapshot_of,
-                # drafted by the proof agent, confirmed by its author in this request (ADR-0013)
-                "key_ideas_drafted_by": summary.drafted_by,
+                # the summary's provenance: the author's, or the agent's draft confirmed or edited (ADR-0013)
+                "key_ideas_drafted_by": drafted_by,
             },
             conn=conn,
         )
     return record
+
+
+KEY_IDEAS_DRAFTED = "proof_map_key_ideas_drafted"
+
+
+def record_key_ideas_draft(store: ProjectStore, node_id: str, *, agent: str, content: bytes) -> None:
+    """Record that the proof agent `agent` wrote the node's working key-ideas.md as `content`
+    (ADR-0013). The next review request compares what it freezes against this draft's SHA-256
+    to say whether the summary is the agent's, confirmed by the author, or its draft edited."""
+    require_node(store, node_id)
+    append_event(
+        store,
+        KEY_IDEAS_DRAFTED,
+        f"{agent} drafted the key ideas of {node_id}",
+        entity_id=node_id,
+        payload={"drafted_by": agent, "sha256": key_ideas.digest(content)},
+    )
 
 
 def _require_key_ideas(store: ProjectStore, node_id: str, data: bytes | None) -> key_ideas.KeyIdeas:
@@ -1669,6 +1690,8 @@ def _binding_problem(store: ProjectStore, node: ProofMapNode, payload: DecisionP
         return "the node's statement or assumptions changed after it was decided on"
     if set(node.dependencies) != {pin.target_node_id for pin in payload.dependency_pins}:
         return "the node's dependencies changed after it was decided on"
+    if payload.key_ideas_drafted_by != proof.key_ideas_drafted_by:
+        return "the snapshot's key-ideas provenance changed after it was decided on"
     return None
 
 
