@@ -33,6 +33,8 @@
               <button id="view-tree" type="button" aria-pressed="false">Tree</button>
             </div>
             <label id="tree-root-label" hidden>rooted at <select id="tree-root"></select></label>
+            <label class="find" title="Find a node by id, label or statement (/)"><span class="lbl">Find</span><input id="map-find" type="search" placeholder="id, label or statement" aria-label="Find a node by id, label or statement" autocomplete="off" spellcheck="false"><kbd>/</kbd></label>
+            <span id="map-find-count" class="lbl" role="status" aria-live="polite"></span>
             <span class="hint" id="map-caption"></span>
             <div class="zoom" role="group" aria-label="Zoom">
               <button id="zoom-out" type="button" aria-label="Zoom out">−</button>

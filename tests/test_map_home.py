@@ -2,9 +2,11 @@
 
 The frontier is its own, strongest signal (ADR-0008): a warning is shown beside it, never in
 its place. Tree lines name their node and how many parents share it in data attributes.
+The search box picks nodes out on the canvas and the tree (issue #116).
 """
 
 import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -138,3 +140,120 @@ def test_empty_review_and_warnings_sections_say_so():
     (full,) = _home(state=_state(PENDING, [warning]))
     assert len(full["pendingRows"]) == 2 and full["pendingCount"] == "2"
     assert full["warnings"] == ["STALE a dependency moved"]
+
+
+# -- the search box (issue #116) ---------------------------------------------------------
+
+LABELLED = {"nodes": [*MAP["nodes"][:2], {**MAP["nodes"][2], "display_label": "Compactness on the line"}]}
+NUMBER = r"(-?[\d.]+(?:e-?\d+)?)"
+
+
+def _dims(reading):
+    return {node_id: "dim" in node["classes"] for node_id, node in reading["dag"].items()}
+
+
+def _centre(reading, node_id):
+    """Where a node's centre lands on the canvas: the scene's translate and scale applied to the node's own translate."""
+    tx, ty, k = map(float, re.fullmatch(rf"translate\({NUMBER},{NUMBER}\) scale\({NUMBER}\)", reading["scene"]).groups())
+    x, y = map(float, re.fullmatch(rf"translate\({NUMBER},{NUMBER}\)", reading["at"][node_id]).groups())
+    return tx + x * k, ty + y * k, k
+
+
+@pytest.mark.parametrize("query, matched", [
+    ("LEM_BOUND", {"lem_bound"}),                        # by id, whatever the case
+    ("partial sums", {"lem_bound"}),                     # by statement
+    ("compactness", {"ref_bw"}),                         # by label
+    ("b", {"thm_main", "lem_bound", "ref_bw"}),
+])
+def test_the_search_box_dims_every_node_on_the_canvas_it_does_not_match(query, matched):
+    first, found = _home(map_=LABELLED, steps=[{"find": query}])
+    assert not any(_dims(first).values()) and first["find"]["count"] == "" and not first["filtering"]
+    assert {node_id for node_id, dim in _dims(found).items() if not dim} == matched
+    assert found["filtering"]
+    assert found["find"]["count"].startswith(f"{len(matched)} of 3 match")
+
+
+def test_the_search_box_dims_the_tree_too():
+    *_, tree = _home(steps=[{"view": "tree"}, {"find": "bolzano"}])
+    assert [(line["id"], line["dim"]) for line in tree["tree"]] == [("thm_main", True), ("lem_bound", True), ("ref_bw", False)]
+    assert tree["find"]["count"].startswith("1 of 3 match")
+    # the search stays on across a switch of view
+    *_, back = _home(steps=[{"find": "bolzano"}, {"view": "tree"}, {"view": "dag"}])
+    assert _dims(back) == {"thm_main": True, "lem_bound": True, "ref_bw": False}
+
+
+def test_the_search_box_says_when_nothing_matches():
+    *_, nothing = _home(steps=[{"find": "hilbert"}])
+    assert all(_dims(nothing).values())
+    assert nothing["find"]["count"].startswith("0 of 3 match") and "No node" in nothing["find"]["count"]
+
+
+def test_escape_clears_the_search():
+    *_, found, cleared = _home(steps=[{"view": "tree"}, {"find": "bound"}, {"key": "Escape"}])
+    assert any(line["dim"] for line in found["tree"])
+    assert cleared["find"]["value"] == "" and cleared["find"]["count"] == ""
+    assert not any(line["dim"] for line in cleared["tree"])
+    *_, dag = _home(steps=[{"find": "bound"}, {"key": "Escape"}])
+    assert not any(_dims(dag).values()) and not dag["filtering"]
+
+
+def test_enter_first_brings_the_first_match_into_view_then_opens_it():
+    first, typed, shown, opened = _home(steps=[{"find": "partial"}, {"key": "Enter"}, {"key": "Enter"}])
+    # the first Enter pans (and zooms, to at least life size) so the match sits in the middle of the canvas
+    x, y, k = _centre(shown, "lem_bound")
+    assert abs(x - 400) < 1 and k >= 1
+    assert abs(y - (44 + 600) / 2) < 1  # the middle of what the map bar leaves showing
+    assert shown["scene"] != typed["scene"] and shown["href"] == ""
+    assert "Enter again" in shown["find"]["count"]
+    # the second opens its page: a lemma in its studio
+    assert opened["href"] == "/studio/lem_bound/"
+
+
+def test_enter_opens_an_imported_result_on_its_own_page():
+    *_, opened = _home(steps=[{"find": "bolzano"}, {"key": "Enter"}, {"key": "Enter"}])
+    assert opened["href"] == "#/node/ref_bw"
+
+
+def test_a_changed_search_starts_again_from_bringing_the_match_into_view():
+    *_, shown = _home(steps=[{"find": "partial"}, {"key": "Enter"}, {"find": "bolzano"}, {"key": "Enter"}])
+    assert shown["href"] == ""
+    x, _, _ = _centre(shown, "ref_bw")
+    assert abs(x - 400) < 1
+
+
+def test_enter_with_nothing_matched_does_nothing():
+    *_, pressed = _home(steps=[{"find": "hilbert"}, {"key": "Enter"}, {"key": "Enter"}])
+    assert pressed["href"] == ""
+
+
+def test_slash_focuses_the_search_box_and_f_still_fits_the_map():
+    first, slash = _home(steps=[{"key": "/"}])
+    assert not first["find"]["focused"] and slash["find"]["focused"]
+    # typed inside the box, "f" is just a character: the map is not refitted under the researcher
+    *_, shown, typed_f = _home(steps=[{"find": "partial"}, {"key": "Enter"}, {"key": "f"}])
+    assert typed_f["scene"] == shown["scene"]
+    # outside the box, F still fits the whole map
+    fitted, *_, refitted = _home(steps=[{"find": "partial"}, {"key": "Enter"}, {"blur": True}, {"key": "f"}])
+    assert refitted["scene"] == fitted["scene"]
+
+
+def test_the_search_box_sits_on_the_map_bar_in_the_panels_style():
+    html = (STATIC / "index.html").read_text()
+    head = html[html.index('<div class="maphead">'):html.index('<div id="map-dag"')]
+    assert 'id="map-find"' in head and 'type="search"' in head and 'id="map-find-count"' in head
+    count = head[head.rindex("<", 0, head.index('id="map-find-count"')):]
+    assert 'aria-live="polite"' in count[:count.index(">")]
+    css = (STATIC / "app.css").read_text()
+    assert "#dag-svg .node.dim" in css and "#map-tree li.dim" in css
+    rule = css[css.index(".find {"):]
+    assert "clip-path: polygon(" in rule[:rule.index("}")]  # chamfered like the panel's other controls
+
+
+def test_the_map_bar_wraps_at_phone_width_rather_than_scrolling_sideways():
+    css = (STATIC / "app.css").read_text()
+    phone = css[css.index("@media (max-width: 720px)"):]
+    assert ".maphead" in phone and "flex-wrap: wrap" in phone
+    find = phone[phone.index(".find {"):]
+    assert "min-width: 0" in find[:find.index("}")]
+    box = phone[phone.index(".find input"):]
+    assert "width: 100%" in box[:box.index("}")]

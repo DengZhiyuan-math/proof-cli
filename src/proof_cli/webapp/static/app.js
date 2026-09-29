@@ -321,6 +321,7 @@ function drawDag(nodes) {
   view.content = { width, height };
   const scene = svg("g", { id: "dag-view" });
   const at = new Map();
+  view.at = at;  // each node's centre on the scene, for the search box to bring one into view
   const saved = positions.load();
   rows.forEach((row, r) => row.forEach((id, i) => {
     const rowWidth = row.length * BOX.w + (row.length - 1) * BOX.gapX;
@@ -349,7 +350,7 @@ function drawDag(nodes) {
     const left = -BOX.w / 2, top = -BOX.h / 2;
     const classes = ["node", `tone-${toneOf(n)}`, n.frontier ? "frontier" : "", n.assignee ? "claimed" : "", rejected(n) ? "rejected" : "", warningOf(n)].filter(Boolean).join(" ");
     const place = () => { const p = at.get(n.id); g.setAttribute("transform", `translate(${p.x},${p.y})`); };
-    const g = svg("g", { class: classes, tabindex: 0, role: "link", "aria-label": `${n.kind} ${n.id}: ${n.acceptance_state}, ${n.workflow_state}, ${n.integrity_state}${n.assignee ? `, claimed by ${n.assignee}` : ""}${n.frontier ? ", on the frontier" : ""}` });
+    const g = svg("g", { class: classes, "data-node-id": n.id, tabindex: 0, role: "link", "aria-label": `${n.kind} ${n.id}: ${n.acceptance_state}, ${n.workflow_state}, ${n.integrity_state}${n.assignee ? `, claimed by ${n.assignee}` : ""}${n.frontier ? ", on the frontier" : ""}` });
     place();
     g.append(svg("path", { class: "box", d: chamfered(left, top, BOX.w, BOX.h, BOX.chamfer) }));
     g.append(svg("rect", { class: `bar ${toneOf(n)}`, x: left, y: top + BOX.chamfer, width: 5, height: BOX.h - BOX.chamfer }));
@@ -450,7 +451,7 @@ function drawTree(nodes) {
 function showMap() {
   const nodes = mapData.nodes;
   const frontier = nodes.filter((n) => n.frontier).length;
-  $("map-caption").textContent = `${nodes.length} node(s) · ${frontier} on the frontier · drag to pan · pinch or ⌘/ctrl + scroll to zoom · F fits`;
+  $("map-caption").textContent = `${nodes.length} node(s) · ${frontier} on the frontier · drag to pan · pinch or ⌘/ctrl + scroll to zoom · F fits · / finds`;
   $("stat-frontier").textContent = String(frontier);
   $("map-dag").hidden = mapView !== "dag";
   $("map-tree").hidden = mapView !== "tree";
@@ -458,6 +459,82 @@ function showMap() {
   $("view-dag").setAttribute("aria-pressed", String(mapView === "dag"));
   $("view-tree").setAttribute("aria-pressed", String(mapView === "tree"));
   if (mapView === "dag") drawDag(nodes); else drawTree(nodes);
+  applyFind();
+}
+
+// -- the search box (issue #116): pick nodes out by id, label or statement, on the canvas and the tree ----
+const finding = { shown: null };  // the match the first Enter brought into view; a second Enter opens it
+
+function findMatcher() {
+  const query = $("map-find").value.trim().toLowerCase();
+  if (!query) return null;
+  return (n) => [n.id, n.display_label || "", n.statement || ""].some((field) => field.toLowerCase().includes(query));
+}
+
+// dim what the search doesn't match, on whichever view is drawn, and say how many it does
+function applyFind() {
+  if (!mapData) return;
+  const matches = findMatcher();
+  const byId = new Map(mapData.nodes.map((n) => [n.id, n]));
+  const mark = (item) => {
+    const id = item.getAttribute("data-node-id");
+    item.classList.toggle("dim", !!matches && !matches(byId.get(id) || { id }));  // a missing dependency matches by id
+    item.classList.toggle("found", !!matches && id === finding.shown);
+  };
+  $("dag-svg").classList.toggle("filtering", !!matches);
+  for (const g of $("dag-svg").querySelectorAll("g.node")) mark(g);
+  for (const li of $("map-tree").querySelectorAll("li")) mark(li);
+  const count = $("map-find-count");
+  if (!matches) { count.textContent = ""; return; }
+  const found = mapData.nodes.filter(matches).length;
+  const next = !found ? "No node has that id, label or statement" : finding.shown ? "Enter again opens it" : "Enter shows the first";
+  count.textContent = `${found} of ${mapData.nodes.length} match · ${next}`;
+}
+
+// pan (and zoom to at least life size) so the node sits in the middle of what the map bar leaves showing
+function showOnCanvas(id) {
+  const canvas = $("map-dag"), p = view.at && view.at.get(id);
+  if (!p || !canvas.clientWidth) return;
+  const top = 44;
+  view.k = Math.min(4, Math.max(view.k, 1));
+  view.tx = canvas.clientWidth / 2 - p.x * view.k;
+  view.ty = (top + canvas.clientHeight) / 2 - p.y * view.k;
+  applyView();
+}
+
+function wireFind() {
+  const box = $("map-find");
+  box.addEventListener("input", () => { finding.shown = null; applyFind(); });
+  box.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      if (!box.value) { box.blur(); return; }  // a second Escape hands the keys back to the map
+      box.value = "";
+      finding.shown = null;
+      applyFind();
+      return;
+    }
+    if (event.key !== "Enter" || !mapData) return;
+    event.preventDefault();
+    const matches = findMatcher();
+    const first = matches && mapData.nodes.find(matches);
+    if (!first) return;
+    if (finding.shown === first.id) { location.href = pageOf(first); return; }  // where it lives (ADR-0011)
+    finding.shown = first.id;
+    if (mapView === "dag") showOnCanvas(first.id);
+    else [...$("map-tree").querySelectorAll("li")].find((li) => li.getAttribute("data-node-id") === first.id)?.scrollIntoView?.({ block: "center" });
+    applyFind();
+  });
+  // "/" finds, as on most sites; the map's own keys (F fits) are untouched, and typing anywhere is never taken over
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) return;
+    const active = document.activeElement;
+    if (active && (["INPUT", "TEXTAREA", "SELECT"].includes(active.tagName) || active.isContentEditable)) return;
+    if ($("home").hidden) return;
+    event.preventDefault();
+    box.focus();
+    box.select();
+  });
 }
 
 // Where a node opens (ADR-0011): a theorem, lemma or claim in its studio, an imported result on its own page.
@@ -550,6 +627,7 @@ document.addEventListener("DOMContentLoaded", () => {
     try { await decide(decisions); } catch (error) { showError(error); }
   });
   wireCanvas();
+  wireFind();
   $("view-dag").addEventListener("click", () => { mapView = "dag"; showMap(); });
   $("view-tree").addEventListener("click", () => { mapView = "tree"; showMap(); });
   $("tree-root").addEventListener("change", showMap);
