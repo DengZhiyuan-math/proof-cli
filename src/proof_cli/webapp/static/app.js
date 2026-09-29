@@ -190,7 +190,7 @@ function tagOf(n) {
 // the icons, SF Symbols' ".circle.fill" style: a filled disc, a white glyph, 16 × 16
 const STATUS_GLYPHS = {
   ready: [["path", { d: "M6.4 4.9v6.2L11.3 8z", class: "glyph-fill" }]],
-  claimed: [["circle", { cx: 8, cy: 6.1, r: 1.9, class: "glyph-fill" }], ["path", { d: "M4.6 11.9a3.4 3.4 0 0 1 6.8 0z", class: "glyph-fill" }]],
+  claimed: [["path", { d: "M9.4 6.6 4.7 11.3", class: "glyph" }], ["rect", { x: 6.8, y: 5.3, width: 5.6, height: 2.5, rx: 0.6, transform: "rotate(45 9.6 6.55)", class: "glyph-fill" }]],  // a hammer: work in progress
   blocked: [["rect", { x: 5.2, y: 7.3, width: 5.6, height: 4.2, rx: 1, class: "glyph-fill" }], ["path", { d: "M6.4 7.3V6.1a1.6 1.6 0 0 1 3.2 0v1.2", class: "glyph" }]],
   review: [["path", { d: "M8 4.6V8l2.3 1.5", class: "glyph" }]],
   accepted: [["path", { d: "M4.9 8.3 7 10.4l4.2-4.6", class: "glyph" }]],
