@@ -89,12 +89,20 @@ Human Review's confirmation that an existing Candidate proof remains valid after
 _Avoid_: reaccept, re-approve, revalidate (as a bare verb — say what's being revalidated)
 
 **Review decision**:
-A Human Review decision (Acceptance, Reference review, Evidence review, Lightweight re-review, Challenge resolution, Promote, Dependent migration) as it is recorded: one line in the node's git-tracked `reviews.jsonl`, naming the Review snapshot's SHA-256, the rationale and the time, committed together with that snapshot by the reviewer. The commit's author, a GitHub identity, *is* the reviewer, and the pushed commit is the record of who decided what. Made only on the proof map page; no CLI command, Codex route or MCP tool makes one. That boundary is a convention for cooperative agents, not a security mechanism. See ADR-0010.
+A Human Review decision (Acceptance, Reference review, Evidence review, Lightweight re-review, Challenge resolution, Promote, Dependent migration) as it is recorded: one line in the node's git-tracked `reviews.jsonl`, naming the Review snapshot's SHA-256, the rationale and the time, committed together with that snapshot by the reviewer. The commit's author, a GitHub identity, *is* the reviewer, and the pushed commit is the record of who decided what. Made only on the proof map page, by the researcher; no CLI command and no agent, in a terminal or as the studio's proof agent, makes one. That boundary is a convention for cooperative agents, not a security mechanism. See ADR-0010.
 _Avoid_: signed decision, confirmation, `--confirm`, approval flag
 
 **Proof map page**:
 proof-cli's own local web page, the map's home, and the researcher's one entry: the DAG and tree, the frontier, creating nodes, each node's three state axes, and the one place Review decisions are made. A theorem, lemma or claim opens in its **studio**, a LaTeX workspace built from prism-local's code with a node panel for claim, split, request review, Challenge and Evidence check. An imported result opens on its own page. See ADR-0008, ADR-0010, ADR-0011.
 _Avoid_: review app (its ADR-0009 name), dashboard, admin panel
+
+**Studio**:
+A local node's page on the proof map page: a LaTeX workspace over the node's folder `proofs/<node-id>/`, built from prism-local's code and served by the map's own server. It has an editor, compile (`proof.tex` → `build/proof.pdf`, when TeX or Tectonic is installed), the PDF with SyncTeX both ways, the proof agent, and a node panel for claim, split, request review, Challenge, Evidence check and the node's Review decisions. Its editor writes only the node's working sources; snapshots, build output and `reviews.jsonl` are never edited there. An imported result has no studio. See ADR-0011.
+_Avoid_: prism-local (the separate project it was copied from), editor window
+
+**Proof agent**:
+The agent a node's studio runs: an automated prover on that node, not a LaTeX assistant. It reads the whole project, the library folders `proof.toml` lists, and the web; it runs `proof` and computation (Python, SageMath, Lean); it writes files only in the node's sources and its `scratch/` folder, and changes project state only through `proof`. It runs in the node's folder with `PROOF_ROOT` set to the project, on the Claude Code or the Codex CLI, with explicit permissions and none of the repository's own instructions. It never makes a Review decision, and its Undo restores files only. See ADR-0011.
+_Avoid_: assistant, chat, agent panel (the panel is where it runs)
 
 **No longer callable** (a Reference review outcome):
 The researcher's judgment that an Imported result can't be relied on after all. Final: its dependents read potentially stale or blocked, and a corrected source becomes a new Imported result node. The researcher then moves the dependents onto it on the proof map page (a Dependent migration decision). Rejected dependents stay where they were, as the record of an abandoned route. An Accepted dependent's Acceptance was made against the withdrawn citation, so it stops counting until the researcher re-Accepts the node against the correction. See #20.
