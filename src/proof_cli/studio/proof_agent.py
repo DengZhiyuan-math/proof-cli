@@ -65,7 +65,8 @@ Work this way:
    keeping scripts and their output in scratch/.
 3. Write the proof in proof.tex (and any file it \\input's). If the node is too large to prove
    directly, split it into Claims instead: `proof node split {node} --child <id>=<statement>
-   --created-by {name}`.
+   --created-by {name}`. If the proof comes to use another node of the map, add the edge:
+   `proof node depend {node} --add <id> --by {name}` (`--remove <id>`, `--move <id> --to <child>`).
 4. When the proof is ready: `proof node request-review {node} --rationale "<why this node is
    scoped to prove directly>" --requested-by {name}`.
 5. Record an Evidence check only for a checker you actually ran, with what it reported:

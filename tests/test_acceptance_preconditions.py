@@ -215,6 +215,23 @@ def test_split_promote_verify_and_exchange_import_never_write_acceptance_state(t
     assert get_acceptance_state(store, "clm_foreign") == "unreviewed"
 
 
+def test_a_node_imported_without_its_snapshot_cannot_be_accepted(tmp_path: Path):
+    """#92: the bundle indexes the Candidate proof but carries no vault files, so the snapshot is missing here."""
+    foreign = ensure_project(tmp_path / "foreign")
+    _awaiting_review(foreign)
+    local = ensure_project(tmp_path / "local")
+    import_exchange_bundle(local, export_exchange_bundle(foreign))
+    assert get_current_candidate_proof(local, "clm_1") is not None
+    assert not (local.root / "proofs" / "clm_1" / "snapshots" / "v1").exists()
+
+    with pytest.raises(ProofMapError) as exc_info:
+        _decide(local, "clm_1", "accept")
+
+    assert exc_info.value.code == "SNAPSHOT_UNREADABLE"
+    assert get_acceptance_state(local, "clm_1") == "unreviewed"
+    assert not (local.root / "proofs" / "clm_1" / "reviews.jsonl").exists()
+
+
 def test_exchange_import_cannot_reopen_a_local_accepted_node_for_review(tmp_path: Path):
     """A hand-made bundle carrying only a newer Candidate proof for a node
     that's Accepted here would otherwise put it back in review-needed with

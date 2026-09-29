@@ -55,7 +55,7 @@ from .storage import ProjectStore, list_references
 from .review import describe_verification_fragment, describe_verification_result_record
 from .verification_broker import build_default_verification_broker
 from .verification_ir import VerificationFragmentStatus, VerificationReviewStatus
-from .theorems import list_theorems
+from .theorems import LEGACY_TRUST_NOTICE, list_theorems
 
 
 def _join(values: list[str] | tuple[str, ...] | None) -> str:
@@ -179,6 +179,7 @@ def build_export(store: ProjectStore) -> str:
 
     lines = [
         "Proof Export",
+        f"Callable, trust and review states below: {LEGACY_TRUST_NOTICE}",
         f"Project: {state['project_id']}",
         f"Current theorem: {state['current_theorem'] or 'none'}",
         f"Goals: {_join(state['open_goals'])}",
