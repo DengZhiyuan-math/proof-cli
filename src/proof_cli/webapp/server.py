@@ -81,7 +81,10 @@ def _proof_view(store: ProjectStore, proof) -> dict | None:
     if path.name == SNAPSHOT_MANIFEST:
         frozen = snapshot_folder_files(path.parent)
     else:
-        frozen = {"proof.tex": path.read_bytes()} if path.is_file() else None
+        try:
+            frozen = {"proof.tex": path.read_bytes()}
+        except OSError:  # gone, or not readable by this process
+            frozen = None
     # a damaged or missing snapshot still shows: its page, its (now void) decisions, its warnings
     files = {rel: data.decode("utf-8", errors="replace") for rel, data in (frozen or {}).items()}
     return {
@@ -150,7 +153,19 @@ def _available_decisions(store: ProjectStore, node, *, claim, proof, dependencie
     for challenge in challenges:
         if challenge.status.value == "open":
             offered.append({"kind": "challenge_resolution", "target_id": challenge.id, "decision": "dismissed"})
+    # a decision on a snapshot that is missing or can't be read would be refused (SNAPSHOT_UNREADABLE, #92):
+    # it isn't offered, and the review section says the snapshot can't be read
+    offered = [item for item in offered if not _on_unreadable_snapshot(store, item)]
     return [{**item, "binding": _binding(store, item["kind"], item["target_id"], item["decision"], item.get("dependency_id"))} for item in offered]
+
+
+def _on_unreadable_snapshot(store: ProjectStore, item: dict) -> bool:
+    """Whether the decision offered as `item` would be made on a snapshot that is missing or can't be read."""
+    try:
+        payload = proof_map.prepare_decision(store, item["kind"], item["target_id"], item["decision"], dependency_id=item.get("dependency_id"))
+    except proof_map.ProofMapError:
+        return False
+    return payload.candidate_proof_id is not None and payload.candidate_proof_sha256 is None
 
 
 def _binding(store: ProjectStore, kind: str, target_id: str, decision: str, dependency_id: str | None = None) -> str | None:
@@ -295,6 +310,18 @@ class ReviewApp:
                 raise RequestError(HTTPStatus.BAD_REQUEST, "INVALID_CHILD_SPEC", "each child needs an id and a statement")
             made = proof_map.split_node(self.store, node_id, children, created_by=actor, reassign=bool(body.get("reassign")))
             return {"children": [child.model_dump(mode="json") for child in made], "next": self.page_of(made[0]) if made else None}
+        if action == "depend":
+            op, dependency, to = body.get("op"), str(body.get("dependency") or "").strip(), str(body.get("to") or "").strip()
+            if op not in ("add", "remove", "move") or not dependency or (op == "move") != bool(to):
+                raise RequestError(
+                    HTTPStatus.BAD_REQUEST, "INVALID_REQUEST", "a dependency edit is op add, remove or move, a dependency, and for a move where to (to)"
+                )
+            who = {"edited_by": actor, "reassign": bool(body.get("reassign"))}
+            if op == "add":
+                return proof_map.add_dependency(self.store, node_id, dependency, **who).as_json()
+            if op == "remove":
+                return proof_map.remove_dependency(self.store, node_id, dependency, **who).as_json()
+            return proof_map.move_dependency(self.store, node_id, dependency, to=to, **who).as_json()
         if action == "request-review":
             return proof_map.request_review(self.store, node_id, requested_by=actor, rationale=str(body.get("rationale") or "")).model_dump(mode="json")
         if action == "challenge":
@@ -332,11 +359,13 @@ class ReviewApp:
                 continue
             if proof_map.get_workflow_state(self.store, node.id) == "review-needed":
                 proof = get_current_candidate_proof(self.store, node.id)
+                # still listed as awaiting review, but nothing is offered on a snapshot that can't be read (#92)
+                readable = proof is None or candidate_proof_sha256(self.store, proof.id) is not None
                 pending.append(
                     {
                         "node_id": node.id,
                         "kind": "acceptance",
-                        "decisions": [decision.value for decision in proof_map.AcceptanceDecision],
+                        "decisions": [decision.value for decision in proof_map.AcceptanceDecision] if readable else [],
                         "bindings": {d.value: _binding(self.store, "acceptance", node.id, d.value) for d in proof_map.AcceptanceDecision},
                         "statement": node.statement,
                         "acceptance_state": proof_map.get_acceptance_state(self.store, node.id),

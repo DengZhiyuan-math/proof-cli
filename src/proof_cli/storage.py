@@ -34,8 +34,6 @@ from .references import (
     ReferenceRecord,
     ReferenceReviewRecord,
     ReferenceReviewStatus,
-    ReferenceSourceType,
-    ReferenceTrustLevel,
     utc_now,
 )
 
@@ -217,7 +215,8 @@ CREATE TABLE IF NOT EXISTS review_history (
 _REVIEW_HISTORY_ADDED_COLUMNS = {"prev_row_hash": "TEXT", "signed_decision": "TEXT", "payload_hash": "TEXT"}
 _CHALLENGE_ADDED_COLUMNS = {"resolution_review_id": "TEXT"}
 _CLAIM_DROPPED_COLUMNS = ("token_hash",)  # the #37 claim token, gone with ADR-0010
-_CANDIDATE_PROOF_ADDED_COLUMNS = {"sha256": "TEXT"}  # a Review snapshot's hash (ADR-0010)
+# a Review snapshot's hash (ADR-0010), and the node's dependencies as the snapshot was requested (#96, JSON)
+_CANDIDATE_PROOF_ADDED_COLUMNS = {"sha256": "TEXT", "dependencies": "TEXT"}
 
 REVIEW_HISTORY_TRIGGERS = """
 CREATE INDEX IF NOT EXISTS idx_review_history_object ON review_history(object_type, object_id, seq);
@@ -295,6 +294,19 @@ WHEN EXISTS (SELECT 1 FROM reviewer_keys WHERE id = NEW.id OR seq = NEW.seq)
 BEGIN
   SELECT RAISE(ABORT, 'reviewer_keys is append-only');
 END;
+"""
+
+# Whole-document state that used to be a JSON side file under `.proof/`
+# (collaboration.json, memory.json; issue #39). Each document is one row,
+# read, changed and written back inside one `store.transaction()`, so
+# concurrent processes take turns on the SQLite write lock instead of
+# overwriting each other's writes.
+SIDE_DOCUMENTS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS side_documents (
+  name TEXT PRIMARY KEY,
+  data TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 """
 
 # Unsigned but chained facts an agent may legitimately record — a node's
@@ -448,6 +460,7 @@ _SCHEMA_DDL_DIGEST = int.from_bytes(
                 REVIEW_HISTORY_TRIGGERS,
                 REVIEWER_KEYS_SCHEMA,
                 PROOF_LEDGER_SCHEMA,
+                SIDE_DOCUMENTS_SCHEMA,
                 _REVIEW_HISTORY_ADDED_COLUMNS,
                 _CHALLENGE_ADDED_COLUMNS,
                 _CLAIM_DROPPED_COLUMNS,
@@ -482,6 +495,7 @@ def _apply_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(REVIEW_HISTORY_TRIGGERS)
     conn.executescript(REVIEWER_KEYS_SCHEMA)
     conn.executescript(PROOF_LEDGER_SCHEMA)
+    conn.executescript(SIDE_DOCUMENTS_SCHEMA)
     conn.commit()
     conn.execute(f"PRAGMA user_version = {_schema_stamp(conn)}")  # leaves the schema cookie alone
     conn.commit()
@@ -559,6 +573,22 @@ class ProjectStore:
             forget_reads()
         for callback in active.after_commit:
             callback()
+
+
+def one_transaction(func):
+    """Run `func(store, ...)` inside one `store.transaction()` on its store.
+
+    For a read-modify-write of whole-document state (`side_documents`,
+    #39): its load and its save both join the transaction, so a concurrent
+    writer waits on the write lock instead of landing in between.
+    """
+
+    @functools.wraps(func)
+    def wrapper(store: ProjectStore, *args, **kwargs):
+        with store.transaction():
+            return func(store, *args, **kwargs)
+
+    return wrapper
 
 
 def after_commit(store: ProjectStore, callback) -> None:
@@ -673,18 +703,18 @@ def memoized_read(func):
     with every other caller in the scope."""
 
     @functools.wraps(func)
-    def wrapper(first, *args, **kwargs):
+    def wrapper(store_or_root, /, *args, **kwargs):  # positional-only: a read may take its own `first=`
         scope = _READ_SCOPE.get()
         if scope is None or kwargs or scope.transaction is not _ACTIVE_TRANSACTION.get():
-            return func(first, *args, **kwargs)
-        root = first.root if isinstance(first, ProjectStore) else first
+            return func(store_or_root, *args, **kwargs)
+        root = store_or_root.root if isinstance(store_or_root, ProjectStore) else store_or_root
         try:
             key = (func, root, args)
             hash(key)
         except TypeError:
-            return func(first, *args)
+            return func(store_or_root, *args)
         if key not in scope.memo:
-            scope.memo[key] = func(first, *args)
+            scope.memo[key] = func(store_or_root, *args)
         return scope.memo[key]
 
     return wrapper
@@ -789,6 +819,108 @@ def mark_review_history_migrated(conn: sqlite3.Connection) -> None:
     )
 
 
+# The JSON side files moved into `side_documents` (issue #39), by document name.
+SIDE_DOCUMENT_FILES = {"collaboration": "collaboration.json", "memory": "memory.json"}
+# Top-level keys a side file may hold that are never carried into its
+# document: `collaboration.json`'s review records are Human Review history,
+# which the #33 migration reads from the file itself.
+_SIDE_DOCUMENT_EXCLUDED_KEYS = {"collaboration": ("review_records",), "memory": ()}
+
+
+def _side_document_migrated_key(name: str) -> str:
+    return f"{name}_json_migrated"
+
+
+def _is_side_document_migrated(conn: sqlite3.Connection, name: str) -> bool:
+    key = _side_document_migrated_key(name)
+    return conn.execute("SELECT 1 FROM project_meta WHERE key = ? LIMIT 1", (key,)).fetchone() is not None
+
+
+def _mark_side_document_migrated(conn: sqlite3.Connection, name: str) -> None:
+    conn.execute(
+        "INSERT OR IGNORE INTO project_meta(key, value) VALUES (?, ?)",
+        (_side_document_migrated_key(name), utc_now().isoformat()),
+    )
+
+
+def _migrate_side_document(store: ProjectStore, conn: sqlite3.Connection, name: str) -> None:
+    """Move `.proof/<name>.json` into `side_documents` — once, on `conn`'s transaction.
+
+    The file's JSON is stored as it stands (bar the excluded keys), so the
+    loader's handling of older layouts still applies to it and nothing is
+    lost. The file itself is left where it is, unchanged: it is never read
+    for this document again. A file that isn't valid JSON (a half-written
+    `memory.json` from the old non-atomic save, say) is refused rather than
+    replaced by an empty document; the migration stays pending until the
+    file is fixed or removed.
+    """
+    if _is_side_document_migrated(conn, name):
+        return
+    path = project_proof_dir(store) / SIDE_DOCUMENT_FILES[name]
+    if path.exists():
+        try:
+            data = json.loads(path.read_text())
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"{path} is not valid JSON ({exc}); it moves into the project database once, "
+                "so fix or remove it to continue"
+            ) from exc
+        if not isinstance(data, dict):
+            raise ValueError(f"{path} does not hold a JSON object; fix or remove it to continue")
+        for key in _SIDE_DOCUMENT_EXCLUDED_KEYS[name]:
+            data.pop(key, None)
+        conn.execute(
+            "INSERT OR IGNORE INTO side_documents(name, data, updated_at) VALUES (?, ?, ?)",
+            (name, json.dumps(data), utc_now().isoformat()),
+        )
+        append_event(
+            store,
+            f"{name}_json_migrated",
+            f"moved {path.name} into the project database",
+            payload={"path": str(path)},
+            conn=conn,
+        )
+    _mark_side_document_migrated(conn, name)
+
+
+def _select_side_document(conn: sqlite3.Connection, name: str) -> dict | None:
+    row = conn.execute("SELECT data FROM side_documents WHERE name = ?", (name,)).fetchone()
+    return json.loads(row["data"]) if row is not None else None
+
+
+def read_side_document(store: ProjectStore, name: str, conn: sqlite3.Connection | None = None) -> dict | None:
+    """The stored document `name` (see `SIDE_DOCUMENT_FILES`), or None if none was ever saved.
+
+    Reads on the caller's transaction (`conn`, or the one this thread holds
+    open), so a read-modify-write inside `store.transaction()` sees its own
+    writes and no other process's in between. The first read of a project
+    that still has the JSON side file migrates it.
+    """
+    if conn is None:
+        conn = active_transaction(store)
+    with _reading(store, conn) as reader:
+        if _is_side_document_migrated(reader, name):
+            return _select_side_document(reader, name)
+    with in_transaction(store, conn) as tx:
+        _migrate_side_document(store, tx, name)
+        return _select_side_document(tx, name)
+
+
+def write_side_document(store: ProjectStore, name: str, data: str, conn: sqlite3.Connection | None = None) -> None:
+    """Replace the stored document `name` with `data` (JSON text).
+
+    Joins the caller's transaction if there is one. A read-modify-write must
+    run inside one `store.transaction()` for concurrent writers not to
+    overwrite each other; this call on its own is only atomic.
+    """
+    with _writing(store, conn) as writer:
+        _migrate_side_document(store, writer, name)  # a pending file is never overwritten unread
+        writer.execute(
+            "INSERT OR REPLACE INTO side_documents(name, data, updated_at) VALUES (?, ?, ?)",
+            (name, data, utc_now().isoformat()),
+        )
+
+
 def create_project(root: str | Path, project_id: str) -> ProjectStore:
     store = ProjectStore(Path(root))
     with store.connect() as conn:
@@ -805,6 +937,9 @@ def create_project(root: str | Path, project_id: str) -> ProjectStore:
                 # a brand-new project has no JSON-era review records, so its
                 # one-shot migration is done before it ever starts
                 mark_review_history_migrated(conn)
+            for name, file_name in SIDE_DOCUMENT_FILES.items():
+                if not (project_proof_dir(store) / file_name).exists():
+                    _mark_side_document_migrated(conn, name)  # nothing to move, so it's done
         state_row = conn.execute("SELECT data FROM state WHERE project_id = ?", (project_id,)).fetchone()
         if state_row is None:
             state = ProjectState(project_id=project_id)
@@ -1060,16 +1195,6 @@ def import_reference_review(store: ProjectStore, review: ReferenceReviewRecord) 
     return review
 
 
-def _reference_trust_level(reference: ReferenceRecord, review_status: ReferenceReviewStatus) -> ReferenceTrustLevel:
-    if review_status != ReferenceReviewStatus.approved:
-        return reference.trust_level
-    if reference.trust_level == ReferenceTrustLevel.foundational:
-        return reference.trust_level
-    if reference.source_type == ReferenceSourceType.standard_reference:
-        return ReferenceTrustLevel.standard_reference
-    return ReferenceTrustLevel.external_research_source
-
-
 def store_reference(store: ProjectStore, reference: ReferenceRecord) -> ReferenceRecord:
     return _upsert_reference(store, reference)
 
@@ -1180,8 +1305,9 @@ def update_proof_map_node(store: ProjectStore, node: ProofMapNode, *, conn: sqli
 
     Its callers are the node's sanctioned edits: Promote (issue #22)
     changing `kind` from `claim` to `lemma`, Split (issue #26) appending
-    children to `dependencies`, and moving dependents off a withdrawn
-    imported result (issue #20) swapping one dependency for its correction.
+    children to `dependencies`, moving dependents off a withdrawn
+    imported result (issue #20) swapping one dependency for its correction,
+    and adding, removing or moving one dependency edge (issue #96).
     """
     with _writing(store, conn) as conn:
         conn.execute(
@@ -1296,6 +1422,7 @@ def _row_to_candidate_proof(row: sqlite3.Row) -> CandidateProofRecord:
         scoping_rationale=row["scoping_rationale"],
         interface_fingerprint=row["interface_fingerprint"],
         sha256=row["sha256"],
+        dependencies=json.loads(row["dependencies"]) if row["dependencies"] is not None else None,
         created_at=row["created_at"],
     )
 
@@ -1324,8 +1451,8 @@ def insert_candidate_proof(
         conn.execute("UPDATE candidate_proofs SET is_current = 0 WHERE node_id = ?", (record.node_id,))
         conn.execute(
             """
-            INSERT INTO candidate_proofs(id, node_id, version, file_path, is_current, review_record_id, submitted_by, scoping_rationale, interface_fingerprint, sha256, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO candidate_proofs(id, node_id, version, file_path, is_current, review_record_id, submitted_by, scoping_rationale, interface_fingerprint, sha256, dependencies, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record.id,
@@ -1338,6 +1465,7 @@ def insert_candidate_proof(
                 record.scoping_rationale,
                 record.interface_fingerprint,
                 record.sha256,
+                json.dumps(record.dependencies) if record.dependencies is not None else None,
                 record.created_at.isoformat(),
             ),
         )
@@ -1816,5 +1944,3 @@ def list_review_history_rows(
         with store.connect() as own:
             rows = own.execute(query, params).fetchall()
     return [_row_to_review_history(row) for row in rows]
-
-

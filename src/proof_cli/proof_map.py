@@ -22,6 +22,7 @@ from .authority import (
     decision_rows,
     list_authority_warnings,
     record_decision,
+    snapshot_matches,
     verify_decision_row,
 )
 from .collaboration import (
@@ -131,11 +132,20 @@ def _decide(
     `viewed_binding`: the `binding_digest` of what the page showed. If the
     decision would now bind anything else — another snapshot, interface,
     dependency pins, Challenges, dependents — it is refused (STALE_VIEW),
-    still inside the transaction, so nothing can change in between.
+    still inside the transaction, so nothing can change in between. A
+    decision on a snapshot that is missing or can't be read is refused
+    (SNAPSHOT_UNREADABLE): it would bind nothing (#92).
     """
     payload = build_decision_payload(
         store, kind, target_id, decision, rationale=rationale, **decision_binding(store, kind, target_id, dependency_id=dependency_id)
     )
+    if payload.candidate_proof_id is not None and payload.candidate_proof_sha256 is None:
+        raise ProofMapError(
+            "SNAPSHOT_UNREADABLE",
+            f"the Review snapshot {target_id}'s decision would be made on is missing or can't be read; "
+            "nothing can be decided on it until it is restored or a new snapshot is requested for review",
+            details={"candidate_proof_id": payload.candidate_proof_id},
+        )
     if viewed_binding is not None and viewed_binding != binding_digest(payload):
         raise ProofMapError(
             "STALE_VIEW", f"what this decision on {target_id} is made on changed since you viewed it; reload and read it again"
@@ -361,7 +371,10 @@ def split_node(
     child, no child folder, and the parent as it was.
 
     Each spec in `child_specs` is `{"id": str, "statement": str,
-    "assumptions": list[str] (optional), "display_label": str (optional)}`.
+    "assumptions": list[str] (optional), "display_label": str (optional),
+    "dependencies": list[str] (optional)}`. A child's own dependencies are
+    validated as any dependency is: each must exist (DEPENDENCY_NOT_FOUND)
+    and none may rest on the parent (DEPENDENCY_CYCLE).
     """
     if not child_specs:
         require_node(store, parent_id)
@@ -413,24 +426,19 @@ def _split(
             "NODE_ACCEPTED", f"node {parent_id} is {acceptance}; splitting it would void that decision, so split is unavailable"
         )
 
-    claim = get_active_claim(store, parent_id, conn=conn)
-    if claim is not None and claim.claimant_id != created_by:
-        if not reassign:
-            raise _not_claimant(parent_id, claim)
-        mark_claim_released(store, claim.id, released_by=created_by, reason=f"reassigned to {created_by}", released_at=utc_now(), conn=conn)
-        taken = ClaimRecord(id=str(uuid.uuid4()), node_id=parent_id, claimant_id=created_by, session_id="")
-        insert_claim(store, taken, conn=conn)
-        append_event(
-            store,
-            "proof_map_claim_reassigned",
-            f"claimed node {parent_id} by {created_by}",
-            entity_id=parent_id,
-            payload={"claim_id": taken.id, "claimant_id": created_by, "previous_claimant_id": claim.claimant_id},
-            conn=conn,
-        )
+    claim = _held_by_another(store, conn, parent_id, created_by, reassign=reassign)
+    if claim is not None:
+        _take_over(store, conn, claim, created_by)
 
     children: list[ProofMapNode] = []
     for spec in child_specs:
+        # a child may rest on existing nodes too (an imported result, a lemma); the parent will
+        # rest on the child, so none of them may rest on the parent (PR #104)
+        for dependency_id in spec.get("dependencies") or []:
+            if get_proof_map_node(store, dependency_id) is not None:
+                path = _dependency_path(store, dependency_id, parent_id)
+                if path is not None:
+                    raise _cycle(spec["id"], [spec["id"], *path, spec["id"]])
         child = create_node(
             store,
             node_id=spec["id"],
@@ -438,6 +446,7 @@ def _split(
             statement=spec["statement"],
             display_label=spec.get("display_label", ""),
             assumptions=spec.get("assumptions"),
+            dependencies=list(spec.get("dependencies") or []),
             created_by=created_by,
             derived_from=parent_id,
         )
@@ -495,6 +504,241 @@ def _not_pickable(store: ProjectStore, node: ProofMapNode) -> ProofMapError | No
     if _has_unresolved_dependency(store, node):
         return ProofMapError("NODE_BLOCKED", f"node {node.id} is Blocked: a dependency isn't Accepted (or Reference-reviewed) yet")
     return None
+
+
+def _held_by_another(
+    store: ProjectStore, conn: sqlite3.Connection, node_id: str, actor: str, *, reassign: bool
+) -> ClaimRecord | None:
+    """The claim `actor` must take over to change `node_id`'s structure, or None if there's none.
+
+    A node someone else holds is theirs (NOT_CLAIMANT), unless `reassign`.
+    Takes nothing over itself: the caller does, once every check has passed.
+    """
+    claim = get_active_claim(store, node_id, conn=conn)
+    if claim is None or claim.claimant_id == actor:
+        return None
+    if not reassign:
+        raise _not_claimant(node_id, claim)
+    return claim
+
+
+def _take_over(store: ProjectStore, conn: sqlite3.Connection, claim: ClaimRecord, actor: str) -> None:
+    """Move `claim` to `actor`, recorded as `claim --reassign` records it."""
+    mark_claim_released(store, claim.id, released_by=actor, reason=f"reassigned to {actor}", released_at=utc_now(), conn=conn)
+    taken = ClaimRecord(id=str(uuid.uuid4()), node_id=claim.node_id, claimant_id=actor, session_id="")
+    insert_claim(store, taken, conn=conn)
+    append_event(
+        store,
+        "proof_map_claim_reassigned",
+        f"claimed node {claim.node_id} by {actor}",
+        entity_id=claim.node_id,
+        payload={"claim_id": taken.id, "claimant_id": actor, "previous_claimant_id": claim.claimant_id},
+        conn=conn,
+    )
+
+
+def _dependency_path(store: ProjectStore, start: str, goal: str) -> list[str] | None:
+    """A chain of dependency edges from `start` down to `goal` (both included), or None.
+
+    Breadth-first with an explicit worklist, like the integrity walk: a
+    project's dependency chain can run deeper than Python's recursion limit.
+    """
+    came_from: dict[str, str | None] = {start: None}
+    pending = [start]
+    while pending:
+        current = pending.pop(0)
+        if current == goal:
+            path = [current]
+            while came_from[path[-1]] is not None:
+                path.append(came_from[path[-1]])
+            return path[::-1]
+        node = get_proof_map_node(store, current)
+        for dependency_id in node.dependencies if node else []:
+            if dependency_id not in came_from:
+                came_from[dependency_id] = current
+                pending.append(dependency_id)
+    return None
+
+
+def _cycle(node_id: str, cycle: list[str]) -> ProofMapError:
+    return ProofMapError(
+        "DEPENDENCY_CYCLE",
+        f"{node_id} can't rest on {cycle[1]}: " + " → ".join(cycle) + " would be a cycle",
+        details={"node_id": node_id, "cycle": cycle},
+    )
+
+
+def _refuse_cycle(store: ProjectStore, node_id: str, dependency_id: str) -> None:
+    """Refuse the edge `node_id` → `dependency_id` if `dependency_id` already rests on `node_id`."""
+    path = _dependency_path(store, dependency_id, node_id)
+    if path is not None:
+        raise _cycle(node_id, [node_id, *path])
+
+
+def _structure_editable(store: ProjectStore, node: ProofMapNode) -> None:
+    """Whether `node`'s dependencies may be edited at all, apart from who holds it (issue #96).
+
+    As `_not_pickable` rules for claiming: never an imported result (it rests
+    on nothing here) or a Rejected node; an Accepted one only while an open
+    Challenge invites its revision. The edit makes its Acceptance stop
+    counting (`unverifiable`: its dependencies changed) until the researcher
+    decides the revised node, so a node in that state stays editable only
+    under the same open Challenge.
+    """
+    if node.kind == ProofMapNodeKind.imported_result:
+        raise ProofMapError(
+            "IMPORTED_RESULT_HAS_NO_DEPENDENCIES",
+            f"{node.id} is an imported_result, established elsewhere: nothing in this map is a premise of it",
+        )
+    acceptance = get_acceptance_state(store, node.id)
+    if acceptance == "rejected":
+        raise ProofMapError("NODE_REJECTED", f"node {node.id} was Rejected and should not be pursued further; its dependencies stay as they were")
+    if acceptance in ("accepted", "unverifiable") and not has_open_challenge(store, node.id):
+        raise ProofMapError(
+            "NODE_ACCEPTED",
+            f"node {node.id} is {acceptance}; changing its dependencies would void that decision, so open a Challenge before revising it",
+        )
+
+
+@dataclass
+class DependencyEdit:
+    """One edit of a node's dependencies: what was done, and the node(s) as they now stand."""
+
+    op: str  # add, remove or move
+    dependency_id: str
+    node: ProofMapNode
+    to: ProofMapNode | None = None  # the node a moved dependency now rests under
+
+    def as_json(self) -> dict[str, Any]:
+        return {
+            "op": self.op,
+            "dependency_id": self.dependency_id,
+            "node": self.node.model_dump(mode="json"),
+            "to": self.to.model_dump(mode="json") if self.to else None,
+        }
+
+
+def _with_dependencies(node: ProofMapNode, dependencies: list[str], actor: str) -> ProofMapNode:
+    return node.model_copy(update={"dependencies": dependencies, "updated_by": actor, "updated_at": utc_now()})
+
+
+def add_dependency(
+    store: ProjectStore, node_id: str, dependency_id: str, *, edited_by: str = "human", reassign: bool = False
+) -> DependencyEdit:
+    """Make `node_id` rest on `dependency_id` too: a Lemma a proof came to use (story 38, #96).
+
+    Structural, like Split: no researcher approval, agent-reachable. The
+    target must exist and not already rest on the node (DEPENDENCY_CYCLE).
+    No pin is taken here: the next request-review pins what the edge offers.
+    """
+    with store.transaction() as conn:
+        node = require_node(store, node_id)
+        _structure_editable(store, node)
+        if get_proof_map_node(store, dependency_id) is None:
+            raise ProofMapError("DEPENDENCY_NOT_FOUND", f"dependency {dependency_id} does not exist; create it before depending on it")
+        if dependency_id in node.dependencies:
+            raise ProofMapError("ALREADY_A_DEPENDENCY", f"{node_id} already rests on {dependency_id}")
+        _refuse_cycle(store, node_id, dependency_id)
+        claim = _held_by_another(store, conn, node_id, edited_by, reassign=reassign)
+        if claim is not None:
+            _take_over(store, conn, claim, edited_by)
+        updated = _with_dependencies(node, [*node.dependencies, dependency_id], edited_by)
+        update_proof_map_node(store, updated, conn=conn)
+        append_event(
+            store,
+            "proof_map_dependency_added",
+            f"{node_id} now rests on {dependency_id}",
+            entity_id=node_id,
+            payload={"dependency_id": dependency_id, "edited_by": edited_by, "dependencies": {"before": node.dependencies, "after": updated.dependencies}},
+            conn=conn,
+        )
+    return DependencyEdit("add", dependency_id, get_node(store, node_id))
+
+
+def remove_dependency(
+    store: ProjectStore, node_id: str, dependency_id: str, *, edited_by: str = "human", reassign: bool = False
+) -> DependencyEdit:
+    """Stop `node_id` resting on `dependency_id` (#96). The edge's pin goes with it."""
+    with store.transaction() as conn:
+        node = require_node(store, node_id)
+        _structure_editable(store, node)
+        if dependency_id not in node.dependencies:
+            raise ProofMapError("NOT_A_DEPENDENCY", f"{dependency_id} is not a dependency of {node_id}")
+        claim = _held_by_another(store, conn, node_id, edited_by, reassign=reassign)
+        if claim is not None:
+            _take_over(store, conn, claim, edited_by)
+        updated = _with_dependencies(node, [d for d in node.dependencies if d != dependency_id], edited_by)
+        update_proof_map_node(store, updated, conn=conn)
+        delete_dependency_pin(store, node_id, dependency_id, conn=conn)
+        append_event(
+            store,
+            "proof_map_dependency_removed",
+            f"{node_id} no longer rests on {dependency_id}",
+            entity_id=node_id,
+            payload={"dependency_id": dependency_id, "edited_by": edited_by, "dependencies": {"before": node.dependencies, "after": updated.dependencies}},
+            conn=conn,
+        )
+    return DependencyEdit("remove", dependency_id, get_node(store, node_id))
+
+
+def move_dependency(
+    store: ProjectStore, node_id: str, dependency_id: str, *, to: str, edited_by: str = "human", reassign: bool = False
+) -> DependencyEdit:
+    """Move `node_id`'s dependency `dependency_id` down onto `to`, one of its own dependencies (#96).
+
+    What CONTEXT.md's Split leaves to a person or agent: a parent's existing
+    dependency deliberately handed to the child that now uses it. `node_id`
+    still rests on it, through `to`. Both nodes are checked — editable, and
+    held by the editor unless `reassign` — before either changes; `to`
+    resting on the dependency mustn't close a cycle. The parent's pin goes
+    with the edge; the child pins it at its next request-review.
+    """
+    with store.transaction() as conn:
+        node = require_node(store, node_id)
+        child = require_node(store, to)
+        _structure_editable(store, node)
+        if dependency_id not in node.dependencies:
+            raise ProofMapError("NOT_A_DEPENDENCY", f"{dependency_id} is not a dependency of {node_id}")
+        if to == dependency_id:
+            raise ProofMapError("SAME_NODE", f"{dependency_id} can't be moved onto itself")
+        if to not in node.dependencies:
+            raise ProofMapError(
+                "NOT_A_DEPENDENCY", f"{to} is not a dependency of {node_id}; a dependency moves onto one of the node's own dependencies",
+                details={"node_id": node_id, "to": to},
+            )
+        _structure_editable(store, child)
+        if dependency_id not in child.dependencies:
+            _refuse_cycle(store, to, dependency_id)
+        claims = [
+            claim
+            for claim in (
+                _held_by_another(store, conn, node_id, edited_by, reassign=reassign),
+                _held_by_another(store, conn, to, edited_by, reassign=reassign),
+            )
+            if claim is not None
+        ]
+        for claim in claims:
+            _take_over(store, conn, claim, edited_by)
+        updated = _with_dependencies(node, [d for d in node.dependencies if d != dependency_id], edited_by)
+        child_after = [*child.dependencies, *([] if dependency_id in child.dependencies else [dependency_id])]
+        update_proof_map_node(store, updated, conn=conn)
+        update_proof_map_node(store, _with_dependencies(child, child_after, edited_by), conn=conn)
+        delete_dependency_pin(store, node_id, dependency_id, conn=conn)
+        append_event(
+            store,
+            "proof_map_dependency_moved",
+            f"moved dependency {dependency_id} of {node_id} onto {to}",
+            entity_id=node_id,
+            payload={
+                "dependency_id": dependency_id,
+                "to": to,
+                "edited_by": edited_by,
+                "dependencies": {"before": node.dependencies, "after": updated.dependencies},
+                "to_dependencies": {"before": child.dependencies, "after": child_after},
+            },
+            conn=conn,
+        )
+    return DependencyEdit("move", dependency_id, get_node(store, node_id), to=get_node(store, to))
 
 
 def claim_node(
@@ -626,8 +870,10 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
         claim = get_active_claim(store, node_id, conn=conn)
         if claim is not None and claim.claimant_id != requested_by:  # a node someone holds is theirs to hand over
             raise _not_claimant(node_id, claim)
+        node = require_node(store, node_id)  # its dependencies as of the write lock, recorded with the snapshot
         current = get_current_candidate_proof(store, node_id, conn=conn)
-        if current is not None and current.sha256 == sha256:
+        # the same files on other dependencies than that snapshot was made on (#96) are a new version
+        if current is not None and current.sha256 == sha256 and _snapshot_dependencies_stand(store, node, current):
             raise ProofMapError(
                 "WORKING_PROOF_UNCHANGED",
                 f"{node_id}'s working proof is unchanged since snapshot v{current.version}, which is already the one under review",
@@ -654,6 +900,7 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
             submitted_by=requested_by,
             scoping_rationale=rationale,
             sha256=sha256,
+            dependencies=list(node.dependencies),
         )
         try:
             insert_candidate_proof(store, record, conn=conn)
@@ -887,8 +1134,12 @@ def pin_dependencies(store: ProjectStore, node: ProofMapNode) -> list[Dependency
     An `imported_result` target pins no version/fingerprint — it's
     immutable, so there's nothing to have moved on. A local target not yet
     Accepted pins `None` for both: nothing confirmed exists yet to check
-    against.
+    against. A pin whose edge is gone (a dependency removed or moved, #96)
+    goes too, so the pins are exactly the node's dependencies.
     """
+    for stale in list_dependency_pins_for_node(store, node.id):
+        if stale.target_node_id not in node.dependencies:
+            delete_dependency_pin(store, node.id, stale.target_node_id)
     pins: list[DependencyPin] = []
     for target_id in node.dependencies:
         target = get_node(store, target_id)
@@ -968,6 +1219,18 @@ def dependency_pin_is_current(store: ProjectStore, pin: DependencyPin) -> bool:
     return _same_interface(store, pin.target_node_id, pin.pinned_fingerprint, current_fingerprint)
 
 
+def dependency_pin_lags(store: ProjectStore, pin: DependencyPin) -> bool:
+    """Whether a pin is behind its target's accepted version (#23): the target has moved on to
+    a new Accepted version since the dependent was checked against it, even with the same
+    interface. The same rule as the page's Lightweight re-review remedy; an imported result
+    has no versions, so it never lags."""
+    target = get_node(store, pin.target_node_id)
+    if target is None or target.kind == ProofMapNodeKind.imported_result:
+        return False
+    accepted = get_accepted_version(store, pin.target_node_id)
+    return accepted is not None and pin.pinned_version != accepted
+
+
 class AcceptanceDecision(str, Enum):
     """The only three ways a local node's acceptance_state may ever change.
 
@@ -1012,6 +1275,44 @@ def _require_awaiting_acceptance_review(store: ProjectStore, node_id: str) -> No
             "a Human Review decision only applies to a submitted Candidate proof awaiting review",
             details={"workflow_state": workflow_state},
         )
+    current = get_current_candidate_proof(store, node_id)
+    if current is not None and not _snapshot_dependencies_stand(store, require_node(store, node_id), current):
+        # the snapshot was made on other dependencies: deciding it would accept a proof of a different node
+        raise ProofMapError(
+            "DEPENDENCIES_CHANGED",
+            f"{node_id}'s dependencies changed since snapshot v{current.version} was requested for review; request review again",
+        )
+
+
+def _snapshot_dependencies_stand(store: ProjectStore, node: ProofMapNode, snapshot: CandidateProofRecord) -> bool:
+    """Whether `node`'s dependencies are still those `snapshot` was requested for review on (#96).
+
+    Read off the snapshot's own record, which no dependency edit touches —
+    not off the pins, which removing an edge deletes along with it. A
+    snapshot from before the record was kept falls back to its pins. A
+    withdrawn citation the researcher moved this node off (a counted
+    `dependent_migration`, #20) reads as its correction: re-Accepting the
+    same snapshot against the correction is exactly what that decision asks.
+    """
+    recorded = snapshot.dependencies
+    if recorded is None:
+        recorded = [pin.target_node_id for pin in list_dependency_pins_for_node(store, node.id)]
+    return {_migrated(store, node.id, dependency_id) for dependency_id in recorded} == set(node.dependencies)
+
+
+def _migrated(store: ProjectStore, node_id: str, dependency_id: str) -> str:
+    """Where counted Dependent migrations moved `node_id`'s edge on `dependency_id` (itself if none did)."""
+    seen = {dependency_id}
+    while True:
+        moved_to = None
+        for row in decision_rows(store, _ACCEPTANCE_OBJECT_TYPE, dependency_id, ReviewRecordKind.dependent_migration.value):
+            verdict = verify_decision_row(store, row["id"])
+            if verdict.status == "verified" and node_id in verdict.payload.migrated_dependents and verdict.payload.dependency_pins:
+                moved_to = verdict.payload.dependency_pins[0].target_node_id
+        if moved_to is None or moved_to in seen:
+            return dependency_id
+        seen.add(moved_to)
+        dependency_id = moved_to
 
 
 def decide_acceptance(
@@ -1253,7 +1554,10 @@ def _binding_problem(store: ProjectStore, node: ProofMapNode, payload: DecisionP
     proof = _get_candidate_proof(store, payload.candidate_proof_id) if payload.candidate_proof_id else None
     if proof is None or proof.node_id != node.id:
         return "it was made on a Candidate proof that isn't this node's"
-    if candidate_proof_sha256(store, proof.id) != payload.candidate_proof_sha256:
+    current = candidate_proof_sha256(store, proof.id)
+    if current is None:
+        return "the snapshot it was decided on is missing or can't be read"
+    if not snapshot_matches(payload.candidate_proof_sha256, current):
         return "the snapshot's text changed after it was decided on"
     if payload.interface_fingerprint != _interface_of(node):
         return "the node's statement or assumptions changed after it was decided on"
@@ -1553,7 +1857,8 @@ def revalidate_dependency(
     Recorded as a `dependency_revalidation` decision whose pins are exactly
     the refreshed pin this writes (ADR-0010).
 
-    Only available when the target's interface fingerprint hasn't changed
+    Only available when the pin lags the target's accepted version (#23;
+    otherwise `PIN_NOT_LAGGING`), and when the target's interface fingerprint hasn't changed
     since it was last pinned — if it has, the old Candidate proof no longer
     demonstrably accounts for the new premise, and a whole new Candidate
     proof is required instead (`INTERFACE_CHANGED`). Records
@@ -1597,6 +1902,12 @@ def revalidate_dependency(
             "INTERFACE_CHANGED",
             f"{target_node_id}'s accepted interface changed since {node_id} last pinned it; "
             "a new Candidate proof is required, lightweight re-review is not available",
+        )
+    if not dependency_pin_lags(store, pin):
+        # nothing moved since the pin: a re-review would reaffirm nothing (#24)
+        raise ProofMapError(
+            "PIN_NOT_LAGGING",
+            f"{node_id}'s pin on {target_node_id} already names its accepted version; there is nothing to re-review",
         )
 
     refreshed = _refreshed_pin(store, target_node_id)
@@ -1870,105 +2181,128 @@ def _visited_upstream() -> None:
         counter.count += 1
 
 
-def _own_trust_problem(store: ProjectStore, node_id: str) -> bool:
-    """Whether `node_id` itself starts an integrity problem: an open Challenge on it, an Imported
-    result found no longer callable, or one of its own dependency edges pinned to an interface
-    its target no longer offers. Looks at the node and its own edges only, never further up."""
+# How much each upstream cause weighs: a Challenge outranks a stale pin, which outranks nothing.
+_CAUSE_RANK = {None: 0, "stale": 1, "challenged": 2}
+
+
+def _worse(a: str | None, b: str | None) -> str | None:
+    return a if _CAUSE_RANK[a] >= _CAUSE_RANK[b] else b
+
+
+def _own_cause(store: ProjectStore, node_id: str) -> str | None:
+    """What `node_id` itself starts, never looking further up: `"challenged"` for an open
+    Challenge on it or an Imported result found no longer callable, `"stale"` for one of its own
+    dependency edges pinned to an interface its target no longer offers, or behind its target's
+    accepted version (#23), else None."""
     _visited_upstream()
     if has_open_challenge(store, node_id):
-        return True
+        return "challenged"
     node = get_node(store, node_id)
     if node is None:
-        return False
+        return None
     if node.kind == ProofMapNodeKind.imported_result and _no_longer_callable(store, node_id):
-        return True  # a citation found wanting: whatever rests on it needs a second look
+        return "challenged"  # a citation found wanting: whatever rests on it needs a second look
     for dependency_id in node.dependencies:
         pin = get_dependency_pin(store, node_id, dependency_id)
-        if pin is not None and not dependency_pin_is_current(store, pin):
-            return True
-    return False
+        if pin is not None and (not dependency_pin_is_current(store, pin) or dependency_pin_lags(store, pin)):
+            return "stale"
+    return None
 
 
-_DOWNSTREAM_OF_PROBLEM = "downstream_of_challenge_or_stale_pin"
+_UPSTREAM_CAUSES = "upstream_cause"
 
 
-def _is_downstream_of_challenge_or_stale_pin(store: ProjectStore, node_id: str) -> bool:
-    """Whether `node_id` is itself Challenged, or reachable (via dependency edges,
-    transitively) from a Challenged node or a dependency edge whose pin no
-    longer matches its target's current accepted interface.
+def _upstream_cause(store: ProjectStore, node_id: str) -> str | None:
+    """What makes `node_id` unsettled upstream: `"challenged"` if it is itself Challenged, or
+    reachable (via dependency edges, transitively) from a Challenged node or a citation found
+    no longer callable; `"stale"` if it is reachable only from a dependency edge whose pin no
+    longer matches its target's accepted interface, or lags its accepted version (#23); else None.
 
-    Pure graph reachability over persisted Challenge and DependencyPin
-    records — nothing is stored per node. See ADR-0004 point 4.
+    Pure graph reachability over persisted Challenge and DependencyPin records — nothing is
+    stored per node. See ADR-0004 point 4.
 
-    One topological pass per read (#108): a depth-first walk in dependency
-    order that records each node's answer in the read scope's memo, so a
-    dependent asked about later reuses its dependencies' answers instead of
-    walking above them again. Over a whole map, every node is visited once
-    per read. Walked with an explicit stack, not recursion: a long-running
-    project's dependency chain can run hundreds of nodes deep, well past
-    Python's default recursion limit.
+    One topological pass per read (#108): a depth-first walk in dependency order that records
+    each node's cause in the read scope's memo, so a dependent asked about later reuses its
+    dependencies' causes instead of walking above them again. Over a whole map, every node is
+    visited once per read. Walked with an explicit stack, not recursion: a long-running
+    project's dependency chain can run hundreds of nodes deep, well past Python's default
+    recursion limit.
     """
-    memo: dict[str, bool] = scoped_memo(store, _DOWNSTREAM_OF_PROBLEM)
+    memo: dict[str, str | None] = scoped_memo(store, _UPSTREAM_CAUSES)
     if node_id in memo:
         return memo[node_id]
 
-    stack: list[tuple[str, Iterator[str]]] = []  # the path being walked, each with its dependencies still to see
+    # the path being walked: each node, its dependencies still to see, and the worst cause so far
+    stack: list[list] = []
     on_path: set[str] = set()
 
-    def found() -> bool:
-        for path_id, _ in stack:  # everything on the path rests on the problem just found
-            memo[path_id] = True
-        return True
+    def challenged() -> str:
+        for path_id, _, _ in stack:  # nothing outranks a Challenge: everything on the path has it
+            memo[path_id] = "challenged"
+        return "challenged"
 
     def enter(current_id: str) -> bool:
-        """Visit a node; whether its own problem already settles the answer."""
-        if _own_trust_problem(store, current_id):
-            memo[current_id] = True
+        """Visit a node; whether its own cause already settles the answer (a Challenge)."""
+        own = _own_cause(store, current_id)
+        if own == "challenged":
+            memo[current_id] = own
             return True
         node = get_node(store, current_id)
-        stack.append((current_id, iter(node.dependencies if node is not None else [])))
+        stack.append([current_id, iter(node.dependencies if node is not None else []), own])
         on_path.add(current_id)
         return False
 
     if enter(node_id):
-        return True
+        return "challenged"
     while stack:
-        current_id, dependencies = stack[-1]
+        top = stack[-1]
+        current_id, dependencies, cause = top
         dependency_id = next(dependencies, None)
-        if dependency_id is None:  # nothing above it is a problem
+        if dependency_id is None:  # every dependency seen: its cause is settled
             stack.pop()
             on_path.discard(current_id)
-            memo[current_id] = False
+            memo[current_id] = cause
+            if stack:
+                stack[-1][2] = _worse(stack[-1][2], cause)
             continue
         if dependency_id in memo:
-            if memo[dependency_id]:
-                return found()
+            if memo[dependency_id] == "challenged":
+                return challenged()
+            top[2] = _worse(cause, memo[dependency_id])
             continue
         if dependency_id in on_path:
             # A dependency cycle, which no service creates: answer by plain reachability instead.
-            for path_id, _ in stack:
+            for path_id, _, _ in stack:
                 memo.pop(path_id, None)
-            return _reaches_trust_problem(store, node_id)
+            return _reachable_cause(store, node_id)
         if enter(dependency_id):
-            return found()
+            return challenged()
     return memo[node_id]
 
 
-def _reaches_trust_problem(store: ProjectStore, node_id: str) -> bool:
-    """Plain reachability from `node_id` to any node with its own trust problem, remembering nothing."""
+def _reachable_cause(store: ProjectStore, node_id: str) -> str | None:
+    """Plain reachability from `node_id`: the worst cause any node it reaches starts, remembering nothing."""
     visited: set[str] = set()
     pending = [node_id]
+    worst: str | None = None
     while pending:
         current_id = pending.pop()
         if current_id in visited:
             continue
         visited.add(current_id)
-        if _own_trust_problem(store, current_id):
-            return True
+        worst = _worse(worst, _own_cause(store, current_id))
+        if worst == "challenged":
+            return worst
         node = get_node(store, current_id)
         if node is not None:
             pending.extend(node.dependencies)
-    return False
+    return worst
+
+
+def _is_downstream_of_challenge_or_stale_pin(store: ProjectStore, node_id: str) -> bool:
+    """Whether anything upstream of `node_id` unsettles it: a Challenge, a withdrawn citation, a
+    stale or lagging pin (see `_upstream_cause`)."""
+    return _upstream_cause(store, node_id) is not None
 
 
 @memoized_read
@@ -2066,7 +2400,8 @@ def get_blocked_reason(store: ProjectStore, node_id: str) -> str | None:
     """Why `get_workflow_state` reads `blocked`, or `None` if it doesn't.
 
     `dependency-challenged` when an unresolved dependency is itself
-    Challenged or downstream of a Challenge/stale pin — distinct from the
+    Challenged or downstream of a Challenge; `dependency-stale` when it is
+    downstream only of a stale or lagging pin (#23) — both distinct from the
     ordinary `not-accepted` case of a dependency simply not having reached
     Acceptance/Reference-review yet.
     """
@@ -2077,12 +2412,15 @@ def get_blocked_reason(store: ProjectStore, node_id: str) -> str | None:
         dependency = get_node(store, dependency_id)
         if dependency is not None and dependency.kind == ProofMapNodeKind.imported_result and _no_longer_callable(store, dependency_id):
             return "dependency-not-callable"
+    stale = False
     for dependency_id in node.dependencies:
-        if not _dependency_satisfied(store, dependency_id) and _is_downstream_of_challenge_or_stale_pin(
-            store, dependency_id
-        ):
+        if _dependency_satisfied(store, dependency_id):
+            continue
+        cause = _upstream_cause(store, dependency_id)
+        if cause == "challenged":
             return "dependency-challenged"
-    return "not-accepted"
+        stale = stale or cause == "stale"
+    return "dependency-stale" if stale else "not-accepted"
 
 
 @memoized_read
