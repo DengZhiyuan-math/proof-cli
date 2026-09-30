@@ -221,9 +221,10 @@ def _record(
 
 
 _SAFE_NODE_ID = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9._-]*")
-# the vault's own files, beside the node folders: a node folder can't take their place, in any letter case
-# (a case-insensitive file system, macOS's default among them, would put `TRUST-RULES.JSONL/` where the file goes)
-_RESERVED_NODE_IDS = frozenset({TRUST_RULES_FILE.casefold(), preamble_path(Path(".")).name.casefold()})
+# the vault's own files and folders, beside the node folders: a node folder can't take their place, in any letter
+# case (a case-insensitive file system, macOS's default among them, would put `TRUST-RULES.JSONL/` where the file
+# goes). `fog/` holds the Proof fog items' folders (ADR-0008, spec #136).
+_RESERVED_NODE_IDS = frozenset({TRUST_RULES_FILE.casefold(), preamble_path(Path(".")).name.casefold(), "fog"})
 
 
 def node_id_problem(node_id: str) -> str | None:
@@ -231,7 +232,7 @@ def node_id_problem(node_id: str) -> str | None:
     if not _SAFE_NODE_ID.fullmatch(node_id):
         return f"node id {node_id!r} must be letters, digits, '.', '_' or '-', not starting with '.'"
     if node_id.casefold() in _RESERVED_NODE_IDS:
-        return f"node id {node_id!r} is the name of one of the vault's own files (proofs/{node_id.casefold()}), in any letter case"
+        return f"node id {node_id!r} is the name of one of the vault's own files or folders (proofs/{node_id.casefold()}), in any letter case"
     return None
 
 
@@ -430,19 +431,23 @@ def split_node(
         require_node(store, parent_id)
         raise ProofMapError("SPLIT_REQUIRES_CHILDREN", "split requires at least one child claim")
     with store.transaction() as conn:
-        # Under the write lock, a child with no node yet and no folder yet is ours alone: no one
-        # else can create that node until this commits. Any other folder may be another writer's
-        # (create_node writes its proof.tex after committing), so a failed split leaves it be.
-        # The cleanup is an on_rollback callback: it runs before the lock goes, while nobody else
-        # can have taken the id, and a failed commit runs it too.
-        ours = {
-            node_folder(store.root, spec["id"])
-            for spec in child_specs
-            if node_id_problem(spec["id"]) is None and get_proof_map_node(store, spec["id"]) is None
-        }
-        ours = {folder for folder in ours if not folder.exists()}
-        on_rollback(store, lambda: _remove_folders(ours))
+        remove_new_node_folders_on_rollback(store, [spec["id"] for spec in child_specs])
         return _split(store, conn, parent_id, child_specs, created_by=created_by, reassign=reassign)
+
+
+def remove_new_node_folders_on_rollback(store: ProjectStore, node_ids: list[str]) -> None:
+    """Inside a write transaction that will create `node_ids`: take their folders with them if it rolls back.
+
+    Under the write lock, a node with no row yet and no folder yet is ours alone: no one else
+    can create it until this commits. Any other folder may be another writer's (`create_node`
+    writes its proof.tex once its own transaction commits — a SAVEPOINT release, inside ours),
+    so those are left be. The cleanup is an `on_rollback` callback: it runs before the lock
+    goes, while nobody else can have taken the id, and a failed commit runs it too. A Split
+    registers it for its children; a free-standing Crystallize for its Claim (spec #136).
+    """
+    ours = {node_folder(store.root, node_id) for node_id in node_ids if node_id_problem(node_id) is None and get_proof_map_node(store, node_id) is None}
+    ours = {folder for folder in ours if not folder.exists()}
+    on_rollback(store, lambda: _remove_folders(ours))
 
 
 def _remove_folders(folders: set[Path]) -> None:

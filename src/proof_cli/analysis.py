@@ -5,7 +5,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from .domain import BlockerRecord, ProofObligation, ProjectState, TheoremContract, utc_now
+from .domain import BlockerRecord, FogItem, ProofObligation, ProjectState, TheoremContract, utc_now
+from .fog import last_dropped
 from .memory import load_memory
 from .retrieval import RetrievalCandidate, RetrievalReport, retrieve_candidates
 from .storage import ProjectStore, list_blockers, list_contracts, list_obligations, read_state
@@ -26,6 +27,9 @@ class ProjectDiagnosticReport(BaseModel):
     current_theorem: str | None = None
     bottleneck_kind: str = "unknown"
     bottleneck_summary: str = ""
+    # where a `route` bottleneck was read from: the last dropped Proof fog item (`fog`), or the
+    # legacy `failed_routes` list when there is none (`legacy`); None for the other kinds
+    bottleneck_source: str | None = None
     central_obligations: list[str] = Field(default_factory=list)
     active_blockers: list[str] = Field(default_factory=list)
     recent_memory: list[str] = Field(default_factory=list)
@@ -92,22 +96,27 @@ def _bottleneck_summary(
     obligations: list[ProofObligation],
     blockers: list[BlockerRecord],
     failed_routes: list[str],
-) -> tuple[str, str]:
+    dropped_fog: FogItem | None = None,
+) -> tuple[str, str, str | None]:
+    """(kind, summary, source). A `route` is the last dropped Proof fog item (ADR-0008, spec #136);
+    `failed_routes` is the legacy fallback when no fog was ever dropped, and says so."""
     if blockers:
         blocker = blockers[0]
-        return "blocker", f"{blocker.id}: {blocker.description}"
+        return "blocker", f"{blocker.id}: {blocker.description}", None
     if obligations:
         obligation = obligations[0]
         summary = obligation.blocking_reason or obligation.goal_statement
-        return "obligation", f"{obligation.id}: {summary}"
+        return "obligation", f"{obligation.id}: {summary}", None
+    if dropped_fog is not None:
+        return "route", f"{dropped_fog.id}: {dropped_fog.text} — dropped: {dropped_fog.reason}", "fog"
     if failed_routes:
-        return "route", failed_routes[-1]
+        return "route", failed_routes[-1], "legacy"
     if state.unresolved_trust_sensitive_calls:
         target = state.unresolved_trust_sensitive_calls[-1]
-        return "trust", f"unresolved trust-sensitive call: {target}"
+        return "trust", f"unresolved trust-sensitive call: {target}", None
     if state.current_theorem:
-        return "theorem", f"{state.current_theorem} is active without an explicit blocker"
-    return "idle", "No active theorem or open proof work detected"
+        return "theorem", f"{state.current_theorem} is active without an explicit blocker", None
+    return "idle", "No active theorem or open proof work detected", None
 
 
 def _next_steps(
@@ -177,7 +186,7 @@ def build_project_diagnostic_report(
     blockers = list_blockers(store)
     memory = _memory_context(store, state)
     retrieval = retrieve_candidates(store, query=query, limit=limit)
-    bottleneck_kind, bottleneck_summary = _bottleneck_summary(state, obligations, blockers, state.failed_routes)
+    bottleneck_kind, bottleneck_summary, bottleneck_source = _bottleneck_summary(state, obligations, blockers, state.failed_routes, last_dropped(store))
     explicit_neighborhood = _explicit_neighborhood(state, contracts, obligations, blockers)
     return ProjectDiagnosticReport(
         project_id=state.project_id,
@@ -185,6 +194,7 @@ def build_project_diagnostic_report(
         current_theorem=state.current_theorem,
         bottleneck_kind=bottleneck_kind,
         bottleneck_summary=bottleneck_summary,
+        bottleneck_source=bottleneck_source,
         central_obligations=[obligation.id for obligation in obligations[:3]],
         active_blockers=[blocker.id for blocker in blockers[:3]],
         recent_memory=memory,

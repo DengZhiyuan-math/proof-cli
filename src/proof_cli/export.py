@@ -187,7 +187,7 @@ def build_export(store: ProjectStore) -> str:
         f"Open obligations: {_join(state['open_obligations'])}",
         f"Proved: {_join(state['recent_theorem_usage'])}",
         f"Blockers: {_join(state['blockers'])}",
-        f"Failed routes: {_join(state['failed_routes'])}",
+        f"Failed routes (legacy): {_join(state['failed_routes'])}",  # a dropped Proof fog item is the record now (spec #136)
         f"Trust-sensitive calls: {_join(state['unresolved_trust_sensitive_calls'])}",
         "Reasoning:",
     ]
