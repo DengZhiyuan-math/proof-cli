@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from _review_client import DirectClient
-from proof_cli.fog import add_fog, crystallize_fog, drop_fog, get_fog, list_experiments
+from proof_cli.fog import add_fog, crystallize_fog, drop_fog, list_experiments, require_fog
 from proof_cli.proof_map import create_node
 from proof_cli.storage import ensure_project
 
@@ -59,7 +59,7 @@ def test_the_page_adds_edits_drops_and_reopens_as_its_git_identity(page):
 
     reopened = _ok(client.post("/api/fog/fog-1/reopen", {}))
     assert reopened["status"] == "open" and reopened["reason"] is None
-    assert get_fog(store, "fog-1").status.value == "open"
+    assert require_fog(store, "fog-1").status.value == "open"
 
 
 @pytest.mark.parametrize("path, body, code", [
@@ -76,16 +76,20 @@ def test_a_write_the_page_cannot_make_is_refused_with_the_service_code(page, pat
     add_fog(store, "one")
     status, response = client.post(path, body)
     assert status >= 400 and response["error"]["code"] == code
-    assert get_fog(store, "fog-1").status.value == "open" and list_experiments(store, "fog-1") == []
+    assert require_fog(store, "fog-1").status.value == "open" and list_experiments(store, "fog-1") == []
 
 
-def test_an_experiment_recorded_from_the_page_names_the_actor_unless_told_who_ran_it(page):
+def test_an_experiment_recorded_from_the_page_says_who_ran_it_or_is_refused(page):
+    """The page never credits its own identity with a run by default: the drawer prefills who, the request says so."""
     store, client = page
     add_fog(store, "one")
-    mine = _ok(client.post("/api/fog/fog-1/experiment", {"outcome": "inconclusive", "summary": "unstable"}))
+    status, refused = client.post("/api/fog/fog-1/experiment", {"outcome": "inconclusive", "summary": "unstable"})
+    assert status == 400 and refused["error"]["code"] == "FOG_RUN_BY_REQUIRED"
+    status, empty = client.post("/api/fog/fog-1/experiment", {"outcome": "inconclusive", "summary": "", "run_by": "agent_a"})
+    assert status == 400 and empty["error"]["code"] == "FOG_SUMMARY_REQUIRED"
     theirs = _ok(client.post("/api/fog/fog-1/experiment", {"outcome": "refutes", "summary": "counterexample at n = 7", "run_by": "agent_a"}))
-    assert (mine["seq"], mine["run_by"]) == (1, client.app._actor()) and (theirs["seq"], theirs["run_by"]) == (2, "agent_a")
-    assert get_fog(store, "fog-1").status.value == "open"
+    assert (theirs["seq"], theirs["run_by"]) == (1, "agent_a")
+    assert require_fog(store, "fog-1").status.value == "open"
 
 
 def test_the_node_page_carries_the_fog_near_it_and_its_origin(page):

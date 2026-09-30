@@ -2015,7 +2015,7 @@ def insert_fog_item(store: ProjectStore, item: FogItem, *, conn: sqlite3.Connect
             """,
             (
                 item.id,
-                int(item.id.rsplit("-", 1)[1]),
+                item.number,
                 item.text,
                 item.notes,
                 json.dumps(item.near),

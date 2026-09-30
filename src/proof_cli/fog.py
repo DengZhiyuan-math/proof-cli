@@ -27,12 +27,10 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from .domain import ExperimentOutcome, FogExperiment, FogItem, FogStatus, ProofMapNode, utc_now
-from .proof_map import ProofMapError, _remove_folders, create_node, node_id_problem, require_node, split_node
+from .proof_map import ProofMapError, create_node, remove_new_node_folders_on_rollback, require_node, split_node
 from .storage import (
     ProjectStore,
     append_event,
-    get_proof_map_node,
-    on_rollback,
     get_fog_item,
     insert_fog_experiment,
     insert_fog_item,
@@ -41,7 +39,7 @@ from .storage import (
     next_fog_number,
     update_fog_item,
 )
-from .vault import node_folder, vault_dir
+from .vault import vault_dir
 
 FOG_DIR = "fog"
 
@@ -54,12 +52,9 @@ def fog_folder(root: Path, fog_id: str) -> Path:
 # -- reading -------------------------------------------------------------------------------------
 
 
-def get_fog(store: ProjectStore, fog_id: str) -> FogItem | None:
-    return get_fog_item(store, fog_id)
-
-
-def require_fog(store: ProjectStore, fog_id: str) -> FogItem:
-    item = get_fog_item(store, fog_id)
+def require_fog(store: ProjectStore, fog_id: str, *, conn=None) -> FogItem:
+    """The item, or FOG_NOT_FOUND. A writer passes its transaction's `conn`, so the check and the write are one."""
+    item = get_fog_item(store, fog_id, conn=conn)
     if item is None:
         raise ProofMapError("FOG_NOT_FOUND", f"no fog item is named {fog_id}")
     return item
@@ -139,7 +134,7 @@ def add_fog(store: ProjectStore, text: str, *, near=(), notes: str = "", created
         raise ProofMapError("FOG_TEXT_REQUIRED", "a fog item needs its text: the difficulty, in words")
     near_ids = _checked_near(store, near)
     with store.transaction() as conn:
-        item = FogItem(id=f"fog-{next_fog_number(store, conn=conn)}", text=text.strip(), notes=notes or "", near=near_ids, created_by=created_by or "human")
+        item = FogItem(id=FogItem.id_for(next_fog_number(store, conn=conn)), text=text.strip(), notes=notes or "", near=near_ids, created_by=created_by or "human")
         insert_fog_item(store, item, conn=conn)
         append_event(store, "proof_fog_added", f"added {item.id}: {item.text}", entity_id=item.id, payload={"near": near_ids, "created_by": item.created_by}, conn=conn)
     return item
@@ -147,19 +142,19 @@ def add_fog(store: ProjectStore, text: str, *, near=(), notes: str = "", created
 
 def edit_fog(store: ProjectStore, fog_id: str, *, text: str | None = None, near=None, notes: str | None = None, edited_by: str = "human") -> FogItem:
     """Change an open item's text, notes or near nodes; whatever isn't given stays. The id never changes."""
-    item = require_fog(store, fog_id)
-    _require_open(item, "edit it")
     if text is not None and not text.strip():
         raise ProofMapError("FOG_TEXT_REQUIRED", "a fog item needs its text: the difficulty, in words")
-    changes: dict = {"updated_at": utc_now()}
-    if text is not None:
-        changes["text"] = text.strip()
-    if notes is not None:
-        changes["notes"] = notes
-    if near is not None:
-        changes["near"] = _checked_near(store, near)
-    edited = item.model_copy(update=changes)
     with store.transaction() as conn:
+        item = require_fog(store, fog_id, conn=conn)
+        _require_open(item, "edit it")
+        changes: dict = {"updated_at": utc_now()}
+        if text is not None:
+            changes["text"] = text.strip()
+        if notes is not None:
+            changes["notes"] = notes
+        if near is not None:
+            changes["near"] = _checked_near(store, near)
+        edited = item.model_copy(update=changes)
         update_fog_item(store, edited, conn=conn)
         append_event(store, "proof_fog_edited", f"edited {item.id}", entity_id=item.id, payload={"edited_by": edited_by, "fields": sorted(k for k in changes if k != "updated_at")}, conn=conn)
     return edited
@@ -167,13 +162,13 @@ def edit_fog(store: ProjectStore, fog_id: str, *, text: str | None = None, near=
 
 def drop_fog(store: ProjectStore, fog_id: str, *, reason: str, dropped_by: str = "human") -> FogItem:
     """Give an item up, saying why. Reversible with `reopen_fog`."""
-    item = require_fog(store, fog_id)
-    _require_open(item, "drop it")
     if not (reason or "").strip():
         raise ProofMapError("FOG_REASON_REQUIRED", f"dropping {fog_id} needs a reason: why this direction is given up")
-    now = utc_now()
-    dropped = item.model_copy(update={"status": FogStatus.dropped, "dropped_by": dropped_by or "human", "dropped_at": now, "reason": reason.strip(), "updated_at": now})
     with store.transaction() as conn:
+        item = require_fog(store, fog_id, conn=conn)
+        _require_open(item, "drop it")
+        now = utc_now()
+        dropped = item.model_copy(update={"status": FogStatus.dropped, "dropped_by": dropped_by or "human", "dropped_at": now, "reason": reason.strip(), "updated_at": now})
         update_fog_item(store, dropped, conn=conn)
         append_event(store, "proof_fog_dropped", f"dropped {item.id}: {reason.strip()}", entity_id=item.id, payload={"dropped_by": dropped.dropped_by, "reason": dropped.reason}, conn=conn)
     return dropped
@@ -181,13 +176,13 @@ def drop_fog(store: ProjectStore, fog_id: str, *, reason: str, dropped_by: str =
 
 def reopen_fog(store: ProjectStore, fog_id: str, *, by: str = "human") -> FogItem:
     """Take a dropped item back, clearing its drop record. An open item is left as it is; a crystallized one never reopens."""
-    item = require_fog(store, fog_id)
-    if item.status == FogStatus.open:
-        return item
-    if item.status == FogStatus.crystallized:
-        raise _not_open(item, "reopening")
-    reopened = item.model_copy(update={"status": FogStatus.open, "dropped_by": None, "dropped_at": None, "reason": None, "updated_at": utc_now()})
     with store.transaction() as conn:
+        item = require_fog(store, fog_id, conn=conn)
+        if item.status == FogStatus.open:
+            return item
+        if item.status == FogStatus.crystallized:
+            raise _not_open(item, "reopening")
+        reopened = item.model_copy(update={"status": FogStatus.open, "dropped_by": None, "dropped_at": None, "reason": None, "updated_at": utc_now()})
         update_fog_item(store, reopened, conn=conn)
         append_event(store, "proof_fog_reopened", f"reopened {item.id}", entity_id=item.id, payload={"by": by}, conn=conn)
     return reopened
@@ -206,7 +201,7 @@ def _checked_path(store: ProjectStore, path: str | None) -> str | None:
     given = Path(str(path).strip())
     if given.is_absolute() or ".." in given.parts:
         raise ProofMapError("FOG_EXPERIMENT_PATH_INVALID", f"an Experiment's path is relative to the project and under proofs/, not {path!r}")
-    if not given.parts or given.parts[0] != vault_dir(store.root).name:
+    if len(given.parts) < 2 or given.parts[0] != vault_dir(store.root).name:
         raise ProofMapError("FOG_EXPERIMENT_PATH_INVALID", f"an Experiment's files live under proofs/ (the vault), not at {path!r}")
     if not (store.root / given).exists():
         raise ProofMapError("FOG_EXPERIMENT_PATH_INVALID", f"nothing is at {path!r}: an Experiment names files that exist")
@@ -215,16 +210,18 @@ def _checked_path(store: ProjectStore, path: str | None) -> str | None:
 
 def record_experiment(store: ProjectStore, fog_id: str, outcome: str, *, summary: str, run_by: str, path: str | None = None) -> FogExperiment:
     """Record a run against an open item: only what was really run, by whoever ran it. Changes the item's status not at all."""
-    item = require_fog(store, fog_id)
-    _require_open(item, "recording an experiment")
     try:
         resolved = ExperimentOutcome(outcome)
     except ValueError as exc:
         raise ProofMapError("INVALID_OUTCOME", f"'{outcome}' is not an Experiment outcome; expected one of: {', '.join(o.value for o in ExperimentOutcome)}") from exc
+    if not (summary or "").strip():
+        raise ProofMapError("FOG_SUMMARY_REQUIRED", "an Experiment says what was computed and what it showed (--summary)")
     if not (run_by or "").strip():
         raise ProofMapError("FOG_RUN_BY_REQUIRED", "an Experiment records who ran it (--run-by)")
     checked_path = _checked_path(store, path)
     with store.transaction() as conn:
+        item = require_fog(store, fog_id, conn=conn)
+        _require_open(item, "recording an experiment")
         experiment = insert_fog_experiment(
             store, FogExperiment(fog_id=item.id, seq=0, outcome=resolved, summary=(summary or "").strip(), run_by=run_by.strip(), path=checked_path), conn=conn
         )
@@ -253,7 +250,7 @@ def _scratch_owner(path: str | None) -> str | None:
 
 def _resolve_parent(item: FogItem, *, parent: str | None, no_parent: bool) -> str | None:
     if parent is not None and no_parent:
-        raise ProofMapError("INVALID_INPUT", "crystallize takes either --parent or --no-parent, not both")
+        raise ProofMapError("FOG_FLAG_CONFLICT", "crystallize takes either --parent or --no-parent, not both")
     if parent is not None:
         return parent
     if no_parent or not item.near:
@@ -291,21 +288,19 @@ def crystallize_fog(
     notes, near nodes and Experiments and reads `crystallized`; a refusal
     anywhere leaves it open and creates no node.
     """
-    item = require_fog(store, fog_id)
-    _require_open(item, "crystallizing it")
-    parent_id = _resolve_parent(item, parent=parent, no_parent=no_parent)
     with store.transaction() as conn:
+        # the checks and the item's change on the write lock: two crystallizes of one item can't both pass
+        item = require_fog(store, fog_id, conn=conn)
+        _require_open(item, "crystallizing it")
+        parent_id = _resolve_parent(item, parent=parent, no_parent=no_parent)
         # the item first: if the node can't be made, the whole transaction rolls back, item included
         update_fog_item(store, item.model_copy(update={"status": FogStatus.crystallized, "node_id": node_id, "updated_at": utc_now()}), conn=conn)
         spec = {"id": node_id, "statement": statement, "assumptions": list(assumptions or []), "display_label": display_label}
         if parent_id is not None:
             (node,) = split_node(store, parent_id, [spec], created_by=created_by, reassign=reassign)  # cleans its child folder up on rollback
         else:
-            # a free-standing Claim writes its proof.tex before this transaction commits: if the commit then
-            # fails, the folder must go with the node (the same cleanup a Split registers, under the same lock)
-            folder = node_folder(store.root, node_id)
-            if node_id_problem(node_id) is None and get_proof_map_node(store, node_id) is None and not folder.exists():
-                on_rollback(store, lambda: _remove_folders({folder}))
+            # a free-standing Claim writes its proof.tex before this transaction commits: the same cleanup a Split registers
+            remove_new_node_folders_on_rollback(store, [node_id])
             node = create_node(store, node_id=node_id, kind="claim", statement=statement, display_label=display_label, assumptions=list(assumptions or []), created_by=created_by)
         append_event(
             store, "proof_fog_crystallized", f"crystallized {item.id} as {node_id}",

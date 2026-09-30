@@ -431,19 +431,23 @@ def split_node(
         require_node(store, parent_id)
         raise ProofMapError("SPLIT_REQUIRES_CHILDREN", "split requires at least one child claim")
     with store.transaction() as conn:
-        # Under the write lock, a child with no node yet and no folder yet is ours alone: no one
-        # else can create that node until this commits. Any other folder may be another writer's
-        # (create_node writes its proof.tex after committing), so a failed split leaves it be.
-        # The cleanup is an on_rollback callback: it runs before the lock goes, while nobody else
-        # can have taken the id, and a failed commit runs it too.
-        ours = {
-            node_folder(store.root, spec["id"])
-            for spec in child_specs
-            if node_id_problem(spec["id"]) is None and get_proof_map_node(store, spec["id"]) is None
-        }
-        ours = {folder for folder in ours if not folder.exists()}
-        on_rollback(store, lambda: _remove_folders(ours))
+        remove_new_node_folders_on_rollback(store, [spec["id"] for spec in child_specs])
         return _split(store, conn, parent_id, child_specs, created_by=created_by, reassign=reassign)
+
+
+def remove_new_node_folders_on_rollback(store: ProjectStore, node_ids: list[str]) -> None:
+    """Inside a write transaction that will create `node_ids`: take their folders with them if it rolls back.
+
+    Under the write lock, a node with no row yet and no folder yet is ours alone: no one else
+    can create it until this commits. Any other folder may be another writer's (`create_node`
+    writes its proof.tex once its own transaction commits — a SAVEPOINT release, inside ours),
+    so those are left be. The cleanup is an `on_rollback` callback: it runs before the lock
+    goes, while nobody else can have taken the id, and a failed commit runs it too. A Split
+    registers it for its children; a free-standing Crystallize for its Claim (spec #136).
+    """
+    ours = {node_folder(store.root, node_id) for node_id in node_ids if node_id_problem(node_id) is None and get_proof_map_node(store, node_id) is None}
+    ours = {folder for folder in ours if not folder.exists()}
+    on_rollback(store, lambda: _remove_folders(ours))
 
 
 def _remove_folders(folders: set[Path]) -> None:

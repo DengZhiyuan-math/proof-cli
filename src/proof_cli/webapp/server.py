@@ -550,9 +550,10 @@ class ReviewApp:
         if action == "reopen":
             return proof_fog.fog_view(self.store, proof_fog.reopen_fog(self.store, fog_id, by=actor))
         if action == "experiment":
+            # who ran it is the request's to say (the drawer prefills it), never assumed to be the page's identity
             experiment = proof_fog.record_experiment(
                 self.store, fog_id, str(body.get("outcome") or ""), summary=str(body.get("summary") or ""),
-                run_by=str(body.get("run_by") or actor), path=body.get("path") or None,
+                run_by=str(body.get("run_by") or ""), path=body.get("path") or None,
             )
             return experiment.model_dump(mode="json")
         raise RequestError(HTTPStatus.NOT_FOUND, "NOT_FOUND", f"no fog action {action!r}")
