@@ -616,12 +616,7 @@ FOG_ALL = {"items": FOG["items"] + [
 
 
 def _fog_home(steps=(), fog=FOG, fog_all=FOG_ALL, nodes=None):
-    if shutil.which("node") is None:
-        pytest.skip("needs node")
-    scenario = {"state": _state(PENDING), "map": MAP, "steps": list(steps), "nodes": nodes or {}, "fog": fog, "fogAll": fog_all}
-    done = subprocess.run(["node", str(HARNESS), json.dumps(scenario)], capture_output=True, text=True, timeout=30)
-    assert done.returncode == 0, done.stderr
-    return json.loads(done.stdout)
+    return _home_rules(steps, state=_state(PENDING), nodes=nodes or {}, fog=fog, fogAll=fog_all)
 
 
 def test_the_toolbar_badge_counts_the_open_fog_and_opens_the_drawer_listing_each_item():
@@ -637,12 +632,19 @@ def test_the_toolbar_badge_counts_the_open_fog_and_opens_the_drawer_listing_each
     assert opened["fogRows"] == [r for r in opened["fogRows"] if r["status"] is None]  # open items carry no status line
 
 
-def test_hovering_a_row_lights_its_near_nodes_up_on_the_canvas_and_draws_nothing():
+def test_hovering_a_row_marks_its_near_nodes_the_way_the_search_box_does_and_draws_nothing():
     _, _, hovered, left = _fog_home(steps=[{"fog": True}, {"fogHover": "fog-1"}, {"fogLeave": "fog-1"}])
-    assert hovered["fogFocus"]
-    assert "fog-near" in hovered["dag"]["lem_bound"]["classes"] and "fog-near" not in hovered["dag"]["thm_main"]["classes"]
-    assert not left["fogFocus"] and all("fog-near" not in n["classes"] for n in left["dag"].values())
+    assert hovered["fogFocus"]  # the canvas filters, as for a search
+    assert "found" in hovered["dag"]["lem_bound"]["classes"] and "dim" not in hovered["dag"]["lem_bound"]["classes"]
+    assert "dim" in hovered["dag"]["thm_main"]["classes"] and "dim" in hovered["dag"]["ref_bw"]["classes"]
+    assert not left["fogFocus"] and all("dim" not in n["classes"] and "found" not in n["classes"] for n in left["dag"].values())
     assert all(len(n["texts"]) == len(m["texts"]) for n, m in zip(hovered["dag"].values(), left["dag"].values()))  # nothing added to the cards
+
+
+def test_hovering_a_row_marks_the_tree_too():
+    hovered = _fog_home(steps=[{"view": "tree"}, {"fog": True}, {"fogHover": "fog-1"}])[-1]
+    lines = {line["id"]: line for line in hovered["tree"]}
+    assert not lines["lem_bound"]["dim"] and lines["thm_main"]["dim"]
 
 
 def test_adding_from_the_composer_posts_the_text_and_the_near_node_and_clears_the_box():
@@ -679,7 +681,18 @@ def test_recording_an_experiment_posts_its_outcome_and_summary():
         {"fogButton": {"id": "fog-2", "text": "Record"}},
     ])[-1]
     (sent,) = recorded["posted"]
-    assert sent == {"url": "/api/fog/fog-2/experiment", "body": {"outcome": "refutes", "summary": "the functional has no critical point for n = 7"}}
+    # who ran it is the request's to say: the page's own identity, prefilled and editable; no path unless one is given
+    assert sent == {"url": "/api/fog/fog-2/experiment", "body": {"outcome": "refutes", "summary": "the functional has no critical point for n = 7", "run_by": "Researcher <r@example.org>"}}
+
+
+def test_an_experiment_can_name_who_ran_it_and_where_its_files_are():
+    recorded = _fog_home(steps=[
+        {"fog": True}, {"fogButton": {"id": "fog-2", "text": "Record experiment…"}},
+        {"fogFill": {"id": "fog-2", "name": "summary", "value": "ran out of memory"}}, {"fogFill": {"id": "fog-2", "name": "run_by", "value": "agent_a"}},
+        {"fogFill": {"id": "fog-2", "name": "path", "value": "proofs/fog/fog-2/variational.sage"}}, {"fogButton": {"id": "fog-2", "text": "Record"}},
+    ])[-1]
+    (sent,) = recorded["posted"]
+    assert sent["body"] == {"outcome": "supports", "summary": "ran out of memory", "run_by": "agent_a", "path": "proofs/fog/fog-2/variational.sage"}
 
 
 def test_the_toggle_lists_dropped_and_crystallized_items_apart_and_reopens_a_dropped_one():
@@ -724,5 +737,28 @@ def test_the_node_page_says_which_fog_item_it_was_crystallized_from_and_lists_th
     assert "Crystallized from fog-4" in opened["nodeFog"]
     assert "Fog near this node" in opened["nodeFog"] and "does the polynomial degree depend on the dimension?" in opened["nodeFog"]
     assert "inconclusive" in opened["nodeFog"] and opened["nodeFogLinks"] == ["fog-4", "fog-5"]
+    assert opened["nodeFogHrefs"] == ["#/fog/fog-4", "#/fog/fog-5"]  # each opens the drawer at the item
     _, plain = _fog_home(steps=[{"open": "eps_poly"}], nodes={"eps_poly": {**NODE_VIEW, "crystallized_from": None, "fog_near": []}})
     assert plain["nodeFog"] == ""
+
+
+def test_a_fog_link_opens_the_drawer_at_the_item_showing_the_rest_when_it_has_left_the_list():
+    _, followed = _fog_home(steps=[{"hash": "#/fog/fog-4"}])
+    assert followed["page"] == "map" and followed["fogDrawerShown"] and followed["fogFound"] == ["fog-4"]
+    assert [r["id"] for r in followed["fogRows"]] == ["fog-1", "fog-2", "fog-3", "fog-4"]  # a crystallized item: the toggle went on
+    _, plain = _fog_home(steps=[{"hash": "#/fog/fog-2"}])
+    assert plain["fogFound"] == ["fog-2"] and [r["id"] for r in plain["fogRows"]] == ["fog-1", "fog-2"]
+
+
+def test_the_badge_on_another_page_goes_to_the_map_with_the_drawer_open():
+    _, review, back = _fog_home(steps=[{"hash": "#/review"}, {"fog": True}])
+    assert review["page"] == "review" and not review["fogDrawerShown"]
+    assert back["page"] == "map" and back["fogDrawerShown"]
+
+
+def test_a_second_click_on_a_row_button_closes_its_form():
+    _, _, shown, hidden = _fog_home(steps=[{"fog": True}, {"fogButton": {"id": "fog-1", "text": "Drop…"}}, {"fogButton": {"id": "fog-1", "text": "Drop…"}}])
+    (row,) = [r for r in shown["fogRows"] if r["id"] == "fog-1"]
+    assert row["form"]
+    (row,) = [r for r in hidden["fogRows"] if r["id"] == "fog-1"]
+    assert not row["form"]

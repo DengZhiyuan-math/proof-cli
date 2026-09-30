@@ -261,11 +261,14 @@ class FakeElement {
       cli: (li.querySelector("code.fog-cli") || { textContent: null }).textContent,
       form: li.querySelectorAll("form").length > 0,
     })),
-    fogFocus: elements["dag-svg"].classList.contains("fog-focus"),
+    fogFocus: elements["dag-svg"].classList.contains("filtering"),
+    fogFound: elements["fog-list"].querySelectorAll("li").filter((li) => li.classList.contains("found")).map((li) => li.getAttribute("data-fog")),
     fogAddText: elements["fog-add-text"].value,
     // the node page's fog block: crystallized from, and the open fog near the node
     nodeFog: elements["node-fog"].textContent,
     nodeFogLinks: elements["node-fog"].querySelectorAll("a").map((a) => a.textContent),
+    nodeFogHrefs: elements["node-fog"].querySelectorAll("a").map((a) => a.getAttribute("href")),
+    page: (focus.body.dataset || {}).page || null,
   });
   const readings = [read()];
   // a key pressed where the focus is: the focused element hears it first, then it bubbles to the document
@@ -283,6 +286,7 @@ class FakeElement {
     if (step.view) await elements[`view-${step.view}`].dispatch("click");
     if (step.root) { elements["tree-root"].value = step.root; await elements["tree-root"].dispatch("change"); }
     if (step.open) { location.hash = `#/node/${encodeURIComponent(step.open)}`; await listeners["window:hashchange"](); }
+    if (step.hash) { location.hash = step.hash; await listeners["window:hashchange"](); for (let i = 0; i < 4; i++) await new Promise((resolve) => setImmediate(resolve)); }
     if (step.tick) { pendingRow(step.tick).querySelector("input[type=checkbox]").checked = step.on !== false; }
     if (step.choose) { pendingRow(step.choose).querySelector("select").value = step.value; }
     if (step.record) {

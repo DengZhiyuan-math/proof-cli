@@ -69,11 +69,21 @@ let state = null;
 // command until the page's node form returns (#133). Hovering a row lights its near nodes up on the
 // canvas the way the search box does, with nothing drawn on the map.
 let fogData = { items: [] };
-const fog = { open: false, showAll: false, form: null };  // form: {id, kind} of the one inline form showing
+// form: {id, kind} of the one inline form showing; near: the hovered row's nodes, lit up on the map; found: the row a #/fog/<id> link asked for
+const fog = { open: false, showAll: false, form: null, near: null, found: null };
 
 async function loadFog() {
   fogData = await api(fog.showAll ? "/api/fog?all=1" : "/api/fog");
   showFog();
+}
+
+// every write the drawer makes: post it, say what happened, read the fog again; a refusal is shown and nothing else changes
+async function fogPost(path, body, message) {
+  try { await api(path, body); } catch (error) { showError(error); return false; }
+  fog.form = null;
+  say(message, "ok");
+  await loadFog();
+  return true;
 }
 
 function fogNodeHref(id) {
@@ -106,12 +116,7 @@ function fogStatusLine(item) {
 function fogForm(item, kind) {
   const form = el("form", null, { class: "fog-form" });
   form.addEventListener("submit", (event) => event.preventDefault());
-  const send = async (action, body) => {
-    try { await api(`/api/fog/${encodeURIComponent(item.id)}/${action}`, body); } catch (error) { showError(error); return; }
-    fog.form = null;
-    say(`${item.id}: ${action === "drop" ? "dropped" : "experiment recorded"}.`, "ok");
-    await loadFog();
-  };
+  const send = (action, body) => fogPost(`/api/fog/${encodeURIComponent(item.id)}/${action}`, body, `${item.id}: ${action === "drop" ? "dropped" : "experiment recorded"}.`);
   if (kind === "drop") {
     const reason = el("input", null, { type: "text", name: "reason", placeholder: "why (required)", "aria-label": "Why it is dropped" });
     const go = el("button", "Drop", { type: "button", class: "primary" });
@@ -121,9 +126,16 @@ function fogForm(item, kind) {
     const outcome = el("select", null, { name: "outcome", "aria-label": "Outcome" });
     for (const value of ["supports", "refutes", "inconclusive", "error"]) outcome.append(el("option", value, { value }));
     const summary = el("input", null, { type: "text", name: "summary", placeholder: "what was computed, what it showed", "aria-label": "Summary" });
+    // who ran it is the request's to say: the page's identity, editable (an agent's run is recorded under the agent's name)
+    const runBy = el("input", null, { type: "text", name: "run_by", value: state ? state.reviewer : "", placeholder: "run by", "aria-label": "Who ran it" });
+    const path = el("input", null, { type: "text", name: "path", placeholder: "path under proofs/ (optional)", "aria-label": "Where its files are" });
     const go = el("button", "Record", { type: "button", class: "primary" });
-    go.addEventListener("click", () => { if (!summary.value.trim()) return say("A summary is required to record an Experiment.", "error"); send("experiment", { outcome: outcome.value, summary: summary.value.trim() }); });
-    form.append(outcome, summary, go);
+    go.addEventListener("click", () => {
+      if (!summary.value.trim()) return say("A summary is required to record an Experiment.", "error");
+      if (!runBy.value.trim()) return say("Say who ran the Experiment.", "error");
+      send("experiment", { outcome: outcome.value, summary: summary.value.trim(), run_by: runBy.value.trim(), ...(path.value.trim() ? { path: path.value.trim() } : {}) });
+    });
+    form.append(outcome, summary, runBy, path, go);
   }
   const cancel = el("button", "Cancel", { type: "button" });
   cancel.addEventListener("click", () => { fog.form = null; showFog(); });
@@ -134,19 +146,10 @@ function fogForm(item, kind) {
 function fogActions(item) {
   const box = el("div", null, { class: "fog-actions" });
   const button = (text, onClick, primary) => { const b = el("button", text, { type: "button", class: primary ? "primary" : "" }); b.addEventListener("click", (event) => { event.stopPropagation(); onClick(); }); return b; };
-  if (item.status === "open") {
-    box.append(
-      button("Crystallize…", () => { fog.form = fog.form && fog.form.id === item.id && fog.form.kind === "crystallize" ? null : { id: item.id, kind: "crystallize" }; showFog(); }, true),
-      button("Record experiment…", () => { fog.form = { id: item.id, kind: "experiment" }; showFog(); }),
-      button("Drop…", () => { fog.form = { id: item.id, kind: "drop" }; showFog(); }),
-    );
-  } else if (item.status === "dropped") {
-    box.append(button("Reopen", async () => {
-      try { await api(`/api/fog/${encodeURIComponent(item.id)}/reopen`, {}); } catch (error) { showError(error); return; }
-      say(`${item.id}: reopened.`, "ok");
-      await loadFog();
-    }));
-  }
+  // each "…" button opens its inline form (or hint) under the row; a second click closes it
+  const toggle = (kind) => () => { fog.form = fog.form && fog.form.id === item.id && fog.form.kind === kind ? null : { id: item.id, kind }; showFog(); };
+  if (item.status === "open") box.append(button("Crystallize…", toggle("crystallize"), true), button("Record experiment…", toggle("experiment")), button("Drop…", toggle("drop")));
+  else if (item.status === "dropped") box.append(button("Reopen", () => fogPost(`/api/fog/${encodeURIComponent(item.id)}/reopen`, {}, `${item.id}: reopened.`)));
   return box;
 }
 
@@ -171,19 +174,21 @@ function fogRow(item) {
   if (status) meta.append(status);
   li.append(meta, fogActions(item));
   if (fog.form && fog.form.id === item.id) li.append(fog.form.kind === "crystallize" ? crystallizeHint(item) : fogForm(item, fog.form.kind));
-  // hovering a row lights its near nodes up on the canvas, the rest fall back (nothing is drawn on the map)
+  // hovering a row lights its near nodes up on the map, the rest fall back: the search box's own marking
+  // (dim / found), on the canvas and the tree alike; nothing is drawn on the map for a fog item
   li.addEventListener("mouseenter", () => focusFogNodes(item.near));
-  li.addEventListener("mouseleave", () => focusFogNodes([]));
+  li.addEventListener("mouseleave", () => focusFogNodes(null));
+  if (fog.found === item.id) li.classList.add("found");
   return li;
 }
 
 function focusFogNodes(ids) {
-  const box = $("dag-svg");
-  box.classList.toggle("fog-focus", ids.length > 0);
-  for (const g of box.querySelectorAll("g.node")) g.classList.toggle("fog-near", ids.includes(g.getAttribute("data-node-id")));
+  fog.near = ids && ids.length ? new Set(ids) : null;
+  applyFind();
 }
 
 function showFog() {
+  focusFogNodes(null);  // the rows are rebuilt: a hovered one goes without its mouseleave
   const items = fogData.items || [];
   const open = items.filter((item) => item.status === "open").length;
   $("stat-fog").textContent = String(open);
@@ -200,14 +205,19 @@ function showFog() {
   if (!items.length) list.append(el("li", fog.showAll ? "No fog, dropped or crystallized." : "No fog: everything you know of is stated as a node.", { class: "fog-none" }));
 }
 
+// the drawer, open at one item (a link from a node's page): a dropped or crystallized one shows the rest too
+async function openFogAt(fogId) {
+  fog.open = true;
+  fog.found = fogId;
+  if (!(fogData.items || []).some((item) => item.id === fogId) && !fog.showAll) { fog.showAll = true; try { await loadFog(); } catch (error) { showError(error); return; } }
+  showFog();
+}
+
 async function addFog() {
   const text = $("fog-add-text").value.trim();
   if (!text) return say("Say what the difficulty is.", "error");
   const nearId = $("fog-add-near").value;
-  try { await api("/api/fog", { text, near: nearId ? [nearId] : [] }); } catch (error) { showError(error); return; }
-  $("fog-add-text").value = "";
-  say("Fog item added.", "ok");
-  await loadFog();
+  if (await fogPost("/api/fog", { text, near: nearId ? [nearId] : [] }, "Fog item added.")) $("fog-add-text").value = "";
 }
 
 function showWarnings(list, into) {
@@ -855,12 +865,13 @@ function applyFind() {
   if (!mapData) return;
   const matches = findMatcher();
   const byId = new Map(mapData.nodes.map((n) => [n.id, n]));
+  const near = fog.near;  // a hovered fog row's near nodes light up the way a search's matches do (issue #137)
   const mark = (item) => {
     const id = item.getAttribute("data-node-id");
-    item.classList.toggle("dim", !!matches && !matches(byId.get(id) || { id }));  // a missing dependency matches by id
-    item.classList.toggle("found", !!matches && id === finding.shown);
+    item.classList.toggle("dim", (!!matches && !matches(byId.get(id) || { id })) || (!!near && !near.has(id)));  // a missing dependency matches by id
+    item.classList.toggle("found", (!!matches && id === finding.shown) || (!!near && near.has(id)));
   };
-  $("dag-svg").classList.toggle("filtering", !!matches);
+  $("dag-svg").classList.toggle("filtering", !!matches || !!near);
   for (const g of $("dag-svg").querySelectorAll("g.node")) mark(g);
   for (const li of $("map-tree").querySelectorAll("li")) mark(li);
   const count = $("map-find-count");
@@ -1008,28 +1019,32 @@ function showNodeFog(view) {
   block.replaceChildren();
   if (view.crystallized_from) {
     const line = el("p", "Crystallized from ", { class: "hint" });
-    line.append(el("a", view.crystallized_from, { href: "#/", title: "The fog item this Claim was stated from: see `proof fog show`", class: "fog-id" }));
+    line.append(el("a", view.crystallized_from, { href: `#/fog/${encodeURIComponent(view.crystallized_from)}`, title: "The fog item this Claim was stated from", class: "fog-id" }));
     block.append(line);
   }
   const near = view.fog_near || [];
   if (near.length) {
     block.append(el("h3", "Fog near this node"));
     const ul = el("ul", null, { class: "node-fog-list" });
-    for (const item of near) { const li = el("li"); li.append(el("a", item.id, { href: "#/", class: "fog-id" }), " ", el("span", item.text, { class: "fog-text" }), " ", experimentChip(item)); ul.append(li); }
+    for (const item of near) { const li = el("li"); li.append(el("a", item.id, { href: `#/fog/${encodeURIComponent(item.id)}`, class: "fog-id" }), " ", el("span", item.text, { class: "fog-text" }), " ", experimentChip(item)); ul.append(li); }
     block.append(ul);
   }
 }
 
 async function route() {
-  // four pages: the map (#/), the review list (#/review), the warnings (#/warnings), a node (#/node/<id>)
+  // four pages: the map (#/), the review list (#/review), the warnings (#/warnings), a node (#/node/<id>);
+  // #/fog/<id> is the map with the fog drawer open at that item (issue #137)
   const match = location.hash.match(/^#\/node\/(.+)$/);
+  const fogLink = location.hash.match(/^#\/fog\/(.+)$/);
   const page = match ? "node" : { "#/review": "review", "#/warnings": "warnings" }[location.hash] || "map";
+  if (fogLink) await openFogAt(decodeURIComponent(fogLink[1]));
   document.body.dataset.page = page;
   $("home").hidden = page !== "map";
   $("review-page").hidden = page !== "review";
   $("warnings-page").hidden = page !== "warnings";
   $("node-page").hidden = page !== "node";
   if (page === "map" && view.content && !view.fitted) fitView();  // drawn while the map was hidden
+  if (page === "map") showFog();  // the drawer as it was left (or as the badge or a #/fog link asked)
   for (const link of document.querySelectorAll(".rail a[data-nav]")) link.classList.toggle("on", link.dataset.nav === page);
   if (match) {
     try { await showNode(decodeURIComponent(match[1])); } catch (error) { say(error.message, "error"); }
@@ -1045,7 +1060,7 @@ async function refresh() {
   showHome();
   showMap();
   showAttention();
-  await loadFog();
+  try { await loadFog(); } catch (error) { say(`The fog couldn't be read: ${error.message}`, "error"); }  // a side drawer: never the page
   await route();
 }
 
@@ -1102,7 +1117,12 @@ document.addEventListener("DOMContentLoaded", () => {
     if (view.fitted) setTimeout(fitView, 240);
   });
   // the fog drawer (issue #137)
-  $("fog-badge").addEventListener("click", (event) => { event.preventDefault(); fog.open = !fog.open; showFog(); });
+  $("fog-badge").addEventListener("click", (event) => {
+    event.preventDefault();
+    if (document.body.dataset.page !== "map") { fog.open = true; location.hash = "#/"; route().catch(showError); return; }  // the drawer lives on the map
+    fog.open = !fog.open;
+    showFog();
+  });
   $("fog-close").addEventListener("click", () => { fog.open = false; showFog(); });
   $("fog-show-all").addEventListener("change", () => { fog.showAll = $("fog-show-all").checked; loadFog().catch(showError); });
   $("fog-add").addEventListener("click", () => addFog().catch(showError));
