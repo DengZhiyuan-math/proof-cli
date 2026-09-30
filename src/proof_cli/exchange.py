@@ -88,7 +88,7 @@ from .governance import (
     list_reusable_asset_records,
 )
 from .memory import HandoffSnapshot, LayeredMemory, latest_handoff_snapshot, load_memory, save_memory
-from .proof_map import _SAFE_NODE_ID, ProofMapError
+from .proof_map import _SAFE_NODE_ID, ProofMapError, note_trust_rule_matches
 from .proof_state import load_state, save_state
 from .publication import PublicationWorkspace, load_publication_workspace, save_publication_workspace
 from .references import ReferenceRecord, ReferenceReviewRecord
@@ -857,7 +857,10 @@ def import_exchange_bundle(store: ProjectStore, bundle: ExchangeBundle | dict[st
         first = plan.problems[0]
         more = f" (and {len(plan.problems) - 1} more problem(s))" if len(plan.problems) > 1 else ""
         raise ProofMapError(first["code"], f"bundle {bundle.id} not imported, nothing written: {first['message']}{more}", details={"problems": plan.problems})
-    return _write_import(store, bundle, plan)
+    report = _write_import(store, bundle, plan)
+    # imported citations and imported results may meet a rule declared here from the moment they land (ADR-0014)
+    note_trust_rule_matches(store)
+    return report
 
 
 # -- output ------------------------------------------------------------------------------

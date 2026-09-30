@@ -38,6 +38,7 @@ from .reviews import (
     append_line,
     commit_decision,
     git_identity,
+    TRUST_RULES_FILE,
     load_trust_rule_entries,
     new_review_id,
     trust_rules_path,
@@ -187,13 +188,23 @@ class TrustRule(BaseModel):
         return [condition.describe() for condition in self.conditions]
 
 
+def _readable(entry: ReviewEntry) -> list[TrustCondition] | None:
+    """The conditions a line records, or None when the line isn't a trust-rule decision this vocabulary can read."""
+    if entry.kind != DecisionKind.trust_rule.value or entry.payload is None or entry.decision not in TRUST_RULE_DECISIONS:
+        return None
+    try:
+        return [TrustCondition.model_validate(item) for item in entry.payload.conditions] if entry.decision != "retire" else []
+    except (ValidationError, ValueError, TypeError):
+        return None  # a hand-edited or later-vocabulary condition: the line is a problem, never a crash
+
+
 def _fold(entries: list[ReviewEntry]) -> dict[str, TrustRule]:
     rules: dict[str, TrustRule] = {}
     for entry in entries:
-        if entry.kind != DecisionKind.trust_rule.value or entry.payload is None:
+        conditions = _readable(entry)
+        if conditions is None:
             continue
         name = entry.object_id
-        conditions = [TrustCondition.model_validate(item) for item in entry.payload.conditions] if entry.decision != "retire" else []
         if entry.decision == "declare" and name not in rules:
             rules[name] = TrustRule(name=name, rationale=entry.rationale, conditions=conditions, declared_by=entry.reviewer, declared_at=entry.decided_at,
                                     changed_by=entry.reviewer, changed_at=entry.decided_at)
@@ -224,7 +235,11 @@ def trust_rule_history(store: ProjectStore, name: str) -> list[dict]:
 
 
 def unreadable_trust_rule_lines(store: ProjectStore) -> list[str]:
-    return load_trust_rule_entries(store.root)[1]
+    """Lines of trust-rules.jsonl that are ignored: not JSON, or a decision this vocabulary can't read."""
+    entries, problems = load_trust_rule_entries(store.root)
+    unreadable = [f"{TRUST_RULES_FILE} line {number} (seq {entry.seq}: not a trust-rule decision this version reads)"
+                  for number, entry in enumerate(entries, start=1) if _readable(entry) is None]
+    return [*problems, *unreadable]
 
 
 def _row(entry: ReviewEntry) -> dict:

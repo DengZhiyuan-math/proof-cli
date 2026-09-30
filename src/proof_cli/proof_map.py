@@ -2180,11 +2180,22 @@ def trust_rule_impact(store: ProjectStore, name: str, *, conditions: list | None
         return {"losing": losing, "depended_on_by_accepted": depended, "gaining": gaining}
 
 
+def trust_rule_view(store: ProjectStore, rule: TrustRule) -> dict[str, Any]:
+    """A rule as the CLI and the page's sheet show it: its record, its conditions in words, and the nodes it trusts right now."""
+    trusting = [
+        node.id for node in list_nodes(store)
+        if node.kind == ProofMapNodeKind.imported_result
+        and get_reference_review_state(store, node.id) == "trusted-by-rule"
+        and rule.name in trust_rules_of(store, node.id)
+    ]
+    return {**rule.model_dump(mode="json"), "conditions_text": rule.describe_conditions(), "trusting": trusting}
+
+
 _TRUSTED_BY_RULE_EVENT = "proof_map_trusted_by_rule"
 
 
 def trust_rule_events(store: ProjectStore, node_id: str | None = None) -> list[EventRecord]:
-    """When each imported result first met which rule (ADR-0014 point 7): informational events, oldest first."""
+    """When each imported result first met which rule (ADR-0014 point 2): informational events, oldest first."""
     return [
         event for event in list_events(store)
         if event.kind == _TRUSTED_BY_RULE_EVENT and (node_id is None or event.entity_id == node_id)

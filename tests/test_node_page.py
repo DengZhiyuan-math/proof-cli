@@ -465,3 +465,8 @@ def test_the_dependency_list_names_the_trust_rule_an_imported_result_is_relied_o
     view = {**VIEW, "dependencies": [{**VIEW["dependencies"][1], "trust_rule": ["textbooks", "same-source"]}]}
     shown = _panel(view=view)
     assert "ref · imported result · trusted by rule textbooks, same-source" in shown["deps"].replace("  ", " ")
+
+
+def test_the_panels_acceptance_chip_names_the_rules_a_trusted_by_rule_node_meets():
+    view = {**VIEW, "node": {"id": "ref", "kind": "imported_result", "statement": "K", "assumptions": []}, "acceptance_state": "trusted-by-rule", "trust_rule": ["textbooks"], "dependencies": []}
+    assert "trusted by rule textbooks" in _panel(view=view)["panel"]

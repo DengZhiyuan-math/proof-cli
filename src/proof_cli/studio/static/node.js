@@ -183,7 +183,8 @@
     // who holds the node is a state only (the proof agent claims through `proof`): a claimed
     // node's workflow chip names its holder, and any other node says whether someone holds it
     if (view.workflow_state !== "claimed") chip(view.workflow_state, view.workflow_state);
-    chip(view.acceptance_state, view.acceptance_state);
+    // an imported result trusted by rule names the rules it meets (ADR-0014)
+    chip(view.acceptance_state, view.acceptance_state === "trusted-by-rule" ? `trusted by rule ${(view.trust_rule || []).join(", ")}` : view.acceptance_state);
     chip(view.integrity_state, view.integrity_state);
     chip(view.claim ? "claimed" : "unclaimed", claimed);
     return box;
