@@ -344,8 +344,75 @@ class ProjectState(BaseModel):
     open_goals: list[str] = Field(default_factory=list)
     open_obligations: list[str] = Field(default_factory=list)
     blockers: list[str] = Field(default_factory=list)
+    # legacy (spec #136): written only by the legacy obligation, blocker and literature-route paths, never
+    # migrated; a direction given up is a dropped Proof fog item now, which `project analyze` reads first
     failed_routes: list[str] = Field(default_factory=list)
     session_history: list[str] = Field(default_factory=list)
     latest_snapshot_id: str | None = None
     recent_theorem_usage: list[str] = Field(default_factory=list)
     unresolved_trust_sensitive_calls: list[str] = Field(default_factory=list)
+
+
+# -- Proof fog (ADR-0008, spec #136): difficulties not yet precise enough to be a Claim, outside the map ----
+
+
+class FogStatus(str, Enum):
+    open = "open"
+    dropped = "dropped"  # given up, with a reason; reversible
+    crystallized = "crystallized"  # stated as a Claim (`node_id`); it has left the fog list, nothing is deleted
+
+
+class ExperimentOutcome(str, Enum):
+    """What a numerical run about a fog item showed. Never `stale`: an Experiment is about an idea, not a snapshot."""
+
+    supports = "supports"
+    refutes = "refutes"
+    inconclusive = "inconclusive"
+    error = "error"
+
+
+class FogItem(BaseModel):
+    """One Proof fog item: a known difficulty, in words, with the nodes it is about (`near`, never a dependency).
+
+    Kept in SQLite, written only through `proof fog …` and the proof map page; anyone, agents
+    included, may add, edit or drop one. Its vault folder `proofs/fog/<id>/` is implied by the id
+    and created only when something is put there.
+    """
+
+    id: str  # fog-N, project-wide, never reused
+    text: str
+
+    @staticmethod
+    def id_for(number: int) -> str:
+        return f"fog-{number}"
+
+    @property
+    def number(self) -> int:
+        return int(self.id.rsplit("-", 1)[1])
+    notes: str = ""
+    near: list[str] = Field(default_factory=list)
+    status: FogStatus = FogStatus.open
+    created_by: str = "human"
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+    dropped_by: str | None = None
+    dropped_at: datetime | None = None
+    reason: str | None = None
+    # the Claim it crystallized into
+    node_id: str | None = None
+
+
+class FogExperiment(BaseModel):
+    """A numerical run recorded against a fog item: what it showed, who ran it, where its files are.
+
+    Insert-only; a mistaken record is answered by a new `error` record. It never changes the item's status."""
+
+    fog_id: str
+    seq: int  # within the item
+    outcome: ExperimentOutcome
+    summary: str
+    run_by: str
+    recorded_at: datetime = Field(default_factory=utc_now)
+    path: str | None = None  # under proofs/, existing when recorded
+    # derived when read: the path no longer exists
+    missing: bool = False

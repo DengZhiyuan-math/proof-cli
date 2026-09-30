@@ -92,6 +92,10 @@ def _rich_project(root: Path):
     create_node(store, node_id="ref_rule", kind="imported_result", statement="S", source_locator="Thm 1", source_version="v1", reference_id="ref_std")
     add_obligation(store, ProofObligation(id="obl_1", goal_statement="G", required_for="thm_t"))
     add_blocker(store, BlockerRecord(id="blk_1", description="stuck", scope="thm_t", failure_type="gap"))
+    # Proof fog (spec #136) is ungated, so it isn't protected: it is here so the fog commands have something to act on
+    from proof_cli.fog import add_fog, record_experiment
+    add_fog(store, "a difficulty not yet stated", near=["lem_a"])
+    record_experiment(store, "fog-1", "inconclusive", summary="ran once", run_by="agent_a")
     return store
 
 
