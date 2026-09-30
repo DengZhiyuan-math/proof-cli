@@ -31,7 +31,10 @@ What the merge keeps and what it never takes:
   in `review_decisions`, recorded in the event log for reference, counting for
   nothing, ADR-0010), and an imported Candidate proof keeps no review record id
   or interface fingerprint. Contracts and references are reset to local
-  defaults (legacy trust is retired, #50). Challenges arrive open.
+  defaults (legacy trust is retired, #50). Challenges arrive open. Trust rules
+  (`proofs/trust-rules.jsonl`, ADR-0014) never travel either way: they are the
+  researcher's own standing declarations, so an imported citation is trusted
+  here only under a rule declared here.
 - **Claims arrive released** and are listed in `released_claims`: an assignee
   in another project isn't working here.
 """
@@ -85,7 +88,7 @@ from .governance import (
     list_reusable_asset_records,
 )
 from .memory import HandoffSnapshot, LayeredMemory, latest_handoff_snapshot, load_memory, save_memory
-from .proof_map import _SAFE_NODE_ID, ProofMapError
+from .proof_map import ProofMapError, node_id_problem, note_trust_rule_matches
 from .proof_state import load_state, save_state
 from .publication import PublicationWorkspace, load_publication_workspace, save_publication_workspace
 from .references import ReferenceRecord, ReferenceReviewRecord
@@ -535,8 +538,8 @@ def _plan_import(store: ProjectStore, bundle: ExchangeBundle) -> _Plan:
     plan.nodes = _new_only(plan, "proof_map_nodes", bundle.proof_map_nodes, local_ids)
     new_ids = {node.id for node in plan.nodes}
     for node in plan.nodes:
-        if not _SAFE_NODE_ID.fullmatch(node.id):
-            plan.problem("INVALID_NODE_ID", f"node id {node.id!r} isn't a plain folder name", node_id=node.id)
+        if (problem := node_id_problem(node.id)) is not None:
+            plan.problem("INVALID_NODE_ID", problem, node_id=node.id)
         missing = [dependency for dependency in node.dependencies if dependency not in local_ids | new_ids]
         if missing:
             plan.problem("DEPENDENCY_NOT_FOUND", f"node {node.id} depends on {', '.join(missing)}, in neither the bundle nor this project", node_id=node.id)
@@ -854,7 +857,10 @@ def import_exchange_bundle(store: ProjectStore, bundle: ExchangeBundle | dict[st
         first = plan.problems[0]
         more = f" (and {len(plan.problems) - 1} more problem(s))" if len(plan.problems) > 1 else ""
         raise ProofMapError(first["code"], f"bundle {bundle.id} not imported, nothing written: {first['message']}{more}", details={"problems": plan.problems})
-    return _write_import(store, bundle, plan)
+    report = _write_import(store, bundle, plan)
+    # imported citations and imported results may meet a rule declared here from the moment they land (ADR-0014)
+    note_trust_rule_matches(store)
+    return report
 
 
 # -- output ------------------------------------------------------------------------------

@@ -43,6 +43,7 @@ from .reviews import (
     reviews_path,
     uncommitted_review_files,
 )
+from .trust_rules import unreadable_trust_rule_lines
 from .storage import (
     ProjectStore,
     memoized_read,
@@ -232,6 +233,7 @@ def challenge_resolution(store: ProjectStore, challenge_id: str) -> dict | None:
 def list_authority_warnings(store: ProjectStore) -> list[AuthorityWarning]:
     """What about the recorded decisions themselves doesn't count, or isn't in git yet."""
     entries, problems = _entries(store)
+    problems = [*problems, *unreadable_trust_rule_lines(store)]  # the project's Trust rule decisions too (ADR-0014)
     warnings = [
         AuthorityWarning(code="REVIEW_LINE_UNREADABLE", message=f"{problem} can't be read and is ignored", details={"line": problem})
         for problem in problems

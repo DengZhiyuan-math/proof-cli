@@ -453,3 +453,138 @@ def test_an_evidence_check_without_a_snapshot_record_still_shows():
     """A check listed without its snapshot (an older server's view) reads as before, and never throws."""
     (shown,) = _evidence([{"id": "ev-1", "candidate_proof_id": "cp-v1", "outcome": "passed", "notes": "", "run_by": "lean"}])
     assert "passed" in shown["text"] and "cp-v1" in shown["text"]
+
+
+# -- Trusted by rule (ADR-0014): the review page's own section, the rules sheet, the chips ------------
+
+TRUSTED = [{"node_id": "ref_bw", "statement": "Bolzano-Weierstrass", "citation": CITATION, "trust_rule": ["textbooks"],
+            "rationale": "matched trust rule textbooks; reviewed explicitly", "decisions": ["reference-review", "no-longer-callable"],
+            "bindings": {"reference-review": "d" * 64, "no-longer-callable": "e" * 64}}]
+RULE = {"name": "textbooks", "rationale": "standard textbooks", "retired": False, "declared_by": "Researcher <r@example.org>", "declared_at": "2026-09-30T10:00:00+00:00",
+        "changed_by": "Researcher <r@example.org>", "changed_at": "2026-09-30T10:00:00+00:00", "conditions": [{"kind": "source_type_in", "values": ["textbook", "monograph"]}],
+        "conditions_text": ["source_type in {textbook, monograph}"], "trusting": ["ref_bw"], "history": [{"decision": "declare"}]}
+RULES = {"rules": [RULE, {**RULE, "name": "old", "retired": True, "trusting": [], "history": [{"decision": "declare"}, {"decision": "retire"}]}],
+         "source_types": ["standard_reference", "research_paper", "textbook", "survey", "monograph", "website", "other"], "weak_source_types": ["website", "other"]}
+
+
+def _trusted_state(trusted=TRUSTED):
+    return {**_state([PENDING[0]]), "trusted_by_rule": list(trusted)}
+
+
+def test_trusted_by_rule_nodes_are_listed_apart_and_never_counted_as_awaiting():
+    (shown,) = _home(state=_trusted_state())
+    assert shown["pendingCount"] == "1" and len(shown["pendingRows"]) == 1  # the local node awaiting review, only
+    (trusted,) = shown["trustedRows"]
+    assert "ref_bw" in trusted["text"] and "Bolzano-Weierstrass" in trusted["text"] and "Principles of Mathematical Analysis" in trusted["text"]
+    assert trusted["rules"] == ["textbooks"] and trusted["rationale"] == "matched trust rule textbooks; reviewed explicitly"
+    assert shown["trustedCount"] == "1"
+    (empty,) = _home(state=_trusted_state([]))
+    assert empty["trustedRows"][0]["text"] == "No imported result is trusted by rule." and empty["trustedCount"] == ""
+
+
+def test_review_explicitly_records_the_ordinary_reference_review_with_the_prefilled_rationale():
+    _, recorded = _home(state=_trusted_state(), steps=[{"reviewExplicitly": "ref_bw"}])
+    (sent,) = [p for p in recorded["posted"] if p["url"] == "/api/decide"]
+    assert sent["body"] == {"decisions": [{"kind": "reference_review", "target_id": "ref_bw", "decision": "reference-review",
+                                           "rationale": "matched trust rule textbooks; reviewed explicitly", "binding": "d" * 64}]}
+
+
+def test_the_rules_sheet_lists_the_rules_and_records_a_declaration():
+    _, opened, filled, recorded = _home(state=_trusted_state(), steps=[
+        {"manage": True},
+        {"rule": {"name": "arxiv", "rationale": "preprints I follow", "arxiv": True}},
+        {"ruleRecord": True},
+    ])
+    assert opened["rulesSheetShown"]
+    assert opened["ruleFormTitle"] == "Declare a rule" and not opened["ruleNameDisabled"]
+    assert opened["rulesListed"] == [] and opened["ruleReminder"] == ""
+    (sent,) = [p for p in recorded["posted"] if p["url"] == "/api/decide"]
+    assert sent["body"] == {"decisions": [{"kind": "trust_rule", "target_id": "arxiv", "decision": "declare", "rationale": "preprints I follow",
+                                           "conditions": [{"kind": "identifier_has_arxiv"}]}]}
+
+
+def _home_with_rules(steps):
+    scenario = {"state": _trusted_state(), "map": MAP, "steps": list(steps), "nodes": {}, "rules": RULES,
+                "preview": {"losing": ["ref_bw"], "depended_on_by_accepted": ["ref_bw"], "gaining": []}}
+    if shutil.which("node") is None:
+        pytest.skip("needs node")
+    done = subprocess.run(["node", str(HARNESS), json.dumps(scenario)], capture_output=True, text=True, timeout=30)
+    assert done.returncode == 0, done.stderr
+    return json.loads(done.stdout)
+
+
+def test_the_sheet_shows_each_rule_with_its_conditions_and_what_it_trusts_and_the_retired_ones_apart():
+    _, opened = _home_with_rules([{"manage": True}])
+    (rule,) = opened["rulesListed"]
+    assert rule["name"] == "textbooks" and "source_type in {textbook, monograph}" in rule["text"] and "trusting ref_bw" in rule["text"]
+    assert rule["buttons"] == ["Amend", "Retire"]
+    assert opened["rulesRetired"] == ["old"]
+
+
+def test_a_weak_source_type_gets_a_reminder_and_a_change_shows_its_impact_before_recording():
+    _, _, weak, retiring, recorded = _home_with_rules([
+        {"manage": True},
+        {"rule": {"name": "web", "types": ["website"]}},
+        {"retire": "textbooks"},
+        {"ruleRecord": True},
+    ])
+    assert "website" in weak["ruleReminder"] and weak["ruleImpact"] == ""  # a declaration has no impact to preview
+    assert retiring["ruleFormTitle"] == "Retire textbooks" and retiring["ruleNameDisabled"] and retiring["ruleReminder"] == ""
+    assert "1 node(s) would stop reading trusted by rule" in retiring["ruleImpact"] and "1 of them depended on by Accepted nodes" in retiring["ruleImpact"]
+    (preview,) = [p for p in retiring["posted"] if p["url"] == "/api/trust-rules/preview"]
+    assert preview["body"] == {"name": "textbooks", "decision": "retire"}
+    (sent,) = [p for p in recorded["posted"] if p["url"] == "/api/decide"]
+    assert sent["body"]["decisions"] == [{"kind": "trust_rule", "target_id": "textbooks", "decision": "retire", "rationale": ""}]
+
+
+def test_amending_prefills_the_rules_conditions_and_sends_the_changed_ones():
+    _, _, amending, _, recorded = _home_with_rules([{"manage": True}, {"amend": "textbooks"}, {"rule": {"rationale": "tightened", "doi": True}}, {"ruleRecord": True}])
+    assert amending["ruleFormTitle"] == "Amend textbooks" and amending["ruleNameDisabled"]
+    (preview,) = [p for p in amending["posted"] if p["url"] == "/api/trust-rules/preview"]
+    assert preview["body"] == {"name": "textbooks", "decision": "amend", "conditions": [{"kind": "source_type_in", "values": ["textbook", "monograph"]}]}
+    (sent,) = [p for p in recorded["posted"] if p["url"] == "/api/decide"]
+    assert sent["body"]["decisions"] == [{"kind": "trust_rule", "target_id": "textbooks", "decision": "amend", "rationale": "tightened",
+                                          "conditions": [{"kind": "identifier_has_doi"}, {"kind": "source_type_in", "values": ["textbook", "monograph"]}]}]
+
+
+def test_a_trusted_by_rule_node_reads_so_on_the_canvas_the_tree_and_its_page():
+    trusted_node = _node("ref_bw", "imported_result", "Bolzano-Weierstrass", acceptance_state="trusted-by-rule", trust_rule=["textbooks"])
+    page = {**_imported_page(CITATION), "acceptance_state": "trusted-by-rule", "trust_rule": ["textbooks"],
+            "rule_events": [{"rule": "textbooks", "at": "2026-09-30T10:00:00+00:00"}],
+            "decisions": [{"kind": "reference_review", "target_id": "ref_bw", "decision": "reference-review", "binding": "d" * 64},
+                          {"kind": "reference_review", "target_id": "ref_bw", "decision": "no-longer-callable", "binding": "e" * 64}]}
+    shown, tree, opened = _home(map_={"nodes": [MAP["nodes"][0], MAP["nodes"][1], trusted_node]}, steps=[{"view": "tree"}, {"open": "ref_bw"}], nodes={"ref_bw": page})
+    card = shown["dag"]["ref_bw"]
+    assert "state-accepted" in card["classes"] and card["tags"] == [{"text": "Trusted by rule", "classes": ["tag"]}] and card["icons"] == ["accepted"]
+    assert card["title"].endswith("trusted by rule textbooks") and "trusted by rule textbooks" in card["label"]  # the names, a hover away
+    (line,) = [li for li in tree["tree"] if li["id"] == "ref_bw"]
+    assert line["chips"][0] == "trusted by rule textbooks"
+    assert opened["nodeAxes"][1] == "trusted by rule textbooks" and "state-accepted" in opened["nodeAxisClasses"][1]  # the accepted family, named
+    assert opened["nodeHistory"] == ["2026-09-30T10:00:00+00:00 · trusted by rule textbooks since then — no decision written; the rule's declaration is the record"]
+    assert opened["nodeDecisionRationales"] == ["matched trust rule textbooks; reviewed explicitly", ""]
+
+
+def _home_rules(steps, **scenario):
+    if shutil.which("node") is None:
+        pytest.skip("needs node")
+    full = {"state": _trusted_state(), "map": MAP, "steps": list(steps), "nodes": {}, "rules": RULES,
+            "preview": {"losing": ["ref_bw"], "depended_on_by_accepted": ["ref_bw"], "gaining": []}, **scenario}
+    done = subprocess.run(["node", str(HARNESS), json.dumps(full)], capture_output=True, text=True, timeout=30)
+    assert done.returncode == 0, done.stderr
+    return json.loads(done.stdout)
+
+
+def test_a_change_is_recorded_only_against_the_impact_of_the_form_as_it_stands():
+    """A preview answering an earlier state of the form is dropped; Record waits for the current one and stays off if it failed."""
+    *_, ordered, recorded = _home_rules([{"manage": True}, {"retire": "textbooks"}, {"amend": "textbooks"}, {"ruleRecord": True}], previewOutOfOrder=True)
+    assert "stale-answer" not in ordered["ruleImpact"] and "1 node(s) would stop" in ordered["ruleImpact"]
+    assert not ordered["ruleRecordDisabled"]
+    (sent,) = [p for p in recorded["posted"] if p["url"] == "/api/decide"]
+    assert sent["body"]["decisions"][0]["decision"] == "amend"
+
+    *_, failed, pressed = _home_rules([{"manage": True}, {"retire": "textbooks"}, {"ruleRecord": True}], previewFails=True)
+    assert failed["ruleRecordDisabled"] and "TRUST_RULE_NOT_FOUND" in failed["ruleImpact"] and "nothing can be recorded" in failed["ruleImpact"]
+    assert not [p for p in pressed["posted"] if p["url"] == "/api/decide"]
+
+    _, declaring = _home_rules([{"manage": True}])
+    assert not declaring["ruleRecordDisabled"]  # a declaration has no impact to wait for

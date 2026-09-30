@@ -14,6 +14,10 @@ where anything else would show.
 Reads are cached per file (path, mtime, size), and the project's whole list
 once per read scope (#43), so a derived axis computed over a whole map reads
 each file once.
+
+The project-level `proofs/trust-rules.jsonl` (ADR-0014) is a decision file of
+the same line shape, read and written through the same layer: one line per
+Trust rule decision (declare, amend, retire), folded by `trust_rules`.
 """
 
 from __future__ import annotations
@@ -26,6 +30,7 @@ import uuid
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -34,6 +39,8 @@ from .storage import forget_reads, memoized_read
 from .vault import vault_dir
 
 REVIEWS_FILE = "reviews.jsonl"
+# the project-level decision file of Trust rules (ADR-0014), beside the node folders
+TRUST_RULES_FILE = "trust-rules.jsonl"
 
 
 class DecisionKind(str, Enum):
@@ -46,6 +53,8 @@ class DecisionKind(str, Enum):
     challenge_resolution = "challenge_resolution"
     promote = "promote"
     dependent_migration = "dependent_migration"
+    # a Trust rule declared, amended or retired: a standing Reference review (ADR-0014)
+    trust_rule = "trust_rule"
 
 
 class PinnedDependency(BaseModel):
@@ -77,6 +86,8 @@ class DecisionPayload(BaseModel):
     migrated_dependents: list[str] = Field(default_factory=list)
     # who wrote the key-ideas summary of the snapshot decided on (ADR-0013), as its record says
     key_ideas_drafted_by: str | None = None
+    # a trust_rule's conditions (ADR-0014): `trust_rules.TrustCondition`, as JSON; empty for a retire
+    conditions: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ReviewEntry(BaseModel):
@@ -113,6 +124,10 @@ DECISION_ROWS: dict[tuple[DecisionKind, str], tuple[str, str]] = {
     (DecisionKind.promote, "promote"): ("proof_map_node", "approved"),
     # a no-longer-callable imported result's dependents moved onto its correction (#20)
     (DecisionKind.dependent_migration, "superseded"): ("proof_map_node", "superseded"),
+    # a Trust rule's three decisions, recorded under the rule's name (ADR-0014)
+    (DecisionKind.trust_rule, "declare"): ("trust_rule", "declare"),
+    (DecisionKind.trust_rule, "amend"): ("trust_rule", "amend"),
+    (DecisionKind.trust_rule, "retire"): ("trust_rule", "retire"),
 }
 
 
@@ -129,6 +144,11 @@ def payload_decision_for(kind: str, object_type: str, recorded: str) -> str | No
 
 def reviews_path(root: Path, node_id: str) -> Path:
     return vault_dir(root) / node_id / REVIEWS_FILE
+
+
+def trust_rules_path(root: Path) -> Path:
+    """The project's Trust rule decisions (ADR-0014): one file, beside the node folders."""
+    return vault_dir(root) / TRUST_RULES_FILE
 
 
 _CACHE: dict[str, tuple[tuple[int, int], list[ReviewEntry], list[str]]] = {}
@@ -170,18 +190,31 @@ def load_entries(root: Path) -> tuple[list[ReviewEntry], list[str]]:
     return entries, problems
 
 
-def append_entry(root: Path, node_id: str, entry: ReviewEntry) -> Path:
+def append_line(path: Path, entry: ReviewEntry) -> Path:
+    """Append one decision line to a decision file (a node's reviews.jsonl, or the project's trust-rules.jsonl)."""
     forget_reads()
-    path = reviews_path(root, node_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(entry.model_dump_json() + "\n")
     return path
 
 
+def append_entry(root: Path, node_id: str, entry: ReviewEntry) -> Path:
+    return append_line(reviews_path(root, node_id), entry)
+
+
 def next_seq(root: Path) -> int:
     entries, _ = load_entries(root)
     return (entries[-1].seq if entries else 0) + 1
+
+
+@memoized_read
+def load_trust_rule_entries(root: Path) -> tuple[list[ReviewEntry], list[str]]:
+    """Every Trust rule decision in the project, in file order, and any unreadable lines (ADR-0014)."""
+    path = trust_rules_path(root)
+    if not path.is_file():
+        return [], []
+    return _read_file(path)
 
 
 def new_review_id() -> str:
@@ -235,9 +268,12 @@ def commit_decision(root: Path, paths: list[Path], message: str) -> str | None:
 
 
 def uncommitted_review_files(root: Path) -> list[str]:
-    """reviews.jsonl files with decisions git doesn't have yet (all of them, outside a git repo)."""
+    """Decision files with decisions git doesn't have yet (all of them, outside a git repo):
+    every node's reviews.jsonl and the project's trust-rules.jsonl."""
     base = vault_dir(root)
     files = sorted(str(path.relative_to(root)) for path in base.glob(f"*/{REVIEWS_FILE}")) if base.is_dir() else []
+    if trust_rules_path(root).is_file():
+        files.append(str(trust_rules_path(root).relative_to(root)))
     if not files or not in_git_repo(root):
         return files
     try:

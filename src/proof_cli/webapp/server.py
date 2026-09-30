@@ -31,7 +31,9 @@ from urllib.parse import unquote, urlsplit
 from .. import proof_map
 from ..collaboration import list_review_records
 from ..domain import ProofMapNodeKind
+from ..references import ReferenceSourceType
 from ..reviews import git_identity
+from ..trust_rules import WEAK_SOURCE_TYPES, list_trust_rules, trust_rule_history
 from ..storage import (
     ProjectStore,
     get_active_claim,
@@ -253,7 +255,50 @@ class ReviewApp:
             "reviewer": git_identity(self.store.root),
             "warnings": [warning.model_dump(mode="json") for warning in warnings],
             "pending": self._pending(),
+            # imported results trusted by a rule (ADR-0014): what the researcher hasn't looked at; never "awaiting"
+            "trusted_by_rule": self._trusted_by_rule(),
         }
+
+    def _trusted_by_rule(self) -> list[dict]:
+        items = []
+        for node in proof_map.list_nodes(self.store):
+            if node.kind != ProofMapNodeKind.imported_result or proof_map.get_reference_review_state(self.store, node.id) != "trusted-by-rule":
+                continue
+            rules = proof_map.trust_rules_of(self.store, node.id)
+            decisions = list(proof_map.REFERENCE_REVIEW_DECISIONS)
+            items.append(
+                {
+                    "node_id": node.id,
+                    "statement": node.statement,
+                    "citation": proof_map.node_citation(self.store, node),
+                    "trust_rule": rules,
+                    # "Review explicitly": the ordinary Reference review, its rationale prefilled and editable
+                    "rationale": f"matched trust rule {', '.join(rules)}; reviewed explicitly",
+                    "decisions": decisions,
+                    "bindings": {d: _binding(self.store, "reference_review", node.id, d) for d in decisions},
+                }
+            )
+        return items
+
+    def trust_rules(self) -> dict:
+        """Every Trust rule, in force or retired, with its history and what it trusts now: what the manage sheet shows (ADR-0014)."""
+        with self._one_state():
+            return {
+                "rules": [
+                    {**proof_map.trust_rule_view(self.store, rule), "history": trust_rule_history(self.store, rule.name)}
+                    for rule in list_trust_rules(self.store, include_retired=True)
+                ],
+                "source_types": [member.value for member in ReferenceSourceType],
+                "weak_source_types": list(WEAK_SOURCE_TYPES),
+            }
+
+    def trust_rule_preview(self, body: dict) -> dict:
+        """What retiring or amending a rule would do, shown before the researcher records it; records nothing."""
+        name, decision = str(body.get("name") or ""), str(body.get("decision") or "")
+        if decision not in ("amend", "retire"):
+            raise RequestError(HTTPStatus.BAD_REQUEST, "INVALID_DECISION", "a preview is of an amend or a retire")
+        with self._one_state():
+            return proof_map.trust_rule_impact(self.store, name, conditions=body.get("conditions") if decision == "amend" else None)
 
     @read_scoped
     def map(self) -> dict:
@@ -274,6 +319,8 @@ class ReviewApp:
                     "workflow_state": workflow,
                     "blocked_reason": proof_map.get_blocked_reason(self.store, node.id) if workflow == "blocked" else None,
                     "acceptance_state": proof_map.get_reference_review_state(self.store, node.id) if imported else proof_map.get_acceptance_state(self.store, node.id),
+                    # the Trust rules an imported result meets (ADR-0014): named on its chip
+                    "trust_rule": proof_map.trust_rules_of(self.store, node.id) if imported else [],
                     "integrity_state": proof_map.get_integrity_state(self.store, node.id),
                     "assignee": claim.claimant_id if claim else None,
                     "frontier": node.id in frontier,
@@ -442,6 +489,9 @@ class ReviewApp:
                 else proof_map.get_acceptance_state(store, node_id)
             ),
             "integrity_state": proof_map.get_integrity_state(store, node_id),
+            "trust_rule": proof_map.trust_rules_of(store, node_id) if node.kind == ProofMapNodeKind.imported_result else [],
+            # when it first met each rule (ADR-0014): an event, never a decision, listed with the history
+            "rule_events": [{"rule": event.payload.get("rule"), "at": event.created_at.isoformat()} for event in proof_map.trust_rule_events(store, node_id)],
             "candidate_proof": _proof_view(store, proof),
             # the working summary: whether review can be requested yet, or the proof agent should draft it (ADR-0013)
             "key_ideas_working": _working_key_ideas(store, node_id) if node.kind != ProofMapNodeKind.imported_result else None,
@@ -496,6 +546,8 @@ class ReviewApp:
                     dependency_id=item.get("dependency_id"),
                     # what the page showed this decision is made on: checked on the decision's own write transaction
                     viewed_binding=item.get("binding"),
+                    # a Trust rule's conditions (ADR-0014)
+                    conditions=item.get("conditions"),
                 )
                 results.append({"target_id": target_id, "ok": True, "result": record.model_dump(mode="json")})
             except KeyError as exc:
@@ -583,6 +635,8 @@ class _Handler(BaseHTTPRequestHandler):
             return self._guarded(self.app.state)
         if path == "/api/map":
             return self._guarded(self.app.map)
+        if path == "/api/trust-rules":
+            return self._guarded(self.app.trust_rules)
         if path.startswith("/api/node/") and path.endswith(("/pdf/snapshot", "/pdf/build")):
             node_id, _, which = unquote(path.removeprefix("/api/node/")).rpartition("/pdf/")
             try:
@@ -624,6 +678,8 @@ class _Handler(BaseHTTPRequestHandler):
         routes: dict[str, Callable[[], Any]] = {
             "/api/decide": lambda: self.app.decide(body),
             "/api/nodes": lambda: self.app.create_node(body),
+            # a read: what a rule change would do, asked with the change itself (ADR-0014)
+            "/api/trust-rules/preview": lambda: self.app.trust_rule_preview(body),
         }
         route = routes.get(path)
         if route is None and path.startswith("/api/node/"):  # the node panel: /api/node/<id>/<action>

@@ -87,6 +87,15 @@
           <table id="pending"><thead><tr><th></th><th>Node</th><th>Statement and key ideas</th><th>Decision</th><th>Rationale</th></tr></thead><tbody></tbody></table>
           <div class="card-foot"><button id="decide-batch" type="button" class="primary">Record Selected Decisions</button></div>
         </div>
+        <details id="trusted-section" class="group trusted-section">
+          <summary class="group-head">Trusted by rule <span class="n" id="trusted-count"></span>
+            <span class="hint">imported results you haven't looked at, callable under a Trust rule</span>
+            <button id="manage-rules" type="button">Manage rules…</button>
+          </summary>
+          <div class="card">
+            <table id="trusted"><thead><tr><th>Node</th><th>Statement</th><th>Rule</th><th>Rationale</th><th></th></tr></thead><tbody></tbody></table>
+          </div>
+        </details>
       </section>
       <section id="warnings-page" class="page" hidden>
         <h1 class="page-title">Warnings</h1>
@@ -147,10 +156,38 @@
           <div class="card pb"><ul id="node-history"></ul></div>
         </div>
       </section>
+      <section id="rules-sheet" hidden>
+        <div class="sheet rules">
+          <h2>Trust rules</h2>
+          <p class="hint">A rule is a standing Reference review: any imported result whose citation meets every condition is callable without a review of its own. Declaring, amending or retiring one is a decision, recorded in proofs/trust-rules.jsonl and committed as the identity shown above.</p>
+          <ul id="rules-list" class="rules-list"></ul>
+          <details id="rules-retired"><summary>Retired rules</summary><ul id="rules-retired-list" class="rules-list"></ul></details>
+          <form id="rule-form" class="rule-form">
+            <h3 id="rules-form-title">Declare a rule</h3>
+            <input id="rule-decision" type="hidden" value="declare">
+            <label>Name <input id="rule-name" placeholder="textbooks" autocomplete="off" spellcheck="false"></label>
+            <label>Rationale <input id="rule-rationale" placeholder="why this class of citations can be relied on" autocomplete="off"></label>
+            <fieldset id="rule-conditions">
+              <legend>Conditions (all must hold)</legend>
+              <label><input id="cond-reviewed" type="checkbox"> source already reviewed — another citation of the same reference, at the same version, has my explicit Reference review</label>
+              <label><input id="cond-doi" type="checkbox"> identifier has DOI</label>
+              <label><input id="cond-arxiv" type="checkbox"> identifier has arXiv</label>
+              <div class="cond-types">source_type in <span id="cond-types"></span></div>
+            </fieldset>
+            <p id="rule-reminder" class="rule-reminder" role="status"></p>
+            <p id="rule-impact" class="hint" role="status"></p>
+            <div class="sheet-foot">
+              <button id="rule-new" type="button">New rule</button>
+              <button id="rule-cancel" type="button">Close</button>
+              <button id="rule-record" type="button" class="primary">Record</button>
+            </div>
+          </form>
+        </div>
+      </section>
       <section id="confirm" hidden>
         <div class="sheet">
           <h2>Record these decisions?</h2>
-          <p class="hint">Each is written to the node's reviews.jsonl and committed with its snapshot, as the identity shown above.</p>
+          <p class="hint">Each is written to its decision file (the node's reviews.jsonl; the project's trust-rules.jsonl for a Trust rule) and committed with its snapshot, as the identity shown above.</p>
           <ul id="confirm-decisions"></ul>
           <div class="sheet-foot">
             <button id="confirm-cancel" type="button">Cancel</button>
