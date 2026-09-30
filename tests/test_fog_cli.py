@@ -8,7 +8,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from proof_cli.cli import app
-from proof_cli.fog import add_fog, drop_fog, get_fog, list_fog
+from proof_cli.fog import add_fog, drop_fog, list_fog, require_fog
 from proof_cli.proof_map import create_node, get_node
 from proof_cli.storage import ensure_project
 
@@ -56,7 +56,7 @@ def test_add_list_show_edit_drop_and_reopen_under_json(tmp_path: Path):
     assert shown["command"] == "fog.show"
     assert (shown["data"]["text"], shown["data"]["experiments"], shown["data"]["latest_experiment"]) == ("the constant is probably optimal", [], None)
     assert (shown["data"]["folder"], shown["data"]["folder_exists"]) == ("proofs/fog/fog-1", False)
-    assert get_fog(store, "fog-1").notes == "try small n"
+    assert require_fog(store, "fog-1").notes == "try small n"
 
 
 def test_experiments_are_recorded_and_listed_under_json_and_show_lists_the_newest_first(tmp_path: Path):
@@ -86,7 +86,7 @@ def test_crystallize_prints_the_node_with_a_fog_field_and_node_show_names_its_or
 
     assert made["command"] == "fog.crystallize"
     assert made["data"]["id"] == "C_new" and made["data"]["kind"] == "claim" and made["data"]["derived_from"] == "L1" and made["data"]["assumptions"] == ["X compact"]
-    assert made["data"]["fog"] == {"id": "fog-1", "status": "crystallized", "node_id": "C_new"}
+    assert made["data"]["fog"] == {"id": "fog-1", "status": "crystallized", "node_id": "C_new"} and made["data"]["reminder"] == ""
     assert get_node(store, "L1").dependencies == ["C_new"] and list_fog(store) == []
 
     shown = _json(tmp_path, "node", "show", "C_new")["data"]
@@ -107,7 +107,8 @@ def test_refusals_are_error_envelopes_with_the_service_codes(tmp_path: Path):
     assert _json(tmp_path, "fog", "edit", "fog-1", "--text", "x", ok=False)["error"]["code"] == "FOG_NOT_OPEN"
     ambiguous = _json(tmp_path, "fog", "crystallize", "fog-2", "X", "s", ok=False)
     assert ambiguous["error"]["code"] == "FOG_PARENT_AMBIGUOUS" and ambiguous["error"]["candidates"] == ["L1", "C1"]
-    assert _json(tmp_path, "fog", "crystallize", "fog-2", "X", "s", "--parent", "L1", "--no-parent", ok=False)["error"]["code"] == "INVALID_INPUT"
+    assert _json(tmp_path, "fog", "crystallize", "fog-2", "X", "s", "--parent", "L1", "--no-parent", ok=False)["error"]["code"] == "FOG_FLAG_CONFLICT"
+    assert _json(tmp_path, "fog", "edit", "fog-2", "--near", "L1", "--clear-near", ok=False)["error"]["code"] == "FOG_FLAG_CONFLICT"
     assert _json(tmp_path, "fog", "experiment", "record", "fog-2", "maybe", "--summary", "s", "--run-by", "a", ok=False)["error"]["code"] == "INVALID_OUTCOME"
     assert _json(tmp_path, "fog", "add", "near nothing", "--near", "nope", ok=False)["error"]["code"] == "NODE_NOT_FOUND"
     assert get_node(store, "X") is None

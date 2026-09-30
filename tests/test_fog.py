@@ -18,7 +18,7 @@ from proof_cli.fog import (
     edit_fog,
     fog_folder,
     fog_near,
-    get_fog,
+    require_fog,
     list_experiments,
     list_fog,
     record_experiment,
@@ -66,7 +66,7 @@ def test_a_fog_item_is_added_with_its_text_notes_and_near_nodes_and_an_increment
     assert (first.id, first.status.value, first.near, first.notes, first.created_by) == ("fog-1", "open", ["L1"], "try n ≤ 10^6 first", "agent_a")
     assert (second.id, second.near, second.created_by) == ("fog-2", [], "human")
     assert [item.id for item in list_fog(store)] == ["fog-1", "fog-2"]
-    assert get_fog(store, "fog-1").text == first.text
+    assert require_fog(store, "fog-1").text == first.text
     assert [event.entity_id for event in _events(store, "proof_fog_added")] == ["fog-1", "fog-2"]
 
 
@@ -104,7 +104,8 @@ def test_near_may_point_at_any_kind_and_at_a_rejected_node_and_changes_no_axis(t
     item = add_fog(store, "about several nodes", near=["L1", "I", "R"])
 
     assert item.near == ["L1", "I", "R"]
-    assert {node_id: _axes(store, node_id) for node_id in ("L1", "C1", "I", "R")} == before
+    assert {node_id: _axes(store, node_id) for node_id in ("L1", "C1", "I", "R")} == before  # each axis, and the frontier
+    assert [n.id for n in get_frontier(store)] == ["L1"]
     assert get_node(store, "L1").dependencies == [] and "fog-1" not in get_node(store, "C1").dependencies
 
 
@@ -116,7 +117,7 @@ def test_editing_changes_text_notes_and_near_but_never_the_id(tmp_path: Path):
 
     assert (edited.id, edited.text, edited.near, edited.notes) == ("fog-1", "sharper", ["C1", "I"], "see the experiment")
     assert edit_fog(store, "fog-1", near=[]).near == []  # near can be cleared
-    assert get_fog(store, "fog-1").text == "sharper"  # a partial edit leaves the rest
+    assert require_fog(store, "fog-1").text == "sharper"  # a partial edit leaves the rest
     assert [e.payload["fields"] for e in _events(store, "proof_fog_edited")] == [["near", "notes", "text"], ["near"]]
 
 
@@ -155,12 +156,14 @@ def test_an_experiment_is_recorded_against_an_open_item_and_never_changes_its_st
     assert (first.seq, first.outcome.value, first.path) == (1, "supports", "proofs/L1/scratch/constant.py")
     assert (second.seq, second.outcome.value, second.path) == (2, "refutes", None)
     assert [e.seq for e in list_experiments(store, "fog-1")] == [1, 2]
-    assert get_fog(store, "fog-1").status.value == "open"  # a refutes drops nothing; a supports crystallizes nothing
+    assert require_fog(store, "fog-1").status.value == "open"  # a refutes drops nothing; a supports crystallizes nothing
     assert [e.entity_id for e in _events(store, "proof_fog_experiment_recorded")] == ["fog-1", "fog-1"]
 
 
 @pytest.mark.parametrize("kwargs, code", [
     ({"outcome": "supports", "summary": "s", "run_by": "  "}, "FOG_RUN_BY_REQUIRED"),
+    ({"outcome": "supports", "summary": "  ", "run_by": "a"}, "FOG_SUMMARY_REQUIRED"),
+    ({"outcome": "supports", "summary": "s", "run_by": "a", "path": "proofs"}, "FOG_EXPERIMENT_PATH_INVALID"),
     ({"outcome": "maybe", "summary": "s", "run_by": "a"}, "INVALID_OUTCOME"),
     ({"outcome": "supports", "summary": "s", "run_by": "a", "path": "proofs/L1/scratch/missing.py"}, "FOG_EXPERIMENT_PATH_INVALID"),
     ({"outcome": "supports", "summary": "s", "run_by": "a", "path": "../outside.py"}, "FOG_EXPERIMENT_PATH_INVALID"),
@@ -220,7 +223,7 @@ def test_crystallize_creates_a_claim_under_the_single_near_node_as_a_split_would
     assert node.derived_from == "L1" and get_node(store, "L1").dependencies == ["C_new"]
     assert made.node.id == "C_new" and made.fog.status.value == "crystallized" and made.fog.node_id == "C_new"
     assert (made.fog.text, made.fog.notes, made.fog.near) == ("the second half might follow from compactness", "keep", ["L1"])
-    assert [item.id for item in list_fog(store)] == [] and get_fog(store, "fog-1").status.value == "crystallized"
+    assert [item.id for item in list_fog(store)] == [] and require_fog(store, "fog-1").status.value == "crystallized"
     assert [e.seq for e in list_experiments(store, "fog-1")] == [1]  # the experiments stay on the item
     assert crystallized_from(store, "C_new").id == "fog-1" and crystallized_from(store, "L1") is None
     (event,) = _events(store, "proof_fog_crystallized")
@@ -239,7 +242,7 @@ def test_crystallize_resolves_the_parent_from_near_or_the_flags(tmp_path: Path):
     with pytest.raises(ProofMapError) as ambiguous:
         crystallize_fog(store, "fog-2", "F2", "which parent?")
     assert ambiguous.value.code == "FOG_PARENT_AMBIGUOUS" and ambiguous.value.details["candidates"] == ["L1", "C1"]
-    assert get_node(store, "F2") is None and get_fog(store, "fog-2").status.value == "open"
+    assert get_node(store, "F2") is None and require_fog(store, "fog-2").status.value == "open"
     chosen = crystallize_fog(store, "fog-2", "F2", "under C1", parent="C1")
     assert chosen.node.derived_from == "C1" and "F2" in get_node(store, "C1").dependencies
     detached = crystallize_fog(store, "fog-3", "F3", "deliberately free", no_parent=True)
@@ -300,7 +303,7 @@ def test_crystallize_needs_an_open_item_and_a_free_node_id(tmp_path: Path):
     add_fog(store, "taken id")
     with pytest.raises(ProofMapError) as taken:
         crystallize_fog(store, "fog-3", "L1", "s", no_parent=True)
-    assert taken.value.code == "NODE_ALREADY_EXISTS" and get_fog(store, "fog-3").status.value == "open"
+    assert taken.value.code == "NODE_ALREADY_EXISTS" and require_fog(store, "fog-3").status.value == "open"
 
 
 def test_crystallize_notes_experiment_files_left_in_an_agents_scratch_folder(tmp_path: Path):
@@ -335,7 +338,7 @@ def test_a_crystallize_that_fails_after_the_node_is_made_leaves_no_node_folder_a
         crystallize_fog(store, "fog-1", "C_free", "stated", no_parent=True)
 
     assert get_node(store, "C_free") is None and not (store.root / "proofs" / "C_free").exists()
-    assert get_fog(store, "fog-1").status.value == "open"
+    assert require_fog(store, "fog-1").status.value == "open"
 
 
 def test_fog_is_not_a_node_id(tmp_path: Path):
@@ -348,7 +351,7 @@ def test_fog_is_not_a_node_id(tmp_path: Path):
     add_fog(store, "one")
     with pytest.raises(ProofMapError) as crystallized:
         crystallize_fog(store, "fog-1", "Fog", "s", no_parent=True)
-    assert crystallized.value.code == "INVALID_NODE_ID" and get_fog(store, "fog-1").status.value == "open"
+    assert crystallized.value.code == "INVALID_NODE_ID" and require_fog(store, "fog-1").status.value == "open"
     assert not (store.root / "proofs" / "fog").exists()
 
 

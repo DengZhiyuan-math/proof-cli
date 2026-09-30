@@ -381,6 +381,14 @@ class FogItem(BaseModel):
 
     id: str  # fog-N, project-wide, never reused
     text: str
+
+    @staticmethod
+    def id_for(number: int) -> str:
+        return f"fog-{number}"
+
+    @property
+    def number(self) -> int:
+        return int(self.id.rsplit("-", 1)[1])
     notes: str = ""
     near: list[str] = Field(default_factory=list)
     status: FogStatus = FogStatus.open

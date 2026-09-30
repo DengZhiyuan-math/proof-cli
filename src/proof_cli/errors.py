@@ -11,7 +11,7 @@ ERROR_CODES: dict[str, str] = {
     # -- the CLI itself ----------------------------------------------------------------
     "USAGE_ERROR": "the command line didn't parse: a missing argument, an unknown option or command (exit 2)",
     "INTERNAL_ERROR": "an unexpected failure inside proof-cli; the message names it",
-    "INVALID_INPUT": "a legacy command (`theorem add`, `reference import`) refused its input under --json, or `fog crystallize` was given both --parent and --no-parent; the message says why",
+    "INVALID_INPUT": "a legacy command (`theorem add`, `reference import`) refused its input under --json; the message says why",
     "PROJECT_NOT_FOUND": "a read was pointed at a folder with no proof project; nothing was created",
     "HUMAN_REVIEW_REQUIRED": "a Human Review decision, made only by the researcher on the proof map page; the error carries its URL",
     # -- nodes -------------------------------------------------------------------------
@@ -93,6 +93,8 @@ ERROR_CODES: dict[str, str] = {
     "FOG_TEXT_REQUIRED": "a fog item needs its text",
     "FOG_REASON_REQUIRED": "dropping a fog item needs a reason",
     "FOG_RUN_BY_REQUIRED": "an Experiment records who ran it (--run-by)",
+    "FOG_SUMMARY_REQUIRED": "an Experiment says what was computed and what it showed (--summary)",
+    "FOG_FLAG_CONFLICT": "two flags that exclude each other were given: --parent with --no-parent, or --near with --clear-near",
     "FOG_EXPERIMENT_PATH_INVALID": "an Experiment's path is relative, under proofs/, and exists when recorded",
     "FOG_PARENT_AMBIGUOUS": "the fog item is near several nodes: name the parent with --parent, or --no-parent",
     "NO_DEPENDENTS": "nothing that can move rests on the node",

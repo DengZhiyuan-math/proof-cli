@@ -120,6 +120,20 @@ from .contract import ProofGroup
 from .theorems import LEGACY_TRUST_NOTICE
 from .collaboration import summarize_review_record
 from .storage import read_scoped
+from .fog import (
+    add_fog,
+    crystallize_fog,
+    crystallized_from,
+    drop_fog,
+    edit_fog,
+    fog_near,
+    fog_view,
+    list_experiments,
+    list_fog,
+    record_experiment,
+    reopen_fog,
+    require_fog,
+)
 from .exchange import (
     export_exchange_bundle,
     import_exchange_bundle,
@@ -159,20 +173,6 @@ from .proof_map import (
     trust_rules_of,
 )
 from .trust_rules import get_trust_rule, list_trust_rules, trust_rule_history
-from .fog import (
-    add_fog,
-    crystallize_fog,
-    crystallized_from,
-    drop_fog,
-    edit_fog,
-    fog_near,
-    fog_view,
-    list_experiments,
-    list_fog,
-    record_experiment,
-    reopen_fog,
-    require_fog,
-)
 from .vault import working_proof_path
 from .rendering import (
     render_candidate_proof,
@@ -380,7 +380,7 @@ def human_review_required(root: str, *, command: str, kind: str, target_id: str,
 
     # not a project yet: nothing to decide, and a refusal shouldn't create one
     url = project_url(get_store(_root(root)), node_id) if (_root(root) / ".proof").exists() else None
-    _emit_node_error(
+    _emit_error(
         ProofMapError(
             "HUMAN_REVIEW_REQUIRED",
             f"{kind} on {target_id} is a Human Review decision: the researcher makes it on the proof map page"
@@ -393,7 +393,8 @@ def human_review_required(root: str, *, command: str, kind: str, target_id: str,
     raise typer.Exit(code=1)
 
 
-def _emit_node_error(exc: ProofMapError, json_output: bool, *, command: str) -> None:
+def _emit_error(exc: ProofMapError, json_output: bool, *, command: str) -> None:
+    """A ProofMapError as the command's error envelope under --json, or one line otherwise (nodes, fog, rules alike)."""
     if json_output:
         typer.echo(dump_envelope(error_envelope(command, exc.code, exc.message, details=exc.details or None)))
     else:
@@ -445,7 +446,7 @@ def node_create(
             created_by=created_by,
         )
     except ProofMapError as exc:
-        _emit_node_error(exc, json_output, command="node.create")
+        _emit_error(exc, json_output, command="node.create")
         raise typer.Exit(code=1)
     _emit_node(node, json_output, command="node.create")
 
@@ -469,7 +470,7 @@ def node_show(
         near = [item.id for item in fog_near(store, node_id)]
         blocked_reason = get_blocked_reason(store, node_id) if workflow_state == "blocked" else None
     except ProofMapError as exc:
-        _emit_node_error(exc, json_output, command="node.show")
+        _emit_error(exc, json_output, command="node.show")
         raise typer.Exit(code=1)
     working = working_proof_path(store.root, node_id)
     working_proof = working.relative_to(store.root).as_posix() if working.is_file() else None
@@ -554,7 +555,7 @@ def trust_rule_show(name: str, root: str = ROOT_OPTION, json_output: bool = type
     store = get_store(_root(root))
     rule = get_trust_rule(store, name)
     if rule is None:
-        _emit_node_error(ProofMapError("TRUST_RULE_NOT_FOUND", f"no trust rule is named {name}"), json_output, command="trust-rule.show")
+        _emit_error(ProofMapError("TRUST_RULE_NOT_FOUND", f"no trust rule is named {name}"), json_output, command="trust-rule.show")
         raise typer.Exit(code=1)
     view = {**trust_rule_view(store, rule), "history": trust_rule_history(store, name)}
     if json_output:
@@ -588,7 +589,7 @@ def fog_add(
     try:
         item = add_fog(store, text, near=near, notes=notes, created_by=created_by)
     except ProofMapError as exc:
-        _emit_node_error(exc, json_output, command="fog.add")
+        _emit_error(exc, json_output, command="fog.add")
         raise typer.Exit(code=1)
     _emit_fog(store, item, json_output, command="fog.add")
 
@@ -613,7 +614,7 @@ def fog_show(fog_id: str, root: str = ROOT_OPTION, json_output: bool = typer.Opt
     try:
         item = require_fog(store, fog_id)
     except ProofMapError as exc:
-        _emit_node_error(exc, json_output, command="fog.show")
+        _emit_error(exc, json_output, command="fog.show")
         raise typer.Exit(code=1)
     _emit_fog(store, item, json_output, command="fog.show")
 
@@ -632,9 +633,11 @@ def fog_edit(
     """Change an open item's text, notes or near nodes; what isn't given stays."""
     store = get_store(_root(root))
     try:
+        if clear_near and near:
+            raise ProofMapError("FOG_FLAG_CONFLICT", "fog edit takes either --near or --clear-near, not both")
         item = edit_fog(store, fog_id, text=text, near=[] if clear_near else (near or None), notes=notes, edited_by=edited_by)
     except ProofMapError as exc:
-        _emit_node_error(exc, json_output, command="fog.edit")
+        _emit_error(exc, json_output, command="fog.edit")
         raise typer.Exit(code=1)
     _emit_fog(store, item, json_output, command="fog.edit")
 
@@ -652,7 +655,7 @@ def fog_drop(
     try:
         item = drop_fog(store, fog_id, reason=reason, dropped_by=dropped_by)
     except ProofMapError as exc:
-        _emit_node_error(exc, json_output, command="fog.drop")
+        _emit_error(exc, json_output, command="fog.drop")
         raise typer.Exit(code=1)
     _emit_fog(store, item, json_output, command="fog.drop")
 
@@ -664,7 +667,7 @@ def fog_reopen(fog_id: str, root: str = ROOT_OPTION, by: str = typer.Option("hum
     try:
         item = reopen_fog(store, fog_id, by=by)
     except ProofMapError as exc:
-        _emit_node_error(exc, json_output, command="fog.reopen")
+        _emit_error(exc, json_output, command="fog.reopen")
         raise typer.Exit(code=1)
     _emit_fog(store, item, json_output, command="fog.reopen")
 
@@ -691,12 +694,11 @@ def fog_crystallize(
             assumptions=assumption, display_label=display_label, created_by=created_by,
         )
     except ProofMapError as exc:
-        _emit_node_error(exc, json_output, command="fog.crystallize")
+        _emit_error(exc, json_output, command="fog.crystallize")
         raise typer.Exit(code=1)
     if json_output:
-        payload = {**made.node.model_dump(mode="json"), "fog": {"id": made.fog.id, "status": made.fog.status.value, "node_id": made.fog.node_id}}
-        if made.reminder:
-            payload["reminder"] = made.reminder
+        # a stable shape (ADR-0006): `reminder` is always there, empty when there is nothing to say
+        payload = {**made.node.model_dump(mode="json"), "fog": {"id": made.fog.id, "status": made.fog.status.value, "node_id": made.fog.node_id}, "reminder": made.reminder}
         typer.echo(dump_envelope(success_envelope("fog.crystallize", payload)))
         return
     typer.echo(render_proof_map_node(made.node, crystallized_from=made.fog.id))
@@ -719,7 +721,7 @@ def fog_experiment_record(
     try:
         experiment = record_experiment(store, fog_id, outcome, summary=summary, run_by=run_by, path=path)
     except ProofMapError as exc:
-        _emit_node_error(exc, json_output, command="fog.experiment.record")
+        _emit_error(exc, json_output, command="fog.experiment.record")
         raise typer.Exit(code=1)
     if json_output:
         typer.echo(dump_envelope(success_envelope("fog.experiment.record", experiment.model_dump(mode="json"))))
@@ -735,7 +737,7 @@ def fog_experiment_list(fog_id: str, root: str = ROOT_OPTION, json_output: bool 
     try:
         require_fog(store, fog_id)
     except ProofMapError as exc:
-        _emit_node_error(exc, json_output, command="fog.experiment.list")
+        _emit_error(exc, json_output, command="fog.experiment.list")
         raise typer.Exit(code=1)
     experiments = [experiment.model_dump(mode="json") for experiment in list_experiments(store, fog_id)]
     if json_output:
@@ -757,7 +759,7 @@ def node_claim(
     try:
         claim = claim_node(store, node_id, claimant_id=assignee, reassign=reassign)
     except ProofMapError as exc:
-        _emit_node_error(exc, json_output, command="node.claim")
+        _emit_error(exc, json_output, command="node.claim")
         raise typer.Exit(code=1)
     _emit_claim(claim, json_output, command="node.claim")
 
@@ -775,7 +777,7 @@ def node_unassign(
     try:
         claim = release_node(store, node_id, claimant_id=by, reason=reason or None)
     except ProofMapError as exc:
-        _emit_node_error(exc, json_output, command="node.unassign")
+        _emit_error(exc, json_output, command="node.unassign")
         raise typer.Exit(code=1)
     _emit_claim(claim, json_output, command="node.unassign")
 
@@ -803,7 +805,7 @@ def node_request_review(
     try:
         record = request_review(store, node_id, requested_by=requested_by, rationale=rationale)
     except ProofMapError as exc:
-        _emit_node_error(exc, json_output, command="node.request_review")
+        _emit_error(exc, json_output, command="node.request_review")
         raise typer.Exit(code=1)
     _emit_candidate_proof(record, json_output, command="node.request_review")
 
@@ -878,7 +880,7 @@ def node_split(
             specs.append({"id": child_id, "statement": statement})
         children = split_node(store, parent_id, specs, created_by=created_by, reassign=reassign)
     except ProofMapError as exc:
-        _emit_node_error(exc, json_output, command="node.split")
+        _emit_error(exc, json_output, command="node.split")
         raise typer.Exit(code=1)
 
     if json_output:
@@ -919,7 +921,7 @@ def node_depend(
         else:
             edit = move_dependency(store, node_id, move, to=to, edited_by=by, reassign=reassign)
     except ProofMapError as exc:
-        _emit_node_error(exc, json_output, command="node.depend")
+        _emit_error(exc, json_output, command="node.depend")
         raise typer.Exit(code=1)
     if json_output:
         typer.echo(dump_envelope(success_envelope("node.depend", edit.as_json())))
@@ -955,7 +957,7 @@ def challenge_open(
     try:
         challenge = open_challenge(store, target_id, opened_by=opened_by, rationale=rationale)
     except ProofMapError as exc:
-        _emit_node_error(exc, json_output, command="challenge.open")
+        _emit_error(exc, json_output, command="challenge.open")
         raise typer.Exit(code=1)
     _emit_challenge(challenge, json_output, command="challenge.open")
 
@@ -987,7 +989,7 @@ def challenge_show(
     try:
         challenge = require_challenge(store, challenge_id)
     except ProofMapError as exc:
-        _emit_node_error(exc, json_output, command="challenge.show")
+        _emit_error(exc, json_output, command="challenge.show")
         raise typer.Exit(code=1)
     _emit_challenge(challenge, json_output, command="challenge.show")
 
@@ -1029,7 +1031,7 @@ def evidence_record(
     try:
         check = record_evidence_check(store, candidate_proof_id, outcome, notes=notes, run_by=run_by)
     except ProofMapError as exc:
-        _emit_node_error(exc, json_output, command="node.evidence.record")
+        _emit_error(exc, json_output, command="node.evidence.record")
         raise typer.Exit(code=1)
     _emit_evidence_check(check, json_output, command="node.evidence.record")
 
@@ -1592,7 +1594,7 @@ def memory_add(
             notes=notes,
         )
     except ProofMapError as exc:
-        _emit_node_error(exc, json_output, command="memory.add")
+        _emit_error(exc, json_output, command="memory.add")
         raise typer.Exit(code=1)
     typer.echo(dump_envelope(success_envelope("memory.add", json.loads(output))) if json_output else output)
 
@@ -1609,7 +1611,7 @@ def _publication(command: str, json_output: bool, data, human) -> None:
         else:
             typer.echo(human())
     except ProofMapError as exc:
-        _emit_node_error(exc, json_output, command=command)
+        _emit_error(exc, json_output, command=command)
         raise typer.Exit(code=1)
 
 
@@ -1991,7 +1993,7 @@ def handoff_create(
     try:
         _emit_legacy_json("handoff.create", json_output, lambda: cmd_handoff_create(_root(root), note=note, node_id=node_id))
     except ProofMapError as exc:
-        _emit_node_error(exc, json_output, command="handoff.create")
+        _emit_error(exc, json_output, command="handoff.create")
         raise typer.Exit(code=1)
 
 
