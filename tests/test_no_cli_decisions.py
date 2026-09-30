@@ -4,8 +4,8 @@ Walks the whole command tree against a project holding every kind of
 protected state, invoking each command with every interesting target and
 the most permissive flags an agent could try — and checks that nothing
 protected changed: acceptance, Reference review, Challenge resolution, kind,
-another session's claim, legacy theorem trust, reference approval, and
-obligation/blocker resolution. (Integrity is not protected: opening a
+another session's claim, legacy theorem trust, reference approval, the Trust
+rules in force (ADR-0014), and obligation/blocker resolution. (Integrity is not protected: opening a
 Challenge or editing a dependency is ordinary agent work.)
 """
 
@@ -47,6 +47,7 @@ from proof_cli.storage import (
     list_references,
 )
 from proof_cli.theorems import add_theorem, list_theorems
+from proof_cli.trust_rules import list_trust_rules
 from _proofs import submit_proof
 
 runner = CliRunner()
@@ -86,6 +87,9 @@ def _rich_project(root: Path):
     add_theorem(store, theorem_id="thm_t", kind="lemma", name="T", statement="T", status=TheoremStatus.verified, trust_level=TrustLevel.project_verified)
     import_reference(store, ReferenceRecord(id="ref_std", title="Std", authors=["A"], year=2020, source_type=ReferenceSourceType.standard_reference, origin="zbmath"))
     seed_reference_review(store, "ref_std", ReferenceReviewStatus.approved)
+    # a Trust rule in force, and an imported result trusted under it (ADR-0014)
+    reviewer.declare_trust_rule("standard", conditions=[{"kind": "source_type_in", "values": ["standard_reference"]}], rationale="standard references")
+    create_node(store, node_id="ref_rule", kind="imported_result", statement="S", source_locator="Thm 1", source_version="v1", reference_id="ref_std")
     add_obligation(store, ProofObligation(id="obl_1", goal_statement="G", required_for="thm_t"))
     add_blocker(store, BlockerRecord(id="blk_1", description="stuck", scope="thm_t", failure_type="gap"))
     return store
@@ -102,6 +106,7 @@ def _protected(store) -> dict:
         "challenges": {c.id: c.status.value for c in list_challenges(store)},
         "theorems": {t.id: (t.status.value, t.trust_level.value) for t in list_theorems(store)},
         "references": {r.id: (r.review_status.value, r.is_callable) for r in list_references(store)},
+        "trust_rules": {r.name: (r.retired, r.rationale, [c.model_dump(mode="json") for c in r.conditions]) for r in list_trust_rules(store, include_retired=True)},
         "obligations": {o.id: o.status.value for o in list_obligations(store)},
         "blockers": {b.id: b.status.value for b in list_blockers(store)},
     }

@@ -22,6 +22,7 @@ The researcher's entry is the proof map page (`proof map open`, below). `proof` 
 proof --help
 proof frontier
 proof node show <id>
+proof trust-rule list   # the Trust rules in force (read-only; declared on the page)
 ```
 
 Every command acts on `--root`, else `$PROOF_ROOT`, else the current folder. An agent working inside a node's folder, like the studio's agent panel, keeps `PROOF_ROOT` set to the project root.
@@ -75,6 +76,8 @@ proof map open [<id>]   # open the map, or a node's page
 ```
 
 Each decision is one line in the node's git-tracked `proofs/<id>/reviews.jsonl`, naming the SHA-256 of the snapshot it decides on. proof-cli commits that line together with the snapshot, as your own git identity (`user.name` / `user.email`); it never pushes. Once you push, the commit on GitHub is the record of who decided what (ADR-0010). Outside a git repository the decision is still recorded, just without that record. `proof review warnings` lists decisions git doesn't have yet.
+
+A **Trust rule** (ADR-0014) is a Reference review you declare in advance for a class of citations — "textbooks and monographs", "another citation of a source I already reviewed, at the same version", "has a DOI". It is declared, amended and retired from the review page's *Trusted by rule* section (Manage rules…), recorded as one line in the project-level `proofs/trust-rules.jsonl` and committed the same way. An imported result whose citation meets a rule reads `trusted-by-rule` and unblocks its dependents; nothing is written on it, and reviewing it explicitly always wins. The review page lists those nodes apart from what awaits you; `proof trust-rule list` and `proof trust-rule show <name>` read the rules, and no command writes one.
 
 No CLI command or agent tool can make these decisions. Those commands answer `HUMAN_REVIEW_REQUIRED` with the page's URL. That is a boundary for cooperative agents on your own machine, not a security mechanism, which suits personal use or a small team on GitHub. A project from before ADR-0010 has its decisions moved into `reviews.jsonl` the first time it's opened, and every node keeps its state.
 

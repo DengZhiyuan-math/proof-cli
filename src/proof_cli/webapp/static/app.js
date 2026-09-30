@@ -105,6 +105,7 @@ function showHome() {
     return tr;
   }));
   if (!state.pending.length) body.append(row(["", "Nothing is awaiting review.", "", "", ""]));
+  showTrusted(state.trusted_by_rule || []);
   showWarnings(state.warnings, $("warnings"));
   const pending = String(state.pending.length);
   $("stat-review").textContent = pending;
@@ -112,6 +113,132 @@ function showHome() {
   $("rail-review").textContent = state.pending.length ? pending : "";
   $("rail-review").className = state.pending.length ? "n hot" : "n";
   $("records-count").textContent = state.warnings.length ? String(state.warnings.length) : "";
+}
+
+// The imported results callable under a Trust rule without a review of their own (ADR-0014): what the
+// researcher hasn't looked at, in its own collapsed section, never counted as awaiting them. "Review
+// explicitly" records the ordinary Reference review, its rationale prefilled here and editable.
+function showTrusted(items) {
+  const body = $("trusted").querySelector("tbody");
+  body.replaceChildren(...items.map((item) => {
+    const link = el("a", item.node_id, { class: "review-link", href: `#/node/${encodeURIComponent(item.node_id)}`, title: "The node's page" });
+    const statement = el("div", item.statement);
+    if (item.citation) statement.append(citationLine(item.citation));
+    const rules = el("div");
+    for (const name of item.trust_rule) { const chip = stateChip("trusted-by-rule", name, `trust rule ${name}`); chip.classList.add("state-chip", "rule-chip"); rules.append(chip); }
+    const rationale = el("input", null, { placeholder: "why" });
+    rationale.value = item.rationale || "";
+    const button = el("button", "Review explicitly", { type: "button" });
+    button.onclick = async () => {
+      const binding = (item.bindings || {})["reference-review"] ?? null;
+      try { await decide([{ kind: "reference_review", target_id: item.node_id, decision: "reference-review", rationale: rationale.value, binding }]); }
+      catch (error) { showError(error); }
+    };
+    const tr = row([link, statement, rules, rationale, button]);
+    tr.dataset.target = item.node_id;
+    return tr;
+  }));
+  if (!items.length) body.append(row(["", "No imported result is trusted by rule.", "", "", ""]));
+  $("trusted-count").textContent = items.length ? String(items.length) : "";
+}
+
+// -- the rules sheet (ADR-0014): the rules in force, their history, and the three decisions on them ------
+let rulesData = null;
+const CONDITION_BOXES = { "cond-reviewed": "source_already_reviewed", "cond-doi": "identifier_has_doi", "cond-arxiv": "identifier_has_arxiv" };
+
+async function openRulesSheet() {
+  rulesData = await api("/api/trust-rules");
+  $("cond-types").replaceChildren(...rulesData.source_types.map((type) => {
+    const label = el("label");
+    label.append(el("input", null, { type: "checkbox", value: type, "data-type": type }), type);
+    return label;
+  }));
+  renderRules();
+  ruleForm("declare");
+  $("rules-sheet").hidden = false;
+}
+
+function renderRules() {
+  const item = (rule) => {
+    const li = el("li", null, { "data-rule": rule.name });
+    li.append(el("b", rule.name), el("span", rule.conditions_text.join(" · "), { class: "conds" }), el("span", rule.rationale));
+    li.append(el("span", `${rule.retired ? "retired" : "declared"} by ${rule.retired ? rule.changed_by : rule.declared_by} · ${rule.retired ? rule.changed_at : rule.declared_at}` +
+      ` · trusting ${rule.trusting.length ? rule.trusting.join(", ") : "nothing right now"} · ${rule.history.length} decision(s)`, { class: "meta" }));
+    if (!rule.retired) {
+      const acts = el("div", null, { class: "acts" });
+      const amend = el("button", "Amend", { type: "button" }), retire = el("button", "Retire", { type: "button" });
+      amend.onclick = () => ruleForm("amend", rule);
+      retire.onclick = () => ruleForm("retire", rule);
+      acts.append(amend, retire);
+      li.append(acts);
+    }
+    return li;
+  };
+  $("rules-list").replaceChildren(...rulesData.rules.filter((r) => !r.retired).map(item));
+  $("rules-retired-list").replaceChildren(...rulesData.rules.filter((r) => r.retired).map(item));
+}
+
+// the form for one decision: a fresh declaration, or an amend or retire of a listed rule
+function ruleForm(decision, rule) {
+  $("rule-decision").value = decision;
+  $("rules-form-title").textContent = decision === "declare" ? "Declare a rule" : decision === "amend" ? `Amend ${rule.name}` : `Retire ${rule.name}`;
+  $("rule-name").value = rule ? rule.name : "";
+  $("rule-name").disabled = decision !== "declare";  // a name never changes
+  $("rule-rationale").value = "";
+  $("rule-conditions").disabled = decision === "retire";
+  const has = (kind) => !!(rule && rule.conditions.some((c) => c.kind === kind));
+  for (const [id, kind] of Object.entries(CONDITION_BOXES)) $(id).checked = decision !== "retire" && has(kind);
+  const types = new Set(rule ? rule.conditions.filter((c) => c.kind === "source_type_in").flatMap((c) => c.values) : []);
+  for (const box of $("cond-types").querySelectorAll("input")) box.checked = decision !== "retire" && types.has(box.value);
+  $("rule-record").textContent = decision === "retire" ? "Record retirement" : decision === "amend" ? "Record amendment" : "Record";
+  ruleFormChanged();
+}
+
+function formConditions() {
+  const conditions = Object.entries(CONDITION_BOXES).filter(([id]) => $(id).checked).map(([, kind]) => ({ kind }));
+  const types = [...$("cond-types").querySelectorAll("input")].filter((box) => box.checked).map((box) => box.value);
+  if (types.length) conditions.push({ kind: "source_type_in", values: types });
+  return conditions;
+}
+
+// The reminder for a weak source type, and the impact of a change, read as the form changes. An amend or
+// retire is recorded only against the impact of the form as it stands now: a preview that comes back for an
+// earlier state of the form is dropped, and Record waits for the current one (and stays off if it failed).
+let previewSeq = 0;
+let previewCurrent = false;
+async function ruleFormChanged() {
+  const decision = $("rule-decision").value;
+  const conditions = formConditions();
+  const weak = (rulesData ? rulesData.weak_source_types : []).filter((type) => conditions.some((c) => c.kind === "source_type_in" && c.values.includes(type)));
+  $("rule-reminder").textContent = decision !== "retire" && weak.length
+    ? `This rule trusts ${weak.join(" and ")} sources: anything an importer typed as one would be callable without your look. Allowed — is it what you mean?` : "";
+  $("rule-impact").textContent = "";
+  const seq = ++previewSeq;
+  previewCurrent = decision === "declare";  // a declaration has no impact to wait for
+  $("rule-record").disabled = !previewCurrent;
+  if (decision === "declare") return;
+  try {
+    const impact = await api("/api/trust-rules/preview", { name: $("rule-name").value, decision, ...(decision === "amend" ? { conditions } : {}) });
+    if (seq !== previewSeq) return;  // the form moved on: this answers an earlier state of it
+    const parts = [`${impact.losing.length} node(s) would stop reading trusted by rule`];
+    if (impact.losing.length) parts.push(`${impact.depended_on_by_accepted.length} of them depended on by Accepted nodes (their Acceptance keeps; other dependents block)`);
+    if (impact.gaining.length) parts.push(`${impact.gaining.length} would newly read trusted by rule`);
+    $("rule-impact").textContent = `Impact: ${parts.join("; ")}${impact.losing.length ? ` — ${impact.losing.join(", ")}` : ""}.`;
+    previewCurrent = true;
+    $("rule-record").disabled = false;
+  } catch (error) {
+    if (seq !== previewSeq) return;
+    $("rule-impact").textContent = `${error.code ? `${error.code}: ${error.message}` : error.message} — nothing can be recorded until the impact is known`;
+  }
+}
+
+async function recordRule() {
+  if (!previewCurrent) return say("Wait for the impact preview of this change before recording it.", "error");
+  const decision = $("rule-decision").value;
+  const item = { kind: "trust_rule", target_id: $("rule-name").value.trim(), decision, rationale: $("rule-rationale").value, ...(decision === "retire" ? {} : { conditions: formConditions() }) };
+  $("rules-sheet").hidden = true;  // the confirm sheet takes its place
+  try { await decide([item]); } catch (error) { showError(error); $("rules-sheet").hidden = false; return; }  // cancelled or refused: back to the form as it was
+  await openRulesSheet();  // back to the list, as it now stands
 }
 
 // who wrote a snapshot's key ideas, as its record says (ADR-0013): recorded by the studio, never read from the file
@@ -177,15 +304,19 @@ const DECISION_LABELS = {
   "evidence_review:unusable": "Mark this Evidence check unusable",
   "challenge_resolution:dismissed": "Dismiss this Challenge (a false alarm)",
   "dependent_migration:superseded": "Move every dependent onto this corrected source (Accepted ones need re-Accepting)",
+  "trust_rule:declare": "Declare a Trust rule",
+  "trust_rule:amend": "Amend the Trust rule (its rationale and conditions)",
+  "trust_rule:retire": "Retire the Trust rule (final; the name is never reused)",
 };
 
 function showError(error) { if (error.message !== "cancelled") say(error.code ? `${error.code}: ${error.message}` : error.message, "error"); }
 
-function decisionRow(decision, proof) {
+function decisionRow(decision, proof, prefill) {
   const label = DECISION_LABELS[`${decision.kind}:${decision.decision}`] || `${decision.kind}: ${decision.decision}`;
   const on = decision.kind === "dependent_migration" ? `onto ${decision.dependency_id}`
     : decision.dependency_id ? `dependency ${decision.dependency_id}` : decision.target_id;
   const rationale = el("input", null, { placeholder: "why" });
+  if (prefill) rationale.value = prefill;
   const button = el("button", "Record");
   button.onclick = async () => {
     const binds = ["acceptance", "promote", "dependency_revalidation"].includes(decision.kind) && proof;
@@ -234,7 +365,13 @@ function tagOf(n) {
   if (n.workflow_state === "revision-requested") return ["revision requested", "review"];
   if (n.workflow_state === "blocked") return ["blocked", "blocked"];
   if (["accepted", "reviewed"].includes(n.acceptance_state)) return [n.acceptance_state, "accepted"];
+  if (n.acceptance_state === "trusted-by-rule") return ["trusted by rule", "accepted"];  // the rule names: on the chips, the tree, the node page
   return ["open", "open"];
+}
+
+// an imported result's acceptance axis, in words: "trusted by rule <names>" names the Trust rules it meets (ADR-0014)
+function acceptanceText(n) {
+  return n.acceptance_state === "trusted-by-rule" ? `trusted by rule ${(n.trust_rule || []).join(", ")}` : n.acceptance_state;
 }
 
 // the icons, SF Symbols' ".circle.fill" style: a filled disc, a white glyph, 16 × 16
@@ -252,7 +389,7 @@ const STATUS_GLYPHS = {
 // word: every axis value lands on one of the seven states (neutral ones get a plain grey disc).
 const VALUE_STATE = {
   frontier: "ready", claimed: "claimed", "review-needed": "review", "revision-requested": "review", blocked: "blocked",
-  accepted: "accepted", reviewed: "accepted", rejected: "rejected", "no-longer-callable": "rejected",
+  accepted: "accepted", reviewed: "accepted", "trusted-by-rule": "accepted", rejected: "rejected", "no-longer-callable": "rejected",
   unverifiable: "attention", "potentially-stale": "attention", challenged: "attention",
 };
 function stateChip(value, text, title) {
@@ -444,7 +581,7 @@ function drawDag(nodes) {
     const left = -BOX.w / 2, top = -BOX.h / 2;
     const classes = ["node", `state-${tagOf(n)[1]}`, n.frontier ? "frontier" : "", rejected(n) ? "rejected" : ""].filter(Boolean).join(" ");
     const place = () => { const p = at.get(n.id); g.setAttribute("transform", `translate(${p.x},${p.y})`); };
-    const g = svg("g", { class: classes, "data-node-id": n.id, tabindex: 0, role: "link", "aria-label": `${n.kind} ${n.id}: ${n.acceptance_state}, ${n.workflow_state}, ${n.integrity_state}${n.assignee ? `, claimed by ${n.assignee}` : ""}${n.frontier ? ", on the frontier" : ""}` });
+    const g = svg("g", { class: classes, "data-node-id": n.id, tabindex: 0, role: "link", "aria-label": `${n.kind} ${n.id}: ${acceptanceText(n)}, ${n.workflow_state}, ${n.integrity_state}${n.assignee ? `, claimed by ${n.assignee}` : ""}${n.frontier ? ", on the frontier" : ""}` });
     place();
     g.append(svg("rect", { class: "box", x: left, y: top, width: BOX.w, height: BOX.h, rx: BOX.radius }));
     const kind = svg("text", { class: "kind", x: left + 14, y: top + 21 });
@@ -470,6 +607,7 @@ function drawDag(nodes) {
     // hovering shows the current snapshot's 核心思路 (ADR-0013), under the statement it proves
     const title = svg("title");
     title.textContent = n.core_idea ? `${n.statement}\n核心思路：${n.core_idea}` : n.statement;
+    if (n.acceptance_state === "trusted-by-rule") title.textContent += `\n${acceptanceText(n)}`;  // the card's word is short; the names are a hover away
     g.append(title);
     // drag a node to move it (its edges follow); a click without a drag opens it
     let drag = null;
@@ -523,7 +661,7 @@ function drawTree(nodes) {
     if (!n) { li.append(el("span", `${id} (missing)`, { class: "warning" })); return li; }
     li.append(el("a", n.id, { href: pageOf(n), ...(n.core_idea ? { title: `核心思路：${n.core_idea}` } : {}) }), ` — ${short(n.display_label || n.statement, 60)}`);
     const small = (chip) => { chip.classList.add("state-chip"); return chip; };
-    li.append(small(stateChip(n.acceptance_state)), small(stateChip(n.workflow_state)), small(stateChip(n.integrity_state)));
+    li.append(small(stateChip(n.acceptance_state, acceptanceText(n))), small(stateChip(n.workflow_state)), small(stateChip(n.integrity_state)));
     if (n.assignee) li.append(small(stateChip("claimed", n.assignee, `claimed by ${n.assignee}`)));
     if (n.frontier) li.append(small(stateChip("frontier", "frontier", "on the frontier: ready to start")));
     if ((parents.get(id) || 0) > 1) li.append(el("span", "shared", { class: "state-chip shared-chip", title: `used by ${parents.get(id)} nodes; see the DAG` }));
@@ -639,8 +777,9 @@ async function showNode(nodeId) {
   const view = await api(`/api/node/${encodeURIComponent(nodeId)}`);
   const node = view.node;
   $("node-title").replaceChildren(node.id, el("small", node.kind.replace("_", " ")));
-  const axis = (name, value) => { const cell = el("div"); cell.append(el("span", name, { class: "lbl" }), stateChip(value, value, `${name}: ${value}`)); return cell; };
-  $("node-axes").replaceChildren(axis("workflow", view.workflow_state), axis("acceptance", view.acceptance_state), axis("integrity", view.integrity_state));
+  const axis = (name, value, text = value) => { const cell = el("div"); cell.append(el("span", name, { class: "lbl" }), stateChip(value, text, `${name}: ${text}`)); return cell; };
+  const acceptance = acceptanceText({ acceptance_state: view.acceptance_state, trust_rule: view.trust_rule });
+  $("node-axes").replaceChildren(axis("workflow", view.workflow_state), axis("acceptance", view.acceptance_state, acceptance), axis("integrity", view.integrity_state));
   const nodeWarnings = el("ul");
   showWarnings(view.warnings, nodeWarnings);
   $("node-warnings").replaceChildren(el("h3", "Warnings for this node"), nodeWarnings);
@@ -678,9 +817,13 @@ async function showNode(nodeId) {
   }
   $("node-evidence").replaceChildren(...view.evidence_checks.map(evidenceItem));
   const decisions = $("node-decisions").querySelector("tbody");
-  decisions.replaceChildren(...view.decisions.map((d) => decisionRow(d, proof)));
+  // reviewing a node trusted by rule explicitly (ADR-0014): the ordinary Reference review, its rationale prefilled
+  const prefill = view.acceptance_state === "trusted-by-rule" ? `matched trust rule ${(view.trust_rule || []).join(", ")}; reviewed explicitly` : "";
+  decisions.replaceChildren(...view.decisions.map((d) => decisionRow(d, proof, d.kind === "reference_review" && d.decision === "reference-review" ? prefill : "")));
   if (!view.decisions.length) decisions.append(row(["No decision to make on this node right now.", "", "", ""]));
-  $("node-history").replaceChildren(...view.history.filter((r) => r.kind).map((r) => el("li", `${r.updated_at} · ${r.kind} · ${r.decision} · ${r.reviewer_id}${r.key_ideas_drafted_by ? ` · key ideas: ${KEY_IDEAS_BY[r.key_ideas_drafted_by] || r.key_ideas_drafted_by}` : ""}${r.rationale ? ` — ${r.rationale}` : ""}`)));
+  // when the node first met each Trust rule: on record as an event, never a decision (ADR-0014)
+  const met = (view.rule_events || []).map((e) => el("li", `${e.at} · trusted by rule ${e.rule} since then — no decision written; the rule's declaration is the record`, { class: "rule-event" }));
+  $("node-history").replaceChildren(...met, ...view.history.filter((r) => r.kind).map((r) => el("li", `${r.updated_at} · ${r.kind} · ${r.decision} · ${r.reviewer_id}${r.key_ideas_drafted_by ? ` · key ideas: ${KEY_IDEAS_BY[r.key_ideas_drafted_by] || r.key_ideas_drafted_by}` : ""}${r.rationale ? ` — ${r.rationale}` : ""}`)));
 }
 
 // An Evidence check names the Review snapshot it checked (issue #122): its version and a short
@@ -790,6 +933,12 @@ document.addEventListener("DOMContentLoaded", () => {
     try { localStorage.setItem("proof.map.sidebar", hidden ? "hidden" : "shown"); } catch { /* ignore */ }
     if (view.fitted) setTimeout(fitView, 240);
   });
+  $("manage-rules").addEventListener("click", (event) => { event.preventDefault(); openRulesSheet().catch(showError); });
+  $("rule-cancel").addEventListener("click", () => { $("rules-sheet").hidden = true; });
+  $("rule-new").addEventListener("click", () => ruleForm("declare"));
+  $("rule-record").addEventListener("click", () => recordRule());
+  $("rule-form").addEventListener("submit", (event) => event.preventDefault());  // Enter in a field never reloads the page
+  for (const id of ["cond-reviewed", "cond-doi", "cond-arxiv", "cond-types", "rule-name"]) $(id).addEventListener("change", () => ruleFormChanged());
   $("view-dag").addEventListener("click", () => { mapView = "dag"; showMap(); });
   $("view-tree").addEventListener("click", () => { mapView = "tree"; showMap(); });
   $("tree-root").addEventListener("change", showMap);

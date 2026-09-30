@@ -66,6 +66,7 @@ def render_proof_map_node(
     working_proof: str | None = None,
     snapshots: list[dict] | None = None,
     citation: dict | None = None,
+    trust_rule: list[str] | None = None,
 ) -> str:
     console = _console()
     console.rule(f"Proof Map Node: {node.id}")
@@ -106,6 +107,9 @@ def render_proof_map_node(
         table.add_row("Blocked reason", blocked_reason)
     if acceptance_state is not None:
         table.add_row("Acceptance state", acceptance_state)
+    if trust_rule:
+        # the Trust rules an imported result meets (ADR-0014)
+        table.add_row("Trust rule", ", ".join(trust_rule))
     if integrity_state is not None:
         table.add_row("Integrity state", integrity_state)
     if working_proof is not None:
@@ -188,6 +192,44 @@ def render_proof_map_node_list(nodes: list[ProofMapNode]) -> str:
     for node in nodes:
         table.add_row(node.id, node.kind.value, node.statement)
     console.print(table)
+    return console.export_text()
+
+
+def render_trust_rule_list(rules: list[dict]) -> str:
+    """The Trust rules (ADR-0014): name, conditions, what each trusts now."""
+    console = _console()
+    console.rule("Trust Rules")
+    if not rules:
+        console.print("No trust rule is in force: every imported result needs its own Reference review.")
+        return console.export_text()
+    table = Table()
+    table.add_column("name")
+    table.add_column("conditions")
+    table.add_column("trusting")
+    table.add_column("rationale")
+    for rule in rules:
+        name = f"{rule['name']} (retired)" if rule.get("retired") else rule["name"]
+        table.add_row(name, "; ".join(rule["conditions_text"]), ", ".join(rule["trusting"]) or "—", rule["rationale"])
+    console.print(table)
+    return console.export_text()
+
+
+def render_trust_rule(rule: dict) -> str:
+    """One Trust rule with every decision recorded under its name (`proof trust-rule show`)."""
+    console = _console()
+    console.rule(f"Trust Rule: {rule['name']}")
+    table = Table(show_header=False, box=None, pad_edge=False)
+    table.add_column("key", style="bold")
+    table.add_column("value")
+    table.add_row("Status", "retired" if rule.get("retired") else "in force")
+    table.add_row("Rationale", rule["rationale"])
+    table.add_row("Conditions", "; ".join(rule["conditions_text"]) or "none")
+    table.add_row("Declared by", f"{rule['declared_by']} at {rule['declared_at']}")
+    table.add_row("Trusting", ", ".join(rule["trusting"]) or "none")
+    console.print(table)
+    console.print("History")
+    for row in rule.get("history", []):
+        console.print(f"  {row['decided_at']} · {row['decision']} · {row['reviewer']} — {row['rationale']}")
     return console.export_text()
 
 
