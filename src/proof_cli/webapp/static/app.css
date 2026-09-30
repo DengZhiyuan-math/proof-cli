@@ -366,3 +366,61 @@ td a { font-family: var(--mono); font-size: 12px; }
   .find-count { order: 4; }
 }
 @media (prefers-reduced-motion: reduce) { .rail { transition: none; } }
+
+/* ---------- the fog drawer (issue #137, ADR-0008): the Proof fog beside the map, never on it */
+.badge.fog b { color: var(--indigo); }
+.badge.fog.on { background: color-mix(in srgb, var(--indigo) 16%, transparent); }
+.fog-drawer { position: absolute; top: 12px; right: 12px; bottom: 76px; width: 360px; z-index: 4; display: flex; flex-direction: column;
+  background: color-mix(in srgb, var(--surface) 86%, transparent); backdrop-filter: saturate(180%) blur(20px); -webkit-backdrop-filter: saturate(180%) blur(20px);
+  border-radius: 14px; box-shadow: var(--shadow-pop); overflow: hidden; }
+.fog-drawer-head { display: flex; align-items: center; gap: 8px; padding: 12px 14px 4px; flex-wrap: wrap; }
+.fog-drawer-head h2 { font-size: 15px; }
+.fog-drawer-head .n { color: var(--label-3); font-weight: 500; font-size: 13px; }
+.fog-drawer-head .close { margin-left: auto; width: 26px; height: 26px; padding: 0; border: 0; box-shadow: none; background: var(--fill); border-radius: 13px; color: var(--label-2); }
+.fog-toggle { display: flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--label-2); margin-left: 4px; }
+.fog-drawer > .hint { margin: 0 14px 8px; }
+.fog-composer { display: grid; gap: 6px; padding: 0 14px 10px; border-bottom: .5px solid var(--sep); }
+.fog-composer input[type=text] { width: 100%; font-family: var(--serif); font-size: 14px; }
+.fog-composer .row2 { display: flex; gap: 6px; }
+.fog-composer .row2 select { flex: 1; min-width: 0; height: 28px; }
+.fog-list { list-style: none; margin: 0; padding: 6px 8px 12px; overflow: auto; flex: 1; display: grid; gap: 4px; align-content: start; }
+.fog-list li { display: grid; gap: 5px; padding: 8px 10px; border-radius: 9px; }
+.fog-list li:hover { background: var(--fill); }
+.fog-list li.gone { opacity: .6; }
+.fog-list li.fog-none { color: var(--label-3); font-size: 12.5px; }
+.fog-list .line { display: flex; gap: 8px; align-items: baseline; }
+.fog-id { font-family: var(--mono); font-size: 11.5px; color: var(--label-3); }
+.fog-text { font-family: var(--serif); font-size: 14px; line-height: 1.45; color: var(--label); margin: 0; }
+.fog-notes { margin: 0; }
+.fog-list .meta { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 11.5px; color: var(--label-3); }
+.fog-near { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.fog-near a { font-family: var(--mono); font-size: 11px; padding: 1px 7px; border-radius: 9px; background: var(--fill); color: var(--label-2); }
+.fog-near a:hover { text-decoration: none; background: var(--fill-2); }
+.fog-status { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--label-3); }
+.fog-status a { font-family: var(--mono); text-transform: none; letter-spacing: 0; }
+.fog-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.fog-actions button { height: 26px; font-size: 12px; padding: 0 9px; }
+.fog-form { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: 0; padding-top: 4px; border-top: .5px solid var(--sep); }
+.fog-form input[type=text] { flex: 1; min-width: 120px; }
+.fog-form select { height: 28px; }
+.fog-form button { height: 26px; font-size: 12px; }
+.fog-cli-hint { margin: 0; padding-top: 4px; border-top: .5px solid var(--sep); }
+.fog-cli { display: block; margin-top: 4px; user-select: all; word-break: break-all; }
+/* an Experiment's outcome: a dot chip, unlike a node state's icon chip, so supports and refutes never read as accepted and rejected */
+.exp { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 8px 0 6px; border-radius: 10px; font-size: 11px; font-weight: 600; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.exp::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
+.exp.supports { color: var(--green); background: color-mix(in srgb, var(--green) 13%, transparent); }
+.exp.refutes { color: var(--red); background: color-mix(in srgb, var(--red) 13%, transparent); }
+.exp.inconclusive { color: var(--label-2); background: var(--fill); }
+.exp.error { color: var(--yellow-text); background: color-mix(in srgb, var(--yellow) 22%, transparent); }
+.exp.none { color: var(--label-3); background: transparent; font-weight: 400; }
+.exp.none::before { display: none; }
+/* the hovered row's near nodes light up on the canvas; everything else falls back, as with the search box */
+#dag-svg.fog-focus .node:not(.fog-near) { opacity: .25; }
+#dag-svg.fog-focus .edge { opacity: .3; }
+#dag-svg .node.fog-near .box { stroke: var(--indigo); stroke-width: 2.6; }
+/* the node page's fog block */
+#node-fog:empty { display: none; }
+.node-fog-list { margin: 4px 0 0; padding-left: 18px; }
+.node-fog-list li { margin: 4px 0; }
+@media (max-width: 760px) { .fog-drawer { left: 12px; width: auto; } }

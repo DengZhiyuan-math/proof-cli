@@ -588,3 +588,141 @@ def test_a_change_is_recorded_only_against_the_impact_of_the_form_as_it_stands()
 
     _, declaring = _home_rules([{"manage": True}])
     assert not declaring["ruleRecordDisabled"]  # a declaration has no impact to wait for
+
+
+# -- the fog drawer (issue #137, ADR-0008): the toolbar badge, the drawer over the canvas, the rows ------
+
+def _fog(fog_id, text, near=(), status="open", experiments=(), **extra):
+    experiments = list(experiments)
+    return {"id": fog_id, "text": text, "notes": "", "near": list(near), "status": status, "reason": None, "dropped_by": None, "dropped_at": None,
+            "node_id": None, "created_by": "human", "created_at": "2026-09-28T10:12:00+00:00", "updated_at": "2026-09-28T10:12:00+00:00",
+            "experiments": list(reversed(experiments)), "experiment_count": len(experiments), "latest_experiment": experiments[-1] if experiments else None,
+            "folder": f"proofs/fog/{fog_id}", "folder_exists": False, **extra}
+
+
+def _experiment(fog_id, seq, outcome, summary, run_by="agent_a", path=None):
+    return {"fog_id": fog_id, "seq": seq, "outcome": outcome, "summary": summary, "run_by": run_by, "recorded_at": "2026-09-29T21:40:00+00:00", "path": path, "missing": False}
+
+
+FOG = {"items": [
+    _fog("fog-1", "the constant in lem_bound is probably optimal", ["lem_bound"],
+         experiments=[_experiment("fog-1", 1, "supports", "n ≤ 10⁶ checked, the ratio tends to 1", path="proofs/lem_bound/scratch/constant.py")]),
+    _fog("fog-2", "is there a variational characterisation?"),
+]}
+FOG_ALL = {"items": FOG["items"] + [
+    _fog("fog-3", "brute-force the generating function", ["lem_bound"], status="dropped", reason="the coefficients grow too fast", dropped_by="human", dropped_at="2026-09-29T09:03:00+00:00"),
+    _fog("fog-4", "the dependence on epsilon may be polynomial", ["thm_main"], status="crystallized", node_id="eps_poly"),
+]}
+
+
+def _fog_home(steps=(), fog=FOG, fog_all=FOG_ALL, nodes=None):
+    if shutil.which("node") is None:
+        pytest.skip("needs node")
+    scenario = {"state": _state(PENDING), "map": MAP, "steps": list(steps), "nodes": nodes or {}, "fog": fog, "fogAll": fog_all}
+    done = subprocess.run(["node", str(HARNESS), json.dumps(scenario)], capture_output=True, text=True, timeout=30)
+    assert done.returncode == 0, done.stderr
+    return json.loads(done.stdout)
+
+
+def test_the_toolbar_badge_counts_the_open_fog_and_opens_the_drawer_listing_each_item():
+    closed, opened = _fog_home(steps=[{"fog": True}])
+    assert closed["fogBadge"] == "2" and not closed["fogDrawerShown"]
+    assert opened["fogDrawerShown"] and opened["fogCount"] == "2"
+    first, second = opened["fogRows"]
+    assert first["id"] == "fog-1" and "the constant in lem_bound is probably optimal" in first["text"]
+    assert first["near"] == ["lem_bound"] and first["exp"].startswith("supports") and "ratio tends to 1" in first["exp"]
+    assert "agent_a" in first["expTitle"] and "proofs/lem_bound/scratch/constant.py" in first["expTitle"]
+    assert first["actions"] == ["Crystallize…", "Record experiment…", "Drop…"]
+    assert second["id"] == "fog-2" and second["near"] == [] and second["exp"] == "no experiment yet"
+    assert opened["fogRows"] == [r for r in opened["fogRows"] if r["status"] is None]  # open items carry no status line
+
+
+def test_hovering_a_row_lights_its_near_nodes_up_on_the_canvas_and_draws_nothing():
+    _, _, hovered, left = _fog_home(steps=[{"fog": True}, {"fogHover": "fog-1"}, {"fogLeave": "fog-1"}])
+    assert hovered["fogFocus"]
+    assert "fog-near" in hovered["dag"]["lem_bound"]["classes"] and "fog-near" not in hovered["dag"]["thm_main"]["classes"]
+    assert not left["fogFocus"] and all("fog-near" not in n["classes"] for n in left["dag"].values())
+    assert all(len(n["texts"]) == len(m["texts"]) for n, m in zip(hovered["dag"].values(), left["dag"].values()))  # nothing added to the cards
+
+
+def test_adding_from_the_composer_posts_the_text_and_the_near_node_and_clears_the_box():
+    _, _, added = _fog_home(steps=[{"fog": True}, {"fogAdd": {"text": "maybe the bound is sharp", "near": "lem_bound"}}])
+    (sent,) = [p for p in added["posted"] if p["url"] == "/api/fog"]
+    assert sent["body"] == {"text": "maybe the bound is sharp", "near": ["lem_bound"]}
+    assert added["fogAddText"] == "" and added["message"] == "Fog item added."
+
+
+def test_adding_nothing_posts_nothing():
+    _, _, added = _fog_home(steps=[{"fog": True}, {"fogAdd": {"text": "   "}}])
+    assert added["posted"] == [] and added["message"] == "Say what the difficulty is."
+
+
+def test_dropping_asks_for_a_reason_inline_and_posts_it():
+    readings = _fog_home(steps=[
+        {"fog": True}, {"fogButton": {"id": "fog-1", "text": "Drop…"}},
+        {"fogButton": {"id": "fog-1", "text": "Drop"}},
+        {"fogFill": {"id": "fog-1", "name": "reason", "value": "the ratio is not monotone after all"}}, {"fogButton": {"id": "fog-1", "text": "Drop"}},
+    ])
+    asked, refused, dropped = readings[2], readings[3], readings[5]
+    (row,) = [r for r in asked["fogRows"] if r["id"] == "fog-1"]
+    assert row["form"] and "Drop" in row["actions"] and "Cancel" in row["actions"]
+    assert refused["posted"] == [] and refused["message"] == "A reason is required to drop a fog item."
+    (sent,) = dropped["posted"]
+    assert sent == {"url": "/api/fog/fog-1/drop", "body": {"reason": "the ratio is not monotone after all"}}
+    assert dropped["message"] == "fog-1: dropped."
+
+
+def test_recording_an_experiment_posts_its_outcome_and_summary():
+    recorded = _fog_home(steps=[
+        {"fog": True}, {"fogButton": {"id": "fog-2", "text": "Record experiment…"}},
+        {"fogFill": {"id": "fog-2", "name": "outcome", "value": "refutes"}}, {"fogFill": {"id": "fog-2", "name": "summary", "value": "the functional has no critical point for n = 7"}},
+        {"fogButton": {"id": "fog-2", "text": "Record"}},
+    ])[-1]
+    (sent,) = recorded["posted"]
+    assert sent == {"url": "/api/fog/fog-2/experiment", "body": {"outcome": "refutes", "summary": "the functional has no critical point for n = 7"}}
+
+
+def test_the_toggle_lists_dropped_and_crystallized_items_apart_and_reopens_a_dropped_one():
+    _, _, everything, reopened = _fog_home(steps=[{"fog": True}, {"fogAll": True}, {"fogButton": {"id": "fog-3", "text": "Reopen"}}])
+    assert [r["id"] for r in everything["fogRows"]] == ["fog-1", "fog-2", "fog-3", "fog-4"]
+    assert everything["fogCount"] == "2" and everything["fogBadge"] == "2"  # the counts stay the open items
+    dropped, crystallized = everything["fogRows"][2], everything["fogRows"][3]
+    assert dropped["status"].startswith("dropped · human, 2026-09-29") and "the coefficients grow too fast" in dropped["status"]
+    assert dropped["actions"] == ["Reopen"]
+    assert crystallized["status"] == "crystallized as eps_poly" and crystallized["actions"] == []
+    (sent,) = reopened["posted"]
+    assert sent == {"url": "/api/fog/fog-3/reopen", "body": {}}
+
+
+def test_crystallize_shows_the_cli_command_with_the_near_node_as_the_parent():
+    _, _, shown = _fog_home(steps=[{"fog": True}, {"fogButton": {"id": "fog-1", "text": "Crystallize…"}}])
+    (row,) = [r for r in shown["fogRows"] if r["id"] == "fog-1"]
+    assert row["cli"] == 'proof fog crystallize fog-1 <node-id> "<statement>" --parent lem_bound'
+    assert shown["posted"] == []
+    _, _, loose = _fog_home(steps=[{"fog": True}, {"fogButton": {"id": "fog-2", "text": "Crystallize…"}}])
+    (row,) = [r for r in loose["fogRows"] if r["id"] == "fog-2"]
+    assert row["cli"] == 'proof fog crystallize fog-2 <node-id> "<statement>"'
+
+
+def test_the_drawer_closes_from_its_button_and_the_badge_reads_the_same():
+    _, opened, closed = _fog_home(steps=[{"fog": True}, {"fogClose": True}])
+    assert opened["fogDrawerShown"] and not closed["fogDrawerShown"] and closed["fogBadge"] == "2"
+
+
+NODE_VIEW = {
+    "node": {"id": "eps_poly", "kind": "claim", "statement": "The dependence on epsilon is polynomial", "assumptions": [], "dependencies": []},
+    "workflow_state": "open", "acceptance_state": "unreviewed", "integrity_state": "current", "warnings": [], "claim": None, "studio": "/studio/eps_poly/",
+    "folder": "proofs/eps_poly", "source": None, "citation": None, "dependents": [], "pdfs": {}, "dependencies": [], "challenges": [], "candidate_proof": None,
+    "evidence_checks": [], "decisions": [], "history": [], "crystallized_from": "fog-4",
+    "fog_near": [_fog("fog-5", "does the polynomial degree depend on the dimension?", ["eps_poly"], experiments=[_experiment("fog-5", 1, "inconclusive", "degree 2 up to n = 4")])],
+}
+
+
+def test_the_node_page_says_which_fog_item_it_was_crystallized_from_and_lists_the_fog_near_it():
+    _, opened = _fog_home(steps=[{"open": "eps_poly"}], nodes={"eps_poly": NODE_VIEW})
+    assert opened["nodePageShown"]
+    assert "Crystallized from fog-4" in opened["nodeFog"]
+    assert "Fog near this node" in opened["nodeFog"] and "does the polynomial degree depend on the dimension?" in opened["nodeFog"]
+    assert "inconclusive" in opened["nodeFog"] and opened["nodeFogLinks"] == ["fog-4", "fog-5"]
+    _, plain = _fog_home(steps=[{"open": "eps_poly"}], nodes={"eps_poly": {**NODE_VIEW, "crystallized_from": None, "fog_near": []}})
+    assert plain["nodeFog"] == ""
