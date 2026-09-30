@@ -26,7 +26,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from pathlib import PurePosixPath
 from typing import Any, Callable, Iterator
-from urllib.parse import unquote, urlsplit
+from urllib.parse import unquote, urlsplit, parse_qs
 
 from .. import proof_map
 from ..collaboration import list_review_records
@@ -34,6 +34,7 @@ from ..domain import ProofMapNodeKind
 from ..references import ReferenceSourceType
 from ..reviews import git_identity
 from ..trust_rules import WEAK_SOURCE_TYPES, list_trust_rules, trust_rule_history
+from .. import fog as proof_fog
 from ..storage import (
     ProjectStore,
     get_active_claim,
@@ -503,6 +504,9 @@ class ReviewApp:
                 if node.kind == ProofMapNodeKind.imported_result else None
             ),
             "citation": proof_map.node_citation(store, node),
+            # the open fog near this node, and the fog item it was crystallized from (ADR-0008, spec #136)
+            "fog_near": [proof_fog.fog_view(store, item) for item in proof_fog.fog_near(store, node_id)],
+            "crystallized_from": (origin := proof_fog.crystallized_from(store, node_id)) and origin.id,
             "dependents": sorted(other.id for other in proof_map.list_nodes(store) if node_id in other.dependencies),
             "pdfs": self._pdfs(node_id, proof),
             "evidence_checks": checks,
@@ -515,6 +519,43 @@ class ReviewApp:
             "warnings": _warnings_for(warnings, node_id, *(challenge.id for challenge in challenges)),
             "decisions": _available_decisions(store, node, claim=claim, proof=proof, dependencies=dependencies, challenges=challenges),
         }
+
+    # -- Proof fog (ADR-0008, spec #136): what the drawer reads and writes; the presentation is issue #137
+
+    def fog(self, *, include_all: bool = False) -> dict:
+        """Every open fog item (or every item), each with its near nodes and its Experiments."""
+        with self._one_state():
+            return {"items": [proof_fog.fog_view(self.store, item) for item in proof_fog.list_fog(self.store, include_all=include_all)]}
+
+    def fog_add(self, body: dict) -> dict:
+        texts = [str(item) for item in body.get("near") or [] if str(item).strip()]
+        item = proof_fog.add_fog(self.store, str(body.get("text") or ""), near=texts, notes=str(body.get("notes") or ""), created_by=self._actor())
+        return proof_fog.fog_view(self.store, item)
+
+    def fog_action(self, fog_id: str, action: str, body: dict) -> dict:
+        """The page's writes on one item, with the CLI's checks and codes: edit, drop, reopen, experiment."""
+        actor = self._actor()
+        if action == "edit":
+            near = body.get("near")
+            item = proof_fog.edit_fog(
+                self.store, fog_id,
+                text=body["text"] if isinstance(body.get("text"), str) else None,
+                near=[str(n) for n in near] if isinstance(near, list) else None,
+                notes=body["notes"] if isinstance(body.get("notes"), str) else None,
+                edited_by=actor,
+            )
+            return proof_fog.fog_view(self.store, item)
+        if action == "drop":
+            return proof_fog.fog_view(self.store, proof_fog.drop_fog(self.store, fog_id, reason=str(body.get("reason") or ""), dropped_by=actor))
+        if action == "reopen":
+            return proof_fog.fog_view(self.store, proof_fog.reopen_fog(self.store, fog_id, by=actor))
+        if action == "experiment":
+            experiment = proof_fog.record_experiment(
+                self.store, fog_id, str(body.get("outcome") or ""), summary=str(body.get("summary") or ""),
+                run_by=str(body.get("run_by") or actor), path=body.get("path") or None,
+            )
+            return experiment.model_dump(mode="json")
+        raise RequestError(HTTPStatus.NOT_FOUND, "NOT_FOUND", f"no fog action {action!r}")
 
     # -- decisions ----------------------------------------------------------------
 
@@ -637,6 +678,9 @@ class _Handler(BaseHTTPRequestHandler):
             return self._guarded(self.app.map)
         if path == "/api/trust-rules":
             return self._guarded(self.app.trust_rules)
+        if path == "/api/fog":
+            include_all = parse_qs(urlsplit(self.path).query).get("all", ["0"])[0] not in ("", "0", "false")
+            return self._guarded(lambda: self.app.fog(include_all=include_all))
         if path.startswith("/api/node/") and path.endswith(("/pdf/snapshot", "/pdf/build")):
             node_id, _, which = unquote(path.removeprefix("/api/node/")).rpartition("/pdf/")
             try:
@@ -680,11 +724,15 @@ class _Handler(BaseHTTPRequestHandler):
             "/api/nodes": lambda: self.app.create_node(body),
             # a read: what a rule change would do, asked with the change itself (ADR-0014)
             "/api/trust-rules/preview": lambda: self.app.trust_rule_preview(body),
+            "/api/fog": lambda: self.app.fog_add(body),
         }
         route = routes.get(path)
         if route is None and path.startswith("/api/node/"):  # the node panel: /api/node/<id>/<action>
             node_id, _, action = path.removeprefix("/api/node/").rpartition("/")
             route = lambda: self.app.node_action(unquote(node_id), action, body)
+        if route is None and path.startswith("/api/fog/"):  # the fog drawer: /api/fog/<fog-id>/<action>
+            fog_id, _, action = path.removeprefix("/api/fog/").rpartition("/")
+            route = lambda: self.app.fog_action(unquote(fog_id), action, body)
         if route is None:
             return self._error(HTTPStatus.NOT_FOUND, "NOT_FOUND", self.path)
         self._guarded(route)

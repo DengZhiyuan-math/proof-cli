@@ -23,6 +23,7 @@ proof --help
 proof frontier
 proof node show <id>
 proof trust-rule list   # the Trust rules in force (read-only; declared on the page)
+proof fog list          # the Proof fog: difficulties not yet precise enough to be a Claim
 ```
 
 Every command acts on `--root`, else `$PROOF_ROOT`, else the current folder. An agent working inside a node's folder, like the studio's agent panel, keeps `PROOF_ROOT` set to the project root.
@@ -65,6 +66,18 @@ A request without `key-ideas.md`, or with 核心思路 or 主要步骤 empty, is
 - **An imported result's page** shows its source, trust level and dependents, and its Reference review.
 
 When you request review after compiling in the studio, the fresh `build/proof.pdf` is archived as `snapshots/v<N>.pdf` next to the snapshot and committed with the decision. `proofs/.gitignore` keeps `build/` out of git. Compiling needs a TeX distribution or Tectonic; without one, the studio still edits and requests review.
+
+## Proof fog
+
+A difficulty you can't state precisely yet goes in the **Proof fog** (ADR-0008), a flat list outside the map — never a node, never a dependency. Anyone, agents included, may add one, edit it, drop it with a reason or reopen it; an item may be *near* the nodes it is about. A numerical run about an item is an **Experiment**, recorded with what it showed (supports, refutes, inconclusive, error), who ran it and where its files are; it never changes the item's status. When the idea can be stated, **crystallize** it into a Claim in one step (a single-child Split of its parent when it has one); the item then reads crystallized and the node's page says where it came from.
+
+```bash
+proof fog add "the constant C is probably optimal" --near L1
+proof fog experiment record fog-1 supports --summary "checked n ≤ 10^6" --run-by agent_a --path proofs/L1/scratch/constant.py
+proof fog crystallize fog-1 C2 "For every n, C(n) ≤ 1 + 1/n"   # parent: the one near node, or --parent / --no-parent
+proof fog drop fog-2 --reason "the coefficients grow too fast"  # proof fog reopen fog-2 takes it back
+proof fog list --all                                           # dropped and crystallized items too
+```
 
 ## Human Review
 
