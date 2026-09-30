@@ -344,6 +344,8 @@ class ProjectState(BaseModel):
     open_goals: list[str] = Field(default_factory=list)
     open_obligations: list[str] = Field(default_factory=list)
     blockers: list[str] = Field(default_factory=list)
+    # legacy (spec #136): written only by the legacy obligation, blocker and literature-route paths, never
+    # migrated; a direction given up is a dropped Proof fog item now, which `project analyze` reads first
     failed_routes: list[str] = Field(default_factory=list)
     session_history: list[str] = Field(default_factory=list)
     latest_snapshot_id: str | None = None

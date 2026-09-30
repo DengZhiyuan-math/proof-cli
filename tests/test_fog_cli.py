@@ -92,7 +92,7 @@ def test_crystallize_prints_the_node_with_a_fog_field_and_node_show_names_its_or
     shown = _json(tmp_path, "node", "show", "C_new")["data"]
     assert shown["crystallized_from"] == "fog-1" and shown["fog_near"] == []
     add_fog(store, "about the new claim", near=["C_new"])
-    assert [f["id"] for f in _json(tmp_path, "node", "show", "C_new")["data"]["fog_near"]] == ["fog-2"]
+    assert _json(tmp_path, "node", "show", "C_new")["data"]["fog_near"] == ["fog-2"]
     text = runner.invoke(app, ["node", "show", "C_new", "--root", str(tmp_path)])
     assert "Crystallized from" in text.output and "fog-1" in text.output and "fog-2" in text.output
 

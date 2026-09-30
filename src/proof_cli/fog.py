@@ -27,10 +27,12 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from .domain import ExperimentOutcome, FogExperiment, FogItem, FogStatus, ProofMapNode, utc_now
-from .proof_map import ProofMapError, create_node, require_node, split_node
+from .proof_map import ProofMapError, _remove_folders, create_node, node_id_problem, require_node, split_node
 from .storage import (
     ProjectStore,
     append_event,
+    get_proof_map_node,
+    on_rollback,
     get_fog_item,
     insert_fog_experiment,
     insert_fog_item,
@@ -39,7 +41,7 @@ from .storage import (
     next_fog_number,
     update_fog_item,
 )
-from .vault import vault_dir
+from .vault import node_folder, vault_dir
 
 FOG_DIR = "fog"
 
@@ -96,12 +98,14 @@ def last_dropped(store: ProjectStore) -> FogItem | None:
 def fog_view(store: ProjectStore, item: FogItem) -> dict:
     """An item as `fog show` and the page report it: its record, its Experiments (newest first), the folder."""
     experiments = list_experiments(store, item.id)
+    folder = fog_folder(store.root, item.id)
     return {
         **item.model_dump(mode="json"),
         "experiments": [experiment.model_dump(mode="json") for experiment in reversed(experiments)],
+        "experiment_count": len(experiments),
         "latest_experiment": experiments[-1].model_dump(mode="json") if experiments else None,
-        "folder": fog_folder(store.root, item.id).relative_to(store.root).as_posix(),
-        "folder_exists": fog_folder(store.root, item.id).is_dir(),
+        "folder": folder.relative_to(store.root).as_posix(),
+        "folder_exists": folder.is_dir(),
     }
 
 
@@ -193,7 +197,10 @@ def reopen_fog(store: ProjectStore, fog_id: str, *, by: str = "human") -> FogIte
 
 
 def _checked_path(store: ProjectStore, path: str | None) -> str | None:
-    """A path under proofs/, relative to the project, that exists right now; None when none was given."""
+    """A path under proofs/, relative to the project, that exists right now; None when none was given.
+
+    A symlink under proofs/ pointing elsewhere passes: the check keeps a cooperative agent's
+    records tidy, it is not a boundary against a hostile one (ADR-0011)."""
     if path is None or not str(path).strip():
         return None
     given = Path(str(path).strip())
@@ -234,8 +241,14 @@ def record_experiment(store: ProjectStore, fog_id: str, outcome: str, *, summary
 class CrystallizeResult(BaseModel):
     node: ProofMapNode
     fog: FogItem
-    # a reminder when Experiment files sit in an agent's scratch/ folder
-    note: str = ""
+    # a reminder when Experiment files sit in an agent's scratch/ folder: they stay there, commit them to keep them
+    reminder: str = ""
+
+
+def _scratch_owner(path: str | None) -> str | None:
+    """The node whose scratch/ folder holds an Experiment's file (`proofs/<node>/scratch/…`), or None."""
+    parts = Path(path).parts if path else ()
+    return parts[1] if len(parts) > 3 and parts[0] == "proofs" and parts[2] == "scratch" else None
 
 
 def _resolve_parent(item: FogItem, *, parent: str | None, no_parent: bool) -> str | None:
@@ -286,16 +299,21 @@ def crystallize_fog(
         update_fog_item(store, item.model_copy(update={"status": FogStatus.crystallized, "node_id": node_id, "updated_at": utc_now()}), conn=conn)
         spec = {"id": node_id, "statement": statement, "assumptions": list(assumptions or []), "display_label": display_label}
         if parent_id is not None:
-            (node,) = split_node(store, parent_id, [spec], created_by=created_by, reassign=reassign)
+            (node,) = split_node(store, parent_id, [spec], created_by=created_by, reassign=reassign)  # cleans its child folder up on rollback
         else:
+            # a free-standing Claim writes its proof.tex before this transaction commits: if the commit then
+            # fails, the folder must go with the node (the same cleanup a Split registers, under the same lock)
+            folder = node_folder(store.root, node_id)
+            if node_id_problem(node_id) is None and get_proof_map_node(store, node_id) is None and not folder.exists():
+                on_rollback(store, lambda: _remove_folders({folder}))
             node = create_node(store, node_id=node_id, kind="claim", statement=statement, display_label=display_label, assumptions=list(assumptions or []), created_by=created_by)
         append_event(
             store, "proof_fog_crystallized", f"crystallized {item.id} as {node_id}",
             entity_id=item.id, payload={"node_id": node_id, "parent": parent_id, "created_by": created_by}, conn=conn,
         )
     crystallized = require_fog(store, fog_id)
-    scratch = sorted({Path(e.path).parts[1] for e in list_fog_experiments(store, fog_id) if e.path and len(Path(e.path).parts) > 2 and Path(e.path).parts[2] == "scratch"})
-    note = ""
-    if scratch:
-        note = "Experiment files stay where they are, in " + ", ".join(f"proofs/{n}/scratch/" for n in scratch) + "; commit them to git if they should be kept."
-    return CrystallizeResult(node=node, fog=crystallized, note=note)
+    owners = sorted({owner for owner in (_scratch_owner(e.path) for e in list_fog_experiments(store, fog_id)) if owner})
+    reminder = ""
+    if owners:
+        reminder = "Experiment files stay where they are, in " + ", ".join(f"proofs/{owner}/scratch/" for owner in owners) + "; commit them to git if they should be kept."
+    return CrystallizeResult(node=node, fog=crystallized, reminder=reminder)

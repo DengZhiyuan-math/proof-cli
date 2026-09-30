@@ -466,7 +466,7 @@ def node_show(
         trust_rule = trust_rules_of(store, node_id)
         # the fog item the node came out of, and the open fog near it (ADR-0008, spec #136)
         origin = crystallized_from(store, node_id)
-        near = [{"id": item.id, "text": item.text} for item in fog_near(store, node_id)]
+        near = [item.id for item in fog_near(store, node_id)]
         blocked_reason = get_blocked_reason(store, node_id) if workflow_state == "blocked" else None
     except ProofMapError as exc:
         _emit_node_error(exc, json_output, command="node.show")
@@ -509,7 +509,7 @@ def node_show(
                 citation=citation,
                 trust_rule=trust_rule,
                 crystallized_from=origin.id if origin else None,
-                fog_near=[item["id"] for item in near],
+                fog_near=near,
             )
         )
 
@@ -695,13 +695,13 @@ def fog_crystallize(
         raise typer.Exit(code=1)
     if json_output:
         payload = {**made.node.model_dump(mode="json"), "fog": {"id": made.fog.id, "status": made.fog.status.value, "node_id": made.fog.node_id}}
-        if made.note:
-            payload["note"] = made.note
+        if made.reminder:
+            payload["reminder"] = made.reminder
         typer.echo(dump_envelope(success_envelope("fog.crystallize", payload)))
         return
     typer.echo(render_proof_map_node(made.node, crystallized_from=made.fog.id))
-    if made.note:
-        typer.echo(made.note)
+    if made.reminder:
+        typer.echo(made.reminder)
 
 
 @fog_experiment_app.command("record")

@@ -221,9 +221,10 @@ def _record(
 
 
 _SAFE_NODE_ID = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9._-]*")
-# the vault's own files, beside the node folders: a node folder can't take their place, in any letter case
-# (a case-insensitive file system, macOS's default among them, would put `TRUST-RULES.JSONL/` where the file goes)
-_RESERVED_NODE_IDS = frozenset({TRUST_RULES_FILE.casefold(), preamble_path(Path(".")).name.casefold()})
+# the vault's own files and folders, beside the node folders: a node folder can't take their place, in any letter
+# case (a case-insensitive file system, macOS's default among them, would put `TRUST-RULES.JSONL/` where the file
+# goes). `fog/` holds the Proof fog items' folders (ADR-0008, spec #136).
+_RESERVED_NODE_IDS = frozenset({TRUST_RULES_FILE.casefold(), preamble_path(Path(".")).name.casefold(), "fog"})
 
 
 def node_id_problem(node_id: str) -> str | None:
@@ -231,7 +232,7 @@ def node_id_problem(node_id: str) -> str | None:
     if not _SAFE_NODE_ID.fullmatch(node_id):
         return f"node id {node_id!r} must be letters, digits, '.', '_' or '-', not starting with '.'"
     if node_id.casefold() in _RESERVED_NODE_IDS:
-        return f"node id {node_id!r} is the name of one of the vault's own files (proofs/{node_id.casefold()}), in any letter case"
+        return f"node id {node_id!r} is the name of one of the vault's own files or folders (proofs/{node_id.casefold()}), in any letter case"
     return None
 
 

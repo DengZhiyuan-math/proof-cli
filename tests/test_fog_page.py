@@ -39,7 +39,7 @@ def test_the_fog_list_carries_each_open_item_with_its_near_nodes_and_latest_expe
     (item,) = listed["items"]
     assert (item["id"], item["text"], item["near"], item["notes"], item["status"]) == ("fog-1", "the constant is optimal", ["L1"], "n ≤ 10^6 first", "open")
     assert item["latest_experiment"]["outcome"] == "supports" and item["latest_experiment"]["path"] == "proofs/L1/scratch/run.py" and item["latest_experiment"]["missing"] is False
-    assert [e["seq"] for e in item["experiments"]] == [1]
+    assert [e["seq"] for e in item["experiments"]] == [1] and item["experiment_count"] == 1
     everything = _ok(client.get("/api/fog?all=1"))
     assert [(i["id"], i["status"]) for i in everything["items"]] == [("fog-1", "open"), ("fog-2", "dropped")]
     assert everything["items"][1]["reason"] == "no"

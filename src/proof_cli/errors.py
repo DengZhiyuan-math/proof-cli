@@ -11,7 +11,7 @@ ERROR_CODES: dict[str, str] = {
     # -- the CLI itself ----------------------------------------------------------------
     "USAGE_ERROR": "the command line didn't parse: a missing argument, an unknown option or command (exit 2)",
     "INTERNAL_ERROR": "an unexpected failure inside proof-cli; the message names it",
-    "INVALID_INPUT": "a legacy command (`theorem add`, `reference import`) refused its input under --json; the message says why",
+    "INVALID_INPUT": "a legacy command (`theorem add`, `reference import`) refused its input under --json, or `fog crystallize` was given both --parent and --no-parent; the message says why",
     "PROJECT_NOT_FOUND": "a read was pointed at a folder with no proof project; nothing was created",
     "HUMAN_REVIEW_REQUIRED": "a Human Review decision, made only by the researcher on the proof map page; the error carries its URL",
     # -- nodes -------------------------------------------------------------------------
@@ -53,7 +53,7 @@ ERROR_CODES: dict[str, str] = {
     "INVALID_CHILD_SPEC": "a split child is written <child-id>=<statement>",
     # -- evidence, challenges, dependencies ----------------------------------------------
     "EVIDENCE_CHECK_NOT_FOUND": "no Evidence check has this id",
-    "INVALID_OUTCOME": "not an Evidence check outcome",
+    "INVALID_OUTCOME": "not an Evidence check outcome (or, on `fog experiment record`, not an Experiment outcome)",
     "CHALLENGE_NOT_FOUND": "no Challenge has this id",
     "CHALLENGE_NOT_OPEN": "the Challenge is already resolved",
     "TARGET_NOT_ACCEPTED": "the target isn't Accepted",

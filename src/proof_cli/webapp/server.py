@@ -506,7 +506,7 @@ class ReviewApp:
             "citation": proof_map.node_citation(store, node),
             # the open fog near this node, and the fog item it was crystallized from (ADR-0008, spec #136)
             "fog_near": [proof_fog.fog_view(store, item) for item in proof_fog.fog_near(store, node_id)],
-            "crystallized_from": (origin := proof_fog.crystallized_from(store, node_id)) and origin.id,
+            "crystallized_from": origin.id if (origin := proof_fog.crystallized_from(store, node_id)) is not None else None,
             "dependents": sorted(other.id for other in proof_map.list_nodes(store) if node_id in other.dependencies),
             "pdfs": self._pdfs(node_id, proof),
             "evidence_checks": checks,

@@ -45,6 +45,7 @@ def _encode_route_entry(route: LiteratureRouteRecord) -> str:
 
 
 def _append_route_to_state(state: ProjectState, route: LiteratureRouteRecord) -> None:
+    # `failed_routes` is legacy (spec #136): kept for old projects; a dropped Proof fog item is the record now
     state.session_history.append(_encode_route_entry(route))
     if route.outcome in {"failed", "rejected"}:
         failed_summary = route.summary()
@@ -274,7 +275,7 @@ def add_blocker(
     return blocker
 
 
-def record_failed_route(
+def record_failed_route(  # legacy (spec #136): only the legacy obligation and blocker paths still call this
     store: ProjectStore,
     route: str,
     *,
