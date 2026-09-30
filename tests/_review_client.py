@@ -90,7 +90,10 @@ class DirectClient:
         if path == "/api/trust-rules":
             return self._call(self.app.trust_rules)
         if path.startswith("/api/fog"):
-            return self._call(lambda: self.app.fog(include_all=path.endswith("all=1")))
+            from urllib.parse import parse_qs, urlsplit
+
+            include_all = parse_qs(urlsplit(path).query).get("all", ["0"])[0] not in ("", "0", "false")  # as the server reads it
+            return self._call(lambda: self.app.fog(include_all=include_all))
         if path.startswith("/api/node/"):
             node_id = path.removeprefix("/api/node/")
             return self._call(lambda: self.app.node(node_id))

@@ -117,6 +117,7 @@ def test_editing_changes_text_notes_and_near_but_never_the_id(tmp_path: Path):
     assert (edited.id, edited.text, edited.near, edited.notes) == ("fog-1", "sharper", ["C1", "I"], "see the experiment")
     assert edit_fog(store, "fog-1", near=[]).near == []  # near can be cleared
     assert get_fog(store, "fog-1").text == "sharper"  # a partial edit leaves the rest
+    assert [e.payload["fields"] for e in _events(store, "proof_fog_edited")] == [["near", "notes", "text"], ["near"]]
 
 
 def test_dropping_records_who_why_and_when_and_reopening_clears_it(tmp_path: Path):
@@ -312,8 +313,43 @@ def test_crystallize_notes_experiment_files_left_in_an_agents_scratch_folder(tmp
 
     made = crystallize_fog(store, "fog-1", "C_new", "stated")
 
-    assert "proofs/L1/scratch/" in made.note and "commit" in made.note
+    assert "proofs/L1/scratch/" in made.reminder and "commit" in made.reminder
     assert script.exists()  # nothing moved
+
+
+def test_a_crystallize_that_fails_after_the_node_is_made_leaves_no_node_folder_and_the_item_open(tmp_path: Path, monkeypatch):
+    """The free-standing path writes proof.tex before the transaction commits: a failure afterwards takes the folder with the node."""
+    import proof_cli.fog as fog_module
+
+    store = _project(tmp_path)
+    add_fog(store, "free-standing")
+    real_append = fog_module.append_event
+
+    def failing(store_, kind, *args, **kwargs):
+        if kind == "proof_fog_crystallized":
+            raise RuntimeError("the event log is full")
+        return real_append(store_, kind, *args, **kwargs)
+
+    monkeypatch.setattr(fog_module, "append_event", failing)
+    with pytest.raises(RuntimeError):
+        crystallize_fog(store, "fog-1", "C_free", "stated", no_parent=True)
+
+    assert get_node(store, "C_free") is None and not (store.root / "proofs" / "C_free").exists()
+    assert get_fog(store, "fog-1").status.value == "open"
+
+
+def test_fog_is_not_a_node_id(tmp_path: Path):
+    """`proofs/fog/` holds the fog items' folders: no node may take its place, in any letter case."""
+    store = _project(tmp_path)
+    for node_id in ("fog", "FOG"):
+        with pytest.raises(ProofMapError) as refused:
+            create_node(store, node_id=node_id, kind="claim", statement="squatting")
+        assert refused.value.code == "INVALID_NODE_ID"
+    add_fog(store, "one")
+    with pytest.raises(ProofMapError) as crystallized:
+        crystallize_fog(store, "fog-1", "Fog", "s", no_parent=True)
+    assert crystallized.value.code == "INVALID_NODE_ID" and get_fog(store, "fog-1").status.value == "open"
+    assert not (store.root / "proofs" / "fog").exists()
 
 
 # -- what the map reads back -----------------------------------------------------------------------------

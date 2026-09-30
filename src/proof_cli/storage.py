@@ -1999,11 +1999,11 @@ def _row_to_fog_item(row: sqlite3.Row) -> FogItem:
     )
 
 
-def next_fog_number(store: ProjectStore, *, conn: sqlite3.Connection | None = None) -> int:
-    """The next fog id's number, decided on the write lock: ids count up and are never reused."""
-    with _writing(store, conn) as conn:
-        row = conn.execute("SELECT MAX(number) AS n FROM proof_fog").fetchone()
-        return int(row["n"] or 0) + 1
+def next_fog_number(store: ProjectStore, *, conn: sqlite3.Connection) -> int:
+    """The next fog id's number, read on the caller's write transaction so ids count up and are never reused:
+    two concurrent adds are ordered by the lock, not raced."""
+    row = conn.execute("SELECT MAX(number) AS n FROM proof_fog").fetchone()
+    return int(row["n"] or 0) + 1
 
 
 def insert_fog_item(store: ProjectStore, item: FogItem, *, conn: sqlite3.Connection | None = None) -> FogItem:

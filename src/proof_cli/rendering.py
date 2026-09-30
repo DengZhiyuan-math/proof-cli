@@ -25,7 +25,7 @@ def render_status(data: dict[str, object]) -> str:
     table.add_row("Goals", ", ".join(data.get("open_goals", []) or []) or "none")
     table.add_row("Obligations", ", ".join(data.get("open_obligations", []) or []) or "none")
     table.add_row("Blockers", ", ".join(data.get("blockers", []) or []) or "none")
-    table.add_row("Failed routes", ", ".join(data.get("failed_routes", []) or []) or "none")
+    table.add_row("Failed routes (legacy)", ", ".join(data.get("failed_routes", []) or []) or "none")  # a dropped Proof fog item is the record now (spec #136)
     table.add_row("Recent results", ", ".join(data.get("recent_theorem_usage", []) or []) or "none")
     table.add_row(
         "Trust-sensitive calls",
