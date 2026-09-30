@@ -275,6 +275,13 @@ def check_rule_decision(store: ProjectStore, name: str, decision: str, *, condit
     """Why a decision on rule `name` can't be recorded (raised), or the conditions it records."""
     if decision not in TRUST_RULE_DECISIONS:
         raise TrustRuleError("INVALID_DECISION", f"'{decision}' is not a trust-rule decision; expected one of: {', '.join(TRUST_RULE_DECISIONS)}")
+    if trust_rules_path(store.root).is_dir():
+        # a project from before ADR-0014 may have a node of that name: its folder stands where the decision file goes
+        raise TrustRuleError(
+            "TRUST_RULES_FILE_BLOCKED",
+            f"proofs/{TRUST_RULES_FILE} is a node's folder in this project, so no trust rule can be recorded here; "
+            "move that node's work to a node under another id first",
+        )
     if not _SAFE_NAME.fullmatch(name or ""):
         raise TrustRuleError("TRUST_RULE_INVALID_NAME", f"rule name {name!r} must be letters, digits, '.', '_' or '-', at most 64 characters")
     if not rationale.strip():

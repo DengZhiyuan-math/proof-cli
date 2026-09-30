@@ -481,3 +481,42 @@ def test_a_line_whose_conditions_this_version_cannot_read_is_warned_about_and_ig
     assert get_reference_review_state(store, "ref_bw") == "trusted-by-rule"
     (problem,) = [warning for warning in list_integrity_warnings(store) if warning.code == "REVIEW_LINE_UNREADABLE"]
     assert problem.details["line"].startswith("trust-rules.jsonl line 2")
+
+
+# -- the decision file's name is not a node's -------------------------------------------------------
+
+
+@pytest.mark.parametrize("node_id", ["trust-rules.jsonl", "preamble.tex"])
+def test_the_vaults_own_file_names_cannot_name_a_node(tmp_path: Path, node_id):
+    """A node folder of that name would stand where the file goes (`proofs/<name>`): refused on creation, split and import."""
+    from proof_cli.exchange import export_exchange_bundle, import_exchange_bundle, parse_bundle
+    from proof_cli.proof_map import split_node
+
+    store = _project(tmp_path)
+    with pytest.raises(ProofMapError) as refused:
+        create_node(store, node_id=node_id, kind="claim", statement="squatting")
+    assert refused.value.code == "INVALID_NODE_ID" and not (store.root / "proofs" / node_id).is_dir()
+    create_node(store, node_id="lem", kind="lemma", statement="L")
+    with pytest.raises(ProofMapError) as split:
+        split_node(store, "lem", [{"id": node_id, "statement": "half"}], created_by="agent_a")
+    assert split.value.code == "INVALID_NODE_ID" and not (store.root / "proofs" / node_id).is_dir()
+    other = ensure_project(tmp_path / "other")
+    create_node(other, node_id="ok", kind="claim", statement="fine")
+    bundle = parse_bundle(export_exchange_bundle(other).model_dump(mode="json"))
+    bundle.proof_map_nodes[0].id = node_id
+    with pytest.raises(ProofMapError) as imported:
+        import_exchange_bundle(store, bundle)
+    assert imported.value.code == "INVALID_NODE_ID"
+
+
+def test_a_project_where_a_node_already_took_the_files_place_refuses_rules_instead_of_crashing(tmp_path: Path):
+    """Built before ADR-0014, a project may hold a node named trust-rules.jsonl: reads see no rules, a declaration says why."""
+    store = _project(tmp_path)
+    (store.root / "proofs" / "trust-rules.jsonl").mkdir(parents=True)  # the node folder such a project has
+    _imported(store, "ref_bw", "rudin")
+
+    assert list_trust_rules(store) == [] and get_reference_review_state(store, "ref_bw") == "unreviewed"
+    with pytest.raises(ProofMapError) as refused:
+        researcher(store).declare_trust_rule("textbooks", conditions=TEXTBOOKS, rationale="standard textbooks")
+    assert refused.value.code == "TRUST_RULES_FILE_BLOCKED"
+    assert "REVIEWS_NOT_COMMITTED" not in _codes(store)

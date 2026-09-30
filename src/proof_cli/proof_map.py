@@ -45,7 +45,7 @@ from .domain import (
     TrustLevel,
     utc_now,
 )
-from .reviews import DecisionKind, DecisionPayload, PinnedDependency, git_identity
+from .reviews import TRUST_RULES_FILE, DecisionKind, DecisionPayload, PinnedDependency, git_identity
 from .storage import (
     ProjectStore,
     memoized_read,
@@ -100,6 +100,7 @@ from .trust_rules import (
 from .vault import (
     SNAPSHOT_MANIFEST,
     archived_pdf_path,
+    preamble_path,
     build_is_current,
     build_pdf_path,
     manifest_digest,
@@ -220,6 +221,17 @@ def _record(
 
 
 _SAFE_NODE_ID = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9._-]*")
+# the vault's own files, beside the node folders: a node folder can't take their place
+_RESERVED_NODE_IDS = frozenset({TRUST_RULES_FILE, preamble_path(Path(".")).name})
+
+
+def node_id_problem(node_id: str) -> str | None:
+    """Why `node_id` can't name a node folder under proofs/ (ADR-0010), or None when it can."""
+    if not _SAFE_NODE_ID.fullmatch(node_id):
+        return f"node id {node_id!r} must be letters, digits, '.', '_' or '-', not starting with '.'"
+    if node_id in _RESERVED_NODE_IDS:
+        return f"node id {node_id!r} is the name of one of the vault's own files (proofs/{node_id})"
+    return None
 
 
 def create_node(
@@ -238,11 +250,10 @@ def create_node(
     derived_from: str | None = None,
     reference_id: str | None = None,
 ) -> ProofMapNode:
-    if not _SAFE_NODE_ID.fullmatch(node_id):
-        # the id names the node's folder under proofs/ (ADR-0010), so it must be a plain folder name
-        raise ProofMapError(
-            "INVALID_NODE_ID", f"node id {node_id!r} must be letters, digits, '.', '_' or '-', not starting with '.'"
-        )
+    problem = node_id_problem(node_id)
+    if problem is not None:
+        # the id names the node's folder under proofs/ (ADR-0010), so it must be a plain, free folder name
+        raise ProofMapError("INVALID_NODE_ID", problem)
     if get_proof_map_node(store, node_id) is not None:
         raise ProofMapError("NODE_ALREADY_EXISTS", f"proof map node {node_id} already exists")
 
@@ -426,7 +437,7 @@ def split_node(
         ours = {
             node_folder(store.root, spec["id"])
             for spec in child_specs
-            if _SAFE_NODE_ID.fullmatch(spec["id"]) and get_proof_map_node(store, spec["id"]) is None
+            if node_id_problem(spec["id"]) is None and get_proof_map_node(store, spec["id"]) is None
         }
         ours = {folder for folder in ours if not folder.exists()}
         on_rollback(store, lambda: _remove_folders(ours))

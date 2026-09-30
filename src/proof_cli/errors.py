@@ -86,6 +86,7 @@ ERROR_CODES: dict[str, str] = {
     "TRUST_RULE_INVALID_NAME": "a rule name is letters, digits, '.', '_' or '-', at most 64 characters",
     "TRUST_RULE_INVALID_CONDITION": "not a condition of the trust-rule vocabulary; the message names it",
     "TRUST_RULE_RATIONALE_REQUIRED": "a trust-rule decision needs a rationale",
+    "TRUST_RULES_FILE_BLOCKED": "a node folder from before ADR-0014 stands where proofs/trust-rules.jsonl goes; no rule can be recorded",
     "NO_DEPENDENTS": "nothing that can move rests on the node",
     "STALE_VIEW": "what the decision is made on changed since the page showed it; reload",
     "SNAPSHOT_UNREADABLE": "the Review snapshot the decision would be made on is missing or can't be read, so nothing is decided on it",
