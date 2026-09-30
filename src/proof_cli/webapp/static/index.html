@@ -33,6 +33,7 @@
     <div class="badges">
       <span class="badge frontier" title="Nodes ready to work on now"><b id="stat-frontier">–</b> Frontier</span>
       <a class="badge review" href="#/review" title="Snapshots and challenges waiting for your decision"><b id="stat-review">–</b> Awaiting you</a>
+      <a class="badge fog" href="#/" id="fog-badge" title="Proof fog: what you can't state precisely yet (ADR-0008)"><b id="stat-fog">–</b> Fog</a>
     </div>
     <div class="me" title="Decisions are recorded and committed as this identity">
       <span class="avatar" id="reviewer-initial">·</span>
@@ -70,6 +71,19 @@
             <li><svg class="status-icon rejected" viewBox="-1 -1 18 18" aria-hidden="true"><circle cx="8" cy="8" r="8" class="disc"/><path d="M5.6 5.6l4.8 4.8M10.4 5.6l-4.8 4.8" class="glyph"/></svg>Rejected</li>
             <li><svg class="status-icon attention" viewBox="-1 -1 18 18" aria-hidden="true"><path d="M8 1.1c.5 0 .95.27 1.2.72l6.1 10.9c.52.93-.15 2.08-1.2 2.08H1.9c-1.05 0-1.72-1.15-1.2-2.08L6.8 1.82C7.05 1.37 7.5 1.1 8 1.1z" class="disc"/><path d="M8 5.6v3.9" class="glyph"/><circle cx="8" cy="12" r="1" class="glyph-fill"/></svg>Needs attention</li>
           </ul>
+          <aside id="fog-drawer" class="fog-drawer" aria-label="Proof fog" hidden>
+            <div class="fog-drawer-head">
+              <h2>Proof fog</h2><span class="n" id="fog-drawer-n"></span>
+              <label class="fog-toggle" title="Dropped and crystallized items too"><input id="fog-show-all" type="checkbox"> show dropped and crystallized</label>
+              <button id="fog-close" type="button" class="close" title="Hide (the Fog badge brings it back)" aria-label="Hide the fog drawer">×</button>
+            </div>
+            <p class="hint">Difficulties not yet precise enough to be a Claim. A fog item is never a node and never a dependency: <em>near</em> only says what it is about.</p>
+            <form class="fog-composer" id="fog-composer">
+              <input id="fog-add-text" type="text" placeholder="A difficulty you can't state precisely yet…" aria-label="New fog item" autocomplete="off">
+              <div class="row2"><select id="fog-add-near" aria-label="Near which node"></select><button id="fog-add" type="button" class="primary">Add</button></div>
+            </form>
+            <ul id="fog-list" class="fog-list"></ul>
+          </aside>
           <div class="zoom" role="group" aria-label="Zoom" title="Drag to pan · pinch or ⌘/Ctrl + scroll to zoom · F fits">
             <button id="zoom-out" type="button" aria-label="Zoom out"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12"/></svg></button>
             <span id="zoom-level">100%</span>
@@ -123,6 +137,7 @@
             <div id="node-folder"></div>
             <div id="node-source"></div>
             <p id="node-dependents" class="hint"></p>
+            <div id="node-fog"></div>
           </div>
         </div>
         <div class="group" id="node-warnings"></div>
