@@ -283,19 +283,9 @@ class ReviewApp:
     def trust_rules(self) -> dict:
         """Every Trust rule, in force or retired, with its history and what it trusts now: what the manage sheet shows (ADR-0014)."""
         with self._one_state():
-            trusting: dict[str, list[str]] = {}
-            for node in proof_map.list_nodes(self.store):
-                if node.kind == ProofMapNodeKind.imported_result and proof_map.get_reference_review_state(self.store, node.id) == "trusted-by-rule":
-                    for name in proof_map.trust_rules_of(self.store, node.id):
-                        trusting.setdefault(name, []).append(node.id)
             return {
                 "rules": [
-                    {
-                        **rule.model_dump(mode="json"),
-                        "conditions_text": rule.describe_conditions(),
-                        "history": trust_rule_history(self.store, rule.name),
-                        "trusting": trusting.get(rule.name, []),
-                    }
+                    {**proof_map.trust_rule_view(self.store, rule), "history": trust_rule_history(self.store, rule.name)}
                     for rule in list_trust_rules(self.store, include_retired=True)
                 ],
                 "source_types": [member.value for member in ReferenceSourceType],

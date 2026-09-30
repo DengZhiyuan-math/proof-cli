@@ -155,6 +155,7 @@ from .proof_map import (
     require_node,
     split_node,
     trust_rule_events,
+    trust_rule_view,
     trust_rules_of,
 )
 from .trust_rules import get_trust_rule, list_trust_rules, trust_rule_history
@@ -504,16 +505,6 @@ def node_list(
 # -- Trust rules (ADR-0014): read-only; declared, amended and retired only on the proof map page
 
 
-def _trust_rule_view(store, rule) -> dict:
-    trusting = [
-        node.id for node in list_nodes(store)
-        if node.kind == ProofMapNodeKind.imported_result
-        and get_reference_review_state(store, node.id) == "trusted-by-rule"
-        and rule.name in trust_rules_of(store, node.id)
-    ]
-    return {**rule.model_dump(mode="json"), "conditions_text": rule.describe_conditions(), "trusting": trusting}
-
-
 @trust_rule_app.command("list")
 @read_scoped
 def trust_rule_list(
@@ -523,7 +514,7 @@ def trust_rule_list(
 ) -> None:
     """The Trust rules in force: which citations are trusted without a review of their own, and why."""
     store = get_store(_root(root))
-    views = [_trust_rule_view(store, rule) for rule in list_trust_rules(store, include_retired=all_rules)]
+    views = [trust_rule_view(store, rule) for rule in list_trust_rules(store, include_retired=all_rules)]
     if json_output:
         typer.echo(dump_envelope(success_envelope("trust-rule.list", views)))
         return
@@ -539,7 +530,7 @@ def trust_rule_show(name: str, root: str = ROOT_OPTION, json_output: bool = type
     if rule is None:
         _emit_node_error(ProofMapError("TRUST_RULE_NOT_FOUND", f"no trust rule is named {name}"), json_output, command="trust-rule.show")
         raise typer.Exit(code=1)
-    view = {**_trust_rule_view(store, rule), "history": trust_rule_history(store, name)}
+    view = {**trust_rule_view(store, rule), "history": trust_rule_history(store, name)}
     if json_output:
         typer.echo(dump_envelope(success_envelope("trust-rule.show", view)))
         return

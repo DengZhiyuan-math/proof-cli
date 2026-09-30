@@ -463,3 +463,21 @@ def test_the_first_time_a_node_meets_a_rule_is_on_record_as_an_event_not_a_decis
     assert not (store.root / "proofs" / "ref_bw" / "reviews.jsonl").exists()
     reviewer.amend_trust_rule("rudin", conditions=[{"kind": "source_type_in", "values": ["textbook"]}], rationale="a change, not a first match")
     assert len(trust_rule_events(store)) == 4
+
+
+def test_a_line_whose_conditions_this_version_cannot_read_is_warned_about_and_ignored(tmp_path: Path):
+    """A hand-edited or later-vocabulary condition is a problem the warnings page names, never a crash on every read."""
+    store = _project(tmp_path)
+    _imported(store, "ref_bw", "rudin")
+    reviewer = researcher(store)
+    reviewer.declare_trust_rule("textbooks", conditions=TEXTBOOKS, rationale="standard textbooks")
+    reviewer.declare_trust_rule("odd", conditions=[{"kind": "identifier_has_doi"}], rationale="edited below")
+    path = store.root / "proofs" / "trust-rules.jsonl"
+    lines = path.read_text().splitlines()
+    lines[1] = lines[1].replace("identifier_has_doi", "author_is_famous")
+    path.write_text("\n".join(lines) + "\n")
+
+    assert [rule.name for rule in list_trust_rules(store)] == ["textbooks"]
+    assert get_reference_review_state(store, "ref_bw") == "trusted-by-rule"
+    (problem,) = [warning for warning in list_integrity_warnings(store) if warning.code == "REVIEW_LINE_UNREADABLE"]
+    assert problem.details["line"].startswith("trust-rules.jsonl line 2")

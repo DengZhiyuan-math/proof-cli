@@ -214,8 +214,7 @@ def load_trust_rule_entries(root: Path) -> tuple[list[ReviewEntry], list[str]]:
     path = trust_rules_path(root)
     if not path.is_file():
         return [], []
-    entries, problems = _read_file(path)
-    return entries, [f"{problem}" for problem in problems]
+    return _read_file(path)
 
 
 def new_review_id() -> str:

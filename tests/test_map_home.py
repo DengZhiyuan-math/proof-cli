@@ -556,6 +556,7 @@ def test_a_trusted_by_rule_node_reads_so_on_the_canvas_the_tree_and_its_page():
     shown, tree, opened = _home(map_={"nodes": [MAP["nodes"][0], MAP["nodes"][1], trusted_node]}, steps=[{"view": "tree"}, {"open": "ref_bw"}], nodes={"ref_bw": page})
     card = shown["dag"]["ref_bw"]
     assert "state-accepted" in card["classes"] and card["tags"] == [{"text": "Trusted by rule", "classes": ["tag"]}] and card["icons"] == ["accepted"]
+    assert card["title"].endswith("trusted by rule textbooks") and "trusted by rule textbooks" in card["label"]  # the names, a hover away
     (line,) = [li for li in tree["tree"] if li["id"] == "ref_bw"]
     assert line["chips"][0] == "trusted by rule textbooks"
     assert opened["nodeAxes"][1] == "trusted by rule textbooks"

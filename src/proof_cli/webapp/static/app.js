@@ -567,7 +567,7 @@ function drawDag(nodes) {
     const left = -BOX.w / 2, top = -BOX.h / 2;
     const classes = ["node", `state-${tagOf(n)[1]}`, n.frontier ? "frontier" : "", rejected(n) ? "rejected" : ""].filter(Boolean).join(" ");
     const place = () => { const p = at.get(n.id); g.setAttribute("transform", `translate(${p.x},${p.y})`); };
-    const g = svg("g", { class: classes, "data-node-id": n.id, tabindex: 0, role: "link", "aria-label": `${n.kind} ${n.id}: ${n.acceptance_state}, ${n.workflow_state}, ${n.integrity_state}${n.assignee ? `, claimed by ${n.assignee}` : ""}${n.frontier ? ", on the frontier" : ""}` });
+    const g = svg("g", { class: classes, "data-node-id": n.id, tabindex: 0, role: "link", "aria-label": `${n.kind} ${n.id}: ${acceptanceText(n)}, ${n.workflow_state}, ${n.integrity_state}${n.assignee ? `, claimed by ${n.assignee}` : ""}${n.frontier ? ", on the frontier" : ""}` });
     place();
     g.append(svg("rect", { class: "box", x: left, y: top, width: BOX.w, height: BOX.h, rx: BOX.radius }));
     const kind = svg("text", { class: "kind", x: left + 14, y: top + 21 });
@@ -593,6 +593,7 @@ function drawDag(nodes) {
     // hovering shows the current snapshot's 核心思路 (ADR-0013), under the statement it proves
     const title = svg("title");
     title.textContent = n.core_idea ? `${n.statement}\n核心思路：${n.core_idea}` : n.statement;
+    if (n.acceptance_state === "trusted-by-rule") title.textContent += `\n${acceptanceText(n)}`;  // the card's word is short; the names are a hover away
     g.append(title);
     // drag a node to move it (its edges follow); a click without a drag opens it
     let drag = null;

@@ -43,6 +43,7 @@ from proof_cli.proof_state import load_state
 from proof_cli.publication import load_publication_workspace
 from proof_cli.references import ReferenceRecord, ReferenceReviewStatus, ReferenceSourceType, ReferenceTrustLevel
 from proof_cli.storage import (
+    import_reference,
     ensure_project,
     get_active_claim,
     get_reference,
@@ -622,3 +623,18 @@ def test_trust_rules_never_travel_in_a_bundle_either_way(tmp_path: Path) -> None
 
     assert [rule.name for rule in list_trust_rules(target)] == ["arxiv"]
     assert not (tmp_path / "target" / "proofs" / "trust-rules.jsonl").read_text().count("textbooks")
+
+
+def test_an_imported_citation_that_meets_a_rule_here_is_on_record_from_the_import(tmp_path: Path) -> None:
+    from proof_cli.proof_map import get_reference_review_state, trust_rule_events
+
+    source = ensure_project(tmp_path / "source")
+    import_reference(source, ReferenceRecord(id="book", title="A Book", authors=["B"], year=2000, source_type=ReferenceSourceType.textbook))
+    create_node(source, node_id="ref_book", kind="imported_result", statement="K", source_locator="Thm 1", source_version="v1", reference_id="book")
+    target = ensure_project(tmp_path / "target")
+    researcher(target).declare_trust_rule("textbooks", conditions=[{"kind": "source_type_in", "values": ["textbook"]}], rationale="mine")
+
+    import_exchange_bundle(target, export_exchange_bundle(source))
+
+    assert get_reference_review_state(target, "ref_book") == "trusted-by-rule"
+    assert [(e.entity_id, e.payload["rule"]) for e in trust_rule_events(target)] == [("ref_book", "textbooks")]

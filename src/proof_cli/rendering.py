@@ -215,6 +215,7 @@ def render_trust_rule_list(rules: list[dict]) -> str:
 
 
 def render_trust_rule(rule: dict) -> str:
+    """One Trust rule with every decision recorded under its name (`proof trust-rule show`)."""
     console = _console()
     console.rule(f"Trust Rule: {rule['name']}")
     table = Table(show_header=False, box=None, pad_edge=False)
