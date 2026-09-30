@@ -89,6 +89,8 @@ class DirectClient:
             return self._call(self.app.map)
         if path == "/api/trust-rules":
             return self._call(self.app.trust_rules)
+        if path.startswith("/api/fog"):
+            return self._call(lambda: self.app.fog(include_all=path.endswith("all=1")))
         if path.startswith("/api/node/"):
             node_id = path.removeprefix("/api/node/")
             return self._call(lambda: self.app.node(node_id))
@@ -101,6 +103,11 @@ class DirectClient:
             return self._call(lambda: self.app.create_node(body or {}))
         if path == "/api/trust-rules/preview":
             return self._call(lambda: self.app.trust_rule_preview(body or {}))
+        if path == "/api/fog":
+            return self._call(lambda: self.app.fog_add(body or {}))
+        if path.startswith("/api/fog/"):
+            fog_id, _, action = path.removeprefix("/api/fog/").rpartition("/")
+            return self._call(lambda: self.app.fog_action(fog_id, action, body or {}))
         if path.startswith("/api/node/"):
             node_id, _, action = path.removeprefix("/api/node/").rpartition("/")
             return self._call(lambda: self.app.node_action(node_id, action, body or {}))

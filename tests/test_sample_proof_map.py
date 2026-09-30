@@ -151,6 +151,19 @@ def test_the_second_citation_of_the_reviewed_source_is_trusted_by_rule_and_liste
     assert "I2" not in [item["node_id"] for item in state["pending"]]
 
 
+def test_the_fog_is_outside_the_graph_and_reads_back_with_its_experiment(sample):
+    """Fog items are never nodes (ADR-0008): the map is unchanged by them, and the page's fog list has them."""
+    nodes = _map(sample.store)
+    assert "fog-1" not in nodes and nodes["L1"]["dependencies"] == ["C1", "C2"]
+    listed = DirectClient(sample.store).get("/api/fog")[1]["data"]["items"]
+    (item,) = listed
+    assert item["id"] == "fog-1" and item["near"] == ["L1"] and item["latest_experiment"]["outcome"] == "supports" and not item["latest_experiment"]["missing"]
+    everything = DirectClient(sample.store).get("/api/fog?all=1")[1]["data"]["items"]
+    assert [(i["id"], i["status"]) for i in everything] == [("fog-1", "open"), ("fog-2", "dropped")]
+    lemma = DirectClient(sample.store).get("/api/node/L1")[1]["data"]
+    assert [f["id"] for f in lemma["fog_near"]] == ["fog-1"]
+
+
 def test_the_builder_scales_for_a_performance_baseline(tmp_path: Path):
     scaled = build_sample_proof_map(tmp_path, copies=3)
 

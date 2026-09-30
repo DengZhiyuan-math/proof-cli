@@ -73,6 +73,11 @@ Work this way:
    node is scoped to prove directly>" --requested-by {name}`.
 5. Record an Evidence check only for a checker you actually ran, with what it reported:
    `proof node evidence record <candidate-proof-id> <outcome> --run-by <checker>`.
+6. A difficulty you can't state yet goes in the Proof fog, not in the proof: `proof fog add "<text>"
+   --near {node} --created-by {name}` (`proof fog list` shows what is there). When you have run a
+   computation about a fog item near this node, record it, with its files in scratch/:
+   `proof fog experiment record <fog-id> <supports|refutes|inconclusive|error> --summary "<what it
+   showed>" --run-by {name} --path proofs/{node}/scratch/<file>`. An Experiment never decides anything.
 
 `proof` acts on the project through $PROOF_ROOT. Change project state only through `proof`, and
 change files only in this node's folder: its sources and scratch/, never snapshots/, build/ or

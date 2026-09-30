@@ -159,6 +159,20 @@ from .proof_map import (
     trust_rules_of,
 )
 from .trust_rules import get_trust_rule, list_trust_rules, trust_rule_history
+from .fog import (
+    add_fog,
+    crystallize_fog,
+    crystallized_from,
+    drop_fog,
+    edit_fog,
+    fog_near,
+    fog_view,
+    list_experiments,
+    list_fog,
+    record_experiment,
+    reopen_fog,
+    require_fog,
+)
 from .vault import working_proof_path
 from .rendering import (
     render_candidate_proof,
@@ -170,6 +184,9 @@ from .rendering import (
     render_proof_map_node_list,
     render_trust_rule,
     render_trust_rule_list,
+    render_fog_experiments,
+    render_fog_item,
+    render_fog_list,
 )
 from .review import render_verification_output
 
@@ -197,6 +214,8 @@ goal_app = typer.Typer(help="(legacy) Goal operations; a goal becomes a Claim no
 theorem_app = typer.Typer(help="(legacy) Theorem-contract registry; the proof map's nodes replace it")
 node_app = typer.Typer(help="Proof map node operations")
 trust_rule_app = typer.Typer(help="Trust rules: the researcher's standing Reference reviews, read-only here (declared on the proof map page; ADR-0014)")
+fog_app = typer.Typer(help="Proof fog: difficulties not yet precise enough to be a Claim, kept outside the map (ADR-0008). Ungated: anyone, agents included, may add, edit, drop or crystallize one")
+fog_experiment_app = typer.Typer(help="Experiments: numerical runs recorded against a fog item; they never change its status")
 node_evidence_app = typer.Typer(help="Evidence check workflows")
 challenge_app = typer.Typer(help="Challenge workflows")
 obligation_app = typer.Typer(help="(legacy) Proof-obligation queue; an obligation is a Claim node now")
@@ -445,6 +464,9 @@ def node_show(
         acceptance_state = _acceptance_axis(store, node)
         integrity_state = get_integrity_state(store, node_id)
         trust_rule = trust_rules_of(store, node_id)
+        # the fog item the node came out of, and the open fog near it (ADR-0008, spec #136)
+        origin = crystallized_from(store, node_id)
+        near = [{"id": item.id, "text": item.text} for item in fog_near(store, node_id)]
         blocked_reason = get_blocked_reason(store, node_id) if workflow_state == "blocked" else None
     except ProofMapError as exc:
         _emit_node_error(exc, json_output, command="node.show")
@@ -466,6 +488,8 @@ def node_show(
         # the Trust rules an imported result meets, and when it first met each (ADR-0014)
         payload["trust_rule"] = trust_rule
         payload["trust_rule_events"] = [{"rule": event.payload.get("rule"), "at": event.created_at.isoformat()} for event in trust_rule_events(store, node_id)]
+        payload["crystallized_from"] = origin.id if origin else None
+        payload["fog_near"] = near
         payload["blocked_reason"] = blocked_reason
         payload["working_proof"] = working_proof
         payload["snapshots"] = snapshots
@@ -484,6 +508,8 @@ def node_show(
                 snapshots=snapshots,
                 citation=citation,
                 trust_rule=trust_rule,
+                crystallized_from=origin.id if origin else None,
+                fog_near=[item["id"] for item in near],
             )
         )
 
@@ -535,6 +561,187 @@ def trust_rule_show(name: str, root: str = ROOT_OPTION, json_output: bool = type
         typer.echo(dump_envelope(success_envelope("trust-rule.show", view)))
         return
     typer.echo(render_trust_rule(view))
+
+
+# -- Proof fog (ADR-0008, spec #136): ungated, outside the map ---------------------------------------
+
+
+def _emit_fog(store, item, json_output: bool, *, command: str) -> None:
+    view = fog_view(store, item)
+    if json_output:
+        typer.echo(dump_envelope(success_envelope(command, view)))
+    else:
+        typer.echo(render_fog_item(view))
+
+
+@fog_app.command("add")
+def fog_add(
+    text: str,
+    root: str = ROOT_OPTION,
+    near: list[str] = typer.Option([], "--near", help="A node this is about (repeatable); never a dependency"),
+    notes: str = typer.Option("", "--notes"),
+    created_by: str = typer.Option("human", "--created-by"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Add a fog item: a difficulty you can't state precisely yet."""
+    store = get_store(_root(root))
+    try:
+        item = add_fog(store, text, near=near, notes=notes, created_by=created_by)
+    except ProofMapError as exc:
+        _emit_node_error(exc, json_output, command="fog.add")
+        raise typer.Exit(code=1)
+    _emit_fog(store, item, json_output, command="fog.add")
+
+
+@fog_app.command("list")
+@read_scoped
+def fog_list(root: str = ROOT_OPTION, all_items: bool = typer.Option(False, "--all", help="Dropped and crystallized items too"), json_output: bool = typer.Option(False, "--json")) -> None:
+    """The open fog items, by id."""
+    store = get_store(_root(root))
+    views = [fog_view(store, item) for item in list_fog(store, include_all=all_items)]
+    if json_output:
+        typer.echo(dump_envelope(success_envelope("fog.list", views)))
+        return
+    typer.echo(render_fog_list(views))
+
+
+@fog_app.command("show")
+@read_scoped
+def fog_show(fog_id: str, root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
+    """One fog item in full: its fields, its Experiments (newest first), its folder, its drop or crystallize record."""
+    store = get_store(_root(root))
+    try:
+        item = require_fog(store, fog_id)
+    except ProofMapError as exc:
+        _emit_node_error(exc, json_output, command="fog.show")
+        raise typer.Exit(code=1)
+    _emit_fog(store, item, json_output, command="fog.show")
+
+
+@fog_app.command("edit")
+def fog_edit(
+    fog_id: str,
+    root: str = ROOT_OPTION,
+    text: str | None = typer.Option(None, "--text"),
+    near: list[str] = typer.Option(None, "--near", help="Replace the near nodes (repeatable)"),
+    clear_near: bool = typer.Option(False, "--clear-near", help="Near no node"),
+    notes: str | None = typer.Option(None, "--notes"),
+    edited_by: str = typer.Option("human", "--by"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Change an open item's text, notes or near nodes; what isn't given stays."""
+    store = get_store(_root(root))
+    try:
+        item = edit_fog(store, fog_id, text=text, near=[] if clear_near else (near or None), notes=notes, edited_by=edited_by)
+    except ProofMapError as exc:
+        _emit_node_error(exc, json_output, command="fog.edit")
+        raise typer.Exit(code=1)
+    _emit_fog(store, item, json_output, command="fog.edit")
+
+
+@fog_app.command("drop")
+def fog_drop(
+    fog_id: str,
+    root: str = ROOT_OPTION,
+    reason: str = typer.Option(..., "--reason", help="Why this direction is given up"),
+    dropped_by: str = typer.Option("human", "--by"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Give an item up, saying why. Reversible with `fog reopen`."""
+    store = get_store(_root(root))
+    try:
+        item = drop_fog(store, fog_id, reason=reason, dropped_by=dropped_by)
+    except ProofMapError as exc:
+        _emit_node_error(exc, json_output, command="fog.drop")
+        raise typer.Exit(code=1)
+    _emit_fog(store, item, json_output, command="fog.drop")
+
+
+@fog_app.command("reopen")
+def fog_reopen(fog_id: str, root: str = ROOT_OPTION, by: str = typer.Option("human", "--by"), json_output: bool = typer.Option(False, "--json")) -> None:
+    """Take a dropped item back."""
+    store = get_store(_root(root))
+    try:
+        item = reopen_fog(store, fog_id, by=by)
+    except ProofMapError as exc:
+        _emit_node_error(exc, json_output, command="fog.reopen")
+        raise typer.Exit(code=1)
+    _emit_fog(store, item, json_output, command="fog.reopen")
+
+
+@fog_app.command("crystallize")
+def fog_crystallize(
+    fog_id: str,
+    node_id: str,
+    statement: str,
+    root: str = ROOT_OPTION,
+    parent: str | None = typer.Option(None, "--parent", help="The node the new Claim is a single-child Split of (default: the item's one near node)"),
+    no_parent: bool = typer.Option(False, "--no-parent", help="A free-standing Claim, even when the item is near a node"),
+    reassign: bool = typer.Option(False, "--reassign", help="Take the parent's claim over from whoever holds it"),
+    assumption: list[str] = typer.Option([], "--assumption"),
+    display_label: str = typer.Option("", "--display-label"),
+    created_by: str = typer.Option("human", "--created-by"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """State an open fog item as a Claim (written here, never taken from the item's text); the item leaves the fog list."""
+    store = get_store(_root(root))
+    try:
+        made = crystallize_fog(
+            store, fog_id, node_id, statement, parent=parent, no_parent=no_parent, reassign=reassign,
+            assumptions=assumption, display_label=display_label, created_by=created_by,
+        )
+    except ProofMapError as exc:
+        _emit_node_error(exc, json_output, command="fog.crystallize")
+        raise typer.Exit(code=1)
+    if json_output:
+        payload = {**made.node.model_dump(mode="json"), "fog": {"id": made.fog.id, "status": made.fog.status.value, "node_id": made.fog.node_id}}
+        if made.note:
+            payload["note"] = made.note
+        typer.echo(dump_envelope(success_envelope("fog.crystallize", payload)))
+        return
+    typer.echo(render_proof_map_node(made.node, crystallized_from=made.fog.id))
+    if made.note:
+        typer.echo(made.note)
+
+
+@fog_experiment_app.command("record")
+def fog_experiment_record(
+    fog_id: str,
+    outcome: str,
+    root: str = ROOT_OPTION,
+    summary: str = typer.Option(..., "--summary", help="What was computed and what it showed, in a sentence or two"),
+    run_by: str = typer.Option(..., "--run-by", help="Who ran it"),
+    path: str | None = typer.Option(None, "--path", help="Its script or output, under proofs/ (an agent's own scratch/, or proofs/fog/<fog-id>/)"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Record a numerical run against an open fog item: supports, refutes, inconclusive or error. Never changes the item's status."""
+    store = get_store(_root(root))
+    try:
+        experiment = record_experiment(store, fog_id, outcome, summary=summary, run_by=run_by, path=path)
+    except ProofMapError as exc:
+        _emit_node_error(exc, json_output, command="fog.experiment.record")
+        raise typer.Exit(code=1)
+    if json_output:
+        typer.echo(dump_envelope(success_envelope("fog.experiment.record", experiment.model_dump(mode="json"))))
+        return
+    typer.echo(render_fog_experiments(fog_id, [experiment.model_dump(mode="json")]))
+
+
+@fog_experiment_app.command("list")
+@read_scoped
+def fog_experiment_list(fog_id: str, root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
+    """An item's Experiments, oldest first."""
+    store = get_store(_root(root))
+    try:
+        require_fog(store, fog_id)
+    except ProofMapError as exc:
+        _emit_node_error(exc, json_output, command="fog.experiment.list")
+        raise typer.Exit(code=1)
+    experiments = [experiment.model_dump(mode="json") for experiment in list_experiments(store, fog_id)]
+    if json_output:
+        typer.echo(dump_envelope(success_envelope("fog.experiment.list", experiments)))
+        return
+    typer.echo(render_fog_experiments(fog_id, experiments))
 
 
 @node_app.command("claim")
@@ -933,6 +1140,8 @@ app.add_typer(theorem_app, name="theorem", rich_help_panel=LEGACY_PANEL)
 app.add_typer(node_app, name="node", rich_help_panel=PROOF_MAP_PANEL)
 app.add_typer(challenge_app, name="challenge", rich_help_panel=PROOF_MAP_PANEL)
 app.add_typer(trust_rule_app, name="trust-rule", rich_help_panel=PROOF_MAP_PANEL)
+fog_app.add_typer(fog_experiment_app, name="experiment")
+app.add_typer(fog_app, name="fog", rich_help_panel=PROOF_MAP_PANEL)
 app.add_typer(obligation_app, name="obligation", rich_help_panel=LEGACY_PANEL)
 app.add_typer(blocker_app, name="blocker", rich_help_panel=LEGACY_PANEL)
 app.add_typer(reference_app, name="reference")

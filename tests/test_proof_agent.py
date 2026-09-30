@@ -322,3 +322,12 @@ def test_a_drafting_turn_that_writes_nothing_leaves_no_summary(studio):
     assert not [e for e in list_events(store) if e.kind == "proof_map_key_ideas_drafted"]  # nothing drafted, nothing recorded
 
 
+
+
+def test_the_standing_brief_says_where_a_difficulty_and_its_experiments_go(studio):
+    """A difficulty the agent can't state goes in the Proof fog, and a computation about one is an Experiment (spec #136)."""
+    store, hub, log, monkeypatch = studio
+    brief = hub.studio("A").agent.context_fn().brief()
+    assert "proof fog add" in brief and "--near A" in brief
+    assert "proof fog experiment record" in brief and "proofs/A/scratch/" in brief
+    assert brief.index("proof fog") > brief.index("evidence record")  # after the proof's own steps

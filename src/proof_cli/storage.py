@@ -23,6 +23,8 @@ from .domain import (
     ClaimRecord,
     DependencyPin,
     EventRecord,
+    FogExperiment,
+    FogItem,
     EvidenceCheck,
     ProofMapNode,
     ProofObligation,
@@ -178,6 +180,38 @@ CREATE TABLE IF NOT EXISTS foreign_attestations (
   object_id TEXT NOT NULL,
   data TEXT NOT NULL,
   imported_at TEXT NOT NULL
+);
+"""
+
+# Proof fog (ADR-0008, spec #136): the flat list outside the map, and the Experiments recorded against its items.
+FOG_SCHEMA = """
+CREATE TABLE IF NOT EXISTS proof_fog (
+  id TEXT PRIMARY KEY,
+  number INTEGER NOT NULL UNIQUE,
+  text TEXT NOT NULL,
+  notes TEXT NOT NULL DEFAULT '',
+  near TEXT NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  dropped_by TEXT,
+  dropped_at TEXT,
+  reason TEXT,
+  node_id TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_proof_fog_node_id ON proof_fog(node_id);
+
+CREATE TABLE IF NOT EXISTS proof_fog_experiments (
+  fog_id TEXT NOT NULL,
+  seq INTEGER NOT NULL,
+  outcome TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  run_by TEXT NOT NULL,
+  recorded_at TEXT NOT NULL,
+  path TEXT,
+  PRIMARY KEY (fog_id, seq)
 );
 """
 
@@ -461,6 +495,7 @@ _SCHEMA_DDL_DIGEST = int.from_bytes(
                 REVIEWER_KEYS_SCHEMA,
                 PROOF_LEDGER_SCHEMA,
                 SIDE_DOCUMENTS_SCHEMA,
+                FOG_SCHEMA,
                 _REVIEW_HISTORY_ADDED_COLUMNS,
                 _CHALLENGE_ADDED_COLUMNS,
                 _CLAIM_DROPPED_COLUMNS,
@@ -496,6 +531,7 @@ def _apply_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(REVIEWER_KEYS_SCHEMA)
     conn.executescript(PROOF_LEDGER_SCHEMA)
     conn.executescript(SIDE_DOCUMENTS_SCHEMA)
+    conn.executescript(FOG_SCHEMA)
     conn.commit()
     conn.execute(f"PRAGMA user_version = {_schema_stamp(conn)}")  # leaves the schema cookie alone
     conn.commit()
@@ -1941,3 +1977,123 @@ def list_review_history_rows(
         with store.connect() as own:
             rows = own.execute(query, params).fetchall()
     return [_row_to_review_history(row) for row in rows]
+
+
+# -- Proof fog (ADR-0008, spec #136) --------------------------------------------------------------------
+
+
+def _row_to_fog_item(row: sqlite3.Row) -> FogItem:
+    return FogItem(
+        id=row["id"],
+        text=row["text"],
+        notes=row["notes"],
+        near=json.loads(row["near"]),
+        status=row["status"],
+        created_by=row["created_by"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+        dropped_by=row["dropped_by"],
+        dropped_at=row["dropped_at"],
+        reason=row["reason"],
+        node_id=row["node_id"],
+    )
+
+
+def next_fog_number(store: ProjectStore, *, conn: sqlite3.Connection | None = None) -> int:
+    """The next fog id's number, decided on the write lock: ids count up and are never reused."""
+    with _writing(store, conn) as conn:
+        row = conn.execute("SELECT MAX(number) AS n FROM proof_fog").fetchone()
+        return int(row["n"] or 0) + 1
+
+
+def insert_fog_item(store: ProjectStore, item: FogItem, *, conn: sqlite3.Connection | None = None) -> FogItem:
+    with _writing(store, conn) as conn:
+        conn.execute(
+            """
+            INSERT INTO proof_fog(id, number, text, notes, near, status, created_by, created_at, updated_at, dropped_by, dropped_at, reason, node_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                item.id,
+                int(item.id.rsplit("-", 1)[1]),
+                item.text,
+                item.notes,
+                json.dumps(item.near),
+                item.status.value,
+                item.created_by,
+                item.created_at.isoformat(),
+                item.updated_at.isoformat(),
+                item.dropped_by,
+                item.dropped_at.isoformat() if item.dropped_at else None,
+                item.reason,
+                item.node_id,
+            ),
+        )
+    return item
+
+
+def update_fog_item(store: ProjectStore, item: FogItem, *, conn: sqlite3.Connection | None = None) -> FogItem:
+    with _writing(store, conn) as conn:
+        conn.execute(
+            """
+            UPDATE proof_fog SET text = ?, notes = ?, near = ?, status = ?, updated_at = ?, dropped_by = ?, dropped_at = ?, reason = ?, node_id = ?
+            WHERE id = ?
+            """,
+            (
+                item.text,
+                item.notes,
+                json.dumps(item.near),
+                item.status.value,
+                item.updated_at.isoformat(),
+                item.dropped_by,
+                item.dropped_at.isoformat() if item.dropped_at else None,
+                item.reason,
+                item.node_id,
+                item.id,
+            ),
+        )
+    return item
+
+
+def get_fog_item(store: ProjectStore, fog_id: str, *, conn: sqlite3.Connection | None = None) -> FogItem | None:
+    with _reading(store, conn) as conn:
+        row = conn.execute("SELECT * FROM proof_fog WHERE id = ? LIMIT 1", (fog_id,)).fetchone()
+    return _row_to_fog_item(row) if row else None
+
+
+def list_fog_items(store: ProjectStore, *, status: str = "", node_id: str = "", conn: sqlite3.Connection | None = None) -> list[FogItem]:
+    """Fog items by id number; `status` narrows to one status, `node_id` to the item crystallized into that node."""
+    query, conditions, params = "SELECT * FROM proof_fog", [], []
+    if status:
+        conditions.append("status = ?")
+        params.append(status)
+    if node_id:
+        conditions.append("node_id = ?")
+        params.append(node_id)
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
+    query += " ORDER BY number"
+    with _reading(store, conn) as conn:
+        rows = conn.execute(query, params).fetchall()
+    return [_row_to_fog_item(row) for row in rows]
+
+
+def insert_fog_experiment(store: ProjectStore, experiment: FogExperiment, *, conn: sqlite3.Connection | None = None) -> FogExperiment:
+    """Append an Experiment to its item; its `seq` is decided here, on the write lock."""
+    with _writing(store, conn) as conn:
+        row = conn.execute("SELECT MAX(seq) AS n FROM proof_fog_experiments WHERE fog_id = ?", (experiment.fog_id,)).fetchone()
+        experiment = experiment.model_copy(update={"seq": int(row["n"] or 0) + 1})
+        conn.execute(
+            "INSERT INTO proof_fog_experiments(fog_id, seq, outcome, summary, run_by, recorded_at, path) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (experiment.fog_id, experiment.seq, experiment.outcome.value, experiment.summary, experiment.run_by, experiment.recorded_at.isoformat(), experiment.path),
+        )
+    return experiment
+
+
+def list_fog_experiments(store: ProjectStore, fog_id: str, *, conn: sqlite3.Connection | None = None) -> list[FogExperiment]:
+    with _reading(store, conn) as conn:
+        rows = conn.execute("SELECT * FROM proof_fog_experiments WHERE fog_id = ? ORDER BY seq", (fog_id,)).fetchall()
+    return [
+        FogExperiment(fog_id=row["fog_id"], seq=row["seq"], outcome=row["outcome"], summary=row["summary"], run_by=row["run_by"], recorded_at=row["recorded_at"], path=row["path"])
+        for row in rows
+    ]

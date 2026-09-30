@@ -67,6 +67,8 @@ def render_proof_map_node(
     snapshots: list[dict] | None = None,
     citation: dict | None = None,
     trust_rule: list[str] | None = None,
+    crystallized_from: str | None = None,
+    fog_near: list[str] | None = None,
 ) -> str:
     console = _console()
     console.rule(f"Proof Map Node: {node.id}")
@@ -100,6 +102,11 @@ def render_proof_map_node(
                     table.add_row(label, citation[key])
     if node.derived_from:
         table.add_row("Derived from", node.derived_from)
+    if crystallized_from:
+        # the fog item the node was stated from (ADR-0008, spec #136)
+        table.add_row("Crystallized from", crystallized_from)
+    if fog_near:
+        table.add_row("Fog near", ", ".join(fog_near))
     # Three independent, computed signals — never folded into one status word.
     if workflow_state is not None:
         table.add_row("Workflow state", workflow_state)
@@ -230,6 +237,69 @@ def render_trust_rule(rule: dict) -> str:
     console.print("History")
     for row in rule.get("history", []):
         console.print(f"  {row['decided_at']} · {row['decision']} · {row['reviewer']} — {row['rationale']}")
+    return console.export_text()
+
+
+def _experiment_line(experiment: dict) -> str:
+    where = f" · {experiment['path']}{' (missing)' if experiment.get('missing') else ''}" if experiment.get("path") else ""
+    return f"#{experiment['seq']} {experiment['outcome']} — {experiment['summary']} ({experiment['run_by']}, {experiment['recorded_at']}){where}"
+
+
+def render_fog_list(items: list[dict]) -> str:
+    """The fog items (ADR-0008): id, status, near nodes, the latest Experiment, the text."""
+    console = _console()
+    console.rule("Proof Fog")
+    if not items:
+        console.print("No fog: everything known about is stated as a node.")
+        return console.export_text()
+    table = Table()
+    table.add_column("id")
+    table.add_column("status")
+    table.add_column("near")
+    table.add_column("latest experiment")
+    table.add_column("text")
+    for item in items:
+        latest = item.get("latest_experiment")
+        table.add_row(
+            item["id"], item["status"], ", ".join(item["near"]) or "—",
+            f"{latest['outcome']} — {latest['summary']}" if latest else "—", item["text"],
+        )
+    console.print(table)
+    return console.export_text()
+
+
+def render_fog_item(view: dict) -> str:
+    """One fog item in full (`proof fog show`)."""
+    console = _console()
+    console.rule(f"Fog: {view['id']}")
+    table = Table(show_header=False, box=None, pad_edge=False)
+    table.add_column("key", style="bold")
+    table.add_column("value")
+    table.add_row("Text", view["text"])
+    if view.get("notes"):
+        table.add_row("Notes", view["notes"])
+    table.add_row("Near", ", ".join(view["near"]) or "no node")
+    table.add_row("Status", view["status"])
+    if view["status"] == "dropped":
+        table.add_row("Dropped", f"{view['dropped_by']} at {view['dropped_at']} — {view['reason']}")
+    if view["status"] == "crystallized":
+        table.add_row("Crystallized as", view["node_id"])
+    table.add_row("Created", f"{view['created_by']} at {view['created_at']}")
+    table.add_row("Folder", f"{view['folder']} ({'exists' if view['folder_exists'] else 'not created yet'})")
+    console.print(table)
+    console.print("Experiments (newest first)" if view["experiments"] else "No experiment recorded.")
+    for experiment in view["experiments"]:
+        console.print(f"  {_experiment_line(experiment)}")
+    return console.export_text()
+
+
+def render_fog_experiments(fog_id: str, experiments: list[dict]) -> str:
+    console = _console()
+    console.rule(f"Experiments on {fog_id}")
+    if not experiments:
+        console.print("No experiment recorded.")
+    for experiment in experiments:
+        console.print(_experiment_line(experiment))
     return console.export_text()
 
 

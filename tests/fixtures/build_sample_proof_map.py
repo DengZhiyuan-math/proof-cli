@@ -7,6 +7,8 @@
     I2 (imported result citing the same source as I, at the same version): Trusted by rule
        under the Trust rule `same-source` (`source already reviewed`, ADR-0014), never reviewed itself
     an open Challenge on L1
+    Proof fog (ADR-0008, spec #136): one open item near L1 with a `supports` Experiment whose script is
+       in L1's scratch/, and one dropped item near T
 
 Only service operations, the `_proofs` helper an agent's "write proof.tex, request review" goes
 through, and the `_researcher` helper, which calls the very functions the proof map page's
@@ -24,6 +26,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from proof_cli.fog import add_fog, drop_fog, record_experiment
 from proof_cli.proof_map import create_node, open_challenge, split_node
 from proof_cli.references import ReferenceRecord, ReferenceSourceType
 from proof_cli.storage import ProjectStore, ensure_project, import_reference
@@ -93,8 +96,15 @@ def build_sample_proof_map(root: Path, *, copies: int = 1) -> SampleProofMap:
 
     challenges = [open_challenge(store, n["L1"], opened_by="agent_b", rationale="is the second half's hypothesis really met?").id for n in names]
 
-    # Proof fog (ADR-0008) lives outside the graph as its own list; it is deferred to the next
-    # milestone, so there is nothing to build yet. Add the sample's fog items here once it lands.
+    # Proof fog (ADR-0008, spec #136): outside the graph, as its own list
+    for n in names:
+        item = add_fog(store, f"the constant in {n['L1']} is probably optimal, but 'optimal' is not yet a statement", near=[n["L1"]], created_by=AGENT)
+        script = store.root / "proofs" / n["L1"] / "scratch" / "constant.py"
+        script.parent.mkdir(parents=True, exist_ok=True)
+        script.write_text("# checks the ratio for n <= 10**6\n")
+        record_experiment(store, item.id, "supports", summary="n ≤ 10^6 checked one by one; the ratio tends to 1", run_by=AGENT, path=f"proofs/{n['L1']}/scratch/constant.py")
+        given_up = add_fog(store, "generating functions by brute force", near=[theorem])
+        drop_fog(store, given_up.id, reason="the coefficients grow too fast to estimate")
 
     return SampleProofMap(store=store, theorem=theorem, copies=names, challenges=challenges)
 
