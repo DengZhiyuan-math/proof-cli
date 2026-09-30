@@ -458,3 +458,10 @@ def test_the_studio_page_loads_the_vendored_katex_before_the_node_panel():
     assert len(list((vendor / "fonts").glob("KaTeX_*.woff2"))) == 20
     css = (vendor / "katex.min.css").read_text()
     assert "url(fonts/KaTeX_Main-Regular.woff2)" in css and "http" not in css  # every font is local
+
+
+def test_the_dependency_list_names_the_trust_rule_an_imported_result_is_relied_on_under():
+    """An imported result depended on under a Trust rule, not a review of its own (ADR-0014): the panel says which rule."""
+    view = {**VIEW, "dependencies": [{**VIEW["dependencies"][1], "trust_rule": ["textbooks", "same-source"]}]}
+    shown = _panel(view=view)
+    assert "ref · imported result · trusted by rule textbooks, same-source" in shown["deps"].replace("  ", " ")

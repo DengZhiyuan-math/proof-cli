@@ -147,7 +147,7 @@
   // ready, in progress, blocked, awaiting review, accepted, rejected, needs attention).
   const VALUE_STATE = {
     claimed: "claimed", "review-needed": "review", "revision-requested": "review", blocked: "blocked",
-    accepted: "accepted", reviewed: "accepted", rejected: "rejected", "no-longer-callable": "rejected",
+    accepted: "accepted", reviewed: "accepted", "trusted-by-rule": "accepted", rejected: "rejected", "no-longer-callable": "rejected",
     unverifiable: "attention", "potentially-stale": "attention", challenged: "attention",
   };
   const GLYPHS = {
@@ -200,7 +200,8 @@
     for (const d of view.dependencies) {
       const li = h("li");
       li.append(h("a", d.node_id, { href: pageOf(d.node_id, d.kind) }));
-      if (d.kind === "imported_result") li.append(" · imported result");
+      // an imported result depended on under a Trust rule rather than a review of its own (ADR-0014)
+      if (d.kind === "imported_result") li.append(d.trust_rule && d.trust_rule.length ? ` · imported result · trusted by rule ${d.trust_rule.join(", ")}` : " · imported result");
       else if (d.pin) li.append(` · pinned ${version(d.pin.pinned_version)} · accepted ${version(d.accepted_version)}${d.current === false ? " · interface changed" : ""}`);
       else li.append(" · not pinned yet");
       if (d.remedy) li.append(` — needs ${d.remedy === "new-candidate-proof" ? "a new Candidate proof" : "a Lightweight re-review"}`);

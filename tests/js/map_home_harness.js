@@ -4,7 +4,10 @@
 // {tick: node_id, on: bool}, {choose: node_id, value}, {record: true} (presses Record, then confirms),
 // {open: node_id} (follows the node's link to its own page, served from scenario.nodes[node_id]),
 // {find: text} (types into the search box), {key: "Enter"|"Escape"|"/"|"f"} (a key pressed where the focus
-// is: the focused element hears it first, then the document), {blur: true} (the focus goes back to the page).
+// is: the focused element hears it first, then the document), {blur: true} (the focus goes back to the page),
+// {reviewExplicitly: node_id} (the Trusted by rule section's button, then the confirm sheet), {manage: true}
+// (opens the rules sheet, served from scenario.rules), {amend: name} / {retire: name} (a listed rule's button),
+// {rule: {name, rationale, reviewed, doi, arxiv, types: [...]}} (fills the form), {ruleRecord: true} (Record, then confirm).
 const fs = require("fs"), path = require("path"), vm = require("vm");
 
 const focus = { on: null, body: null };
@@ -46,6 +49,7 @@ class FakeElement {
       return picked ? picked.value : "";
     }
     if (this.tagName === "OPTION") return this.attributes.value ?? this.textContent;
+    if (this.tagName === "INPUT" && this._value === "" && this.attributes.value !== undefined) return this.attributes.value;  // a checkbox's value attribute
     return this._value;
   }
   set value(v) {
@@ -90,16 +94,24 @@ class FakeElement {
     "zoom-in", "zoom-out", "zoom-fit", "zoom-tidy", "zoom-level", "map-find", "map-find-count",
     "node-title", "node-axes", "node-warnings", "node-statement", "node-assumptions", "node-claim", "node-folder", "node-source",
     "node-dependents", "node-pdfs", "node-deps", "node-challenges", "node-proof-meta", "node-proof-exact", "node-evidence",
-    "node-decisions", "node-history"];
+    "node-decisions", "node-history",
+    // the Trusted by rule section and the rules sheet (ADR-0014)
+    "trusted", "trusted-count", "trusted-section", "manage-rules", "rules-sheet", "rules-list", "rules-retired-list", "rule-form", "rules-form-title",
+    "rule-decision", "rule-name", "rule-rationale", "rule-conditions", "cond-reviewed", "cond-doi", "cond-arxiv", "cond-types",
+    "rule-reminder", "rule-impact", "rule-new", "rule-cancel", "rule-record"];
   const tags = { "tree-root": "select", "dag-svg": "svg", "decide-batch": "button", pending: "table", warnings: "ul", "map-find": "input", "attention-nodes": "ul",
-    "node-deps": "table", "node-decisions": "table", "node-challenges": "ul", "node-evidence": "ul", "node-history": "ul" };
+    "node-deps": "table", "node-decisions": "table", "node-challenges": "ul", "node-evidence": "ul", "node-history": "ul",
+    trusted: "table", "rules-list": "ul", "rules-retired-list": "ul", "rule-name": "input", "rule-rationale": "input", "rule-decision": "input",
+    "cond-reviewed": "input", "cond-doi": "input", "cond-arxiv": "input", "manage-rules": "button", "rule-record": "button", "rule-cancel": "button", "rule-new": "button" };
   const elements = Object.fromEntries(ids.map((id) => [id, new FakeElement(tags[id] || "div")]));
   Object.assign(elements["map-dag"], { clientWidth: 800, clientHeight: 600 });  // the canvas has a size, so it can be fitted and panned
   focus.body = focus.on = new FakeElement("body");
   // an element the page drew itself (the DAG's <g id="dag-view">) is found by its id too
   const byId = (id) => elements[id] || Object.values(elements).flatMap((e) => e._all()).find((n) => n.getAttribute("id") === id) || null;
-  for (const table of ["pending", "node-deps", "node-decisions"]) elements[table].append(new FakeElement("thead"), new FakeElement("tbody"));
+  for (const table of ["pending", "node-deps", "node-decisions", "trusted"]) elements[table].append(new FakeElement("thead"), new FakeElement("tbody"));
   elements.confirm.hidden = true;
+  elements["rules-sheet"].hidden = true;
+  for (const id of ["cond-reviewed", "cond-doi", "cond-arxiv"]) elements[id].setAttribute("type", "checkbox");
   const listeners = {};
   const hear = (type, fn) => { (listeners[type] ||= []).push(fn); };
   const location = { hash: "", href: "" };
@@ -117,7 +129,10 @@ class FakeElement {
     fetch: async (url, init = {}) => {
       if (init.method === "POST") posted.push({ url, body: JSON.parse(init.body) });
       const node = url.startsWith("/api/node/") ? (scenario.nodes || {})[decodeURIComponent(url.slice("/api/node/".length))] : undefined;
-      const data = url === "/api/state" ? scenario.state : url === "/api/map" ? scenario.map : node || { results: [] };
+      const data = url === "/api/state" ? scenario.state : url === "/api/map" ? scenario.map
+        : url === "/api/trust-rules" ? (scenario.rules || { rules: [], source_types: [], weak_source_types: [] })
+        : url === "/api/trust-rules/preview" ? (scenario.preview || { losing: [], depended_on_by_accepted: [], gaining: [] })
+        : node || { results: [] };
       return { json: async () => ({ ok: true, data }) };
     },
   };
@@ -187,7 +202,26 @@ class FakeElement {
     pendingMath: elements.pending.querySelectorAll("tbody tr").map((tr) => tr.querySelectorAll("span.math").map((m) => ({ class: m.className, text: m.textContent }))),
     katex: katexCalls,
     confirmShown: !elements.confirm.hidden,
-    posted,
+    posted: [...posted],  // what has been posted so far, as of this reading
+    // the Trusted by rule section (ADR-0014): each row's text, its rule chips and its prefilled rationale; the count
+    trustedRows: elements.trusted.querySelectorAll("tbody tr").map((tr) => ({
+      text: tr.textContent,
+      rules: tr.querySelectorAll("span.rule-chip").map((c) => c.textContent),
+      rationale: (tr.querySelectorAll("input")[0] || { value: "" }).value,
+    })),
+    trustedCount: elements["trusted-count"].textContent,
+    // the rules sheet: shown, each listed rule (in force, then retired), the form's title, reminder and impact line
+    rulesSheetShown: !elements["rules-sheet"].hidden,
+    rulesListed: elements["rules-list"].querySelectorAll("li").map((li) => ({ name: li.getAttribute("data-rule"), text: li.textContent, buttons: li.querySelectorAll("button").map((b) => b.textContent) })),
+    rulesRetired: elements["rules-retired-list"].querySelectorAll("li").map((li) => li.getAttribute("data-rule")),
+    ruleFormTitle: elements["rules-form-title"].textContent,
+    ruleNameDisabled: elements["rule-name"].disabled,
+    ruleReminder: elements["rule-reminder"].textContent,
+    ruleImpact: elements["rule-impact"].textContent,
+    // the node page's acceptance chip and its history lines
+    nodeAxes: elements["node-axes"].querySelectorAll("span.chip").map((c) => c.textContent),
+    nodeHistory: elements["node-history"].querySelectorAll("li").map((li) => li.textContent),
+    nodeDecisionRationales: elements["node-decisions"].querySelectorAll("tbody tr").map((tr) => (tr.querySelectorAll("input")[0] || { value: "" }).value),
   });
   const readings = [read()];
   // a key pressed where the focus is: the focused element hears it first, then it bubbles to the document
@@ -213,6 +247,29 @@ class FakeElement {
       if (!elements.confirm.hidden) elements["confirm-record"].onclick();
       await pressed;
     }
+    // the Trusted by rule section and the rules sheet (ADR-0014)
+    const settle = async () => { for (let i = 0; i < 4; i++) await new Promise((resolve) => setImmediate(resolve)); };
+    const confirmIfShown = async (pressed) => { await settle(); if (!elements.confirm.hidden) elements["confirm-record"].onclick(); await pressed; await settle(); };
+    if (step.reviewExplicitly) {
+      const tr = elements.trusted.querySelectorAll("tbody tr").find((r) => r.dataset.target === step.reviewExplicitly);
+      await confirmIfShown(tr.querySelector("button").onclick());
+    }
+    if (step.manage) { await elements["manage-rules"].dispatch("click"); await settle(); }
+    if (step.amend || step.retire) {
+      const li = elements["rules-list"].querySelectorAll("li").find((r) => r.getAttribute("data-rule") === (step.amend || step.retire));
+      await li.querySelectorAll("button").find((b) => b.textContent === (step.amend ? "Amend" : "Retire")).onclick();
+      await settle();
+    }
+    if (step.rule) {
+      const r = step.rule;
+      if (r.name !== undefined) elements["rule-name"].value = r.name;
+      if (r.rationale !== undefined) elements["rule-rationale"].value = r.rationale;
+      for (const [id, key] of [["cond-reviewed", "reviewed"], ["cond-doi", "doi"], ["cond-arxiv", "arxiv"]]) if (r[key] !== undefined) elements[id].checked = r[key];
+      if (r.types) for (const box of elements["cond-types"].querySelectorAll("input")) box.checked = r.types.includes(box.value);
+      await elements["cond-types"].dispatch("change");
+      await settle();
+    }
+    if (step.ruleRecord) await confirmIfShown(elements["rule-record"].dispatch("click"));
     readings.push(read());
   }
   console.log(JSON.stringify(readings));

@@ -4,6 +4,8 @@
                │             └── C2 (claim, split from L1)
                └── L2 (lemma) ── C2                            <- the shared dependency: a diamond
     R (claim, derived_from T), Rejected: an abandoned route
+    I2 (imported result citing the same source as I, at the same version): Trusted by rule
+       under the Trust rule `same-source` (`source already reviewed`, ADR-0014), never reviewed itself
     an open Challenge on L1
 
 Only service operations, the `_proofs` helper an agent's "write proof.tex, request review" goes
@@ -23,9 +25,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from proof_cli.proof_map import create_node, open_challenge, split_node
-from proof_cli.storage import ProjectStore, ensure_project
+from proof_cli.references import ReferenceRecord, ReferenceSourceType
+from proof_cli.storage import ProjectStore, ensure_project, import_reference
 
 AGENT = "agent_a"
+# the one citation of the sample: I and I2 both link it (issue #91)
+SOURCE = ReferenceRecord(id="sample-source", title="A Sample Monograph", authors=["S. Ample"], year=2001,
+                         source_type=ReferenceSourceType.monograph, identifier="doi:10.0000/sample")
+TRUST_RULE = "same-source"
 
 
 @dataclass
@@ -51,11 +58,15 @@ def build_sample_proof_map(root: Path, *, copies: int = 1) -> SampleProofMap:
     from _researcher import researcher
 
     store = ensure_project(root)
-    names = [{role: role if k == 1 else f"{role}-{k}" for role in ("L1", "L2", "C1", "C2", "I", "R")} for k in range(1, copies + 1)]
+    import_reference(store, SOURCE)
+    # one look per source and version (ADR-0014): I2 cites what I was reviewed for, and is trusted by that rule
+    researcher(store).declare_trust_rule(TRUST_RULE, conditions=[{"kind": "source_already_reviewed"}], rationale="one look per source and edition")
+    names = [{role: role if k == 1 else f"{role}-{k}" for role in ("L1", "L2", "C1", "C2", "I", "I2", "R")} for k in range(1, copies + 1)]
 
     for n in names:
-        create_node(store, node_id=n["I"], kind="imported_result", statement=f"Known result {n['I']}", source_locator="doi:10.0000/sample", source_version="v1")
+        create_node(store, node_id=n["I"], kind="imported_result", statement=f"Known result {n['I']}", source_locator="Theorem 1", source_version="v1", reference_id=SOURCE.id)
         researcher(store).decide_reference_review(n["I"], rationale="the published source checks out")
+        create_node(store, node_id=n["I2"], kind="imported_result", statement=f"Known result {n['I2']}", source_locator="Theorem 2", source_version="v1", reference_id=SOURCE.id)
 
         create_node(store, node_id=n["L1"], kind="lemma", statement=f"Lemma {n['L1']}")
         split_node(

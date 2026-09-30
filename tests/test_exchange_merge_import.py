@@ -148,7 +148,7 @@ def test_a_candidate_proof_path_outside_its_node_folder_rejects_the_whole_bundle
     assert _files_under(tmp_path / "target") == set()
 
 
-@pytest.mark.parametrize("bad_path", ["proofs/M/../L/proof.tex", "/tmp/evil.tex", "proofs/M/reviews.jsonl", "proofs/nobody/x.tex", "proofs\\M\\x.tex"])
+@pytest.mark.parametrize("bad_path", ["proofs/M/../L/proof.tex", "/tmp/evil.tex", "proofs/M/reviews.jsonl", "proofs/nobody/x.tex", "proofs\\M\\x.tex", "proofs/trust-rules.jsonl"])
 def test_a_vault_file_outside_an_imported_node_folder_rejects_the_whole_bundle(tmp_path: Path, bad_path: str) -> None:
     source = _accepted_l_and_m(tmp_path / "source")
     bundle = export_exchange_bundle(source)
@@ -600,3 +600,25 @@ def test_cli_handoff_inspect_human_and_json(tmp_path: Path) -> None:
     malformed = runner.invoke(app, ["handoff", "inspect", "-", "--json"], input="nope")
     assert malformed.exit_code == 1
     assert json.loads(malformed.stdout)["error"]["code"] == "MALFORMED_BUNDLE"
+
+
+# -- Trust rules stay home (ADR-0014) -----------------------------------------------------------
+
+
+def test_trust_rules_never_travel_in_a_bundle_either_way(tmp_path: Path) -> None:
+    """A rule is the researcher's own standing declaration: exported bundles leave it out, and importing one
+    into a project with rules leaves those rules exactly as they were."""
+    from proof_cli.trust_rules import list_trust_rules
+
+    source = _accepted_l_and_m(tmp_path / "source")
+    researcher(source).declare_trust_rule("textbooks", conditions=[{"kind": "source_type_in", "values": ["textbook"]}], rationale="mine")
+    bundle = export_exchange_bundle(source)
+    assert not any(f.path.endswith("trust-rules.jsonl") for f in bundle.vault_files)
+    assert not any(row.get("kind") == "trust_rule" for row in bundle.review_decisions)
+
+    target = ensure_project(tmp_path / "target")
+    researcher(target).declare_trust_rule("arxiv", conditions=[{"kind": "identifier_has_arxiv"}], rationale="theirs")
+    import_exchange_bundle(target, bundle)
+
+    assert [rule.name for rule in list_trust_rules(target)] == ["arxiv"]
+    assert not (tmp_path / "target" / "proofs" / "trust-rules.jsonl").read_text().count("textbooks")

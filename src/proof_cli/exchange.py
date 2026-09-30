@@ -31,7 +31,10 @@ What the merge keeps and what it never takes:
   in `review_decisions`, recorded in the event log for reference, counting for
   nothing, ADR-0010), and an imported Candidate proof keeps no review record id
   or interface fingerprint. Contracts and references are reset to local
-  defaults (legacy trust is retired, #50). Challenges arrive open.
+  defaults (legacy trust is retired, #50). Challenges arrive open. Trust rules
+  (`proofs/trust-rules.jsonl`, ADR-0014) never travel either way: they are the
+  researcher's own standing declarations, so an imported citation is trusted
+  here only under a rule declared here.
 - **Claims arrive released** and are listed in `released_claims`: an assignee
   in another project isn't working here.
 """

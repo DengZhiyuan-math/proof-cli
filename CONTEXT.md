@@ -45,7 +45,7 @@ A local proof obligation serving a specific parent node, not yet judged reusable
 _Avoid_: obligation, proof obligation, open goal
 
 **Imported result** (a proof map node kind):
-An external, already-established result pulled in as a dependency. It carries a trust level instead of a candidate proof, and enters the map through Reference review rather than Acceptance. Immutable once created — its statement, source locator, and source version never change in place. If the cited source is corrected or reinterpreted, that's a new Imported result node, not a revision of this one; dependents migrate to it deliberately. An Imported result has no dependencies of its own: it is established elsewhere. Its `ReferenceRecord` is only the citation (paper, book, arXiv entry), linked by the node's immutable `reference_id` (#91). It has no trust of its own: it is relied on only through the Reference review of the Imported result that links it. See ADR-0005, ADR-0012.
+An external, already-established result pulled in as a dependency. It carries a trust level instead of a candidate proof, and enters the map through Reference review rather than Acceptance. Immutable once created — its statement, source locator, and source version never change in place. If the cited source is corrected or reinterpreted, that's a new Imported result node, not a revision of this one; dependents migrate to it deliberately. An Imported result has no dependencies of its own: it is established elsewhere. Its `ReferenceRecord` is only the citation (paper, book, arXiv entry), linked by the node's immutable `reference_id` (#91). It has no trust of its own: it is relied on only through the Reference review of the Imported result that links it, or a Trust rule its citation meets. See ADR-0005, ADR-0012, ADR-0014.
 _Avoid_: reference, external theorem
 
 **Candidate proof**:
@@ -69,8 +69,16 @@ The researcher's explicit decision that a candidate proof for a Theorem, Lemma, 
 _Avoid_: close, merge, verify
 
 **Reference review**:
-The researcher's explicit decision that an Imported result's external source is trustworthy enough to be depended on. Distinct from Acceptance: it judges the reliability of a source, not whether a proof holds.
+The researcher's explicit decision that an Imported result's external source is trustworthy enough to be depended on. Distinct from Acceptance: it judges the reliability of a source, not whether a proof holds. It may also be given in advance, for a class of citations, by a Trust rule; the node then reads Trusted by rule rather than reviewed.
 _Avoid_: acceptance, verification
+
+**Trust rule**:
+A standing Reference review the researcher declares in advance: any Imported result whose citation meets the rule's conditions may be depended on without a review of its own. Declared and changed only by the researcher, on the proof map page, like every other Human Review decision; the declaration is the only record (one line per decision in the project's git-tracked `proofs/trust-rules.jsonl`: declare, amend, retire), no decision is written on the nodes it covers. A rule has an immutable name, a required rationale and one or more conditions, all of which must hold; several rules each count on their own. The conditions are a closed vocabulary: `source already reviewed` (another citation of the same reference at the same version carries the researcher's explicit Reference review, never another rule-trusted node), `source_type in {…}`, `identifier has DOI`, `identifier has arXiv`. Never the node's own trust level, free text or library folders. `proof trust-rule list` and `show` read the rules; no CLI command writes one. See ADR-0014.
+_Avoid_: auto-trust, policy, whitelist, auto-accept
+
+**Trusted by rule** (an acceptance state, Imported results only):
+Derived, never stored: the node has no counting Reference review of its own but meets a Trust rule. Dependents treat it as Reference-reviewed. An explicit decision on the node, made or later, takes precedence; No longer callable is final regardless. The review page lists such nodes in their own section, apart from what awaits the researcher, each with a button to review it explicitly. Losing the rule (tightened or retired) is losing standing, nothing more: unaccepted dependents block, Accepted ones keep their Acceptance.
+_Avoid_: auto-reviewed, pre-approved, reviewed (that is the explicit decision)
 
 **Promote**:
 The researcher's explicit decision to change an Accepted Claim's kind to Lemma, marking it as independently reusable. Only possible after the Claim has been Accepted; a node's kind is never automatically reassigned, and Promote does not currently support demotion.
@@ -93,7 +101,7 @@ Human Review's confirmation that an existing Candidate proof remains valid after
 _Avoid_: reaccept, re-approve, revalidate (as a bare verb — say what's being revalidated)
 
 **Review decision**:
-A Human Review decision (Acceptance, Reference review, Evidence review, Lightweight re-review, Challenge resolution, Promote, Dependent migration) as it is recorded: one line in the node's git-tracked `reviews.jsonl`, naming the Review snapshot's SHA-256, the rationale and the time, committed together with that snapshot by the reviewer. The commit's author, a GitHub identity, *is* the reviewer, and the pushed commit is the record of who decided what. Made only on the proof map page, by the researcher; no CLI command and no agent, in a terminal or as the studio's proof agent, makes one. That boundary is a convention for cooperative agents, not a security mechanism. See ADR-0010.
+A Human Review decision (Acceptance, Reference review, Evidence review, Lightweight re-review, Challenge resolution, Promote, Dependent migration; a Trust rule declared, amended or retired) as it is recorded: one line in the node's git-tracked `reviews.jsonl` (the project's `trust-rules.jsonl` for a Trust rule), naming the Review snapshot's SHA-256, the rationale and the time, committed together with that snapshot by the reviewer. The commit's author, a GitHub identity, *is* the reviewer, and the pushed commit is the record of who decided what. Made only on the proof map page, by the researcher; no CLI command and no agent, in a terminal or as the studio's proof agent, makes one. That boundary is a convention for cooperative agents, not a security mechanism. See ADR-0010.
 _Avoid_: signed decision, confirmation, `--confirm`, approval flag
 
 **Proof map page**:
@@ -117,7 +125,7 @@ _Avoid_: rejected reference, revoked citation
 A proof map node's state is tracked along three independent axes, never folded into one flat status. None are stored directly — each is computed from lower-level records (an active claim, the node's latest Candidate proof and its review decision, its dependencies' own state, and any open Challenges). See ADR-0002, ADR-0004.
 
 - **workflow state**: Claimed, Review-needed, Revision requested, Blocked — how far the current attempt has gotten
-- **acceptance state**: Accepted, Rejected, or unreviewed by default — set only by the researcher's Human Review, and only ever read off the newest Review decision. Reads *unverifiable* when that decision no longer matches its snapshot or its node
+- **acceptance state**: Accepted, Rejected, or unreviewed by default — set only by the researcher's Human Review, and only ever read off the newest Review decision. Reads *unverifiable* when that decision no longer matches its snapshot or its node. An Imported result reads its Reference review here: reviewed, no longer callable, or *Trusted by rule* when a Trust rule covers it
 - **integrity state**: current by default, Potentially stale, or Challenged — a derived warning overlay, never itself a workflow or acceptance value
 
 **Claimed** (a workflow state):
