@@ -486,9 +486,10 @@ def test_a_line_whose_conditions_this_version_cannot_read_is_warned_about_and_ig
 # -- the decision file's name is not a node's -------------------------------------------------------
 
 
-@pytest.mark.parametrize("node_id", ["trust-rules.jsonl", "preamble.tex"])
+@pytest.mark.parametrize("node_id", ["trust-rules.jsonl", "TRUST-RULES.JSONL", "Trust-Rules.jsonl", "preamble.tex", "PREAMBLE.TEX"])
 def test_the_vaults_own_file_names_cannot_name_a_node(tmp_path: Path, node_id):
-    """A node folder of that name would stand where the file goes (`proofs/<name>`): refused on creation, split and import."""
+    """A node folder of that name would stand where the file goes (`proofs/<name>`) — on a case-insensitive file
+    system in any letter case: refused on creation, split and import."""
     from proof_cli.exchange import export_exchange_bundle, import_exchange_bundle, parse_bundle
     from proof_cli.proof_map import split_node
 

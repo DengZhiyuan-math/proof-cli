@@ -221,16 +221,17 @@ def _record(
 
 
 _SAFE_NODE_ID = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9._-]*")
-# the vault's own files, beside the node folders: a node folder can't take their place
-_RESERVED_NODE_IDS = frozenset({TRUST_RULES_FILE, preamble_path(Path(".")).name})
+# the vault's own files, beside the node folders: a node folder can't take their place, in any letter case
+# (a case-insensitive file system, macOS's default among them, would put `TRUST-RULES.JSONL/` where the file goes)
+_RESERVED_NODE_IDS = frozenset({TRUST_RULES_FILE.casefold(), preamble_path(Path(".")).name.casefold()})
 
 
 def node_id_problem(node_id: str) -> str | None:
     """Why `node_id` can't name a node folder under proofs/ (ADR-0010), or None when it can."""
     if not _SAFE_NODE_ID.fullmatch(node_id):
         return f"node id {node_id!r} must be letters, digits, '.', '_' or '-', not starting with '.'"
-    if node_id in _RESERVED_NODE_IDS:
-        return f"node id {node_id!r} is the name of one of the vault's own files (proofs/{node_id})"
+    if node_id.casefold() in _RESERVED_NODE_IDS:
+        return f"node id {node_id!r} is the name of one of the vault's own files (proofs/{node_id.casefold()}), in any letter case"
     return None
 
 
