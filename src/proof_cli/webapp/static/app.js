@@ -62,6 +62,164 @@ async function decide(decisions) {
 // -- pages -------------------------------------------------------------------------
 let state = null;
 
+// -- the fog drawer (issue #137, ADR-0008): the Proof fog beside the map, never on it -----------------
+// A fog item is a difficulty not yet precise enough to be a Claim; it is never a node, and `near` is
+// an informal pointer, never a dependency. The drawer lists open items (dropped and crystallized ones
+// on request), adds, drops, reopens and records Experiments through /api/fog; crystallize is a CLI
+// command until the page's node form returns (#133). Hovering a row lights its near nodes up on the
+// canvas the way the search box does, with nothing drawn on the map.
+let fogData = { items: [] };
+// form: {id, kind} of the one inline form showing; near: the hovered row's nodes, lit up on the map; found: the row a #/fog/<id> link asked for
+const fog = { open: false, showAll: false, form: null, near: null, found: null };
+
+async function loadFog() {
+  fogData = await api(fog.showAll ? "/api/fog?all=1" : "/api/fog");
+  showFog();
+}
+
+// every write the drawer makes: post it, say what happened, read the fog again; a refusal is shown and nothing else changes
+async function fogPost(path, body, message) {
+  try { await api(path, body); } catch (error) { showError(error); return false; }
+  fog.form = null;
+  say(message, "ok");
+  await loadFog();
+  return true;
+}
+
+function fogNodeHref(id) {
+  const n = mapData ? mapData.nodes.find((x) => x.id === id) : null;
+  return n ? pageOf(n) : `#/node/${encodeURIComponent(id)}`;
+}
+
+// the newest Experiment as a chip: its outcome and summary, the rest on hover
+function experimentChip(item) {
+  const e = item.latest_experiment;
+  if (!e) return el("span", "no experiment yet", { class: "exp none" });
+  const when = String(e.recorded_at || "").slice(0, 16).replace("T", " ");
+  return el("span", `${e.outcome} · ${short(e.summary, 48)}`, { class: `exp ${e.outcome}`, title: `${e.summary} — ${e.run_by}, ${when}${e.path ? ` · ${e.path}${e.missing ? " (missing)" : ""}` : ""}` });
+}
+
+function nearChips(item) {
+  const box = el("span", null, { class: "fog-near" });
+  if (!item.near.length) box.append(el("span", "not near any node", { class: "fog-id" }));
+  for (const id of item.near) box.append(el("a", id, { href: fogNodeHref(id), title: `near ${id} — what it is about, never a dependency` }));
+  return box;
+}
+
+function fogStatusLine(item) {
+  if (item.status === "dropped") return el("span", `dropped · ${item.dropped_by}, ${String(item.dropped_at || "").slice(0, 10)} — ${item.reason}`, { class: "fog-status" });
+  if (item.status === "crystallized") { const line = el("span", "crystallized as ", { class: "fog-status" }); line.append(el("a", item.node_id, { href: fogNodeHref(item.node_id) })); return line; }
+  return null;
+}
+
+// the one inline form a row shows: drop (a reason), experiment (an outcome and a summary)
+function fogForm(item, kind) {
+  const form = el("form", null, { class: "fog-form" });
+  form.addEventListener("submit", (event) => event.preventDefault());
+  const send = (action, body) => fogPost(`/api/fog/${encodeURIComponent(item.id)}/${action}`, body, `${item.id}: ${action === "drop" ? "dropped" : "experiment recorded"}.`);
+  if (kind === "drop") {
+    const reason = el("input", null, { type: "text", name: "reason", placeholder: "why (required)", "aria-label": "Why it is dropped" });
+    const go = el("button", "Drop", { type: "button", class: "primary" });
+    go.addEventListener("click", () => { if (!reason.value.trim()) return say("A reason is required to drop a fog item.", "error"); send("drop", { reason: reason.value.trim() }); });
+    form.append(reason, go);
+  } else {
+    const outcome = el("select", null, { name: "outcome", "aria-label": "Outcome" });
+    for (const value of ["supports", "refutes", "inconclusive", "error"]) outcome.append(el("option", value, { value }));
+    const summary = el("input", null, { type: "text", name: "summary", placeholder: "what was computed, what it showed", "aria-label": "Summary" });
+    // who ran it is the request's to say: the page's identity, editable (an agent's run is recorded under the agent's name)
+    const runBy = el("input", null, { type: "text", name: "run_by", value: state ? state.reviewer : "", placeholder: "run by", "aria-label": "Who ran it" });
+    const path = el("input", null, { type: "text", name: "path", placeholder: "path under proofs/ (optional)", "aria-label": "Where its files are" });
+    const go = el("button", "Record", { type: "button", class: "primary" });
+    go.addEventListener("click", () => {
+      if (!summary.value.trim()) return say("A summary is required to record an Experiment.", "error");
+      if (!runBy.value.trim()) return say("Say who ran the Experiment.", "error");
+      send("experiment", { outcome: outcome.value, summary: summary.value.trim(), run_by: runBy.value.trim(), ...(path.value.trim() ? { path: path.value.trim() } : {}) });
+    });
+    form.append(outcome, summary, runBy, path, go);
+  }
+  const cancel = el("button", "Cancel", { type: "button" });
+  cancel.addEventListener("click", () => { fog.form = null; showFog(); });
+  form.append(cancel);
+  return form;
+}
+
+function fogActions(item) {
+  const box = el("div", null, { class: "fog-actions" });
+  const button = (text, onClick, primary) => { const b = el("button", text, { type: "button", class: primary ? "primary" : "" }); b.addEventListener("click", (event) => { event.stopPropagation(); onClick(); }); return b; };
+  // each "…" button opens its inline form (or hint) under the row; a second click closes it
+  const toggle = (kind) => () => { fog.form = fog.form && fog.form.id === item.id && fog.form.kind === kind ? null : { id: item.id, kind }; showFog(); };
+  if (item.status === "open") box.append(button("Crystallize…", toggle("crystallize"), true), button("Record experiment…", toggle("experiment")), button("Drop…", toggle("drop")));
+  else if (item.status === "dropped") box.append(button("Reopen", () => fogPost(`/api/fog/${encodeURIComponent(item.id)}/reopen`, {}, `${item.id}: reopened.`)));
+  return box;
+}
+
+// a crystallize is a CLI command until the page's node form returns (#133): the command, ready to copy
+function crystallizeHint(item) {
+  const parent = item.near.length === 1 ? ` --parent ${item.near[0]}` : item.near.length > 1 ? ` --parent <one of ${item.near.join(", ")}>` : "";
+  const hint = el("p", null, { class: "hint fog-cli-hint" });
+  hint.append("State it as a Claim from the CLI (the statement is written fresh; the fog's text is never copied): ",
+    el("code", `proof fog crystallize ${item.id} <node-id> "<statement>"${parent}`, { class: "fog-cli" }));
+  return hint;
+}
+
+function fogRow(item) {
+  const li = el("li", null, { "data-fog": item.id, class: item.status === "open" ? "" : "gone" });
+  const line = el("div", null, { class: "line" });
+  line.append(el("span", item.id, { class: "fog-id" }), experimentChip(item));
+  li.append(line, el("p", item.text, { class: "fog-text" }));
+  if (item.notes) li.append(el("p", item.notes, { class: "hint fog-notes" }));
+  const meta = el("div", null, { class: "meta" });
+  meta.append(nearChips(item));
+  const status = fogStatusLine(item);
+  if (status) meta.append(status);
+  li.append(meta, fogActions(item));
+  if (fog.form && fog.form.id === item.id) li.append(fog.form.kind === "crystallize" ? crystallizeHint(item) : fogForm(item, fog.form.kind));
+  // hovering a row lights its near nodes up on the map, the rest fall back: the search box's own marking
+  // (dim / found), on the canvas and the tree alike; nothing is drawn on the map for a fog item
+  li.addEventListener("mouseenter", () => focusFogNodes(item.near));
+  li.addEventListener("mouseleave", () => focusFogNodes(null));
+  if (fog.found === item.id) li.classList.add("found");
+  return li;
+}
+
+function focusFogNodes(ids) {
+  fog.near = ids && ids.length ? new Set(ids) : null;
+  applyFind();
+}
+
+function showFog() {
+  focusFogNodes(null);  // the rows are rebuilt: a hovered one goes without its mouseleave
+  const items = fogData.items || [];
+  const open = items.filter((item) => item.status === "open").length;
+  $("stat-fog").textContent = String(open);
+  $("fog-drawer-n").textContent = String(open);
+  $("fog-badge").classList.toggle("on", fog.open);
+  $("fog-drawer").hidden = !fog.open;
+  $("fog-show-all").checked = fog.showAll;
+  const near = $("fog-add-near");
+  const chosen = near.value;
+  near.replaceChildren(el("option", "near: none", { value: "" }), ...(mapData ? mapData.nodes : []).map((n) => el("option", `near: ${n.id}`, { value: n.id })));
+  near.value = chosen;
+  const list = $("fog-list");
+  list.replaceChildren(...items.map(fogRow));
+  if (!items.length) list.append(el("li", fog.showAll ? "No fog, dropped or crystallized." : "No fog: everything you know of is stated as a node.", { class: "fog-none" }));
+}
+
+// the drawer, open at one item (a link from a node's page): a dropped or crystallized one shows the rest too
+async function openFogAt(fogId) {
+  fog.open = true;
+  fog.found = fogId;
+  if (!(fogData.items || []).some((item) => item.id === fogId) && !fog.showAll) { fog.showAll = true; try { await loadFog(); } catch (error) { showError(error); return; } }
+  showFog();
+}
+
+async function addFog() {
+  const text = $("fog-add-text").value.trim();
+  if (!text) return say("Say what the difficulty is.", "error");
+  const nearId = $("fog-add-near").value;
+  if (await fogPost("/api/fog", { text, near: nearId ? [nearId] : [] }, "Fog item added.")) $("fog-add-text").value = "";
+}
+
 function showWarnings(list, into) {
   into.replaceChildren(...list.map((w) => { const li = el("li", null, { class: "warning" }); li.append(el("code", w.code), " ", w.message); return li; }));
   if (!list.length) into.append(el("li", "None."));
@@ -707,12 +865,13 @@ function applyFind() {
   if (!mapData) return;
   const matches = findMatcher();
   const byId = new Map(mapData.nodes.map((n) => [n.id, n]));
+  const near = fog.near;  // a hovered fog row's near nodes light up the way a search's matches do (issue #137)
   const mark = (item) => {
     const id = item.getAttribute("data-node-id");
-    item.classList.toggle("dim", !!matches && !matches(byId.get(id) || { id }));  // a missing dependency matches by id
-    item.classList.toggle("found", !!matches && id === finding.shown);
+    item.classList.toggle("dim", (!!matches && !matches(byId.get(id) || { id })) || (!!near && !near.has(id)));  // a missing dependency matches by id
+    item.classList.toggle("found", (!!matches && id === finding.shown) || (!!near && near.has(id)));
   };
-  $("dag-svg").classList.toggle("filtering", !!matches);
+  $("dag-svg").classList.toggle("filtering", !!matches || !!near);
   for (const g of $("dag-svg").querySelectorAll("g.node")) mark(g);
   for (const li of $("map-tree").querySelectorAll("li")) mark(li);
   const count = $("map-find-count");
@@ -791,6 +950,7 @@ async function showNode(nodeId) {
   $("node-source").replaceChildren(...(view.source ? [el("h3", "Source"), el("p", `${view.source.locator} · ${view.source.version}${view.source.trust_level ? ` · ${view.source.trust_level}` : ""}`)] : []));
   if (view.citation) $("node-source").append(citationBlock(view.citation));
   $("node-dependents").textContent = view.dependents.length ? `Used by: ${view.dependents.join(", ")}` : "Nothing depends on this node yet.";
+  showNodeFog(view);
   const pdfs = [];
   if (view.pdfs.snapshot) pdfs.push(el("a", "PDF archived with this snapshot", { href: `/api/node/${encodeURIComponent(node.id)}/pdf/snapshot`, target: "_blank", rel: "noopener" }));
   if (view.pdfs.build) pdfs.push(el("a", "the studio's current build (of the working file, which may be newer than the snapshot)", { href: `/api/node/${encodeURIComponent(node.id)}/pdf/build`, target: "_blank", rel: "noopener" }));
@@ -853,16 +1013,38 @@ function evidenceItem(c) {
   return li;
 }
 
+// the node's fog (ADR-0008): the item it was crystallized from, looked up in the fog table, and the open fog near it
+function showNodeFog(view) {
+  const block = $("node-fog");
+  block.replaceChildren();
+  if (view.crystallized_from) {
+    const line = el("p", "Crystallized from ", { class: "hint" });
+    line.append(el("a", view.crystallized_from, { href: `#/fog/${encodeURIComponent(view.crystallized_from)}`, title: "The fog item this Claim was stated from", class: "fog-id" }));
+    block.append(line);
+  }
+  const near = view.fog_near || [];
+  if (near.length) {
+    block.append(el("h3", "Fog near this node"));
+    const ul = el("ul", null, { class: "node-fog-list" });
+    for (const item of near) { const li = el("li"); li.append(el("a", item.id, { href: `#/fog/${encodeURIComponent(item.id)}`, class: "fog-id" }), " ", el("span", item.text, { class: "fog-text" }), " ", experimentChip(item)); ul.append(li); }
+    block.append(ul);
+  }
+}
+
 async function route() {
-  // four pages: the map (#/), the review list (#/review), the warnings (#/warnings), a node (#/node/<id>)
+  // four pages: the map (#/), the review list (#/review), the warnings (#/warnings), a node (#/node/<id>);
+  // #/fog/<id> is the map with the fog drawer open at that item (issue #137)
   const match = location.hash.match(/^#\/node\/(.+)$/);
+  const fogLink = location.hash.match(/^#\/fog\/(.+)$/);
   const page = match ? "node" : { "#/review": "review", "#/warnings": "warnings" }[location.hash] || "map";
+  if (fogLink) await openFogAt(decodeURIComponent(fogLink[1]));
   document.body.dataset.page = page;
   $("home").hidden = page !== "map";
   $("review-page").hidden = page !== "review";
   $("warnings-page").hidden = page !== "warnings";
   $("node-page").hidden = page !== "node";
   if (page === "map" && view.content && !view.fitted) fitView();  // drawn while the map was hidden
+  if (page === "map") showFog();  // the drawer as it was left (or as the badge or a #/fog link asked)
   for (const link of document.querySelectorAll(".rail a[data-nav]")) link.classList.toggle("on", link.dataset.nav === page);
   if (match) {
     try { await showNode(decodeURIComponent(match[1])); } catch (error) { say(error.message, "error"); }
@@ -878,6 +1060,7 @@ async function refresh() {
   showHome();
   showMap();
   showAttention();
+  try { await loadFog(); } catch (error) { say(`The fog couldn't be read: ${error.message}`, "error"); }  // a side drawer: never the page
   await route();
 }
 
@@ -933,6 +1116,18 @@ document.addEventListener("DOMContentLoaded", () => {
     try { localStorage.setItem("proof.map.sidebar", hidden ? "hidden" : "shown"); } catch { /* ignore */ }
     if (view.fitted) setTimeout(fitView, 240);
   });
+  // the fog drawer (issue #137)
+  $("fog-badge").addEventListener("click", (event) => {
+    event.preventDefault();
+    if (document.body.dataset.page !== "map") { fog.open = true; location.hash = "#/"; route().catch(showError); return; }  // the drawer lives on the map
+    fog.open = !fog.open;
+    showFog();
+  });
+  $("fog-close").addEventListener("click", () => { fog.open = false; showFog(); });
+  $("fog-show-all").addEventListener("change", () => { fog.showAll = $("fog-show-all").checked; loadFog().catch(showError); });
+  $("fog-add").addEventListener("click", () => addFog().catch(showError));
+  $("fog-add-text").addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); addFog().catch(showError); } });
+  $("fog-composer").addEventListener("submit", (event) => event.preventDefault());
   $("manage-rules").addEventListener("click", (event) => { event.preventDefault(); openRulesSheet().catch(showError); });
   $("rule-cancel").addEventListener("click", () => { $("rules-sheet").hidden = true; });
   $("rule-new").addEventListener("click", () => ruleForm("declare"));

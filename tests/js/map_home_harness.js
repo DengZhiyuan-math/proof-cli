@@ -8,6 +8,9 @@
 // {reviewExplicitly: node_id} (the Trusted by rule section's button, then the confirm sheet), {manage: true}
 // (opens the rules sheet, served from scenario.rules), {amend: name} / {retire: name} (a listed rule's button),
 // {rule: {name, rationale, reviewed, doi, arxiv, types: [...]}} (fills the form), {ruleRecord: true} (Record, then confirm).
+// The fog drawer (issue #137): {fog: true} (the toolbar badge), {fogClose: true}, {fogHover: fog_id} / {fogLeave: fog_id},
+// {fogAdd: {text, near}}, {fogAll: bool} (the show-dropped toggle), {fogButton: {id, text}} (a row's button by its text),
+// {fogFill: {id, name, value}} (a row's inline form field), served from scenario.fog / scenario.fogAll.
 const fs = require("fs"), path = require("path"), vm = require("vm");
 
 const focus = { on: null, body: null };
@@ -98,11 +101,14 @@ class FakeElement {
     // the Trusted by rule section and the rules sheet (ADR-0014)
     "trusted", "trusted-count", "trusted-section", "manage-rules", "rules-sheet", "rules-list", "rules-retired-list", "rule-form", "rules-form-title",
     "rule-decision", "rule-name", "rule-rationale", "rule-conditions", "cond-reviewed", "cond-doi", "cond-arxiv", "cond-types",
-    "rule-reminder", "rule-impact", "rule-new", "rule-cancel", "rule-record"];
+    "rule-reminder", "rule-impact", "rule-new", "rule-cancel", "rule-record",
+    // the fog drawer (issue #137) and the node page's fog block
+    "fog-badge", "stat-fog", "fog-drawer", "fog-drawer-n", "fog-list", "fog-close", "fog-add-text", "fog-add-near", "fog-add", "fog-show-all", "fog-composer", "node-fog"];
   const tags = { "tree-root": "select", "dag-svg": "svg", "decide-batch": "button", pending: "table", warnings: "ul", "map-find": "input", "attention-nodes": "ul",
     "node-deps": "table", "node-decisions": "table", "node-challenges": "ul", "node-evidence": "ul", "node-history": "ul",
     trusted: "table", "rules-list": "ul", "rules-retired-list": "ul", "rule-name": "input", "rule-rationale": "input", "rule-decision": "input",
-    "cond-reviewed": "input", "cond-doi": "input", "cond-arxiv": "input", "manage-rules": "button", "rule-record": "button", "rule-cancel": "button", "rule-new": "button" };
+    "cond-reviewed": "input", "cond-doi": "input", "cond-arxiv": "input", "manage-rules": "button", "rule-record": "button", "rule-cancel": "button", "rule-new": "button",
+    "fog-badge": "a", "stat-fog": "b", "fog-drawer": "aside", "fog-list": "ul", "fog-close": "button", "fog-add-text": "input", "fog-add-near": "select", "fog-add": "button", "fog-show-all": "input", "fog-composer": "form" };
   const elements = Object.fromEntries(ids.map((id) => [id, new FakeElement(tags[id] || "div")]));
   Object.assign(elements["map-dag"], { clientWidth: 800, clientHeight: 600 });  // the canvas has a size, so it can be fitted and panned
   focus.body = focus.on = new FakeElement("body");
@@ -111,6 +117,8 @@ class FakeElement {
   for (const table of ["pending", "node-deps", "node-decisions", "trusted"]) elements[table].append(new FakeElement("thead"), new FakeElement("tbody"));
   elements.confirm.hidden = true;
   elements["rules-sheet"].hidden = true;
+  elements["fog-drawer"].hidden = true;
+  elements["fog-show-all"].setAttribute("type", "checkbox");
   for (const id of ["cond-reviewed", "cond-doi", "cond-arxiv"]) elements[id].setAttribute("type", "checkbox");
   const listeners = {};
   const hear = (type, fn) => { (listeners[type] ||= []).push(fn); };
@@ -133,6 +141,8 @@ class FakeElement {
       const data = url === "/api/state" ? scenario.state : url === "/api/map" ? scenario.map
         : url === "/api/trust-rules" ? (scenario.rules || { rules: [], source_types: [], weak_source_types: [] })
         : url === "/api/trust-rules/preview" ? (scenario.preview || { losing: [], depended_on_by_accepted: [], gaining: [] })
+        : url === "/api/fog" ? (scenario.fog || { items: [] })
+        : url === "/api/fog?all=1" ? (scenario.fogAll || scenario.fog || { items: [] })
         : node || { results: [] };
       if (url === "/api/trust-rules/preview") {
         // scenario.previewFails: the server refuses every preview; scenario.previewOutOfOrder: the first preview's
@@ -236,6 +246,29 @@ class FakeElement {
     nodeAxes: elements["node-axes"].querySelectorAll("span.chip").map((c) => c.textContent),
     nodeHistory: elements["node-history"].querySelectorAll("li").map((li) => li.textContent),
     nodeDecisionRationales: elements["node-decisions"].querySelectorAll("tbody tr").map((tr) => (tr.querySelectorAll("input")[0] || { value: "" }).value),
+    // the fog drawer (issue #137): the badge's count, whether the drawer shows, each row as it reads
+    fogBadge: elements["stat-fog"].textContent,
+    fogDrawerShown: !elements["fog-drawer"].hidden,
+    fogCount: elements["fog-drawer-n"].textContent,
+    fogRows: elements["fog-list"].querySelectorAll("li").map((li) => ({
+      id: li.getAttribute("data-fog"),
+      text: li.textContent,
+      near: li.querySelectorAll("span.fog-near a").map((a) => a.textContent),
+      exp: (li.querySelector("span.exp") || { textContent: null }).textContent,
+      expTitle: (li.querySelector("span.exp") || { getAttribute: () => null }).getAttribute("title"),
+      actions: li.querySelectorAll("button").map((b) => b.textContent),
+      status: (li.querySelector("span.fog-status") || { textContent: null }).textContent,
+      cli: (li.querySelector("code.fog-cli") || { textContent: null }).textContent,
+      form: li.querySelectorAll("form").length > 0,
+    })),
+    fogFocus: elements["dag-svg"].classList.contains("filtering"),
+    fogFound: elements["fog-list"].querySelectorAll("li").filter((li) => li.classList.contains("found")).map((li) => li.getAttribute("data-fog")),
+    fogAddText: elements["fog-add-text"].value,
+    // the node page's fog block: crystallized from, and the open fog near the node
+    nodeFog: elements["node-fog"].textContent,
+    nodeFogLinks: elements["node-fog"].querySelectorAll("a").map((a) => a.textContent),
+    nodeFogHrefs: elements["node-fog"].querySelectorAll("a").map((a) => a.getAttribute("href")),
+    page: (focus.body.dataset || {}).page || null,
   });
   const readings = [read()];
   // a key pressed where the focus is: the focused element hears it first, then it bubbles to the document
@@ -253,6 +286,7 @@ class FakeElement {
     if (step.view) await elements[`view-${step.view}`].dispatch("click");
     if (step.root) { elements["tree-root"].value = step.root; await elements["tree-root"].dispatch("change"); }
     if (step.open) { location.hash = `#/node/${encodeURIComponent(step.open)}`; await listeners["window:hashchange"](); }
+    if (step.hash) { location.hash = step.hash; await listeners["window:hashchange"](); for (let i = 0; i < 4; i++) await new Promise((resolve) => setImmediate(resolve)); }
     if (step.tick) { pendingRow(step.tick).querySelector("input[type=checkbox]").checked = step.on !== false; }
     if (step.choose) { pendingRow(step.choose).querySelector("select").value = step.value; }
     if (step.record) {
@@ -284,6 +318,23 @@ class FakeElement {
       await settle();
     }
     if (step.ruleRecord) await confirmIfShown(elements["rule-record"].disabled ? Promise.resolve() : elements["rule-record"].dispatch("click"));  // a disabled button hears no click
+    // the fog drawer (issue #137)
+    const fogRow = (id) => elements["fog-list"].querySelectorAll("li").find((li) => li.getAttribute("data-fog") === id);
+    if (step.fog) { await elements["fog-badge"].dispatch("click"); await settle(); }
+    if (step.fogClose) { await elements["fog-close"].dispatch("click"); await settle(); }
+    if (step.fogHover) { await fogRow(step.fogHover).dispatch("mouseenter"); await settle(); }
+    if (step.fogLeave) { await fogRow(step.fogLeave).dispatch("mouseleave"); await settle(); }
+    if (step.fogAdd) {
+      elements["fog-add-text"].value = step.fogAdd.text || "";
+      elements["fog-add-near"].value = step.fogAdd.near || "";
+      await elements["fog-add"].dispatch("click"); await settle();
+    }
+    if (step.fogAll !== undefined) { elements["fog-show-all"].checked = step.fogAll; await elements["fog-show-all"].dispatch("change"); await settle(); }
+    if (step.fogButton) { await fogRow(step.fogButton.id).querySelectorAll("button").find((b) => b.textContent === step.fogButton.text).dispatch("click"); await settle(); }
+    if (step.fogFill) {
+      const field = fogRow(step.fogFill.id)._all().find((n) => n.getAttribute("name") === step.fogFill.name);
+      field.value = step.fogFill.value;
+    }
     readings.push(read());
   }
   console.log(JSON.stringify(readings));
