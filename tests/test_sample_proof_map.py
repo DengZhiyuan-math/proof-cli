@@ -22,6 +22,7 @@ WITH_THE_CHALLENGE_OPEN = {
     "C1": ("open", None, "accepted", "current", False),
     "C2": ("open", None, "accepted", "current", False),
     "I": ("open", None, "reviewed", "current", False),  # an imported result's acceptance axis is its Reference review
+    "I2": ("open", None, "trusted-by-rule", "current", False),  # or the Trust rule its citation meets (ADR-0014)
     "R": ("open", None, "rejected", "current", False),
 }
 AFTER_THE_DISMISSAL = {
@@ -53,7 +54,7 @@ def _dismiss(sample) -> None:
 def test_the_sample_has_the_shape_of_spec_14(sample):
     nodes = _map(sample.store)
     assert {node_id: n["kind"] for node_id, n in nodes.items()} == {
-        "T": "theorem", "L1": "lemma", "L2": "lemma", "C1": "claim", "C2": "claim", "I": "imported_result", "R": "claim",
+        "T": "theorem", "L1": "lemma", "L2": "lemma", "C1": "claim", "C2": "claim", "I": "imported_result", "I2": "imported_result", "R": "claim",
     }
     assert nodes["T"]["dependencies"] == ["L1", "L2"]
     assert nodes["L1"]["dependencies"] == ["C1", "C2"]
@@ -84,7 +85,7 @@ def test_the_frontier_is_what_the_map_marks_ready(sample):
 
 def test_the_shared_claim_is_one_node_in_the_dag_with_two_parents(sample):
     nodes = _map(sample.store)
-    assert list(nodes).count("C2") == 1 and len(nodes) == 7
+    assert list(nodes).count("C2") == 1 and len(nodes) == 8
     assert sorted(node_id for node_id, n in nodes.items() if "C2" in n["dependencies"]) == ["L1", "L2"]
 
 
@@ -140,11 +141,21 @@ def test_dismissing_the_challenge_clears_every_stale_mark(sample):
     assert {n.id for n in get_frontier(sample.store)} == {"T"}
 
 
+def test_the_second_citation_of_the_reviewed_source_is_trusted_by_rule_and_listed_apart(sample):
+    """I2 cites what I was reviewed for, at the same version: the sample's Trust rule covers it (ADR-0014)."""
+    nodes = _map(sample.store)
+    assert nodes["I2"]["acceptance_state"] == "trusted-by-rule" and nodes["I2"]["trust_rule"] == ["same-source"]
+    assert nodes["I"]["trust_rule"] == []  # the explicit review counts; nothing rests on a rule-trusted node
+    state = DirectClient(sample.store).get("/api/state")[1]["data"]
+    assert [item["node_id"] for item in state["trusted_by_rule"]] == ["I2"]
+    assert "I2" not in [item["node_id"] for item in state["pending"]]
+
+
 def test_the_builder_scales_for_a_performance_baseline(tmp_path: Path):
     scaled = build_sample_proof_map(tmp_path, copies=3)
 
     nodes = _map(scaled.store)
-    assert len(nodes) == 1 + 3 * 6
+    assert len(nodes) == 1 + 3 * 7
     assert nodes["T"]["dependencies"] == ["L1", "L2", "L1-2", "L2-2", "L1-3", "L2-3"]
     assert nodes["L2-3"]["dependencies"] == ["C2-3"]
     assert nodes["C1-3"]["dependencies"] == ["I-3"]

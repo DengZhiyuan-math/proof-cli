@@ -4,6 +4,7 @@
 - **Amends** ADR-0005 Rule 1: a `ReferenceRecord` is no longer re-reviewed on its own. It is trusted only through the Reference review of the imported_result node that links it.
 - **Amends** ADR-0001: `ProofObligation` and `BlockerRecord` stay only as legacy informational notes, with no "resolve", and a `BlockerRecord` is not an annotation attached to a proof-map node (point 6).
 - **Amends** ADR-0004: a `CommentThread` is not how an observation about a proof-map node is recorded (point 7).
+- **Amended by** ADR-0014: point 5's deferred conditional auto-trust is decided there, as a Trust rule the researcher declares in advance.
 
 ## Context
 
@@ -33,6 +34,8 @@ So the project answered "what can be called?" in two places, and one of them cou
    - A Reference review binds the `reference_id`, not the entry's text. If the linked entry is deleted, the review reads unverifiable. Editing the entry's text doesn't touch the review.
 
 5. **Conditional auto-trust is deferred.** A rule that treats a reference meeting certain conditions as trusted without a review may come later. For now it is recorded under Not yet specified on the wayfinder map (#87).
+
+   **Update (ADR-0014):** decided. A Trust rule is a Human Review decision the researcher declares in advance (`proofs/trust-rules.jsonl`); an imported result whose citation meets one reads `trusted-by-rule`, derived and never written, and an explicit Reference review on the node always wins.
 
 6. **A `BlockerRecord` is a legacy informational note, not attached to proof-map nodes.** ADR-0001 kept it as "an annotation attached to a node". It isn't one: nothing links it to a node, and none will. A problem with a node is expressed as a Challenge when it calls the node's standing into doubt, or informally otherwise (point 7). *(Researcher's decision, 2026-09-29, closing out #14.)*
 

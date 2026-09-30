@@ -114,6 +114,7 @@ from .commands import (
     cmd_theorem_show,
     get_store,
 )
+from .domain import ProofMapNodeKind
 from .envelope import dump_envelope, error_envelope, success_envelope
 from .contract import ProofGroup
 from .theorems import LEGACY_TRUST_NOTICE
@@ -139,6 +140,7 @@ from .proof_map import (
     get_blocked_reason,
     get_frontier,
     get_integrity_state,
+    get_reference_review_state,
     get_workflow_state,
     list_candidate_proofs,
     list_challenges,
@@ -152,7 +154,10 @@ from .proof_map import (
     request_review,
     require_node,
     split_node,
+    trust_rule_events,
+    trust_rules_of,
 )
+from .trust_rules import get_trust_rule, list_trust_rules, trust_rule_history
 from .vault import working_proof_path
 from .rendering import (
     render_candidate_proof,
@@ -162,6 +167,8 @@ from .rendering import (
     render_frontier,
     render_proof_map_node,
     render_proof_map_node_list,
+    render_trust_rule,
+    render_trust_rule_list,
 )
 from .review import render_verification_output
 
@@ -188,6 +195,7 @@ project_app = typer.Typer(help="Project diagnostics workflows")
 goal_app = typer.Typer(help="(legacy) Goal operations; a goal becomes a Claim node")
 theorem_app = typer.Typer(help="(legacy) Theorem-contract registry; the proof map's nodes replace it")
 node_app = typer.Typer(help="Proof map node operations")
+trust_rule_app = typer.Typer(help="Trust rules: the researcher's standing Reference reviews, read-only here (declared on the proof map page; ADR-0014)")
 node_evidence_app = typer.Typer(help="Evidence check workflows")
 challenge_app = typer.Typer(help="Challenge workflows")
 obligation_app = typer.Typer(help="(legacy) Proof-obligation queue; an obligation is a Claim node now")
@@ -266,13 +274,22 @@ def reason(theorem_id: str, root: str = ROOT_OPTION, notes: str = "") -> None:
     typer.echo(cmd_proof_reason(theorem_id, _root(root), notes=notes))
 
 
+def _acceptance_axis(store, node) -> str:
+    """The acceptance axis as the proof map page reads it: an imported result's Reference review state
+    (`reviewed`, `trusted-by-rule`, …; ADR-0014), a local node's acceptance state."""
+    if node.kind == ProofMapNodeKind.imported_result:
+        return get_reference_review_state(store, node.id)
+    return get_acceptance_state(store, node.id)
+
+
 def _with_state_axes(store, node) -> dict:
-    """A node under --json, with its three state axes (ADR-0002)."""
+    """A node under --json, with its three state axes (ADR-0002) and, for an imported result, the Trust rules it meets."""
     return {
         **node.model_dump(mode="json"),
         "workflow_state": get_workflow_state(store, node.id),
-        "acceptance_state": get_acceptance_state(store, node.id),
+        "acceptance_state": _acceptance_axis(store, node),
         "integrity_state": get_integrity_state(store, node.id),
+        "trust_rule": trust_rules_of(store, node.id),
     }
 
 
@@ -424,8 +441,9 @@ def node_show(
     try:
         node = require_node(store, node_id)
         workflow_state = get_workflow_state(store, node_id)
-        acceptance_state = get_acceptance_state(store, node_id)
+        acceptance_state = _acceptance_axis(store, node)
         integrity_state = get_integrity_state(store, node_id)
+        trust_rule = trust_rules_of(store, node_id)
         blocked_reason = get_blocked_reason(store, node_id) if workflow_state == "blocked" else None
     except ProofMapError as exc:
         _emit_node_error(exc, json_output, command="node.show")
@@ -444,6 +462,9 @@ def node_show(
         payload["workflow_state"] = workflow_state
         payload["acceptance_state"] = acceptance_state
         payload["integrity_state"] = integrity_state
+        # the Trust rules an imported result meets, and when it first met each (ADR-0014)
+        payload["trust_rule"] = trust_rule
+        payload["trust_rule_events"] = [{"rule": event.payload.get("rule"), "at": event.created_at.isoformat()} for event in trust_rule_events(store, node_id)]
         payload["blocked_reason"] = blocked_reason
         payload["working_proof"] = working_proof
         payload["snapshots"] = snapshots
@@ -461,6 +482,7 @@ def node_show(
                 working_proof=working_proof,
                 snapshots=snapshots,
                 citation=citation,
+                trust_rule=trust_rule,
             )
         )
 
@@ -477,6 +499,51 @@ def node_list(
         typer.echo(dump_envelope(success_envelope("node.list", [_with_state_axes(store, node) for node in nodes])))
         return
     typer.echo(render_proof_map_node_list(nodes))
+
+
+# -- Trust rules (ADR-0014): read-only; declared, amended and retired only on the proof map page
+
+
+def _trust_rule_view(store, rule) -> dict:
+    trusting = [
+        node.id for node in list_nodes(store)
+        if node.kind == ProofMapNodeKind.imported_result
+        and get_reference_review_state(store, node.id) == "trusted-by-rule"
+        and rule.name in trust_rules_of(store, node.id)
+    ]
+    return {**rule.model_dump(mode="json"), "conditions_text": rule.describe_conditions(), "trusting": trusting}
+
+
+@trust_rule_app.command("list")
+@read_scoped
+def trust_rule_list(
+    root: str = ROOT_OPTION,
+    all_rules: bool = typer.Option(False, "--all", help="Retired rules too"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """The Trust rules in force: which citations are trusted without a review of their own, and why."""
+    store = get_store(_root(root))
+    views = [_trust_rule_view(store, rule) for rule in list_trust_rules(store, include_retired=all_rules)]
+    if json_output:
+        typer.echo(dump_envelope(success_envelope("trust-rule.list", views)))
+        return
+    typer.echo(render_trust_rule_list(views))
+
+
+@trust_rule_app.command("show")
+@read_scoped
+def trust_rule_show(name: str, root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
+    """One Trust rule, with every decision recorded under its name."""
+    store = get_store(_root(root))
+    rule = get_trust_rule(store, name)
+    if rule is None:
+        _emit_node_error(ProofMapError("TRUST_RULE_NOT_FOUND", f"no trust rule is named {name}"), json_output, command="trust-rule.show")
+        raise typer.Exit(code=1)
+    view = {**_trust_rule_view(store, rule), "history": trust_rule_history(store, name)}
+    if json_output:
+        typer.echo(dump_envelope(success_envelope("trust-rule.show", view)))
+        return
+    typer.echo(render_trust_rule(view))
 
 
 @node_app.command("claim")
@@ -874,6 +941,7 @@ app.add_typer(project_app, name="project")
 app.add_typer(theorem_app, name="theorem", rich_help_panel=LEGACY_PANEL)
 app.add_typer(node_app, name="node", rich_help_panel=PROOF_MAP_PANEL)
 app.add_typer(challenge_app, name="challenge", rich_help_panel=PROOF_MAP_PANEL)
+app.add_typer(trust_rule_app, name="trust-rule", rich_help_panel=PROOF_MAP_PANEL)
 app.add_typer(obligation_app, name="obligation", rich_help_panel=LEGACY_PANEL)
 app.add_typer(blocker_app, name="blocker", rich_help_panel=LEGACY_PANEL)
 app.add_typer(reference_app, name="reference")

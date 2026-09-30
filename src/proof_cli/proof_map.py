@@ -39,6 +39,7 @@ from .domain import (
     DependencyPin,
     EvidenceCheck,
     EvidenceOutcome,
+    EventRecord,
     ProofMapNode,
     ProofMapNodeKind,
     TrustLevel,
@@ -48,9 +49,11 @@ from .reviews import DecisionKind, DecisionPayload, PinnedDependency, git_identi
 from .storage import (
     ProjectStore,
     memoized_read,
+    read_scope,
     read_scoped,
     scoped_memo,
     append_event,
+    list_events,
     latest_event,
     get_active_claim,
     get_candidate_proof as _get_candidate_proof,
@@ -81,6 +84,19 @@ from .storage import (
     delete_dependency_pin,
 )
 from . import key_ideas
+from .trust_rules import (
+    SiblingCitation,
+    TrustConditionKind,
+    TrustRule,
+    TrustRuleDecision,
+    TrustRuleError,
+    check_rule_decision,
+    get_trust_rule,
+    list_trust_rules,
+    parse_conditions,
+    record_rule_decision,
+    rule_matches,
+)
 from .vault import (
     SNAPSHOT_MANIFEST,
     archived_pdf_path,
@@ -320,6 +336,9 @@ def create_node(
         raise ProofMapError("NODE_ALREADY_EXISTS", f"proof map node {node_id} already exists") from exc
     if resolved_kind != ProofMapNodeKind.imported_result:
         write_working_proof(store.root, node_id=node.id, kind=resolved_kind.value, statement=statement)
+    elif reference_id is not None:
+        # a citation may meet a Trust rule the moment it is linked (ADR-0014): on record from then
+        note_trust_rule_matches(store, [node.id])
     return node
 
 
@@ -1376,6 +1395,8 @@ def dependency_details(store: ProjectStore, node_id: str) -> list[dict]:
                 "accepted_version": accepted_version,
                 "current": current,
                 "remedy": _pin_remedy(pin, current=current, accepted_version=accepted_version),
+                # an imported result depended on by rule rather than by a review (ADR-0014)
+                "trust_rule": trust_rules_of(store, dependency_id) if dependency and dependency.kind == ProofMapNodeKind.imported_result else [],
             }
         )
     return details
@@ -1595,6 +1616,9 @@ def decision_binding(
             "dependency_pins": [PinnedDependency(target_node_id=replacement.id, pinned_fingerprint=_interface_of(replacement))],
             "migrated_dependents": [node.id for node in list_migratable_dependents(store, target_id)],
         }
+    if kind == DecisionKind.trust_rule:
+        # a rule binds nothing on the map: it is judged against the citations as they are whenever it is read (ADR-0014)
+        return dict(none)
     raise ProofMapError("INVALID_DECISION_KIND", f"{kind.value} is not a proof-map decision")
 
 
@@ -1627,14 +1651,19 @@ def apply_decision(
     rationale: str = "",
     dependency_id: str | None = None,
     viewed_binding: str | None = None,
+    conditions: list | None = None,
 ) -> Any:
     """Make one Human Review decision by kind: the proof map page's single entry point (ADR-0010).
 
-    `viewed_binding`: what the page showed (`binding_digest`); see `_decide`."""
+    `viewed_binding`: what the page showed (`binding_digest`); see `_decide`.
+    `conditions`: a Trust rule's conditions, for a `trust_rule` declare or amend (ADR-0014)."""
     try:
         resolved_kind = DecisionKind(kind)
     except ValueError as exc:
         raise ProofMapError("INVALID_DECISION_KIND", f"'{kind}' is not a decision kind") from exc
+    if resolved_kind == DecisionKind.trust_rule:
+        # a rule binds nothing the page could have shown stale: no viewed binding (ADR-0014)
+        return decide_trust_rule(store, target_id, decision, conditions=conditions, reviewer=reviewer, rationale=rationale)
     who = {"reviewer": reviewer, "rationale": rationale, "viewed_binding": viewed_binding}
     if resolved_kind == DecisionKind.acceptance:
         return decide_acceptance(store, target_id, decision, **who)
@@ -1895,6 +1924,8 @@ def decide_reference_review(
             payload={"reviewer_id": decided.reviewer_id, "review_id": record.id},
             conn=conn,
         )
+    # other citations of the same source may now meet `source already reviewed` (ADR-0014)
+    note_trust_rule_matches(store)
     return record
 
 
@@ -2011,9 +2042,9 @@ def node_citation(store: ProjectStore, node: ProofMapNode) -> dict[str, Any] | N
 
 
 @memoized_read
-@read_scoped
-def get_reference_review_state(store: ProjectStore, node_id: str) -> str:
-    """`unreviewed`, `reviewed`, `unverifiable` or `no-longer-callable`, from the newest `kind=reference_review` decision.
+def _explicit_reference_review(store: ProjectStore, node_id: str) -> str:
+    """`unreviewed`, `reviewed`, `unverifiable` or `no-longer-callable`, from the newest `kind=reference_review`
+    decision alone: the researcher's explicit decision on this node, never a Trust rule.
 
     Counts only while the imported result still cites what was reviewed
     (statement and source) — never acceptance_state. Once found
@@ -2031,6 +2062,159 @@ def get_reference_review_state(store: ProjectStore, node_id: str) -> str:
         # the review was made on a citation that is gone (issue #91)
         return "unverifiable"
     return "reviewed" if latest.decision == ReviewGovernanceState.approved else "unreviewed"
+
+
+@memoized_read
+@read_scoped
+def get_reference_review_state(store: ProjectStore, node_id: str) -> str:
+    """An imported result's Reference review state: `no-longer-callable`, `reviewed`, `trusted-by-rule`,
+    `unverifiable` or `unreviewed`, in that order of precedence (ADR-0014 point 2).
+
+    The explicit decision comes first: `no-longer-callable` is final, and a
+    counting Reference review wins over any rule. Otherwise a citation that
+    meets a Trust rule in force reads `trusted-by-rule` — derived here every
+    time, never stored — ahead of an explicit decision that no longer counts,
+    since a rule judges the citation as it is now.
+    """
+    explicit = _explicit_reference_review(store, node_id)
+    if explicit in ("no-longer-callable", "reviewed"):
+        return explicit
+    if trust_rules_of(store, node_id):
+        return "trusted-by-rule"
+    return explicit
+
+
+@memoized_read
+@read_scoped
+def trust_rules_of(store: ProjectStore, node_id: str, *, rules: list[TrustRule] | None = None) -> list[str]:
+    """The names of every Trust rule an imported result meets right now (ADR-0014), in declaration order.
+
+    A pure function of the rules in force (or `rules`, to preview a change),
+    the node, its citation as it stands, and the *explicit* Reference review
+    state of the other citations of the same reference. Empty for a local
+    node, a node with no citation, and a node found no longer callable.
+    """
+    node = require_node(store, node_id)
+    if node.kind != ProofMapNodeKind.imported_result or node.reference_id is None:
+        return []
+    in_force = list_trust_rules(store) if rules is None else [rule for rule in rules if not rule.retired]
+    if not in_force or _no_longer_callable(store, node_id):
+        return []
+    reference = get_reference(store, node.reference_id)
+    if reference is None:
+        return []
+    siblings = [
+        SiblingCitation(node_id=other.id, source_version=other.source_version, explicit_state=_explicit_reference_review(store, other.id))
+        for other in list_nodes(store)
+        if other.kind == ProofMapNodeKind.imported_result and other.id != node.id and other.reference_id == node.reference_id
+    ] if any(condition.kind == TrustConditionKind.source_already_reviewed for rule in in_force for condition in rule.conditions) else []
+    return [rule.name for rule in in_force if rule_matches(rule, source_version=node.source_version, reference=reference, siblings=siblings)]
+
+
+def decide_trust_rule(
+    store: ProjectStore,
+    name: str,
+    decision: str,
+    *,
+    conditions: list | None = None,
+    reviewer: str | None = None,
+    rationale: str = "",
+) -> TrustRuleDecision:
+    """Declare, amend or retire a Trust rule: a Human Review decision on the project's trust-rules.jsonl (ADR-0014).
+
+    Made only on the proof map page. The checks (a name that is free, or a
+    rule that exists and isn't retired; at least one condition; a rationale)
+    and the write happen under one write lock; the line is committed as the
+    reviewer's git identity once it has landed. Nothing is written on the
+    nodes the rule covers: their state follows from the rule set in force.
+    """
+    with store.transaction():
+        try:
+            resolved = check_rule_decision(store, name, decision, conditions=conditions, rationale=rationale)
+            record = record_rule_decision(store, name, decision, conditions=resolved, reviewer=reviewer, rationale=rationale)
+        except TrustRuleError as exc:
+            raise ProofMapError(exc.code, exc.message) from exc
+    note_trust_rule_matches(store)
+    return record
+
+
+def trust_rule_impact(store: ProjectStore, name: str, *, conditions: list | None = None) -> dict[str, list[str]]:
+    """What retiring rule `name` (or amending it to `conditions`) would do, for the page to show before recording.
+
+    `losing`: the imported results that read trusted-by-rule now and would not
+    afterwards; `depended_on_by_accepted`: those of them an Accepted node rests
+    on (its Acceptance keeps, ADR-0014 point 4); `gaining`: nodes that would
+    newly read trusted-by-rule. A preview only: it records nothing and binds
+    nothing.
+    """
+    with read_scope():
+        rule = get_trust_rule(store, name)
+        if rule is None:
+            raise ProofMapError("TRUST_RULE_NOT_FOUND", f"no trust rule is named {name}")
+        if conditions is None:
+            changed = rule.model_copy(update={"retired": True})
+        else:
+            try:
+                changed = rule.model_copy(update={"conditions": parse_conditions(conditions)})
+            except TrustRuleError as exc:
+                raise ProofMapError(exc.code, exc.message) from exc
+        hypothetical = [changed if other.name == name else other for other in list_trust_rules(store)]
+        nodes = list_nodes(store)
+        losing: list[str] = []
+        gaining: list[str] = []
+        for node in nodes:
+            if node.kind != ProofMapNodeKind.imported_result:
+                continue
+            now = get_reference_review_state(store, node.id)
+            if now not in ("trusted-by-rule", "unreviewed", "unverifiable"):
+                continue
+            after = bool(trust_rules_of(store, node.id, rules=hypothetical))
+            if now == "trusted-by-rule" and not after:
+                losing.append(node.id)
+            elif now != "trusted-by-rule" and after:
+                gaining.append(node.id)
+        depended = [
+            node_id for node_id in losing
+            if any(node_id in other.dependencies and get_acceptance_state(store, other.id) == "accepted" for other in nodes)
+        ]
+        return {"losing": losing, "depended_on_by_accepted": depended, "gaining": gaining}
+
+
+_TRUSTED_BY_RULE_EVENT = "proof_map_trusted_by_rule"
+
+
+def trust_rule_events(store: ProjectStore, node_id: str | None = None) -> list[EventRecord]:
+    """When each imported result first met which rule (ADR-0014 point 7): informational events, oldest first."""
+    return [
+        event for event in list_events(store)
+        if event.kind == _TRUSTED_BY_RULE_EVENT and (node_id is None or event.entity_id == node_id)
+    ]
+
+
+def note_trust_rule_matches(store: ProjectStore, node_ids: list[str] | None = None) -> list[EventRecord]:
+    """Record the first time a node meets a rule, as an event and never a decision.
+
+    Called after the writes that can make a citation start meeting a rule: a
+    rule declared or amended, an imported result created, a Reference review
+    decided. Reading a node's state never writes; a node that met the same rule
+    before is not noted again.
+    """
+    with read_scope():
+        wanted = set(node_ids) if node_ids is not None else None
+        noted: dict[str, set[str]] = {}
+        for event in trust_rule_events(store):
+            noted.setdefault(event.entity_id or "", set()).add(str(event.payload.get("rule")))
+        events = []
+        for node in list_nodes(store):
+            if node.kind != ProofMapNodeKind.imported_result or (wanted is not None and node.id not in wanted):
+                continue
+            for rule in trust_rules_of(store, node.id):
+                if rule in noted.get(node.id, set()):
+                    continue
+                events.append(append_event(
+                    store, _TRUSTED_BY_RULE_EVENT, f"{node.id} is trusted by rule {rule}", entity_id=node.id, payload={"rule": rule}
+                ))
+    return events
 
 
 def revalidate_dependency(
@@ -2140,7 +2324,8 @@ def open_challenge(store: ProjectStore, target_node_id: str, *, opened_by: str =
     node = require_node(store, target_node_id)
 
     if node.kind == ProofMapNodeKind.imported_result:
-        if get_reference_review_state(store, target_node_id) != "reviewed":
+        # a node trusted by rule is depended on as a reviewed one is, so it can be Challenged as one (ADR-0014)
+        if get_reference_review_state(store, target_node_id) not in ("reviewed", "trusted-by-rule"):
             raise ProofMapError(
                 "TARGET_NOT_REVIEWED",
                 f"{target_node_id} has not been Reference-reviewed yet; nothing to Challenge",
@@ -2512,7 +2697,8 @@ def _dependency_satisfied(store: ProjectStore, dependency_id: str) -> bool:
     if dependency is None:
         return True
     if dependency.kind == ProofMapNodeKind.imported_result:
-        reached_standing = get_reference_review_state(store, dependency_id) == "reviewed"
+        # a Reference review, or a Trust rule standing in for one (ADR-0014)
+        reached_standing = get_reference_review_state(store, dependency_id) in ("reviewed", "trusted-by-rule")
     else:
         reached_standing = get_acceptance_state(store, dependency_id) == "accepted"
     if not reached_standing:

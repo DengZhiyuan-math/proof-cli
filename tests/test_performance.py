@@ -397,3 +397,28 @@ def test_benchmark_the_frontier_of_a_1000_node_chain(tmp_path: Path, capsys):
     with capsys.disabled():
         print(f"\n1000-node chain: get_frontier {elapsed:.3f}s, {visits.count} upstream visits, {len(frontier)} on the frontier")
     assert visits.count <= length
+
+
+# -- Trust rules (ADR-0014): the rule set is read once per read, whatever the map's size ---------------
+
+
+def test_a_map_read_folds_the_trust_rules_once(tmp_path: Path, review_reads):
+    """Every imported result's state consults the rules in force; one page read folds the file once, not per node."""
+    from proof_cli.references import ReferenceRecord, ReferenceSourceType
+    from proof_cli.storage import import_reference
+    from proof_cli.webapp.server import ReviewApp
+
+    store = ensure_project(tmp_path)
+    import_reference(store, ReferenceRecord(id="book", title="A Book", year=2000, source_type=ReferenceSourceType.textbook))
+    for k in range(30):
+        create_node(store, node_id=f"ref{k}", kind="imported_result", statement=f"result {k}", source_locator=f"Thm {k}", source_version="v1", reference_id="book")
+    researcher(store).declare_trust_rule("textbooks", conditions=[{"kind": "source_type_in", "values": ["textbook"]}], rationale="standard textbooks")
+    app = ReviewApp(store)
+    try:
+        review_reads.clear()
+        nodes = app.map()["nodes"]
+    finally:
+        app.close()
+
+    assert all(n["acceptance_state"] == "trusted-by-rule" for n in nodes)
+    assert [path.name for path in review_reads].count("trust-rules.jsonl") <= 1

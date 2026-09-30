@@ -51,6 +51,23 @@ class Researcher:
 
         return dismiss_challenge(self.store, challenge_id, **self._who(rationale))
 
+    # -- Trust rules (ADR-0014): the page's three decisions on the project's trust-rules.jsonl
+
+    def declare_trust_rule(self, name: str, *, conditions: list, rationale: str = ""):
+        from proof_cli.proof_map import decide_trust_rule
+
+        return decide_trust_rule(self.store, name, "declare", conditions=conditions, **self._who(rationale))
+
+    def amend_trust_rule(self, name: str, *, conditions: list, rationale: str = ""):
+        from proof_cli.proof_map import decide_trust_rule
+
+        return decide_trust_rule(self.store, name, "amend", conditions=conditions, **self._who(rationale))
+
+    def retire_trust_rule(self, name: str, *, rationale: str = ""):
+        from proof_cli.proof_map import decide_trust_rule
+
+        return decide_trust_rule(self.store, name, "retire", **self._who(rationale))
+
 
 def researcher(store) -> Researcher:
     return Researcher(store)

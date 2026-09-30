@@ -38,6 +38,7 @@ from .reviews import (
     git_identity,
     in_git_repo,
     load_entries,
+    load_trust_rule_entries,
     new_review_id,
     next_seq,
     reviews_path,
@@ -232,6 +233,7 @@ def challenge_resolution(store: ProjectStore, challenge_id: str) -> dict | None:
 def list_authority_warnings(store: ProjectStore) -> list[AuthorityWarning]:
     """What about the recorded decisions themselves doesn't count, or isn't in git yet."""
     entries, problems = _entries(store)
+    problems = [*problems, *load_trust_rule_entries(store.root)[1]]  # the project's Trust rule decisions too (ADR-0014)
     warnings = [
         AuthorityWarning(code="REVIEW_LINE_UNREADABLE", message=f"{problem} can't be read and is ignored", details={"line": problem})
         for problem in problems
