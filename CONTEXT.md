@@ -109,7 +109,7 @@ A Human Review decision (Acceptance, Reference review, Evidence review, Lightwei
 _Avoid_: signed decision, confirmation, `--confirm`, approval flag
 
 **Proof map page**:
-proof-cli's own local web page, the map's home, and the researcher's one entry: the DAG and tree, the frontier, each node's three state axes, and the one place Review decisions are made. Nodes are created from the CLI, not on the page. A theorem, lemma or claim opens in its **studio**, a LaTeX workspace built from prism-local's code with a node panel for claim, split, request review, Challenge and Evidence check. An imported result opens on its own page. See ADR-0008, ADR-0010, ADR-0011.
+proof-cli's own local web page, the map's home, and the researcher's one entry: the DAG and tree, the frontier, each node's three state axes, and the one place Review decisions are made. Nodes are created from the CLI, not on the page. The Proof fog is a drawer beside the map, opened from the toolbar's Fog badge: the open items, each near the nodes it is about (lit up on the canvas on hover, never drawn on it), their newest Experiment, and the adds, drops, reopens and Experiments; crystallize stays a CLI command until the page's node form returns. A theorem, lemma or claim opens in its **studio**, a LaTeX workspace built from prism-local's code with a node panel for claim, split, request review, Challenge and Evidence check. An imported result opens on its own page. See ADR-0008, ADR-0010, ADR-0011.
 _Avoid_: review app (its ADR-0009 name), dashboard, admin panel
 
 **Studio**:
