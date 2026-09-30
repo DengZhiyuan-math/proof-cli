@@ -116,6 +116,7 @@ class FakeElement {
   const hear = (type, fn) => { (listeners[type] ||= []).push(fn); };
   const location = { hash: "", href: "" };
   const posted = [];
+  const previews = { asked: 0, releaseFirst: null };
   const context = {
     console, location, setTimeout() {}, Node: FakeElement,
     document: {
@@ -133,6 +134,16 @@ class FakeElement {
         : url === "/api/trust-rules" ? (scenario.rules || { rules: [], source_types: [], weak_source_types: [] })
         : url === "/api/trust-rules/preview" ? (scenario.preview || { losing: [], depended_on_by_accepted: [], gaining: [] })
         : node || { results: [] };
+      if (url === "/api/trust-rules/preview") {
+        // scenario.previewFails: the server refuses every preview; scenario.previewOutOfOrder: the first preview's
+        // answer (a stale one) arrives only after the second has been asked and answered
+        if (scenario.previewFails) return { json: async () => ({ ok: false, error: { code: "TRUST_RULE_NOT_FOUND", message: "no such rule" } }) };
+        if (scenario.previewOutOfOrder) {
+          previews.asked += 1;
+          if (previews.asked === 1) return { json: () => new Promise((resolve) => { previews.releaseFirst = () => resolve({ ok: true, data: { losing: ["stale-answer"], depended_on_by_accepted: [], gaining: [] } }); }) };
+          setImmediate(() => previews.releaseFirst && previews.releaseFirst());
+        }
+      }
       return { json: async () => ({ ok: true, data }) };
     },
   };
@@ -218,6 +229,9 @@ class FakeElement {
     ruleNameDisabled: elements["rule-name"].disabled,
     ruleReminder: elements["rule-reminder"].textContent,
     ruleImpact: elements["rule-impact"].textContent,
+    ruleRecordDisabled: elements["rule-record"].disabled,
+    // the node page's axis chips: each one's state class
+    nodeAxisClasses: elements["node-axes"].querySelectorAll("span.chip").map((c) => c.className),
     // the node page's acceptance chip and its history lines
     nodeAxes: elements["node-axes"].querySelectorAll("span.chip").map((c) => c.textContent),
     nodeHistory: elements["node-history"].querySelectorAll("li").map((li) => li.textContent),
@@ -269,7 +283,7 @@ class FakeElement {
       await elements["cond-types"].dispatch("change");
       await settle();
     }
-    if (step.ruleRecord) await confirmIfShown(elements["rule-record"].dispatch("click"));
+    if (step.ruleRecord) await confirmIfShown(elements["rule-record"].disabled ? Promise.resolve() : elements["rule-record"].dispatch("click"));  // a disabled button hears no click
     readings.push(read());
   }
   console.log(JSON.stringify(readings));

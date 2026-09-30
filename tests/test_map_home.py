@@ -559,6 +559,32 @@ def test_a_trusted_by_rule_node_reads_so_on_the_canvas_the_tree_and_its_page():
     assert card["title"].endswith("trusted by rule textbooks") and "trusted by rule textbooks" in card["label"]  # the names, a hover away
     (line,) = [li for li in tree["tree"] if li["id"] == "ref_bw"]
     assert line["chips"][0] == "trusted by rule textbooks"
-    assert opened["nodeAxes"][1] == "trusted by rule textbooks"
+    assert opened["nodeAxes"][1] == "trusted by rule textbooks" and "state-accepted" in opened["nodeAxisClasses"][1]  # the accepted family, named
     assert opened["nodeHistory"] == ["2026-09-30T10:00:00+00:00 · trusted by rule textbooks since then — no decision written; the rule's declaration is the record"]
     assert opened["nodeDecisionRationales"] == ["matched trust rule textbooks; reviewed explicitly", ""]
+
+
+def _home_rules(steps, **scenario):
+    if shutil.which("node") is None:
+        pytest.skip("needs node")
+    full = {"state": _trusted_state(), "map": MAP, "steps": list(steps), "nodes": {}, "rules": RULES,
+            "preview": {"losing": ["ref_bw"], "depended_on_by_accepted": ["ref_bw"], "gaining": []}, **scenario}
+    done = subprocess.run(["node", str(HARNESS), json.dumps(full)], capture_output=True, text=True, timeout=30)
+    assert done.returncode == 0, done.stderr
+    return json.loads(done.stdout)
+
+
+def test_a_change_is_recorded_only_against_the_impact_of_the_form_as_it_stands():
+    """A preview answering an earlier state of the form is dropped; Record waits for the current one and stays off if it failed."""
+    *_, ordered, recorded = _home_rules([{"manage": True}, {"retire": "textbooks"}, {"amend": "textbooks"}, {"ruleRecord": True}], previewOutOfOrder=True)
+    assert "stale-answer" not in ordered["ruleImpact"] and "1 node(s) would stop" in ordered["ruleImpact"]
+    assert not ordered["ruleRecordDisabled"]
+    (sent,) = [p for p in recorded["posted"] if p["url"] == "/api/decide"]
+    assert sent["body"]["decisions"][0]["decision"] == "amend"
+
+    *_, failed, pressed = _home_rules([{"manage": True}, {"retire": "textbooks"}, {"ruleRecord": True}], previewFails=True)
+    assert failed["ruleRecordDisabled"] and "TRUST_RULE_NOT_FOUND" in failed["ruleImpact"] and "nothing can be recorded" in failed["ruleImpact"]
+    assert not [p for p in pressed["posted"] if p["url"] == "/api/decide"]
+
+    _, declaring = _home_rules([{"manage": True}])
+    assert not declaring["ruleRecordDisabled"]  # a declaration has no impact to wait for

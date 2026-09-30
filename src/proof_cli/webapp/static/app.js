@@ -201,7 +201,11 @@ function formConditions() {
   return conditions;
 }
 
-// the reminder for a weak source type, and the impact of a change, read as the form changes
+// The reminder for a weak source type, and the impact of a change, read as the form changes. An amend or
+// retire is recorded only against the impact of the form as it stands now: a preview that comes back for an
+// earlier state of the form is dropped, and Record waits for the current one (and stays off if it failed).
+let previewSeq = 0;
+let previewCurrent = false;
 async function ruleFormChanged() {
   const decision = $("rule-decision").value;
   const conditions = formConditions();
@@ -209,17 +213,27 @@ async function ruleFormChanged() {
   $("rule-reminder").textContent = decision !== "retire" && weak.length
     ? `This rule trusts ${weak.join(" and ")} sources: anything an importer typed as one would be callable without your look. Allowed — is it what you mean?` : "";
   $("rule-impact").textContent = "";
+  const seq = ++previewSeq;
+  previewCurrent = decision === "declare";  // a declaration has no impact to wait for
+  $("rule-record").disabled = !previewCurrent;
   if (decision === "declare") return;
   try {
     const impact = await api("/api/trust-rules/preview", { name: $("rule-name").value, decision, ...(decision === "amend" ? { conditions } : {}) });
+    if (seq !== previewSeq) return;  // the form moved on: this answers an earlier state of it
     const parts = [`${impact.losing.length} node(s) would stop reading trusted by rule`];
     if (impact.losing.length) parts.push(`${impact.depended_on_by_accepted.length} of them depended on by Accepted nodes (their Acceptance keeps; other dependents block)`);
     if (impact.gaining.length) parts.push(`${impact.gaining.length} would newly read trusted by rule`);
     $("rule-impact").textContent = `Impact: ${parts.join("; ")}${impact.losing.length ? ` — ${impact.losing.join(", ")}` : ""}.`;
-  } catch (error) { $("rule-impact").textContent = error.code ? `${error.code}: ${error.message}` : error.message; }
+    previewCurrent = true;
+    $("rule-record").disabled = false;
+  } catch (error) {
+    if (seq !== previewSeq) return;
+    $("rule-impact").textContent = `${error.code ? `${error.code}: ${error.message}` : error.message} — nothing can be recorded until the impact is known`;
+  }
 }
 
 async function recordRule() {
+  if (!previewCurrent) return say("Wait for the impact preview of this change before recording it.", "error");
   const decision = $("rule-decision").value;
   const item = { kind: "trust_rule", target_id: $("rule-name").value.trim(), decision, rationale: $("rule-rationale").value, ...(decision === "retire" ? {} : { conditions: formConditions() }) };
   $("rules-sheet").hidden = true;  // the confirm sheet takes its place
@@ -763,9 +777,9 @@ async function showNode(nodeId) {
   const view = await api(`/api/node/${encodeURIComponent(nodeId)}`);
   const node = view.node;
   $("node-title").replaceChildren(node.id, el("small", node.kind.replace("_", " ")));
-  const axis = (name, value) => { const cell = el("div"); cell.append(el("span", name, { class: "lbl" }), stateChip(value, value, `${name}: ${value}`)); return cell; };
+  const axis = (name, value, text = value) => { const cell = el("div"); cell.append(el("span", name, { class: "lbl" }), stateChip(value, text, `${name}: ${text}`)); return cell; };
   const acceptance = acceptanceText({ acceptance_state: view.acceptance_state, trust_rule: view.trust_rule });
-  $("node-axes").replaceChildren(axis("workflow", view.workflow_state), axis("acceptance", acceptance), axis("integrity", view.integrity_state));
+  $("node-axes").replaceChildren(axis("workflow", view.workflow_state), axis("acceptance", view.acceptance_state, acceptance), axis("integrity", view.integrity_state));
   const nodeWarnings = el("ul");
   showWarnings(view.warnings, nodeWarnings);
   $("node-warnings").replaceChildren(el("h3", "Warnings for this node"), nodeWarnings);
