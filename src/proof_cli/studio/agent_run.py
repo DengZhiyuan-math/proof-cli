@@ -139,7 +139,7 @@ class AgentRun:
         with self._lock:
             if run.stop:  # stopped and released while the node was being assigned: this Start is over before it began
                 run.state.name = name
-                stopped = True
+                stopped = self._run is run  # a later Start under the same name now holds the assignment: it is not ours to give back
             else:
                 stopped = False
                 run.state = RunState(status="running", role=roles[0] if roles else "prover", turns_max=turns_max, started_at=time.time(),
@@ -149,6 +149,7 @@ class AgentRun:
                 run.thread = threading.Thread(target=self._loop, args=(run,), name=f"agent-run-{name}", daemon=True)
         if stopped:
             self.hooks.release(name)  # the assignment it just made is given back
+        if stopped or run.stop:
             return self.view()
         run.thread.start()
         return self.view()
@@ -230,7 +231,6 @@ class AgentRun:
                     return
                 job = self.agent.jobs[started["job"]]
                 with self._lock:
-                    run.job = job
                     deadline = run.state.deadline
                 over_budget = False
                 with job.cond:
@@ -271,14 +271,26 @@ class AgentRun:
             self._end(run, "stuck", f"{type(exc).__name__}: {exc}")
 
     def _start_turn(self, run: _Start, prompt: str, provider: str) -> dict | None:
-        """Start the role's turn; the researcher's own Ask turn, if one is running, is waited for. None: released meanwhile."""
+        """Start the role's turn; the researcher's own Ask turn, if one is running, is waited for. None: released meanwhile —
+        before the turn, while it was being prepared (the manager asks `unless` once more before the turn exists), or in
+        the moment it began, in which case it is stopped at once."""
         deadline = time.monotonic() + BUSY_WAIT
         while True:
             with self._lock:
                 if run.stop:
                     return None
-            started = self.agent.start(prompt, None, "edit", run.model, run.effort, None, provider)
-            busy = "error" in started and "still working" in started["error"]
+            started = self.agent.start(prompt, None, "edit", run.model, run.effort, None, provider, unless=lambda: run.stop)
+            if "job" in started:
+                with self._lock:
+                    run.job = self.agent.jobs[started["job"]]
+                    stopped = run.stop
+                if stopped:
+                    self.agent.stop(started["job"])
+                    return None
+                return started
+            if "called off" in started.get("error", ""):
+                return None
+            busy = "still working" in started["error"]
             if not busy or time.monotonic() >= deadline:
                 return started
             time.sleep(0.2)

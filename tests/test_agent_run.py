@@ -385,6 +385,89 @@ def test_stop_and_release_while_the_node_is_still_being_assigned_holds():
     assert started == [] and not run.active()  # and no turn ever started
 
 
+def test_stop_while_the_turn_is_being_prepared_starts_no_turn(studio, monkeypatch):
+    """Third review T-P1: Stop lands while the manager is still checking the backend (its preflight). No turn may begin
+    after it: the manager asks the run once more before the turn exists, and nothing is written."""
+    import threading
+
+    store, hub, log, queue = studio
+    _queue(queue, [["write", "scratch/after-release.txt", "written after Stop"]])
+    agent = hub.studio("N").agent
+    backend = agent.backend("claude")
+    entered, gate = threading.Event(), threading.Event()
+    original = backend.preflight
+
+    def slow_preflight(root):
+        entered.set()
+        assert gate.wait(5)
+        return original(root)
+
+    monkeypatch.setattr(backend, "preflight", slow_preflight)
+    status, started = _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["typesetter"]})
+    assert status == 200 and entered.wait(5) and agent.active is None
+    assert _post(hub, "/studio/N/api/agent/release")[1]["status"] == "released"
+    gate.set()
+    time.sleep(1.0)
+    assert _get(hub, "/studio/N/api/agent/run")[1]["status"] == "released"
+    assert agent.active is None and _turns(log) == []  # no turn ever existed
+    assert not (store.root / "proofs" / "N" / "scratch" / "after-release.txt").exists()
+    assert get_active_claim(store, "N") is None
+
+
+def test_an_old_starts_assignment_coming_back_late_does_not_release_the_new_runs_claim():
+    """Third review T-P2: the first Start is stopped while its assignment is still pending; a second Start under the
+    same name claims the node; when the first assignment comes back, it must not give back what the second holds."""
+    import threading
+    from dataclasses import fields
+
+    from proof_cli.proof_map import release_node
+    from proof_cli.studio.agent_run import AgentRun, RunHooks
+
+    store = ensure_project(Path(os.environ.get("TMPDIR", "/tmp")) / f"proof-late-assignment-{os.getpid()}-{time.time_ns()}")
+    create_node(store, node_id="N", kind="claim", statement="a claim")
+    entered, gate = threading.Event(), threading.Event()
+    calls: list[str] = []
+
+    def assign(name):
+        calls.append(name)
+        if len(calls) == 1:
+            entered.set()
+            assert gate.wait(5)
+        from proof_cli.proof_map import claim_node
+        claim_node(store, "N", claimant_id=name)
+
+    def release(name):
+        claim = get_active_claim(store, "N")
+        if claim is not None and claim.claimant_id == name:
+            release_node(store, "N", claimant_id=name)
+
+    class Agent:  # a turn that cannot start: the second run ends stuck at once, keeping its claim
+        jobs = {}
+
+        def start(self, *args, **kwargs):
+            return {"error": "The studio is closed."}
+
+        def stop(self, jid):
+            pass
+
+    hooks_kw = dict(agent_name=lambda p: "claude-code", budget=lambda: (40, 60.0), assign=assign, release=release,
+                    work_log=lambda: [], record_stuck=lambda *a: None, review_now=lambda: {})
+    run = AgentRun(Agent(), RunHooks(**{f.name: hooks_kw[f.name] for f in fields(RunHooks)}))
+    first = threading.Thread(target=lambda: run.start("claude"))
+    first.start()
+    assert entered.wait(5)
+    assert run.release()["status"] == "released"
+    second = run.start("claude", roles=["numerics"])
+    assert second["status"] in ("running", "stuck") and get_active_claim(store, "N").claimant_id == "claude-code"  # the second holds the node
+    gate.set()
+    first.join(5)
+    time.sleep(0.3)
+    assert get_active_claim(store, "N").claimant_id == "claude-code"  # the late assignment gave nothing back
+    assert run.view()["status"] in ("running", "stuck")  # the second run, untouched by the first's end
+    run.release()
+    assert get_active_claim(store, "N") is None
+
+
 def test_a_start_right_after_stop_and_release_is_not_ended_by_the_old_coordinator(studio):
     """Reaudit R-P1: the first run's turn is still being stopped when the second Start begins; when it finally ends,
     only the first Start ends — the second keeps running its own turn and counts it."""

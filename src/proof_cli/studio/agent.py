@@ -91,11 +91,14 @@ class AgentManager:
     def start(self, prompt: str, session_id: str | None, mode: str,
               model: str | None = None, effort: str | None = None,
               scope: list[str] | None = None, provider: str | None = None,
-              finish: Callable[[], None] | None = None) -> dict:
+              finish: Callable[[], None] | None = None,
+              unless: Callable[[], bool] | None = None) -> dict:
         """Run one turn. `scope` (project-relative files) limits which files the agent may
         change in edit mode; None lets it change any file and create new ones. `finish` runs
         once the backend is done, before the turn's changes are read, so its own changes are
-        part of the turn (and of its Undo)."""
+        part of the turn (and of its Undo). `unless` is asked once more, after the checks and
+        the preflight, right before the turn exists: true, and no turn starts (a run stopped
+        while its turn was being prepared)."""
         if self.closed:
             return {"error": "The studio is closed."}
         backend = self.backend(provider)
@@ -112,6 +115,8 @@ class AgentManager:
         with self.lock:
             if self.closed:
                 return {"error": "The studio is closed."}
+            if unless is not None and unless():
+                return {"error": "The turn was called off before it started."}
             if self.active and not self.active.done:
                 return {"error": "The agent is still working on the previous message."}
             job = Job(next(self.ids))
