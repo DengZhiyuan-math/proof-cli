@@ -139,7 +139,9 @@ class AgentRun:
         with self._lock:
             if run.stop:  # stopped and released while the node was being assigned: this Start is over before it began
                 run.state.name = name
-                stopped = self._run is run  # a later Start under the same name now holds the assignment: it is not ours to give back
+                # ours to give back — unless a later Start under the same name holds the node now. A later Start that is
+                # over (released) or never began left no claim behind, so what this late assignment made is ours too.
+                stopped = self._run is run or self._run.state.status in ("idle", "released")
             else:
                 stopped = False
                 run.state = RunState(status="running", role=roles[0] if roles else "prover", turns_max=turns_max, started_at=time.time(),
