@@ -1099,7 +1099,7 @@ const AV = {
     if (this.id !== null) return;                       // the next step already took the view
     $("#agent-view").hidden = true;
     // Show the result where it is, unless you hid the agent's view.
-    if (!this.hidden && S.files.some((f) => f.path === path)) openFile(path, line);
+    if (!this.hidden && S.files.some((f) => f.path === path)) openFile(path, line, false);  // in the editor; the view the researcher is on stays
   },
 };
 
