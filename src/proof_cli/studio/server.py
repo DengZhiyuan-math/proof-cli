@@ -281,6 +281,21 @@ def _err(code, msg) -> Response:
     return _json({"error": msg}, code)
 
 
+def program_argv(script: Path) -> list[str]:
+    """How to start the node's program: the script as itself when it is executable; otherwise (an exchanged copy,
+    a fresh checkout) by the interpreter its own `#!` line names, so a zsh or Python entry runs as written —
+    and through `sh` only when it names none (audit R-S2)."""
+    if os.access(script, os.X_OK):
+        return [str(script)]
+    with script.open("rb") as handle:
+        first = handle.readline(512)
+    if first.startswith(b"#!"):
+        interpreter = shlex.split(first[2:].decode("utf-8", "replace").strip())
+        if interpreter:
+            return [*interpreter, str(script)]
+    return ["/bin/sh", str(script)]
+
+
 class Studio:
     """One folder's studio: its settings, files, build, SyncTeX and agent, with its own locks.
 
@@ -298,8 +313,8 @@ class Studio:
                  hidden: tuple[str, ...] = (), agent_scratch: str | None = None,
                  agent_context: Callable[[], object] | None = None,
                  node_medium: Callable[[], str | None] | None = None,
-                 on_run: Callable[[str, str, str | None, str | None], dict] | None = None,
-                 working_digest: Callable[[], str | None] | None = None,
+                 on_run: Callable[[str, str, object, object], dict] | None = None,
+                 working_digest: Callable[[], object] | None = None,
                  open_command: Callable[[], str | None] | None = None) -> None:
         # a node's Medium (spec #145): Run exists for a computation; on_run records a run as an
         # Evidence check when the folder it ran in is the current snapshot — working_digest is the
@@ -607,9 +622,7 @@ class Studio:
                 out = f"{RUN_SCRIPT} is missing in {self.root}: nothing ran"
             else:
                 try:
-                    # the script as itself when it is executable; through sh otherwise (an exchanged copy, a fresh checkout)
-                    argv = [str(script)] if os.access(script, os.X_OK) else ["/bin/sh", str(script)]
-                    rc, out = runner.run(argv, self.root, env=build.build_env())
+                    rc, out = runner.run(program_argv(script), self.root, env=build.build_env())
                 except build.Stopped:  # stopped from another request, or by the time limit (the Runner raises for both)
                     out = f"the run took longer than {int(RUN_TIMEOUT)} seconds and was stopped" if runner.timed_out else "stopped"
         except OSError as exc:
