@@ -44,11 +44,17 @@ class El {
       }
       if (url === "api/agent/run") return { status: 200, json: async () => run };
       if (url === "api/agent/log") return { status: 200, json: async () => ({ entries: log, turns: scenario.turns || [], folder: "/proj/proofs/N" }) };
-      if (url.startsWith("api/agent/events")) return { status: 200, json: async () => ({ events: [{ t: "text", text: said }, { t: "done" }], done: true }) };
+      if (url.startsWith("api/agent/events")) {
+        const after = Number((url.match(/after=(\d+)/) || [0, 0])[1]);
+        const events = scenario.events || [{ t: "text", text: said }, { t: "done" }];
+        return { status: 200, json: async () => ({ events: events.slice(after), done: true }) };
+      }
       return { status: 404, json: async () => ({}) };
     },
   };
   globalThis.focusedSet = (el) => { focused = el; };
+  // the Files view's live feed (app.js studioLive): what the pane hands it of the running turn
+  context.studioLive = { fed: [], resets: 0, feed(events) { this.fed.push(...events); }, reset() { this.resets += 1; } };
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, "../../src/proof_cli/studio/static/common.js"), "utf8"), context);  // `api`, NODE
   vm.runInContext(fs.readFileSync(path.join(__dirname, "../../src/proof_cli/studio/static/run.js"), "utf8"), context);
@@ -67,6 +73,7 @@ class El {
     redirect: { text: (pane.all().find((x) => x.cls() === "run-redirect") || { value: "" }).value, role: (pane.all().find((x) => x.cls() === "run-redirect-role") || { value: "" }).value },
     open: pane.all().filter((x) => x.tag === "details" && x.open).map((x) => String(x.attrs["data-turn"])),
     focusedRedirect: !!(focused && focused.cls && focused.cls() === "run-redirect"),
+    live: context.studioLive.fed.map((e) => e.t), resets: context.studioLive.resets,
     transcripts: Object.fromEntries(pane.all().filter((x) => x.tag === "details").map((x) => [String(x.attrs["data-turn"]), (x.all().find((t) => t.cls() === "turn-transcript") || { textContent: "" }).textContent])),
     polls: [...timers], posted: [...posted], dispatched: [...dispatched],
   });

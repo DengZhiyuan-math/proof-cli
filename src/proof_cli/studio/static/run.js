@@ -22,7 +22,7 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
   }
 
   const ROLE_WORD = { prover: "Prover", typesetter: "Typesetter", numerics: "Numerics" };
-  const state = { run: null, log: [], turns: [], folder: "", timer: null, redirectBox: null, roleBox: null, shown: "", transcripts: {} };
+  const state = { run: null, log: [], turns: [], folder: "", timer: null, redirectBox: null, roleBox: null, shown: "", transcripts: {}, following: null };
 
   const note = h("p", "", { class: "run-note", role: "status" });
   function tell(text, bad) { note.textContent = text; note.setAttribute("class", bad ? "run-note bad" : "run-note"); }
@@ -122,6 +122,46 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
     return li;
   }
 
+  // A turn's conversation as text: what it said, and each step it took — the tool and where (a file, a command),
+  // a compile and how it went — so the researcher reads what the agent did, not only what it wrote.
+  function transcriptText(events, done) {
+    const lines = [];
+    for (const ev of events) {
+      if (ev.t === "text") lines.push(ev.text || "");
+      else if (ev.t === "error") lines.push(`! ${ev.message || ""}`);
+      else if (ev.t === "tool") lines.push(`▸ ${ev.name}${ev.summary ? " " + ev.summary : ""}`);
+      else if (ev.t === "thinking_start") lines.push("… thinking");
+      else if (ev.t === "build") lines.push(`▸ Compile: ${buildWord(ev.result || {})}`);
+    }
+    return lines.join("\n") || (done ? "(no text in this turn)" : "(nothing said yet)");
+  }
+  function buildWord(r) {
+    const errors = (r.diagnostics || []).filter((d) => d.severity === "error").length;
+    return r.cancelled ? "stopped" : r.timed_out ? "timed out" : r.exit === 0 && !errors ? "OK" : errors ? `${errors} error(s)` : `failed (exit ${r.exit})`;
+  }
+
+  // The running turn, watched live: its events are read as they come (the server holds the request until
+  // there are some) and handed to the Files view (app.js studioLive), which shows the agent at work — the
+  // lines it reads, the file as it writes it, the build it ran. One turn is followed at a time.
+  async function followLoop(job) {
+    const live = globalThis.studioLive;
+    if (live) live.reset();
+    let after = 0;
+    while (state.following === job) {
+      let r;
+      try { r = await api(`/api/agent/events?job=${job}&after=${after}`); } catch (e) { break; }
+      const events = r.events || [];
+      after += events.length;
+      if (live && events.length) live.feed(events);
+      if (r.done || r._status !== 200) break;
+    }
+    if (state.following === job) state.following = null;
+  }
+  function follow() {
+    const turn = state.turns.find((t) => !t.done);
+    if (turn && state.following !== turn.job) { state.following = turn.job; followLoop(turn.job); }
+  }
+
   // a turn of this Start, folded: its role and prompt, the files it changed, and its conversation (the job's events)
   function turnEntry(turn, index) {
     const details = h("details", null, { class: "log-turn", "data-turn": index + 1 });
@@ -141,7 +181,7 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
       const known = state.transcripts[turn.job];
       if (known && known.final) return;
       const r = await api(`/api/agent/events?job=${turn.job}&after=0`);
-      const text = (r.events || []).filter((ev) => ev.t === "text" || ev.t === "error").map((ev) => ev.text || ev.message || "").join("\n") || (turn.done ? "(no text in this turn)" : "(nothing said yet)");
+      const text = transcriptText(r.events || [], turn.done);
       state.transcripts[turn.job] = { text, final: !!turn.done };
       transcript.textContent = text;
     };
@@ -194,6 +234,7 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
     state.turns = log._status === 200 && Array.isArray(log.turns) ? log.turns : [];
     state.folder = log.folder || state.folder;
     render(force === true);
+    follow();
   }
 
   globalThis.studioRun = {

@@ -2,7 +2,7 @@
 
 The LaTeX studio of a node's page: editor, compile, PDF with SyncTeX, and the agent panel (ADR-0011).
 
-It began as a copy of [prism-local](https://github.com/DengZhiyuan-math/Local-Ai-agent-for-latex) at commit `6512eb8f7d65d152dfb45fba64e3606fa1dc4755`, taken on 2026-09-28 (#68), and belongs to proof-cli from then on. The two projects are independent. Nothing is synced either way, and proof-cli owes prism-local no compatibility.
+It began as a copy of [prism-local](https://github.com/DengZhiyuan-math/Local-Ai-agent-for-latex) at commit `6512eb8f7d65d152dfb45fba64e3606fa1dc4755`, taken on 2026-09-28 (#68), and belongs to proof-cli from then on. The two projects are independent and proof-cli owes prism-local no compatibility; when prism-local gains something the node page wants, it is taken over by hand (a three-way merge of the files that still match, the rest ported), never merged as a branch. See "Taken from upstream since".
 
 ## Kept from prism-local
 
@@ -15,6 +15,10 @@ It began as a copy of [prism-local](https://github.com/DengZhiyuan-math/Local-Ai
 
 - The multi-project Home page and its server: `hub.py`, `static/home.*`.
 - The port registry (`registry.py`), page presence and idle exit (`presence.py`), the launcher and `bin/`. proof-cli's own server and proof map do those jobs.
+
+## Taken from upstream since
+
+- **2938c05 (2026-10-01), "Watch the agent work, let it compile, and a fuller PDF reader".** Taken: the Claude backend streams thinking, each tool step with the file and lines it works on, and the text of a file as it is written (`tool_start`, `tool_live`, `thinking*` events); the page marks where the agent reads, rewrites and changed, and shows the file it is writing over the editor (`AH`, `AV` in `app.js`); refused steps are named; with the claude.ai login tokens are shown, not a price. The compile tool (`mcp_compile.py`, an MCP server Claude Code starts per turn) builds through the node's own studio — in proof-cli the Typesetter and the LaTeX node's Ask turns get it, a computation node's turns don't, and the Typesetter no longer runs latexmk itself. The PDF reader's links with Back, text selection, search and bookmarks; glyphs drawn as paths; inverse SyncTeX from the contents and the bibliography to the source or the `.bib` entry; the fold addon for sections, environments and `\[ \]` (`texfold.js`, vendored `foldcode.js`/`foldgutter.*`). proof-cli adds what upstream has no need of: the run pane follows the running turn's events live into the Files view and shows each step in the turn's transcript. Left out: the "Update: restart" button and `/api/restart` (proof-cli's server is its own program), the shell-allowlist logic (a role's Bash rules come from `proof_agent.py`), the API-model backend's share, and `home.js`.
 
 ## Changed on import
 
