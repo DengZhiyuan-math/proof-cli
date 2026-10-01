@@ -24,7 +24,7 @@ import time
 from pathlib import Path
 
 from .fsutil import read_json
-from .backends import NO_WINDOW, TREE, CliBackend, Job, find_bin, kill_tree, system_append
+from .backends import MCP_SERVER, NO_WINDOW, TREE, CliBackend, Job, compile_tool_server, compiles, find_bin, kill_tree, system_append
 
 MODES = {"edit": "acceptEdits", "ask": "plan"}
 
@@ -125,9 +125,7 @@ def account_problem(info: dict, allowed: str) -> str | None:
     return None
 
 
-# The agent's compile tool (mcp_compile.py), as Claude Code names it: MCP server "studio", tool "compile".
-MCP_SERVER = "studio"
-COMPILE_TOOL = f"mcp__{MCP_SERVER}__compile"
+COMPILE_TOOL = f"mcp__{MCP_SERVER}__compile"       # the compile tool (backends.compile_tool_server), as Claude Code names it
 
 
 def _loads_compile_tool(block: dict) -> bool:
@@ -308,14 +306,9 @@ class ClaudeCode(CliBackend):
                "--append-system-prompt", system_append(job.context)]
         # The compile tool (mcp_compile.py): the studio's own build, the one the researcher sees — no
         # shell needed to compile, and no other MCP server is loaded.
-        # an edit turn of a role that typesets (plan mode admits no tool that builds; the Prover and Numerics don't compile)
-        compiles = bool(job.server_url) and job.mode == "edit" and (job.context is None or job.context.compiles)
-        tools = [COMPILE_TOOL] if compiles else []
-        if compiles:
-            cmd += ["--mcp-config", json.dumps({"mcpServers": {MCP_SERVER: {
-                "command": sys.executable,
-                "args": [str(Path(__file__).with_name("mcp_compile.py")), "--url", job.server_url]}}}),
-                    "--strict-mcp-config"]
+        tools = [COMPILE_TOOL] if compiles(job) else []
+        if tools:
+            cmd += ["--mcp-config", json.dumps({"mcpServers": {MCP_SERVER: compile_tool_server(job.server_url)}}), "--strict-mcp-config"]
         if job.context:
             cmd += job.context.claude_args(job.mode == "edit", self.scope_rules(job.scope) if job.scope else None, tools=tools)
         elif job.scope or tools:

@@ -46,6 +46,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import threading
 from pathlib import Path
 from typing import Callable
@@ -94,6 +95,22 @@ def system_append(context=None) -> str:
         "  Write), not shell commands such as cat, sed, python or rm.\n", ""
     )
     return f"{general}\n{context.brief()}"
+
+
+# The agent's compile tool (mcp_compile.py, taken from upstream 2938c05): an MCP server either CLI starts
+# for the turn, named "studio", with one tool, "compile", that builds through the node's own studio.
+MCP_SERVER = "studio"
+
+
+def compiles(job: "Job") -> bool:
+    """Whether this turn gets the compile tool: the node's studio has a build (a URL), the turn edits (plan
+    mode admits no tool that builds), and its role typesets (the Prover and Numerics don't)."""
+    return bool(job.server_url) and job.mode == "edit" and (job.context is None or job.context.compiles)
+
+
+def compile_tool_server(url: str) -> dict:
+    """The MCP server's command and arguments, as either CLI's configuration wants them."""
+    return {"command": sys.executable, "args": [str(Path(__file__).with_name("mcp_compile.py")), "--url", url]}
 
 
 def find_bin(env: str, name: str, extra: tuple[str, ...] = ()) -> str | None:

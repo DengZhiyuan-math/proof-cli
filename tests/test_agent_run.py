@@ -752,6 +752,29 @@ def test_the_typesetter_compiles_through_the_nodes_studio_not_a_shell(studio):
     assert "mcp__studio__compile" in argv and "Bash(latexmk *)" not in argv and "Bash(pdflatex *)" not in argv
 
 
+def test_the_typesetter_on_codex_is_configured_with_the_compile_tool_too(studio, monkeypatch):
+    """Fourth review F3: the same brief, the same tool — through Codex's configuration overrides."""
+    from proof_cli.studio.backend_codex import Codex
+    from proof_cli.webapp.server import project_origin
+
+    store, hub, log, queue = studio
+    agent = hub.studio("N").agent
+    seen = []
+    codex = Codex("codex", {"bin": "codex"})
+    agent.backends["codex"] = codex
+    monkeypatch.setattr(codex, "unavailable", lambda: None)
+    monkeypatch.setattr(codex, "preflight", lambda root: None)
+    monkeypatch.setattr(agent, "_run", lambda job, backend: seen.append(backend.command(job)))  # never start Codex
+    _post(hub, "/studio/N/api/agent/start", {"provider": "codex", "roles": ["typesetter"]})
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline and not seen:
+        time.sleep(0.02)
+    _post(hub, "/studio/N/api/agent/release")
+    ((cmd, prompt),) = seen
+    assert f'mcp_servers.studio.args=["{__import__("proof_cli.studio.mcp_compile", fromlist=["__file__"]).__file__}", "--url", "{project_origin(store)}/studio/N/"]' in cmd
+    assert "compile it with the `compile` tool" in prompt
+
+
 def test_only_a_typesetting_turn_on_a_latex_node_gets_the_compile_tool(studio):
     store, hub, log, queue = studio
     create_node(store, node_id="C", kind="claim", statement="n ≤ 10^4 holds", medium="computation")

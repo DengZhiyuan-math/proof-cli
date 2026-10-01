@@ -409,6 +409,23 @@ class CompileTool(unittest.TestCase):
             cmd, _ = self.claude.command(job_for(mode="edit", root=tmpdir(), server_url="http://127.0.0.1:9/studio/N/", context=ctx))
             self.assertEqual("--mcp-config" in cmd, expected, role)
 
+    def test_codex_gets_the_same_tool_through_its_configuration(self):
+        """Fourth review F3: the Typesetter's brief asks for the compile tool on either CLI; Codex is configured too."""
+        from proof_cli.studio.proof_agent import ProofAgentContext
+        codex = Codex("codex", {"bin": "codex"})
+        ctx = ProofAgentContext("N", tmpdir(), role="typesetter")
+        cmd, _ = codex.command(job_for(mode="edit", root=tmpdir(), server_url="http://127.0.0.1:9/studio/N/", context=ctx))
+        overrides = [cmd[i + 1] for i, x in enumerate(cmd) if x == "-c"]
+        command = next(o for o in overrides if o.startswith("mcp_servers.studio.command="))
+        args = next(o for o in overrides if o.startswith("mcp_servers.studio.args="))
+        self.assertEqual(json.loads(command.split("=", 1)[1]), sys.executable)
+        self.assertEqual(json.loads(args.split("=", 1)[1])[1:], ["--url", "http://127.0.0.1:9/studio/N/"])
+        self.assertTrue(json.loads(args.split("=", 1)[1])[0].endswith("proof_cli/studio/mcp_compile.py"))
+        for job in (job_for(mode="ask", root=tmpdir(), server_url="http://127.0.0.1:9/studio/N/", context=ctx),
+                    job_for(mode="edit", root=tmpdir(), server_url="http://127.0.0.1:9/studio/N/", context=ProofAgentContext("N", tmpdir(), role="prover")),
+                    job_for(mode="edit", root=tmpdir(), context=ctx)):
+            self.assertFalse(any(x.startswith("mcp_servers.") for x in codex.command(job)[0]), job.mode)
+
     def test_an_ask_turn_has_no_tool(self):
         """Plan mode admits no tool that builds: offering it would only make a refused step."""
         cmd, _ = self.claude.command(job_for(mode="ask", root=tmpdir(), server_url="http://127.0.0.1:9/studio/L1/"))
