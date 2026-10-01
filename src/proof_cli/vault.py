@@ -6,7 +6,7 @@ import shutil
 from pathlib import Path
 from typing import Callable
 
-from .key_ideas import KEY_IDEAS_FILE
+from .key_ideas import KEY_IDEAS_FILE, TEMPLATE as KEY_IDEAS_TEMPLATE
 
 
 def vault_dir(root: Path) -> Path:
@@ -243,6 +243,45 @@ def write_working_proof(root: Path, *, node_id: str, kind: str, statement: str) 
         "\\end{document}\n",
         encoding="utf-8",
     )
+
+
+RUN_SCRIPT = "run.sh"
+OUT_DIR = "out"
+_RUN_SKELETON = """\
+#!/usr/bin/env bash
+# Proof map node {node_id} ({kind}), medium: computation.
+# This script is the computation that is meant to establish the statement:
+#   {statement}
+# It runs in this folder. Write what it produces (tables, figures, logs) into out/ — the
+# review snapshot freezes this folder, out/ included, and the researcher's Acceptance judges
+# whether what was frozen establishes the statement. Exit 0 when the check passes.
+set -euo pipefail
+mkdir -p out
+echo "nothing computed yet" > out/run.log
+exit 1
+"""
+
+
+def write_working_computation(root: Path, *, node_id: str, kind: str, statement: str) -> None:
+    """Create a computation node's folder, if missing: an executable `run.sh` skeleton and a
+    key-ideas skeleton — and no `proof.tex` (spec #145). Never overwrites."""
+    ignore = vault_dir(root) / ".gitignore"
+    if not ignore.exists():
+        ignore.parent.mkdir(parents=True, exist_ok=True)
+        ignore.write_text("*/build/\n", encoding="utf-8")
+    folder = node_folder(root, node_id)
+    folder.mkdir(parents=True, exist_ok=True)
+    run = folder / RUN_SCRIPT
+    if not run.exists():
+        run.write_text(_RUN_SKELETON.format(node_id=node_id, kind=kind, statement=statement.replace("\n", " ")), encoding="utf-8")
+        run.chmod(run.stat().st_mode | 0o111)
+    key_ideas = folder / KEY_IDEAS_FILE
+    if not key_ideas.exists():
+        key_ideas.write_text(KEY_IDEAS_TEMPLATE, encoding="utf-8")
+
+
+def run_script_path(root: Path, node_id: str) -> Path:
+    return node_folder(root, node_id) / RUN_SCRIPT
 
 
 def write_snapshot(path: Path, content: bytes) -> None:

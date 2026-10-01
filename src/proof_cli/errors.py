@@ -44,6 +44,9 @@ ERROR_CODES: dict[str, str] = {
     # -- proofs, snapshots and splits ----------------------------------------------------
     "SCOPING_RATIONALE_REQUIRED": "requesting review needs a statement of why the node is scoped to prove directly",
     "WORKING_PROOF_MISSING": "the node has no working proof.tex",
+    "RUN_SCRIPT_MISSING": "a computation node has no run.sh: its review needs the program that is its candidate proof (spec #145)",
+    "INVALID_MEDIUM": "the medium is not latex or computation (spec #145)",
+    "MEDIUM_NOT_APPLICABLE": "an imported result has no candidate proof, so no medium (spec #145)",
     "WORKING_PROOF_UNCHANGED": "the working proof is the snapshot already under review",
     "KEY_IDEAS_REQUIRED": "requesting review needs the node's key-ideas.md, with 核心思路 and 主要步骤 filled in (ADR-0013); `missing` names what is absent",
     "CANDIDATE_PROOF_NOT_FOUND": "no Candidate proof has this id",

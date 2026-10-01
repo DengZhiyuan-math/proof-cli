@@ -76,6 +76,8 @@ def render_proof_map_node(
     table.add_column("key", style="bold")
     table.add_column("value")
     table.add_row("Kind", node.kind.value)
+    if node.medium is not None:
+        table.add_row("Medium", node.medium.value)  # what the candidate proof is made of (spec #145)
     if node.display_label:
         table.add_row("Display label", node.display_label)
     table.add_row("Statement", node.statement)
@@ -120,7 +122,7 @@ def render_proof_map_node(
     if integrity_state is not None:
         table.add_row("Integrity state", integrity_state)
     if working_proof is not None:
-        table.add_row("Working proof", working_proof)
+        table.add_row("Run script" if working_proof.endswith("run.sh") else "Working proof", working_proof)
     for snapshot in snapshots or []:
         current = " (current)" if snapshot["is_current"] else ""
         table.add_row(f"Snapshot v{snapshot['version']}", f"{snapshot['file_path']}{current} sha256={snapshot['sha256'] or '—'}")
@@ -141,7 +143,7 @@ def render_frontier(nodes: list[ProofMapNode]) -> str:
     table.add_column("kind")
     table.add_column("statement")
     for node in nodes:
-        table.add_row(node.id, node.kind.value, node.statement)
+        table.add_row(node.id, f"{node.kind.value} · {node.medium.value}" if node.medium is not None and node.medium.value != "latex" else node.kind.value, node.statement)
     console.print(table)
     return console.export_text()
 

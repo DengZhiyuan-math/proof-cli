@@ -53,8 +53,12 @@ An external, already-established result pulled in as a dependency. It carries a 
 _Avoid_: reference, external theorem
 
 **Candidate proof**:
-A proof of a proof map node, written by an agent or collaborator; a reviewable artifact, never an established result. It is a standalone LaTeX document, the node's working file `proofs/<node-id>/proof.tex`, which agents and the researcher edit freely. What gets reviewed is never the moving working file but a Review snapshot of it. The proof map node itself (id, kind, dependencies) stays in SQLite. See ADR-0010.
+A proof of a proof map node, written by an agent or collaborator; a reviewable artifact, never an established result. It is a standalone LaTeX document, the node's working file `proofs/<node-id>/proof.tex`, which agents and the researcher edit freely — or, for a node whose Medium is `computation`, the program `run.sh` and what it writes to `out/`. What gets reviewed is never the moving working file but a Review snapshot of it. The proof map node itself (id, kind, dependencies) stays in SQLite. See ADR-0010.
 _Avoid_: resolution, solution
+
+**Medium** (of a Theorem, Lemma or Claim):
+What the node's Candidate proof is made of: `latex`, a standalone LaTeX document (`proof.tex`), or `computation`, a program (`run.sh` as its entry, its outputs in `out/`) whose run is meant to establish the statement — a case-by-case check, an enumeration, a formal verification, a simulation. The medium changes what the studio shows and what a Review snapshot freezes, never how the node is claimed, reviewed or Accepted: the researcher still decides whether what was frozen establishes the statement. Set at creation (`node create --medium`), changeable at any time (`node medium set`) without touching the Accepted mathematical interface. An Imported result has none.
+_Avoid_: numerical node, kind (that is theorem / lemma / claim), workspace
 
 **Proof vault**:
 The repo's top-level `proofs/` directory. It holds a shared `preamble.tex`, and one folder per node with its working `proof.tex`, its Review snapshots (`snapshots/v<N>/`, every input of the proof frozen with a manifest; older ones are single `v<N>.tex` files) and its Review decisions (`reviews.jsonl`), all tracked by git. Each node folder is an ordinary LaTeX project: the node's studio edits it, and any LaTeX editor can open it as is. Older `v<N>.md` files from ADR-0003 remain as read-only history. Distinct from `.proof/`, which holds internal, non-human-authored project state.
