@@ -72,10 +72,7 @@ _SHARED_PREFIXES = ("mathtext.js", "vendor/katex.min.", "vendor/fonts/KaTeX_")
 _MAX_BODY_BYTES = 2_000_000
 
 
-class RequestError(Exception):
-    def __init__(self, status: HTTPStatus, code: str, message: str, details: dict | None = None) -> None:
-        super().__init__(message)
-        self.status, self.code, self.message, self.details = status, code, message, details or {}
+from .studios import RequestError  # noqa: E402  (one refusal type for the page and its studios)
 
 
 # the frozen outputs a browser may show inline: raster images only (an SVG or HTML can carry script)
@@ -340,6 +337,7 @@ class ReviewApp:
                     "kind": node.kind.value,
                     "display_label": node.display_label,
                     "medium": node.medium.value if node.medium is not None else None,  # what its candidate proof is made of (spec #145)
+                    "run": self.studios.run_state(node.id),  # the agent's run on it, when one is active (spec #145)
                     "statement": node.statement,
                     "dependencies": node.dependencies,
                     "workflow_state": workflow,
@@ -399,6 +397,12 @@ class ReviewApp:
 
     def _actor(self) -> str:
         return git_identity(self.store.root)
+
+    def run_action(self, node_id: str, action: str, body: dict) -> dict:
+        """Start, pause, resume, redirect or release the Proof agent's run on a node, from the map or the node's page (spec #145)."""
+        if action not in ("start", "pause", "resume", "redirect", "release"):
+            raise RequestError(HTTPStatus.NOT_FOUND, "NOT_FOUND", f"no run action {action!r}")
+        return self.studios.run_action(node_id, action, body)
 
     @staticmethod
     def page_of(node) -> str:
@@ -549,6 +553,7 @@ class ReviewApp:
             "citation": proof_map.node_citation(store, node),
             # the open fog near this node, and the fog item it was crystallized from (ADR-0008, spec #136)
             "fog_near": [proof_fog.fog_view(store, item) for item in proof_fog.fog_near(store, node_id)],
+            "run": self.studios.run_state(node_id),
             "crystallized_from": origin.id if (origin := proof_fog.crystallized_from(store, node_id)) is not None else None,
             "dependents": sorted(other.id for other in proof_map.list_nodes(store) if node_id in other.dependencies),
             "pdfs": self._pdfs(node_id, proof),
@@ -788,6 +793,9 @@ class _Handler(BaseHTTPRequestHandler):
         if route is None and path.startswith("/api/fog/"):  # the fog drawer: /api/fog/<fog-id>/<action>
             fog_id, _, action = path.removeprefix("/api/fog/").rpartition("/")
             route = lambda: self.app.fog_action(unquote(fog_id), action, body)
+        if route is None and path.startswith("/api/node/") and "/agent/" in path:  # the agent's run, from the map or the node page (spec #145)
+            node_id, _, action = path.removeprefix("/api/node/").rpartition("/agent/")
+            route = lambda: self.app.run_action(unquote(node_id), action, body)
         if route is None:
             return self._error(HTTPStatus.NOT_FOUND, "NOT_FOUND", self.path)
         self._guarded(route)

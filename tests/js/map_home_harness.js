@@ -103,7 +103,7 @@ class FakeElement {
     "rule-decision", "rule-name", "rule-rationale", "rule-conditions", "cond-reviewed", "cond-doi", "cond-arxiv", "cond-types",
     "rule-reminder", "rule-impact", "rule-new", "rule-cancel", "rule-record",
     // the fog drawer (issue #137) and the node page's fog block
-    "fog-badge", "stat-fog", "fog-drawer", "fog-drawer-n", "fog-list", "fog-close", "fog-add-text", "fog-add-near", "fog-add", "fog-show-all", "fog-composer", "node-fog", "node-outputs"];
+    "fog-badge", "stat-fog", "fog-drawer", "fog-drawer-n", "fog-list", "fog-close", "fog-add-text", "fog-add-near", "fog-add", "fog-show-all", "fog-composer", "node-fog", "node-outputs", "node-run"];
   const tags = { "tree-root": "select", "dag-svg": "svg", "decide-batch": "button", pending: "table", warnings: "ul", "map-find": "input", "attention-nodes": "ul",
     "node-deps": "table", "node-decisions": "table", "node-challenges": "ul", "node-evidence": "ul", "node-history": "ul",
     trusted: "table", "rules-list": "ul", "rules-retired-list": "ul", "rule-name": "input", "rule-rationale": "input", "rule-decision": "input",
@@ -264,6 +264,8 @@ class FakeElement {
     fogFocus: elements["dag-svg"].classList.contains("filtering"),
     fogFound: elements["fog-list"].querySelectorAll("li").filter((li) => li.classList.contains("found")).map((li) => li.getAttribute("data-fog")),
     fogAddText: elements["fog-add-text"].value,
+    // the agent's run on the node page (spec #145): its line and its buttons
+    nodeRun: { text: elements["node-run"].textContent, buttons: elements["node-run"].querySelectorAll("button").map((b) => b.textContent) },
     // the node page's fog block: crystallized from, and the open fog near the node
     nodeFog: elements["node-fog"].textContent,
     nodeFogLinks: elements["node-fog"].querySelectorAll("a").map((a) => a.textContent),
@@ -335,6 +337,10 @@ class FakeElement {
     }
     if (step.fogAll !== undefined) { elements["fog-show-all"].checked = step.fogAll; await elements["fog-show-all"].dispatch("change"); await settle(); }
     if (step.fogButton) { await fogRow(step.fogButton.id).querySelectorAll("button").find((b) => b.textContent === step.fogButton.text).dispatch("click"); await settle(); }
+    if (step.runButton) {  // the node page's oversight (spec #145): a button by its text, after filling the redirect line
+      if (step.runButton.redirect !== undefined) elements["node-run"].querySelector("input").value = step.runButton.redirect;
+      await elements["node-run"].querySelectorAll("button").find((b) => b.textContent === step.runButton.text).dispatch("click"); await settle();
+    }
     if (step.fogFill) {
       const field = fogRow(step.fogFill.id)._all().find((n) => n.getAttribute("name") === step.fogFill.name);
       field.value = step.fogFill.value;

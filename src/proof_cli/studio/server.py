@@ -28,14 +28,15 @@ from pathlib import Path
 from typing import Callable
 
 from . import build, httpbase
+from .agent_run import AgentRun, RunHooks
 from ..key_ideas import KEY_IDEAS_FILE
 from ..vault import RUN_SCRIPT
-
-# what a computation node's studio edits besides the LaTeX suffixes (spec #145): its program, its data, its logs
-COMPUTATION_SUFFIXES = {".sh", ".py", ".sage", ".lean", ".jl", ".r", ".R", ".m", ".gp", ".mac", ".csv", ".json", ".log", ".toml", ".yml", ".yaml", ".cfg", ".ini"}
 from .agent import NO_WINDOW, AgentManager
 from .fsutil import EDITABLE_SUFFIXES, SKIP_DIRS, with_line_ends_of, write_bytes
 from .texutil import group, plain_text
+
+# what a computation node's studio edits besides the LaTeX suffixes (spec #145): its program, its data, its logs
+COMPUTATION_SUFFIXES = {".sh", ".py", ".sage", ".lean", ".jl", ".r", ".R", ".m", ".gp", ".mac", ".csv", ".json", ".log", ".toml", ".yml", ".yaml", ".cfg", ".ini"}
 
 MAX_FILES = 3000
 
@@ -315,7 +316,8 @@ class Studio:
                  node_medium: Callable[[], str | None] | None = None,
                  on_run: Callable[[str, str, object, object], dict] | None = None,
                  working_digest: Callable[[], object] | None = None,
-                 open_command: Callable[[], str | None] | None = None) -> None:
+                 open_command: Callable[[], str | None] | None = None,
+                 run_hooks: RunHooks | None = None) -> None:
         # a node's Medium (spec #145): Run exists for a computation; on_run records a run as an
         # Evidence check when the folder it ran in is the current snapshot — working_digest is the
         # folder's manifest digest, read before and after the run — and says what it did or why not;
@@ -340,6 +342,8 @@ class Studio:
         self.sync = SyncTex(self)
         # agent_context: a node's proof agent (proof_agent.py), made fresh for each turn
         self.agent = AgentManager(lambda: self.root, self.agent_files, self.agent_writable, context_fn=agent_context)
+        # the agent's run on this node (agent_run.py, spec #145): Start once, then autonomous, under the researcher's eye
+        self.run = AgentRun(self.agent, run_hooks) if run_hooks is not None else None
 
     def refresh_config(self) -> None:
         """Load prism.json again when it changed, so a new engine or outdir applies at once."""
@@ -357,6 +361,8 @@ class Studio:
         if running is not None:
             running.stop()      # registered before it runs anything, so nothing starts
         self.stop_runs()        # a computation's runs too (ADR-0011: programs are limited per folder)
+        if self.run is not None and self.run.active():
+            self.run.release("the studio is closing")
         self.agent.shutdown()
 
     # ------------------------------------------------------------ the agent's files
@@ -641,6 +647,27 @@ class Studio:
         return {"exit": rc, "output": out, "seconds": seconds, "cancelled": cancelled, "timed_out": runner.timed_out,
                 "outcome": outcome, "evidence": recorded.get("evidence"), "note": recorded.get("note") or ""}
 
+    def _run_action(self, action: str, body: dict) -> Response:
+        """The researcher's oversight of the agent's run (spec #145): start, pause, resume, redirect, release."""
+        if self.run is None:
+            return _json({"error": "NO_RUN", "message": "this folder has no proof map node, so no agent run"}, 404)
+        if action == "start":
+            provider = str(body.get("provider") or (self.agent.backend(None).id if self.agent.backend(None) else ""))
+            roles = body.get("roles") if isinstance(body.get("roles"), list) else None
+            r = self.run.start(provider, roles=roles, redirect=str(body.get("redirect") or "") or None,
+                               model=body.get("model") or None, effort=body.get("effort") or None)
+            return _json(r, 409 if r.get("error") == "RUN_ACTIVE" else 200)
+        if action == "pause":
+            return _json(self.run.pause())
+        if action == "resume":
+            return _json(self.run.resume())
+        if action == "redirect":
+            text = str(body.get("text") or "").strip()
+            if not text:
+                return _json({"error": "REDIRECT_EMPTY", "message": "say what the agent should do differently"}, 400)
+            return _json(self.run.redirect(text, body.get("role") or None))
+        return _json(self.run.release())
+
     def stop_runs(self) -> bool:
         with self._admit:
             runs = list(self.running_runs)
@@ -713,6 +740,8 @@ class Studio:
                                "build": {m: self.cfg.describe(m) for m in self.cfg.modes},
                                # the node's Medium, its folder and how to hand it to an editor (spec #145)
                                "folder": str(self.root), "medium": self.medium(), "open": self.how_to_open()})
+        if path == "/api/agent/run":
+            return _json(self.run.view() if self.run is not None else {"status": "idle", "reason": "no run on this folder"})
         if path == "/api/agent/events":
             job = self.agent.jobs.get(int(q["job"]))
             if not job:
@@ -808,6 +837,8 @@ class Studio:
             return _json(r, 409 if r.get("busy") else 200)
         if path == "/api/build/stop":
             return _json({"ok": self.stop_build()})
+        if path.startswith("/api/agent/") and path.split("/")[3] in ("start", "pause", "resume", "redirect", "release"):
+            return self._run_action(path.split("/")[3], body)
         if path == "/api/run":
             if self.medium() != "computation":
                 return _json({"error": "NOT_A_COMPUTATION", "message": "Run is for a node whose medium is computation; this one compiles"}, 409)

@@ -431,3 +431,10 @@ td a { font-family: var(--mono); font-size: 12px; }
 .node-outputs-list li { margin: 6px 0; }
 .node-outputs-list .hint { margin: 0 0 0 4px; }
 .output-preview { display: block; max-width: 100%; max-height: 320px; margin-top: 6px; border-radius: 8px; box-shadow: var(--shadow-card); background: #fff; }
+
+/* the agent's run on the node page (spec #145): where it stands, and the researcher's four actions */
+.node-run { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.node-run:empty { display: none; }
+.node-run .run-where { font-size: 12.5px; font-weight: 600; color: var(--label-2); }
+.node-run input { min-width: 240px; flex: 1; }
+.node-run .hint { margin: 0; }

@@ -44,6 +44,12 @@ ERROR_CODES: dict[str, str] = {
     # -- proofs, snapshots and splits ----------------------------------------------------
     "SCOPING_RATIONALE_REQUIRED": "requesting review needs a statement of why the node is scoped to prove directly",
     "WORKING_PROOF_MISSING": "the node has no working proof.tex",
+    "INVALID_ROLE": "the Proof agent role is not prover, typesetter or numerics (spec #145)",
+    "ROLE_REQUIRED": "a progress report names the role that makes it: PROOF_AGENT_ROLE in the agent's runtime, or --role (spec #145)",
+    "INVALID_PROGRESS_STATUS": "a step's status is started, done or stuck (spec #145)",
+    "INVALID_PROGRESS_STEP": "steps count from 1 (spec #145)",
+    "PROGRESS_STATUS_REQUIRED": "a step report needs its status (spec #145)",
+    "PROGRESS_EMPTY": "a progress report is a plan or a step; this one is neither (spec #145)",
     "RUN_SCRIPT_MISSING": "a computation node has no run.sh: its review needs the program that is its candidate proof (spec #145)",
     "INVALID_MEDIUM": "the medium is not latex or computation (spec #145)",
     "MEDIUM_NOT_APPLICABLE": "an imported result has no candidate proof, so no medium (spec #145)",
