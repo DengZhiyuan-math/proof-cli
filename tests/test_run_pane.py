@@ -143,6 +143,7 @@ def test_a_turns_transcript_reads_its_steps_and_the_running_turn_is_handed_to_th
     events = [{"t": "tool_start", "id": "r1", "name": "Read"}, {"t": "tool", "id": "r1", "name": "Read", "summary": "sec/a.tex", "path": "sec/a.tex", "lines": [20, 30]},
               {"t": "tool_result", "id": "r1", "error": False}, {"t": "thinking_start"}, {"t": "text", "text": "I rewrote §2."},
               {"t": "build", "result": {"exit": 0, "diagnostics": []}}, {"t": "done"}]
-    _, opened, _ = _pane(run=RUNNING, log=LOG, turns=turns, events=events, typed="x", open=[1])
+    _, opened, polled = _pane(run=RUNNING, log=LOG, turns=turns, events=events, typed="x", open=[1])
     assert opened["transcripts"]["1"] == "▸ Read sec/a.tex\n… thinking\nI rewrote §2.\n▸ Compile: OK"
     assert opened["live"] == [e["t"] for e in events] and opened["resets"] == 1  # every event once, after a reset for the new turn
+    assert polled["live"] == opened["live"] and polled["resets"] == 1  # the next poll does not follow the same turn again

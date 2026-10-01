@@ -402,6 +402,39 @@ class CompileTool(unittest.TestCase):
         cmd, _ = self.claude.command(job_for(mode="edit", root=tmpdir()))
         self.assertNotIn("--mcp-config", cmd)
 
+    def test_a_role_that_does_not_typeset_has_no_tool(self):
+        from proof_cli.studio.proof_agent import ProofAgentContext
+        for role, expected in (("prover", False), ("numerics", False), ("typesetter", True), (None, True)):
+            ctx = ProofAgentContext("N", tmpdir(), role=role)
+            cmd, _ = self.claude.command(job_for(mode="edit", root=tmpdir(), server_url="http://127.0.0.1:9/studio/N/", context=ctx))
+            self.assertEqual("--mcp-config" in cmd, expected, role)
+
+    def test_an_ask_turn_has_no_tool(self):
+        """Plan mode admits no tool that builds: offering it would only make a refused step."""
+        cmd, _ = self.claude.command(job_for(mode="ask", root=tmpdir(), server_url="http://127.0.0.1:9/studio/L1/"))
+        self.assertNotIn("--mcp-config", cmd)
+
+    def test_the_tool_posts_the_build_as_the_pages_own_origin(self):
+        """proof-cli's server takes a write only from its own origin: the tool's request carries it."""
+        from unittest import mock
+
+        from proof_cli.studio import mcp_compile
+        seen = []
+
+        class Answer:
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def read(self): return b'{"exit": 0, "diagnostics": []}'
+
+        with mock.patch("urllib.request.urlopen", side_effect=lambda req, timeout: (seen.append(req), Answer())[1]):
+            r = mcp_compile.build("http://127.0.0.1:8765/studio/L1/", False)
+        (req,) = seen
+        self.assertEqual(r, {"exit": 0, "diagnostics": []})
+        self.assertEqual(req.full_url, "http://127.0.0.1:8765/studio/L1/api/build")
+        self.assertEqual(req.get_header("Origin"), "http://127.0.0.1:8765")
+        self.assertEqual(req.get_header("Content-type"), "application/json")
+        self.assertEqual(json.loads(req.data), {"mode": "draft", "clean": False, "by": "agent"})
+
     def test_protocol(self):
         from proof_cli.studio import mcp_compile
         a = mcp_compile.answer({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}}, "u")

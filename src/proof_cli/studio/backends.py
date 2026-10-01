@@ -28,7 +28,8 @@ Events a backend emits through ``job.emit`` (the panel understands exactly these
     {"t": "tool_start", "id": str, "name": str} a tool call begins (its input still streams)
     {"t": "tool_live", "id": str, "path"?: str, "text"?: str, "old"?: str, "old_done"?: true}
                                                 the file a Write/Edit is writing, as it streams
-    {"t": "tool", "id": str, "name": str, "summary": str}
+    {"t": "tool", "id": str, "name": str, "summary": str, "path"?: str, "lines"?: [first, last]}
+                                                a tool call, with the file (and lines) a file tool works on
     {"t": "tool_result", "id": str, "error": bool, "preview": str}
     {"t": "build", "result": dict}              a build the agent ran (agent.py, not backends)
     {"t": "rate", "rate": dict}                 Claude usage limits

@@ -44,9 +44,9 @@ class AgentManager:
         self.lock = threading.Lock()
         self.active: Job | None = None
         self.closed = False        # set by shutdown(): no turn starts after it
-        # the studio's own URL for the agent's compile tool (mcp_compile.py): a string, a callable
-        # answering one per turn (None: no compile tool, as on a computation node), or None
-        self.server_url: str | Callable[[], str | None] | None = None
+        # the studio's own URL for the agent's compile tool (mcp_compile.py), asked once per turn
+        # (None: no compile tool, as on a computation node)
+        self.server_url: Callable[[], str | None] | None = None
 
     def backend(self, provider: str | None) -> Backend | None:
         return self.backends.get(provider or self.default)
@@ -145,7 +145,7 @@ class AgentManager:
         job.mode, job.model, job.effort = mode if mode in ("edit", "ask") else "ask", model, effort
         job.root, job.files = self.root_fn(), self.files_fn
         job.context = self.context_fn() if self.context_fn else None
-        job.server_url = self.server_url() if callable(self.server_url) else self.server_url
+        job.server_url = self.server_url() if self.server_url else None
         job.writable = lambda rel: self._writable(job, rel)
         job.finish = finish
         job.before = self._snapshot()

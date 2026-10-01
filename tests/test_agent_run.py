@@ -752,13 +752,17 @@ def test_the_typesetter_compiles_through_the_nodes_studio_not_a_shell(studio):
     assert "mcp__studio__compile" in argv and "Bash(latexmk *)" not in argv and "Bash(pdflatex *)" not in argv
 
 
-def test_a_computation_nodes_turn_has_no_compile_tool(studio):
+def test_only_a_typesetting_turn_on_a_latex_node_gets_the_compile_tool(studio):
     store, hub, log, queue = studio
     create_node(store, node_id="C", kind="claim", statement="n ≤ 10^4 holds", medium="computation")
-    _queue(queue, [["sleep", "0"]])
+    _queue(queue, [["sleep", "0"]], [["sleep", "0"]])
     _post(hub, "/studio/C/api/agent/start", {"provider": "claude", "roles": ["numerics"]})
     _wait(hub, node="C")
-    assert "--mcp-config" not in _turns(log)[0]["argv"]
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["prover"]})
+    _wait(hub)
+    numerics, prover = _turns(log)
+    assert "--mcp-config" not in numerics["argv"]  # a computation node has no build
+    assert "--mcp-config" not in prover["argv"] and "mcp__studio__compile" not in prover["argv"]  # the Prover does not typeset
 
 
 def test_a_build_the_agent_ran_shows_in_its_turn(studio):
@@ -771,7 +775,7 @@ def test_a_build_the_agent_ran_shows_in_its_turn(studio):
     while time.monotonic() < deadline and not (agent.active and not agent.active.done):
         time.sleep(0.02)
     status, built = _post(hub, "/studio/N/api/build", {"mode": "draft", "by": "agent"})
-    assert status in (200, 409)
+    assert status == 200
     answer = hub.request("GET", "/studio/N/api/agent/events", f"job={agent.active.id}&after=0", None, cross_site=False)
     events = json.loads(answer.body)["events"]
     assert any(e["t"] == "build" and e["result"] == built for e in events)
