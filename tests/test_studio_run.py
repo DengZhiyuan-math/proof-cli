@@ -11,6 +11,8 @@ decision. Open in VS Code hands the node folder to the editor: `vscode://file/<f
 import json
 import os
 import subprocess
+import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -245,3 +247,62 @@ def test_an_imported_computation_node_keeps_a_runnable_entry(hub, tmp_path):
         assert status == 200 and result["exit"] == 0
     finally:
         other.close()
+
+
+def test_an_input_edited_during_the_run_and_put_back_is_still_not_the_snapshot_that_ran(hub):
+    """Audit R-S1: the helper is changed while the program runs and restored before it ends — content as frozen, but
+    not what ran. A touched input is seen by its stamp, and nothing is recorded."""
+    import threading
+
+    store, hub = hub
+    folder = store.root / "proofs" / "N"
+    (folder / "scratch").mkdir()
+    _script(store, "N", "touch scratch/started\nwhile [ ! -f scratch/go ]; do sleep 0.02; done\n"
+                        f"'{sys.executable}' check.py\nrc=$?\ntouch scratch/checked\nwhile [ ! -f scratch/end ]; do sleep 0.02; done\nexit \"$rc\"\n")
+    failing = "import sys\nsys.exit(7)\n"
+    (folder / "check.py").write_text(failing)
+    proof = _reviewed(store)  # v1 freezes the failing helper
+
+    def _until(path: Path) -> None:
+        deadline = time.monotonic() + 10
+        while not path.exists():
+            assert time.monotonic() < deadline, f"{path} never appeared"
+            time.sleep(0.01)
+
+    answer: dict = {}
+    worker = threading.Thread(target=lambda: answer.update(_post(hub, "/studio/N/api/run")[1]))
+    worker.start()
+    _until(folder / "scratch" / "started")
+    (folder / "check.py").write_text("import sys\nsys.exit(0)\n")  # edited while the program waits
+    (folder / "scratch" / "go").touch()
+    _until(folder / "scratch" / "checked")
+    (folder / "check.py").write_text(failing)  # and undone before it ends
+    (folder / "scratch" / "end").touch()
+    worker.join(15)
+
+    assert answer["exit"] == 0  # what ran was the edited helper
+    assert answer["evidence"] is None and "changed during the run" in answer["note"]
+    assert list_evidence_checks(store, proof.id) == []
+
+
+def test_a_passing_run_still_counts_when_only_its_outputs_were_written(hub):
+    """The program writes out/ itself; that is not a touched input. Written again identically, the folder is still v2."""
+    store, hub = hub
+    _script(store, "N", "mkdir -p out\nprintf 'n,ratio\\n' > out/table.csv\nexit 0\n")
+    _post(hub, "/studio/N/api/run")
+    proof = _reviewed(store)
+    time.sleep(0.02)
+    status, result = _post(hub, "/studio/N/api/run")
+    assert result["evidence"]["outcome"] == "passed" and list_evidence_checks(store, proof.id)[0].outcome.value == "passed"
+
+
+def test_a_non_executable_entry_runs_by_the_interpreter_its_shebang_names(hub):
+    """Audit R-S2: an entry that lost its execute bit is run as written — by its `#!` line — not forced through sh."""
+    store, hub = hub
+    run = store.root / "proofs" / "N" / "run.sh"
+    run.write_text(f"#!{sys.executable}\nprint('computed by python')\n")
+    run.chmod(0o644)
+    status, result = _post(hub, "/studio/N/api/run")
+    assert status == 200 and result["exit"] == 0 and "computed by python" in result["output"]
+    run.write_text("echo computed by sh\n")  # no shebang: sh, as before
+    assert "computed by sh" in _post(hub, "/studio/N/api/run")[1]["output"]
