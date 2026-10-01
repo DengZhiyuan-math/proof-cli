@@ -18,11 +18,11 @@ from proof_cli.fog import (
     edit_fog,
     fog_folder,
     fog_near,
-    require_fog,
     list_experiments,
     list_fog,
     record_experiment,
     reopen_fog,
+    require_fog,
 )
 from proof_cli.proof_map import (
     ProofMapError,
@@ -100,12 +100,13 @@ def test_near_may_point_at_any_kind_and_at_a_rejected_node_and_changes_no_axis(t
     submit_proof(store, "R", claimant_id="agent_a", scoping_rationale="scoped", content="\\begin{proof}no.\\end{proof}\n")
     researcher(store).decide_acceptance("R", "reject", rationale="wrong")
     before = {node_id: _axes(store, node_id) for node_id in ("L1", "C1", "I", "R")}
+    frontier_before = [n.id for n in get_frontier(store)]
 
     item = add_fog(store, "about several nodes", near=["L1", "I", "R"])
 
     assert item.near == ["L1", "I", "R"]
-    assert {node_id: _axes(store, node_id) for node_id in ("L1", "C1", "I", "R")} == before  # each axis, and the frontier
-    assert [n.id for n in get_frontier(store)] == ["L1"]
+    assert {node_id: _axes(store, node_id) for node_id in ("L1", "C1", "I", "R")} == before  # each axis
+    assert [n.id for n in get_frontier(store)] == frontier_before == ["L1"]  # the frontier, before and after
     assert get_node(store, "L1").dependencies == [] and "fog-1" not in get_node(store, "C1").dependencies
 
 
@@ -163,7 +164,12 @@ def test_an_experiment_is_recorded_against_an_open_item_and_never_changes_its_st
 @pytest.mark.parametrize("kwargs, code", [
     ({"outcome": "supports", "summary": "s", "run_by": "  "}, "FOG_RUN_BY_REQUIRED"),
     ({"outcome": "supports", "summary": "  ", "run_by": "a"}, "FOG_SUMMARY_REQUIRED"),
+    ({"outcome": "supports", "summary": "\n\t", "run_by": "a"}, "FOG_SUMMARY_REQUIRED"),
     ({"outcome": "supports", "summary": "s", "run_by": "a", "path": "proofs"}, "FOG_EXPERIMENT_PATH_INVALID"),
+    ({"outcome": "supports", "summary": "s", "run_by": "a", "path": "proofs/"}, "FOG_EXPERIMENT_PATH_INVALID"),
+    ({"outcome": "supports", "summary": "s", "run_by": "a", "path": "./proofs"}, "FOG_EXPERIMENT_PATH_INVALID"),
+    ({"outcome": "supports", "summary": "s", "run_by": "a", "path": "proofs/."}, "FOG_EXPERIMENT_PATH_INVALID"),
+    ({"outcome": "supports", "summary": "s", "run_by": "a", "path": "proofs/L1/.."}, "FOG_EXPERIMENT_PATH_INVALID"),
     ({"outcome": "maybe", "summary": "s", "run_by": "a"}, "INVALID_OUTCOME"),
     ({"outcome": "supports", "summary": "s", "run_by": "a", "path": "proofs/L1/scratch/missing.py"}, "FOG_EXPERIMENT_PATH_INVALID"),
     ({"outcome": "supports", "summary": "s", "run_by": "a", "path": "../outside.py"}, "FOG_EXPERIMENT_PATH_INVALID"),
@@ -304,6 +310,49 @@ def test_crystallize_needs_an_open_item_and_a_free_node_id(tmp_path: Path):
     with pytest.raises(ProofMapError) as taken:
         crystallize_fog(store, "fog-3", "L1", "s", no_parent=True)
     assert taken.value.code == "NODE_ALREADY_EXISTS" and require_fog(store, "fog-3").status.value == "open"
+
+
+def test_two_crystallizes_of_one_item_cannot_both_pass(tmp_path: Path, monkeypatch):
+    """The second crystallize waits on the first's write lock, then reads the item there: crystallized, FOG_NOT_OPEN.
+    Had it checked the item before taking the lock, it would have seen it open and made a second node."""
+    import threading
+    import time
+
+    import proof_cli.fog as fog_module
+
+    store = _project(tmp_path)
+    add_fog(store, "one idea", near=["L1"])
+    inside, release = threading.Event(), threading.Event()
+    real_update = fog_module.update_fog_item
+
+    def held(store_, item, **kwargs):
+        if threading.current_thread().name == "first":
+            inside.set()
+            release.wait(10)
+        return real_update(store_, item, **kwargs)
+
+    monkeypatch.setattr(fog_module, "update_fog_item", held)
+    outcomes: dict[str, object] = {}
+
+    def run(name, node_id):
+        try:
+            outcomes[name] = crystallize_fog(store, "fog-1", node_id, "stated", no_parent=True)
+        except ProofMapError as exc:
+            outcomes[name] = exc
+
+    first = threading.Thread(target=run, args=("first", "C_a"), name="first")
+    second = threading.Thread(target=run, args=("second", "C_b"), name="second")
+    first.start()
+    assert inside.wait(10)  # the first holds the write lock, the item not yet crystallized
+    second.start()
+    time.sleep(0.3)  # long enough for the second to reach its read: before the lock it would see `open`
+    release.set()
+    first.join(10)
+    second.join(10)
+
+    assert outcomes["first"].node.id == "C_a"
+    assert isinstance(outcomes["second"], ProofMapError) and outcomes["second"].code == "FOG_NOT_OPEN"
+    assert get_node(store, "C_b") is None and require_fog(store, "fog-1").node_id == "C_a"
 
 
 def test_crystallize_notes_experiment_files_left_in_an_agents_scratch_folder(tmp_path: Path):

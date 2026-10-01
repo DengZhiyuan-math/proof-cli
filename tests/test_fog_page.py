@@ -69,6 +69,9 @@ def test_the_page_adds_edits_drops_and_reopens_as_its_git_identity(page):
     ("/api/fog/fog-1/drop", {}, "FOG_REASON_REQUIRED"),
     ("/api/fog/fog-1/experiment", {"outcome": "maybe", "summary": "s", "run_by": "a"}, "INVALID_OUTCOME"),
     ("/api/fog/fog-1/experiment", {"outcome": "supports", "summary": "s", "run_by": "a", "path": "proofs/L1/none.py"}, "FOG_EXPERIMENT_PATH_INVALID"),
+    ("/api/fog/fog-1/experiment", {"outcome": "supports", "summary": "s", "run_by": "a", "path": "proofs/"}, "FOG_EXPERIMENT_PATH_INVALID"),
+    ("/api/fog/fog-1/experiment", {"outcome": "supports", "summary": " \n ", "run_by": "a"}, "FOG_SUMMARY_REQUIRED"),
+    ("/api/fog/fog-1/experiment", {"outcome": "supports", "summary": "s", "run_by": "   "}, "FOG_RUN_BY_REQUIRED"),
     ("/api/fog/fog-1/nothing", {}, "NOT_FOUND"),
 ])
 def test_a_write_the_page_cannot_make_is_refused_with_the_service_code(page, path, body, code):

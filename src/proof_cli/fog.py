@@ -26,7 +26,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from .domain import ExperimentOutcome, FogExperiment, FogItem, FogStatus, ProofMapNode, utc_now
+from .domain import ExperimentOutcome, FogExperiment, FogItem, FogStatus, ProofMapNode, fog_id, utc_now
 from .proof_map import ProofMapError, create_node, remove_new_node_folders_on_rollback, require_node, split_node
 from .storage import (
     ProjectStore,
@@ -134,7 +134,7 @@ def add_fog(store: ProjectStore, text: str, *, near=(), notes: str = "", created
         raise ProofMapError("FOG_TEXT_REQUIRED", "a fog item needs its text: the difficulty, in words")
     near_ids = _checked_near(store, near)
     with store.transaction() as conn:
-        item = FogItem(id=FogItem.id_for(next_fog_number(store, conn=conn)), text=text.strip(), notes=notes or "", near=near_ids, created_by=created_by or "human")
+        item = FogItem(id=fog_id(next_fog_number(store, conn=conn)), text=text.strip(), notes=notes or "", near=near_ids, created_by=created_by or "human")
         insert_fog_item(store, item, conn=conn)
         append_event(store, "proof_fog_added", f"added {item.id}: {item.text}", entity_id=item.id, payload={"near": near_ids, "created_by": item.created_by}, conn=conn)
     return item
