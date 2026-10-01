@@ -574,6 +574,64 @@ def test_a_start_waits_while_the_previous_run_is_still_giving_the_node_back():
     assert get_active_claim(store, "N") is None
 
 
+def test_a_late_assignment_after_the_next_run_requested_review_leaves_no_claim():
+    """Fifth review: the first Start's assignment is pending; Stop; a second Start claims and Review what it has hands
+    the node over (claim released); then the first assignment comes back and claims again — given back."""
+    import threading
+    from dataclasses import fields
+
+    from proof_cli.proof_map import claim_node, release_node
+    from proof_cli.studio.agent_run import AgentRun, RunHooks
+
+    store = ensure_project(Path(os.environ.get("TMPDIR", "/tmp")) / f"proof-late-review-{os.getpid()}-{time.time_ns()}")
+    create_node(store, node_id="N", kind="claim", statement="a claim")
+    entered, gate = threading.Event(), threading.Event()
+    calls: list[str] = []
+
+    def assign(name):
+        calls.append(name)
+        if len(calls) == 1:
+            entered.set()
+            assert gate.wait(5)
+        claim_node(store, "N", claimant_id=name)
+
+    def release(name):
+        claim = get_active_claim(store, "N")
+        if claim is not None and claim.claimant_id == name:
+            release_node(store, "N", claimant_id=name)
+
+    def review_now():  # as the project's request-review does: the snapshot is frozen and the node handed over
+        release("claude-code")
+        return {"version": 1}
+
+    class Agent:
+        jobs = {}
+
+        def start(self, *args, **kwargs):
+            return {"error": "The agent is still working on the previous message."}  # never a turn: the run waits
+
+        def stop(self, jid):
+            pass
+
+    hooks_kw = dict(agent_name=lambda p: "claude-code", budget=lambda: (40, 60.0), assign=assign, release=release,
+                    work_log=lambda: [], record_stuck=lambda *a: None, review_now=review_now)
+    run = AgentRun(Agent(), RunHooks(**{f.name: hooks_kw[f.name] for f in fields(RunHooks)}))
+    first = threading.Thread(target=lambda: run.start("claude"))
+    first.start()
+    assert entered.wait(5)
+    run.release()
+    run.start("claude")
+    assert get_active_claim(store, "N").claimant_id == "claude-code"
+    run.review_now()
+    state = run.view()
+    assert (state["status"], state["reason"]) == ("done", "review-requested") and get_active_claim(store, "N") is None
+    gate.set()
+    first.join(5)
+    assert get_active_claim(store, "N") is None  # the late assignment's claim was given back: the node was handed over
+    assert (run.view()["status"], run.view()["reason"]) == ("done", "review-requested")
+    run.release()
+
+
 def test_a_start_right_after_stop_and_release_is_not_ended_by_the_old_coordinator(studio):
     """Reaudit R-P1: the first run's turn is still being stopped when the second Start begins; when it finally ends,
     only the first Start ends — the second keeps running its own turn and counts it."""
