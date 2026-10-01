@@ -468,6 +468,58 @@ def test_an_old_starts_assignment_coming_back_late_does_not_release_the_new_runs
     assert get_active_claim(store, "N") is None
 
 
+def test_a_late_assignment_after_the_next_run_was_also_stopped_leaves_no_claim():
+    """Fourth review F2: the first Start's assignment is pending; Stop; a second Start claims and is stopped too (claim
+    gone); then the first assignment comes back and claims again — nothing holds the node, so it is given back."""
+    import threading
+    from dataclasses import fields
+
+    from proof_cli.proof_map import claim_node, release_node
+    from proof_cli.studio.agent_run import AgentRun, RunHooks
+
+    store = ensure_project(Path(os.environ.get("TMPDIR", "/tmp")) / f"proof-double-stop-{os.getpid()}-{time.time_ns()}")
+    create_node(store, node_id="N", kind="claim", statement="a claim")
+    entered, gate = threading.Event(), threading.Event()
+    calls: list[str] = []
+
+    def assign(name):
+        calls.append(name)
+        if len(calls) == 1:
+            entered.set()
+            assert gate.wait(5)
+        claim_node(store, "N", claimant_id=name)
+
+    def release(name):
+        claim = get_active_claim(store, "N")
+        if claim is not None and claim.claimant_id == name:
+            release_node(store, "N", claimant_id=name)
+
+    class Agent:
+        jobs = {}
+
+        def start(self, *args, **kwargs):
+            return {"error": "The studio is closed."}
+
+        def stop(self, jid):
+            pass
+
+    hooks_kw = dict(agent_name=lambda p: "claude-code", budget=lambda: (40, 60.0), assign=assign, release=release,
+                    work_log=lambda: [], record_stuck=lambda *a: None, review_now=lambda: {})
+    run = AgentRun(Agent(), RunHooks(**{f.name: hooks_kw[f.name] for f in fields(RunHooks)}))
+    first = threading.Thread(target=lambda: run.start("claude"))
+    first.start()
+    assert entered.wait(5)
+    run.release()
+    run.start("claude", roles=["numerics"])
+    assert get_active_claim(store, "N").claimant_id == "claude-code"
+    run.release()  # the second run too
+    assert get_active_claim(store, "N") is None
+    gate.set()
+    first.join(5)
+    assert get_active_claim(store, "N") is None  # the late assignment's claim was given back
+    assert run.view()["status"] == "released"
+
+
 def test_a_start_right_after_stop_and_release_is_not_ended_by_the_old_coordinator(studio):
     """Reaudit R-P1: the first run's turn is still being stopped when the second Start begins; when it finally ends,
     only the first Start ends — the second keeps running its own turn and counts it."""
