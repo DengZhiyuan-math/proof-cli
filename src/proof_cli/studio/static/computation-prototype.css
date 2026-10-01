@@ -1,0 +1,68 @@
+/* PROTOTYPE (issue #142): three variants of the studio's computation mode, switchable with
+   ?variant=A|B|C. Throwaway: branch prototype/computation-studio, never master. */
+.proto-bar { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 50; display: flex; align-items: center; gap: 4px;
+  height: 36px; padding: 0 6px; border-radius: 18px; background: #111; color: #fff; box-shadow: 0 6px 24px rgba(0,0,0,.35); font: 12.5px/1 var(--font); }
+.proto-bar button { height: 26px; min-width: 26px; padding: 0 8px; border: 0; border-radius: 13px; background: transparent; color: #fff; box-shadow: none; font-weight: 600; }
+.proto-bar button:hover { background: rgba(255,255,255,.16); }
+.proto-bar .lbl { padding: 0 6px; white-space: nowrap; }
+.proto-bar .lbl b { font-weight: 700; margin-right: 6px; }
+.proto-bar .q { color: #9a9a9f; margin-left: 8px; }
+
+/* shared: the medium chip, the run status, the outputs viewer */
+.comp-chip { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 8px; border-radius: 10px; font-size: 11px; font-weight: 600; background: var(--fill); color: var(--text2); margin: 4px 0 6px; }
+.comp-chip::before { content: ""; width: 7px; height: 7px; border-radius: 2px; background: currentColor; }
+.comp-run { display: grid; gap: 4px; padding: 10px 12px; border-radius: 10px; background: var(--panel2); box-shadow: var(--shadow-card); font-size: 12.5px; }
+.comp-run .line { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.comp-run .st { font-weight: 600; }
+.comp-run .st.ok { color: var(--ok); } .comp-run .st.err { color: var(--err); }
+.comp-run .muted { color: var(--muted); font-size: 11.5px; }
+.comp-run code { font-family: var(--mono); font-size: 11.5px; color: var(--text2); }
+.comp-outputs { display: grid; gap: 12px; padding: 14px; align-content: start; }
+.comp-card { background: var(--panel2); border-radius: 10px; box-shadow: var(--shadow-card); overflow: hidden; }
+.comp-card .head { display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-bottom: .5px solid var(--border2); font-size: 11.5px; color: var(--muted); }
+.comp-card .head code { font-family: var(--mono); color: var(--text2); }
+.comp-card .head .kind { margin-left: auto; font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; }
+.comp-card svg.plot { display: block; width: 100%; height: auto; max-height: 260px; background: #fff; }
+.comp-card pre { margin: 0; padding: 10px 12px; font: 11.5px/1.5 var(--mono); color: var(--text2); max-height: 220px; overflow: auto; white-space: pre; }
+.comp-card table { border-collapse: collapse; width: 100%; font: 12px var(--mono); }
+.comp-card th, .comp-card td { text-align: right; padding: 5px 12px; border-bottom: .5px solid var(--border2); }
+.comp-card th { color: var(--muted); font-weight: 500; }
+.comp-card tr:last-child td { border-bottom: 0; }
+.comp-empty { color: var(--muted); padding: 24px; text-align: center; }
+#btn-vscode { display: inline-flex; align-items: center; gap: 6px; }
+#btn-vscode .vs { width: 15px; height: 15px; fill: currentColor; }
+
+/* variant A: the PDF pane becomes the Outputs pane */
+.comp-toolbar { display: flex; gap: 6px; align-items: center; padding: 0 8px; background: var(--panel); border-bottom: .5px solid var(--border); flex: none; height: var(--bar-h); }
+.comp-toolbar .status { margin-left: auto; }
+#comp-pane { flex: 1; overflow: auto; background: var(--pdf-bg); }
+
+/* variant B: VS Code first — the editor pane becomes a workspace card */
+.comp-workspace { position: absolute; inset: var(--bar-h) 0 0 0; overflow: auto; background: var(--bg); display: grid; place-items: start center; padding: 28px 24px; }
+.comp-ws-card { width: min(560px, 100%); background: var(--panel2); border-radius: 14px; box-shadow: var(--shadow-card); padding: 22px 24px; display: grid; gap: 14px; }
+.comp-ws-card h2 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: -.01em; }
+.comp-ws-card .path { font-family: var(--mono); font-size: 12px; color: var(--text2); word-break: break-all; }
+.comp-ws-card .files { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font: 12.5px var(--mono); color: var(--text2); }
+.comp-ws-card .files li::before { content: "▸ "; color: var(--muted); }
+.comp-ws-card .files li.entry { color: var(--text); font-weight: 600; }
+.comp-ws-card .buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+.comp-ws-card .buttons button { height: 34px; padding: 0 16px; font-size: 13.5px; }
+.comp-ws-card .hint { color: var(--muted); font-size: 12px; margin: 0; }
+
+/* variant C: one centre pane, a run log with the outputs inline */
+#comp-centre { flex: 1; min-width: 200px; display: flex; flex-direction: column; background: var(--bg); position: relative; }
+.comp-log { flex: 1; overflow: auto; padding: 14px 18px 60px; display: grid; gap: 10px; align-content: start; max-width: 860px; width: 100%; margin: 0 auto; }
+.comp-log .entry { display: grid; grid-template-columns: 64px 1fr; gap: 12px; align-items: start; font-size: 12.5px; }
+.comp-log .entry .t { font-family: var(--mono); font-size: 11px; color: var(--muted); padding-top: 3px; }
+.comp-log .entry pre { margin: 0; font: 11.5px/1.5 var(--mono); color: var(--text2); white-space: pre-wrap; }
+.comp-log .entry .comp-card { margin-top: 2px; }
+.comp-log .divider { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-top: 8px; }
+.comp-tabs { display: flex; gap: 4px; align-items: center; padding: 0 8px; height: var(--bar-h); background: var(--panel); border-bottom: .5px solid var(--border); flex: none; }
+.comp-tabs button.tab { height: 26px; padding: 0 12px; border: 0; background: transparent; box-shadow: none; border-radius: 7px; color: var(--text2); }
+.comp-tabs button.tab.active { background: var(--panel2); color: var(--text); box-shadow: 0 .5px 1.5px rgba(0,0,0,.14), 0 0 0 .5px var(--border2); }
+/* variant C's agent card: the agent's plan on the node, and the researcher's oversight controls */
+.comp-agent { gap: 8px; border-left: 3px solid var(--accent); }
+.comp-plan { margin: 0; padding-left: 20px; display: grid; gap: 3px; font-size: 12.5px; color: var(--text); }
+.comp-plan li.done { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--faint); }
+.comp-agent .buttons { display: flex; gap: 6px; flex-wrap: wrap; }
+.comp-agent .buttons button { height: 26px; font-size: 12px; }
