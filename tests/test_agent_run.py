@@ -660,3 +660,19 @@ def test_the_prover_may_open_a_challenge(studio):
     _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["prover"]})
     _wait(hub)
     assert "Bash(proof node challenge *)" in _turns(log)[0]["argv"]
+
+
+def test_review_what_it_has_while_paused_ends_the_run_and_resume_does_nothing(studio):
+    store, hub, log, queue = studio
+    write_key_ideas(store, "N")
+    _queue(queue, [["write", "proof.tex", "\\documentclass{amsart}\\begin{document}half\\end{document}\n"]], [["write", "scratch/after-review.md", "x"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
+    _post(hub, "/studio/N/api/agent/pause")
+    _wait(hub, until=("paused",))
+    status, frozen = _post(hub, "/studio/N/api/agent/review-now")
+    assert status == 200 and frozen["version"] == 1
+    state = _get(hub, "/studio/N/api/agent/run")[1]
+    assert state["status"] == "done" and state["reason"] == "review-requested" and state["active"] is False
+    assert _post(hub, "/studio/N/api/agent/resume")[1]["status"] == "done"  # nothing to resume
+    time.sleep(0.8)
+    assert not (store.root / "proofs" / "N" / "scratch" / "after-review.md").exists() and len(_turns(log)) == 1
