@@ -143,6 +143,7 @@ from .exchange import (
     summarize_inspect_report,
 )
 from .proof_map import (
+    set_medium,
     ProofMapError,
     add_dependency,
     claim_node,
@@ -173,7 +174,7 @@ from .proof_map import (
     trust_rules_of,
 )
 from .trust_rules import get_trust_rule, list_trust_rules, trust_rule_history
-from .vault import working_proof_path
+from .vault import run_script_path, working_proof_path
 from .rendering import (
     render_candidate_proof,
     render_challenge,
@@ -427,6 +428,7 @@ def node_create(
     reference_id: str = typer.Option(
         "", "--reference-id", help="imported_result only: the `reference list` entry it cites; fixed once the node exists"
     ),
+    medium: str = typer.Option("", "--medium", help="What the candidate proof is made of: latex (default) or computation (run.sh, outputs in out/)"),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     store = get_store(_root(root))
@@ -443,6 +445,7 @@ def node_create(
             source_version=source_version or None,
             trust_level=trust_level or None,
             reference_id=reference_id or None,
+            medium=medium or None,
             created_by=created_by,
         )
     except ProofMapError as exc:
@@ -472,7 +475,7 @@ def node_show(
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.show")
         raise typer.Exit(code=1)
-    working = working_proof_path(store.root, node_id)
+    working = run_script_path(store.root, node_id) if (node.medium is not None and node.medium.value == "computation") else working_proof_path(store.root, node_id)
     working_proof = working.relative_to(store.root).as_posix() if working.is_file() else None
     snapshots = [
         {"version": proof.version, "file_path": proof.file_path, "sha256": proof.sha256, "is_current": proof.is_current}
@@ -684,6 +687,7 @@ def fog_crystallize(
     assumption: list[str] = typer.Option([], "--assumption"),
     display_label: str = typer.Option("", "--display-label"),
     created_by: str = typer.Option("human", "--created-by"),
+    medium: str = typer.Option("", "--medium", help="The new Claim's medium: latex (default) or computation"),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """State an open fog item as a Claim (written here, never taken from the item's text); the item leaves the fog list."""
@@ -692,6 +696,7 @@ def fog_crystallize(
         made = crystallize_fog(
             store, fog_id, node_id, statement, parent=parent, no_parent=no_parent, reassign=reassign,
             assumptions=assumption, display_label=display_label, created_by=created_by,
+            medium=medium or None,
         )
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="fog.crystallize")
@@ -889,6 +894,28 @@ def node_split(
         )
     else:
         typer.echo(render_proof_map_node_list(children))
+
+
+node_medium_app = typer.Typer(help="What a node's candidate proof is made of: latex, or computation (spec #145)")
+node_app.add_typer(node_medium_app, name="medium")
+
+
+@node_medium_app.command("set")
+def node_medium_set(
+    node_id: str,
+    medium: str = typer.Argument(..., help="latex or computation"),
+    by: str = typer.Option("human", "--by", help="Who is switching (an agent or person name)"),
+    root: str = ROOT_OPTION,
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Switch a node's medium. Allowed at any time: files stay, the missing entry (run.sh or proof.tex) is scaffolded, an Acceptance stands."""
+    store = get_store(_root(root))
+    try:
+        node = set_medium(store, node_id, medium, by=by)
+    except ProofMapError as exc:
+        _emit_error(exc, json_output, command="node.medium.set")
+        raise typer.Exit(code=1)
+    _emit_node(node, json_output, command="node.medium.set")
 
 
 @node_app.command("depend")

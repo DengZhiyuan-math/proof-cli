@@ -743,7 +743,7 @@ function drawDag(nodes) {
     place();
     g.append(svg("rect", { class: "box", x: left, y: top, width: BOX.w, height: BOX.h, rx: BOX.radius }));
     const kind = svg("text", { class: "kind", x: left + 14, y: top + 21 });
-    kind.textContent = `${KIND_LABEL[n.kind] || capitalised(n.kind.replace("_", " "))}  `;
+    kind.textContent = `${KIND_LABEL[n.kind] || capitalised(n.kind.replace("_", " "))}${n.medium === "computation" ? " · computation" : ""}  `;
     const id = svg("tspan", { class: "id" });
     id.textContent = short(n.id, 18);
     kind.append(id);

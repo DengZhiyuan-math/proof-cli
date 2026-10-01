@@ -32,6 +32,7 @@ from .collaboration import (
     ReviewRecordKind,
 )
 from .domain import (
+    Medium,
     CandidateProofRecord,
     Challenge,
     ChallengeStatus,
@@ -111,6 +112,8 @@ from .vault import (
     working_inputs,
     working_proof_path,
     write_snapshot_folder,
+    run_script_path,
+    write_working_computation,
     write_working_proof,
 )
 
@@ -251,6 +254,7 @@ def create_node(
     trust_level: TrustLevel | str | None = None,
     derived_from: str | None = None,
     reference_id: str | None = None,
+    medium: Medium | str | None = None,
 ) -> ProofMapNode:
     problem = node_id_problem(node_id)
     if problem is not None:
@@ -302,6 +306,8 @@ def create_node(
                 "an imported_result node requires both a source_locator and a source_version",
             )
 
+    resolved_medium = _resolve_medium(resolved_kind, medium)
+
     if reference_id is not None:
         # the citation an imported result links (issue #91, ADR-0012): only there, and only one that exists
         if resolved_kind != ProofMapNodeKind.imported_result:
@@ -326,6 +332,7 @@ def create_node(
         trust_level=resolved_trust_level,
         reference_id=reference_id,
         derived_from=derived_from,
+        medium=resolved_medium,
         created_by=created_by,
         updated_by=created_by,
     )
@@ -348,11 +355,54 @@ def create_node(
             ) from exc
         raise ProofMapError("NODE_ALREADY_EXISTS", f"proof map node {node_id} already exists") from exc
     if resolved_kind != ProofMapNodeKind.imported_result:
-        write_working_proof(store.root, node_id=node.id, kind=resolved_kind.value, statement=statement)
+        _write_working_files(store.root, node)
     elif reference_id is not None:
         # a citation may meet a Trust rule the moment it is linked (ADR-0014): on record from then
         note_trust_rule_matches(store, [node.id])
     return node
+
+
+def _resolve_medium(kind: ProofMapNodeKind, medium: Medium | str | None) -> Medium | None:
+    """The node's Medium (spec #145): `latex` unless asked otherwise; never on an imported result."""
+    if kind == ProofMapNodeKind.imported_result:
+        if medium is not None:
+            raise ProofMapError("MEDIUM_NOT_APPLICABLE", "an imported_result has no candidate proof, so no medium; it enters the map through Reference review")
+        return None
+    if medium is None:
+        return Medium.latex
+    try:
+        return Medium(medium)
+    except ValueError as exc:
+        valid = ", ".join(member.value for member in Medium)
+        raise ProofMapError("INVALID_MEDIUM", f"'{medium}' is not a medium; expected one of: {valid}") from exc
+
+
+def _write_working_files(root: Path, node: ProofMapNode) -> None:
+    """The node folder its Medium asks for: a LaTeX document, or a computation's run.sh (spec #145)."""
+    if node.medium == Medium.computation:
+        write_working_computation(root, node_id=node.id, kind=node.kind.value, statement=node.statement)
+    else:
+        write_working_proof(root, node_id=node.id, kind=node.kind.value, statement=node.statement)
+
+
+def set_medium(store: ProjectStore, node_id: str, medium: Medium | str, *, by: str = "human") -> ProofMapNode:
+    """Change what a node's candidate proof is made of (spec #145). Allowed at any time: the
+    medium is not part of the Accepted mathematical interface, so an Acceptance stands; files are
+    never removed, and the entry the new medium needs (run.sh or proof.tex) is scaffolded if missing."""
+    node = require_node(store, node_id)
+    resolved = _resolve_medium(node.kind, medium)
+    if resolved is None:  # an imported result: _resolve_medium refused a medium already
+        raise ProofMapError("MEDIUM_NOT_APPLICABLE", "an imported_result has no candidate proof, so no medium")
+    previous = node.medium
+    changed = node.model_copy(update={"medium": resolved, "updated_by": by, "updated_at": utc_now()})
+    with store.transaction() as conn:
+        update_proof_map_node(store, changed, conn=conn)
+        append_event(
+            store, "proof_map_node_medium_set", f"{node_id}: medium {previous.value if previous else '—'} → {resolved.value}",
+            entity_id=node_id, payload={"from": previous.value if previous else None, "to": resolved.value, "by": by}, conn=conn,
+        )
+    _write_working_files(store.root, changed)
+    return changed
 
 
 def _promoted(store: ProjectStore, node_id: str) -> bool:
@@ -504,6 +554,7 @@ def _split(
             dependencies=list(spec.get("dependencies") or []),
             created_by=created_by,
             derived_from=parent_id,
+            medium=spec.get("medium"),
         )
         children.append(child)
 
@@ -917,9 +968,15 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
             "SCOPING_RATIONALE_REQUIRED",
             "requesting review requires stating why this node is now appropriately scoped to prove directly",
         )
-    working = working_proof_path(store.root, node_id)
-    if not working.is_file():
-        raise ProofMapError("WORKING_PROOF_MISSING", f"{working.relative_to(store.root).as_posix()} doesn't exist")
+    # the entry its Medium asks for (spec #145): a computation's run.sh, a LaTeX document's proof.tex
+    if node.medium == Medium.computation:
+        run = run_script_path(store.root, node_id)
+        if not run.is_file():
+            raise ProofMapError("RUN_SCRIPT_MISSING", f"{run.relative_to(store.root).as_posix()} doesn't exist: a computation node's review needs its run.sh")
+    else:
+        working = working_proof_path(store.root, node_id)
+        if not working.is_file():
+            raise ProofMapError("WORKING_PROOF_MISSING", f"{working.relative_to(store.root).as_posix()} doesn't exist")
     # read once: what is hashed is exactly what is frozen, even if a file changes meanwhile.
     # The key-ideas summary is one of these inputs (ADR-0013): frozen, listed and hashed with
     # the proof, so a change to it alone is a new version, by the same unchanged-check below
