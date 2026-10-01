@@ -18,6 +18,7 @@ import gzip
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import threading
@@ -265,6 +266,9 @@ class Response:
         self.status, self.body, self.ctype = status, body, ctype
 
 
+RUN_TIMEOUT = 600.0  # seconds for one run of a computation node's run.sh, as for a build
+
+
 def _json(obj, code=200) -> Response:
     return Response(code, json.dumps(obj).encode("utf-8"))
 
@@ -288,7 +292,17 @@ class Studio:
 
     def __init__(self, root: Path, *, fixed_build: tuple[str, str] | None = None,
                  hidden: tuple[str, ...] = (), agent_scratch: str | None = None,
-                 agent_context: Callable[[], object] | None = None) -> None:
+                 agent_context: Callable[[], object] | None = None,
+                 node_medium: Callable[[], str | None] | None = None,
+                 on_run: Callable[[str, str], dict | None] | None = None,
+                 open_command: Callable[[], str | None] | None = None) -> None:
+        # a node's Medium (spec #145): Run exists for a computation; on_run records a run as an
+        # Evidence check and says what it recorded (None when there is no snapshot yet);
+        # open_command is the project's optional way to hand the folder to an editor
+        self.node_medium = node_medium
+        self.on_run = on_run
+        self.open_command = open_command
+        self.running_runs: list[build.Runner] = []  # runs may be concurrent, each its own Evidence check
         self.fixed_build = fixed_build
         self.hidden = hidden
         self.agent_scratch = agent_scratch
@@ -558,6 +572,76 @@ class Studio:
             b.stop()
         return b is not None
 
+    # ------------------------------------------------------------ a computation's run (spec #145)
+    RUN_SCRIPT = "run.sh"
+
+    def medium(self) -> str | None:
+        return self.node_medium() if self.node_medium else None
+
+    def run_program(self) -> dict:
+        """Run the node's run.sh in its folder: the computation that is its candidate proof. Its exit
+        code is recorded as an Evidence check on the current snapshot (0 passed, otherwise failed, a
+        run that could not start or was stopped error) — never a decision. Runs may be concurrent."""
+        t0 = time.time()
+        script = self.root / self.RUN_SCRIPT
+        runner = build.Runner(RUN_TIMEOUT)
+        with self._admit:
+            if self.closed:
+                return {"closed": True, "exit": None, "output": "The studio is closed.", "seconds": 0, "cancelled": False, "timed_out": False, "evidence": None, "note": ""}
+            self.running_runs.append(runner)
+        rc: int | None = None
+        cancelled = False
+        try:
+            if not script.is_file() or not os.access(script, os.X_OK):
+                out = f"{self.RUN_SCRIPT} is missing or not executable in {self.root}: nothing ran"
+            else:
+                try:
+                    rc, out = runner.run([str(script)], self.root, env=build.build_env())
+                except build.Stopped:
+                    cancelled, out = True, "stopped"
+        except OSError as exc:
+            out = f"{self.RUN_SCRIPT} could not start: {exc}"
+        finally:
+            with self._admit:
+                if runner in self.running_runs:
+                    self.running_runs.remove(runner)
+        seconds = round(time.time() - t0, 1)
+        outcome = "passed" if rc == 0 else "failed" if rc is not None else "error"
+        what = "stopped" if cancelled else "timed out" if runner.timed_out else f"exit {rc}" if rc is not None else "could not start"
+        notes = f"./{self.RUN_SCRIPT}: {what} after {seconds}s"
+        evidence = self.on_run(outcome, notes) if self.on_run else None
+        note = "" if evidence is not None else "no snapshot yet: request review, and runs are recorded as Evidence checks on it"
+        return {"exit": rc, "output": out, "seconds": seconds, "cancelled": cancelled, "timed_out": runner.timed_out,
+                "outcome": outcome, "evidence": evidence, "note": note}
+
+    def stop_runs(self) -> bool:
+        with self._admit:
+            runs = list(self.running_runs)
+        for runner in runs:
+            runner.stop()
+        return bool(runs)
+
+    def how_to_open(self) -> dict:
+        """How the page hands this folder to an editor: the project's command, or the vscode:// scheme."""
+        command = self.open_command() if self.open_command else None
+        if command:
+            return {"kind": "command", "command": command}
+        return {"kind": "scheme", "url": f"vscode://file/{self.root}"}
+
+    def open_folder(self) -> dict:
+        """Run the project's open command with the folder (and the entry file) filled in; without one,
+        tell the page to use the scheme itself."""
+        how = self.how_to_open()
+        if how["kind"] != "command":
+            return {"ok": True, **how}
+        entry = self.root / (self.RUN_SCRIPT if self.medium() == "computation" else self.cfg.main)
+        argv = [part.replace("{folder}", str(self.root)).replace("{file}", str(entry)) for part in shlex.split(how["command"])]
+        try:
+            done = subprocess.run(argv, cwd=self.root, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=15)
+        except (OSError, subprocess.SubprocessError) as exc:
+            return {"ok": False, "kind": "command", "error": f"{how['command']}: {exc}"}
+        return {"ok": done.returncode == 0, "kind": "command", "exit": done.returncode, "output": (done.stdout + done.stderr)[-2000:]}
+
 
     # ------------------------------------------------------------ requests
     def get(self, path: str, q: dict) -> Response:
@@ -591,7 +675,9 @@ class Studio:
         if path == "/api/config":
             return _json({"main": self.cfg.main, "outdir": self.cfg.outdir, "modes": self.cfg.modes,
                                "builder": self.cfg.builder, "engine": self.cfg.engine, "error": self.cfg.error,
-                               "build": {m: self.cfg.describe(m) for m in self.cfg.modes}})
+                               "build": {m: self.cfg.describe(m) for m in self.cfg.modes},
+                               # the node's Medium, its folder and how to hand it to an editor (spec #145)
+                               "folder": str(self.root), "medium": self.medium(), "open": self.how_to_open()})
         if path == "/api/agent/events":
             job = self.agent.jobs.get(int(q["job"]))
             if not job:
@@ -687,6 +773,14 @@ class Studio:
             return _json(r, 409 if r.get("busy") else 200)
         if path == "/api/build/stop":
             return _json({"ok": self.stop_build()})
+        if path == "/api/run":
+            if self.medium() != "computation":
+                return _json({"error": "NOT_A_COMPUTATION", "message": "Run is for a node whose medium is computation; this one compiles"}, 409)
+            return _json(self.run_program())
+        if path == "/api/run/stop":
+            return _json({"stopped": self.stop_runs()})
+        if path == "/api/open":
+            return _json(self.open_folder())
         return _err(404, "not found")
 
 

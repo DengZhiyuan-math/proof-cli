@@ -424,3 +424,10 @@ td a { font-family: var(--mono); font-size: 12px; }
 .node-fog-list { margin: 4px 0 0; padding-left: 18px; }
 .node-fog-list li { margin: 4px 0; }
 @media (max-width: 760px) { .fog-drawer { left: 12px; width: auto; } }
+
+/* a snapshot's frozen outputs on the node page (spec #145): a list, images previewed */
+#node-outputs:empty { display: none; }
+.node-outputs-list { margin: 4px 0 0; padding-left: 18px; }
+.node-outputs-list li { margin: 6px 0; }
+.node-outputs-list .hint { margin: 0 0 0 4px; }
+.output-preview { display: block; max-width: 100%; max-height: 320px; margin-top: 6px; border-radius: 8px; box-shadow: var(--shadow-card); background: #fff; }

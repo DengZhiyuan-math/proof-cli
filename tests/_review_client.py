@@ -94,6 +94,20 @@ class DirectClient:
 
             include_all = parse_qs(urlsplit(path).query).get("all", ["0"])[0] not in ("", "0", "false")  # as the server reads it
             return self._call(lambda: self.app.fog(include_all=include_all))
+        if path.startswith("/api/node/") and "/snapshot/file?" in path:
+            # a frozen file of the node's current snapshot, as bytes with its type (spec #145)
+            from urllib.parse import parse_qs, urlsplit
+            from proof_cli.proof_map import ProofMapError
+            from proof_cli.webapp.server import RequestError
+            node_id = path.removeprefix("/api/node/").split("/snapshot/file")[0]
+            rel = parse_qs(urlsplit(path).query).get("path", [""])[0]
+            try:
+                data, content_type = self.app.snapshot_file(node_id, rel)
+            except RequestError as exc:
+                return int(exc.status), {"ok": False, "error": {"code": exc.code, "message": exc.message}}
+            except ProofMapError as exc:
+                return 404, {"ok": False, "error": {"code": exc.code, "message": exc.message}}
+            return 200, (data, content_type)
         if path.startswith("/api/node/"):
             node_id = path.removeprefix("/api/node/")
             return self._call(lambda: self.app.node(node_id))

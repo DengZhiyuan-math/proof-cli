@@ -128,6 +128,7 @@ ERROR_CODES: dict[str, str] = {
     "NO_DECISIONS": "the request decided nothing",
     "MALFORMED_DECISION": "a decision in the request isn't a well-formed object",
     "NO_PDF": "that PDF doesn't exist",
+    "NO_SUCH_FILE": "the node's current snapshot froze no file by that path (a computation's output is served only from inside its snapshot; spec #145)",
     "NO_PROOF_FOLDER": "the node has no proof folder",
     "INVALID_REQUEST": "the page's request is missing what the action needs (a node id, which snapshot, …)",
     "NOT_FOUND": "no such page route or node action, or (a legacy command under --json) no such contract, reference or target",

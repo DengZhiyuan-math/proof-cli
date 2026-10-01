@@ -25,6 +25,10 @@ proof node show <id>
 proof trust-rule list   # the Trust rules in force (read-only; declared on the page)
 proof fog list          # the Proof fog: difficulties not yet precise enough to be a Claim
 proof node create C3 claim "For every n ≤ 10^4 …" --medium computation   # a node established by a program: run.sh, outputs in out/
+# In a computation node's studio, Run executes run.sh (its exit code is an Evidence check: 0 passed, otherwise
+# failed) and Open in VS Code hands the folder to the editor — vscode://file/<folder>, or the command proof.toml names:
+#   [studio]
+#   open_command = "code {folder}"     # {folder} and {file} are filled in; run by the page's server
 ```
 
 Every command acts on `--root`, else `$PROOF_ROOT`, else the current folder. An agent working inside a node's folder, like the studio's agent panel, keeps `PROOF_ROOT` set to the project root.
