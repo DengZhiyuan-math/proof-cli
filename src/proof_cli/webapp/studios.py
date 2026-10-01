@@ -18,7 +18,7 @@ import threading
 from dataclasses import dataclass
 from http import HTTPStatus
 from pathlib import Path
-from urllib.parse import parse_qs, unquote
+from urllib.parse import parse_qs, quote, unquote
 
 from .. import proof_map
 from ..domain import ProofMapNodeKind
@@ -125,7 +125,15 @@ class StudioHub:
                     working_digest=lambda: self._working_digest(node_id),
                     open_command=lambda: open_command(root),
                 )
+                # the agent's compile tool builds through this node's studio (taken from upstream, 2938c05):
+                # a LaTeX node's Typesetter compiles what the researcher sees; a computation node has no build
+                self._studios[node.id].agent.server_url = lambda: self._studio_url(node_id) if self._medium(node_id) != "computation" else None
             return self._studios[node.id]
+
+    def _studio_url(self, node_id: str) -> str:
+        from .server import project_origin  # the page's pinned origin (a late import: server.py imports this module)
+
+        return f"{project_origin(self.store)}/studio/{quote(node_id, safe='')}/"
 
     # -- a run's turn (spec #145): what the context of the turn being started takes from the node's run
     def _active_run(self, node_id: str):

@@ -734,3 +734,45 @@ def test_review_what_it_has_while_paused_ends_the_run_and_resume_does_nothing(st
     assert _post(hub, "/studio/N/api/agent/resume")[1]["status"] == "done"  # nothing to resume
     time.sleep(0.8)
     assert not (store.root / "proofs" / "N" / "scratch" / "after-review.md").exists() and len(_turns(log)) == 1
+
+
+# -- taken from upstream (prism-local 2938c05): the agent compiles through the studio's own build -------------
+
+
+def test_the_typesetter_compiles_through_the_nodes_studio_not_a_shell(studio):
+    from proof_cli.webapp.server import project_origin
+
+    store, hub, log, queue = studio
+    _queue(queue, [["sleep", "0"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["typesetter"]})
+    _wait(hub)
+    argv = _turns(log)[0]["argv"]
+    servers = json.loads(argv[argv.index("--mcp-config") + 1])["mcpServers"]
+    assert servers["studio"]["args"][-2:] == ["--url", f"{project_origin(store)}/studio/N/"] and "--strict-mcp-config" in argv
+    assert "mcp__studio__compile" in argv and "Bash(latexmk *)" not in argv and "Bash(pdflatex *)" not in argv
+
+
+def test_a_computation_nodes_turn_has_no_compile_tool(studio):
+    store, hub, log, queue = studio
+    create_node(store, node_id="C", kind="claim", statement="n ≤ 10^4 holds", medium="computation")
+    _queue(queue, [["sleep", "0"]])
+    _post(hub, "/studio/C/api/agent/start", {"provider": "claude", "roles": ["numerics"]})
+    _wait(hub, node="C")
+    assert "--mcp-config" not in _turns(log)[0]["argv"]
+
+
+def test_a_build_the_agent_ran_shows_in_its_turn(studio):
+    """The compile tool posts the build as the agent's: the turn's events carry it, so the page shows it as yours."""
+    store, hub, log, queue = studio
+    _queue(queue, [["sleep", "3"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["typesetter"]})
+    deadline = time.monotonic() + 10
+    agent = hub.studio("N").agent
+    while time.monotonic() < deadline and not (agent.active and not agent.active.done):
+        time.sleep(0.02)
+    status, built = _post(hub, "/studio/N/api/build", {"mode": "draft", "by": "agent"})
+    assert status in (200, 409)
+    answer = hub.request("GET", "/studio/N/api/agent/events", f"job={agent.active.id}&after=0", None, cross_site=False)
+    events = json.loads(answer.body)["events"]
+    assert any(e["t"] == "build" and e["result"] == built for e in events)
+    _post(hub, "/studio/N/api/agent/release")

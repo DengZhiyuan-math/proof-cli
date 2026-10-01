@@ -158,7 +158,7 @@ your draft; requesting review is how they confirm it, and the studio records tha
 # role's section says what this turn is for and what it never does.
 _PROOF_READS = ("Bash(proof search *)", "Bash(proof retrieve *)", "Bash(proof node show *)", "Bash(proof node list *)", "Bash(proof reference list *)",
                 "Bash(proof memory list *)", "Bash(proof fog list *)", "Bash(proof fog show *)", "Bash(proof node progress *)")
-_TEX_PROGRAMS = ("latexmk", "pdflatex", "xelatex", "lualatex", "tectonic", "bibtex", "biber", "kpsewhich")
+_TEX_LOOKUPS = ("kpsewhich",)   # the Typesetter compiles through the studio's build (its compile tool), not a shell
 
 
 @dataclass(frozen=True)
@@ -191,8 +191,9 @@ A direction you can't state yet goes in the fog before you stop: `proof fog add 
 """,
     "typesetter": """\
 This turn you are the **Typesetter** of node {node}. You write the Prover's draft (scratch/proof-draft.md)
-as the node's LaTeX — proof.tex and the files it \\input's — compile it and fix what fails, keep the
-preamble's conventions, and write the text of key-ideas.md from the draft. You do no mathematics:
+as the node's LaTeX — proof.tex and the files it \\input's — compile it with the `compile` tool (the
+studio's own build, whose PDF and problems the researcher sees; never pdflatex or latexmk yourself) and fix
+what fails, keep the preamble's conventions, and write the text of key-ideas.md from the draft. You do no mathematics:
 never supply a missing step or a missing case yourself; when the draft lacks one, report it and end your turn
 (`proof node progress {node} --step N --status done --note "missing: …"`), and the Prover takes it from there.
 You never split the node and never request review. When the build cannot be made to pass for a reason
@@ -218,7 +219,7 @@ ROLES: dict[str, Role] = {
         COMPUTATION,
     ),
     AgentRole.typesetter.value: Role(
-        AgentRole.typesetter.value, _ROLE_BRIEFS["typesetter"], ("./*.tex", "./**/*.tex", "./key-ideas.md"), _PROOF_READS, _TEX_PROGRAMS,
+        AgentRole.typesetter.value, _ROLE_BRIEFS["typesetter"], ("./*.tex", "./**/*.tex", "./key-ideas.md"), _PROOF_READS, _TEX_LOOKUPS,
     ),
     AgentRole.numerics.value: Role(
         AgentRole.numerics.value, _ROLE_BRIEFS["numerics"],
@@ -278,10 +279,10 @@ class ProofAgentContext:
         return BRIEF.format(node=self.node_id, name=self.name, library=f", and the library ({library[2:]})" if library else "",
                             work=work.format(node=self.node_id, name=self.name))
 
-    def claude_args(self, edit: bool, scope_rules: list[str] | None = None) -> list[str]:
+    def claude_args(self, edit: bool, scope_rules: list[str] | None = None, tools: list[str] | tuple[str, ...] = ()) -> list[str]:
         """Claude Code's permissions: read the project and library, the web, `proof` and computation;
-        edit only this folder, never its protected files. `--setting-sources user` keeps the
-        repository's own settings and Bash allowlist out."""
+        edit only this folder, never its protected files; `tools`, the studio's own tools for this turn
+        (its compile tool). `--setting-sources user` keeps the repository's own settings and Bash allowlist out."""
         args = [
             "--setting-sources", "user",
             "--permission-prompts", "none",   # nobody can approve here: a call no rule allows is refused
@@ -299,6 +300,7 @@ class ProofAgentContext:
                 allowed += scope_rules
             elif edit:
                 allowed += ["Edit(./**)", "Write(./**)", "MultiEdit(./**)"]
+        allowed += list(tools)
         denied = [f"{tool}(./{path})" for tool in ("Edit", "Write", "MultiEdit") for path in PROTECTED]
         return [*args, "--allowedTools", *allowed, "--disallowedTools", *denied]
 

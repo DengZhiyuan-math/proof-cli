@@ -134,3 +134,15 @@ def test_a_running_turns_conversation_is_read_on_until_the_turn_is_done_then_kep
     assert polled["transcripts"]["1"] == "first fragment\nthen a lemma"  # a poll with no other news still reads on
     assert finished["transcripts"]["1"] == conversation["final"] and "running" not in finished["turns"][0]["summary"]
     assert reopened["transcripts"]["1"] == conversation["final"]  # final: kept, not asked for again
+
+
+def test_a_turns_transcript_reads_its_steps_and_the_running_turn_is_handed_to_the_files_view():
+    """From upstream 2938c05, watched the proof-cli way: the transcript shows each step the agent took, and the
+    running turn's events are read as they come and handed to the Files view (app.js studioLive)."""
+    turns = [{"job": 7, "role": "typesetter", "prompt": "Take your turn as the Typesetter…", "at": 1.0, "done": False, "changed": []}]
+    events = [{"t": "tool_start", "id": "r1", "name": "Read"}, {"t": "tool", "id": "r1", "name": "Read", "summary": "sec/a.tex", "path": "sec/a.tex", "lines": [20, 30]},
+              {"t": "tool_result", "id": "r1", "error": False}, {"t": "thinking_start"}, {"t": "text", "text": "I rewrote §2."},
+              {"t": "build", "result": {"exit": 0, "diagnostics": []}}, {"t": "done"}]
+    _, opened, _ = _pane(run=RUNNING, log=LOG, turns=turns, events=events, typed="x", open=[1])
+    assert opened["transcripts"]["1"] == "▸ Read sec/a.tex\n… thinking\nI rewrote §2.\n▸ Compile: OK"
+    assert opened["live"] == [e["t"] for e in events] and opened["resets"] == 1  # every event once, after a reset for the new turn
