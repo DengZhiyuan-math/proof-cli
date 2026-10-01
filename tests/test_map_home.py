@@ -784,3 +784,32 @@ def test_the_node_page_lists_a_computations_frozen_outputs_and_previews_its_imag
     assert "image/png" in plot["text"] and table["image"] == [] and "text/csv" in table["text"]
     _, plain = _fog_home(steps=[{"open": "c_check"}], nodes={"c_check": {**view, "candidate_proof": None}})
     assert plain["nodeOutputs"] == []
+
+
+# -- the Proof agent's run (spec #145): on the map card, and the oversight on the node page ------------
+
+def test_a_claimed_nodes_card_names_the_runs_role_and_step():
+    running = {**_node("lem_bound", "lemma", "The partial sums are bounded", assignee="claude-code", workflow_state="claimed"),
+               "run": {"status": "running", "role": "typesetter", "step": 4, "steps": 5}}
+    paused = {**_node("lem_two", "lemma", "Another", assignee="claude-code", workflow_state="claimed"), "run": {"status": "paused", "role": "prover", "step": None, "steps": None}}
+    plain = _node("lem_three", "lemma", "Held by a person", assignee="ada", workflow_state="claimed")
+    (shown,) = _home(map_={"nodes": [running, paused, plain]})
+    assert shown["dag"]["lem_bound"]["tags"][0]["text"] == "Typesetter · step 4/5"
+    assert shown["dag"]["lem_two"]["tags"][0]["text"] == "Prover · paused"
+    assert shown["dag"]["lem_three"]["tags"][0]["text"] == "Ada"
+
+
+def test_the_node_page_starts_the_agent_and_offers_the_oversight_actions_while_it_runs():
+    idle = {**NODE_VIEW, "node": {**NODE_VIEW["node"], "id": "c_check"}, "run": None, "crystallized_from": None, "fog_near": []}
+    _, opened, started = _fog_home(steps=[{"open": "c_check"}, {"runButton": {"text": "Start agent"}}], nodes={"c_check": idle})
+    assert opened["nodeRun"]["buttons"] == ["Start agent"]
+    (sent,) = started["posted"]
+    assert sent == {"url": "/api/node/c_check/agent/start", "body": {}}
+    running = {**idle, "run": {"status": "running", "role": "prover", "step": 2, "steps": 3}}
+    _, shown, redirected = _fog_home(steps=[{"open": "c_check"}, {"runButton": {"text": "Redirect", "redirect": "try the dual problem"}}], nodes={"c_check": running})
+    assert "prover · step 2/3 · running" in shown["nodeRun"]["text"] and shown["nodeRun"]["buttons"] == ["Pause", "Redirect", "Stop and release"]
+    (sent,) = redirected["posted"]
+    assert sent == {"url": "/api/node/c_check/agent/redirect", "body": {"text": "try the dual problem"}}
+    paused = {**idle, "run": {"status": "paused", "role": "prover", "step": 2, "steps": 3}}
+    _, held = _fog_home(steps=[{"open": "c_check"}], nodes={"c_check": paused})
+    assert held["nodeRun"]["buttons"] == ["Resume", "Redirect", "Stop and release"]

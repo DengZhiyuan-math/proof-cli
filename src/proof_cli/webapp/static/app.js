@@ -518,6 +518,7 @@ function tagOf(n) {
   if (n.acceptance_state === "unverifiable") return ["decision outdated", "attention"];
   if (["rejected", "no-longer-callable"].includes(n.acceptance_state)) return [n.acceptance_state === "rejected" ? "rejected" : "no longer callable", "rejected"];
   if (n.frontier) return ["ready", "ready"];
+  if (n.run && n.run.status !== "idle") return [`${n.run.role || "agent"}${n.run.step && n.run.steps ? ` · step ${n.run.step}/${n.run.steps}` : n.run.status === "paused" ? " · paused" : ""}`, "claimed"];  // the agent's run (spec #145)
   if (n.assignee) return [n.assignee, "claimed"];
   if (n.workflow_state === "review-needed") return ["awaiting review", "review"];
   if (n.workflow_state === "revision-requested") return ["revision requested", "review"];
@@ -939,6 +940,7 @@ async function showNode(nodeId) {
   const axis = (name, value, text = value) => { const cell = el("div"); cell.append(el("span", name, { class: "lbl" }), stateChip(value, text, `${name}: ${text}`)); return cell; };
   const acceptance = acceptanceText({ acceptance_state: view.acceptance_state, trust_rule: view.trust_rule });
   $("node-axes").replaceChildren(axis("workflow", view.workflow_state), axis("acceptance", view.acceptance_state, acceptance), axis("integrity", view.integrity_state));
+  showRunControls(node, view);
   const nodeWarnings = el("ul");
   showWarnings(view.warnings, nodeWarnings);
   $("node-warnings").replaceChildren(el("h3", "Warnings for this node"), nodeWarnings);
@@ -1012,6 +1014,32 @@ function evidenceItem(c) {
     li.append(" ", chip);
   }
   return li;
+}
+
+// the Proof agent's run on a local node (spec #145): Start once, then the oversight actions — never a prompt
+function showRunControls(node, view) {
+  const box = $("node-run");
+  box.replaceChildren();
+  if (node.kind === "imported_result" || view.acceptance_state === "rejected") return;
+  const run = view.run;
+  const post = async (action, body) => {
+    try { await api(`/api/node/${encodeURIComponent(node.id)}/agent/${action}`, body || {}); } catch (error) { showError(error); return; }
+    say(`Agent run: ${action}.`, "ok");
+    await route();
+  };
+  const button = (text, action, body, primary) => { const b = el("button", text, { type: "button", class: primary ? "primary" : "" }); b.addEventListener("click", () => post(action, body)); return b; };
+  if (!run) {
+    box.append(button("Start agent", "start", {}, true), el("span", "The agent works the node on its own, as Prover, Typesetter and Numerics, until it requests review or needs you.", { class: "hint" }));
+    return;
+  }
+  const where = `${run.role || "agent"}${run.step && run.steps ? ` · step ${run.step}/${run.steps}` : ""} · ${run.status}`;
+  box.append(el("span", where, { class: "run-where" }));
+  if (run.status === "paused") box.append(button("Resume", "resume", {}));
+  else if (run.status === "running") box.append(button("Pause", "pause", {}));
+  const redirect = el("input", null, { type: "text", placeholder: "Redirect: one line for its next turn", "aria-label": "Redirect the agent" });
+  const send = el("button", "Redirect", { type: "button" });
+  send.addEventListener("click", () => { if (redirect.value.trim()) post("redirect", { text: redirect.value.trim() }); });
+  box.append(redirect, send, button("Stop and release", "release", {}));
 }
 
 // the node's fog (ADR-0008): the item it was crystallized from, looked up in the fog table, and the open fog near it

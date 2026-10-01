@@ -361,6 +361,84 @@ def create_node(
     return node
 
 
+# -- the Proof agent's work log (spec #145, decided in #144) ---------------------------------------
+# A run reports its plan and each step through `proof node progress`, as project state written through
+# `proof` like everything else: an event on the node, never a decision, never a file in the node folder
+# (a snapshot would freeze it). The work log the studio shows is these reports merged, in time order,
+# with what the agent did through other `proof` commands: a split, a review request, an Evidence check,
+# a fog item, a dependency edit.
+
+AGENT_ROLES = ("prover", "typesetter", "numerics")
+PROGRESS_STATUSES = ("started", "done", "stuck")
+PROGRESS_EVENT = "agent_progress"
+
+
+def record_progress(
+    store: ProjectStore,
+    node_id: str,
+    *,
+    role: str,
+    by: str,
+    plan: list[str] | None = None,
+    step: int | None = None,
+    status: str | None = None,
+    note: str = "",
+    handoff: str | None = None,
+) -> dict:
+    """Report a plan (the steps the run means to take), one step's status, or a handoff to another role. Returns the log entry."""
+    require_node(store, node_id)
+    if role not in AGENT_ROLES:
+        raise ProofMapError("INVALID_ROLE", f"'{role}' is not a Proof agent role; expected one of: {', '.join(AGENT_ROLES)}")
+    steps = [str(item).strip() for item in (plan or []) if str(item).strip()]
+    if handoff is not None:
+        if handoff not in AGENT_ROLES:
+            raise ProofMapError("INVALID_ROLE", f"'{handoff}' is not a Proof agent role to hand off to; expected one of: {', '.join(AGENT_ROLES)}")
+        payload = {"kind": "handoff", "role": role, "by": by, "to": handoff, "note": note.strip()}
+        message = f"{role} on {node_id}: handed off to {handoff}" + (f" — {note.strip()}" if note.strip() else "")
+    elif steps:
+        payload = {"kind": "plan", "role": role, "by": by, "plan": steps, "note": note.strip()}
+        message = f"{role} on {node_id}: plan of {len(steps)} step(s)"
+    elif step is not None:
+        if status is None:
+            raise ProofMapError("PROGRESS_STATUS_REQUIRED", "a step report needs --status started, done or stuck")
+        if status not in PROGRESS_STATUSES:
+            raise ProofMapError("INVALID_PROGRESS_STATUS", f"'{status}' is not a step status; expected one of: {', '.join(PROGRESS_STATUSES)}")
+        if int(step) < 1:
+            raise ProofMapError("INVALID_PROGRESS_STEP", "steps count from 1")
+        payload = {"kind": "step", "role": role, "by": by, "step": int(step), "status": status, "note": note.strip()}
+        message = f"{role} on {node_id}: step {step} {status}" + (f" — {note.strip()}" if note.strip() else "")
+    else:
+        raise ProofMapError("PROGRESS_EMPTY", "report a plan (--plan, repeatable), a step (--step N --status …) or a handoff (--handoff <role>)")
+    with store.transaction() as conn:
+        append_event(store, PROGRESS_EVENT, message, entity_id=node_id, payload=payload, conn=conn)
+    return {**payload, "node_id": node_id, "at": utc_now().isoformat()}
+
+
+def work_log(store: ProjectStore, node_id: str) -> list[dict]:
+    """The node's work log: the agent's reports merged, in time order, with what it did through `proof`."""
+    require_node(store, node_id)
+    proof_ids = {proof.id for proof in list_candidate_proofs(store, node_id)}
+    entries: list[dict] = []
+    for event in list_events(store):
+        at = event.created_at.isoformat()
+        payload = event.payload or {}
+        if event.kind == PROGRESS_EVENT and event.entity_id == node_id:
+            entries.append({"at": at, **payload})
+        elif event.kind == "proof_map_node_split" and event.entity_id == node_id:
+            entries.append({"at": at, "kind": "split", "by": payload.get("created_by"), "nodes": list(payload.get("child_ids") or [])})
+        elif event.kind == "proof_map_review_requested" and event.entity_id == node_id:
+            entries.append({"at": at, "kind": "review-requested", "by": payload.get("requested_by"), "version": payload.get("version"), "candidate_proof_id": payload.get("candidate_proof_id")})
+        elif event.kind == "proof_map_evidence_check_recorded" and event.entity_id in proof_ids:
+            entries.append({"at": at, "kind": "evidence", "by": payload.get("run_by"), "outcome": payload.get("outcome"), "evidence_check_id": payload.get("evidence_check_id")})
+        elif event.kind == "proof_fog_added" and node_id in (payload.get("near") or []):
+            entries.append({"at": at, "kind": "fog", "by": payload.get("created_by"), "fog_id": event.entity_id, "text": event.message.partition(": ")[2]})
+        elif event.kind in ("proof_map_dependency_added", "proof_map_dependency_removed", "proof_map_dependency_moved") and event.entity_id == node_id:
+            entries.append({"at": at, "kind": "dependencies", "by": payload.get("edited_by") or payload.get("by"), "change": event.kind.rsplit("_", 1)[1], "dependency": payload.get("dependency_id") or payload.get("dependency")})
+        elif event.kind in ("proof_map_node_claimed", "proof_map_claim_reassigned") and event.entity_id == node_id:
+            entries.append({"at": at, "kind": "claimed", "by": payload.get("claimant_id") or payload.get("assignee")})
+    return entries
+
+
 def _resolve_medium(kind: ProofMapNodeKind, medium: Medium | str | None) -> Medium | None:
     """The node's Medium (spec #145): `latex` unless asked otherwise; never on an imported result."""
     if kind == ProofMapNodeKind.imported_result:

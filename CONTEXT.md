@@ -121,8 +121,24 @@ A local node's page on the proof map page: a LaTeX workspace over the node's fol
 _Avoid_: prism-local (the separate project it was copied from), editor window
 
 **Proof agent**:
-The agent a node's studio runs: an automated prover on that node, not a LaTeX assistant. It reads the whole project, the library folders `proof.toml` lists, and the web; it runs `proof` and computation (Python, SageMath, Lean); it writes files only in the node's sources and its `scratch/` folder, and changes project state only through `proof`. It runs in the node's folder with `PROOF_ROOT` set to the project, on the Claude Code or the Codex CLI, with explicit permissions and none of the repository's own instructions. It never makes a Review decision, and its Undo restores files only. See ADR-0011.
-_Avoid_: assistant, chat, agent panel (the panel is where it runs)
+The agent run a node's studio starts and the researcher watches: one run holds the node's claim under the project's agent name and works the node to a review request on its own, as three roles in turn — Prover, Typesetter and Numerics. It reads the whole project, the library folders `proof.toml` lists, and the web; it runs `proof` and computation; it writes files only in the node's folder, within each role's scope, and changes project state only through `proof`. It runs in the node's folder with `PROOF_ROOT` set to the project, on the Claude Code or the Codex CLI, with explicit permissions and none of the repository's own instructions. It reports its plan and each step with `proof node progress`, stops for a review request, a decision only a human can make, its budget or when stuck, and never makes a Review decision. Started once, from the map, the node page or the studio; paused, redirected, resumed or released by the researcher. See ADR-0011, ADR-0016.
+_Avoid_: assistant, chat, agent panel (the panel is where it is watched), prompt-driven
+
+**Prover** (a Proof agent role):
+Finds the proof — retrieval first, then reasoning — and writes its structure as a draft in `scratch/`; decides when to split the node and when to request review; hands work to the Typesetter or Numerics and takes it back.
+_Avoid_: solver, assistant
+
+**Typesetter** (a Proof agent role):
+Writes the Prover's draft as the node's LaTeX and its key-ideas summary, compiles and fixes it; never supplies a missing step itself — it reports the gap and the Prover takes it from there; never splits, never requests review.
+_Avoid_: LaTeX assistant, editor
+
+**Numerics** (a Proof agent role):
+Writes and runs the computations — the candidate proof of a `computation` node, or evidence for a LaTeX one — and records what they showed as Evidence checks or Experiments; never edits the LaTeX.
+_Avoid_: verifier (an Evidence check's checker), simulator
+
+**Work log**:
+A node's record of what its Proof agent did, in time order: the plan and each step the roles reported with `proof node progress`, merged with what they did through other `proof` commands — a split, a review request, an Evidence check, a fog item, a dependency edit. Project state (events), never a file in the node folder. What the studio's centre shows.
+_Avoid_: transcript (the raw conversation, folded under a step), chat history
 
 **No longer callable** (a Reference review outcome):
 The researcher's judgment that an Imported result can't be relied on after all. Final: its dependents read potentially stale or blocked, and a corrected source becomes a new Imported result node. The researcher then moves the dependents onto it on the proof map page (a Dependent migration decision). Rejected dependents stay where they were, as the record of an abandoned route. An Accepted dependent's Acceptance was made against the withdrawn citation, so it stops counting until the researcher re-Accepts the node against the correction. See #20.

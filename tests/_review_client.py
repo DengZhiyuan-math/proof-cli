@@ -122,6 +122,9 @@ class DirectClient:
             return self._call(lambda: self.app.trust_rule_preview(body or {}))
         if path == "/api/fog":
             return self._call(lambda: self.app.fog_add(body or {}))
+        if path.startswith("/api/node/") and "/agent/" in path:
+            node_id, _, action = path.removeprefix("/api/node/").rpartition("/agent/")
+            return self._call(lambda: self.app.run_action(node_id, action, body or {}))
         if path.startswith("/api/fog/"):
             fog_id, _, action = path.removeprefix("/api/fog/").rpartition("/")
             return self._call(lambda: self.app.fog_action(fog_id, action, body or {}))
