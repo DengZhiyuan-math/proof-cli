@@ -31,6 +31,33 @@ def test_node_create_takes_a_medium_and_every_view_carries_it(tmp_path: Path):
     assert shown.exit_code == 0 and "computation" in shown.output and "run.sh" in shown.output
 
 
+def test_node_show_json_names_a_computations_entry_as_run_script_never_as_working_proof(tmp_path: Path):
+    ensure_project(tmp_path)
+    _data(_run(tmp_path, "node", "create", "c1", "claim", "a computation", "--medium", "computation", "--json"))
+    _data(_run(tmp_path, "node", "create", "c2", "claim", "a written proof", "--json"))
+    computation = _data(_run(tmp_path, "node", "show", "c1", "--json"))
+    assert computation["run_script"] == "proofs/c1/run.sh" and computation["working_proof"] is None
+    written = _data(_run(tmp_path, "node", "show", "c2", "--json"))
+    assert written["working_proof"] == "proofs/c2/proof.tex" and "run_script" not in written
+
+
+def test_requesting_review_reminds_about_a_large_out_folder_and_still_succeeds(tmp_path: Path, monkeypatch):
+    import proof_cli.vault as vault
+    from _proofs import write_key_ideas
+
+    store = ensure_project(tmp_path)
+    _data(_run(tmp_path, "node", "create", "c1", "claim", "a computation", "--medium", "computation", "--json"))
+    folder = tmp_path / "proofs" / "c1"
+    (folder / "out").mkdir()
+    (folder / "out" / "data.bin").write_bytes(b"x" * 4096)
+    write_key_ideas(store, "c1")
+    monkeypatch.setattr(vault, "LARGE_OUTPUT_BYTES", 1024)
+    result = _run(tmp_path, "node", "request-review", "c1", "--rationale", "every case is covered", "--requested-by", "human", "--json")
+    data = _data(result)
+    assert data["version"] == 1
+    assert "out/ holds" in data["note"]
+
+
 def test_node_medium_set_switches_and_refuses_what_the_service_refuses(tmp_path: Path):
     ensure_project(tmp_path)
     _data(_run(tmp_path, "node", "create", "c1", "claim", "a claim", "--json"))

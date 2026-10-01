@@ -143,14 +143,10 @@ from .exchange import (
     summarize_inspect_report,
 )
 from .proof_map import (
-    set_medium,
-    ProofMapError,
     add_dependency,
     claim_node,
     create_node,
     dependency_details,
-    move_dependency,
-    remove_dependency,
     get_acceptance_state,
     get_blocked_reason,
     get_frontier,
@@ -161,20 +157,24 @@ from .proof_map import (
     list_challenges,
     list_integrity_warnings,
     list_nodes,
+    move_dependency,
     node_citation,
     open_challenge,
+    ProofMapError,
     record_evidence_check,
     release_node,
-    require_challenge,
+    remove_dependency,
     request_review,
+    require_challenge,
     require_node,
+    set_medium,
     split_node,
     trust_rule_events,
     trust_rule_view,
     trust_rules_of,
 )
 from .trust_rules import get_trust_rule, list_trust_rules, trust_rule_history
-from .vault import run_script_path, working_proof_path
+from .vault import large_output_note, working_entry_path
 from .rendering import (
     render_candidate_proof,
     render_challenge,
@@ -218,6 +218,7 @@ trust_rule_app = typer.Typer(help="Trust rules: the researcher's standing Refere
 fog_app = typer.Typer(help="Proof fog: difficulties not yet precise enough to be a Claim, kept outside the map (ADR-0008). Ungated: anyone, agents included, may add, edit, drop or crystallize one")
 fog_experiment_app = typer.Typer(help="Experiments: numerical runs recorded against a fog item; they never change its status")
 node_evidence_app = typer.Typer(help="Evidence check workflows")
+node_medium_app = typer.Typer(help="What a node's candidate proof is made of: latex, or computation (spec #145)")
 challenge_app = typer.Typer(help="Challenge workflows")
 obligation_app = typer.Typer(help="(legacy) Proof-obligation queue; an obligation is a Claim node now")
 blocker_app = typer.Typer(help="(legacy) Blocker tracking")
@@ -475,7 +476,8 @@ def node_show(
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.show")
         raise typer.Exit(code=1)
-    working = run_script_path(store.root, node_id) if (node.medium is not None and node.medium.value == "computation") else working_proof_path(store.root, node_id)
+    computation = node.medium is not None and node.medium.value == "computation"
+    working = working_entry_path(store.root, node_id, node.medium.value if node.medium else None)
     working_proof = working.relative_to(store.root).as_posix() if working.is_file() else None
     snapshots = [
         {"version": proof.version, "file_path": proof.file_path, "sha256": proof.sha256, "is_current": proof.is_current}
@@ -486,6 +488,8 @@ def node_show(
     if json_output:
         payload = node.model_dump(mode="json")
         payload["citation"] = citation
+        if computation:  # the entry is run.sh, under its own key: `working_proof` means proof.tex
+            payload["run_script"], working_proof = working_proof, None
         payload["workflow_state"] = workflow_state
         payload["acceptance_state"] = acceptance_state
         payload["integrity_state"] = integrity_state
@@ -805,14 +809,21 @@ def node_request_review(
     root: str = ROOT_OPTION,
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
-    """Snapshot the node's working proof.tex for review (ADR-0010). Needs no claim."""
+    """Snapshot the node's working proof.tex (or a computation's run.sh and out/) for review (ADR-0010). Needs no claim."""
     store = get_store(_root(root))
     try:
         record = request_review(store, node_id, requested_by=requested_by, rationale=rationale)
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.request_review")
         raise typer.Exit(code=1)
+    # a large out/ is a reminder, never a refusal (spec #145): the researcher's .gitignore decides what stays
+    note = large_output_note(store.root, node_id) or ""
+    if json_output:
+        typer.echo(dump_envelope(success_envelope("node.request_review", {**record.model_dump(mode="json"), "note": note})))
+        return
     _emit_candidate_proof(record, json_output, command="node.request_review")
+    if note:
+        typer.echo(f"Note: {note}")
 
 
 def _emit_review_record(record, json_output: bool, *, command: str) -> None:
@@ -896,10 +907,6 @@ def node_split(
         typer.echo(render_proof_map_node_list(children))
 
 
-node_medium_app = typer.Typer(help="What a node's candidate proof is made of: latex, or computation (spec #145)")
-node_app.add_typer(node_medium_app, name="medium")
-
-
 @node_medium_app.command("set")
 def node_medium_set(
     node_id: str,
@@ -911,7 +918,7 @@ def node_medium_set(
     """Switch a node's medium. Allowed at any time: files stay, the missing entry (run.sh or proof.tex) is scaffolded, an Acceptance stands."""
     store = get_store(_root(root))
     try:
-        node = set_medium(store, node_id, medium, by=by)
+        node = set_medium(store, node_id, medium, edited_by=by)
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.medium.set")
         raise typer.Exit(code=1)
@@ -1070,6 +1077,7 @@ def evidence_review(check_id: str, decision: str = typer.Argument(""), root: str
 
 
 node_app.add_typer(node_evidence_app, name="evidence")
+node_app.add_typer(node_medium_app, name="medium")
 
 
 def _running_review_app(store) -> bool:

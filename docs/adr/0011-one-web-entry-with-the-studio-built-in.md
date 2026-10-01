@@ -1,6 +1,6 @@
 # One web entry, with the LaTeX studio built in
 
-**Status**: accepted (implemented in #67–#72).
+**Status**: accepted (implemented in #67–#72). Amended by ADR-0015: a node whose Medium is `computation` works in the studio's computation mode (Run, Open in VS Code), and its program and `out/` are its candidate proof, frozen by the snapshot — unlike a LaTeX node's `scratch/`.
 - **Supersedes** ADR-0010 point 5 ("prism-local is coupled only through files") and its note that proof-cli needs no TeX.
 - **Supersedes** ADR-0007's "Start agent is not the web app spawning or supervising an agent process": the node page now runs an agent.
 - **Amends** ADR-0006 (the command surface), ADR-0008 (the node page) and ADR-0010's snapshot (point 5 below).

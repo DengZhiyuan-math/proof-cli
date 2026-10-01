@@ -32,6 +32,7 @@ from proof_cli.fog import add_fog, drop_fog, record_experiment
 from proof_cli.proof_map import create_node, open_challenge, record_evidence_check, request_review, split_node
 from proof_cli.references import ReferenceRecord, ReferenceSourceType
 from proof_cli.storage import ProjectStore, ensure_project, import_reference
+from proof_cli.vault import node_folder
 
 AGENT = "agent_a"
 # the one citation of the sample: I and I2 both link it (issue #91)
@@ -51,12 +52,6 @@ class SampleProofMap:
         return [copy[role] for copy in self.copies]
 
 
-def _write_key_ideas(store: ProjectStore, node_id: str) -> None:
-    from _proofs import write_key_ideas
-
-    write_key_ideas(store, node_id)
-
-
 def _prove(store: ProjectStore, node_id: str, decision: str = "accept") -> None:
     from _proofs import submit_proof
     from _researcher import researcher
@@ -66,6 +61,7 @@ def _prove(store: ProjectStore, node_id: str, decision: str = "accept") -> None:
 
 
 def build_sample_proof_map(root: Path, *, copies: int = 1) -> SampleProofMap:
+    from _proofs import write_key_ideas
     from _researcher import researcher
 
     store = ensure_project(root)
@@ -100,12 +96,12 @@ def build_sample_proof_map(root: Path, *, copies: int = 1) -> SampleProofMap:
     # a computation node (spec #145): its program and outputs are the candidate proof; a run is an Evidence check
     for n in names:
         create_node(store, node_id=n["N"], kind="claim", statement=f"For every n ≤ 10^4 the inequality of {n['N']} holds", derived_from=theorem, medium="computation")
-        folder = root / "proofs" / n["N"]
+        folder = node_folder(root, n["N"])
         (folder / "run.sh").write_text("#!/usr/bin/env bash\nset -e\nmkdir -p out\npython3 check.py > out/table.csv\n")
         (folder / "check.py").write_text("print('n,ratio')\nfor k in (10, 100, 1000, 10000):\n    print(f'{k},{1 - 1 / k:.4f}')\n")
         (folder / "out").mkdir(exist_ok=True)
         (folder / "out" / "table.csv").write_text("n,ratio\n10,0.9000\n100,0.9900\n1000,0.9990\n10000,0.9999\n")
-        _write_key_ideas(store, n["N"])
+        write_key_ideas(store, n["N"])
         proof = request_review(store, n["N"], requested_by=AGENT, rationale="a finite check: every n ≤ 10^4 is covered")
         record_evidence_check(store, proof.id, "passed", notes="exit 0: every n ≤ 10^4 checked", run_by=AGENT)
         researcher(store).decide_acceptance(n["N"], "accept", rationale="the program covers every case and its output is on record")

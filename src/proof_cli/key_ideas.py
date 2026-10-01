@@ -100,6 +100,26 @@ def view(data: bytes | None) -> dict | None:
     return parse(text).as_json(text)
 
 
+# the same four headings for a node whose medium is computation (spec #145): the hints say
+# what each holds when the candidate proof is a program and its outputs, not a written argument
+TEMPLATE_COMPUTATION = """\
+## 核心思路
+
+<!-- 必填：算了什么、为什么这个计算确立了陈述（覆盖了哪些情形、依据什么判定）。数学公式写成 $…$。 -->
+
+## 主要步骤
+
+<!-- 必填：3–7 步，计算的步骤——输入怎么枚举、每一步算什么、用到哪个依赖节点的结果、输出写到 out/ 的哪个文件。 -->
+
+## 难点
+
+<!-- 最可能出错的地方：浮点误差、覆盖范围的边界、随机性、运行环境；可以写「无」。 -->
+
+## 未覆盖
+
+<!-- 计算没有覆盖的情形、额外假设或尚未处理的部分；可以写「无」。 -->
+"""
+
 TEMPLATE = """\
 ## 核心思路
 
