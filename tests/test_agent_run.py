@@ -99,8 +99,9 @@ def _get(hub, path):
     return answer.status, json.loads(answer.body)
 
 
-def _wait(hub, node="N", until=("done", "stuck", "budget", "paused", "released", "needs-decision"), timeout=60):
+def _wait(hub, node="N", until=("done", "stuck", "budget", "paused", "released"), timeout=60):
     deadline = time.monotonic() + timeout
+    state = None
     while time.monotonic() < deadline:
         state = _get(hub, f"/studio/{node}/api/agent/run")[1]
         if state["status"] in until:
@@ -171,6 +172,8 @@ def test_a_computation_node_hands_the_work_to_numerics(studio):
     numerics = _turns(log)[1]
     assert numerics["role"] == "numerics" and "Numerics" in numerics["brief"] and "run.sh" in numerics["brief"]
     assert "Bash(proof node evidence record *)" in numerics["argv"] and "Edit(./out/**)" in numerics["argv"] and "Edit(./**/*.tex)" not in numerics["argv"]
+    assert "Bash(./run.sh)" in numerics["argv"] and "Bash(bash *)" in numerics["argv"]  # it can run its own program
+    assert "Bash(proof fog add *)" not in numerics["argv"]
 
 
 # -- the run stops on its own ----------------------------------------------------------------------
@@ -261,3 +264,35 @@ def test_the_map_and_the_node_payload_show_the_runs_role_and_step(studio):
     assert node["assignee"] == "claude-code" and node["run"] == {"status": "running", "role": "prover", "step": 2, "steps": 3}
     assert client.get("/api/node/N")[1]["data"]["run"]["role"] == "prover"
     _wait(hub)
+
+
+def test_start_is_refused_while_someone_else_holds_the_node_and_leaves_no_run_behind(studio):
+    from proof_cli.proof_map import claim_node
+
+    store, hub, log, queue = studio
+    claim_node(store, "N", claimant_id="ada")
+    status, refused = _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
+    assert status == 400 and refused["error"] == "CLAIM_CONFLICT"  # the service's own refusal, as it stands
+    assert _get(hub, "/studio/N/api/agent/run")[1]["status"] == "idle"
+    assert get_active_claim(store, "N").claimant_id == "ada" and not _turns(log)
+
+
+def test_the_typesetters_report_reaches_the_prover_when_it_hands_back_without_a_handoff(studio):
+    store, hub, log, queue = studio
+    _queue(queue,
+           [["proof", "node", "progress", "N", "--handoff", "typesetter", "--note", "write it up"]],
+           [["proof", "node", "progress", "N", "--step", "1", "--status", "done", "--note", "missing: the case n = 0"]],
+           [["proof", "node", "progress", "N", "--step", "2", "--status", "stuck", "--note", "n = 0 needs a different argument"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
+    _wait(hub)
+    prover_again = _turns(log)[2]
+    assert prover_again["role"] == "prover" and "The typesetter reports: missing: the case n = 0" in prover_again["prompt"]
+
+
+def test_the_budget_table_in_proof_toml_is_read(studio):
+    store, hub, log, queue = studio
+    (store.root / "proof.toml").write_text("[studio]\nbudget = { turns = 1, minutes = 60 }\n")
+    _queue(queue, [["write", "scratch/a.md", "x"]], [["write", "scratch/b.md", "x"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
+    state = _wait(hub)
+    assert state["status"] == "budget" and state["turns_max"] == 1 and len(_turns(log)) == 1

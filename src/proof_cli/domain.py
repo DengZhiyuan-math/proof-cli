@@ -65,6 +65,17 @@ class ProofMapNodeKind(str, Enum):
     imported_result = "imported_result"
 
 
+class AgentRole(str, Enum):
+    """The three roles of a Proof agent's run (spec #145, decided in #144): who takes a turn on a node."""
+
+    prover = "prover"
+    typesetter = "typesetter"
+    numerics = "numerics"
+
+
+AGENT_ROLES = tuple(role.value for role in AgentRole)
+
+
 class Medium(str, Enum):
     """What a Theorem, Lemma or Claim's candidate proof is made of (spec #145, decided in #141).
 

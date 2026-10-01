@@ -763,6 +763,21 @@ function drawDag(nodes) {
     g.append(status, statusIcon(statusKind, left + BOX.w - 6, top + 6, 30));
     // the frontier is its own, strongest signal (ADR-0008): a warning is shown beside it, never in its place
     if (n.frontier && warningOf(n)) g.append(statusIcon("ready", left + BOX.w - 36, top + 6, 22));
+    // Start agent from the card (spec #145): a local node nobody holds; the click never opens the node
+    if (n.kind !== "imported_result" && !n.assignee && !n.run && !rejected(n)) {
+      const start = svg("g", { class: "start", role: "button", tabindex: 0, "aria-label": `Start the agent on ${n.id}` });
+      start.append(svg("rect", { x: left + BOX.w - 78, y: top + BOX.h - 26, width: 66, height: 18, rx: 9 }));
+      const label = svg("text", { x: left + BOX.w - 45, y: top + BOX.h - 13, "text-anchor": "middle" });
+      label.textContent = "▶ Start";
+      start.append(label);
+      start.addEventListener("click", async (event) => {
+        event.stopPropagation(); event.preventDefault();
+        try { await api(`/api/node/${encodeURIComponent(n.id)}/agent/start`, {}); } catch (error) { showError(error); return; }
+        say(`Agent started on ${n.id}.`, "ok");
+        await refresh();
+      });
+      g.append(start);
+    }
     // hovering shows the current snapshot's 核心思路 (ADR-0013), under the statement it proves
     const title = svg("title");
     title.textContent = n.core_idea ? `${n.statement}\n核心思路：${n.core_idea}` : n.statement;

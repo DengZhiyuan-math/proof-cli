@@ -187,6 +187,7 @@ class FakeElement {
       icons: g.querySelectorAll("g.status-icon").map((i) => i.className.split(" ").find((c) => c !== "status-icon")),
       label: g.attributes["aria-label"],
       title: (g.querySelector("title") || { textContent: null }).textContent,  // what hovering it shows
+      start: !!g.querySelector("g.start"),  // the card offers Start agent (spec #145)
     }])),
     // each tree line in drawing order
     tree: elements["map-tree"].querySelectorAll("li").map(treeLine),
@@ -337,6 +338,10 @@ class FakeElement {
     }
     if (step.fogAll !== undefined) { elements["fog-show-all"].checked = step.fogAll; await elements["fog-show-all"].dispatch("change"); await settle(); }
     if (step.fogButton) { await fogRow(step.fogButton.id).querySelectorAll("button").find((b) => b.textContent === step.fogButton.text).dispatch("click"); await settle(); }
+    if (step.cardStart) {  // Start agent from a map card (spec #145)
+      const g = elements["dag-svg"].querySelectorAll("g.node").find((n) => nodeIdOf(n) === step.cardStart);
+      await g.querySelector("g.start").dispatch("click"); await settle();
+    }
     if (step.runButton) {  // the node page's oversight (spec #145): a button by its text, after filling the redirect line
       if (step.runButton.redirect !== undefined) elements["node-run"].querySelector("input").value = step.runButton.redirect;
       await elements["node-run"].querySelectorAll("button").find((b) => b.textContent === step.runButton.text).dispatch("click"); await settle();

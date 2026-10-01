@@ -32,6 +32,7 @@ from .collaboration import (
     ReviewRecordKind,
 )
 from .domain import (
+    AGENT_ROLES,
     CandidateProofRecord,
     Challenge,
     ChallengeStatus,
@@ -48,14 +49,8 @@ from .domain import (
 )
 from .reviews import TRUST_RULES_FILE, DecisionKind, DecisionPayload, PinnedDependency, git_identity
 from .storage import (
-    ProjectStore,
-    memoized_read,
-    read_scope,
-    read_scoped,
-    scoped_memo,
     append_event,
-    list_events,
-    latest_event,
+    delete_dependency_pin,
     get_active_claim,
     get_candidate_proof as _get_candidate_proof,
     get_challenge as _get_challenge,
@@ -64,25 +59,32 @@ from .storage import (
     get_evidence_check as _get_evidence_check,
     get_proof_map_node,
     get_reference,
+    insert_candidate_proof,
     insert_challenge,
     insert_claim,
-    insert_candidate_proof,
     insert_evidence_check,
     insert_proof_map_node,
+    latest_event,
     list_candidate_proofs_for_node,
     list_challenges as _list_challenges,
     list_dependency_pins_for_node,
+    list_events,
     list_evidence_checks_for_candidate_proof,
+    list_fog_items,
     list_proof_map_nodes,
     mark_challenge_dismissed,
     mark_claim_released,
+    memoized_read,
     next_candidate_proof_version,
     on_rollback,
+    ProjectStore,
+    read_scope,
+    read_scoped,
+    scoped_memo,
     set_candidate_proof_interface_fingerprint,
     set_candidate_proof_review_record_id,
     update_proof_map_node,
     upsert_dependency_pin,
-    delete_dependency_pin,
 )
 from . import key_ideas
 from .trust_rules import (
@@ -368,7 +370,6 @@ def create_node(
 # with what the agent did through other `proof` commands: a split, a review request, an Evidence check,
 # a fog item, a dependency edit.
 
-AGENT_ROLES = ("prover", "typesetter", "numerics")
 PROGRESS_STATUSES = ("started", "done", "stuck")
 PROGRESS_EVENT = "agent_progress"
 
@@ -377,7 +378,7 @@ def record_progress(
     store: ProjectStore,
     node_id: str,
     *,
-    role: str,
+    role: str | None,
     by: str,
     plan: list[str] | None = None,
     step: int | None = None,
@@ -387,6 +388,8 @@ def record_progress(
 ) -> dict:
     """Report a plan (the steps the run means to take), one step's status, or a handoff to another role. Returns the log entry."""
     require_node(store, node_id)
+    if not role:
+        raise ProofMapError("ROLE_REQUIRED", "say which role reports: prover, typesetter or numerics (an agent's runtime sets PROOF_AGENT_ROLE)")
     if role not in AGENT_ROLES:
         raise ProofMapError("INVALID_ROLE", f"'{role}' is not a Proof agent role; expected one of: {', '.join(AGENT_ROLES)}")
     steps = [str(item).strip() for item in (plan or []) if str(item).strip()]
@@ -418,6 +421,7 @@ def work_log(store: ProjectStore, node_id: str) -> list[dict]:
     """The node's work log: the agent's reports merged, in time order, with what it did through `proof`."""
     require_node(store, node_id)
     proof_ids = {proof.id for proof in list_candidate_proofs(store, node_id)}
+    near_fog = {item.id for item in list_fog_items(store) if node_id in item.near}  # the fog about this node: its Experiments belong here
     entries: list[dict] = []
     for event in list_events(store):
         at = event.created_at.isoformat()
@@ -432,6 +436,8 @@ def work_log(store: ProjectStore, node_id: str) -> list[dict]:
             entries.append({"at": at, "kind": "evidence", "by": payload.get("run_by"), "outcome": payload.get("outcome"), "evidence_check_id": payload.get("evidence_check_id")})
         elif event.kind == "proof_fog_added" and node_id in (payload.get("near") or []):
             entries.append({"at": at, "kind": "fog", "by": payload.get("created_by"), "fog_id": event.entity_id, "text": event.message.partition(": ")[2]})
+        elif event.kind == "proof_fog_experiment_recorded" and event.entity_id in near_fog:
+            entries.append({"at": at, "kind": "experiment", "by": payload.get("run_by"), "fog_id": event.entity_id, "outcome": payload.get("outcome"), "seq": payload.get("seq")})
         elif event.kind in ("proof_map_dependency_added", "proof_map_dependency_removed", "proof_map_dependency_moved") and event.entity_id == node_id:
             entries.append({"at": at, "kind": "dependencies", "by": payload.get("edited_by") or payload.get("by"), "change": event.kind.rsplit("_", 1)[1], "dependency": payload.get("dependency_id") or payload.get("dependency")})
         elif event.kind in ("proof_map_node_claimed", "proof_map_claim_reassigned") and event.entity_id == node_id:

@@ -72,7 +72,10 @@ _SHARED_PREFIXES = ("mathtext.js", "vendor/katex.min.", "vendor/fonts/KaTeX_")
 _MAX_BODY_BYTES = 2_000_000
 
 
-from .studios import RequestError  # noqa: E402  (one refusal type for the page and its studios)
+class RequestError(Exception):
+    def __init__(self, status: HTTPStatus, code: str, message: str, details: dict | None = None) -> None:
+        super().__init__(message)
+        self.status, self.code, self.message, self.details = status, code, message, details or {}
 
 
 # the frozen outputs a browser may show inline: raster images only (an SVG or HTML can carry script)
@@ -402,7 +405,10 @@ class ReviewApp:
         """Start, pause, resume, redirect or release the Proof agent's run on a node, from the map or the node's page (spec #145)."""
         if action not in ("start", "pause", "resume", "redirect", "release"):
             raise RequestError(HTTPStatus.NOT_FOUND, "NOT_FOUND", f"no run action {action!r}")
-        return self.studios.run_action(node_id, action, body)
+        status, data = self.studios.run_action(node_id, action, body)
+        if status >= 400:
+            raise RequestError(HTTPStatus(status), str(data.get("error") or "RUN_REFUSED"), str(data.get("message") or data.get("error") or "refused"))
+        return data
 
     @staticmethod
     def page_of(node) -> str:

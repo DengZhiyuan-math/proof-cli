@@ -647,26 +647,28 @@ class Studio:
         return {"exit": rc, "output": out, "seconds": seconds, "cancelled": cancelled, "timed_out": runner.timed_out,
                 "outcome": outcome, "evidence": recorded.get("evidence"), "note": recorded.get("note") or ""}
 
-    def _run_action(self, action: str, body: dict) -> Response:
-        """The researcher's oversight of the agent's run (spec #145): start, pause, resume, redirect, release."""
+    def run_action(self, action: str, body: dict) -> tuple[int, dict]:
+        """The researcher's oversight of the agent's run (spec #145): start, pause, resume, redirect or release — (status, answer)."""
         if self.run is None:
-            return _json({"error": "NO_RUN", "message": "this folder has no proof map node, so no agent run"}, 404)
+            return 404, {"error": "NO_RUN", "message": "this folder has no proof map node, so no agent run"}
         if action == "start":
             provider = str(body.get("provider") or (self.agent.backend(None).id if self.agent.backend(None) else ""))
             roles = body.get("roles") if isinstance(body.get("roles"), list) else None
             r = self.run.start(provider, roles=roles, redirect=str(body.get("redirect") or "") or None,
                                model=body.get("model") or None, effort=body.get("effort") or None)
-            return _json(r, 409 if r.get("error") == "RUN_ACTIVE" else 200)
+            return (409 if r.get("error") == "RUN_ACTIVE" else 400 if "error" in r else 200), r
         if action == "pause":
-            return _json(self.run.pause())
+            return 200, self.run.pause()
         if action == "resume":
-            return _json(self.run.resume())
+            return 200, self.run.resume()
         if action == "redirect":
             text = str(body.get("text") or "").strip()
             if not text:
-                return _json({"error": "REDIRECT_EMPTY", "message": "say what the agent should do differently"}, 400)
-            return _json(self.run.redirect(text, body.get("role") or None))
-        return _json(self.run.release())
+                return 400, {"error": "REDIRECT_EMPTY", "message": "say what the agent should do differently"}
+            return 200, self.run.redirect(text, body.get("role") or None)
+        if action == "release":
+            return 200, self.run.release()
+        return 404, {"error": "NOT_FOUND", "message": f"no run action {action!r}"}
 
     def stop_runs(self) -> bool:
         with self._admit:
@@ -838,7 +840,8 @@ class Studio:
         if path == "/api/build/stop":
             return _json({"ok": self.stop_build()})
         if path.startswith("/api/agent/") and path.split("/")[3] in ("start", "pause", "resume", "redirect", "release"):
-            return self._run_action(path.split("/")[3], body)
+            status, data = self.run_action(path.split("/")[3], body)
+            return _json(data, status)
         if path == "/api/run":
             if self.medium() != "computation":
                 return _json({"error": "NOT_A_COMPUTATION", "message": "Run is for a node whose medium is computation; this one compiles"}, 409)
