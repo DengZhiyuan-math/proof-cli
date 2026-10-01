@@ -392,6 +392,21 @@ async function runProgram() {
   }
 }
 
+// The centre (spec #145, decided in #144): the agent's work log by default; the editor and the PDF — or the
+// program and out/ — behind the Files tab. #files opens on Files; the choice is remembered per node.
+function showCentre(which) {
+  const files = which === "files";
+  $("#run-stage").hidden = files;
+  $("#editor-pane").hidden = !files; $("#pdf-pane").hidden = !files;
+  for (const g of document.querySelectorAll('.gutter[data-resize="pdf"]')) g.hidden = !files;
+  $("#tab-run").setAttribute("aria-selected", String(!files)); $("#tab-files").setAttribute("aria-selected", String(files));
+  store.set("centre", which);
+  if (files && typeof cm !== "undefined") cm.refresh();
+}
+$("#tab-run").onclick = () => showCentre("run");
+$("#tab-files").onclick = () => showCentre("files");
+showCentre(location.hash === "#files" ? "files" : store.get("centre", "run"));
+
 async function loadConfig() {
   const r = await api("/api/config");
   if (r._status !== 200) return;
@@ -843,13 +858,15 @@ function insertMention(token, snip, replaceFrom) {
    researcher's own decision on it (node.js offers it through globalThis.studioReview). An agent
    item writes its request into the message box, to add to and send; the agent carries it out
    through `proof`. The decision opens the review sheet and is never the agent's (ADR-0010). */
-const AGENT_ACTIONS = [
-  ["Prove it", "Work on this node's proof: retrieval first, then write the proof in proof.tex and compile it."],
-  ["Request review", "This node's proof is ready. Compile it, then request review with a rationale for why the node is scoped to prove directly: "],
-  ["Split into claims", "This node is too large to prove directly. Propose Claims that together prove it, then split the node into them: "],
-  ["Edit dependencies", "Change one of this node's dependency edges (add a Lemma the proof uses, remove one it doesn't, or move one onto a split child): "],
-  ["Open a Challenge", "Open a Challenge on the dependency that may no longer hold, and say why: "],
-  ["Record evidence", "Run a checker on the snapshot under review and record the Evidence check with what it reported: "],
+// One-off tasks (spec #145): each runs as a single role's turn of the run, with the task as its redirect —
+// never a prompt the researcher has to write. The old prove-it prompt is gone: proving is what Start does.
+const AGENT_TASKS = [
+  ["Prover · propose a split", "prover", "This node is too large to prove directly. Propose Claims that together prove it, then split the node into them."],
+  ["Prover · edit dependencies", "prover", "Change one of this node's dependency edges: add a Lemma the proof uses, remove one it doesn't, or move one onto a split child."],
+  ["Prover · open a Challenge", "prover", "Open a Challenge on the dependency that may no longer hold, and say why."],
+  ["Typesetter · draft key ideas", "typesetter", "Write key-ideas.md from the draft and proof.tex: 核心思路, 主要步骤, 难点, 未覆盖."],
+  ["Typesetter · compile and fix", "typesetter", "Compile proof.tex and fix what fails, without changing the mathematics."],
+  ["Numerics · run a check", "numerics", "Run the computation that checks this node's statement and record what it showed."],
 ];
 function askAgent(request, mode) {
   if (mode) { $("#chat-mode").value = mode; store.set("chat.mode", mode); }
@@ -869,11 +886,24 @@ function plusMenu(open) {
     return b;
   };
   const review = typeof globalThis.studioReview === "function" ? globalThis.studioReview() : null;
-  const keyIdeas = typeof globalThis.studioKeyIdeas === "function" ? globalThis.studioKeyIdeas() : null;
-  const rows = [node("div", "menu-head", "Ask the agent to")];
-  if (keyIdeas) rows.push(item("Draft key ideas", keyIdeas.draft, "The proof agent writes key-ideas.md from proof.tex and the dependencies; you edit it, then request review"));
+  const run = globalThis.studioRun || null;
+  const state = run ? run.state() : null;
+  const active = !!(state && ["running", "pausing", "paused", "starting"].includes(state.status));
+  // the researcher's oversight first (spec #145): Start once, then Pause / Resume, Redirect, Review what it has, Stop and release
+  const rows = [node("div", "menu-head", "The agent")];
+  if (!run) rows.push(node("div", "menu-head", "no run on this page"));
+  else if (!active) rows.push(item("Start agent", () => run.start(), "The agent works the node on its own until it requests review or needs you"));
+  else {
+    rows.push(item(state.status === "paused" ? "Resume" : "Pause", () => (state.status === "paused" ? run.resume() : run.pause()), "The turn finishes; the agent keeps the node"));
+    rows.push(item("Redirect…", () => { const text = prompt("One line for the agent's next turn:"); if (text && text.trim()) run.redirect(text.trim()); }, "One line, handed to its next turn"));
+    rows.push(item("Review what it has", () => run.reviewNow(), "Freeze a snapshot of the folder as it stands and review it"));
+    rows.push(item("Stop and release", () => run.release(), "End the run and unassign the node"));
+  }
+  if (run) {
+    rows.push(node("hr", "menu-sep"), node("div", "menu-head", "Ask the agent to"));
+    for (const [label, role, task] of AGENT_TASKS) rows.push(item(label, () => run.start([role], task), active ? "Wait for the run to stop, or pause it" : task));
+  }
   if (review) rows.push(item(`Check snapshot v${review.version}`, () => askAgent(review.check, "ask"), "Read-only: the agent reports what does not hold"));
-  for (const [label, request] of AGENT_ACTIONS) rows.push(item(label, () => askAgent(request), request));
   if (review) rows.push(node("hr", "menu-sep"), node("div", "menu-head", "Your decision"), item(`Review snapshot v${review.version}…`, review.open, "Accept, request a revision or reject: recorded as you", "decide"));
   $("#review-card").hidden = true;
   menu.replaceChildren(...rows);

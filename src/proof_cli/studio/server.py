@@ -668,6 +668,11 @@ class Studio:
             return 200, self.run.redirect(text, body.get("role") or None)
         if action == "release":
             return 200, self.run.release()
+        if action == "review-now":  # Review what it has: a snapshot of the folder as it stands, as the researcher
+            try:
+                return 200, self.run.hooks.review_now()
+            except Exception as exc:  # noqa: BLE001 — the service's refusal is the answer (no key ideas yet, nothing new, …)
+                return 409, {"error": getattr(exc, "code", None) or type(exc).__name__, "message": getattr(exc, "message", None) or str(exc)}
         return 404, {"error": "NOT_FOUND", "message": f"no run action {action!r}"}
 
     def stop_runs(self) -> bool:
@@ -744,6 +749,8 @@ class Studio:
                                "folder": str(self.root), "medium": self.medium(), "open": self.how_to_open()})
         if path == "/api/agent/run":
             return _json(self.run.view() if self.run is not None else {"status": "idle", "reason": "no run on this folder"})
+        if path == "/api/agent/log":  # the node's work log (spec #145): what the agent planned, did and handed over
+            return _json({"entries": self.run.hooks.work_log() if self.run is not None else []})
         if path == "/api/agent/events":
             job = self.agent.jobs.get(int(q["job"]))
             if not job:
@@ -839,7 +846,7 @@ class Studio:
             return _json(r, 409 if r.get("busy") else 200)
         if path == "/api/build/stop":
             return _json({"ok": self.stop_build()})
-        if path.startswith("/api/agent/") and path.split("/")[3] in ("start", "pause", "resume", "redirect", "release"):
+        if path.startswith("/api/agent/") and path.split("/")[3] in ("start", "pause", "resume", "redirect", "release", "review-now"):
             status, data = self.run_action(path.split("/")[3], body)
             return _json(data, status)
         if path == "/api/run":

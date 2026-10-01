@@ -403,7 +403,7 @@ class ReviewApp:
 
     def run_action(self, node_id: str, action: str, body: dict) -> dict:
         """Start, pause, resume, redirect or release the Proof agent's run on a node, from the map or the node's page (spec #145)."""
-        if action not in ("start", "pause", "resume", "redirect", "release"):
+        if action not in ("start", "pause", "resume", "redirect", "release", "review-now"):
             raise RequestError(HTTPStatus.NOT_FOUND, "NOT_FOUND", f"no run action {action!r}")
         status, data = self.studios.run_action(node_id, action, body)
         if status >= 400:

@@ -44,6 +44,7 @@ class RunHooks:
     release: Callable[[str], None]                    # release the node when this name is its assignee
     work_log: Callable[[], list[dict]]                # the node's work log, oldest first
     record_stuck: Callable[[str, str, str], None]     # (role, name, note): the run's own last word, as a stuck step
+    review_now: Callable[[], dict]                    # freeze a snapshot of the folder as it stands, as the researcher: Review what it has
 
 
 @dataclass
