@@ -122,3 +122,15 @@ def test_a_poll_that_brings_news_rebuilds_but_still_keeps_what_was_in_hand():
     _, _, polled = _pane(run=RUNNING, log=LOG, turns=turns, typed="try the dual problem", role="prover", open=[1], changed=news)
     assert any("step 4 done" in e["text"] for e in polled["log"])  # the new entry is shown
     assert polled["redirect"]["text"] == "try the dual problem" and polled["open"] == ["1"] and polled["focusedRedirect"]
+
+
+def test_a_running_turns_conversation_is_read_on_until_the_turn_is_done_then_kept():
+    """Reaudit R-P3: the conversation opened while the turn runs is not frozen at its first fragment — each poll and each
+    opening reads on; once the turn is done, what was last read is final and shown again without asking."""
+    turns = [{"job": 7, "role": "prover", "prompt": "Take your turn as the Prover…", "at": 1.0, "done": False, "changed": []}]
+    conversation = {"turn": 1, "more": "first fragment\nthen a lemma", "final": "first fragment\nthen a lemma\ncompleted proof"}
+    _, opened, polled, finished, reopened = _pane(run=RUNNING, log=LOG, turns=turns, said="first fragment", conversation=conversation)
+    assert opened["transcripts"]["1"] == "first fragment" and "running" in opened["turns"][0]["summary"]
+    assert polled["transcripts"]["1"] == "first fragment\nthen a lemma"  # a poll with no other news still reads on
+    assert finished["transcripts"]["1"] == conversation["final"] and "running" not in finished["turns"][0]["summary"]
+    assert reopened["transcripts"]["1"] == conversation["final"]  # final: kept, not asked for again

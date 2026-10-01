@@ -26,6 +26,7 @@ class El {
   let focused = null;
   let run = scenario.run, log = scenario.log || [];
   const timers = [];
+  let said = scenario.said || "I read L1 first.";  // what the backend has of the turn's conversation so far
   const context = {
     document: { getElementById: (id) => (id === "run-pane" ? pane : null), createElement: (tag) => new El(tag), dispatchEvent: (ev) => { dispatched.push({ type: ev.type, detail: ev.detail || null }); },
                 querySelectorAll: () => [], documentElement: { dataset: {} }, get activeElement() { return focused; } },
@@ -43,7 +44,7 @@ class El {
       }
       if (url === "api/agent/run") return { status: 200, json: async () => run };
       if (url === "api/agent/log") return { status: 200, json: async () => ({ entries: log, turns: scenario.turns || [], folder: "/proj/proofs/N" }) };
-      if (url.startsWith("api/agent/events")) return { status: 200, json: async () => ({ events: [{ t: "text", text: "I read L1 first." }, { t: "done" }], done: true }) };
+      if (url.startsWith("api/agent/events")) return { status: 200, json: async () => ({ events: [{ t: "text", text: said }, { t: "done" }], done: true }) };
       return { status: 404, json: async () => ({}) };
     },
   };
@@ -66,6 +67,7 @@ class El {
     redirect: { text: (pane.all().find((x) => x.cls() === "run-redirect") || { value: "" }).value, role: (pane.all().find((x) => x.cls() === "run-redirect-role") || { value: "" }).value },
     open: pane.all().filter((x) => x.tag === "details" && x.open).map((x) => String(x.attrs["data-turn"])),
     focusedRedirect: !!(focused && focused.cls && focused.cls() === "run-redirect"),
+    transcripts: Object.fromEntries(pane.all().filter((x) => x.tag === "details").map((x) => [String(x.attrs["data-turn"]), (x.all().find((t) => t.cls() === "turn-transcript") || { textContent: "" }).textContent])),
     polls: [...timers], posted: [...posted], dispatched: [...dispatched],
   });
   const readings = [read()];
@@ -79,6 +81,16 @@ class El {
     await context.studioRun.refresh();
     for (let i = 0; i < 4; i++) await new Promise(setImmediate);
     readings.push(read());
+  }
+  const tick = async () => { for (let i = 0; i < 6; i++) await new Promise(setImmediate); };
+  const openTurn = async (n) => { const d = pane.all().find((x) => x.tag === "details" && Number(x.attrs["data-turn"]) === n); d.open = true; await d.listeners.toggle(); await tick(); };
+  if (scenario.conversation) {  // the researcher opens a running turn; the agent says more; the turn ends; the researcher looks again
+    const c = scenario.conversation;
+    await openTurn(c.turn); readings.push(read());                 // opened while running
+    said = c.more; await context.studioRun.refresh(); await tick(); readings.push(read());   // a poll with no other news
+    said = c.final; scenario.turns[c.turn - 1].done = true; await context.studioRun.refresh(); await tick(); readings.push(read());  // the turn is done
+    const d = pane.all().find((x) => x.tag === "details" && Number(x.attrs["data-turn"]) === c.turn); d.open = false; await d.listeners.toggle();
+    said = "(the backend is not asked again)"; await openTurn(c.turn); readings.push(read());  // closed and opened again: final, from memory
   }
   for (const label of [].concat(scenario.press || [])) {
     if (scenario.redirect !== undefined) { const box = pane.all().find((x) => x.cls() === "run-redirect"); if (box) box.value = scenario.redirect; }

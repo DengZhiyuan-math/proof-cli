@@ -22,7 +22,7 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
   }
 
   const ROLE_WORD = { prover: "Prover", typesetter: "Typesetter", numerics: "Numerics" };
-  const state = { run: null, log: [], turns: [], folder: "", timer: null, redirectBox: null, roleBox: null, shown: "" };
+  const state = { run: null, log: [], turns: [], folder: "", timer: null, redirectBox: null, roleBox: null, shown: "", transcripts: {} };
 
   const note = h("p", "", { class: "run-note", role: "status" });
   function tell(text, bad) { note.textContent = text; note.setAttribute("class", bad ? "run-note bad" : "run-note"); }
@@ -132,13 +132,20 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
     if (turn.changed && turn.changed.length) { const files = h("p", "changed: ", { class: "turn-files" }); turn.changed.forEach((rel, i) => { if (i) files.append(", "); files.append(fileLink(rel)); }); body.append(files); }
     const transcript = h("pre", "", { class: "turn-transcript" });
     body.append(transcript);
-    details.addEventListener("toggle", async () => {
-      if (!details.open || transcript.textContent) return;
-      state.transcripts = state.transcripts || {};
+    // The conversation is read when the turn is opened. Only a finished turn's is final: a running turn's is read
+    // again on every open and every poll until the turn is done, so what is shown is never a stale fragment (reaudit R-P3).
+    const cached = state.transcripts[turn.job];
+    if (cached) transcript.textContent = cached.text;
+    details.loadTranscript = async () => {
+      if (!details.open) return;
+      const known = state.transcripts[turn.job];
+      if (known && known.final) return;
       const r = await api(`/api/agent/events?job=${turn.job}&after=0`);
-      transcript.textContent = state.transcripts[turn.job] = (r.events || []).filter((ev) => ev.t === "text" || ev.t === "error").map((ev) => ev.text || ev.message || "").join("\n") || "(no text in this turn)";
-    });
-    if (state.transcripts && state.transcripts[turn.job]) transcript.textContent = state.transcripts[turn.job];
+      const text = (r.events || []).filter((ev) => ev.t === "text" || ev.t === "error").map((ev) => ev.text || ev.message || "").join("\n") || (turn.done ? "(no text in this turn)" : "(nothing said yet)");
+      state.transcripts[turn.job] = { text, final: !!turn.done };
+      transcript.textContent = text;
+    };
+    details.addEventListener("toggle", details.loadTranscript);
     details.append(body);
     return details;
   }
@@ -156,7 +163,10 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
     if (state.redirectBox && kept.redirect) state.redirectBox.value = kept.redirect;
     if (state.roleBox && kept.role) state.roleBox.value = kept.role;
     if (state.redirectBox && kept.focused) state.redirectBox.focus();
-    for (const d of pane.querySelectorAll("details")) if (kept.open.includes(d.getAttribute("data-turn"))) d.open = true;
+    for (const d of pane.querySelectorAll("details")) if (kept.open.includes(d.getAttribute("data-turn"))) { d.open = true; d.loadTranscript(); }
+  }
+  function followOpenTurns() {  // a poll with no news still reads on in the conversations that are open and not yet final
+    for (const d of pane.querySelectorAll("details[open]")) d.loadTranscript();
   }
 
   function render(force) {
@@ -164,7 +174,7 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
     const changed = force || signature !== state.shown;
     if (state.timer) clearTimeout(state.timer);
     state.timer = setTimeout(refresh, state.run && state.run.active ? RUN_POLL_MS : IDLE_POLL_MS);
-    if (!changed) return;
+    if (!changed) { followOpenTurns(); return; }
     const kept = keep();
     state.shown = signature;
     const log = h("ol", null, { class: "work-log" });
