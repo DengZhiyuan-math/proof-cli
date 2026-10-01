@@ -9,6 +9,7 @@ decision. Open in VS Code hands the node folder to the editor: `vscode://file/<f
 """
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -66,6 +67,8 @@ def _reviewed(store, node_id="N"):
 def test_run_executes_run_sh_in_the_node_folder_and_records_a_passed_evidence_check(hub):
     store, hub = hub
     _script(store, "N", "mkdir -p out\necho 'n,ratio' > out/table.csv\necho checked every n\nexit 0\n")
+    (store.root / "proofs" / "N" / "out").mkdir()
+    (store.root / "proofs" / "N" / "out" / "table.csv").write_text("n,ratio\n")  # the output the program rewrites, frozen with it
     proof = _reviewed(store)
     status, result = _post(hub, "/studio/N/api/run")
     assert status == 200
@@ -194,3 +197,51 @@ def test_a_file_opens_at_its_line_by_scheme_or_through_the_command(hub):
     (store.root / "proof.toml").write_text(f'[studio]\nopen_command = "sh -c \'echo {{file}} > {marker}\'"\n')
     assert _post(hub, "/studio/N/api/open", {"file": "check.py", "line": 40})[1]["ok"] is True
     assert marker.read_text().strip() == str((store.root / "proofs" / "N" / "check.py").resolve())
+
+
+# -- a run is evidence about the snapshot it matches, never about a folder that drifted (audit S1) -------
+
+
+def test_a_run_of_a_program_that_differs_from_the_snapshot_is_recorded_against_nothing(hub):
+    store, hub = hub
+    _script(store, "N", "exit 7\n")
+    proof = _reviewed(store)  # v1 freezes a failing program
+    _script(store, "N", "exit 0\n")  # the working copy now passes — v1 did not
+    status, result = _post(hub, "/studio/N/api/run")
+    assert status == 200 and result["exit"] == 0
+    assert result["evidence"] is None and "differs from snapshot v1" in result["note"]
+    assert list_evidence_checks(store, proof.id) == []
+
+
+def test_a_run_counts_only_when_the_folder_matches_the_snapshot_before_and_after(hub):
+    store, hub = hub
+    _script(store, "N", "mkdir -p out\necho 'n,ratio' > out/table.csv\nexit 0\n")  # writes an output the snapshot did not hold
+    proof = _reviewed(store)
+    status, result = _post(hub, "/studio/N/api/run")
+    assert result["evidence"] is None and "changed during the run" in result["note"]  # out/table.csv appeared: the folder is no longer v1
+    assert list_evidence_checks(store, proof.id) == []
+    proof2 = request_review(store, "N", requested_by="agent_a", rationale="with its output")
+    status, again = _post(hub, "/studio/N/api/run")  # the same output is written again: the folder still matches v2
+    assert again["evidence"]["outcome"] == "passed"
+    (check,) = list_evidence_checks(store, proof2.id)
+    assert check.outcome.value == "passed"
+
+
+# -- an exchanged computation node still runs (audit S2) -----------------------------------------------
+
+
+def test_an_imported_computation_node_keeps_a_runnable_entry(hub, tmp_path):
+    from proof_cli.exchange import bundle_to_json, export_exchange_bundle, import_exchange_bundle, parse_bundle
+
+    store, hub = hub
+    _script(store, "N", "exit 0\n")
+    target = ensure_project(tmp_path / "target")
+    import_exchange_bundle(target, parse_bundle(bundle_to_json(export_exchange_bundle(store))))
+    run = target.root / "proofs" / "N" / "run.sh"
+    assert run.is_file() and os.access(run, os.X_OK)  # the entry's execute bit survives the bundle
+    other = StudioHub(target)
+    try:
+        status, result = _post(other, "/studio/N/api/run")
+        assert status == 200 and result["exit"] == 0
+    finally:
+        other.close()

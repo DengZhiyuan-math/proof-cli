@@ -298,13 +298,16 @@ class Studio:
                  hidden: tuple[str, ...] = (), agent_scratch: str | None = None,
                  agent_context: Callable[[], object] | None = None,
                  node_medium: Callable[[], str | None] | None = None,
-                 on_run: Callable[[str, str], dict | None] | None = None,
+                 on_run: Callable[[str, str, str | None, str | None], dict] | None = None,
+                 working_digest: Callable[[], str | None] | None = None,
                  open_command: Callable[[], str | None] | None = None) -> None:
         # a node's Medium (spec #145): Run exists for a computation; on_run records a run as an
-        # Evidence check and says what it recorded (None when there is no snapshot yet);
+        # Evidence check when the folder it ran in is the current snapshot — working_digest is the
+        # folder's manifest digest, read before and after the run — and says what it did or why not;
         # open_command is the project's optional way to hand the folder to an editor
         self.node_medium = node_medium
         self.on_run = on_run
+        self.working_digest = working_digest
         self.open_command = open_command
         self.running_runs: list[build.Runner] = []  # runs may be concurrent, each its own Evidence check
         self.fixed_build = fixed_build
@@ -598,12 +601,15 @@ class Studio:
                         "outcome": "error", "evidence": None, "note": ""}
             self.running_runs.append(runner)
         rc: int | None = None
+        digest_before = self.working_digest() if self.working_digest else None
         try:
-            if not script.is_file() or not os.access(script, os.X_OK):
-                out = f"{RUN_SCRIPT} is missing or not executable in {self.root}: nothing ran"
+            if not script.is_file():
+                out = f"{RUN_SCRIPT} is missing in {self.root}: nothing ran"
             else:
                 try:
-                    rc, out = runner.run([str(script)], self.root, env=build.build_env())
+                    # the script as itself when it is executable; through sh otherwise (an exchanged copy, a fresh checkout)
+                    argv = [str(script)] if os.access(script, os.X_OK) else ["/bin/sh", str(script)]
+                    rc, out = runner.run(argv, self.root, env=build.build_env())
                 except build.Stopped:  # stopped from another request, or by the time limit (the Runner raises for both)
                     out = f"the run took longer than {int(RUN_TIMEOUT)} seconds and was stopped" if runner.timed_out else "stopped"
         except OSError as exc:
@@ -617,10 +623,10 @@ class Studio:
         outcome = "passed" if rc == 0 else "failed" if rc is not None else "error"
         what = "stopped" if cancelled else "timed out" if runner.timed_out else f"exit {rc}" if rc is not None else "could not start"
         notes = f"./{RUN_SCRIPT}: {what} after {seconds}s"
-        evidence = self.on_run(outcome, notes) if self.on_run else None
-        note = "" if evidence is not None else "no snapshot yet: request review, and runs are recorded as Evidence checks on it"
+        digest_after = self.working_digest() if self.working_digest else None
+        recorded = self.on_run(outcome, notes, digest_before, digest_after) if self.on_run else {"evidence": None, "note": ""}
         return {"exit": rc, "output": out, "seconds": seconds, "cancelled": cancelled, "timed_out": runner.timed_out,
-                "outcome": outcome, "evidence": evidence, "note": note}
+                "outcome": outcome, "evidence": recorded.get("evidence"), "note": recorded.get("note") or ""}
 
     def stop_runs(self) -> bool:
         with self._admit:

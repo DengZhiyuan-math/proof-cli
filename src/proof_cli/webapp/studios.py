@@ -13,6 +13,7 @@ fixed: `proof.tex` → `build/proof.pdf`, the PDF review archives when it is cur
 
 from __future__ import annotations
 
+import hashlib
 import threading
 from dataclasses import dataclass
 from http import HTTPStatus
@@ -25,7 +26,8 @@ from ..reviews import git_identity
 from ..storage import ProjectStore, get_current_candidate_proof
 from ..studio.proof_agent import ProofAgentContext, library_folders, open_command
 from ..studio.server import Studio
-from ..vault import node_folder
+from ..authority import candidate_proof_sha256
+from ..vault import manifest_digest, node_folder, working_inputs
 
 STUDIO_STATIC = Path(__file__).resolve().parent.parent / "studio" / "static"
 # the node's build: what vault.build_is_current checks and review archives (ADR-0010)
@@ -106,7 +108,8 @@ class StudioHub:
                     # the node's Medium as of each request, a run recorded as an Evidence check as the page's
                     # identity, and the project's optional open command (spec #145)
                     node_medium=lambda: self._medium(node_id),
-                    on_run=lambda outcome, notes: self._record_run(node_id, outcome, notes),
+                    on_run=lambda outcome, notes, before, after: self._record_run(node_id, outcome, notes, before, after),
+                    working_digest=lambda: self._working_digest(node_id),
                     open_command=lambda: open_command(root),
                 )
             return self._studios[node.id]
@@ -115,13 +118,23 @@ class StudioHub:
         node = proof_map.get_node(self.store, node_id)
         return node.medium.value if node is not None and node.medium is not None else None
 
-    def _record_run(self, node_id: str, outcome: str, notes: str) -> dict | None:
-        """A run is an Evidence check on the node's current snapshot (spec #145); before any snapshot, nothing to record it against."""
+    def _working_digest(self, node_id: str) -> str:
+        """The node folder's inputs as a snapshot would freeze them, digested — what a run actually ran."""
+        return manifest_digest({rel: hashlib.sha256(path.read_bytes()).hexdigest() for rel, path in working_inputs(self.store.root, node_id).items()})
+
+    def _record_run(self, node_id: str, outcome: str, notes: str, before: str | None, after: str | None) -> dict:
+        """A run is an Evidence check on a specific Candidate proof (ADR-0004): recorded only when the folder it ran in
+        is the current snapshot — the same before and after the run, and the same as what was frozen. Otherwise nothing
+        is recorded, and the answer says why."""
         proof = get_current_candidate_proof(self.store, node_id)
         if proof is None:
-            return None
+            return {"evidence": None, "note": "no snapshot yet: request review, and runs of what it froze are recorded as Evidence checks on it"}
+        if before != after:
+            return {"evidence": None, "note": f"the folder changed during the run, so it is not snapshot v{proof.version} that ran: request review to freeze what is there now"}
+        if before != candidate_proof_sha256(self.store, proof.id):
+            return {"evidence": None, "note": f"the program differs from snapshot v{proof.version}: request review to freeze it, and runs of it are recorded"}
         check = proof_map.record_evidence_check(self.store, proof.id, outcome, notes=notes, run_by=git_identity(self.store.root))
-        return check.model_dump(mode="json")
+        return {"evidence": check.model_dump(mode="json"), "note": ""}
 
     def _dependencies(self, node_id: str) -> list[str]:
         node = proof_map.get_node(self.store, node_id)
