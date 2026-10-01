@@ -29,6 +29,10 @@ from typing import Callable
 
 from . import build, httpbase
 from ..key_ideas import KEY_IDEAS_FILE
+from ..vault import RUN_SCRIPT
+
+# what a computation node's studio edits besides the LaTeX suffixes (spec #145): its program, its data, its logs
+COMPUTATION_SUFFIXES = {".sh", ".py", ".sage", ".lean", ".jl", ".r", ".R", ".m", ".gp", ".mac", ".csv", ".json", ".log", ".toml", ".yml", ".yaml", ".cfg", ".ini"}
 from .agent import NO_WINDOW, AgentManager
 from .fsutil import EDITABLE_SUFFIXES, SKIP_DIRS, with_line_ends_of, write_bytes
 from .texutil import group, plain_text
@@ -334,6 +338,7 @@ class Studio:
             running = self.running_build
         if running is not None:
             running.stop()      # registered before it runs anything, so nothing starts
+        self.stop_runs()        # a computation's runs too (ADR-0011: programs are limited per folder)
         self.agent.shutdown()
 
     # ------------------------------------------------------------ the agent's files
@@ -381,7 +386,7 @@ class Studio:
         if self.root not in p.parents:
             raise ValueError("outside project")
         r = p.relative_to(self.root).as_posix()
-        if p.suffix not in EDITABLE_SUFFIXES or self._excluded(r):
+        if p.suffix not in self.editable_suffixes() or self._excluded(r):
             raise ValueError("not an editable file")
         return p
 
@@ -391,7 +396,7 @@ class Studio:
             for g in self.cfg.files:
                 for p in self.root.glob(g):
                     rel = p.relative_to(self.root).as_posix()
-                    if p.is_file() and p.suffix in EDITABLE_SUFFIXES and not self._excluded(rel):
+                    if p.is_file() and p.suffix in self.editable_suffixes() and not self._excluded(rel):
                         seen.add(rel)
         else:
             for dirpath, dirnames, filenames in os.walk(self.root):
@@ -402,7 +407,7 @@ class Studio:
                                      and not (reld == "" and d in self.hidden))
                 for f in filenames:
                     rel = reld + f
-                    if Path(f).suffix in EDITABLE_SUFFIXES and not self._excluded(rel):
+                    if Path(f).suffix in self.editable_suffixes() and not self._excluded(rel):
                         seen.add(rel)
                 if len(seen) > MAX_FILES:
                     break
@@ -573,42 +578,45 @@ class Studio:
         return b is not None
 
     # ------------------------------------------------------------ a computation's run (spec #145)
-    RUN_SCRIPT = "run.sh"
-
     def medium(self) -> str | None:
         return self.node_medium() if self.node_medium else None
+
+    def editable_suffixes(self) -> set[str]:
+        """The files the editor lists and writes: the LaTeX set, plus a computation's program and data (spec #145)."""
+        return EDITABLE_SUFFIXES | COMPUTATION_SUFFIXES if self.medium() == "computation" else EDITABLE_SUFFIXES
 
     def run_program(self) -> dict:
         """Run the node's run.sh in its folder: the computation that is its candidate proof. Its exit
         code is recorded as an Evidence check on the current snapshot (0 passed, otherwise failed, a
         run that could not start or was stopped error) — never a decision. Runs may be concurrent."""
         t0 = time.time()
-        script = self.root / self.RUN_SCRIPT
+        script = self.root / RUN_SCRIPT
         runner = build.Runner(RUN_TIMEOUT)
         with self._admit:
             if self.closed:
-                return {"closed": True, "exit": None, "output": "The studio is closed.", "seconds": 0, "cancelled": False, "timed_out": False, "evidence": None, "note": ""}
+                return {"closed": True, "exit": None, "output": "The studio is closed.", "seconds": 0, "cancelled": False, "timed_out": False,
+                        "outcome": "error", "evidence": None, "note": ""}
             self.running_runs.append(runner)
         rc: int | None = None
-        cancelled = False
         try:
             if not script.is_file() or not os.access(script, os.X_OK):
-                out = f"{self.RUN_SCRIPT} is missing or not executable in {self.root}: nothing ran"
+                out = f"{RUN_SCRIPT} is missing or not executable in {self.root}: nothing ran"
             else:
                 try:
                     rc, out = runner.run([str(script)], self.root, env=build.build_env())
-                except build.Stopped:
-                    cancelled, out = True, "stopped"
+                except build.Stopped:  # stopped from another request, or by the time limit (the Runner raises for both)
+                    out = f"the run took longer than {int(RUN_TIMEOUT)} seconds and was stopped" if runner.timed_out else "stopped"
         except OSError as exc:
-            out = f"{self.RUN_SCRIPT} could not start: {exc}"
+            out = f"{RUN_SCRIPT} could not start: {exc}"
         finally:
             with self._admit:
                 if runner in self.running_runs:
                     self.running_runs.remove(runner)
         seconds = round(time.time() - t0, 1)
+        cancelled = runner.stopped.is_set() and not runner.timed_out  # as Build.run reads it
         outcome = "passed" if rc == 0 else "failed" if rc is not None else "error"
         what = "stopped" if cancelled else "timed out" if runner.timed_out else f"exit {rc}" if rc is not None else "could not start"
-        notes = f"./{self.RUN_SCRIPT}: {what} after {seconds}s"
+        notes = f"./{RUN_SCRIPT}: {what} after {seconds}s"
         evidence = self.on_run(outcome, notes) if self.on_run else None
         note = "" if evidence is not None else "no snapshot yet: request review, and runs are recorded as Evidence checks on it"
         return {"exit": rc, "output": out, "seconds": seconds, "cancelled": cancelled, "timed_out": runner.timed_out,
@@ -628,13 +636,21 @@ class Studio:
             return {"kind": "command", "command": command}
         return {"kind": "scheme", "url": f"vscode://file/{self.root}"}
 
-    def open_folder(self) -> dict:
-        """Run the project's open command with the folder (and the entry file) filled in; without one,
-        tell the page to use the scheme itself."""
+    def open_folder(self, file: str | None = None, line: int | None = None) -> dict:
+        """Hand the folder — or one of its files, at a line — to the editor: run the project's open
+        command with {folder} and {file} filled in, or tell the page the scheme URL to use itself
+        (`vscode://file/<folder>`, `vscode://file/<file>:<line>`)."""
+        target = self.root
+        if file:
+            try:
+                target = self.resolve(file)  # a file of this folder, never outside it
+            except ValueError:
+                return {"ok": False, "error": f"not a file of this node: {file}"}
         how = self.how_to_open()
         if how["kind"] != "command":
-            return {"ok": True, **how}
-        entry = self.root / (self.RUN_SCRIPT if self.medium() == "computation" else self.cfg.main)
+            url = f"vscode://file/{target}" + (f":{int(line)}" if file and line else "")
+            return {"ok": True, "kind": "scheme", "url": url}
+        entry = target if file else self.root / (RUN_SCRIPT if self.medium() == "computation" else self.cfg.main)
         argv = [part.replace("{folder}", str(self.root)).replace("{file}", str(entry)) for part in shlex.split(how["command"])]
         try:
             done = subprocess.run(argv, cwd=self.root, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=15)
@@ -780,7 +796,8 @@ class Studio:
         if path == "/api/run/stop":
             return _json({"stopped": self.stop_runs()})
         if path == "/api/open":
-            return _json(self.open_folder())
+            line = body.get("line")
+            return _json(self.open_folder(str(body.get("file") or "") or None, int(line) if line else None))
         return _err(404, "not found")
 
 

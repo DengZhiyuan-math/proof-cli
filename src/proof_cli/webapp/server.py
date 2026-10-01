@@ -47,7 +47,7 @@ from ..storage import (
 )
 from ..authority import candidate_proof_sha256
 from .. import key_ideas
-from ..vault import SNAPSHOT_MANIFEST, archived_pdf_path, build_pdf_path, frozen_key_ideas, node_folder, snapshot_folder_file, snapshot_folder_files
+from ..vault import OUT_DIR, SNAPSHOT_MANIFEST, archived_pdf_path, build_pdf_path, frozen_key_ideas, node_folder, snapshot_folder_file, snapshot_folder_files
 from .studios import StudioHub
 
 
@@ -78,10 +78,16 @@ class RequestError(Exception):
         self.status, self.code, self.message, self.details = status, code, message, details or {}
 
 
+# the frozen outputs a browser may show inline: raster images only (an SVG or HTML can carry script)
+_INLINE_OUTPUT_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
+# what a frozen output is sent under: no script, no frames, nothing of the page's origin reachable
+_OUTPUT_POLICY = "sandbox; default-src 'none'"
+
+
 def _output_type(rel: str) -> str:
-    """A frozen output's media type by its name; CSV and JSON are named so a viewer can tell a table from a blob."""
+    """A frozen output's media type by its name (a .log is text; anything unknown is a blob)."""
     guessed, _ = mimetypes.guess_type(rel)
-    return guessed or {"csv": "text/csv", "json": "application/json", "log": "text/plain", "txt": "text/plain"}.get(rel.rsplit(".", 1)[-1].lower(), "application/octet-stream")
+    return guessed or ("text/plain" if rel.lower().endswith(".log") else "application/octet-stream")
 
 
 def _proof_view(store: ProjectStore, proof) -> dict | None:
@@ -109,7 +115,7 @@ def _proof_view(store: ProjectStore, proof) -> dict | None:
             files[rel] = data.decode("utf-8")
         except UnicodeDecodeError:
             pass
-        if rel.startswith("out/"):
+        if rel.startswith(f"{OUT_DIR}/"):
             outputs.append({"path": rel, "bytes": len(data), "type": _output_type(rel)})
     summary = key_ideas.view((frozen or {}).get(key_ideas.KEY_IDEAS_FILE))
     if summary is not None:  # who wrote it, as the snapshot's record says (never read from the file)
@@ -359,17 +365,22 @@ class ReviewApp:
         }
 
     def snapshot_file(self, node_id: str, rel: str) -> tuple[bytes, str]:
-        """One file the node's current snapshot froze (spec #145): a computation's output, as bytes with its type.
-        Only a path the manifest lists; never anything outside the snapshot folder."""
+        """One file the node's current snapshot froze (spec #145): a computation's output, as bytes with the
+        type it is served as. Served by the name the manifest lists it under (`snapshot_folder_file`
+        reads nothing else), so a path outside the snapshot never resolves; a folder snapshot only.
+        Never as active content on the page's origin: a raster image is served as itself (and sent
+        under a sandboxing policy), anything else — an agent-written HTML or SVG included — as a plain
+        download, so no frozen file can act on the page as the researcher (ADR-0010)."""
         proof_map.require_node(self.store, node_id)
         proof = get_current_candidate_proof(self.store, node_id)
         path = self.store.root / proof.file_path if proof is not None else None
-        if path is None or path.name != SNAPSHOT_MANIFEST or not rel or rel.startswith(("/", "../")) or "/../" in rel or "\\" in rel:
+        if path is None or path.name != SNAPSHOT_MANIFEST or not rel:
             raise RequestError(HTTPStatus.NOT_FOUND, "NO_SUCH_FILE", f"{node_id} has no frozen file {rel!r}")
         data = snapshot_folder_file(path.parent, rel)
         if data is None:
             raise RequestError(HTTPStatus.NOT_FOUND, "NO_SUCH_FILE", f"{node_id}'s snapshot froze no file {rel!r}")
-        return data, _output_type(rel)
+        kind = _output_type(rel)
+        return data, (kind if kind in _INLINE_OUTPUT_TYPES else "application/octet-stream")
 
     def pdf(self, node_id: str, which: str) -> bytes:
         proof_map.require_node(self.store, node_id)  # a known node id: a plain folder name, never a path
@@ -724,7 +735,7 @@ class _Handler(BaseHTTPRequestHandler):
                 return self._error(exc.status, exc.code, exc.message)
             except proof_map.ProofMapError as exc:
                 return self._error(HTTPStatus.NOT_FOUND, exc.code, exc.message)
-            return self._send(HTTPStatus.OK, data, content_type, policy=False)
+            return self._send(HTTPStatus.OK, data, content_type, policy=_OUTPUT_POLICY)
         if path.startswith("/api/node/") and path.endswith(("/pdf/snapshot", "/pdf/build")):
             node_id, _, which = unquote(path.removeprefix("/api/node/")).rpartition("/pdf/")
             try:

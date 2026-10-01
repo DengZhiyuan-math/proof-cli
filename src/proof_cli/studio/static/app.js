@@ -21,7 +21,7 @@ const cm = CodeMirror($("#editor"), {
   styleActiveLine: true, indentUnit: 2, tabSize: 2, indentWithTabs: false,
   extraKeys: {
     "Cmd-S": () => saveActive(), "Ctrl-S": () => saveActive(),
-    "Cmd-Enter": () => compile(), "Ctrl-Enter": () => compile(),
+    "Cmd-Enter": () => primaryAction(), "Ctrl-Enter": () => primaryAction(),
     "Cmd-J": () => forwardSync(), "Ctrl-J": () => forwardSync(),
     "Ctrl-Space": (ed) => showCompletions(ed, true),
     "Cmd-/": "toggleTexComment", "Ctrl-/": "toggleTexComment",
@@ -152,7 +152,7 @@ async function saveActive() {
   const t = activeTab(); if (!t) return;
   clearTimeout(t.saveTimer);
   const ok = await saveTab(t);
-  if (ok && $("#auto-compile").checked) compile();
+  if (ok && $("#auto-compile").checked && MEDIUM.value !== "computation") compile();
 }
 
 /* Autosave, as in Overleaf: an edit is saved a moment after you stop typing, and every
@@ -166,7 +166,7 @@ function scheduleSave(t) {
 }
 async function autosave(t) {
   if (!S.tabs.includes(t) || t.conflict || !isDirty(t)) return;
-  if ((await saveTab(t)) && $("#auto-compile").checked) scheduleCompile();
+  if ((await saveTab(t)) && $("#auto-compile").checked && MEDIUM.value !== "computation") scheduleCompile();
 }
 function flushSaves() {
   for (const t of S.tabs) { clearTimeout(t.saveTimer); autosave(t); }
@@ -355,15 +355,16 @@ function applyMedium(r) {
   MEDIUM.open = r.open || null;
   const computation = MEDIUM.value === "computation";
   const open = $("#btn-open-editor");
-  if (open) {
-    open.hidden = !computation;
-    open.title = MEDIUM.open && MEDIUM.open.kind === "command" ? `Open this node's folder with: ${MEDIUM.open.command}` : "Open this node's folder in VS Code (vscode://file/…)";
-  }
+  open.hidden = !computation;
+  open.title = MEDIUM.open && MEDIUM.open.kind === "command" ? `Open this node's folder with: ${MEDIUM.open.command}` : "Open this node's folder in VS Code (vscode://file/…)";
   $("#btn-compile-menu").hidden = computation;
   for (const id of ["#zoom-out", "#zoom-in", "#zoom-fit", "#zoom-label", "#page-label", "#pdf-popout", "#btn-forward"]) { const e = $(id); if (e) e.hidden = computation; }
-  $("#pdf-empty").textContent = computation ? "A computation node: Run executes run.sh here; what it writes to out/ is in Files, and its exit code is an Evidence check." : "No PDF yet — press Compile.";
+  $("#pdf-empty").textContent = computation ? "A computation node: Run executes run.sh here. Its exit code is an Evidence check; what it writes to out/ is frozen with the next snapshot and listed on the node's page." : "No PDF yet — press Compile.";
   setCompileButton(false);
 }
+// the bar's primary action, and ⌘↵: Run on a computation node, Compile on a LaTeX one
+function primaryAction() { return MEDIUM.value === "computation" ? runProgram() : compile(); }
+
 async function openInEditor() {
   const r = await api("/api/open", {});
   if (r.kind === "scheme" && r.url) { location.href = r.url; return; }
@@ -409,7 +410,7 @@ async function loadConfig() {
 // While a build runs, the Compile button stops it.
 function setCompileButton(running) {
   const b = $("#btn-compile");
-  const computation = typeof MEDIUM !== "undefined" && MEDIUM.value === "computation";
+  const computation = MEDIUM.value === "computation";
   b.classList.toggle("stop", running);
   b.querySelector("svg").outerHTML = icon(running ? "stop" : "play");
   $("#compile-label").textContent = running ? "Stop" : computation ? "Run" : "Compile";
@@ -461,10 +462,10 @@ async function compile(clean = false) {
   }
 }
 $("#btn-compile").onclick = () => {
-  if (MEDIUM.value === "computation") return S.building ? api("/api/run/stop", {}) : runProgram();
-  return S.building ? api("/api/build/stop", {}) : compile();
+  if (!S.building) return primaryAction();
+  return api(MEDIUM.value === "computation" ? "/api/run/stop" : "/api/build/stop", {});
 };
-{ const open = $("#btn-open-editor"); if (open) open.onclick = () => openInEditor(); }
+$("#btn-open-editor").onclick = () => openInEditor();
 $("#btn-clean-build").onclick = () => { compileMenu(false); compile(true); };
 
 /* Compile menu: build mode and auto-compile, on the ▾ half of the Compile button. */

@@ -154,3 +154,43 @@ def test_opening_without_a_command_tells_the_page_to_use_the_scheme(hub):
     store, hub = hub
     status, result = _post(hub, "/studio/N/api/open")
     assert status == 200 and result == {"ok": True, "kind": "scheme", "url": f"vscode://file/{(store.root / 'proofs' / 'N').resolve()}"}
+
+
+def test_a_run_that_outlives_the_time_limit_is_recorded_as_an_error_not_as_stopped(hub, monkeypatch):
+    from proof_cli.studio import server as studio_server
+
+    store, hub = hub
+    monkeypatch.setattr(studio_server, "RUN_TIMEOUT", 1.0)
+    _script(store, "N", "sleep 20\n")
+    proof = _reviewed(store)
+    status, result = _post(hub, "/studio/N/api/run")
+    assert status == 200 and result["timed_out"] is True and result["cancelled"] is False and result["exit"] is None
+    assert "longer than 1 seconds" in result["output"]
+    (check,) = list_evidence_checks(store, proof.id)
+    assert check.outcome.value == "error" and "timed out" in check.notes
+
+
+def test_a_computation_nodes_studio_lists_and_edits_its_program_and_data_while_a_latex_nodes_does_not(hub):
+    store, hub = hub
+    folder = store.root / "proofs" / "N"
+    (folder / "check.py").write_text("print(1)\n")
+    (folder / "out").mkdir()
+    (folder / "out" / "table.csv").write_text("n,ratio\n")
+    listed = {f["path"] for f in _get(hub, "/studio/N/api/tree")[1]["files"]}
+    assert {"run.sh", "check.py", "key-ideas.md", "out/table.csv"} <= listed
+    (store.root / "proofs" / "L" / "helper.py").write_text("print(1)\n")
+    assert "helper.py" not in {f["path"] for f in _get(hub, "/studio/L/api/tree")[1]["files"]}
+    status, _ = _post(hub, "/studio/N/api/file", {"path": "check.py", "content": "print(2)\n", "base_mtime": None, "force": True})
+    assert status == 200 and (folder / "check.py").read_text() == "print(2)\n"
+
+
+def test_a_file_opens_at_its_line_by_scheme_or_through_the_command(hub):
+    store, hub = hub
+    (store.root / "proofs" / "N" / "check.py").write_text("print(1)\n")
+    status, result = _post(hub, "/studio/N/api/open", {"file": "check.py", "line": 40})
+    assert result == {"ok": True, "kind": "scheme", "url": f"vscode://file/{(store.root / 'proofs' / 'N' / 'check.py').resolve()}:40"}
+    assert _post(hub, "/studio/N/api/open", {"file": "../L/proof.tex"})[1]["ok"] is False
+    marker = store.root / "opened.txt"
+    (store.root / "proof.toml").write_text(f'[studio]\nopen_command = "sh -c \'echo {{file}} > {marker}\'"\n')
+    assert _post(hub, "/studio/N/api/open", {"file": "check.py", "line": 40})[1]["ok"] is True
+    assert marker.read_text().strip() == str((store.root / "proofs" / "N" / "check.py").resolve())
