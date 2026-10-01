@@ -32,15 +32,15 @@ from .collaboration import (
     ReviewRecordKind,
 )
 from .domain import (
-    Medium,
     CandidateProofRecord,
     Challenge,
     ChallengeStatus,
     ClaimRecord,
     DependencyPin,
+    EventRecord,
     EvidenceCheck,
     EvidenceOutcome,
-    EventRecord,
+    Medium,
     ProofMapNode,
     ProofMapNodeKind,
     TrustLevel,
@@ -110,9 +110,8 @@ from .vault import (
     snapshot_dir,
     snapshots_on_disk,
     working_inputs,
-    working_proof_path,
+    working_entry_path,
     write_snapshot_folder,
-    run_script_path,
     write_working_computation,
     write_working_proof,
 )
@@ -385,21 +384,21 @@ def _write_working_files(root: Path, node: ProofMapNode) -> None:
         write_working_proof(root, node_id=node.id, kind=node.kind.value, statement=node.statement)
 
 
-def set_medium(store: ProjectStore, node_id: str, medium: Medium | str, *, by: str = "human") -> ProofMapNode:
+def set_medium(store: ProjectStore, node_id: str, medium: Medium | str, *, edited_by: str = "human") -> ProofMapNode:
     """Change what a node's candidate proof is made of (spec #145). Allowed at any time: the
     medium is not part of the Accepted mathematical interface, so an Acceptance stands; files are
-    never removed, and the entry the new medium needs (run.sh or proof.tex) is scaffolded if missing."""
+    never removed, and the entry the new medium needs (run.sh or proof.tex) is scaffolded if
+    missing. Setting the medium a node already has changes and records nothing."""
     node = require_node(store, node_id)
-    resolved = _resolve_medium(node.kind, medium)
-    if resolved is None:  # an imported result: _resolve_medium refused a medium already
-        raise ProofMapError("MEDIUM_NOT_APPLICABLE", "an imported_result has no candidate proof, so no medium")
-    previous = node.medium
-    changed = node.model_copy(update={"medium": resolved, "updated_by": by, "updated_at": utc_now()})
+    resolved = _resolve_medium(node.kind, medium)  # refuses an imported result or an unknown medium
+    if resolved == node.medium:
+        return node
+    changed = node.model_copy(update={"medium": resolved, "updated_by": edited_by, "updated_at": utc_now()})
     with store.transaction() as conn:
         update_proof_map_node(store, changed, conn=conn)
         append_event(
-            store, "proof_map_node_medium_set", f"{node_id}: medium {previous.value if previous else '—'} → {resolved.value}",
-            entity_id=node_id, payload={"from": previous.value if previous else None, "to": resolved.value, "by": by}, conn=conn,
+            store, "proof_map_node_medium_set", f"{node_id}: medium {node.medium.value} → {resolved.value}",
+            entity_id=node_id, payload={"from": node.medium.value, "to": resolved.value, "by": edited_by}, conn=conn,
         )
     _write_working_files(store.root, changed)
     return changed
@@ -969,14 +968,13 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
             "requesting review requires stating why this node is now appropriately scoped to prove directly",
         )
     # the entry its Medium asks for (spec #145): a computation's run.sh, a LaTeX document's proof.tex
-    if node.medium == Medium.computation:
-        run = run_script_path(store.root, node_id)
-        if not run.is_file():
-            raise ProofMapError("RUN_SCRIPT_MISSING", f"{run.relative_to(store.root).as_posix()} doesn't exist: a computation node's review needs its run.sh")
-    else:
-        working = working_proof_path(store.root, node_id)
-        if not working.is_file():
-            raise ProofMapError("WORKING_PROOF_MISSING", f"{working.relative_to(store.root).as_posix()} doesn't exist")
+    entry = working_entry_path(store.root, node_id, node.medium.value if node.medium else None)
+    if not entry.is_file():
+        computation = node.medium == Medium.computation
+        raise ProofMapError(
+            "RUN_SCRIPT_MISSING" if computation else "WORKING_PROOF_MISSING",
+            f"{entry.relative_to(store.root).as_posix()} doesn't exist" + (": a computation node's review needs the program that is its candidate proof" if computation else ""),
+        )
     # read once: what is hashed is exactly what is frozen, even if a file changes meanwhile.
     # The key-ideas summary is one of these inputs (ADR-0013): frozen, listed and hashed with
     # the proof, so a change to it alone is a new version, by the same unchanged-check below

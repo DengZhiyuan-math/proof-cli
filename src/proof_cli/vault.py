@@ -6,7 +6,7 @@ import shutil
 from pathlib import Path
 from typing import Callable
 
-from .key_ideas import KEY_IDEAS_FILE, TEMPLATE as KEY_IDEAS_TEMPLATE
+from .key_ideas import KEY_IDEAS_FILE, TEMPLATE_COMPUTATION as KEY_IDEAS_TEMPLATE_COMPUTATION
 
 
 def vault_dir(root: Path) -> Path:
@@ -224,10 +224,7 @@ def write_working_proof(root: Path, *, node_id: str, kind: str, statement: str) 
     if not preamble.exists():
         preamble.parent.mkdir(parents=True, exist_ok=True)
         preamble.write_text(PREAMBLE, encoding="utf-8")
-    ignore = vault_dir(root) / ".gitignore"
-    if not ignore.exists():
-        # build output is regenerated; what's reviewed is the snapshot (and its archived PDF)
-        ignore.write_text("*/build/\n", encoding="utf-8")
+    _ensure_vault_ignore(root)
     path = working_proof_path(root, node_id)
     if path.exists():
         return
@@ -245,6 +242,14 @@ def write_working_proof(root: Path, *, node_id: str, kind: str, statement: str) 
     )
 
 
+def _ensure_vault_ignore(root: Path) -> None:
+    """The vault's .gitignore, once: build output is regenerated; what's reviewed is the snapshot (and its archived PDF)."""
+    ignore = vault_dir(root) / ".gitignore"
+    if not ignore.exists():
+        ignore.parent.mkdir(parents=True, exist_ok=True)
+        ignore.write_text("*/build/\n", encoding="utf-8")
+
+
 RUN_SCRIPT = "run.sh"
 OUT_DIR = "out"
 _RUN_SKELETON = """\
@@ -254,7 +259,7 @@ _RUN_SKELETON = """\
 #   {statement}
 # It runs in this folder. Write what it produces (tables, figures, logs) into out/ — the
 # review snapshot freezes this folder, out/ included, and the researcher's Acceptance judges
-# whether what was frozen establishes the statement. Exit 0 when the check passes.
+# whether what was frozen establishes the statement. Exit 0 when the computation establishes it.
 set -euo pipefail
 mkdir -p out
 echo "nothing computed yet" > out/run.log
@@ -265,10 +270,7 @@ exit 1
 def write_working_computation(root: Path, *, node_id: str, kind: str, statement: str) -> None:
     """Create a computation node's folder, if missing: an executable `run.sh` skeleton and a
     key-ideas skeleton — and no `proof.tex` (spec #145). Never overwrites."""
-    ignore = vault_dir(root) / ".gitignore"
-    if not ignore.exists():
-        ignore.parent.mkdir(parents=True, exist_ok=True)
-        ignore.write_text("*/build/\n", encoding="utf-8")
+    _ensure_vault_ignore(root)
     folder = node_folder(root, node_id)
     folder.mkdir(parents=True, exist_ok=True)
     run = folder / RUN_SCRIPT
@@ -277,11 +279,33 @@ def write_working_computation(root: Path, *, node_id: str, kind: str, statement:
         run.chmod(run.stat().st_mode | 0o111)
     key_ideas = folder / KEY_IDEAS_FILE
     if not key_ideas.exists():
-        key_ideas.write_text(KEY_IDEAS_TEMPLATE, encoding="utf-8")
+        key_ideas.write_text(KEY_IDEAS_TEMPLATE_COMPUTATION, encoding="utf-8")
 
 
 def run_script_path(root: Path, node_id: str) -> Path:
     return node_folder(root, node_id) / RUN_SCRIPT
+
+
+LARGE_OUTPUT_BYTES = 50 * 1024 * 1024  # a reminder, never a refusal, when out/ is this big at snapshot time (spec #145)
+
+
+def output_bytes(root: Path, node_id: str) -> int:
+    """How much a computation node's out/ holds: what a Review snapshot would freeze with the program."""
+    out = node_folder(root, node_id) / OUT_DIR
+    return sum(path.stat().st_size for path in out.rglob("*") if path.is_file()) if out.is_dir() else 0
+
+
+def large_output_note(root: Path, node_id: str) -> str | None:
+    """A note for the researcher when out/ is large (spec #145): big data is their call and their .gitignore."""
+    size = output_bytes(root, node_id)
+    if size <= LARGE_OUTPUT_BYTES:
+        return None
+    return f"out/ holds {size / (1024 * 1024):.0f} MB: every review snapshot freezes a copy of it; keep what the review needs there and .gitignore the rest"
+
+
+def working_entry_path(root: Path, node_id: str, medium: str | None) -> Path:
+    """The file a node's work starts from, by its Medium (spec #145): a computation's run.sh, otherwise proof.tex."""
+    return run_script_path(root, node_id) if medium == "computation" else working_proof_path(root, node_id)
 
 
 def write_snapshot(path: Path, content: bytes) -> None:

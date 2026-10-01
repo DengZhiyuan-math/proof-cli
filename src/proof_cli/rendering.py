@@ -122,7 +122,7 @@ def render_proof_map_node(
     if integrity_state is not None:
         table.add_row("Integrity state", integrity_state)
     if working_proof is not None:
-        table.add_row("Run script" if working_proof.endswith("run.sh") else "Working proof", working_proof)
+        table.add_row("Run script" if node.medium is not None and node.medium.value == "computation" else "Working proof", working_proof)
     for snapshot in snapshots or []:
         current = " (current)" if snapshot["is_current"] else ""
         table.add_row(f"Snapshot v{snapshot['version']}", f"{snapshot['file_path']}{current} sha256={snapshot['sha256'] or '—'}")

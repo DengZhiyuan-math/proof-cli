@@ -196,7 +196,7 @@
     const node = view.node;
     document.title = `${node.id} · proof studio`;
     const name = document.getElementById("projname");
-    if (name) name.textContent = `${node.kind} · ${node.id}`;
+    if (name) name.textContent = `${node.kind}${node.medium === "computation" ? " · computation" : ""} · ${node.id}`;  // its medium when it is a program (spec #145)
     const deps = h("ul", null, { class: "node-deps" });
     for (const d of view.dependencies) {
       const li = h("li");
