@@ -117,7 +117,7 @@ proof-cli's own local web page, the map's home, and the researcher's one entry: 
 _Avoid_: review app (its ADR-0009 name), dashboard, admin panel
 
 **Studio**:
-A local node's page on the proof map page: the Proof agent's workbench, watched by the researcher. Its centre is the node's Work log — the run's plan, its role and step, and the oversight actions (Start, Pause, Redirect, Resume, Stop and release, Review what it has) — and the editor and PDF, or a `computation` node's program and `out/`, are its Files view; a computation node's bar offers Run and Open in VS Code where a LaTeX node's offers Compile. It has a node panel for the node's state and dependencies, the review sheet for the researcher's decisions, and an Ask box for read-only questions to the agent. Served by the map's own server; built from prism-local's code. See ADR-0011, ADR-0015, ADR-0016.
+A local node's page on the proof map page: the Proof agent's workbench, watched by the researcher. Its centre is the node's Work log — the run's plan, its role and step, and the oversight actions (Start, Pause, Redirect, Resume, Stop and release, and Review what it has, which freezes a snapshot and, as any review request does, hands the node over) — and the editor and PDF, or a `computation` node's program and `out/`, are its Files view; a computation node's bar offers Run and Open in VS Code where a LaTeX node's offers Compile. It has a node panel for the node's state and dependencies, the review sheet for the researcher's decisions, and an Ask box for read-only questions to the agent. Served by the map's own server; built from prism-local's code. See ADR-0011, ADR-0015, ADR-0016.
 _Avoid_: prism-local (the separate project it was copied from), editor window, LaTeX editor
 
 **Proof agent**:

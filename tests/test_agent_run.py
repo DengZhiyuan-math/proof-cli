@@ -611,7 +611,7 @@ def test_the_studio_serves_the_work_log(studio):
     assert status == 200 and [e["kind"] for e in served["entries"]][:3] == ["claimed", "plan", "step"]
 
 
-def test_review_what_it_has_freezes_a_snapshot_as_the_researcher(studio):
+def test_review_what_it_has_freezes_a_snapshot_in_the_runs_name_and_ends_the_run(studio):
     store, hub, log, queue = studio
     write_key_ideas(store, "N")
     _queue(queue, [["write", "proof.tex", "\\documentclass{amsart}\\begin{document}half\\end{document}\n"], ["sleep", "2"]], [["sleep", "0"]])
@@ -631,3 +631,32 @@ def test_review_what_it_has_is_refused_when_nothing_can_be_frozen(studio):
     store, hub, log, queue = studio
     status, refused = _post(hub, "/studio/N/api/agent/review-now")  # no key ideas yet: the service refuses, and says so
     assert status == 409 and refused["error"] == "KEY_IDEAS_REQUIRED"
+
+
+def test_the_log_lists_this_starts_turns_with_their_roles(studio):
+    store, hub, log, queue = studio
+    _queue(queue, [["proof", "node", "progress", "N", "--handoff", "typesetter", "--note", "write it"]], [["sleep", "0"]], [["proof", "node", "progress", "N", "--step", "1", "--status", "stuck", "--note", "enough"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
+    _wait(hub)
+    turns = _get(hub, "/studio/N/api/agent/log")[1]["turns"]
+    assert [t["role"] for t in turns] == ["prover", "typesetter", "prover"] and all(t["done"] for t in turns) and "Take your turn as the Prover" in turns[0]["prompt"]
+
+
+def test_the_chat_route_is_ask_only_whatever_the_body_says(studio):
+    store, hub, log, queue = studio
+    _queue(queue, [["write", "proof.tex", "edited by a chat turn\n"]])
+    status, started = _post(hub, "/studio/N/api/agent", {"prompt": "rewrite the proof", "mode": "edit", "provider": "claude"})
+    assert status == 200 and "job" in started
+    job = hub.studio("N").agent.jobs[started["job"]]
+    deadline = time.monotonic() + 30
+    while not job.done and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert job.mode == "ask"  # the backend gets no Edit permission in this mode; what the stub wrote directly says nothing about that
+
+
+def test_the_prover_may_open_a_challenge(studio):
+    store, hub, log, queue = studio
+    _queue(queue, [["sleep", "0"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["prover"]})
+    _wait(hub)
+    assert "Bash(proof node challenge *)" in _turns(log)[0]["argv"]

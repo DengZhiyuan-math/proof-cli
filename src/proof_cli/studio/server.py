@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import build, httpbase
-from .agent_run import AgentRun, RunHooks
+from .agent_run import AgentRun, RunHooks, refusal
 from ..key_ideas import KEY_IDEAS_FILE
 from ..vault import RUN_SCRIPT
 from .agent import NO_WINDOW, AgentManager
@@ -668,11 +668,14 @@ class Studio:
             return 200, self.run.redirect(text, body.get("role") or None)
         if action == "release":
             return 200, self.run.release()
-        if action == "review-now":  # Review what it has: a snapshot of the folder as it stands, as the researcher
+        if action == "review-now":  # Review what it has: a snapshot of the folder as it stands
             try:
-                return 200, self.run.hooks.review_now()
-            except Exception as exc:  # noqa: BLE001 — the service's refusal is the answer (no key ideas yet, nothing new, …)
-                return 409, {"error": getattr(exc, "code", None) or type(exc).__name__, "message": getattr(exc, "message", None) or str(exc)}
+                return 200, self.run.review_now()
+            except Exception as exc:  # noqa: BLE001 — a refusal (no key ideas yet, nothing new, …) is the answer; anything else is a bug
+                answer = refusal(exc)
+                if answer is None:
+                    raise
+                return 409, answer
         return 404, {"error": "NOT_FOUND", "message": f"no run action {action!r}"}
 
     def stop_runs(self) -> bool:
@@ -749,8 +752,9 @@ class Studio:
                                "folder": str(self.root), "medium": self.medium(), "open": self.how_to_open()})
         if path == "/api/agent/run":
             return _json(self.run.view() if self.run is not None else {"status": "idle", "reason": "no run on this folder"})
-        if path == "/api/agent/log":  # the node's work log (spec #145): what the agent planned, did and handed over
-            return _json({"entries": self.run.hooks.work_log() if self.run is not None else []})
+        if path == "/api/agent/log":  # the node's work log (spec #145): what the agent planned, did and handed over, and the run's turns
+            return _json({"entries": self.run.work_log() if self.run is not None else [], "turns": self.run.turn_list() if self.run is not None else [],
+                          "folder": str(self.root)})
         if path == "/api/agent/events":
             job = self.agent.jobs.get(int(q["job"]))
             if not job:
@@ -829,8 +833,9 @@ class Studio:
                     raise ValueError("scope must be a list of files")
                 for f in scope:
                     self.resolve(f)          # an editable project file, or ValueError
+            # the chat is Ask only (spec #145, decided in #144): the agent is driven from its run, never from here
             r = self.agent.start(body["prompt"], body.get("session_id") or None,
-                            body.get("mode", "ask"), body.get("model") or None,
+                            "ask", body.get("model") or None,
                             body.get("effort") or None, scope, body.get("provider") or None)
             return _json(r, 409 if "error" in r else 200)
         if path == "/api/key-ideas/draft":

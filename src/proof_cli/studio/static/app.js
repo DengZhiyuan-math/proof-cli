@@ -49,6 +49,7 @@ function activeTab() { return S.tabs.find((t) => t.path === S.active) || null; }
 function isDirty(t) { return !t.doc.isClean(t.gen); }
 
 async function openFile(path, line) {
+  showCentre("files");  // a file is read and edited in the Files view (spec #145)
   let t = S.tabs.find((x) => x.path === path);
   if (!t) {
     const r = await api("/api/file?path=" + encodeURIComponent(path));
@@ -399,13 +400,15 @@ function showCentre(which) {
   $("#run-stage").hidden = files;
   $("#editor-pane").hidden = !files; $("#pdf-pane").hidden = !files;
   for (const g of document.querySelectorAll('.gutter[data-resize="pdf"]')) g.hidden = !files;
-  $("#tab-run").setAttribute("aria-selected", String(!files)); $("#tab-files").setAttribute("aria-selected", String(files));
+  $("#tab-log").setAttribute("aria-selected", String(!files)); $("#tab-files").setAttribute("aria-selected", String(files));
   store.set("centre", which);
-  if (files && typeof cm !== "undefined") cm.refresh();
+  if (files) cm.refresh();
 }
-$("#tab-run").onclick = () => showCentre("run");
+$("#tab-log").onclick = () => showCentre("run");
 $("#tab-files").onclick = () => showCentre("files");
 showCentre(location.hash === "#files" ? "files" : store.get("centre", "run"));
+// the bar's primary action — Run or Compile, with its build menu — sits on the centre's tab bar, reachable from either view (#142)
+$("#centre-tabs").append($("#compile-box"));
 
 async function loadConfig() {
   const r = await api("/api/config");
@@ -684,7 +687,7 @@ document.addEventListener("keydown", (e) => {
   if (e.defaultPrevented) return;          // CodeMirror already handled it (its own ⌘S, ⌘↵)
   const mod = e.metaKey || e.ctrlKey;
   if (mod && e.key === "s") { e.preventDefault(); saveActive(); }
-  else if (mod && e.key === "Enter") { e.preventDefault(); compile(); }
+  else if (mod && e.key === "Enter") { e.preventDefault(); primaryAction(); }
   else if (mod && e.key === "b" && !e.shiftKey) { e.preventDefault(); sidebarHidden(!$("#sidebar").classList.contains("hidden")); }
 });
 window.addEventListener("beforeunload", (e) => { if (S.tabs.some(isDirty)) { e.preventDefault(); e.returnValue = ""; } });
@@ -726,7 +729,7 @@ function chatHidden(h) {
 }
 chatHidden(store.get("chat.hidden", false));
 $("#btn-chat").onclick = () => chatHidden(!$("#chat").classList.contains("hidden"));
-$("#chat-mode").value = store.get("chat.mode", "edit");
+$("#chat-mode").value = store.get("chat.mode", "ask");  // the chat is Ask only (spec #145); an older remembered mode no longer exists
 $("#chat-mode").onchange = (e) => store.set("chat.mode", e.target.value);
 
 // Minimal, safe rendering: escape first, then code fences, inline code, bold, file:line links.
@@ -895,13 +898,17 @@ function plusMenu(open) {
   else if (!active) rows.push(item("Start agent", () => run.start(), "The agent works the node on its own until it requests review or needs you"));
   else {
     rows.push(item(state.status === "paused" ? "Resume" : "Pause", () => (state.status === "paused" ? run.resume() : run.pause()), "The turn finishes; the agent keeps the node"));
-    rows.push(item("Redirect…", () => { const text = prompt("One line for the agent's next turn:"); if (text && text.trim()) run.redirect(text.trim()); }, "One line, handed to its next turn"));
+    rows.push(item("Redirect…", () => { showCentre("run"); run.focusRedirect(); }, "One line, handed to its next turn: type it in the run card"));
     rows.push(item("Review what it has", () => run.reviewNow(), "Freeze a snapshot of the folder as it stands and review it"));
     rows.push(item("Stop and release", () => run.release(), "End the run and unassign the node"));
   }
   if (run) {
-    rows.push(node("hr", "menu-sep"), node("div", "menu-head", "Ask the agent to"));
-    for (const [label, role, task] of AGENT_TASKS) rows.push(item(label, () => run.start([role], task), active ? "Wait for the run to stop, or pause it" : task));
+    rows.push(node("hr", "menu-sep"), node("div", "menu-head", "One-off task (one role, one turn)"));
+    for (const [label, role, task] of AGENT_TASKS) {
+      const row = item(label, () => run.start([role], task), active ? "Finish or stop the run first" : task);
+      row.disabled = active;
+      rows.push(row);
+    }
   }
   if (review) rows.push(item(`Check snapshot v${review.version}`, () => askAgent(review.check, "ask"), "Read-only: the agent reports what does not hold"));
   if (review) rows.push(node("hr", "menu-sep"), node("div", "menu-head", "Your decision"), item(`Review snapshot v${review.version}…`, review.open, "Accept, request a revision or reject: recorded as you", "decide"));
@@ -1227,9 +1234,7 @@ async function runLocal(name, arg) {
     return sysNote(`<b>${cat.skills.length} skills</b> (click one to use it):\n${chipList(cat.skills)}\n\n<small>Refresh with <code>/skills refresh</code>.</small>`);
   }
   if (name === "mode") {
-    if (!["edit", "ask"].includes(arg)) return sysNote(`Mode is <b>${$("#chat-mode").value}</b>. Usage: <code>/mode edit</code> or <code>/mode ask</code>.`);
-    $("#chat-mode").value = arg; store.set("chat.mode", arg);
-    return sysNote(`Mode: <b>${arg === "edit" ? "Edit (may change files)" : "Ask (read-only)"}</b>`);
+    return sysNote(`Mode is <b>Ask (read-only)</b>: the agent is driven from its run, not from here (spec #145).`);
   }
   if (name === "clear" || name === "new") return $("#chat-new").onclick();
 }

@@ -12,8 +12,8 @@ import pytest
 
 HARNESS = Path(__file__).resolve().parent / "js" / "run_pane_harness.js"
 
-IDLE = {"status": "idle", "reason": "", "role": None, "turns": 0, "turns_max": 0, "name": "", "steps": None, "step": None, "redirect": None}
-RUNNING = {"status": "running", "reason": "", "role": "typesetter", "turns": 3, "turns_max": 40, "name": "claude-code", "steps": 5, "step": 4, "step_status": "started", "redirect": None}
+IDLE = {"status": "idle", "active": False, "reason": "", "role": None, "turns": 0, "turns_max": 0, "name": "", "steps": None, "step": None, "redirect": None}
+RUNNING = {"status": "running", "active": True, "reason": "", "role": "typesetter", "turns": 3, "turns_max": 40, "name": "claude-code", "steps": 5, "step": 4, "step_status": "started", "redirect": None}
 LOG = [
     {"at": "2026-10-01T09:30:00+00:00", "kind": "claimed", "by": "claude-code"},
     {"at": "2026-10-01T09:30:05+00:00", "kind": "plan", "role": "prover", "by": "claude-code", "plan": ["read what the project holds", "draft the proof", "have it typeset", "check n ≤ 10^4", "request review"]},
@@ -64,11 +64,11 @@ def test_the_work_log_reads_in_time_order_with_roles_and_links():
     assert "step 1 done — nothing in the project settles it" in texts["step"] or any("step 1 done" in e["text"] for e in shown["log"])
     assert "handed off to the Typesetter: write §2 as LaTeX" in texts["handoff"]
     assert "/studio/N1/" in shown["links"] and "/studio/N2/" in shown["links"]
-    assert "Evidence check passed" in texts["evidence"] and "fog fog-3: the constant may be optimal" in texts["fog"]
+    assert "Evidence check passed" in texts["evidence"] and "fog-3" in texts["fog"] and "the constant may be optimal" in texts["fog"]
 
 
 def test_pause_redirect_and_release_post_their_actions_with_what_was_typed():
-    _, paused = _pane(run=RUNNING, log=LOG, press="Pause", after={**RUNNING, "status": "paused"})
+    _, paused = _pane(run=RUNNING, log=LOG, press="Pause", after={**RUNNING, "status": "paused"})  # still active
     assert paused["posted"] == [{"url": "api/agent/pause", "body": {}}] and paused["buttons"][0] == "Resume"
     _, redirected = _pane(run=RUNNING, log=LOG, press="Redirect", redirect="try the dual problem", role="prover")
     assert redirected["posted"] == [{"url": "api/agent/redirect", "body": {"text": "try the dual problem", "role": "prover"}}]
@@ -76,10 +76,26 @@ def test_pause_redirect_and_release_post_their_actions_with_what_was_typed():
     assert released["posted"] == [{"url": "api/agent/release", "body": {}}] and released["buttons"] == ["Start agent", "Start"]
 
 
-def test_review_what_it_has_freezes_a_snapshot_and_tells_the_node_panel():
+def test_review_what_it_has_freezes_a_snapshot_and_has_the_node_panel_open_the_review_sheet():
     _, frozen = _pane(run=RUNNING, log=LOG, press="Review what it has", answer={"version": 3, "id": "cp-3"})
     assert frozen["posted"] == [{"url": "api/agent/review-now", "body": {}}]
-    assert "Snapshot v3 frozen" in frozen["note"] and frozen["dispatched"] == ["proof:node-changed"]
+    assert "Snapshot v3 frozen" in frozen["note"] and "handed the node over" in frozen["note"]
+    assert frozen["dispatched"] == [{"type": "proof:node-changed", "detail": {"review": True}}]
+
+
+def test_the_log_links_to_what_each_entry_produced_and_folds_each_turns_conversation():
+    turns = [{"job": 7, "role": "prover", "prompt": "Take your turn as the Prover…", "at": 1.0, "done": True, "changed": ["scratch/proof-draft.md"]},
+             {"job": 8, "role": "typesetter", "prompt": "Take your turn as the Typesetter…", "at": 2.0, "done": False, "changed": []}]
+    (shown,) = _pane(run=RUNNING, log=LOG, turns=turns)
+    assert "/#/fog/fog-3" in shown["links"] and "/#/node/N" in shown["links"]  # the fog item in the map's drawer, the Evidence check on the node's page
+    assert [t["summary"] for t in shown["turns"]] == ["turn 1 · Prover", "turn 2 · Typesetter · running"]
+    assert shown["turns"][0]["files"] == ["vscode://file//proj/proofs/N/scratch/proof-draft.md"]
+
+
+def test_the_pane_keeps_reading_so_a_start_from_the_map_shows_up():
+    (idle,) = _pane(run=IDLE, log=[])
+    (active,) = _pane(run=RUNNING, log=LOG)
+    assert idle["polls"] == [10000] and active["polls"] == [2000]
 
 
 def test_a_refused_action_is_said_and_nothing_else_changes():
@@ -88,6 +104,6 @@ def test_a_refused_action_is_said_and_nothing_else_changes():
 
 
 def test_a_stopped_run_says_why():
-    stuck = {**RUNNING, "status": "stuck", "reason": "no change in 5 turn(s)"}
+    stuck = {**RUNNING, "status": "stuck", "active": False, "reason": "no change in 5 turn(s)"}
     (shown,) = _pane(run=stuck, log=LOG)
     assert shown["status"] == "stuck" and "no change in 5 turn(s)" in shown["text"] and shown["buttons"][0] == "Start agent"

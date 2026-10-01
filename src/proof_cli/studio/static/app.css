@@ -483,7 +483,16 @@ pre.panel-view { font: 12px/1.5 var(--mono); white-space: pre-wrap; color: var(-
 .work-log li { display: grid; grid-template-columns: 44px 84px 1fr; gap: 10px; align-items: baseline; padding: 6px 10px; border-radius: 8px; font-size: 12.5px; background: var(--panel2); box-shadow: var(--shadow-card); }
 .work-log li.log-empty { display: block; color: var(--muted); box-shadow: none; background: transparent; }
 .log-time { font-family: var(--mono); font-size: 11px; color: var(--muted); }
-.log-role { font-weight: 600; color: var(--text2); } .log-role.prover { color: var(--accent); } .log-role.typesetter { color: var(--indigo); } .log-role.numerics { color: var(--ok); }
+.log-role { font-weight: 600; color: var(--text2); }  /* the role is a word, never a colour: the four system colours keep their one job each */
 .log-body { color: var(--text); word-break: break-word; }
 .work-log li.log-step .log-body, .work-log li.log-plan .log-body { color: var(--text2); }
 .work-log li.log-review-requested { border-left: 3px solid var(--warn); }
+.turns { display: grid; gap: 4px; }
+.log-turn { background: var(--panel2); border-radius: 8px; box-shadow: var(--shadow-card); padding: 6px 10px; font-size: 12.5px; }
+.log-turn summary { cursor: pointer; color: var(--text2); font-weight: 500; }
+.turn-body { display: grid; gap: 6px; padding: 6px 0 2px; }
+.turn-prompt, .turn-files { margin: 0; color: var(--muted); font-size: 12px; }
+.turn-transcript { margin: 0; max-height: 240px; overflow: auto; font: 11.5px/1.5 var(--mono); color: var(--text2); white-space: pre-wrap; }
+.turn-transcript:empty { display: none; }
+#centre-tabs .spacer { flex: 1; }
+#centre-tabs #compile-box { margin-right: 4px; }

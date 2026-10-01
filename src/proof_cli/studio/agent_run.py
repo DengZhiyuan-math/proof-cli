@@ -44,7 +44,7 @@ class RunHooks:
     release: Callable[[str], None]                    # release the node when this name is its assignee
     work_log: Callable[[], list[dict]]                # the node's work log, oldest first
     record_stuck: Callable[[str, str, str], None]     # (role, name, note): the run's own last word, as a stuck step
-    review_now: Callable[[], dict]                    # freeze a snapshot of the folder as it stands, as the researcher: Review what it has
+    review_now: Callable[[], dict]                    # Review what it has: freeze a snapshot of the folder as it stands (in the assignee's name)
 
 
 @dataclass
@@ -78,9 +78,16 @@ class _Start:
     turn_redirect: str | None = None
     model: object = None
     effort: object = None
+    turns: list[dict] = field(default_factory=list)  # each turn of this Start: {"job", "role", "prompt", "at"} — the raw conversation is the job's events
 
 
 ACTIVE = ("starting", "running", "pausing", "paused")
+
+
+def refusal(exc: Exception) -> dict | None:
+    """A service's refusal as an answer — its code and message — or None for anything that is not one."""
+    code = getattr(exc, "code", None)
+    return {"error": code, "message": getattr(exc, "message", None) or str(exc)} if code else None
 
 
 class AgentRun:
@@ -115,7 +122,8 @@ class AgentRun:
         plans = [e for e in log if e.get("kind") == "plan"]
         steps = [e for e in log if e.get("kind") == "step"]
         return {
-            "status": state.status, "reason": state.reason, "role": state.role, "name": state.name, "provider": state.provider,
+            "status": state.status, "active": state.status in ACTIVE,
+            "reason": state.reason, "role": state.role, "name": state.name, "provider": state.provider,
             "turns": state.turns, "turns_max": state.turns_max, "started_at": state.started_at, "deadline": state.deadline,
             "roles": list(state.roles), "redirect": state.redirect,
             "steps": len(plans[-1]["plan"]) if plans else None, "step": steps[-1]["step"] if steps else None,
@@ -138,12 +146,14 @@ class AgentRun:
             turns_max, minutes = self.hooks.budget()
             name = self.hooks.agent_name(provider)
             self.hooks.assign(name)  # another assignee, a blocked or rejected node: refused here, and no run begins
-        except Exception as exc:  # noqa: BLE001 — the refusal is the answer; the slot is given back
+        except Exception as exc:  # noqa: BLE001 — a refusal is the answer; the slot is given back either way
             with self._lock:
                 if not run.stop:
                     run.state.status = "idle"
-            code = getattr(exc, "code", None) or type(exc).__name__
-            return {"error": code, "message": getattr(exc, "message", None) or str(exc)}
+            answer = refusal(exc)
+            if answer is None:
+                raise
+            return answer
         with self._lock:
             if run.stop:  # stopped and released while the node was being assigned: this Start is over before it began
                 run.state.name = name
@@ -168,6 +178,37 @@ class AgentRun:
             return self.view()
         run.thread.start()
         return self.view()
+
+    def work_log(self) -> list[dict]:
+        return self.hooks.work_log()
+
+    def turn_list(self) -> list[dict]:
+        """The turns of this Start so far, oldest first, each with whether its job is done — the conversation is read by job."""
+        with self._lock:
+            turns = [dict(turn) for turn in self._run.turns]
+        for turn in turns:
+            job = self.agent.jobs.get(turn["job"])
+            turn["done"] = bool(job and job.done)
+            done = next((e for e in reversed(job.events) if e.get("t") == "done"), {}) if job else {}
+            turn["changed"] = [c.get("path") for c in done.get("changed") or []]
+        return turns
+
+    def review_now(self) -> dict:
+        """Review what it has: a snapshot of the folder as it stands, frozen through the project's own request-review.
+        A review request hands the node over, so a successful freeze ends the run — paused or running — and nothing
+        resumes it: the researcher's review is what happens next (audit P4)."""
+        record = self.hooks.review_now()
+        with self._lock:
+            run = self._run
+            job = run.job if self.active() else None
+            if self.active():
+                run.stop = True
+                run.pause = False
+                run.state.status, run.state.reason = "done", "review-requested"
+                self._wake.notify_all()
+        if job is not None and not job.done:
+            self.agent.stop(job.id)
+        return record
 
     def pause(self) -> dict:
         with self._lock:
@@ -259,6 +300,7 @@ class AgentRun:
                     return
                 job = self.agent.jobs[started["job"]]
                 with self._lock:
+                    run.turns.append({"job": job.id, "role": role, "prompt": prompt, "at": time.time()})
                     deadline = run.state.deadline
                 over_budget = False
                 with job.cond:
