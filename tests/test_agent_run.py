@@ -345,3 +345,67 @@ def test_a_second_start_while_the_first_is_still_being_assigned_is_refused():
     assert second.get("error") == "RUN_ACTIVE" and assigned == ["claude-code"]  # one slot, one assignment
     run.release()
 
+
+def test_stop_and_release_while_the_node_is_still_being_assigned_holds():
+    """Reaudit R-P2: Stop during `starting` is final — when the assignment comes back, no coordinator starts, and the
+    assignment it made is given back."""
+    import threading
+
+    from proof_cli.studio.agent_run import AgentRun, RunHooks
+
+    gate = threading.Event()
+    assigned, released, started = [], [], []
+
+    class Agent:
+        jobs = {}
+
+        def start(self, *args, **kwargs):
+            started.append(args)
+            return {"error": "The studio is closed."}
+
+        def stop(self, jid):
+            pass
+
+    from dataclasses import fields
+
+    hooks_kw = dict(agent_name=lambda p: "claude-code", budget=lambda: (40, 60.0), assign=lambda name: (gate.wait(5), assigned.append(name)),
+                    release=released.append, work_log=lambda: [], record_stuck=lambda *a: None, review_now=lambda: {})
+    run = AgentRun(Agent(), RunHooks(**{f.name: hooks_kw[f.name] for f in fields(RunHooks)}))
+    first = {}
+    worker = threading.Thread(target=lambda: first.update(run.start("claude")))
+    worker.start()
+    time.sleep(0.2)
+    stopped = run.release()
+    assert stopped["status"] == "released"
+    gate.set()
+    worker.join(5)
+    time.sleep(0.2)
+    assert first["status"] == "released" and run.view()["status"] == "released"
+    assert assigned == ["claude-code"] and released == ["claude-code"]  # the assignment it had made is given back
+    assert started == [] and not run.active()  # and no turn ever started
+
+
+def test_a_start_right_after_stop_and_release_is_not_ended_by_the_old_coordinator(studio):
+    """Reaudit R-P1: the first run's turn is still being stopped when the second Start begins; when it finally ends,
+    only the first Start ends — the second keeps running its own turn and counts it."""
+    store, hub, log, queue = studio
+    _queue(queue, [["sleep", "20"]], [["sleep", "1.5"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["typesetter"]})
+    agent = hub.studio("N").agent
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and not (agent.active and agent.active.proc):
+        time.sleep(0.01)
+    old = agent.active
+    assert old is not None and _post(hub, "/studio/N/api/agent/release")[1]["status"] == "released"
+    status, second = _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["numerics"]})
+    assert status == 200 and second["status"] == "running"
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and not (agent.active and agent.active is not old and agent.active.proc):
+        time.sleep(0.01)
+    assert old.done, "the old turn was stopped before the new one began"
+    state = _get(hub, "/studio/N/api/agent/run")[1]
+    assert (state["status"], state["turns"], state["roles"]) == ("running", 0, ["numerics"])  # the old coordinator's exit changed nothing
+    final = _wait(hub, timeout=30)
+    assert (final["status"], final["reason"], final["turns"]) == ("done", "turn-finished", 1)
+    assert _turns(log)[-1]["role"] == "numerics" and get_active_claim(store, "N").claimant_id == "claude-code"
+
