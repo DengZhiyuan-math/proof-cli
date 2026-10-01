@@ -1,10 +1,14 @@
 /* The studio's centre: the Proof agent's run on this node, under the researcher's eye (spec #145, decided in
-   #144 and #142). Reads /api/agent/run and /api/agent/log; renders the run card — status, role and step, the
-   plan, the oversight actions — and the work log, in time order, with the roles' reports and what they did
-   through `proof`. Nothing here drives the agent with a prompt: Start once, then Pause, Redirect, Resume,
-   Stop and release, Review what it has. Everything from the project is inserted as text, never as HTML.
-   Exposes globalThis.studioRun for the agent panel's "+" menu. Harnessed on its own (tests/js/run_pane_harness.js). */
+   #144 and #142). Reads api/agent/run and api/agent/log; renders the run card — status, role and step, the
+   plan, the oversight actions — and the work log, in time order, with the roles' reports, what they did
+   through `proof`, and each turn's conversation folded under it. Nothing here drives the agent with a prompt:
+   Start once, then Pause, Redirect, Resume, Stop and release, Review what it has. Everything from the project
+   is inserted as text, never as HTML. Uses common.js's `api`; exposes globalThis.studioRun for the agent
+   panel's "+" menu. Harnessed on its own (tests/js/run_pane_harness.js). */
 "use strict";
+
+const RUN_POLL_MS = 2000;    // while a run is on: how often the pane reads the run and the log again
+const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page shows up without a reload
 
 (function runPane() {
   const pane = document.getElementById("run-pane");
@@ -16,58 +20,56 @@
     for (const [key, value] of Object.entries(attrs || {})) node.setAttribute(key, value);
     return node;
   }
-  async function call(path, body) {
-    const options = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json", "X-Prism-Local": "1" }, body: JSON.stringify(body) };
-    const response = await fetch(path.replace(/^\//, ""), options);   // relative: this node's /studio/<id>/
-    let data = {};
-    try { data = await response.json(); } catch { /* non-JSON */ }
-    data._status = response.status;
-    return data;
-  }
 
   const ROLE_WORD = { prover: "Prover", typesetter: "Typesetter", numerics: "Numerics" };
-  const state = { run: null, log: [], timer: null, note: "" };
+  const state = { run: null, log: [], turns: [], folder: "", timer: null, redirectBox: null };
 
   const note = h("p", "", { class: "run-note", role: "status" });
   function tell(text, bad) { note.textContent = text; note.setAttribute("class", bad ? "run-note bad" : "run-note"); }
 
   async function act(action, body) {
-    const r = await call(`/api/agent/${action}`, body || {});
+    const r = await api(`/api/agent/${action}`, body || {});
     if (r._status >= 400) { tell(`${r.error || "refused"}: ${r.message || ""}`.trim(), true); return r; }
-    tell(action === "start" ? `Started as ${r.name || "the agent"}.` : action === "review-now" ? `Snapshot v${r.version} frozen: review it from the "+" menu.` : `${action}: ${r.status || "done"}.`);
-    if (action === "review-now" && document.dispatchEvent) document.dispatchEvent(new (globalThis.CustomEvent || Event)("proof:node-changed"));
+    if (action === "start") tell(`Started as ${r.name || "the agent"}.`);
+    else if (action === "review-now") {
+      // a review request hands the node over (CONTEXT: a claim ends when its holder requests review): the run ends here,
+      // the snapshot is yours to judge, and Start takes the node up again afterwards
+      tell(`Snapshot v${r.version} frozen; the run has handed the node over. The review sheet is open.`);
+      document.dispatchEvent(new CustomEvent("proof:node-changed", { detail: { review: true } }));
+    } else tell(`${action}: ${r.status || "done"}.`);
     await refresh();
     return r;
   }
 
-  // the four actions, and Review what it has (which freezes a snapshot as the researcher)
+  // the oversight: Start (the whole run, or one role for one turn); then Pause / Resume, Redirect, Review what it has, Stop and release
   function controls(run) {
     const box = h("div", null, { class: "run-controls" });
     const button = (label, action, body, cls) => { const b = h("button", label, { type: "button", class: cls || "" }); b.onclick = () => act(action, body); return b; };
-    const active = run && ["running", "pausing", "paused", "starting"].includes(run.status);
-    if (!active) {
+    if (!run || !run.active) {
       box.append(button("Start agent", "start", {}, "primary"));
-      const one = h("select", null, { class: "run-role", title: "Or one role alone, for one turn" });
-      one.append(h("option", "all roles", { value: "" }), ...Object.entries(ROLE_WORD).map(([value, word]) => h("option", `${word} only`, { value })));
-      const go = h("button", "Start", { type: "button", title: "Start the chosen role alone, for one turn" });
-      go.onclick = () => act("start", one.value ? { roles: [one.value] } : {});
-      box.append(one, go);
+      const role = h("select", null, { class: "run-role", title: "Or one role alone, for one turn" });
+      role.append(h("option", "all roles", { value: "" }), ...Object.entries(ROLE_WORD).map(([value, word]) => h("option", `${word} only`, { value })));
+      const startRole = h("button", "Start", { type: "button", title: "Start the chosen role alone, for one turn" });
+      startRole.onclick = () => act("start", role.value ? { roles: [role.value] } : {});
+      box.append(role, startRole);
       return box;
     }
     if (run.status === "paused") box.append(button("Resume", "resume", {}, "primary"));
     else box.append(button("Pause", "pause", {}));
     const redirect = h("input", null, { type: "text", class: "run-redirect", placeholder: "Redirect: one line for its next turn", "aria-label": "Redirect the agent" });
-    const to = h("select", null, { class: "run-redirect-role", title: "For the next turn of this role, or whoever is next" });
-    to.append(h("option", "next turn", { value: "" }), ...Object.entries(ROLE_WORD).map(([value, word]) => h("option", word, { value })));
+    state.redirectBox = redirect;
+    const forRole = h("select", null, { class: "run-redirect-role", title: "For the next turn of this role, or whoever is next" });
+    forRole.append(h("option", "next turn", { value: "" }), ...Object.entries(ROLE_WORD).map(([value, word]) => h("option", word, { value })));
     const send = h("button", "Redirect", { type: "button" });
-    send.onclick = () => { if (redirect.value.trim()) act("redirect", { text: redirect.value.trim(), role: to.value || null }); };
-    box.append(redirect, to, send, button("Review what it has", "review-now", {}), button("Stop and release", "release", {}, "danger"));
+    send.onclick = () => { if (redirect.value.trim()) act("redirect", { text: redirect.value.trim(), role: forRole.value || null }); };
+    box.append(redirect, forRole, send,
+               button("Review what it has", "review-now", {}),
+               button("Stop and release", "release", {}, "danger"));
     return box;
   }
 
   function runCard(run) {
     const card = h("section", null, { class: "run-card" });
-    const active = run && ["running", "pausing", "paused", "starting"].includes(run.status);
     const line = h("div", null, { class: "run-line" });
     if (!run || run.status === "idle") {
       line.append(h("span", "No agent is working on this node.", { class: "run-status idle" }));
@@ -76,7 +78,7 @@
       const where = `${ROLE_WORD[run.role] || run.role || "agent"}${run.step && run.steps ? ` · step ${run.step}/${run.steps}` : ""}`;
       line.append(h("span", run.status, { class: `run-status ${run.status}` }), h("span", where, { class: "run-where" }),
                   h("span", `${run.name || ""} · turn ${run.turns}/${run.turns_max}`, { class: "run-meta" }));
-      if (run.reason && !active) line.append(h("span", run.reason, { class: "run-reason" }));
+      if (run.reason && !run.active) line.append(h("span", run.reason, { class: "run-reason" }));
       card.append(line);
       if (run.redirect && run.redirect.text) card.append(h("p", `Redirect waiting: ${run.redirect.text}${run.redirect.role ? ` (for the ${ROLE_WORD[run.redirect.role]})` : ""}`, { class: "run-hint" }));
     }
@@ -87,8 +89,7 @@
       plan.plan.forEach((text, i) => {
         const n = i + 1;
         const last = [...reports].reverse().find((e) => e.step === n);
-        const status = last ? last.status : "";
-        steps.append(h("li", text, { class: status, "data-step": n }));
+        steps.append(h("li", text, { class: last ? last.status : "", "data-step": n }));
       });
       card.append(steps);
     }
@@ -96,41 +97,67 @@
     return card;
   }
 
+  // a file the agent changed, opened where files are edited: in VS Code, at its line when one is known
+  const fileLink = (rel) => h("a", rel, { href: `vscode://file/${state.folder}/${rel}`, class: "log-file", title: `Open ${rel} in VS Code` });
+
   // one work-log entry as a line: time, role, what happened, and a link to what it produced
   function entry(e) {
     const li = h("li", null, { class: `log-${e.kind}`, "data-kind": e.kind });
     const when = String(e.at || "").slice(11, 16);
-    li.append(h("span", when, { class: "log-time" }), h("span", e.role ? ROLE_WORD[e.role] || e.role : e.by || "", { class: `log-role ${e.role || ""}` }));
+    li.append(h("span", when, { class: "log-time" }), h("span", e.role ? ROLE_WORD[e.role] || e.role : e.by || "", { class: "log-role" }));
     const body = h("span", null, { class: "log-body" });
     if (e.kind === "plan") body.append(`plan: ${(e.plan || []).map((s, i) => `${i + 1}. ${s}`).join("  ")}`);
     else if (e.kind === "step") body.append(`step ${e.step} ${e.status}${e.note ? ` — ${e.note}` : ""}`);
     else if (e.kind === "handoff") body.append(`handed off to the ${ROLE_WORD[e.to] || e.to}${e.note ? `: ${e.note}` : ""}`);
     else if (e.kind === "split") body.append("split into ", ...(e.nodes || []).flatMap((id, i) => [i ? ", " : "", h("a", id, { href: `/studio/${encodeURIComponent(id)}/` })]));
-    else if (e.kind === "review-requested") body.append(`requested review of snapshot v${e.version}`);
-    else if (e.kind === "evidence") body.append(`Evidence check ${e.outcome}`);
-    else if (e.kind === "fog") body.append(`fog ${e.fog_id}: ${e.text || ""}`);
-    else if (e.kind === "experiment") body.append(`Experiment ${e.seq} on ${e.fog_id}: ${e.outcome}`);
-    else if (e.kind === "dependencies") body.append(`dependency ${e.change}: ${e.dependency}`);
-    else if (e.kind === "claimed") body.append(`took the node`);
+    else if (e.kind === "review-requested") body.append("requested review of ", h("a", `snapshot v${e.version}`, { href: `/#/node/${encodeURIComponent(NODE)}`, title: "The frozen files, on the node's page" }));
+    else if (e.kind === "evidence") body.append("Evidence check ", h("a", e.outcome, { href: `/#/node/${encodeURIComponent(NODE)}`, title: "On the node's page" }));
+    else if (e.kind === "fog") body.append("fog ", h("a", e.fog_id, { href: `/#/fog/${encodeURIComponent(e.fog_id)}`, title: "In the map's fog drawer" }), `: ${e.text || ""}`);
+    else if (e.kind === "experiment") body.append(`Experiment ${e.seq} on `, h("a", e.fog_id, { href: `/#/fog/${encodeURIComponent(e.fog_id)}` }), `: ${e.outcome}`);
+    else if (e.kind === "dependencies") body.append(`dependency ${e.change}: `, h("a", e.dependency, { href: `/studio/${encodeURIComponent(e.dependency)}/` }));
+    else if (e.kind === "claimed") body.append("took the node");
     else body.append(String(e.kind));
     li.append(body);
     return li;
+  }
+
+  // a turn of this Start, folded: its role and prompt, the files it changed, and its conversation (the job's events)
+  function turnEntry(turn, index) {
+    const details = h("details", null, { class: "log-turn", "data-turn": index + 1 });
+    const summary = h("summary", `turn ${index + 1} · ${ROLE_WORD[turn.role] || turn.role}${turn.done ? "" : " · running"}`);
+    details.append(summary);
+    const body = h("div", null, { class: "turn-body" });
+    body.append(h("p", turn.prompt, { class: "turn-prompt" }));
+    if (turn.changed && turn.changed.length) { const files = h("p", "changed: ", { class: "turn-files" }); turn.changed.forEach((rel, i) => { if (i) files.append(", "); files.append(fileLink(rel)); }); body.append(files); }
+    const transcript = h("pre", "", { class: "turn-transcript" });
+    body.append(transcript);
+    details.addEventListener("toggle", async () => {
+      if (!details.open || transcript.textContent) return;
+      const r = await api(`/api/agent/events?job=${turn.job}&after=0`);
+      transcript.textContent = (r.events || []).filter((ev) => ev.t === "text" || ev.t === "error").map((ev) => ev.text || ev.message || "").join("\n") || "(no text in this turn)";
+    });
+    details.append(body);
+    return details;
   }
 
   function render() {
     const log = h("ol", null, { class: "work-log" });
     for (const e of state.log) log.append(entry(e));
     if (!state.log.length) log.append(h("li", "Nothing yet: the work log fills as the agent reports its plan and its steps.", { class: "log-empty" }));
-    pane.replaceChildren(runCard(state.run), h("h3", "Work log", { class: "run-head" }), log);
-    const active = state.run && ["running", "pausing", "paused", "starting"].includes(state.run.status);
-    if (state.timer) { clearTimeout(state.timer); state.timer = null; }
-    if (active && globalThis.setTimeout) state.timer = setTimeout(refresh, 2000);
+    const turns = h("div", null, { class: "turns" });
+    state.turns.forEach((turn, i) => turns.append(turnEntry(turn, i)));
+    pane.replaceChildren(runCard(state.run), h("h3", "Work log", { class: "run-head" }), log,
+                         ...(state.turns.length ? [h("h3", "This Start's turns", { class: "run-head" }), turns] : []));
+    if (state.timer) clearTimeout(state.timer);
+    state.timer = setTimeout(refresh, state.run && state.run.active ? RUN_POLL_MS : IDLE_POLL_MS);
   }
 
   async function refresh() {
-    const [run, log] = await Promise.all([call("/api/agent/run"), call("/api/agent/log")]);
+    const [run, log] = await Promise.all([api("/api/agent/run"), api("/api/agent/log")]);
     state.run = run._status === 200 ? run : null;
     state.log = log._status === 200 && Array.isArray(log.entries) ? log.entries : [];
+    state.turns = log._status === 200 && Array.isArray(log.turns) ? log.turns : [];
+    state.folder = log.folder || state.folder;
     render();
   }
 
@@ -140,6 +167,7 @@
     pause: () => act("pause", {}), resume: () => act("resume", {}), release: () => act("release", {}),
     redirect: (text, role) => act("redirect", { text, role: role || null }),
     reviewNow: () => act("review-now", {}),
+    focusRedirect: () => { if (state.redirectBox) state.redirectBox.focus(); },
     refresh,
   };
   refresh();

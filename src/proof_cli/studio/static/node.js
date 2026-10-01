@@ -243,6 +243,8 @@
     // the "+" menu offers the proof agent's draft of key-ideas.md while the node has none
     globalThis.studioKeyIdeas = () => (needsDraft ? {
       draft: async () => {
+        // the Typesetter's job (spec #145): one turn of that role, started from the run — never a prompt-driven edit turn
+        if (globalThis.studioRun) { await globalThis.studioRun.start(["typesetter"], "Write key-ideas.md from the draft and proof.tex: 核心思路, 主要步骤, 难点, 未覆盖."); tell("The Typesetter drafts key-ideas.md: read and edit it, then request review to confirm it."); await render(); return; }
         if (typeof draftKeyIdeas !== "function") { tell("The agent panel isn't available on this page.", true); return; }
         try { await draftKeyIdeas(); tell("The proof agent drafted key-ideas.md: read and edit it, then request review to confirm it."); }
         catch (error) { tell(`${error.code || "error"}: ${error.message}`, true); }
@@ -263,5 +265,10 @@
   }
 
   render();
-  if (document.addEventListener) document.addEventListener("proof:node-changed", () => { render(); });  // the run pane froze a snapshot or changed the claim
+  // the run pane froze a snapshot (Review what it has) or changed the assignee: read the node again, and open the review sheet when asked
+  document.addEventListener("proof:node-changed", async (event) => {
+    await render();
+    const review = event.detail && event.detail.review && typeof globalThis.studioReview === "function" ? globalThis.studioReview() : null;
+    if (review) review.open();
+  });
 })();

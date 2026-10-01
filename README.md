@@ -27,7 +27,7 @@ proof fog list          # the Proof fog: difficulties not yet precise enough to 
 proof node create C3 claim "For every n ≤ 10^4 …" --medium computation   # a node established by a program: run.sh, outputs in out/
 # A node's studio opens on the agent's Work log: its plan, role and step, the oversight actions (Start, Pause,
 # Redirect, Resume, Stop and release, Review what it has) and what it did; the editor and PDF — or a computation's
-# program and out/ — sit behind the Files tab; the chat box only asks the agent read-only questions.
+# program and out/ — sit behind the Files tab; the Ask box only puts read-only questions to the agent.
 # The Proof agent works a node on its own once started (from the map, the node page or the studio): a run of three
 # roles — Prover, Typesetter, Numerics — that reports its plan and steps (`proof node progress`), stops for a review
 # request, a decision, its budget or when stuck, and that you pause, redirect, resume or release. In proof.toml:

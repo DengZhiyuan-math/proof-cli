@@ -21,7 +21,7 @@ class El {
   const everything = () => [...panel.all(), ...card.all()];  // the node panel and the review card in the agent panel
   const context = {
     NODE: scenario.view.node.id,
-    document: { getElementById: (id) => (id === "node-panel" ? panel : id === "review-card" ? card : name), createElement: (tag) => new El(tag) },
+    document: { getElementById: (id) => (id === "node-panel" ? panel : id === "review-card" ? card : name), createElement: (tag) => new El(tag), addEventListener() {} },
     location: {},
     confirm: () => { events.push("confirm"); return scenario.confirm !== false; },
     openReadOnly: (name, text) => { events.push({ openReadOnly: name, text }); },
