@@ -520,6 +520,60 @@ def test_a_late_assignment_after_the_next_run_was_also_stopped_leaves_no_claim()
     assert run.view()["status"] == "released"
 
 
+def test_a_start_waits_while_the_previous_run_is_still_giving_the_node_back():
+    """Sixth review: the decision to give the node back was made under the lock and the release done outside it; a
+    Start arriving in between claimed the node (the same name) and then lost that claim to the release. A Start now
+    waits for a release in progress, and keeps the claim it makes."""
+    import threading
+    from dataclasses import fields
+
+    from proof_cli.proof_map import claim_node, release_node
+    from proof_cli.studio.agent_run import AgentRun, RunHooks
+
+    store = ensure_project(Path(os.environ.get("TMPDIR", "/tmp")) / f"proof-settle-{os.getpid()}-{time.time_ns()}")
+    create_node(store, node_id="N", kind="claim", statement="a claim")
+    releasing, gate = threading.Event(), threading.Event()
+
+    def release(name):
+        releasing.set()
+        assert gate.wait(5)  # the release takes its time: the window the next Start used to slip through
+        claim = get_active_claim(store, "N")
+        if claim is not None and claim.claimant_id == name:
+            release_node(store, "N", claimant_id=name)
+
+    class Agent:
+        jobs = {}
+
+        def start(self, *args, **kwargs):
+            return {"error": "The studio is closed."}  # every run ends stuck at once, keeping its claim
+
+        def stop(self, jid):
+            pass
+
+    hooks_kw = dict(agent_name=lambda p: "claude-code", budget=lambda: (40, 60.0), assign=lambda name: claim_node(store, "N", claimant_id=name),
+                    release=release, work_log=lambda: [], record_stuck=lambda *a: None, review_now=lambda: {})
+    run = AgentRun(Agent(), RunHooks(**{f.name: hooks_kw[f.name] for f in fields(RunHooks)}))
+    run.start("claude")
+    deadline = time.monotonic() + 5
+    while run.view()["status"] != "stuck" and time.monotonic() < deadline:
+        time.sleep(0.01)
+    stopper = threading.Thread(target=run.release)
+    stopper.start()
+    assert releasing.wait(5)
+    started: dict = {}
+    second = threading.Thread(target=lambda: started.update(run.start("claude")))
+    second.start()
+    time.sleep(0.3)
+    assert not started, "the Start waits while the node is being given back"
+    gate.set()
+    stopper.join(5)
+    second.join(5)
+    assert started and started["status"] in ("starting", "running", "stuck")  # it began after the release
+    assert get_active_claim(store, "N").claimant_id == "claude-code"  # and its claim is intact
+    run.release()
+    assert get_active_claim(store, "N") is None
+
+
 def test_a_start_right_after_stop_and_release_is_not_ended_by_the_old_coordinator(studio):
     """Reaudit R-P1: the first run's turn is still being stopped when the second Start begins; when it finally ends,
     only the first Start ends — the second keeps running its own turn and counts it."""
