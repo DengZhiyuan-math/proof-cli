@@ -103,7 +103,7 @@ class FakeElement {
     "rule-decision", "rule-name", "rule-rationale", "rule-conditions", "cond-reviewed", "cond-doi", "cond-arxiv", "cond-types",
     "rule-reminder", "rule-impact", "rule-new", "rule-cancel", "rule-record",
     // the fog drawer (issue #137) and the node page's fog block
-    "fog-badge", "stat-fog", "fog-drawer", "fog-drawer-n", "fog-list", "fog-close", "fog-add-text", "fog-add-near", "fog-add", "fog-show-all", "fog-composer", "node-fog"];
+    "fog-badge", "stat-fog", "fog-drawer", "fog-drawer-n", "fog-list", "fog-close", "fog-add-text", "fog-add-near", "fog-add", "fog-show-all", "fog-composer", "node-fog", "node-outputs"];
   const tags = { "tree-root": "select", "dag-svg": "svg", "decide-batch": "button", pending: "table", warnings: "ul", "map-find": "input", "attention-nodes": "ul",
     "node-deps": "table", "node-decisions": "table", "node-challenges": "ul", "node-evidence": "ul", "node-history": "ul",
     trusted: "table", "rules-list": "ul", "rules-retired-list": "ul", "rule-name": "input", "rule-rationale": "input", "rule-decision": "input",
@@ -268,6 +268,10 @@ class FakeElement {
     nodeFog: elements["node-fog"].textContent,
     nodeFogLinks: elements["node-fog"].querySelectorAll("a").map((a) => a.textContent),
     nodeFogHrefs: elements["node-fog"].querySelectorAll("a").map((a) => a.getAttribute("href")),
+    // a snapshot's frozen outputs on the node page (spec #145): each link, and which are previewed as images
+    nodeOutputs: elements["node-outputs"].querySelectorAll("li").map((li) => ({
+      text: li.textContent, href: li.querySelector("a").getAttribute("href"), image: li.querySelectorAll("img").map((i) => i.getAttribute("src")),
+    })),
     page: (focus.body.dataset || {}).page || null,
   });
   const readings = [read()];

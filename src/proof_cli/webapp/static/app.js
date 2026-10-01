@@ -975,6 +975,7 @@ async function showNode(nodeId) {
     $("node-proof-meta").textContent = "No snapshot has been requested for review yet.";
     $("node-proof-exact").textContent = "";
   }
+  showOutputs(node.id, proof);
   $("node-evidence").replaceChildren(...view.evidence_checks.map(evidenceItem));
   const decisions = $("node-decisions").querySelector("tbody");
   // reviewing a node trusted by rule explicitly (ADR-0014): the ordinary Reference review, its rationale prefilled
@@ -1029,6 +1030,25 @@ function showNodeFog(view) {
     for (const item of near) { const li = el("li"); li.append(el("a", item.id, { href: `#/fog/${encodeURIComponent(item.id)}`, class: "fog-id" }), " ", el("span", item.text, { class: "fog-text" }), " ", experimentChip(item)); ul.append(li); }
     block.append(ul);
   }
+}
+
+// what a computation wrote to out/, as the snapshot froze it (spec #145): each file a link to itself,
+// an image previewed; the frozen text files are shown above as text, a binary one never is
+function showOutputs(nodeId, proof) {
+  const box = $("node-outputs");
+  box.replaceChildren();
+  const outputs = (proof && proof.outputs) || [];
+  if (!outputs.length) return;
+  box.append(el("h3", "Frozen outputs"));
+  const ul = el("ul", null, { class: "node-outputs-list" });
+  for (const output of outputs) {
+    const href = `/api/node/${encodeURIComponent(nodeId)}/snapshot/file?path=${encodeURIComponent(output.path)}`;
+    const li = el("li");
+    li.append(el("a", output.path, { href, target: "_blank", rel: "noopener", class: "mono" }), el("span", ` · ${output.type} · ${output.bytes} bytes`, { class: "hint" }));
+    if (output.type.startsWith("image/")) li.append(el("img", null, { src: href, alt: output.path, class: "output-preview", loading: "lazy" }));
+    ul.append(li);
+  }
+  box.append(ul);
 }
 
 async function route() {

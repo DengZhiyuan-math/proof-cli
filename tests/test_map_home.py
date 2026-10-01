@@ -772,3 +772,15 @@ def test_a_computation_nodes_card_names_its_medium_beside_its_kind():
     (shown,) = _home(map_={"nodes": [computation, latex]})
     assert shown["dag"]["c_check"]["texts"][0].startswith("Claim · computation")  # the kind line, then the id
     assert shown["dag"]["c_plain"]["texts"][0].startswith("Claim ") and "computation" not in shown["dag"]["c_plain"]["texts"][0]
+
+
+def test_the_node_page_lists_a_computations_frozen_outputs_and_previews_its_images():
+    proof = {"id": "cp-v1", "version": 1, "sha256": "a" * 64, "text": "", "files": {"run.sh": "#!/usr/bin/env bash\n", "out/table.csv": "n,ratio\n"}, "key_ideas": None, "unreadable": False,
+             "outputs": [{"path": "out/plot.png", "type": "image/png", "bytes": 70}, {"path": "out/table.csv", "type": "text/csv", "bytes": 8}]}
+    view = {**NODE_VIEW, "node": {**NODE_VIEW["node"], "id": "c_check", "medium": "computation"}, "candidate_proof": proof, "crystallized_from": None, "fog_near": []}
+    _, opened = _fog_home(steps=[{"open": "c_check"}], nodes={"c_check": view})
+    plot, table = opened["nodeOutputs"]
+    assert plot["href"] == "/api/node/c_check/snapshot/file?path=out%2Fplot.png" and plot["image"] == [plot["href"]]
+    assert "image/png" in plot["text"] and table["image"] == [] and "text/csv" in table["text"]
+    _, plain = _fog_home(steps=[{"open": "c_check"}], nodes={"c_check": {**view, "candidate_proof": None}})
+    assert plain["nodeOutputs"] == []

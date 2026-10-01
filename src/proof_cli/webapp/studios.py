@@ -21,8 +21,9 @@ from urllib.parse import parse_qs, unquote
 
 from .. import proof_map
 from ..domain import ProofMapNodeKind
-from ..storage import ProjectStore
-from ..studio.proof_agent import ProofAgentContext, library_folders
+from ..reviews import git_identity
+from ..storage import ProjectStore, get_current_candidate_proof
+from ..studio.proof_agent import ProofAgentContext, library_folders, open_command
 from ..studio.server import Studio
 from ..vault import node_folder
 
@@ -102,8 +103,25 @@ class StudioHub:
                         node_id, root, library_folders(root), dependencies=self._dependencies(node_id),
                         on_drafted=lambda agent, data: proof_map.record_key_ideas_draft(self.store, node_id, agent=agent, content=data),
                     ),
+                    # the node's Medium as of each request, a run recorded as an Evidence check as the page's
+                    # identity, and the project's optional open command (spec #145)
+                    node_medium=lambda: self._medium(node_id),
+                    on_run=lambda outcome, notes: self._record_run(node_id, outcome, notes),
+                    open_command=lambda: open_command(root),
                 )
             return self._studios[node.id]
+
+    def _medium(self, node_id: str) -> str | None:
+        node = proof_map.get_node(self.store, node_id)
+        return node.medium.value if node is not None and node.medium is not None else None
+
+    def _record_run(self, node_id: str, outcome: str, notes: str) -> dict | None:
+        """A run is an Evidence check on the node's current snapshot (spec #145); before any snapshot, nothing to record it against."""
+        proof = get_current_candidate_proof(self.store, node_id)
+        if proof is None:
+            return None
+        check = proof_map.record_evidence_check(self.store, proof.id, outcome, notes=notes, run_by=git_identity(self.store.root))
+        return check.model_dump(mode="json")
 
     def _dependencies(self, node_id: str) -> list[str]:
         node = proof_map.get_node(self.store, node_id)
