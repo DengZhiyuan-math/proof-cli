@@ -263,4 +263,5 @@
   }
 
   render();
+  if (document.addEventListener) document.addEventListener("proof:node-changed", () => { render(); });  // the run pane froze a snapshot or changed the claim
 })();

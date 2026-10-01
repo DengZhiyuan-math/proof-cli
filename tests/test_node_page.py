@@ -216,15 +216,21 @@ def test_no_page_offers_open_in_prism_local():
         assert "prism-local" not in text.lower() and "PROOF_CLI_PRISM_LOCAL" not in text, path.name
 
 
-def test_the_studio_page_carries_the_node_panel_and_the_agents_actions():
-    """The node panel shows the node and who holds it; what the proof agent does is asked of it from its panel."""
+def test_the_studio_page_carries_the_node_panel_the_run_pane_and_the_oversight_menu():
+    """The node panel shows the node and who holds it; the centre is the agent's run (spec #145); the "+" menu is
+    the researcher's oversight, with one-off tasks run as a role's turn — never a prompt the researcher writes."""
     index = (STUDIO_STATIC / "index.html").read_text()
-    assert 'src="static/node.js"' in index and 'id="node-panel"' in index and 'id="chat-plus"' in index and 'id="plus-menu"' in index
+    assert 'src="static/node.js"' in index and 'src="static/run.js"' in index and 'id="node-panel"' in index and 'id="run-pane"' in index
+    assert 'id="chat-plus"' in index and 'id="plus-menu"' in index and 'id="tab-files"' in index
+    assert '<option value="edit">' not in index  # the chat is Ask only
     panel = (STUDIO_STATIC / "node.js").read_text()
     for action in ("claim", "unassign", "split", "depend", "request-review", "challenge", "evidence"):
         assert f'"/{action}"' not in panel, action  # the agent does these, through `proof`
     agent = (STUDIO_STATIC / "app.js").read_text()
-    for label in ("Prove it", "Request review", "Split into claims", "Edit dependencies", "Open a Challenge", "Record evidence"):
+    assert '"Prove it"' not in agent  # it is Start
+    for label in ("Start agent", "Pause", "Redirect…", "Review what it has", "Stop and release"):
+        assert f'"{label}"' in agent, label
+    for label in ("Prover · propose a split", "Typesetter · draft key ideas", "Numerics · run a check"):
         assert f'["{label}",' in agent, label
 
 

@@ -44,7 +44,14 @@
   </aside>
   <div class="gutter" data-resize="sidebar" id="sidebar-gutter"></div>
 
-  <section id="editor-pane">
+  <section id="run-stage">
+    <div id="centre-tabs" role="tablist" aria-label="Centre">
+      <button id="tab-run" type="button" role="tab" aria-selected="true">Work log</button>
+      <button id="tab-files" type="button" role="tab" aria-selected="false">Files</button>
+    </div>
+    <section id="run-pane" aria-label="The agent's run on this node"></section>
+  </section>
+  <section id="editor-pane" hidden>
     <div id="editor-head">
       <div id="tabs"></div>
       <button id="btn-forward" class="ghost" data-icon="arrow" title="Show this line in the PDF (⌘J). Double-click the PDF to jump back to the source. ⌘F search · Ctrl-Space complete">PDF</button>
@@ -55,7 +62,7 @@
   </section>
   <div class="gutter" data-resize="pdf"></div>
 
-  <section id="pdf-pane">
+  <section id="pdf-pane" hidden>
     <div id="pdf-toolbar">
       <div id="compile-box" class="split-btn">
         <button id="btn-compile" class="primary" data-icon="play" title="Save all and compile (⌘↵)"><span id="compile-label">Compile</span></button>
@@ -84,8 +91,7 @@
   <aside id="chat">
     <div id="chat-head">
       <b data-icon="spark" aria-label="Agent"></b>
-      <select id="chat-mode" title="Edit: may change files (you review a diff and can undo). Ask: read-only.">
-        <option value="edit">Edit</option>
+      <select id="chat-mode" title="Ask: read-only questions to the agent about this node. The agent is driven from its run, not from here.">
         <option value="ask">Ask (read-only)</option>
       </select>
       <button id="chat-info" class="icon" data-icon="gauge" aria-label="Account and usage limits" aria-haspopup="dialog" aria-expanded="false" title="Account and usage limits"></button>
@@ -100,7 +106,7 @@
       <section id="review-card" class="popover" aria-label="Review" hidden></section>
       <div id="plus-menu" class="popover menu" role="menu" hidden></div>
       <div id="slash-menu" role="listbox" hidden></div>
-      <textarea id="chat-input" rows="2" placeholder="Ask the proof agent…" title="@ a file or the selection to limit its edits · / for commands · ↵ send, ⇧↵ newline"></textarea>
+      <textarea id="chat-input" rows="2" placeholder="Ask the agent about this node (read-only)…" title="A read-only question; the agent is driven from its run above · ↵ send, ⇧↵ newline"></textarea>
       <div class="chat-actions">
         <button id="chat-plus" class="plus" type="button" aria-label="Actions and review" aria-haspopup="menu" aria-expanded="false" title="Ask the agent to…, or review a snapshot">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6v12M6 12h12"/></svg>
@@ -144,5 +150,6 @@
 <script src="static/vendor/katex.min.js"></script>
 <script src="static/mathtext.js"></script>
 <script src="static/node.js"></script>
+<script src="static/run.js"></script>
 </body>
 </html>

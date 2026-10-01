@@ -598,3 +598,36 @@ def test_a_start_right_after_stop_and_release_is_not_ended_by_the_old_coordinato
     assert (final["status"], final["reason"], final["turns"]) == ("done", "turn-finished", 1)
     assert _turns(log)[-1]["role"] == "numerics" and get_active_claim(store, "N").claimant_id == "claude-code"
 
+
+# -- what the studio's centre reads and does (spec #145, part 4) ---------------------------------------
+
+
+def test_the_studio_serves_the_work_log(studio):
+    store, hub, log, queue = studio
+    _queue(queue, [["proof", "node", "progress", "N", "--plan", "read", "--plan", "prove"], ["proof", "node", "progress", "N", "--step", "1", "--status", "started"]], [["sleep", "0"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
+    _wait(hub)
+    status, served = _get(hub, "/studio/N/api/agent/log")
+    assert status == 200 and [e["kind"] for e in served["entries"]][:3] == ["claimed", "plan", "step"]
+
+
+def test_review_what_it_has_freezes_a_snapshot_as_the_researcher(studio):
+    store, hub, log, queue = studio
+    write_key_ideas(store, "N")
+    _queue(queue, [["write", "proof.tex", "\\documentclass{amsart}\\begin{document}half\\end{document}\n"], ["sleep", "2"]], [["sleep", "0"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
+    time.sleep(1.2)
+    status, frozen = _post(hub, "/studio/N/api/agent/review-now")
+    assert status == 200 and frozen["version"] == 1
+    assert get_workflow_state(store, "N") == "review-needed"
+    from proof_cli.proof_map import list_candidate_proofs
+    (proof,) = list_candidate_proofs(store, "N")
+    assert proof.submitted_by == "claude-code"  # the node is the run's: the request is made in its name, and ends it
+    state = _wait(hub)
+    assert state["status"] == "done" and state["reason"] == "review-requested" and get_active_claim(store, "N") is None
+
+
+def test_review_what_it_has_is_refused_when_nothing_can_be_frozen(studio):
+    store, hub, log, queue = studio
+    status, refused = _post(hub, "/studio/N/api/agent/review-now")  # no key ideas yet: the service refuses, and says so
+    assert status == 409 and refused["error"] == "KEY_IDEAS_REQUIRED"
