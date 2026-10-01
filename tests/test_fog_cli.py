@@ -110,6 +110,9 @@ def test_refusals_are_error_envelopes_with_the_service_codes(tmp_path: Path):
     assert _json(tmp_path, "fog", "crystallize", "fog-2", "X", "s", "--parent", "L1", "--no-parent", ok=False)["error"]["code"] == "FOG_FLAG_CONFLICT"
     assert _json(tmp_path, "fog", "edit", "fog-2", "--near", "L1", "--clear-near", ok=False)["error"]["code"] == "FOG_FLAG_CONFLICT"
     assert _json(tmp_path, "fog", "experiment", "record", "fog-2", "maybe", "--summary", "s", "--run-by", "a", ok=False)["error"]["code"] == "INVALID_OUTCOME"
+    assert _json(tmp_path, "fog", "experiment", "record", "fog-2", "supports", "--summary", "  ", "--run-by", "a", ok=False)["error"]["code"] == "FOG_SUMMARY_REQUIRED"
+    assert _json(tmp_path, "fog", "experiment", "record", "fog-2", "supports", "--summary", "s", "--run-by", " ", ok=False)["error"]["code"] == "FOG_RUN_BY_REQUIRED"
+    assert _json(tmp_path, "fog", "experiment", "record", "fog-2", "supports", "--summary", "s", "--run-by", "a", "--path", "proofs/", ok=False)["error"]["code"] == "FOG_EXPERIMENT_PATH_INVALID"
     assert _json(tmp_path, "fog", "add", "near nothing", "--near", "nope", ok=False)["error"]["code"] == "NODE_NOT_FOUND"
     assert get_node(store, "X") is None
 

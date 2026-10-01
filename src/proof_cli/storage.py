@@ -23,14 +23,15 @@ from .domain import (
     ClaimRecord,
     DependencyPin,
     EventRecord,
+    EvidenceCheck,
     FogExperiment,
     FogItem,
-    EvidenceCheck,
     ProofMapNode,
     ProofObligation,
     ProjectSnapshot,
     ProjectState,
     TheoremContract,
+    fog_number,
 )
 from .references import (
     ReferenceRecord,
@@ -2015,7 +2016,7 @@ def insert_fog_item(store: ProjectStore, item: FogItem, *, conn: sqlite3.Connect
             """,
             (
                 item.id,
-                item.number,
+                fog_number(item.id),
                 item.text,
                 item.notes,
                 json.dumps(item.near),

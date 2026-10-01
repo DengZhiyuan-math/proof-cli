@@ -371,6 +371,19 @@ class ExperimentOutcome(str, Enum):
     error = "error"
 
 
+FOG_ID_PREFIX = "fog-"
+
+
+def fog_id(number: int) -> str:
+    """The fog item id for a project-wide number: `fog-N`. The one place the format lives (with `fog_number`)."""
+    return f"{FOG_ID_PREFIX}{number}"
+
+
+def fog_number(item_id: str) -> int:
+    """The number in a fog item id, `fog_id`'s inverse."""
+    return int(item_id.removeprefix(FOG_ID_PREFIX))
+
+
 class FogItem(BaseModel):
     """One Proof fog item: a known difficulty, in words, with the nodes it is about (`near`, never a dependency).
 
@@ -379,16 +392,8 @@ class FogItem(BaseModel):
     and created only when something is put there.
     """
 
-    id: str  # fog-N, project-wide, never reused
+    id: str  # fog-N (`fog_id`), project-wide, never reused
     text: str
-
-    @staticmethod
-    def id_for(number: int) -> str:
-        return f"fog-{number}"
-
-    @property
-    def number(self) -> int:
-        return int(self.id.rsplit("-", 1)[1])
     notes: str = ""
     near: list[str] = Field(default_factory=list)
     status: FogStatus = FogStatus.open
