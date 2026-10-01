@@ -296,3 +296,52 @@ def test_the_budget_table_in_proof_toml_is_read(studio):
     _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
     state = _wait(hub)
     assert state["status"] == "budget" and state["turns_max"] == 1 and len(_turns(log)) == 1
+
+
+# -- the audit's findings on the run (P1, P2, P4) ---------------------------------------------------------
+
+
+def test_the_time_budget_stops_a_turn_that_is_still_running(studio):
+    store, hub, log, queue = studio
+    (store.root / "proof.toml").write_text("[studio]\nbudget = { turns = 40, minutes = 0.02 }\n")  # 1.2 seconds
+    _queue(queue, [["sleep", "20"]], [["sleep", "0"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
+    state = _wait(hub, timeout=30)
+    assert state["status"] == "budget" and "spent" in state["reason"]
+    assert len(_turns(log)) <= 1  # the long turn was stopped; no second one ran
+    assert get_active_claim(store, "N") is not None  # it waits for the researcher, holding its place
+
+
+def test_a_second_start_while_the_first_is_still_being_assigned_is_refused():
+    import threading
+
+    from proof_cli.studio.agent_run import AgentRun, RunHooks
+
+    gate = threading.Event()
+    assigned = []
+
+    class Agent:  # never reached: the assignment blocks
+        jobs = {}
+
+        def start(self, *args, **kwargs):
+            return {"error": "The studio is closed."}
+
+        def stop(self, jid):
+            pass
+
+    from dataclasses import fields
+
+    hooks_kw = dict(agent_name=lambda p: "claude-code", budget=lambda: (40, 60.0), assign=lambda name: (gate.wait(5), assigned.append(name)),
+                    release=lambda name: None, work_log=lambda: [], record_stuck=lambda *a: None, review_now=lambda: {})
+    hooks = RunHooks(**{f.name: hooks_kw[f.name] for f in fields(RunHooks)})  # only the hooks this version of the run takes
+    run = AgentRun(Agent(), hooks)
+    first = {}
+    worker = threading.Thread(target=lambda: first.update(run.start("claude")))
+    worker.start()
+    time.sleep(0.2)
+    second = run.start("claude")  # while the first is still assigning
+    gate.set()
+    worker.join(5)
+    assert second.get("error") == "RUN_ACTIVE" and assigned == ["claude-code"]  # one slot, one assignment
+    run.release()
+
