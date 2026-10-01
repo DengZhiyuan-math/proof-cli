@@ -22,7 +22,7 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
   }
 
   const ROLE_WORD = { prover: "Prover", typesetter: "Typesetter", numerics: "Numerics" };
-  const state = { run: null, log: [], turns: [], folder: "", timer: null, redirectBox: null };
+  const state = { run: null, log: [], turns: [], folder: "", timer: null, redirectBox: null, roleBox: null, shown: "" };
 
   const note = h("p", "", { class: "run-note", role: "status" });
   function tell(text, bad) { note.textContent = text; note.setAttribute("class", bad ? "run-note bad" : "run-note"); }
@@ -37,7 +37,7 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
       tell(`Snapshot v${r.version} frozen; the run has handed the node over. The review sheet is open.`);
       document.dispatchEvent(new CustomEvent("proof:node-changed", { detail: { review: true } }));
     } else tell(`${action}: ${r.status || "done"}.`);
-    await refresh();
+    await refresh(true);
     return r;
   }
 
@@ -60,6 +60,7 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
     state.redirectBox = redirect;
     const forRole = h("select", null, { class: "run-redirect-role", title: "For the next turn of this role, or whoever is next" });
     forRole.append(h("option", "next turn", { value: "" }), ...Object.entries(ROLE_WORD).map(([value, word]) => h("option", word, { value })));
+    state.roleBox = forRole;
     const send = h("button", "Redirect", { type: "button" });
     send.onclick = () => { if (redirect.value.trim()) act("redirect", { text: redirect.value.trim(), role: forRole.value || null }); };
     box.append(redirect, forRole, send,
@@ -133,14 +134,39 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
     body.append(transcript);
     details.addEventListener("toggle", async () => {
       if (!details.open || transcript.textContent) return;
+      state.transcripts = state.transcripts || {};
       const r = await api(`/api/agent/events?job=${turn.job}&after=0`);
-      transcript.textContent = (r.events || []).filter((ev) => ev.t === "text" || ev.t === "error").map((ev) => ev.text || ev.message || "").join("\n") || "(no text in this turn)";
+      transcript.textContent = state.transcripts[turn.job] = (r.events || []).filter((ev) => ev.t === "text" || ev.t === "error").map((ev) => ev.text || ev.message || "").join("\n") || "(no text in this turn)";
     });
+    if (state.transcripts && state.transcripts[turn.job]) transcript.textContent = state.transcripts[turn.job];
     details.append(body);
     return details;
   }
 
-  function render() {
+  // What the researcher has in hand across a rebuild: the redirect being typed (and its role, and the focus),
+  // and the turns being read. A poll that finds nothing new rebuilds nothing at all (audit P3).
+  function keep() {
+    return {
+      redirect: state.redirectBox ? state.redirectBox.value : "", role: state.roleBox ? state.roleBox.value : "",
+      focused: !!(state.redirectBox && document.activeElement === state.redirectBox),
+      open: Array.from(pane.querySelectorAll("details[open]")).map((d) => d.getAttribute("data-turn")),
+    };
+  }
+  function restore(kept) {
+    if (state.redirectBox && kept.redirect) state.redirectBox.value = kept.redirect;
+    if (state.roleBox && kept.role) state.roleBox.value = kept.role;
+    if (state.redirectBox && kept.focused) state.redirectBox.focus();
+    for (const d of pane.querySelectorAll("details")) if (kept.open.includes(d.getAttribute("data-turn"))) d.open = true;
+  }
+
+  function render(force) {
+    const signature = JSON.stringify([state.run, state.log, state.turns]);
+    const changed = force || signature !== state.shown;
+    if (state.timer) clearTimeout(state.timer);
+    state.timer = setTimeout(refresh, state.run && state.run.active ? RUN_POLL_MS : IDLE_POLL_MS);
+    if (!changed) return;
+    const kept = keep();
+    state.shown = signature;
     const log = h("ol", null, { class: "work-log" });
     for (const e of state.log) log.append(entry(e));
     if (!state.log.length) log.append(h("li", "Nothing yet: the work log fills as the agent reports its plan and its steps.", { class: "log-empty" }));
@@ -148,17 +174,16 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
     state.turns.forEach((turn, i) => turns.append(turnEntry(turn, i)));
     pane.replaceChildren(runCard(state.run), h("h3", "Work log", { class: "run-head" }), log,
                          ...(state.turns.length ? [h("h3", "This Start's turns", { class: "run-head" }), turns] : []));
-    if (state.timer) clearTimeout(state.timer);
-    state.timer = setTimeout(refresh, state.run && state.run.active ? RUN_POLL_MS : IDLE_POLL_MS);
+    restore(kept);
   }
 
-  async function refresh() {
+  async function refresh(force) {
     const [run, log] = await Promise.all([api("/api/agent/run"), api("/api/agent/log")]);
     state.run = run._status === 200 ? run : null;
     state.log = log._status === 200 && Array.isArray(log.entries) ? log.entries : [];
     state.turns = log._status === 200 && Array.isArray(log.turns) ? log.turns : [];
     state.folder = log.folder || state.folder;
-    render();
+    render(force === true);
   }
 
   globalThis.studioRun = {

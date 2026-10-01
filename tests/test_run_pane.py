@@ -107,3 +107,18 @@ def test_a_stopped_run_says_why():
     stuck = {**RUNNING, "status": "stuck", "active": False, "reason": "no change in 5 turn(s)"}
     (shown,) = _pane(run=stuck, log=LOG)
     assert shown["status"] == "stuck" and "no change in 5 turn(s)" in shown["text"] and shown["buttons"][0] == "Start agent"
+
+
+def test_a_poll_keeps_the_redirect_being_typed_the_open_conversation_and_the_focus():
+    turns = [{"job": 7, "role": "prover", "prompt": "Take your turn as the Prover…", "at": 1.0, "done": True, "changed": []}]
+    _, typed, polled = _pane(run=RUNNING, log=LOG, turns=turns, typed="try the dual problem", role="prover", open=[1])
+    assert typed["redirect"] == {"text": "try the dual problem", "role": "prover"} and typed["open"] == ["1"] and typed["focusedRedirect"]
+    assert polled["redirect"] == {"text": "try the dual problem", "role": "prover"} and polled["open"] == ["1"] and polled["focusedRedirect"]  # nothing new: nothing rebuilt
+
+
+def test_a_poll_that_brings_news_rebuilds_but_still_keeps_what_was_in_hand():
+    turns = [{"job": 7, "role": "prover", "prompt": "Take your turn as the Prover…", "at": 1.0, "done": True, "changed": []}]
+    news = {"at": "2026-10-01T09:40:00+00:00", "kind": "step", "role": "typesetter", "by": "claude-code", "step": 4, "status": "done", "note": "typeset"}
+    _, _, polled = _pane(run=RUNNING, log=LOG, turns=turns, typed="try the dual problem", role="prover", open=[1], changed=news)
+    assert any("step 4 done" in e["text"] for e in polled["log"])  # the new entry is shown
+    assert polled["redirect"]["text"] == "try the dual problem" and polled["open"] == ["1"] and polled["focusedRedirect"]
