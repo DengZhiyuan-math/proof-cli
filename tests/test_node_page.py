@@ -529,3 +529,36 @@ def test_a_frozen_output_that_could_carry_script_is_served_as_a_download_never_a
     assert _ok(client.get("/api/node/N/snapshot/file?path=out/report.html"))["type"] == "application/octet-stream"  # served as a download
     assert _ok(client.get("/api/node/N/snapshot/file?path=out/plot.svg"))["type"] == "application/octet-stream"
     assert _ok(client.get("/api/node/N/snapshot/file?path=out/plot.png"))["type"] == "image/png"  # a raster image shows inline
+
+
+def test_the_centres_tab_bar_stays_in_both_views_and_the_first_visit_keeps_the_work_log():
+    """Fourth review F1: the Work log · Files tabs and the bar's Run/Compile live in the centre column above what is
+    shown; the Files view hides the work log only, and the first visit's preloaded file does not switch the view."""
+    from html.parser import HTMLParser
+
+    class Tree(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.stack, self.parents = [], {}
+
+        def handle_starttag(self, tag, attrs):
+            attrs = dict(attrs)
+            if "id" in attrs:
+                self.parents[attrs["id"]] = list(self.stack)
+            if tag not in ("link", "meta", "input", "br", "hr", "img"):
+                self.stack.append(attrs.get("id") or tag)
+
+        def handle_endtag(self, tag):
+            if self.stack:
+                self.stack.pop()
+
+    tree = Tree()
+    tree.feed((STUDIO_STATIC / "index.html").read_text())
+    assert "centre" in tree.parents["centre-tabs"] and "centre-body" not in tree.parents["centre-tabs"]  # the bar is above both views
+    for pane in ("run-pane", "editor-pane", "pdf-pane"):
+        assert "centre-body" in tree.parents[pane], pane  # and both views are below it
+    app = (STUDIO_STATIC / "app.js").read_text()
+    centre = app[app.index("function showCentre"):app.index("$(\"#tab-log\").onclick")]
+    assert '$("#run-pane").hidden = files;' in centre and "#centre\")" not in centre and "run-stage" not in app
+    init = app[app.index("async function init()"):]
+    assert "await openFile(BUILD.main, undefined, false)" in init  # preloaded behind the Files tab, the work log stays

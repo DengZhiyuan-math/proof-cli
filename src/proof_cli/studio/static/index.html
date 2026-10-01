@@ -44,14 +44,14 @@
   </aside>
   <div class="gutter" data-resize="sidebar" id="sidebar-gutter"></div>
 
-  <section id="run-stage">
+  <section id="centre">
     <div id="centre-tabs" role="tablist" aria-label="Centre">
       <button id="tab-log" type="button" role="tab" aria-selected="true">Work log</button>
       <button id="tab-files" type="button" role="tab" aria-selected="false">Files</button>
       <span class="spacer"></span>
     </div>
+    <div id="centre-body">
     <section id="run-pane" aria-label="The agent's run on this node"></section>
-  </section>
   <section id="editor-pane" hidden>
     <div id="editor-head">
       <div id="tabs"></div>
@@ -86,6 +86,8 @@
       <a id="pdf-popout" class="btn ghost" data-icon="popout" href="viewer" title="Open the PDF in a separate tab (stays in sync)">Pop out</a>
     </div>
     <div id="pdf-scroll"><div id="pdf-pages"></div><div id="pdf-empty">No PDF yet — press Compile.</div></div>
+  </section>
+    </div>
   </section>
   <div class="gutter" data-resize="chat" id="chat-gutter"></div>
 
