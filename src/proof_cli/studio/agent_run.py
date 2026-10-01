@@ -29,6 +29,7 @@ from ..domain import AGENT_ROLES
 
 STUCK_TURNS = 5      # turns in a row that change nothing — no report, no file, no run, no fog — before the run stops as stuck
 BUSY_WAIT = 30.0     # seconds a turn waits for the researcher's own Ask turn to end before giving up
+SETTLE_WAIT = 5.0    # seconds a Start waits for a run that is over to finish giving the node back
 # the turn's changes the stuck rule counts: a report, a split, a fog item, an Evidence check, a dependency edit
 _CHANGES = ("plan", "step", "handoff", "split", "fog", "experiment", "evidence", "dependencies", "review-requested")
 
@@ -88,6 +89,7 @@ class AgentRun:
         self._lock = threading.Lock()
         self._wake = threading.Condition(self._lock)
         self._run = _Start(RunState())
+        self._settling = 0   # releases of the node in progress: a Start arriving meanwhile waits for them (see _give_back)
 
     # ------------------------------------------------------------ what the current Start is
     @property
@@ -123,6 +125,11 @@ class AgentRun:
     def start(self, provider: str, *, roles: list[str] | None = None, redirect: str | None = None, model=None, effort=None) -> dict:
         roles = [role for role in (roles or []) if role in AGENT_ROLES]
         with self._lock:
+            # a run that is over may still be giving the node back: begin after it, so this Start's own assignment
+            # cannot slip in between the decision and the release and be taken away with it
+            deadline = time.monotonic() + SETTLE_WAIT
+            while self._settling and not self.active() and time.monotonic() < deadline:
+                self._wake.wait(0.05)
             if self.active():
                 return {"error": "RUN_ACTIVE", "message": "an agent is already working on this node; pause, redirect or release it"}
             run = self._run = _Start(RunState(status="starting"))  # holds the slot while the node is assigned, outside the lock
@@ -145,6 +152,8 @@ class AgentRun:
                 # keeps its claim on purpose, and the late assignment made none.
                 later = self._run.state
                 stopped = self._run is run or later.status in ("idle", "released") or later.reason == "review-requested"
+                if stopped:
+                    self._settling += 1  # decided and announced in one breath: a Start arriving now waits for the release
             else:
                 stopped = False
                 run.state = RunState(status="running", role=roles[0] if roles else "prover", turns_max=turns_max, started_at=time.time(),
@@ -153,7 +162,7 @@ class AgentRun:
                 run.model, run.effort = model, effort
                 run.thread = threading.Thread(target=self._loop, args=(run,), name=f"agent-run-{name}", daemon=True)
         if stopped:
-            self.hooks.release(name)  # the assignment it just made is given back
+            self._give_back(name)  # the assignment it just made is given back
         if stopped or run.stop:
             return self.view()
         run.thread.start()
@@ -190,12 +199,25 @@ class AgentRun:
             run.pause = False
             run.state.status = "released"
             run.state.reason = reason
+            gives_back = was not in ("idle", "released", "starting")  # a Start still assigning gives its assignment back itself
+            if gives_back:
+                self._settling += 1
             self._wake.notify_all()
         if job is not None and not job.done:
             self.agent.stop(job.id)
-        if was not in ("idle", "released", "starting"):  # a Start still assigning gives its assignment back itself
-            self.hooks.release(name)
+        if gives_back:
+            self._give_back(name)
         return self.view()
+
+    def _give_back(self, name: str) -> None:
+        """Release the node for a run that is over. `_settling` was raised under the lock together with the decision,
+        so a Start arriving meanwhile waits in `start()` instead of claiming the node and losing that claim to this."""
+        try:
+            self.hooks.release(name)
+        finally:
+            with self._lock:
+                self._settling -= 1
+                self._wake.notify_all()
 
     # ------------------------------------------------------------ the loop
     def _loop(self, run: _Start) -> None:
