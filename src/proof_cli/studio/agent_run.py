@@ -139,9 +139,12 @@ class AgentRun:
         with self._lock:
             if run.stop:  # stopped and released while the node was being assigned: this Start is over before it began
                 run.state.name = name
-                # ours to give back — unless a later Start under the same name holds the node now. A later Start that is
-                # over (released) or never began left no claim behind, so what this late assignment made is ours too.
-                stopped = self._run is run or self._run.state.status in ("idle", "released")
+                # ours to give back — unless a later Start under the same name holds the node now. A later Start that
+                # never began, was released, or requested review (a review request hands the node over) left no claim
+                # behind, so what this late assignment made is ours too; one that ended done, stuck or over budget
+                # keeps its claim on purpose, and the late assignment made none.
+                later = self._run.state
+                stopped = self._run is run or later.status in ("idle", "released") or later.reason == "review-requested"
             else:
                 stopped = False
                 run.state = RunState(status="running", role=roles[0] if roles else "prover", turns_max=turns_max, started_at=time.time(),
