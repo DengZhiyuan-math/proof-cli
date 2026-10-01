@@ -48,8 +48,8 @@ function modeFor(path) { return path.endsWith(".md") ? "markdown" : "stex"; }
 function activeTab() { return S.tabs.find((t) => t.path === S.active) || null; }
 function isDirty(t) { return !t.doc.isClean(t.gen); }
 
-async function openFile(path, line) {
-  showCentre("files");  // a file is read and edited in the Files view (spec #145)
+async function openFile(path, line, reveal = true) {
+  if (reveal) showCentre("files");  // a file the researcher opens is read in the Files view; a preload or the agent's edit stays where the researcher is (spec #145)
   let t = S.tabs.find((x) => x.path === path);
   if (!t) {
     const r = await api("/api/file?path=" + encodeURIComponent(path));
@@ -397,7 +397,7 @@ async function runProgram() {
 // program and out/ — behind the Files tab. #files opens on Files; the choice is remembered per node.
 function showCentre(which) {
   const files = which === "files";
-  $("#run-stage").hidden = files;
+  $("#run-pane").hidden = files;
   $("#editor-pane").hidden = !files; $("#pdf-pane").hidden = !files;
   for (const g of document.querySelectorAll('.gutter[data-resize="pdf"]')) g.hidden = !files;
   $("#tab-log").setAttribute("aria-selected", String(!files)); $("#tab-files").setAttribute("aria-selected", String(files));
@@ -1403,11 +1403,12 @@ cm.setOption("extraKeys", { ...cm.getOption("extraKeys"), "Cmd-L": askAboutSelec
   const sess = store.get("session", null);
   const exists = (p) => S.files.some((f) => f.path === p);
   if (sess && sess.tabs) {
-    for (const p of sess.tabs.filter(exists)) if (p !== sess.active) await openFile(p);
-    if (sess.active && exists(sess.active)) await openFile(sess.active);
+    for (const p of sess.tabs.filter(exists)) if (p !== sess.active) await openFile(p, undefined, false);
+    if (sess.active && exists(sess.active)) await openFile(sess.active, undefined, false);
   }
-  // No saved session: open the file the server builds (prism.json's "main", or the guess).
-  if (!S.active && exists(BUILD.main)) await openFile(BUILD.main);
+  // No saved session: open the file the server builds (prism.json's "main", or the guess) — in the editor,
+  // behind the Files tab; the centre stays on the work log (spec #145, story 42)
+  if (!S.active && exists(BUILD.main)) await openFile(BUILD.main, undefined, false);
   renderProblems();
   setInterval(poll, 2000);
 })();

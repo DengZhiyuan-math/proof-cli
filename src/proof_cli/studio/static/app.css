@@ -459,7 +459,9 @@ pre.panel-view { font: 12px/1.5 var(--mono); white-space: pre-wrap; color: var(-
 #review-card .node-review-links { margin: 0; font-size: 12px; }
 
 /* ---------- the centre: the agent's run and the work log (spec #145, decided in #144 and #142) */
-#run-stage { flex: 1; min-width: 200px; display: flex; flex-direction: column; background: var(--bg); position: relative; }
+/* The centre column: its tab bar (Work log · Files, and Run or Compile) stays whatever is shown below it. */
+#centre { flex: 1; min-width: 200px; display: flex; flex-direction: column; background: var(--bg); position: relative; }
+#centre-body { flex: 1; min-height: 0; display: flex; }
 #centre-tabs { display: flex; gap: 4px; align-items: center; padding: 0 8px; height: var(--bar-h); background: var(--panel); border-bottom: .5px solid var(--border); flex: none; }
 #centre-tabs button { height: 26px; padding: 0 12px; border: 0; background: transparent; box-shadow: none; border-radius: 7px; color: var(--text2); font-weight: 500; }
 #centre-tabs button[aria-selected="true"] { background: var(--panel2); color: var(--text); box-shadow: 0 .5px 1.5px rgba(0, 0, 0, .14), 0 0 0 .5px var(--border2); }
