@@ -123,7 +123,7 @@ from .storage import (
     upsert_dependency_pin,
 )
 from .theorems import list_theorems
-from .vault import SNAPSHOT_MANIFEST, exchanged_files, preamble_path, snapshot_digest_of
+from .vault import RUN_SCRIPT, SNAPSHOT_MANIFEST, exchanged_files, preamble_path, snapshot_digest_of
 
 SHARED_PREAMBLE = "proofs/preamble.tex"
 RELEASED_BY = "exchange-import"
@@ -686,6 +686,8 @@ def _merge_collaboration(local: CollaborationState, incoming: CollaborationState
 
 def _write_vault_file(path: Path, data: bytes) -> None:
     path.write_bytes(data)
+    if path.name == RUN_SCRIPT:  # a computation node's entry runs as itself (spec #145): the bundle carries bytes, not modes
+        path.chmod(path.stat().st_mode | 0o111)
 
 
 def _write_files(store: ProjectStore, files: list[tuple[str, bytes]]) -> None:
