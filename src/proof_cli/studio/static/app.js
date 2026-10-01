@@ -1400,8 +1400,8 @@ function renderTurnCard(e) {
     h += `<div class="warn">Blocked edits outside ${esc(e.scope.join(", "))}. Remove the @-mentions to let the agent change other files.</div>`;
   if (e.reverted && e.reverted.length)
     h += `<div class="warn">Undid changes outside the @-mentioned files: ${esc(e.reverted.join(", "))}.</div>`;
-  // Other refusals, mostly shell commands (which a turn here may run only where the
-  // project's .claude/settings.json allows them). They do not undo the changes above.
+  // Other refusals, mostly commands outside the role's own allowlist (proof_agent.py).
+  // They do not undo the changes above.
   const others = (e.denied || denied.map((tool) => ({ tool, what: "" })))
     .filter((d) => !(e.scope && writes.includes(d.tool)));
   if (others.length) {

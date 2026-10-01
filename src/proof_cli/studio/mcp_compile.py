@@ -17,6 +17,7 @@ import json
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import urlsplit
 
 TOOL = {
     "name": "compile",
@@ -42,10 +43,13 @@ WAIT_BUSY = 300          # seconds to wait for a build that is already running
 def build(url: str, clean: bool) -> dict:
     body = json.dumps({"mode": "draft", "clean": clean, "by": "agent"}).encode()
     deadline = time.time() + WAIT_BUSY
+    parts = urlsplit(url)
     while True:
+        # proof-cli's server takes a write only from its own page's origin (webapp/server.py): this tool
+        # builds on that page's behalf, from the same machine, and says so
         req = urllib.request.Request(url.rstrip("/") + "/api/build", data=body, method="POST",
-                                     headers={"Content-Type": "application/json",
-                                              "X-Prism-Local": "1"})
+                                     headers={"Content-Type": "application/json", "X-Prism-Local": "1",
+                                              "Origin": f"{parts.scheme}://{parts.netloc}"})
         try:
             with urllib.request.urlopen(req, timeout=900) as resp:
                 return json.loads(resp.read().decode("utf-8", "replace"))
@@ -118,8 +122,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--url", required=True, help="the node's studio, http://127.0.0.1:PORT/studio/<node>/")
     url = ap.parse_args().url
-    # The pipes themselves (fds 0 and 1): under pythonw.exe (an editor started from the
-    # desktop shortcut) sys.stdin and sys.stdout can be None.
+    # The pipes themselves (fds 0 and 1): under a windowless Python sys.stdin and sys.stdout can be None.
     stdin = open(0, "r", encoding="utf-8", errors="replace", closefd=False)
     out = open(1, "w", encoding="utf-8", newline="\n", closefd=False)
     for line in stdin:

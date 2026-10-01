@@ -5,10 +5,11 @@ Each chat turn runs the local Claude Code CLI headlessly in the repository:
     claude -p <prompt> --output-format stream-json --verbose
            --include-partial-messages --permission-mode <mode> [--resume <id>]
 
-so the agent loads the project's CLAUDE.md, skills and .claude/settings.json
-permissions exactly as it would in the terminal. In "edit" mode file edits are accepted
-automatically. Non-interactive runs cannot approve a shell command, so the shell tools
-are left out unless the settings allow some commands, and then only those run. "ask" mode uses plan mode (read-only).
+with the permissions proof-cli states for the turn (proof_agent.py: a role's `proof`
+commands, programs and write scope; never the repository's own settings, ADR-0011 point 8).
+In "edit" mode file edits within that scope are accepted automatically; a headless run
+cannot approve anything else, so a call no rule allows is refused and the turn card names
+it. "ask" mode uses plan mode (read-only).
 """
 from __future__ import annotations
 
@@ -132,7 +133,8 @@ COMPILE_TOOL = f"mcp__{MCP_SERVER}__compile"
 def _loads_compile_tool(block: dict) -> bool:
     """Claude Code loading the compile tool before its first use: not a step to show."""
     q = str((block.get("input") or {}).get("query") or "")
-    return block.get("name") == "ToolSearch" and COMPILE_TOOL in q         and all(COMPILE_TOOL == t.strip() for t in q.removeprefix("select:").split(","))
+    return block.get("name") == "ToolSearch" and COMPILE_TOOL in q \
+        and all(COMPILE_TOOL == t.strip() for t in q.removeprefix("select:").split(","))
 
 
 def _tool_place(name: str, inp: dict, root: Path) -> dict:
@@ -306,8 +308,10 @@ class ClaudeCode(CliBackend):
                "--append-system-prompt", system_append(job.context)]
         # The compile tool (mcp_compile.py): the studio's own build, the one the researcher sees — no
         # shell needed to compile, and no other MCP server is loaded.
-        tools = [COMPILE_TOOL] if job.server_url else []
-        if job.server_url:
+        # an edit turn of a role that typesets (plan mode admits no tool that builds; the Prover and Numerics don't compile)
+        compiles = bool(job.server_url) and job.mode == "edit" and (job.context is None or job.context.compiles)
+        tools = [COMPILE_TOOL] if compiles else []
+        if compiles:
             cmd += ["--mcp-config", json.dumps({"mcpServers": {MCP_SERVER: {
                 "command": sys.executable,
                 "args": [str(Path(__file__).with_name("mcp_compile.py")), "--url", job.server_url]}}}),
@@ -338,14 +342,16 @@ class ClaudeCode(CliBackend):
             et, delta = ev.get("type"), ev.get("delta") or {}
             if et == "content_block_delta" and delta.get("type") == "text_delta":
                 job.emit({"t": "delta", "text": delta["text"]})
-            elif et == "content_block_start" and                     (ev.get("content_block") or {}).get("type") in ("thinking", "redacted_thinking"):
+            elif et == "content_block_start" and \
+                    (ev.get("content_block") or {}).get("type") in ("thinking", "redacted_thinking"):
                 # Thinking starts. Its text follows only where the model sends it: newer
                 # models think without showing it, and then the panel shows that it thinks.
                 job.emit({"t": "thinking_start"})
             elif et == "content_block_delta" and delta.get("type") == "thinking_delta":
                 if delta.get("thinking"):
                     job.emit({"t": "thinking", "text": delta["thinking"]})
-            elif et == "content_block_start" and                     (ev.get("content_block") or {}).get("type") == "tool_use":
+            elif et == "content_block_start" and \
+                    (ev.get("content_block") or {}).get("type") == "tool_use":
                 # A tool call starts. Its input streams in as JSON fragments; for a file
                 # write or edit, the text is shown as it is written (tool_live events):
                 # "text" is the new text, "old" the text an Edit replaces.

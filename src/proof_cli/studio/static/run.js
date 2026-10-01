@@ -22,7 +22,7 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
   }
 
   const ROLE_WORD = { prover: "Prover", typesetter: "Typesetter", numerics: "Numerics" };
-  const state = { run: null, log: [], turns: [], folder: "", timer: null, redirectBox: null, roleBox: null, shown: "", transcripts: {}, following: null };
+  const state = { run: null, log: [], turns: [], folder: "", timer: null, redirectBox: null, roleBox: null, shown: "", transcripts: {}, following: null, followed: new Set() };
 
   const note = h("p", "", { class: "run-note", role: "status" });
   function tell(text, bad) { note.textContent = text; note.setAttribute("class", bad ? "run-note bad" : "run-note"); }
@@ -155,11 +155,12 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
       if (live && events.length) live.feed(events);
       if (r.done || r._status !== 200) break;
     }
+    state.followed.add(job);  // once: a turn that ended between two polls is not replayed from its first event
     if (state.following === job) state.following = null;
   }
   function follow() {
     const turn = state.turns.find((t) => !t.done);
-    if (turn && state.following !== turn.job) { state.following = turn.job; followLoop(turn.job); }
+    if (turn && state.following !== turn.job && !state.followed.has(turn.job)) { state.following = turn.job; followLoop(turn.job); }
   }
 
   // a turn of this Start, folded: its role and prompt, the files it changed, and its conversation (the job's events)

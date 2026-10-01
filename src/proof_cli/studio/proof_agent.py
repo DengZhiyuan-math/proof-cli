@@ -245,6 +245,12 @@ class ProofAgentContext:
     role: str | None = None
     redirect: str | None = None
 
+    @property
+    def compiles(self) -> bool:
+        """Whether this turn may compile through the studio's build: the Typesetter's, and the solo agent's (an edit
+        turn such as the key-ideas draft); the Prover writes its draft and Numerics its program, neither typesets."""
+        return self.role in (None, AgentRole.typesetter.value)
+
     def key_ideas_prompt(self) -> str:
         """The turn that drafts a missing key-ideas.md from proof.tex and the dependencies (ADR-0013)."""
         deps = ", ".join(f"{dep} (../{dep}/)" for dep in self.dependencies) or "none (it has no dependencies)"
