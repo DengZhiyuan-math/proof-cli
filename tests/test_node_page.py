@@ -504,7 +504,22 @@ def test_the_node_page_lists_a_snapshots_outputs_and_keeps_binary_ones_out_of_th
 def test_a_frozen_output_is_served_as_itself_and_only_from_inside_the_snapshot(page):
     store, client = page
     _computation_with_snapshot(store)
-    status, (data, content_type) = client.get("/api/node/N/snapshot/file?path=out/plot.png")
-    assert status == 200 and data == PNG and content_type == "image/png"
+    served = _ok(client.get("/api/node/N/snapshot/file?path=out/plot.png"))
+    assert served["bytes"] == PNG and served["type"] == "image/png"
     assert client.get("/api/node/N/snapshot/file?path=../../proof.tex")[0] == 404
     assert client.get("/api/node/N/snapshot/file?path=out/missing.png")[0] == 404
+
+
+def test_a_frozen_output_that_could_carry_script_is_served_as_a_download_never_as_a_page(page):
+    store, client = page
+    _computation_with_snapshot(store)
+    folder = store.root / "proofs" / "N"
+    (folder / "out" / "report.html").write_text("<script>fetch('/api/decide')</script>")
+    (folder / "out" / "plot.svg").write_text("<svg onload='fetch(\"/api/decide\")'/>")
+    from proof_cli.proof_map import request_review
+    request_review(store, "N", requested_by="agent_a", rationale="with a report")
+    outputs = {o["path"]: o["type"] for o in _ok(client.get("/api/node/N"))["candidate_proof"]["outputs"]}
+    assert outputs["out/report.html"] == "text/html" and outputs["out/plot.svg"] == "image/svg+xml"  # listed by what they are
+    assert _ok(client.get("/api/node/N/snapshot/file?path=out/report.html"))["type"] == "application/octet-stream"  # served as a download
+    assert _ok(client.get("/api/node/N/snapshot/file?path=out/plot.svg"))["type"] == "application/octet-stream"
+    assert _ok(client.get("/api/node/N/snapshot/file?path=out/plot.png"))["type"] == "image/png"  # a raster image shows inline

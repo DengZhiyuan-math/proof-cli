@@ -107,7 +107,7 @@ class DirectClient:
                 return int(exc.status), {"ok": False, "error": {"code": exc.code, "message": exc.message}}
             except ProofMapError as exc:
                 return 404, {"ok": False, "error": {"code": exc.code, "message": exc.message}}
-            return 200, (data, content_type)
+            return 200, {"ok": True, "data": {"bytes": data, "type": content_type}}  # the bytes the server would send, and their type
         if path.startswith("/api/node/"):
             node_id = path.removeprefix("/api/node/")
             return self._call(lambda: self.app.node(node_id))
