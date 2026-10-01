@@ -438,3 +438,9 @@ td a { font-family: var(--mono); font-size: 12px; }
 .node-run .run-where { font-size: 12.5px; font-weight: 600; color: var(--label-2); }
 .node-run input { min-width: 240px; flex: 1; }
 .node-run .hint { margin: 0; }
+
+/* Start agent on a map card (spec #145): a small pill in the card's corner, the primary colour */
+#dag-svg .node .start { cursor: pointer; }
+#dag-svg .node .start rect { fill: var(--blue); }
+#dag-svg .node .start text { fill: #fff; font-size: 11px; font-weight: 600; letter-spacing: 0; }
+#dag-svg .node .start:hover rect { fill: color-mix(in srgb, var(--blue) 85%, #000); }

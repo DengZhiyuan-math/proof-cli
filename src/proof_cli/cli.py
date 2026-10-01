@@ -920,7 +920,7 @@ def node_progress(
     note: str = typer.Option("", "--note", help="A line about the step: what it found, why it is stuck, what the next role should do"),
     handoff: str = typer.Option("", "--handoff", help="Hand the work to this role (prover, typesetter or numerics) and end the turn"),
     role: str = typer.Option("", "--role", help="prover, typesetter or numerics (default: PROOF_AGENT_ROLE, set in the agent's runtime)"),
-    by: str = typer.Option("", "--by", help="Who reports (default: PROOF_AGENT_NAME, else human)"),
+    by: str = typer.Option("", "--by", help="Who reports; empty means PROOF_AGENT_NAME from the agent's runtime, else human"),
     root: str = ROOT_OPTION,
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
@@ -935,11 +935,8 @@ def node_progress(
             else:
                 typer.echo(render_work_log(node_id, log))
             return
-        resolved_role = role or os.environ.get("PROOF_AGENT_ROLE", "")
-        if not resolved_role:
-            raise ProofMapError("ROLE_REQUIRED", "say which role reports: --role prover|typesetter|numerics (an agent's runtime sets PROOF_AGENT_ROLE)")
         entry = record_progress(
-            store, node_id, role=resolved_role, by=by or os.environ.get("PROOF_AGENT_NAME") or "human",
+            store, node_id, role=role or os.environ.get("PROOF_AGENT_ROLE") or None, by=by or os.environ.get("PROOF_AGENT_NAME") or "human",
             plan=plan or None, step=step, status=status or None, note=note, handoff=handoff or None,
         )
     except ProofMapError as exc:

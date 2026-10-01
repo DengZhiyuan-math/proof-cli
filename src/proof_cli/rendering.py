@@ -367,6 +367,8 @@ def render_work_log(node_id: str, log: list[dict]) -> str:
             body = f"Evidence check {entry.get('outcome')}"
         elif kind == "fog":
             body = f"fog {entry.get('fog_id')}: {entry.get('text')}"
+        elif kind == "experiment":
+            body = f"Experiment {entry.get('seq')} on {entry.get('fog_id')}: {entry.get('outcome')}"
         elif kind == "dependencies":
             body = f"dependency {entry.get('change')}: {entry.get('dependency')}"
         else:

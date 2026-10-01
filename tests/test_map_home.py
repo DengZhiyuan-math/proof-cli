@@ -813,3 +813,13 @@ def test_the_node_page_starts_the_agent_and_offers_the_oversight_actions_while_i
     paused = {**idle, "run": {"status": "paused", "role": "prover", "step": 2, "steps": 3}}
     _, held = _fog_home(steps=[{"open": "c_check"}], nodes={"c_check": paused})
     assert held["nodeRun"]["buttons"] == ["Resume", "Redirect", "Stop and release"]
+
+
+def test_a_map_card_offers_start_agent_for_a_local_node_nobody_holds_and_posts_it():
+    free = _node("lem_bound", "lemma", "The partial sums are bounded", frontier=True)
+    held = _node("lem_two", "lemma", "Held", assignee="claude-code", workflow_state="claimed")
+    imported = _node("ref_bw", "imported_result", "Bolzano-Weierstrass")
+    (shown, started) = _home(map_={"nodes": [free, held, imported]}, steps=[{"cardStart": "lem_bound"}])
+    assert shown["dag"]["lem_bound"]["start"] and not shown["dag"]["lem_two"]["start"] and not shown["dag"]["ref_bw"]["start"]
+    (sent,) = started["posted"]
+    assert sent == {"url": "/api/node/lem_bound/agent/start", "body": {}}

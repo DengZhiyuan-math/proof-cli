@@ -57,8 +57,13 @@ def test_the_work_log_merges_what_the_agent_did_through_proof(tmp_path: Path):
     split_node(store, "N", [{"id": "N1", "statement": "first half"}], created_by="claude-code")
     add_fog(store, "the second half may need compactness", near=["N"], created_by="claude-code")
     record_progress(store, "N", role="prover", by="claude-code", step=1, status="done")
+    from proof_cli.fog import list_fog, record_experiment
+
+    (item,) = list_fog(store)
+    record_experiment(store, item.id, "refutes", summary="n = 7 is a counterexample", run_by="claude-code")
     kinds = [entry["kind"] for entry in work_log(store, "N")]
-    assert kinds == ["plan", "step", "split", "fog", "step"]  # in time order, the automatic events between the reports
+    assert kinds == ["plan", "step", "split", "fog", "step", "experiment"]  # in time order, the automatic events between the reports
+    assert work_log(store, "N")[-1]["outcome"] == "refutes"
     split = next(entry for entry in work_log(store, "N") if entry["kind"] == "split")
     assert split["nodes"] == ["N1"] and split["by"] == "claude-code"
 

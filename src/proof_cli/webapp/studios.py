@@ -71,14 +71,6 @@ def _error(status: HTTPStatus, code: str, message: str) -> StudioAnswer:
     return StudioAnswer(int(status), body, "application/json")
 
 
-class RequestError(Exception):
-    """A refused request, as the map's server reports one: (status, code, message), with details for the envelope."""
-
-    def __init__(self, status: HTTPStatus, code: str, message: str, details: dict | None = None) -> None:
-        super().__init__(message)
-        self.status, self.code, self.message, self.details = status, code, message, details or {}
-
-
 class NoStudio(Exception):
     """This node has no studio: (code, message)."""
 
@@ -112,19 +104,18 @@ class StudioHub:
                     # and knowing the node's dependencies as of each turn, to draft its key ideas (ADR-0013)
                     agent_context=lambda: ProofAgentContext(
                         node_id, root, library_folders(root), dependencies=self._dependencies(node_id),
-                        name=self._turn_name(node_id),
+                        name=self.turn_name(node_id),
                         on_drafted=lambda agent, data: proof_map.record_key_ideas_draft(self.store, node_id, agent=agent, content=data),
                         # a run's turn (spec #145): which role, and the researcher's redirect for it
-                        role=self._turn(node_id, "role_for_turn"), redirect=self._turn(node_id, "redirect_for_turn"),
+                        role=self.turn_role(node_id), redirect=self.turn_redirect(node_id),
                     ),
                     run_hooks=RunHooks(
                         agent_name=lambda provider: agent_name(root, provider),
                         budget=lambda: budget(root),
-                        claim=lambda name: proof_map.claim_node(self.store, node_id, claimant_id=name),
+                        assign=lambda name: proof_map.claim_node(self.store, node_id, claimant_id=name),
                         release=lambda name: self._release(node_id, name),
                         work_log=lambda: proof_map.work_log(self.store, node_id),
-                        review_requested=lambda: proof_map.get_workflow_state(self.store, node_id) == "review-needed",
-                        closing_note=lambda role, name, note: proof_map.record_progress(self.store, node_id, role=role, by=name, step=max(1, self._last_step(node_id)), status="stuck", note=note),
+                        record_stuck=lambda role, name, note: proof_map.record_progress(self.store, node_id, role=role, by=name, step=self._last_step(node_id), status="stuck", note=note),
                     ),
                     # the node's Medium as of each request, a run recorded as an Evidence check as the page's
                     # identity, and the project's optional open command (spec #145)
@@ -135,16 +126,23 @@ class StudioHub:
                 )
             return self._studios[node.id]
 
-    def _turn(self, node_id: str, what: str):
-        """What the node's run says about the turn being started (None outside a run)."""
+    # -- a run's turn (spec #145): what the context of the turn being started takes from the node's run
+    def _active_run(self, node_id: str):
         studio = self._studios.get(node_id)
         run = studio.run if studio is not None else None
-        return getattr(run, what)() if run is not None and run.active() else None
+        return run if run is not None and run.active() else None
 
-    def _turn_name(self, node_id: str) -> str:
-        studio = self._studios.get(node_id)
-        run = studio.run if studio is not None else None
-        return run.state.name if run is not None and run.active() and run.state.name else "studio-agent"
+    def turn_role(self, node_id: str) -> str | None:
+        run = self._active_run(node_id)
+        return run.role_for_turn() if run is not None else None
+
+    def turn_redirect(self, node_id: str) -> str | None:
+        run = self._active_run(node_id)
+        return run.redirect_for_turn() if run is not None else None
+
+    def turn_name(self, node_id: str) -> str:
+        run = self._active_run(node_id)
+        return run.state.name if run is not None and run.state.name else "studio-agent"
 
     def _release(self, node_id: str, name: str) -> None:
         """Release the node when the run still holds it (a review request already released it)."""
@@ -156,26 +154,19 @@ class StudioHub:
         steps = [e["step"] for e in proof_map.work_log(self.store, node_id) if e.get("kind") == "step"]
         return steps[-1] if steps else 1
 
-    def run_action(self, node_id: str, action: str, body: dict) -> dict:
-        """The researcher's oversight of a node's run through the map's own API (spec #145): the studio's answer."""
-        import json as _json
-
+    def run_action(self, node_id: str, action: str, body: dict) -> tuple[int, dict]:
+        """The researcher's oversight of a node's run through the map's own API (spec #145): (status, the studio's answer)."""
         try:
             studio = self.studio(node_id)
         except NoStudio as exc:
             code, message = exc.args
-            raise RequestError(HTTPStatus.NOT_FOUND, code, message)
-        answer = studio.post(f"/api/agent/{action}", body or {})
-        data = _json.loads(answer.body)
-        if answer.status >= 400:
-            raise RequestError(HTTPStatus(answer.status), str(data.get("error") or "RUN_REFUSED"), str(data.get("message") or data.get("error") or "refused"))
-        return data
+            return int(HTTPStatus.NOT_FOUND), {"error": code, "message": message}
+        return studio.run_action(action, body or {})
 
     def run_state(self, node_id: str) -> dict | None:
         """The node's run as the map shows it (spec #145): None when no run is active."""
-        studio = self._studios.get(node_id)
-        run = studio.run if studio is not None else None
-        if run is None or not run.active():
+        run = self._active_run(node_id)
+        if run is None:
             return None
         view = run.view()
         return {"status": view["status"], "role": view["role"], "step": view["step"], "steps": view["steps"]}
