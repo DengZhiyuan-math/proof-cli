@@ -83,7 +83,8 @@ class AgentRun:
         return self._turn_redirect
 
     def active(self) -> bool:
-        return self.state.status in ("running", "pausing", "paused")
+        """The run holds the node's one slot: while it is being started too, so two Starts can't both begin."""
+        return self.state.status in ("starting", "running", "pausing", "paused")
 
     def view(self) -> dict:
         """The run as the page and the map read it: status, reason, role, turns, and where the plan stands."""
@@ -202,15 +203,23 @@ class AgentRun:
                 job = self.agent.jobs[started["job"]]
                 with self._lock:
                     self._job = job
+                    deadline = self.state.deadline
+                over_budget = False
                 with job.cond:
                     while not job.done:
                         job.cond.wait(0.5)
+                        if not job.done and not over_budget and deadline and time.time() >= deadline:
+                            over_budget = True  # the time budget ends a turn that is still running (spec #145, story 25)
+                            self.agent.stop(job.id)
                 with self._lock:
                     self._job = None
                     if self._stop:
                         return
                     self.state.turns += 1
                     single = bool(self.state.roles)
+                if over_budget:
+                    self._end("budget", f"the time budget of this Start is spent ({self.state.turns} turn(s), the last one stopped)")
+                    return
                 done = next((e for e in reversed(job.events) if e.get("t") == "done"), {})
                 new = self.hooks.work_log()[before:]
                 self._handoff = next((e for e in reversed(new) if e.get("kind") == "handoff"), None)
