@@ -799,6 +799,13 @@ def test_a_claimed_nodes_card_names_the_runs_role_and_step():
     assert shown["dag"]["lem_three"]["tags"][0]["text"] == "Ada"
 
 
+def test_a_card_whose_run_needs_a_human_decision_says_so():
+    asking = {**_node("lem_bound", "lemma", "Bounded", assignee="claude-code", workflow_state="claimed"),
+              "run": {"status": "needs-human", "role": "numerics", "step": 2, "steps": 3, "decision": "choose the norm"}}
+    (shown,) = _home(map_={"nodes": [asking]})
+    assert shown["dag"]["lem_bound"]["tags"][0]["text"] == "Numerics · needs you"
+
+
 def test_the_node_page_starts_the_agent_and_offers_the_oversight_actions_while_it_runs():
     idle = {**NODE_VIEW, "node": {**NODE_VIEW["node"], "id": "c_check"}, "run": None, "crystallized_from": None, "fog_near": []}
     _, opened, started = _fog_home(steps=[{"open": "c_check"}, {"runButton": {"text": "Start agent"}}], nodes={"c_check": idle})
@@ -807,7 +814,7 @@ def test_the_node_page_starts_the_agent_and_offers_the_oversight_actions_while_i
     assert sent == {"url": "/api/node/c_check/agent/start", "body": {}}
     running = {**idle, "run": {"status": "running", "role": "prover", "step": 2, "steps": 3}}
     _, shown, redirected = _fog_home(steps=[{"open": "c_check"}, {"runButton": {"text": "Redirect", "redirect": "try the dual problem"}}], nodes={"c_check": running})
-    assert "prover · step 2/3 · running" in shown["nodeRun"]["text"] and shown["nodeRun"]["buttons"] == ["Pause", "Redirect", "Stop and release"]
+    assert "Prover · step 2/3 · running" in shown["nodeRun"]["text"] and shown["nodeRun"]["buttons"] == ["Pause", "Redirect", "Stop and release"]
     (sent,) = redirected["posted"]
     assert sent == {"url": "/api/node/c_check/agent/redirect", "body": {"text": "try the dual problem"}}
     paused = {**idle, "run": {"status": "paused", "role": "prover", "step": 2, "steps": 3}}

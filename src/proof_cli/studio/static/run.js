@@ -1,7 +1,8 @@
 /* The studio's centre: the Proof agent's run on this node, under the researcher's eye (spec #145, decided in
    #144 and #142). Reads api/agent/run and api/agent/log; renders the run card — status, role and step, the
    plan, the oversight actions — and the work log, in time order, with the roles' reports, what they did
-   through `proof`, and each turn's conversation folded under it. Nothing here drives the agent with a prompt:
+   through `proof`, and each turn's conversation folded under its step — read from what the project kept, so the
+   turns of earlier Starts are there after a new Start or a restart. Nothing here drives the agent with a prompt:
    Start once, then Pause, Redirect, Resume, Stop and release, Review what it has. Everything from the project
    is inserted as text, never as HTML. Uses common.js's `api`; exposes globalThis.studioRun for the agent
    panel's "+" menu. Harnessed on its own (tests/js/run_pane_harness.js). */
@@ -22,7 +23,7 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
   }
 
   const ROLE_WORD = { prover: "Prover", typesetter: "Typesetter", numerics: "Numerics" };
-  const state = { run: null, log: [], turns: [], folder: "", open: null, read: false, timer: null, redirectBox: null, roleBox: null, shown: "", transcripts: {} };
+  const state = { run: null, log: [], folder: "", open: null, read: false, timer: null, redirectBox: null, roleBox: null, shown: "", transcripts: {} };
 
   const note = h("p", "", { class: "run-note", role: "status" });
   function tell(text, bad) { note.textContent = text; note.setAttribute("class", bad ? "run-note bad" : "run-note"); }
@@ -47,6 +48,7 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
     const button = (label, action, body, cls) => { const b = h("button", label, { type: "button", class: cls || "" }); b.onclick = () => act(action, body); return b; };
     if (!run || !run.active) {
       box.append(button("Start agent", "start", {}, "primary"));
+      if (run && run.status === "release-failed") box.append(button("Stop and release", "release", {}, "danger"));  // try giving it back again
       const role = h("select", null, { class: "run-role", title: "Or one role alone, for one turn" });
       role.append(h("option", "all roles", { value: "" }), ...Object.entries(ROLE_WORD).map(([value, word]) => h("option", `${word} only`, { value })));
       const startRole = h("button", "Start", { type: "button", title: "Start the chosen role alone, for one turn" });
@@ -81,6 +83,7 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
                   h("span", `${run.name || ""} · turn ${run.turns}/${run.turns_max}`, { class: "run-meta" }));
       if (run.reason && !run.active) line.append(h("span", run.reason, { class: "run-reason" }));
       card.append(line);
+      if (run.status === "needs-human" && run.decision) card.append(h("p", `Needs you: ${run.decision}`, { class: "run-decision" }));
       if (run.redirect && run.redirect.text) card.append(h("p", `Redirect waiting: ${run.redirect.text}${run.redirect.role ? ` (for the ${ROLE_WORD[run.redirect.role]})` : ""}`, { class: "run-hint" }));
     }
     const plan = [...state.log].reverse().find((e) => e.kind === "plan");
@@ -112,6 +115,7 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
       if (n === current) return { status: "started", label: `current step · ${ROLE_WORD[latest.role] || latest.role || "agent"}` };
       if (report && report.status === "done") return { status: "done", label: "done" };
       if (report && report.status === "stuck") return { status: "stuck", label: "stuck" };
+      if (report && report.status === "needs-human") return { status: "stuck", label: "needs you" };
       if (n === next) return { status: "next", label: "next" };
       return { status: "", label: "" };
     });
@@ -141,7 +145,8 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
     li.append(h("span", when, { class: "log-time" }), h("span", e.role ? ROLE_WORD[e.role] || e.role : e.by || "", { class: "log-role" }));
     const body = h("span", null, { class: "log-body" });
     if (e.kind === "plan") body.append(`plan: ${(e.plan || []).map((s, i) => `${i + 1}. ${s}`).join("  ")}`);
-    else if (e.kind === "step") body.append(`step ${e.step} ${e.status}${e.note ? ` — ${e.note}` : ""}`);
+    else if (e.kind === "step") body.append(`step ${e.step} ${e.status === "needs-human" ? "needs you" : e.status}${e.note ? ` — ${e.note}` : ""}`);
+    else if (e.kind === "turn") body.append(turnFold(e, false));
     else if (e.kind === "handoff") body.append(`handed off to the ${ROLE_WORD[e.to] || e.to}${e.note ? `: ${e.note}` : ""}`);
     else if (e.kind === "split") body.append("split into ", ...(e.nodes || []).flatMap((id, i) => [i ? ", " : "", h("a", id, { href: `/studio/${encodeURIComponent(id)}/` })]));
     else if (e.kind === "review-requested") body.append("requested review of ", h("a", `snapshot v${e.version}`, { href: `/#/node/${encodeURIComponent(NODE)}`, title: "The frozen files, on the node's page" }));
@@ -155,28 +160,32 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
     return li;
   }
 
-  // a turn of this Start, folded: its role and prompt, the files it changed, and its conversation (the job's events)
-  function turnEntry(turn, index) {
-    const details = h("details", null, { class: "log-turn", "data-turn": index + 1 });
-    const summary = h("summary", `turn ${index + 1} · ${ROLE_WORD[turn.role] || turn.role}${turn.done ? "" : " · running"}`);
-    details.append(summary);
+  // A turn, folded under its step (spec #145, story 40): its role, its prompt, the files it changed, and its raw
+  // conversation. A finished turn's is read from what the project kept (api/agent/turn), so an earlier Start's
+  // turns read the same after a new Start or a restart; the turn running now is read from its job, again on every
+  // open and every poll until it is over, so what is shown is never a stale fragment (reaudit R-P3).
+  function turnFold(turn, running) {
+    const details = h("details", null, { class: "log-turn", "data-turn": turn.turn });
+    const where = turn.step ? `step ${turn.step} · ` : "";
+    details.append(h("summary", `${where}${ROLE_WORD[turn.role] || turn.role || "agent"}'s turn${running ? " · running" : ""} — its conversation`));
     const body = h("div", null, { class: "turn-body" });
-    body.append(h("p", turn.prompt, { class: "turn-prompt" }));
+    const prompt = h("p", "", { class: "turn-prompt" });
+    body.append(prompt);
     if (turn.changed && turn.changed.length) { const files = h("p", "changed: ", { class: "turn-files" }); turn.changed.forEach((change, i) => { if (i) files.append(", "); files.append(fileLink(change)); }); body.append(files); }
     const transcript = h("pre", "", { class: "turn-transcript" });
     body.append(transcript);
-    // The conversation is read when the turn is opened. Only a finished turn's is final: a running turn's is read
-    // again on every open and every poll until the turn is done, so what is shown is never a stale fragment (reaudit R-P3).
-    const cached = state.transcripts[turn.job];
-    if (cached) transcript.textContent = cached.text;
+    const show = (known) => { transcript.textContent = known.text; prompt.textContent = known.prompt || ""; };
+    if (state.transcripts[turn.turn]) show(state.transcripts[turn.turn]);
     details.loadTranscript = async () => {
       if (!details.open) return;
-      const known = state.transcripts[turn.job];
-      if (known && known.final) return;
-      const r = await api(`/api/agent/events?job=${turn.job}&after=0`);
-      const text = (r.events || []).filter((ev) => ev.t === "text" || ev.t === "error").map((ev) => ev.text || ev.message || "").join("\n") || (turn.done ? "(no text in this turn)" : "(nothing said yet)");
-      state.transcripts[turn.job] = { text, final: !!turn.done };
-      transcript.textContent = text;
+      const known = state.transcripts[turn.turn];
+      if (known && known.final) return show(known);
+      const r = running ? await api(`/api/agent/events?job=${turn.job}&after=0`) : await api(`/api/agent/turn?turn=${encodeURIComponent(turn.turn)}`);
+      const said = (r.events || []).filter((ev) => ev.t === "text" || ev.t === "error").map((ev) => ev.text || ev.message || "").join("\n");
+      const kept = { text: said || (running ? "(nothing said yet)" : r._status === 200 ? "(no text in this turn)" : "(this turn's conversation was not kept)"),
+                     prompt: r.prompt || "", final: !running && r._status === 200 };
+      state.transcripts[turn.turn] = kept;
+      show(kept);
     };
     details.addEventListener("toggle", details.loadTranscript);
     details.append(body);
@@ -203,7 +212,7 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
   }
 
   function render(force) {
-    const signature = JSON.stringify([state.run, state.log, state.turns]);
+    const signature = JSON.stringify([state.run, state.log]);
     const changed = force || signature !== state.shown;
     if (state.timer) clearTimeout(state.timer);
     state.timer = setTimeout(refresh, state.run && state.run.active ? RUN_POLL_MS : IDLE_POLL_MS);
@@ -212,11 +221,17 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
     state.shown = signature;
     const log = h("ol", null, { class: "work-log" });
     for (const e of state.log) log.append(entry(e));
-    if (!state.log.length) log.append(h("li", "Nothing yet: the work log fills as the agent reports its plan and its steps.", { class: "log-empty" }));
-    const turns = h("div", null, { class: "turns" });
-    state.turns.forEach((turn, i) => turns.append(turnEntry(turn, i)));
-    pane.replaceChildren(runCard(state.run), h("h3", "Work log", { class: "run-head" }), log,
-                         ...(state.turns.length ? [h("h3", "This Start's turns", { class: "run-head" }), turns] : []));
+    const now = state.run;
+    if (now && now.active && now.turn && now.job && !state.log.some((e) => e.kind === "turn" && e.turn === now.turn)) {
+      // the turn running now: under the step it is on, read from its job until it is recorded
+      const li = h("li", null, { class: "log-turn-running", "data-kind": "turn" });
+      li.append(h("span", "now", { class: "log-time" }), h("span", ROLE_WORD[now.role] || now.role || "", { class: "log-role" }),
+                h("span", null, { class: "log-body" }));
+      li.children[li.children.length - 1].append(turnFold({ turn: now.turn, job: now.job, role: now.role, step: now.step }, true));
+      log.append(li);
+    }
+    if (!log.children.length) log.append(h("li", "Nothing yet: the work log fills as the agent reports its plan and its steps.", { class: "log-empty" }));
+    pane.replaceChildren(runCard(state.run), h("h3", "Work log", { class: "run-head" }), log);
     restore(kept);
   }
 
@@ -224,7 +239,6 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
     const [run, log] = await Promise.all([api("/api/agent/run"), api("/api/agent/log")]);
     state.run = run._status === 200 ? run : null;
     state.log = log._status === 200 && Array.isArray(log.entries) ? log.entries : [];
-    state.turns = log._status === 200 && Array.isArray(log.turns) ? log.turns : [];
     state.folder = log.folder || state.folder;
     state.open = (log._status === 200 && log.open) || state.open;
     // A studio with no agent at work opens on "Start agent on this node", whatever Files tab was remembered

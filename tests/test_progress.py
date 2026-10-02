@@ -73,6 +73,7 @@ def test_the_work_log_merges_what_the_agent_did_through_proof(tmp_path: Path):
     ({"role": "prover", "step": 1, "status": "finished"}, "INVALID_PROGRESS_STATUS"),
     ({"role": "prover", "step": 1}, "PROGRESS_STATUS_REQUIRED"),
     ({"role": "prover"}, "PROGRESS_EMPTY"),
+    ({"role": "prover", "step": 1, "status": "needs-human"}, "DECISION_REQUIRED"),
 ])
 def test_a_malformed_report_is_refused(tmp_path: Path, bad, code):
     store = ensure_project(tmp_path)
@@ -104,3 +105,40 @@ def test_without_a_role_the_cli_refuses_a_report(tmp_path: Path):
     _data(_run(tmp_path, "node", "create", "N", "claim", "a claim", "--json"))
     refused = _run(tmp_path, "node", "progress", "N", "--plan", "x", "--json", env={"PROOF_AGENT_ROLE": ""})
     assert refused.exit_code == 1 and json.loads(refused.output)["error"]["code"] == "ROLE_REQUIRED"
+
+
+# -- seventh review (PR #148): a decision only a human can make, and what each entry and turn carries ----------
+
+
+def test_a_step_that_needs_a_human_decision_names_it(tmp_path: Path):
+    ensure_project(tmp_path)
+    _data(_run(tmp_path, "node", "create", "N", "claim", "a claim", "--json"))
+    env = {"PROOF_AGENT_ROLE": "prover", "PROOF_AGENT_NAME": "claude-code"}
+    asked = _data(_run(tmp_path, "node", "progress", "N", "--step", "1", "--status", "needs-human", "--note", "choose the norm", "--json", env=env))
+    assert asked["status"] == "needs-human" and asked["note"] == "choose the norm"
+    refused = _run(tmp_path, "node", "progress", "N", "--step", "1", "--status", "needs-human", "--json", env=env)
+    assert refused.exit_code == 1 and json.loads(refused.output)["error"]["code"] == "DECISION_REQUIRED"
+    shown = _run(tmp_path, "node", "progress", "N")
+    assert "needs a human decision — choose the norm" in shown.output
+
+
+def test_automatic_entries_take_the_role_of_the_turn_that_made_them_and_a_turn_keeps_its_conversation(tmp_path: Path):
+    from proof_cli.fog import add_fog
+    from proof_cli.proof_map import agent_turn_transcript, record_agent_turn
+
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="N", kind="claim", statement="a claim")
+    add_fog(store, "the researcher's own hunch", near=["N"], created_by="ada")  # outside any turn: no role
+    record_agent_turn(store, "N", phase="started", turn="t1", role="numerics", by="claude-code", provider="claude")
+    add_fog(store, "the ratio may stay below 2", near=["N"], created_by="claude-code")
+    record_agent_turn(store, "N", phase="ended", turn="t1", role="numerics", by="claude-code", provider="claude",
+                      job=3, session_id="s-1", step=2, events=[{"t": "init", "session_id": "s-1"}, {"t": "text", "text": "checked n ≤ 100"}])
+    log = work_log(store, "N")
+    fog = [entry for entry in log if entry["kind"] == "fog"]
+    assert [(entry["role"], entry["text"]) for entry in fog] == [(None, "the researcher's own hunch"), ("numerics", "the ratio may stay below 2")]
+    (turn,) = [entry for entry in log if entry["kind"] == "turn"]
+    assert (turn["role"], turn["job"], turn["session_id"], turn["step"], turn["turn"]) == ("numerics", 3, "s-1", 2, "t1")
+    kept = agent_turn_transcript(store, "N", "t1")
+    assert kept["events"][1]["text"] == "checked n ≤ 100" and kept["session_id"] == "s-1"
+    assert agent_turn_transcript(store, "N", "no-such-turn") is None
+    assert agent_turn_transcript(store, "N", "../../escape") is None

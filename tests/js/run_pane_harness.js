@@ -1,6 +1,7 @@
 // Runs the studio's real run pane (src/proof_cli/studio/static/run.js) against a minimal DOM.
 // argv[2]: JSON {run, log, press: a button label or a list, redirect: text, role: a select value, answer,
-// open: how the log says files open, hash: the page's #, clickFile: a changed file's path to click}.
+// open: how the log says files open, hash: the page's #, clickFile: a changed file's path to click,
+// turns: the log's turn entries (appended to log), said: what the backend has of a turn's conversation}.
 // Prints what the pane shows and what it posted.
 const fs = require("fs"), path = require("path"), vm = require("vm");
 
@@ -25,9 +26,10 @@ class El {
   const scenario = JSON.parse(process.argv[2]);
   const pane = new El("section"), posted = [], dispatched = [], centred = [];
   let focused = null;
-  let run = scenario.run, log = scenario.log || [];
+  let run = scenario.run, log = [...(scenario.log || []), ...(scenario.turns || [])];
   const timers = [];
   let said = scenario.said || "I read L1 first.";  // what the backend has of the turn's conversation so far
+  const askedTurns = [];  // the recorded conversations read from the project (api/agent/turn)
   const context = {
     document: { getElementById: (id) => (id === "run-pane" ? pane : null), createElement: (tag) => new El(tag), dispatchEvent: (ev) => { dispatched.push({ type: ev.type, detail: ev.detail || null }); },
                 querySelectorAll: () => [], documentElement: { dataset: {} }, get activeElement() { return focused; } },
@@ -45,7 +47,14 @@ class El {
         return { status: scenario.refuse ? 409 : 200, json: async () => (scenario.refuse ? { error: "RUN_ACTIVE", message: "already working" } : answer) };
       }
       if (url === "api/agent/run") return { status: 200, json: async () => run };
-      if (url === "api/agent/log") return { status: 200, json: async () => ({ entries: log, turns: scenario.turns || [], folder: "/proj/proofs/N", open: scenario.open || { kind: "scheme", url: "vscode://file//proj/proofs/N" } }) };
+      if (url === "api/agent/log") return { status: 200, json: async () => ({ entries: log, folder: "/proj/proofs/N", open: scenario.open || { kind: "scheme", url: "vscode://file//proj/proofs/N" } }) };
+      if (url.startsWith("api/agent/turn?")) {
+        const id = decodeURIComponent(url.split("turn=")[1]);
+        askedTurns.push(id);
+        const known = log.some((e) => e.kind === "turn" && e.turn === id);
+        return known ? { status: 200, json: async () => ({ turn: id, prompt: `Take your turn (${id})…`, events: [{ t: "text", text: said }, { t: "done" }] }) }
+                     : { status: 404, json: async () => ({ error: "NO_SUCH_TURN", message: "no recorded turn by that id" }) };
+      }
       if (url.startsWith("api/agent/events")) return { status: 200, json: async () => ({ events: [{ t: "text", text: said }, { t: "done" }], done: true }) };
       return { status: 404, json: async () => ({}) };
     },
@@ -64,19 +73,19 @@ class El {
     log: pane.all().filter((x) => x.tag === "li" && x.attrs["data-kind"]).map((x) => ({ kind: x.attrs["data-kind"], text: x.text() })),
     links: pane.all().filter((x) => x.tag === "a").map((x) => x.attrs.href),
     note: (pane.all().find((x) => x.cls().startsWith("run-note")) || { textContent: "" }).textContent,
-    turns: pane.all().filter((x) => x.tag === "details").map((x) => ({ summary: x.children.find((c) => c.tag === "summary").textContent, files: x.all().filter((a) => a.tag === "a").map((a) => a.attrs.href), titles: x.all().filter((a) => a.tag === "a").map((a) => a.attrs.title) })),
+    turns: pane.all().filter((x) => x.tag === "details").map((x) => ({ summary: x.children.find((c) => c.tag === "summary").textContent, id: x.attrs["data-turn"], prompt: (x.all().find((t) => t.cls() === "turn-prompt") || { textContent: "" }).textContent, files: x.all().filter((a) => a.tag === "a").map((a) => a.attrs.href), titles: x.all().filter((a) => a.tag === "a").map((a) => a.attrs.title) })),
     // what the researcher has in hand (audit P3): the redirect draft and its role, which turns are open, whether the draft has the focus
     redirect: { text: (pane.all().find((x) => x.cls() === "run-redirect") || { value: "" }).value, role: (pane.all().find((x) => x.cls() === "run-redirect-role") || { value: "" }).value },
     open: pane.all().filter((x) => x.tag === "details" && x.open).map((x) => String(x.attrs["data-turn"])),
     focusedRedirect: !!(focused && focused.cls && focused.cls() === "run-redirect"),
     transcripts: Object.fromEntries(pane.all().filter((x) => x.tag === "details").map((x) => [String(x.attrs["data-turn"]), (x.all().find((t) => t.cls() === "turn-transcript") || { textContent: "" }).textContent])),
-    polls: [...timers], posted: [...posted], dispatched: [...dispatched], centred: [...centred],
+    polls: [...timers], posted: [...posted], dispatched: [...dispatched], centred: [...centred], askedTurns: [...askedTurns],
   });
   const readings = [read()];
   if (scenario.typed !== undefined) {  // the researcher types a redirect, picks its role, opens a turn's conversation, then a poll comes
     const box = pane.all().find((x) => x.cls() === "run-redirect"); box.value = scenario.typed; box.focus();
     if (scenario.role !== undefined) { const sel = pane.all().find((x) => x.cls() === "run-redirect-role"); if (sel) sel.value = scenario.role; }
-    for (const d of pane.all().filter((x) => x.tag === "details" && (scenario.open || []).includes(Number(x.attrs["data-turn"])))) { d.open = true; await (d.listeners.toggle || (async () => {}))(); }
+    for (const d of pane.all().filter((x) => x.tag === "details" && (scenario.open || []).includes(x.attrs["data-turn"]))) { d.open = true; await (d.listeners.toggle || (async () => {}))(); }
     for (let i = 0; i < 4; i++) await new Promise(setImmediate);
     readings.push(read());
     if (scenario.changed) log = [...log, scenario.changed];  // the next poll sees a new entry
@@ -85,13 +94,14 @@ class El {
     readings.push(read());
   }
   const tick = async () => { for (let i = 0; i < 6; i++) await new Promise(setImmediate); };
-  const openTurn = async (n) => { const d = pane.all().find((x) => x.tag === "details" && Number(x.attrs["data-turn"]) === n); d.open = true; await d.listeners.toggle(); await tick(); };
+  const openTurn = async (id) => { const d = pane.all().find((x) => x.tag === "details" && x.attrs["data-turn"] === id); d.open = true; await d.listeners.toggle(); await tick(); };
   if (scenario.conversation) {  // the researcher opens a running turn; the agent says more; the turn ends; the researcher looks again
     const c = scenario.conversation;
     await openTurn(c.turn); readings.push(read());                 // opened while running
     said = c.more; await context.studioRun.refresh(); await tick(); readings.push(read());   // a poll with no other news
-    said = c.final; scenario.turns[c.turn - 1].done = true; await context.studioRun.refresh(); await tick(); readings.push(read());  // the turn is done
-    const d = pane.all().find((x) => x.tag === "details" && Number(x.attrs["data-turn"]) === c.turn); d.open = false; await d.listeners.toggle();
+    // the turn is done: the run has no turn running, and the log has the turn's record, its conversation kept
+    said = c.final; run = { ...run, job: null, turn: null }; log = [...log, c.recorded]; await context.studioRun.refresh(); await tick(); readings.push(read());
+    const d = pane.all().find((x) => x.tag === "details" && x.attrs["data-turn"] === c.turn); d.open = false; await d.listeners.toggle();
     said = "(the backend is not asked again)"; await openTurn(c.turn); readings.push(read());  // closed and opened again: final, from memory
   }
   if (scenario.clickFile) {  // the researcher clicks a file a turn changed

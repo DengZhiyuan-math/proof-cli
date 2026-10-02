@@ -48,6 +48,7 @@ from ..storage import (
 from ..authority import candidate_proof_sha256
 from .. import key_ideas
 from ..vault import OUT_DIR, SNAPSHOT_MANIFEST, archived_pdf_path, build_pdf_path, frozen_key_ideas, node_folder, snapshot_folder_file, snapshot_folder_files
+from ..studio.agent_run import ACTIONS as RUN_ACTIONS
 from .studios import StudioHub
 
 
@@ -403,7 +404,7 @@ class ReviewApp:
 
     def run_action(self, node_id: str, action: str, body: dict) -> dict:
         """Start, pause, resume, redirect or release the Proof agent's run on a node, from the map or the node's page (spec #145)."""
-        if action not in ("start", "pause", "resume", "redirect", "release", "review-now"):
+        if action not in RUN_ACTIONS:
             raise RequestError(HTTPStatus.NOT_FOUND, "NOT_FOUND", f"no run action {action!r}")
         status, data = self.studios.run_action(node_id, action, body)
         if status >= 400:

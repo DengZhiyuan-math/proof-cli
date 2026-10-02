@@ -176,6 +176,15 @@ class Role:
         return [f"{tool}({pattern})" for pattern in self.writes for tool in ("Edit", "Write", "MultiEdit")]
 
 
+# Every role's obligations when it stops (spec #145: 停下时写 progress … 说不清的方向 fog add --near), and how it
+# says that only the researcher can decide what comes next.
+_STOPPING = """\
+When you stop — done, stuck, or waiting for the researcher — report it: `--step N --status done|stuck --note "<what
+now stands>"`. When a decision only the researcher can make is in the way (a choice of definition, of norm, of which
+case to drop), name it and stop: `proof node progress {node} --step N --status needs-human --note "<the decision>"`.
+A direction you can't state yet goes in the fog before you stop: `proof fog add "<text>" --near {node} --created-by {name}`.
+"""
+
 _ROLE_BRIEFS = {
     "prover": """\
 This turn you are the **Prover** of node {node}. You find the proof: retrieval first, then your own
@@ -186,47 +195,68 @@ proof is ready to request review. Report your plan first (`proof node progress {
 then each step as you start and finish it (`--step N --status started|done`). When a step needs
 another role, hand it over and end your turn: `proof node progress {node} --handoff typesetter --note
 "<what to write>"` or `--handoff numerics --note "<what to compute>"`; the run brings you back after.
-When you are stuck, or a human must decide something, say so and stop: `--step N --status stuck --note "<why>"`.
-A direction you can't state yet goes in the fog before you stop: `proof fog add "<text>" --near {node} --created-by {name}`.
-""",
+""" + _STOPPING,
     "typesetter": """\
 This turn you are the **Typesetter** of node {node}. You write the Prover's draft (scratch/proof-draft.md)
 as the node's LaTeX — proof.tex and the files it \\input's — compile it and fix what fails, keep the
 preamble's conventions, and write the text of key-ideas.md from the draft. You do no mathematics:
 never supply a missing step or a missing case yourself; when the draft lacks one, report it and end your turn
 (`proof node progress {node} --step N --status done --note "missing: …"`), and the Prover takes it from there.
-You never split the node and never request review. When the build cannot be made to pass for a reason
-of its own, say so and stop: `--step N --status stuck --note "<why>"`.
-""",
+You never split the node and never request review. Compile without --shell-escape.
+""" + _STOPPING,
     "numerics": """\
 This turn you are the **Numerics** role of node {node}. You write and run the computations: run.sh is the
 entry, scripts beside it, everything they produce in out/. On a computation node that program and its
 outputs are the candidate proof itself; on a LaTeX node they are evidence for the Prover. Record every run
 you make as an Evidence check once a snapshot exists (`proof node evidence record <candidate-proof-id>
 <passed|failed|inconclusive|error> --run-by {name}`), and a computation about a fog item as an Experiment.
-Run the program yourself (`./run.sh`, or the interpreter directly). Before a snapshot exists, what a run
-showed goes in your step's note; once one does, it is an Evidence check. You never edit the LaTeX. Report your
-steps with `proof node progress {node}`, hand back with `--handoff prover --note "<what the numbers showed>"`
-when you are done, and stop with `--step N --status stuck --note "<why>"` when the computation cannot be made to run.
-""",
+Run the program yourself (`./run.sh`, or the interpreter on a script file: `python3 check.py`, never `python3 -c`).
+Before a snapshot exists, what a run showed goes in your step's note; once one does, it is an Evidence check.
+You never edit the LaTeX. Report your steps with `proof node progress {node}`, and hand back with
+`--handoff prover --note "<what the numbers showed>"` when you are done.
+""" + _STOPPING,
 }
+# every role may put an unclear direction in the fog near the node (the stopping duty above)
+_EVERY_ROLE = ("Bash(proof fog add *)",)
 ROLES: dict[str, Role] = {
     AgentRole.prover.value: Role(
         AgentRole.prover.value, _ROLE_BRIEFS["prover"], ("./scratch/**",),
-        (*_PROOF_READS, "Bash(proof node split *)", "Bash(proof node depend *)", "Bash(proof node request-review *)", "Bash(proof challenge open *)",
-         "Bash(proof fog add *)", "Bash(proof fog edit *)", "Bash(proof fog drop *)", "Bash(proof fog reopen *)", "Bash(proof fog crystallize *)"),
+        (*_PROOF_READS, *_EVERY_ROLE, "Bash(proof node split *)", "Bash(proof node depend *)", "Bash(proof node request-review *)", "Bash(proof challenge open *)",
+         "Bash(proof fog edit *)", "Bash(proof fog drop *)", "Bash(proof fog reopen *)", "Bash(proof fog crystallize *)"),
         COMPUTATION,
     ),
     AgentRole.typesetter.value: Role(
-        AgentRole.typesetter.value, _ROLE_BRIEFS["typesetter"], ("./*.tex", "./**/*.tex", "./key-ideas.md"), _PROOF_READS, _TEX_PROGRAMS,
+        AgentRole.typesetter.value, _ROLE_BRIEFS["typesetter"], ("./*.tex", "./**/*.tex", "./key-ideas.md"), (*_PROOF_READS, *_EVERY_ROLE), _TEX_PROGRAMS,
     ),
     AgentRole.numerics.value: Role(
         AgentRole.numerics.value, _ROLE_BRIEFS["numerics"],
         ("./run.sh", "./*.py", "./*.sage", "./*.lean", "./*.jl", "./*.r", "./*.txt", "./out/**", "./scratch/**"),
-        (*_PROOF_READS, "Bash(proof node evidence record *)", "Bash(proof fog experiment record *)"),
-        (*COMPUTATION, "bash", "sh"), ("Bash(./run.sh)", "Bash(./run.sh *)"),
+        (*_PROOF_READS, *_EVERY_ROLE, "Bash(proof node evidence record *)", "Bash(proof fog experiment record *)"),
+        COMPUTATION, ("Bash(./run.sh)", "Bash(./run.sh *)"),  # its own program; no general shell (ADR-0011)
     ),
 }
+
+# What a role's programs could still run beyond a file of the node's own: an interpreter's inline code or module
+# (`python3 -c "…"`, `python3 -m proof_cli …`), TeX's shell escape, latexmk's Perl. Denied, so a role's scope is not
+# one command away from anything (ADR-0011; a contract for a cooperative agent, as ADR-0010 says, not a sandbox).
+_INLINE = {"python": ("-c", "-m"), "python3": ("-c", "-m"), "sage": ("-c", "-m", "-sh", "-python", "-ipython"), "latexmk": ("-e", "-shell-escape", "--shell-escape"),
+           **{tex: ("-shell-escape", "--shell-escape") for tex in ("pdflatex", "xelatex", "lualatex")}}
+# the commands that make a turn a run, for the stuck rule: a computation, a compile, the node's own program
+_RUNS = frozenset((*COMPUTATION, *_TEX_PROGRAMS))
+
+
+def inline_code_rules(programs: tuple[str, ...]) -> list[str]:
+    """The Bash rules that deny `programs` their inline-code forms (see _INLINE)."""
+    return [f"Bash({program} {flag} *)" for program in programs for flag in _INLINE.get(program, ())]
+
+
+def is_a_run(command: str) -> bool:
+    """Whether a shell command an agent ran is a run — a computation, a compile, `./run.sh` — rather than a look around."""
+    for part in command.replace("&&", ";").replace("||", ";").replace("|", ";").split(";"):
+        words = part.split()
+        if words and (words[0] in ("./run.sh", "run.sh") or Path(words[0]).name in _RUNS):
+            return True
+    return False
 
 
 @dataclass
@@ -240,9 +270,8 @@ class ProofAgentContext:
     dependencies: list[str] = field(default_factory=list)   # the node's, for drafting its key ideas
     # records a key-ideas draft in project state: (agent name, the bytes it wrote); see record_draft
     on_drafted: Callable[[str, bytes], None] | None = None
-    # a run's turn (spec #145): which role this turn is, and the researcher's redirect for it, if any
+    # a run's turn (spec #145): which role this turn is; None for the researcher's own turn (an Ask)
     role: str | None = None
-    redirect: str | None = None
 
     def key_ideas_prompt(self) -> str:
         """The turn that drafts a missing key-ideas.md from proof.tex and the dependencies (ADR-0013)."""
@@ -288,9 +317,11 @@ class ProofAgentContext:
             "--settings", json.dumps({"claudeMdExcludes": self.claude_md_excludes()}),
             "--add-dir", str(self.project_root), *(str(folder) for folder in self.library),
         ]
+        inline: list[str] = []
         if self.role in ROLES:  # a run's turn: the role's `proof` commands, programs and write scope (spec #145)
             role = ROLES[self.role]
             allowed = ["Read", "Glob", "Grep", "WebSearch", "WebFetch", *role.proof, *(f"Bash({command} *)" for command in role.programs), *role.commands]
+            inline = inline_code_rules(role.programs)  # a named program, never a shell by another name
             if edit:
                 allowed += role.write_rules()
         else:
@@ -299,7 +330,7 @@ class ProofAgentContext:
                 allowed += scope_rules
             elif edit:
                 allowed += ["Edit(./**)", "Write(./**)", "MultiEdit(./**)"]
-        denied = [f"{tool}(./{path})" for tool in ("Edit", "Write", "MultiEdit") for path in PROTECTED]
+        denied = [f"{tool}(./{path})" for tool in ("Edit", "Write", "MultiEdit") for path in PROTECTED] + inline
         return [*args, "--allowedTools", *allowed, "--disallowedTools", *denied]
 
     def claude_md_excludes(self) -> list[str]:
