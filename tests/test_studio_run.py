@@ -407,7 +407,7 @@ def test_a_vscode_link_percent_encodes_the_path(hub):
     assert unquote(result["url"].removeprefix("vscode://file/").rsplit(":", 1)[0]) == str((folder / "a #1 ?.py").resolve())
 
 
-@pytest.mark.parametrize("line", ["forty", "4.5", -1, 0, True, [3]])
+@pytest.mark.parametrize("line", ["forty", "4.5", -1, 0, True, [3], "²", "٣x"])
 def test_a_bad_line_is_a_400_with_a_registered_code(hub, line):
     from proof_cli.errors import ERROR_CODES
 
@@ -449,3 +449,106 @@ def test_a_chatty_run_keeps_only_the_tail_of_its_output(hub, monkeypatch):
     printed = result["output"].split("\n\n[no snapshot yet")[0]  # what the program printed, before the Evidence note
     assert printed.rstrip().endswith("LAST") and "line 0\n" not in printed
     assert "earlier output dropped" in result["output"] and len(result["output"]) < 11_000
+
+
+# -- the second review round: why a run was not recorded, one error shape, a linear output cap -------------
+
+
+def test_a_run_against_a_snapshot_that_cannot_be_read_says_so(hub):
+    import shutil
+
+    store, hub = hub
+    _script(store, "N", "exit 0\n")
+    proof = _reviewed(store)
+    shutil.rmtree(store.root / "proofs" / "N" / "snapshots" / "v1")
+    result = _post(hub, "/studio/N/api/run")[1]
+    assert result["exit"] == 0 and result["evidence"] is None
+    assert "snapshot v1 can't be read" in result["note"] and "differ" not in result["note"]
+    assert list_evidence_checks(store, proof.id) == []
+
+
+def test_a_run_that_writes_outside_out_names_the_path(hub):
+    store, hub = hub
+    _script(store, "N", "mkdir -p results\necho 1 > results/table.csv\nexit 0\n")
+    proof = _reviewed(store)
+    result = _post(hub, "/studio/N/api/run")[1]
+    assert result["evidence"] is None
+    assert "the run wrote outside out/ (results/table.csv), which changed its inputs" in result["note"]
+    assert list_evidence_checks(store, proof.id) == []
+
+
+def test_the_run_binds_the_hash_it_compared_against(hub, monkeypatch):
+    """The bound hash is the one read with the frozen inputs, handed to the record (and checked there)."""
+    from proof_cli import proof_map
+
+    store, hub = hub
+    _script(store, "N", "exit 0\n")
+    proof = _reviewed(store)
+    seen = {}
+    real = proof_map.record_evidence_check
+
+    def spy(*args, **kwargs):
+        seen.update(kwargs)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(proof_map, "record_evidence_check", spy)
+    result = _post(hub, "/studio/N/api/run")[1]
+    assert seen["snapshot_sha256"] == result["evidence"]["candidate_proof_sha256"] == proof.sha256
+
+
+def test_the_output_cap_keeps_the_tail_of_many_small_chunks_in_linear_time():
+    from proof_cli.studio.build import _Tail
+
+    class Chunks:
+        def __init__(self, n, size):
+            self.left, self.size, self.i = n, size, 0
+
+        def read(self, _):
+            if not self.left:
+                return b""
+            self.left -= 1
+            self.i += 1
+            return (b"%09d" % self.i).ljust(self.size, b".")
+
+    limit, n, size = 8 * 1024 * 1024, 60_000, 1024  # 60 MB through the 8 MB bound, a kilobyte at a time
+    tail = _Tail(limit)
+    t0 = time.monotonic()
+    tail.drain(Chunks(n, size))
+    out = tail.text()
+    assert time.monotonic() - t0 < 5  # trimming the front of one big buffer per chunk would take minutes
+    assert tail.dropped == n * size - limit
+    body = out.split("]\n", 1)[1]
+    assert len(body) == limit and body.endswith((b"%09d" % n).ljust(size, b".").decode())
+    assert out.startswith(f"[… {n * size - limit} bytes of earlier output dropped")
+
+
+def test_a_closed_hub_answers_in_the_one_studio_error_shape(hub):
+    store, hub = hub
+    hub.close()
+    status, body = _post(hub, "/studio/N/api/run")
+    assert status == 503 and body == {"error": "the proof map's server is shutting down", "code": "STUDIO_CLOSED"}
+
+
+def test_every_code_a_studio_answers_with_is_registered():
+    import ast
+    import re
+
+    from proof_cli.errors import ERROR_CODES
+
+    src = Path(__file__).resolve().parents[1] / "src" / "proof_cli"
+    found = {}
+    for path in (src / "studio" / "server.py", src / "webapp" / "studios.py"):
+        for node in ast.walk(ast.parse(path.read_text())):
+            name = getattr(node.func, "id", None) or getattr(node.func, "attr", None) if isinstance(node, ast.Call) else None
+            if name in ("_err", "_Refused", "_error", "NoStudio"):
+                for arg in node.args:
+                    if isinstance(arg, ast.Constant) and isinstance(arg.value, str) and re.fullmatch(r"[A-Z][A-Z0-9_]+", arg.value):
+                        found[arg.value] = f"{path.name}:{node.lineno}"
+    assert len(found) > 10 and not {code: at for code, at in found.items() if code not in ERROR_CODES}
+
+
+def test_a_studio_error_is_one_shape(hub):
+    store, hub = hub
+    for status, body in (_get(hub, "/studio/N/api/nothing-here"), _get(hub, "/studio/N/api/file"),
+                         _post(hub, "/studio/N/api/agent/stop", {}), _get(hub, "/studio/N/pdf")):
+        assert status >= 400 and set(body) == {"error", "code"}, body

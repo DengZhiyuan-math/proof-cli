@@ -292,6 +292,18 @@ def frozen_inputs_digest(folder: Path) -> str | None:
     return inputs_digest(entries, executable)
 
 
+def frozen_digests(folder: Path) -> tuple[str, str] | None:
+    """A snapshot folder's SHA-256 (`snapshot_folder_digest`) and its `frozen_inputs_digest`, from one read of
+    its files: the hash a Run's Evidence check is bound to is the hash of the inputs it was compared with
+    (#147). None if the snapshot is gone or unreadable."""
+    try:
+        names, executable = _read_manifest(folder)
+        entries = {rel: hashlib.sha256((folder / _stored(rel)).read_bytes()).hexdigest() for rel in names}
+    except _UNREADABLE:
+        return None
+    return manifest_digest(entries, executable), inputs_digest(entries, executable)
+
+
 def frozen_output_bytes(folder: Path) -> int:
     """How many bytes of `out/` a snapshot folder froze, as stored; 0 if it can't be read."""
     try:
