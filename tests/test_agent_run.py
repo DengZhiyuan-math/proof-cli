@@ -1121,9 +1121,10 @@ def test_review_what_it_has_is_recorded_under_the_researcher_and_ends_the_run(st
 
     store, hub, log, queue = studio
     write_key_ideas(store, "N")
-    _queue(queue, [["write", "proof.tex", "\\documentclass{amsart}\\begin{document}half\\end{document}\n"], ["sleep", "2"]], [["sleep", "0"]])
+    _queue(queue, [["write", "proof.tex", "\\documentclass{amsart}\\begin{document}half\\end{document}\n"], ["sleep", "10"]], [["sleep", "0"]])
     _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
-    time.sleep(1.2)
+    proof_tex = store.root / "proofs" / "N" / "proof.tex"
+    _until(lambda: "half" in proof_tex.read_text(), "the Prover's turn to write proof.tex (and go on working)")
     assert get_active_claim(store, "N").claimant_id == "claude-code"
     status, frozen = _post(hub, "/studio/N/api/agent/review-now")
     assert status == 200 and frozen["version"] == 1
@@ -1196,9 +1197,7 @@ def test_the_chat_route_is_ask_only_whatever_the_body_says(studio):
     status, started = _post(hub, "/studio/N/api/agent", {"prompt": "rewrite the proof", "mode": "edit", "provider": "claude"})
     assert status == 200 and "job" in started
     job = hub.studio("N").agent.jobs[started["job"]]
-    deadline = time.monotonic() + 30
-    while not job.done and time.monotonic() < deadline:
-        time.sleep(0.05)
+    _until(lambda: job.done, "the Ask turn to end")
     assert job.mode == "ask"  # the backend gets no Edit permission in this mode; what the stub wrote directly says nothing about that
 
 
@@ -1274,7 +1273,8 @@ def test_review_what_it_has_while_paused_ends_the_run_and_resume_does_nothing(st
     state = _get(hub, "/studio/N/api/agent/run")[1]
     assert state["status"] == "done" and state["reason"] == "review-requested" and state["active"] is False
     assert _post(hub, "/studio/N/api/agent/resume")[1]["status"] == "done"  # nothing to resume
-    time.sleep(0.8)
+    run = hub.studio("N").run
+    _until(lambda: not (run._run.thread and run._run.thread.is_alive()), "the run's coordinator to stop")  # no turn can follow now
     assert not (store.root / "proofs" / "N" / "scratch" / "after-review.md").exists() and len(_turns(log)) == 1
 
 
@@ -1397,11 +1397,10 @@ def test_a_files_save_of_the_summary_waits_while_an_agent_edit_turn_runs(studio)
     from proof_cli.errors import ERROR_CODES
 
     store, hub, log, queue = studio
-    _queue(queue, [["sleep", "2"]])
+    _queue(queue, [["sleep", "5"]])
     _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["typesetter"]})
-    deadline = time.monotonic() + 10
-    while not (hub.studio("N").agent.active and not hub.studio("N").agent.active.done) and time.monotonic() < deadline:
-        time.sleep(0.05)
+    agent = hub.studio("N").agent
+    _until(lambda: agent.active is not None and not agent.active.done, "the Typesetter's turn to be running")
     status, refused = _post(hub, "/studio/N/api/file", {"path": "key-ideas.md", "content": "mine\n"})
     assert status == 409 and refused["code"] == "KEY_IDEAS_AGENT_TURN" and "KEY_IDEAS_AGENT_TURN" in ERROR_CODES
     assert not (store.root / "proofs" / "N" / "key-ideas.md").exists()
