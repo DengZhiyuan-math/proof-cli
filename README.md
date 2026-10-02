@@ -70,6 +70,9 @@ A request without `key-ideas.md`, or with 核心思路 or 主要步骤 empty, is
   # proof.toml, at the project root
   [studio]
   library = ["~/papers", "../lecture-notes"]
+
+  [snapshot]
+  large_output_mb = 50   # a computation snapshot freezing more of out/ gives the SNAPSHOT_LARGE_OUTPUT notice
   ```
 - **An imported result's page** shows its source, trust level and dependents, and its Reference review.
 

@@ -185,11 +185,17 @@ class ProofMapNode(BaseModel):
 
     @model_validator(mode="after")
     def _default_medium(self):
-        if self.kind == ProofMapNodeKind.imported_result:
-            self.medium = None
-        elif self.medium is None:
+        # lenient on read: a node from before the field reads `latex`. An imported result keeps
+        # what it was given, never silently nulled: every write path refuses a medium on one
+        # (MEDIUM_NOT_APPLICABLE), so none is ever stored
+        if self.kind != ProofMapNodeKind.imported_result and self.medium is None:
             self.medium = Medium.latex
         return self
+
+
+def is_computation(node: ProofMapNode) -> bool:
+    """Whether the node's candidate proof is a program (spec #145): its Medium is `computation`."""
+    return node.medium == Medium.computation
 
 
 class ClaimRecord(BaseModel):
