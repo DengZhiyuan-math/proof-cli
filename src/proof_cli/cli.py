@@ -157,7 +157,9 @@ from .proof_map import (
     get_integrity_state,
     get_reference_review_state,
     get_workflow_state,
+    evidence_binding,
     list_candidate_proofs,
+    list_evidence_checks,
     list_challenges,
     list_integrity_warnings,
     list_nodes,
@@ -178,6 +180,7 @@ from .proof_map import (
     work_log,
 )
 from .trust_rules import get_trust_rule, list_trust_rules, trust_rule_history
+from .authority import candidate_proof_sha256
 from .vault import working_entry_path
 from .rendering import (
     render_candidate_proof,
@@ -505,6 +508,12 @@ def node_show(
         payload["blocked_reason"] = blocked_reason
         payload["working_proof"] = working_proof
         payload["snapshots"] = snapshots
+        # each Evidence check with its own bound hash, read against its snapshot as it is now (PR #147)
+        payload["evidence_checks"] = [
+            {**check.model_dump(mode="json"), "snapshot_version": proof.version, "binding": evidence_binding(check, now)}
+            for proof in list_candidate_proofs(store, node_id) for now in [candidate_proof_sha256(store, proof.id)]
+            for check in list_evidence_checks(store, proof.id)
+        ]
         # what the node page shows of each dependency: its pin, whether current, the remedy (#97)
         payload["dependency_details"] = dependency_details(store, node_id)
         typer.echo(dump_envelope(success_envelope("node.show", payload)))
@@ -1101,12 +1110,17 @@ def evidence_record(
     root: str = ROOT_OPTION,
     notes: str = "",
     run_by: str = typer.Option("system", "--run-by", help="The checker or backend that ran the check; the node page shows it"),
+    snapshot_sha256: str | None = typer.Option(
+        None, "--snapshot-sha256",
+        help="The SHA-256 of the snapshot the check ran on; refused unless it is the snapshot's hash now. "
+             "Omitted, the check is bound to the snapshot's hash at the moment of recording.",
+    ),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Record an Evidence check against a specific Candidate proof. Advisory, ungated."""
     store = get_store(_root(root))
     try:
-        check = record_evidence_check(store, candidate_proof_id, outcome, notes=notes, run_by=run_by)
+        check = record_evidence_check(store, candidate_proof_id, outcome, notes=notes, run_by=run_by, snapshot_sha256=snapshot_sha256)
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.evidence.record")
         raise typer.Exit(code=1)
@@ -2027,16 +2041,25 @@ def exchange_export(
 ) -> None:
     """The project as one bundle: the proof map, its Proof vault files and its side state (#31).
     Its contracts' and references' trust fields are legacy (ADR-0012); an importer resets them."""
-    bundle_json = cmd_exchange_export(_root(root), note=note)  # led by the legacy notice
+    try:
+        bundle_json = cmd_exchange_export(_root(root), note=note)  # led by the legacy notice
+    except ProofMapError as exc:  # a node folder it can't read whole: an unreadable file, a symbolic link
+        _emit_error(exc, json_output, command="exchange.export")
+        raise typer.Exit(code=1)
     if output:
         Path(output).write_text(bundle_json + "\n", encoding="utf-8")
         bundle = parse_bundle(bundle_json)
         counts = inspect_exchange_bundle(bundle).section_counts
-        summary = {"legacy_notice": LEGACY_TRUST_NOTICE, "path": output, "bundle_id": bundle.id, "section_counts": counts}
+        summary = {
+            "legacy_notice": LEGACY_TRUST_NOTICE, "path": output, "bundle_id": bundle.id, "section_counts": counts,
+            "notices": bundle.notices,  # SNAPSHOT_EXPORTED_UNVERIFIABLE per snapshot it had to leave files out of
+        }
         if json_output:
             typer.echo(dump_envelope(success_envelope("exchange.export", summary)))
         else:
             typer.echo(f"Wrote bundle {bundle.id} to {output}: {counts['proof_map_nodes']} node(s), {counts['vault_files']} vault file(s)")
+            for item in bundle.notices:
+                typer.echo(f"Note ({item['code']}): {item['message']}")
         return
     _emit_legacy_json("exchange.export", json_output, lambda: bundle_json)
 

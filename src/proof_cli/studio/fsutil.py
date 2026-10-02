@@ -9,6 +9,9 @@ import time
 from pathlib import Path
 
 EDITABLE_SUFFIXES = {".tex", ".bib", ".md", ".sty", ".cls", ".bbx", ".cbx", ".txt", ".tikz"}
+# what a computation node's studio edits besides those (spec #145): its program, its data, its logs —
+# matched case-insensitively, so `.R` is `.r`
+COMPUTATION_SUFFIXES = {".sh", ".py", ".sage", ".lean", ".jl", ".r", ".m", ".gp", ".mac", ".csv", ".json", ".log", ".toml", ".yml", ".yaml", ".cfg", ".ini"}
 SKIP_DIRS = {"node_modules", "__pycache__", "venv", ".venv"}
 
 
