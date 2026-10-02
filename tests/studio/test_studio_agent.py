@@ -303,3 +303,261 @@ class ClaudeAccountGuard(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ClaudeLiveEvents(unittest.TestCase):
+    """Thinking and the text of a file being written reach the page while they stream (upstream 2938c05)."""
+
+    def stream(self, *events):
+        return [{"type": "stream_event", "parent_tool_use_id": None, "event": e} for e in events]
+
+    def test_write_streams_its_content(self):
+        root = Path(tempfile.gettempdir()).resolve()
+        text = "\\documentclass{amsart}\n\\title{\"Primes\" é 😀}\n\ttab \\u0041\n"
+        raw = json.dumps({"file_path": str(root / "sec" / "a.tex"), "content": text})
+        frags = [raw[i:i + 3] for i in range(0, len(raw), 3)]  # cut anywhere, through escapes and surrogate pairs
+        lines = self.stream(
+            {"type": "message_start"},
+            {"type": "content_block_start", "index": 0, "content_block": {"type": "thinking"}},
+            {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "Plan the file."}},
+            {"type": "content_block_start", "index": 1, "content_block": {"type": "tool_use", "id": "tu1", "name": "Write", "input": {}}},
+            *({"type": "content_block_delta", "index": 1, "delta": {"type": "input_json_delta", "partial_json": f}} for f in frags))
+        j, st = job_for(root=root), {}
+        cc = ClaudeCode("claude", {"bin": "claude"})
+        for d in lines:
+            cc.handle(d, j, st)
+        ev = j.events
+        self.assertEqual(ev[1:3], [{"t": "thinking_start"}, {"t": "thinking", "text": "Plan the file."}])
+        self.assertEqual(ev[3], {"t": "tool_start", "id": "tu1", "name": "Write"})
+        live = [e for e in ev if e["t"] == "tool_live"]
+        self.assertEqual([e["path"] for e in live if "path" in e], ["sec/a.tex"])
+        self.assertEqual("".join(e.get("text", "") for e in live), text)
+
+    def test_edit_streams_old_and_new_text(self):
+        root = Path(tempfile.gettempdir()).resolve()
+        raw = json.dumps({"file_path": str(root / "main.tex"), "old_string": "a \\[x\\]", "new_string": "a \\begin{equation}x\\end{equation}"})
+        lines = self.stream(
+            {"type": "content_block_start", "index": 0, "content_block": {"type": "tool_use", "id": "e1", "name": "Edit", "input": {}}},
+            *({"type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": raw[i:i + 4]}} for i in range(0, len(raw), 4)))
+        j, st = job_for(root=root), {}
+        cc = ClaudeCode("claude", {"bin": "claude"})
+        for d in lines:
+            cc.handle(d, j, st)
+        live = [e for e in j.events if e["t"] == "tool_live"]
+        self.assertEqual("".join(e.get("old", "") for e in live), "a \\[x\\]")
+        self.assertEqual("".join(e.get("text", "") for e in live), "a \\begin{equation}x\\end{equation}")
+        done = next(i for i, e in enumerate(live) if e.get("old_done"))
+        self.assertFalse(any("text" in e for e in live[:done]), "the old text is complete first")
+
+    def test_tools_say_where_they_work(self):
+        root = Path(tempfile.gettempdir()).resolve()
+        j, st = job_for(root=root), {}
+        cc = ClaudeCode("claude", {"bin": "claude"})
+        cc.handle({"type": "assistant", "parent_tool_use_id": None, "message": {"content": [
+            {"type": "tool_use", "id": "r1", "name": "Read", "input": {"file_path": str(root / "sec" / "a.tex"), "offset": 20, "limit": 11}},
+            {"type": "tool_use", "id": "r2", "name": "Read", "input": {"file_path": str(root / "b.tex")}},
+            {"type": "tool_use", "id": "g1", "name": "Grep", "input": {"pattern": "x"}}]}}, j, st)
+        r1, r2, g1 = j.events
+        self.assertEqual((r1["path"], r1["lines"]), ("sec/a.tex", [20, 30]))
+        self.assertEqual(r2["path"], "b.tex")
+        self.assertNotIn("lines", r2, "a whole file is not a range to mark")
+        self.assertNotIn("path", g1)
+
+    def test_other_tools_stream_nothing(self):
+        j, st = job_for(), {}
+        cc = ClaudeCode("claude", {"bin": "claude"})
+        for d in self.stream(
+                {"type": "content_block_start", "index": 0, "content_block": {"type": "tool_use", "id": "b", "name": "Bash", "input": {}}},
+                {"type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": '{"command": "ls"}'}}):
+            cc.handle(d, j, st)
+        self.assertEqual([e["t"] for e in j.events], ["tool_start"])
+
+    def test_refused_steps_are_named(self):
+        j, st = job_for(root=tmpdir()), {}
+        ClaudeCode("claude", {"bin": "claude"}).handle({"type": "result", "permission_denials": [
+            {"tool_name": "Bash", "tool_input": {"command": "latexmk -pdf main.tex"}}]}, j, st)
+        self.assertEqual(st["denied"], [{"tool": "Bash", "what": "latexmk -pdf main.tex"}])
+
+
+class CompileTool(unittest.TestCase):
+    """The agent compiles with the node studio's own build (mcp_compile.py), not a shell (upstream 2938c05)."""
+
+    def setUp(self):
+        no_account_lock(self)
+        self.claude = ClaudeCode("claude", {"bin": "claude"})
+
+    def test_a_turn_with_a_studio_url_gets_the_tool_and_only_that_mcp_server(self):
+        from proof_cli.studio import backend_claude
+        cmd, _ = self.claude.command(job_for(mode="edit", root=tmpdir(), compile_url="http://127.0.0.1:9/studio/L1/"))
+        cfg = json.loads(cmd[cmd.index("--mcp-config") + 1])
+        (name,) = cfg["mcpServers"]
+        args = cfg["mcpServers"][name]["args"]
+        self.assertEqual(name, "studio")
+        self.assertTrue(args[0].endswith("proof_cli/studio/mcp_compile.py"), args)
+        self.assertEqual(args[1:], ["--url", "http://127.0.0.1:9/studio/L1/"])
+        self.assertIn("--strict-mcp-config", cmd)
+        self.assertIn(backend_claude.COMPILE_TOOL, cmd[cmd.index("--allowedTools") + 1:])
+
+    def test_a_turn_without_a_studio_url_has_no_tool(self):
+        cmd, _ = self.claude.command(job_for(mode="edit", root=tmpdir()))
+        self.assertNotIn("--mcp-config", cmd)
+
+    def test_a_role_that_does_not_typeset_has_no_tool(self):
+        from proof_cli.studio.proof_agent import ProofAgentContext
+        for role, expected in (("prover", False), ("numerics", False), ("typesetter", True), (None, True)):
+            ctx = ProofAgentContext("N", tmpdir(), role=role)
+            cmd, _ = self.claude.command(job_for(mode="edit", root=tmpdir(), compile_url="http://127.0.0.1:9/studio/N/", context=ctx))
+            self.assertEqual("--mcp-config" in cmd, expected, role)
+
+    def test_codex_gets_the_same_tool_through_its_configuration(self):
+        """Fourth review F3: the Typesetter's brief asks for the compile tool on either CLI; Codex is configured too."""
+        from proof_cli.studio.proof_agent import ProofAgentContext
+        codex = Codex("codex", {"bin": "codex"})
+        ctx = ProofAgentContext("N", tmpdir(), role="typesetter")
+        cmd, _ = codex.command(job_for(mode="edit", root=tmpdir(), compile_url="http://127.0.0.1:9/studio/N/", context=ctx))
+        overrides = [cmd[i + 1] for i, x in enumerate(cmd) if x == "-c"]
+        command = next(o for o in overrides if o.startswith("mcp_servers.studio.command="))
+        args = next(o for o in overrides if o.startswith("mcp_servers.studio.args="))
+        self.assertEqual(json.loads(command.split("=", 1)[1]), sys.executable)
+        self.assertEqual(json.loads(args.split("=", 1)[1])[1:], ["--url", "http://127.0.0.1:9/studio/N/"])
+        self.assertTrue(json.loads(args.split("=", 1)[1])[0].endswith("proof_cli/studio/mcp_compile.py"))
+        for job in (job_for(mode="ask", root=tmpdir(), compile_url="http://127.0.0.1:9/studio/N/", context=ctx),
+                    job_for(mode="edit", root=tmpdir(), compile_url="http://127.0.0.1:9/studio/N/", context=ProofAgentContext("N", tmpdir(), role="prover")),
+                    job_for(mode="edit", root=tmpdir(), context=ctx)):
+            self.assertFalse(any(x.startswith("mcp_servers.") for x in codex.command(job)[0]), job.mode)
+        from proof_cli.studio import mcp_compile
+        self.assertIn("Claude Code and Codex", mcp_compile.__doc__.splitlines()[0])  # seventh review: its docstring says so
+
+    def test_an_ask_turn_has_no_tool(self):
+        """Plan mode admits no tool that builds: offering it would only make a refused step."""
+        cmd, _ = self.claude.command(job_for(mode="ask", root=tmpdir(), compile_url="http://127.0.0.1:9/studio/L1/"))
+        self.assertNotIn("--mcp-config", cmd)
+
+    def test_the_tool_posts_the_build_as_the_pages_own_origin(self):
+        """proof-cli's server takes a write only from its own origin: the tool's request carries it."""
+        from unittest import mock
+
+        from proof_cli.studio import mcp_compile
+        seen = []
+
+        class Answer:
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def read(self): return b'{"exit": 0, "diagnostics": []}'
+
+        with mock.patch("urllib.request.urlopen", side_effect=lambda req, timeout: (seen.append(req), Answer())[1]):
+            r = mcp_compile.build("http://127.0.0.1:8765/studio/L1/", False)
+        (req,) = seen
+        self.assertEqual(r, {"exit": 0, "diagnostics": []})
+        self.assertEqual(req.full_url, "http://127.0.0.1:8765/studio/L1/api/build")
+        self.assertEqual(req.get_header("Origin"), "http://127.0.0.1:8765")
+        self.assertEqual(req.get_header("Content-type"), "application/json")
+        self.assertEqual(json.loads(req.data), {"mode": "draft", "clean": False, "by": "agent"})
+
+    def test_one_name_for_the_tool_in_events(self):
+        """Seventh review: the tool shows as "Compile" through one helper, wherever Claude Code names it."""
+        from proof_cli.studio import backend_claude
+        self.assertEqual(backend_claude.tool_name(backend_claude.COMPILE_TOOL), "Compile")
+        self.assertEqual(backend_claude.tool_name("Read"), "Read")
+        self.assertEqual(backend_claude.tool_name(None), None)
+        j, st = job_for(root=tmpdir()), {}
+        self.claude.handle({"type": "stream_event", "parent_tool_use_id": None, "event": {"type": "content_block_start", "index": 0, "content_block": {
+            "type": "tool_use", "id": "c1", "name": backend_claude.COMPILE_TOOL}}}, j, st)
+        self.claude.handle({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": "c1", "name": backend_claude.COMPILE_TOOL, "input": {}}]}}, j, st)
+        self.assertEqual([e["name"] for e in j.events if e["t"] in ("tool_start", "tool")], ["Compile", "Compile"])
+
+    def test_the_rule_and_the_attribute_have_their_own_names(self):
+        """Seventh review: `has_compile_tool(job)` decides; a context's `compiles` says whether its role typesets."""
+        from proof_cli.studio.proof_agent import ProofAgentContext
+        self.assertFalse(hasattr(backends, "compiles"))
+        ctx = ProofAgentContext("N", tmpdir(), role="typesetter")
+        self.assertTrue(backends.has_compile_tool(job_for(mode="edit", compile_url="http://127.0.0.1:9/studio/N/", context=ctx)))
+        self.assertFalse(hasattr(manager(Path("."), plain=Codex("plain", {"bin": "codex"})), "server_url"))  # the manager's is compile_url
+        self.assertFalse(hasattr(backends.Job(1), "server_url"))  # and so is the turn's
+        self.assertIsNone(backends.Job(1).compile_url)
+
+    def test_codex_names_the_tool_compile_too(self):
+        """Last review round: one mapping (backends.tool_name) for both CLIs' names of the compile tool."""
+        self.assertEqual(backends.tool_name("mcp__studio__compile"), "Compile")
+        self.assertEqual(backends.tool_name("studio.compile"), "Compile")
+        self.assertEqual(backends.tool_name("other.compile"), "other.compile")
+        j, st = job_for(root=tmpdir()), {}
+        Codex("codex", {"bin": "codex"}).handle({"type": "item.started", "item": {
+            "id": "m1", "type": "mcp_tool_call", "server": "studio", "tool": "compile"}}, j, st)
+        self.assertEqual([e["name"] for e in j.events if e["t"] == "tool"], ["Compile"])
+
+    def test_protocol(self):
+        from proof_cli.studio import mcp_compile
+        a = mcp_compile.answer({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}}, "u")
+        self.assertEqual(a["result"]["protocolVersion"], "2025-06-18")
+        self.assertIsNone(mcp_compile.answer({"jsonrpc": "2.0", "method": "notifications/initialized"}, "u"))
+        tools = mcp_compile.answer({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}, "u")
+        self.assertEqual([t["name"] for t in tools["result"]["tools"]], ["compile"])
+
+    def test_report_lists_errors_with_lines(self):
+        from proof_cli.studio import mcp_compile
+        text, failed = mcp_compile.report({"exit": 1, "engine": "pdflatex", "seconds": 2.1, "diagnostics": [
+            {"severity": "error", "file": "main.tex", "line": 12, "message": "Undefined control sequence"},
+            {"severity": "warning", "file": "main.tex", "line": 3, "message": "Reference `x' undefined"}]})
+        self.assertTrue(failed)
+        self.assertIn("1 error(s), 1 warning(s)", text)
+        self.assertIn("- error: main.tex:12: Undefined control sequence", text)
+        text, failed = mcp_compile.report({"exit": 0, "diagnostics": []})
+        self.assertFalse(failed)
+        self.assertTrue(text.startswith("Build OK."))
+
+
+class DisplayMathRule(unittest.TestCase):
+    """Seventh review: the rule against $$ is LaTeX's; key-ideas.md is Markdown and is typeset only from $…$ and
+    $$…$$ (ADR-0013, mathtext.js), so the instructions every turn gets scope it to .tex files and say so."""
+
+    def bullets(self, text):
+        return ["- " + b for b in text.split("\n- ")[1:]]
+
+    def test_the_rule_is_for_tex_files_and_key_ideas_keeps_its_dollars(self):
+        from proof_cli.studio.proof_agent import ProofAgentContext
+        for text in (backends.system_append(), backends.system_append(ProofAgentContext("N", tmpdir()))):
+            rules = [b for b in self.bullets(text) if "display math" in b]
+            tex = [b for b in rules if "never" in b]
+            self.assertEqual(len(tex), 1, rules)
+            self.assertTrue(tex[0].startswith("- In .tex files,"), tex[0])
+            self.assertIn("$$ ... $$", tex[0])
+            (md,) = [b for b in rules if "key-ideas.md" in b]
+            self.assertNotIn("never", md)
+            self.assertIn("$...$", md)
+            self.assertIn("$$...$$", md)
+
+    def test_the_typesetters_brief_has_the_key_ideas_guide_and_both_rules(self):
+        """The merge with #149's KEY_IDEAS_GUIDE: the Typesetter, who writes key-ideas.md, is told both delimiters
+        there and the environments rule for the .tex files, and nothing tells it to avoid $$ in key-ideas.md."""
+        from proof_cli.studio.proof_agent import KEY_IDEAS_GUIDE, ProofAgentContext
+        self.assertIn("$…$", KEY_IDEAS_GUIDE)
+        self.assertIn("$$…$$", KEY_IDEAS_GUIDE)
+        text = backends.system_append(ProofAgentContext("N", tmpdir(), role="typesetter"))
+        self.assertIn("## 核心思路", text)  # the guide itself
+        self.assertIn("- In .tex files, write display math with named LaTeX environments", text)
+        self.assertIn("In the .tex files display math is a named environment;\nin key-ideas.md it is $$…$$ and inline math $…$.", text)
+        self.assertNotIn("Compile without --shell-escape", text)  # it compiles with the tool, never in a shell
+
+
+class ClaudeBilling(unittest.TestCase):
+    """total_cost_usd is a list price: it is a real cost only with an API key (upstream 2938c05)."""
+
+    def result(self, key_source):
+        cc, j, st = ClaudeCode("claude", {"bin": "claude"}), job_for(), {}
+        cc.handle({"type": "system", "subtype": "init", "session_id": "s", "apiKeySource": key_source}, j, st)
+        cc.handle({"type": "result", "subtype": "success", "total_cost_usd": 5.353,
+                   "usage": {"input_tokens": 4, "cache_creation_input_tokens": 100, "cache_read_input_tokens": 900, "output_tokens": 50}}, j, st)
+        return st
+
+    def test_subscription_shows_no_price(self):
+        st = self.result("none")
+        self.assertIsNone(st["cost"])
+        self.assertEqual(st["billing"], "subscription")
+        self.assertEqual(st["usage"], {"in": 1004, "out": 50})
+
+    def test_api_key_shows_the_price(self):
+        st = self.result("ANTHROPIC_API_KEY")
+        self.assertEqual(st["cost"], 5.353)
+        self.assertEqual(st["billing"], "api")

@@ -395,7 +395,9 @@ class AgentRun:
                     # several roles without the Prover: nobody decides to go on once the first hands nothing over
                     self._end(run, "done", "turn-finished")
                     return
-                ran = any(e.get("t") == "tool" and e.get("name") == "Bash" and is_a_run(str(e.get("summary") or "")) for e in job.events)
+                # a run: a computation or a compile in a shell, or a compile through the compile tool (the Typesetter's)
+                ran = any(e.get("t") == "tool" and (e.get("name") == "Compile" or (e.get("name") == "Bash" and is_a_run(str(e.get("summary") or ""))))
+                          for e in job.events)
                 changed = bool(done.get("changed")) or ran or any(e.get("kind") in _CHANGES for e in new)
                 idle_turns = 0 if changed else idle_turns + 1
                 if idle_turns >= STUCK_TURNS:

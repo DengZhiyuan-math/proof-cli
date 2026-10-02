@@ -247,8 +247,47 @@ class SyncTex:
                 "w": 60.0, "h": 12.0, "line": target}
 
     def inverse(self, page: int, x: float, y: float) -> dict | None:
+        """The source line typeset at (x, y) on `page`. Text that LaTeX wrote into a
+        generated file and read back (the table of contents from .toc, the bibliography from
+        .bbl) is not where you edit it: a click there goes to the .bib entry of a reference,
+        or else to the nearest line of a source file."""
+        outdir = self.studio.cfg.outdir + "/"
+        hit = self._inverse(page, x, y)
+        if hit and hit["file"].startswith(outdir):
+            hit = (self._bib_entry(hit) if hit["file"].endswith(".bbl") else None) \
+                or self._inverse(page, x, y, lambda f: not f.startswith(outdir))
+        return hit
+
+    def _bib_entry(self, hit: dict) -> dict | None:
+        """The .bib entry of the \\bibitem whose text is at hit's line of a .bbl file."""
+        try:
+            lines = (self.studio.root / hit["file"]).read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            return None
+        key = None
+        for text in reversed(lines[:hit["line"]]):
+            m = re.search(r"\\bibitem\s*(?:\[[^\]]*\])?\s*\{([^}]+)\}|\\entry\{([^}]+)\}", text)
+            if m:
+                key = m.group(1) or m.group(2)
+                break
+        if not key:
+            return None
+        entry = re.compile(r"@\w+\s*[{(]\s*" + re.escape(key.strip()) + r"\s*,")
+        for rel in self.studio.list_files():
+            if not rel.endswith(".bib"):
+                continue
+            try:
+                text = (self.studio.root / rel).read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            m = entry.search(text)
+            if m:
+                return {"file": rel, "line": text.count("\n", 0, m.start()) + 1}
+        return None
+
+    def _inverse(self, page: int, x: float, y: float, keep=lambda f: True) -> dict | None:
         box = self._line_box(page, x, y)
-        on_page = [r for r in self.recs if r[0] == page and r[3] > 0]
+        on_page = [r for r in self.recs if r[0] == page and r[3] > 0 and keep(r[2])]
         if box:
             base = box[5]
             row = [r for r in on_page if r[1] in self.FINE
@@ -926,6 +965,8 @@ class Studio:
             return _json(self.agent.undo(int(body["turn"])))
         if path == "/api/build":
             r = self.run_build(str(body.get("mode", "draft")), bool(body.get("clean")))
+            if body.get("by") == "agent" and not r.get("busy"):
+                self.agent.built(r)  # the agent's compile tool: the page shows its build as it shows yours
             return _json(r, 409 if r.get("busy") else 200)
         if path == "/api/build/stop":
             return _json({"ok": self.stop_build()})

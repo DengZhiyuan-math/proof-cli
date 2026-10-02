@@ -203,3 +203,32 @@ def test_the_plan_says_in_words_which_steps_are_done_the_current_step_and_its_ro
     between = [*LOG[:-3], {**LOG[5], "status": "done"}]  # step 4 done, nothing started yet
     marks = {str(p["step"]): p["mark"] for p in _pane(run=RUNNING, log=between)[0]["plan"]}
     assert marks == {"1": "done", "2": "", "3": "", "4": "done", "5": "next"}
+
+
+def test_a_turns_transcript_reads_its_steps_and_the_running_turn_is_handed_to_the_files_view():
+    """From upstream 2938c05, watched the proof-cli way: the transcript shows each step the agent took, and the
+    running turn's events are read as they come and handed to the Files view (app.js studioLive)."""
+    running = {**RUNNING, "job": 7, "turn": "t9", "started_at": 100.0}
+    events = [{"t": "tool_start", "id": "r1", "name": "Read"}, {"t": "tool", "id": "r1", "name": "Read", "summary": "sec/a.tex", "path": "sec/a.tex", "lines": [20, 30]},
+              {"t": "tool_result", "id": "r1", "error": False}, {"t": "thinking_start"}, {"t": "text", "text": "I rewrote §2."},
+              {"t": "build", "result": {"exit": 0, "diagnostics": []}}, {"t": "done"}]
+    _, opened, polled = _pane(run=running, log=LOG, events=events, typed="x", open=["t9"])
+    assert opened["transcripts"]["t9"] == "▸ Read sec/a.tex\n… thinking\nI rewrote §2.\n▸ Compile: OK"
+    assert opened["live"] == [e["t"] for e in events] and opened["resets"] == 1  # every event once, after a reset for the new Start
+    assert polled["live"] == opened["live"] and polled["resets"] == 1  # the next poll does not follow the same turn again
+
+
+def test_the_files_views_marks_are_reset_by_a_new_start_not_by_each_turn():
+    """Seventh review: the Files view keeps what the Prover changed when the Typesetter's turn comes (a role's
+    hand-off is the same Start); only a new Start clears last run's marks."""
+    prover = {**RUNNING, "role": "prover", "job": 7, "turn": "t1", "started_at": 100.0}
+    typesetter = {**prover, "role": "typesetter", "job": 8, "turn": "t2"}
+    again = {**prover, "job": 9, "turn": "t3", "started_at": 200.0}
+    events = [{"t": "tool", "id": "w1", "name": "Edit", "summary": "proof.tex", "path": "proof.tex"}, {"t": "tool_result", "id": "w1", "error": False}, {"t": "done"}]
+    first, handed_off, restarted = _pane(run=prover, log=LOG, events=events, sequence=[
+        {"run": typesetter, "log": [*LOG, _turn("t1", "prover", 1, job=7)]},
+        {"run": again},
+    ])
+    assert first["resets"] == 1 and first["live"] == ["tool", "tool_result", "done"]
+    assert handed_off["resets"] == 1 and len(handed_off["live"]) == 6  # the Typesetter's turn followed, the marks kept
+    assert restarted["resets"] == 2 and len(restarted["live"]) == 9  # a new Start: last run's marks go
