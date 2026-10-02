@@ -38,7 +38,9 @@ proof node progress N              # the node's work log: what the agent planned
 # In a computation node's studio, Run executes run.sh (its exit code is an Evidence check on the current snapshot:
 # 0 passed, otherwise failed — recorded only when the run completes with the snapshot's frozen inputs, untouched;
 # see ADR-0015; a checker recording one by hand names the snapshot it ran on with
-# `proof node evidence record <proof> <outcome> --snapshot-sha256 <sha>`). run.sh runs as you, with your full environment, and can write anywhere you can (ADR-0010's
+# `proof node evidence record <proof> <outcome> --snapshot-sha256 <sha>` — refused unless it is that snapshot's
+# hash now; with no flag the check binds the snapshot as it is at the moment of recording, and a snapshot that
+# can't be read takes no check, SNAPSHOT_UNREADABLE). run.sh runs as you, with your full environment, and can write anywhere you can (ADR-0010's
 # cooperative model, not a sandbox); the page keeps the last 8 MB of its output.
 # Open in VS Code hands the folder to the editor — vscode://file/<folder>, or the command proof.toml names:
 #   [studio]
@@ -60,6 +62,8 @@ proof node request-review <id> --rationale "why it is scoped to prove directly"
 ```
 
 A request without `key-ideas.md`, or with 核心思路 or 主要步骤 empty, is refused with `KEY_IDEAS_REQUIRED`. Otherwise it freezes every input of the proof into an immutable snapshot, `proofs/<id>/snapshots/v<N>/`: the node's working sources (not `build/`, `scratch/` or older snapshots), its key-ideas summary and the shared preamble, with a `manifest.json` of each file's SHA-256. The snapshot's SHA-256, which decisions bind, is that of the manifest, so a change to any input, an `\input` file, a preamble macro or the summary alone included, is a new version to review. Review is always of a snapshot, never of the working files (ADR-0010, ADR-0011). The researcher reviews it in the node's studio: the review view shows the snapshot's key ideas and records the decisions, and links to the node's page for the frozen LaTeX and the archived PDF (ADR-0013). A snapshot from before summaries existed is reviewed as before, and says it has none.
+
+A snapshot, and an exchange export (`proof exchange export`), never freeze or carry secrets (`.env`, `.env.*`, `.envrc`, `.netrc`), hidden folders, or dotfiles other than a computation's allowlisted environment files (`.python-version`, `.tool-versions`, `.nvmrc`, `.node-version`, `.ruby-version`). Requesting review lists what it left out, by path only (ADR-0015). **Neither follows a symbolic link. This is a deliberate change: an export used to skip links silently.** An export now fails as a whole with `NODE_FOLDER_SYMLINK` if any node folder holds a link outside `scratch/`, `build/` and hidden folders, and the error names each link, dangling ones included. Replace each link with a copy of its target (`cp --remove-destination "$(readlink <link>)" <link>`), or move it into `scratch/`, then export again.
 
 ## The proof map page
 

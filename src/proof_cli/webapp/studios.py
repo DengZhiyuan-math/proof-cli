@@ -13,6 +13,7 @@ fixed: `proof.tex` → `build/proof.pdf`, the PDF review archives when it is cur
 
 from __future__ import annotations
 
+import hashlib
 import threading
 from dataclasses import dataclass
 from http import HTTPStatus
@@ -26,8 +27,8 @@ from ..storage import ProjectStore, get_current_candidate_proof
 from ..studio.agent_run import ACTIVE, RunHooks
 from ..studio.proof_agent import ProofAgentContext, agent_name, budget, library_folders, open_command
 from ..studio.server import ComputationHooks, FinishedRun, RunInputs, RunRecord, Studio
-from ..vault import (SNAPSHOT_MANIFEST, NodeFolderLinks, frozen_digests, frozen_role, node_folder,
-                     read_working_snapshot, working_inputs)
+from ..vault import (SNAPSHOT_MANIFEST, frozen_digests, frozen_role, inputs_digest, is_executable, node_folder,
+                     working_inputs, working_links)
 
 STUDIO_STATIC = Path(__file__).resolve().parent.parent / "studio" / "static"
 # the node's build: what vault.build_is_current checks and review archives (ADR-0010)
@@ -180,15 +181,24 @@ class StudioHub:
         """The state of the program's inputs (`vault.frozen_role` is `input`: its scripts, data and hidden environment
         files, never `out/`): their inputs digest, as `frozen_inputs_digest` hashes a snapshot's, and a stamp of each
         (size, mtime, ctime, inode). An input edited during a run and put back before it ends has its content as
-        before but not its stamp (audit R-S1); its ctime no program can set back. A folder that can't be read whole
-        — an unreadable file, a symbolic link (NODE_FOLDER_SYMLINK) — is no state to compare, and says why."""
+        before but not its stamp (audit R-S1); its ctime no program can set back. The digest is
+        `vault.inputs_digest` over exactly the files `working_inputs_digest` reads, without refusing a link under
+        `out/`: only a symbolic link among the inputs, or an unreadable input, is no state to compare, and says why."""
+        folder = node_folder(self.store.root, node_id)
         try:
+            links = sorted(path.relative_to(folder).as_posix() for path, _ in working_links(self.store.root, node_id, Medium.computation)
+                           if frozen_role(path.relative_to(folder).as_posix()) == "input")
+            if links:  # a link among the outputs is an output, and outputs may differ (Q41)
+                return RunInputs("", {}, f"{', '.join(links)}: a symbolic link among the program's inputs, which a Run's inputs are "
+                                         "never compared through")
             paths = {rel: path for rel, path in working_inputs(self.store.root, node_id, Medium.computation).items()
                      if frozen_role(rel) == "input"}
             stamps = {rel: f"{st.st_size}:{st.st_mtime_ns}:{st.st_ctime_ns}:{st.st_ino}" for rel, path in paths.items() for st in [path.stat()]}
-            digest = read_working_snapshot(self.store.root, node_id, Medium.computation).inputs_digest()
-        except (OSError, NodeFolderLinks) as exc:
-            return RunInputs("", {}, proof_map.node_folder_error(self.store.root, node_id, exc, "a run's Evidence check").message)
+            digest = inputs_digest({rel: hashlib.sha256(path.read_bytes()).hexdigest() for rel, path in paths.items()},
+                                   [rel for rel, path in paths.items() if is_executable(path)])
+        except OSError as exc:
+            where = Path(exc.filename).relative_to(folder).as_posix() if exc.filename and Path(exc.filename).is_relative_to(folder) else str(folder)
+            return RunInputs("", {}, f"{where} can't be read ({exc.strerror or exc}), so the program's inputs can't be compared")
         return RunInputs(digest, stamps)
 
     @staticmethod
@@ -218,7 +228,7 @@ class StudioHub:
             return {"evidence": None, "note": f"an input could not be read — not recorded against {version}"}
         unreadable = run.before.unreadable or run.after.unreadable
         if unreadable:
-            return {"evidence": None, "note": f"the node folder could not be read whole — not recorded against {version}: {unreadable}"}
+            return {"evidence": None, "note": f"the run was not recorded as an Evidence check on {version}: {unreadable}"}
         changed = self._changed_during(run.before, run.after)
         if changed:
             return {"evidence": None, "note": f"{changed} — not recorded against {version}"}
