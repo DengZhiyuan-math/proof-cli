@@ -577,7 +577,6 @@ def _ensure_vault_ignore(root: Path) -> None:
 
 
 RUN_SCRIPT = "run.sh"
-OUT_DIR = "out"
 _RUN_SKELETON = """\
 #!/usr/bin/env bash
 # Proof map node {node_id} ({kind}), medium: computation.

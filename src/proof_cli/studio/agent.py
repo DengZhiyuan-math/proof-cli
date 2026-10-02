@@ -26,6 +26,13 @@ MODEL_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/\[\]-]{0,119}")
 MAX_TURNS = 50          # turns kept in memory for their events and Undo
 
 
+def _coded(answer: dict, code: str) -> dict:
+    """A backend's own answer in the studio's error shape: an `error` it gives without a code gets `code`."""
+    if isinstance(answer, dict) and "error" in answer and "code" not in answer:
+        return {**answer, "code": code}
+    return answer
+
+
 class AgentManager:
     def __init__(self, root_fn: Callable[[], Path], files_fn: Callable[[], list[str]],
                  writable_fn: Callable[[str], object] | None = None,
@@ -91,29 +98,42 @@ class AgentManager:
     def start(self, prompt: str, session_id: str | None, mode: str,
               model: str | None = None, effort: str | None = None,
               scope: list[str] | None = None, provider: str | None = None,
-              finish: Callable[[], None] | None = None) -> dict:
+              finish: Callable[[], None] | None = None,
+              unless: Callable[[], bool] | None = None,
+              turn: dict | None = None,
+              begin: Callable[[Job], None] | None = None) -> dict:
         """Run one turn. `scope` (project-relative files) limits which files the agent may
         change in edit mode; None lets it change any file and create new ones. `finish` runs
         once the backend is done, before the turn's changes are read, so its own changes are
-        part of the turn (and of its Undo)."""
+        part of the turn (and of its Undo). `unless` is asked once more, after the checks and
+        the preflight, right before the turn exists: true, and no turn starts (a run stopped
+        while its turn was being prepared). `turn` is a run's turn (agent_run.py): its role,
+        name and redirect, handed to the node's context as they are — None for the
+        researcher's own turn, which no run's role reaches. `begin` is told the turn's job once the
+        turn exists, right before its backend starts (a run marks its turn as started there)."""
         if self.closed:
-            return {"error": "The studio is closed."}
+            return {"error": "The studio is closed.", "code": "STUDIO_CLOSED"}
         backend = self.backend(provider)
         if backend is None:
-            return {"error": f"Unknown provider: {provider}"}
+            return {"error": f"Unknown provider: {provider}", "code": "AGENT_UNKNOWN_PROVIDER"}
         why = backend.unavailable()
         if why:
-            return {"error": why}
+            return {"error": why, "code": "AGENT_UNAVAILABLE"}
         if model and not MODEL_RE.fullmatch(model):
-            return {"error": f"Not a model name: {model}"}
-        bad = backend.check(model, effort) or backend.preflight(self.root_fn())
+            return {"error": f"Not a model name: {model}", "code": "AGENT_INVALID_OPTION"}
+        bad = backend.check(model, effort)
         if bad:
-            return {"error": bad}
+            return {"error": bad, "code": "AGENT_INVALID_OPTION"}
+        bad = backend.preflight(self.root_fn())
+        if bad:
+            return {"error": bad, "code": "AGENT_UNAVAILABLE"}
         with self.lock:
             if self.closed:
-                return {"error": "The studio is closed."}
+                return {"error": "The studio is closed.", "code": "STUDIO_CLOSED"}
+            if unless is not None and unless():
+                return {"error": "The turn was called off before it started.", "code": "TURN_CALLED_OFF"}
             if self.active and not self.active.done:
-                return {"error": "The agent is still working on the previous message."}
+                return {"error": "The agent is still working on the previous message.", "code": "AGENT_BUSY"}
             job = Job(next(self.ids))
             job.provider = backend.id   # before it is visible as active: stop() finds its backend
             self.jobs[job.id] = job
@@ -136,10 +156,16 @@ class AgentManager:
         job.provider, job.prompt, job.session_id = backend.id, prompt, session_id
         job.mode, job.model, job.effort = mode if mode in ("edit", "ask") else "ask", model, effort
         job.root, job.files = self.root_fn(), self.files_fn
-        job.context = self.context_fn() if self.context_fn else None
+        job.context = (self.context_fn(turn) if turn is not None else self.context_fn()) if self.context_fn else None
+        job.turn = turn
         job.writable = lambda rel: self._writable(job, rel)
         job.finish = finish
         job.before = self._snapshot()
+        if begin is not None:
+            try:
+                begin(job)
+            except Exception as e:  # noqa: BLE001 — the turn is registered as active: it must still run and end
+                job.emit({"t": "error", "message": f"{type(e).__name__}: {e}"})
         threading.Thread(target=self._run, args=(job, backend), daemon=True).start()
         return {"job": job.id, "provider": backend.id}
 
@@ -201,18 +227,18 @@ class AgentManager:
     def commands(self, provider: str | None, refresh: bool = False) -> dict:
         backend = self.backend(provider)
         if backend is None:
-            return {"error": f"Unknown provider: {provider}"}
-        return backend.commands(self.root_fn(), refresh)
+            return {"error": f"Unknown provider: {provider}", "code": "AGENT_UNKNOWN_PROVIDER"}
+        return _coded(backend.commands(self.root_fn(), refresh), "AGENT_UNAVAILABLE")
 
     def probe_rate(self, provider: str | None = None) -> dict:
         backend = self.backend(provider)
         if backend is None or not backend.usage_limits:
-            return {"error": "This provider reports no usage limits."}
+            return {"error": "This provider reports no usage limits.", "code": "AGENT_NO_USAGE_LIMITS"}
         # The probe is a (tiny) model call, so it passes the same check as a turn.
         bad = backend.preflight(self.root_fn())
         if bad:
-            return {"error": bad, "rate": getattr(backend, "rate", None)}
-        return backend.probe_rate()
+            return {"error": bad, "code": "AGENT_UNAVAILABLE", "rate": getattr(backend, "rate", None)}
+        return _coded(backend.probe_rate(), "AGENT_UNAVAILABLE")
 
     def stop(self, jid: int) -> dict:
         job = self.jobs.get(jid)
@@ -262,7 +288,7 @@ class AgentManager:
         """Restore files changed in `turn`, only where they still match the turn's result."""
         job = self.turns.get(turn)
         if not job:
-            return {"error": "unknown turn"}
+            return {"error": "unknown turn", "code": "NO_SUCH_JOB"}
         rels = [rel for rel in sorted(set(job.before) | set(job.after))
                 if job.before.get(rel) != job.after.get(rel)]
         restored = self._restore(job, rels)

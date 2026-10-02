@@ -794,3 +794,49 @@ def test_the_node_page_lists_a_computations_frozen_outputs_and_previews_its_imag
     assert "image/png" in plot["text"] and table["image"] == [] and "text/csv" in table["text"]
     _, plain = _fog_home(steps=[{"open": "c_check"}], nodes={"c_check": {**view, "candidate_proof": None}})
     assert plain["nodeOutputs"] == []
+
+
+# -- the Proof agent's run (spec #145): on the map card, and the oversight on the node page ------------
+
+def test_a_claimed_nodes_card_names_the_runs_role_and_step():
+    running = {**_node("lem_bound", "lemma", "The partial sums are bounded", assignee="claude-code", workflow_state="claimed"),
+               "run": {"status": "running", "role": "typesetter", "step": 4, "steps": 5}}
+    paused = {**_node("lem_two", "lemma", "Another", assignee="claude-code", workflow_state="claimed"), "run": {"status": "paused", "role": "prover", "step": None, "steps": None}}
+    plain = _node("lem_three", "lemma", "Held by a person", assignee="ada", workflow_state="claimed")
+    (shown,) = _home(map_={"nodes": [running, paused, plain]})
+    assert shown["dag"]["lem_bound"]["tags"][0]["text"] == "Typesetter · step 4/5"
+    assert shown["dag"]["lem_two"]["tags"][0]["text"] == "Prover · paused"
+    assert shown["dag"]["lem_three"]["tags"][0]["text"] == "Ada"
+
+
+def test_a_card_whose_run_needs_a_human_decision_says_so():
+    asking = {**_node("lem_bound", "lemma", "Bounded", assignee="claude-code", workflow_state="claimed"),
+              "run": {"status": "needs-human", "role": "numerics", "step": 2, "steps": 3, "decision": "choose the norm"}}
+    (shown,) = _home(map_={"nodes": [asking]})
+    assert shown["dag"]["lem_bound"]["tags"][0]["text"] == "Numerics · needs you"
+
+
+def test_the_node_page_starts_the_agent_and_offers_the_oversight_actions_while_it_runs():
+    idle = {**NODE_VIEW, "node": {**NODE_VIEW["node"], "id": "c_check"}, "run": None, "crystallized_from": None, "fog_near": []}
+    _, opened, started = _fog_home(steps=[{"open": "c_check"}, {"runButton": {"text": "Start agent"}}], nodes={"c_check": idle})
+    assert opened["nodeRun"]["buttons"] == ["Start agent"]
+    (sent,) = started["posted"]
+    assert sent == {"url": "/api/node/c_check/agent/start", "body": {}}
+    running = {**idle, "run": {"status": "running", "role": "prover", "step": 2, "steps": 3}}
+    _, shown, redirected = _fog_home(steps=[{"open": "c_check"}, {"runButton": {"text": "Redirect", "redirect": "try the dual problem"}}], nodes={"c_check": running})
+    assert "Prover · step 2/3 · running" in shown["nodeRun"]["text"] and shown["nodeRun"]["buttons"] == ["Pause", "Redirect", "Stop and release"]
+    (sent,) = redirected["posted"]
+    assert sent == {"url": "/api/node/c_check/agent/redirect", "body": {"text": "try the dual problem"}}
+    paused = {**idle, "run": {"status": "paused", "role": "prover", "step": 2, "steps": 3}}
+    _, held = _fog_home(steps=[{"open": "c_check"}], nodes={"c_check": paused})
+    assert held["nodeRun"]["buttons"] == ["Resume", "Redirect", "Stop and release"]
+
+
+def test_a_map_card_offers_start_agent_for_a_local_node_nobody_holds_and_posts_it():
+    free = _node("lem_bound", "lemma", "The partial sums are bounded", frontier=True)
+    held = _node("lem_two", "lemma", "Held", assignee="claude-code", workflow_state="claimed")
+    imported = _node("ref_bw", "imported_result", "Bolzano-Weierstrass")
+    (shown, started) = _home(map_={"nodes": [free, held, imported]}, steps=[{"cardStart": "lem_bound"}])
+    assert shown["dag"]["lem_bound"]["start"] and not shown["dag"]["lem_two"]["start"] and not shown["dag"]["ref_bw"]["start"]
+    (sent,) = started["posted"]
+    assert sent == {"url": "/api/node/lem_bound/agent/start", "body": {}}

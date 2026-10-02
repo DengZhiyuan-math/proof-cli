@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -165,6 +166,7 @@ from .proof_map import (
     node_citation,
     open_challenge,
     record_evidence_check,
+    record_progress,
     release_node,
     require_challenge,
     request_review,
@@ -175,6 +177,7 @@ from .proof_map import (
     trust_rule_events,
     trust_rule_view,
     trust_rules_of,
+    work_log,
 )
 from .trust_rules import get_trust_rule, list_trust_rules, trust_rule_history
 from .authority import candidate_proof_sha256
@@ -184,14 +187,15 @@ from .rendering import (
     render_challenge,
     render_challenge_list,
     render_claim,
+    render_fog_experiments,
+    render_fog_item,
+    render_fog_list,
     render_frontier,
     render_proof_map_node,
     render_proof_map_node_list,
     render_trust_rule,
     render_trust_rule_list,
-    render_fog_experiments,
-    render_fog_item,
-    render_fog_list,
+    render_work_log,
 )
 from .review import render_verification_output
 
@@ -915,6 +919,44 @@ def node_split(
         )
     else:
         typer.echo(render_proof_map_node_list(children))
+
+
+@node_app.command("progress")
+def node_progress(
+    node_id: str,
+    plan: list[str] = typer.Option(None, "--plan", help="A step of the plan; repeat for each step, in order"),
+    step: int = typer.Option(None, "--step", help="The step being reported, counting from 1"),
+    status: str = typer.Option("", "--status", help="With --step: started, done, stuck, or needs-human (a decision only the researcher can make, named in --note)"),
+    note: str = typer.Option("", "--note", help="A line about the step: what it found, why it is stuck, what the next role should do"),
+    handoff: str = typer.Option("", "--handoff", help="Hand the work to this role (prover, typesetter or numerics) and end the turn"),
+    role: str = typer.Option("", "--role", help="prover, typesetter or numerics (default: PROOF_AGENT_ROLE, set in the agent's runtime)"),
+    by: str = typer.Option("", "--by", help="Who reports; empty means PROOF_AGENT_NAME from the agent's runtime, else human"),
+    root: str = ROOT_OPTION,
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """A Proof agent's report of its plan or a step on this node — the studio's work log (spec #145).
+    Without --plan or --step: the node's work log so far."""
+    store = get_store(_root(root))
+    try:
+        if not plan and step is None and not handoff:
+            log = work_log(store, node_id)
+            if json_output:
+                typer.echo(dump_envelope(success_envelope("node.progress", log)))
+            else:
+                typer.echo(render_work_log(node_id, log))
+            return
+        entry = record_progress(
+            store, node_id, role=role or os.environ.get("PROOF_AGENT_ROLE") or None, by=by or os.environ.get("PROOF_AGENT_NAME") or "human",
+            plan=plan or None, step=step, status=status or None, note=note, handoff=handoff or None,
+        )
+    except ProofMapError as exc:
+        _emit_error(exc, json_output, command="node.progress")
+        raise typer.Exit(code=1)
+    if json_output:
+        typer.echo(dump_envelope(success_envelope("node.progress", entry)))
+    else:
+        body = f"plan of {len(entry['plan'])} step(s)" if entry["kind"] == "plan" else f"handed off to {entry['to']}" if entry["kind"] == "handoff" else f"step {entry['step']} {entry['status']}"
+        typer.echo(f"{entry['role']} on {node_id}: {body}" + (f" — {entry['note']}" if entry.get("note") else ""))
 
 
 @node_medium_app.command("set")

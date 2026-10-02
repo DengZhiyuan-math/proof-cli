@@ -1,0 +1,1051 @@
+"""The Proof agent's run on a node (spec #145, decided in #144): Start once, then autonomous.
+
+A run holds the node's claim under the project's agent name and works the node as three roles in
+turn — Prover, Typesetter, Numerics — each the same CLI with its own brief, environment and write
+scope; it stops when review is requested, when its budget is spent, when it is stuck, or when the
+researcher pauses or releases it; a Redirect is handed to the next turn. A stub Claude Code on PATH
+plays the CLI: each turn pops the next script from a queue file and runs its `proof` commands, so
+the tests see the real launch (role, brief, permissions) and the real project state it produces.
+"""
+
+import json
+import os
+import stat
+import sys
+import time
+from pathlib import Path
+
+import pytest
+
+from _proofs import write_key_ideas
+from _review_client import DirectClient
+from proof_cli.proof_map import create_node, get_active_claim, get_workflow_state, work_log
+from proof_cli.storage import ensure_project
+from proof_cli.webapp.studios import StudioHub
+
+SRC = Path(__file__).resolve().parents[1] / "src"
+# each invocation pops one script (a list of commands; ["write", path, text] writes a file, ["tool", command]
+# reports a shell command the agent ran, as Claude Code's stream does) from FAKE_QUEUE and logs how it was
+# started to FAKE_LOG (one JSON line per turn)
+FAKE_CLAUDE = r'''#!{python}
+import json, os, subprocess, sys
+if sys.argv[1:3] == ["auth", "status"]:
+    print(json.dumps({{"loggedIn": True, "email": "stub@example.org"}})); sys.exit(0)
+prompt = sys.stdin.read()
+queue_path = os.environ["FAKE_QUEUE"]
+queue = json.load(open(queue_path)) if os.path.exists(queue_path) else []
+script = queue.pop(0) if queue else []
+json.dump(queue, open(queue_path, "w"))
+log = {{"argv": sys.argv[1:], "cwd": os.getcwd(), "role": os.environ.get("PROOF_AGENT_ROLE"), "name": os.environ.get("PROOF_AGENT_NAME"),
+       "prompt": prompt, "brief": sys.argv[sys.argv.index("--append-system-prompt") + 1] if "--append-system-prompt" in sys.argv else "", "ran": []}}
+tools = []
+for command in script:
+    if command[0] == "tool":
+        tools.append(command[1]); continue
+    if command[0] == "write":
+        path = os.path.join(os.getcwd(), command[1]); os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        open(path, "w").write(command[2]); continue
+    if command[0] == "sleep":
+        import time; time.sleep(float(command[1])); continue
+    done = subprocess.run(command, capture_output=True, text=True)
+    log["ran"].append({{"argv": command, "code": done.returncode, "out": done.stdout[-2000:], "err": done.stderr[-2000:]}})
+open(os.environ["FAKE_LOG"], "a").write(json.dumps(log) + "\n")
+print(json.dumps({{"type": "system", "subtype": "init", "session_id": "stub-session", "model": "stub"}}))
+for i, tool in enumerate(tools):
+    print(json.dumps({{"type": "assistant", "message": {{"content": [{{"type": "tool_use", "id": f"t{{i}}", "name": "Bash", "input": {{"command": tool}}}}]}}}}))
+print(json.dumps({{"type": "result", "session_id": "stub-session", "is_error": False, "subtype": "success"}}))
+'''
+
+
+def _executable(path: Path, text: str) -> Path:
+    path.write_text(text)
+    path.chmod(path.stat().st_mode | stat.S_IEXEC)
+    return path
+
+
+@pytest.fixture
+def studio(tmp_path: Path, monkeypatch):
+    """A project with claim N, a stub Claude Code on PATH, `proof` running this checkout, and the hub."""
+    project = tmp_path / "project"
+    store = ensure_project(project)
+    create_node(store, node_id="N", kind="claim", statement="a claim")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _executable(bin_dir / "claude", FAKE_CLAUDE.format(python=sys.executable))
+    _executable(bin_dir / "proof", f'#!/bin/sh\nexec "{sys.executable}" -m proof_cli.cli "$@"\n')
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("PYTHONPATH", f"{SRC}{os.pathsep}{os.environ.get('PYTHONPATH', '')}")
+    monkeypatch.setenv("CLAUDE_BIN", str(bin_dir / "claude"))
+    for name in ("PROOF_ROOT", "PROOF_CLAUDE_ACCOUNT", "PROOF_AGENT_ROLE", "PROOF_AGENT_NAME"):
+        monkeypatch.delenv(name, raising=False)
+    log = tmp_path / "claude-log.jsonl"
+    queue = tmp_path / "queue.json"
+    monkeypatch.setenv("FAKE_LOG", str(log))
+    monkeypatch.setenv("FAKE_QUEUE", str(queue))
+    hub = StudioHub(store)
+    yield store, hub, log, queue
+    hub.close()
+
+
+def _queue(queue: Path, *scripts):
+    queue.write_text(json.dumps(list(scripts)))
+
+
+def _turns(log: Path) -> list[dict]:
+    return [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+
+
+def _post(hub, path, body=None):
+    answer = hub.request("POST", path, "", body or {}, cross_site=False)
+    return answer.status, json.loads(answer.body)
+
+
+def _get(hub, path):
+    answer = hub.request("GET", path, "", None, cross_site=False)
+    return answer.status, json.loads(answer.body)
+
+
+def _hooks(**given):
+    """A run's hooks for the tests that drive AgentRun alone: what is not given does nothing."""
+    from dataclasses import fields
+
+    from proof_cli.studio.agent_run import RunHooks
+
+    base = dict(agent_name=lambda provider: "claude-code", budget=lambda: (40, 60.0), assign=lambda name: None,
+                release=lambda name, reason: None, work_log=lambda: [], record_close=lambda *a: None)
+    names = {f.name for f in fields(RunHooks)}
+    return RunHooks(**{key: value for key, value in {**base, **given}.items() if key in names})
+
+
+WAIT = 30.0  # seconds: how long a test waits for a subprocess (the stub CLI, a `proof` call) to do what it should
+
+
+def _until(ready, what, timeout=WAIT, every=0.05):
+    """Poll `ready()` until it is true; after `timeout` seconds fail, naming `what` (a string, or a callable that says
+    what is missing at that moment). Never a fixed sleep: a `proof` start-up takes seconds in a slow sandbox."""
+    deadline = time.monotonic() + timeout
+    while True:
+        value = ready()
+        if value:
+            return value
+        if time.monotonic() >= deadline:
+            raise AssertionError(f"waited {timeout:g}s for {what() if callable(what) else what}")
+        time.sleep(every)
+
+
+def _turn_running(hub, node="N"):
+    """The run's turn, once its CLI process is running."""
+    agent = hub.studio(node).agent
+    return _until(lambda: agent.active if agent.active is not None and not agent.active.done and agent.active.proc is not None else None,
+                  "the run's turn to start its CLI")
+
+
+def _wait(hub, node="N", until=("done", "stuck", "budget", "needs-human", "paused", "released"), timeout=60):
+    deadline = time.monotonic() + timeout
+    state = None
+    while time.monotonic() < deadline:
+        state = _get(hub, f"/studio/{node}/api/agent/run")[1]
+        if state["status"] in until:
+            return state
+        time.sleep(0.05)
+    raise AssertionError(f"the run never reached {until}: {state}")
+
+
+REVIEW = ["proof", "node", "request-review", "N", "--rationale", "scoped", "--requested-by", "claude-code"]
+
+
+# -- Start once, then autonomous ------------------------------------------------------------------
+
+
+def test_start_claims_the_node_under_the_agents_name_and_the_prover_goes_first(studio):
+    store, hub, log, queue = studio
+    _queue(queue, [["proof", "node", "progress", "N", "--plan", "read", "--plan", "prove"]], [["sleep", "0"]])
+    status, started = _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
+    assert status == 200 and started["status"] == "running", started
+    claim = get_active_claim(store, "N")
+    assert claim is not None and claim.claimant_id == "claude-code"  # the provider's name, unless proof.toml says otherwise
+    _wait(hub, until=("done", "stuck", "budget"))
+    first = _turns(log)[0]
+    assert first["role"] == "prover" and first["name"] == "claude-code"
+    assert "Prover" in first["brief"] and "scratch/" in first["brief"] and "never write proof.tex" in first["brief"]
+    log = work_log(store, "N")
+    assert log[0]["kind"] == "claimed" and log[0]["by"] == "claude-code"  # the run's claim opens the log
+    assert log[1]["kind"] == "plan" and log[1]["role"] == "prover"
+
+
+def test_a_run_stops_when_review_is_requested(studio):
+    store, hub, log, queue = studio
+    write_key_ideas(store, "N")
+    _queue(queue, [["write", "proof.tex", "\\documentclass{amsart}\\begin{document}ok\\end{document}\n"], REVIEW], [["sleep", "0"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["prover"]})
+    state = _wait(hub)
+    assert state["status"] == "done" and state["reason"] == "review-requested"
+    assert get_workflow_state(store, "N") == "review-needed" and get_active_claim(store, "N") is None
+    assert len(_turns(log)) == 1  # nothing ran after the request
+
+
+def test_the_whole_run_hands_the_work_from_the_prover_to_the_typesetter_and_back(studio):
+    store, hub, log, queue = studio
+    write_key_ideas(store, "N")
+    _queue(queue,
+           [["proof", "node", "progress", "N", "--handoff", "typesetter", "--note", "write §2 as LaTeX"]],  # prover delegates
+           [["write", "proof.tex", "\\documentclass{amsart}\\begin{document}typeset\\end{document}\n"]],  # typesetter writes
+           [REVIEW])  # prover closes
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
+    state = _wait(hub)
+    roles = [turn["role"] for turn in _turns(log)]
+    assert roles == ["prover", "typesetter", "prover"] and state["reason"] == "review-requested"
+    typesetter = _turns(log)[1]
+    assert "write §2 as LaTeX" in typesetter["prompt"] and "Typesetter" in typesetter["brief"] and "never supply a missing step" in typesetter["brief"]
+    assert "Bash(proof node split *)" not in typesetter["argv"] and "Edit(./key-ideas.md)" in typesetter["argv"]
+
+
+def test_a_computation_node_hands_the_work_to_numerics(studio):
+    store, hub, log, queue = studio
+    create_node(store, node_id="C", kind="claim", statement="n ≤ 10^4 holds", medium="computation")
+    write_key_ideas(store, "C")
+    _queue(queue,
+           [["proof", "node", "progress", "C", "--handoff", "numerics", "--note", "check n ≤ 10^4"]],
+           [["write", "out/table.csv", "n,ratio\n"]],
+           [["proof", "node", "request-review", "C", "--rationale", "a finite check", "--requested-by", "claude-code"]])
+    _post(hub, "/studio/C/api/agent/start", {"provider": "claude"})
+    _wait(hub, node="C")
+    numerics = _turns(log)[1]
+    assert numerics["role"] == "numerics" and "Numerics" in numerics["brief"] and "run.sh" in numerics["brief"]
+    assert "Bash(proof node evidence record *)" in numerics["argv"] and "Edit(./out/**)" in numerics["argv"] and "Edit(./**/*.tex)" not in numerics["argv"]
+    assert "Bash(./run.sh)" in numerics["argv"] and "Bash(bash *)" not in numerics["argv"]  # its own program, never a general shell
+    assert "Bash(proof fog add *)" in numerics["argv"]  # the duty of every role: an unclear direction goes in the fog
+
+
+# -- the run stops on its own ----------------------------------------------------------------------
+
+
+def test_the_budget_stops_the_run_and_keeps_the_claim(studio):
+    store, hub, log, queue = studio
+    (store.root / "proof.toml").write_text("[studio]\nbudget_turns = 2\n")
+    _queue(queue, *[[["write", f"scratch/t{i}.md", "x"]] for i in range(6)])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
+    state = _wait(hub)
+    assert state["status"] == "budget" and len(_turns(log)) == 2 and state["turns"] == 2
+    assert get_active_claim(store, "N") is not None  # it waits for the researcher, holding its place
+    assert work_log(store, "N")[-1]["kind"] == "step" and work_log(store, "N")[-1]["status"] == "stuck"  # the run's own closing note
+
+
+def test_turns_that_change_nothing_read_as_stuck(studio, monkeypatch):
+    from proof_cli.studio import agent_run
+
+    store, hub, log, queue = studio
+    monkeypatch.setattr(agent_run, "STUCK_TURNS", 2)
+    _queue(queue, *[[["sleep", "0"]] for _ in range(6)])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
+    state = _wait(hub)
+    assert state["status"] == "stuck" and len(_turns(log)) == 2
+    assert "no change" in state["reason"]
+
+
+def test_a_turn_that_reports_stuck_or_a_decision_stops_the_run(studio):
+    store, hub, log, queue = studio
+    _queue(queue, [["proof", "node", "progress", "N", "--step", "1", "--status", "stuck", "--note", "needs the researcher to choose the norm"]], [["sleep", "0"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
+    state = _wait(hub)
+    assert state["status"] == "stuck" and "choose the norm" in state["reason"] and len(_turns(log)) == 1
+
+
+# -- oversight -----------------------------------------------------------------------------------
+
+
+def test_pause_lets_the_turn_finish_then_holds_and_a_redirect_reaches_the_next_turn(studio):
+    store, hub, log, queue = studio
+    _queue(queue, [["sleep", "0.6"]], [["sleep", "0"]], [["sleep", "0"]], [["sleep", "0"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
+    _turn_running(hub)
+    assert _post(hub, "/studio/N/api/agent/pause")[1]["status"] in ("pausing", "paused")
+    _wait(hub, until=("paused",))
+    assert len(_turns(log)) == 1 and get_active_claim(store, "N") is not None
+    _post(hub, "/studio/N/api/agent/redirect", {"text": "try the dual problem instead", "role": "prover"})
+    _post(hub, "/studio/N/api/agent/resume")
+    _wait(hub, until=("done", "stuck", "budget", "paused"))
+    second = _turns(log)[1]
+    assert "try the dual problem instead" in second["prompt"] and second["role"] == "prover"
+
+
+def test_stop_and_release_ends_the_run_and_unassigns_the_node(studio):
+    store, hub, log, queue = studio
+    _queue(queue, [["sleep", "5"]], [["sleep", "0"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
+    _turn_running(hub)
+    status, released = _post(hub, "/studio/N/api/agent/release")
+    assert status == 200 and released["status"] == "released"
+    assert get_active_claim(store, "N") is None
+    time.sleep(0.5)  # nothing more may happen: a check of an absence, not a wait for a subprocess
+    assert len(_turns(log)) <= 1 and _get(hub, "/studio/N/api/agent/run")[1]["status"] == "released"
+
+
+def test_only_one_run_per_node_and_a_single_role_can_be_asked_for(studio):
+    store, hub, log, queue = studio
+    _queue(queue, [["sleep", "1"]], [["sleep", "0"]])
+    assert _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["typesetter"]})[0] == 200
+    status, again = _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
+    assert status == 409 and again["code"] == "RUN_ACTIVE"
+    _wait(hub)
+    assert [turn["role"] for turn in _turns(log)] == ["typesetter"]
+
+
+# -- what the map and the node page see --------------------------------------------------------
+
+
+def test_the_map_and_the_node_payload_show_the_runs_role_and_step(studio):
+    store, hub, log, queue = studio
+    _queue(queue, [["proof", "node", "progress", "N", "--plan", "a", "--plan", "b", "--plan", "c"], ["proof", "node", "progress", "N", "--step", "2", "--status", "started"], ["sleep", "1.5"]], [["sleep", "0"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
+    client = DirectClient(store)
+    client.app.studios = hub  # the page's own hub is this one
+
+    def shown():
+        node = next(n for n in client.get("/api/map")[1]["data"]["nodes"] if n["id"] == "N")
+        return node if (node.get("run") or {}).get("step") == 2 and node["run"].get("steps") == 3 else None
+
+    def missing():
+        kinds = [e.get("kind") for e in work_log(store, "N")]
+        return "the turn's two `proof node progress` calls to land; still missing: " + (
+            ", ".join(what for what, kind in (("the plan (--plan a b c)", "plan"), ("step 2 started", "step")) if kind not in kinds) or "neither (the map did not show them)")
+
+    node = _until(shown, missing, every=0.1)
+    assert node["assignee"] == "claude-code" and node["run"] == {"status": "running", "role": "prover", "step": 2, "steps": 3, "decision": None}
+    assert client.get("/api/node/N")[1]["data"]["run"]["role"] == "prover"
+    _wait(hub)
+
+
+def test_start_is_refused_while_someone_else_holds_the_node_and_leaves_no_run_behind(studio):
+    from proof_cli.proof_map import claim_node
+
+    store, hub, log, queue = studio
+    claim_node(store, "N", claimant_id="ada")
+    status, refused = _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
+    assert status == 400 and refused["code"] == "CLAIM_CONFLICT"  # the service's own refusal, as it stands
+    assert _get(hub, "/studio/N/api/agent/run")[1]["status"] == "idle"
+    assert get_active_claim(store, "N").claimant_id == "ada" and not _turns(log)
+
+
+def test_the_typesetters_report_reaches_the_prover_when_it_hands_back_without_a_handoff(studio):
+    store, hub, log, queue = studio
+    _queue(queue,
+           [["proof", "node", "progress", "N", "--handoff", "typesetter", "--note", "write it up"]],
+           [["proof", "node", "progress", "N", "--step", "1", "--status", "done", "--note", "missing: the case n = 0"]],
+           [["proof", "node", "progress", "N", "--step", "2", "--status", "stuck", "--note", "n = 0 needs a different argument"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
+    _wait(hub)
+    prover_again = _turns(log)[2]
+    assert prover_again["role"] == "prover" and "The typesetter reports: missing: the case n = 0" in prover_again["prompt"]
+
+
+def test_the_budget_table_in_proof_toml_is_read(studio):
+    store, hub, log, queue = studio
+    (store.root / "proof.toml").write_text("[studio]\nbudget = { turns = 1, minutes = 60 }\n")
+    _queue(queue, [["write", "scratch/a.md", "x"]], [["write", "scratch/b.md", "x"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
+    state = _wait(hub)
+    assert state["status"] == "budget" and state["turns_max"] == 1 and len(_turns(log)) == 1
+
+
+# -- the audit's findings on the run (P1, P2, P4) ---------------------------------------------------------
+
+
+def test_the_time_budget_stops_a_turn_that_is_still_running(studio):
+    store, hub, log, queue = studio
+    (store.root / "proof.toml").write_text("[studio]\nbudget = { turns = 40, minutes = 0.02 }\n")  # 1.2 seconds
+    _queue(queue, [["sleep", "20"]], [["sleep", "0"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
+    state = _wait(hub, timeout=30)
+    assert state["status"] == "budget" and "spent" in state["reason"]
+    assert len(_turns(log)) <= 1  # the long turn was stopped; no second one ran
+    assert get_active_claim(store, "N") is not None  # it waits for the researcher, holding its place
+
+
+def test_a_second_start_while_the_first_is_still_being_assigned_is_refused():
+    import threading
+
+    from proof_cli.studio.agent_run import AgentRun
+
+    gate = threading.Event()
+    assigned = []
+
+    class Agent:  # never reached: the assignment blocks
+        jobs = {}
+
+        def start(self, *args, **kwargs):
+            return {"error": "The studio is closed."}
+
+        def stop(self, jid):
+            pass
+
+    hooks_kw = dict(agent_name=lambda p: "claude-code", budget=lambda: (40, 60.0), assign=lambda name: (gate.wait(5), assigned.append(name)),
+                    release=lambda name, reason: None, work_log=lambda: [], record_close=lambda *a: None)
+    hooks = _hooks(**hooks_kw)
+    run = AgentRun(Agent(), hooks)
+    first = {}
+    worker = threading.Thread(target=lambda: first.update(run.start("claude")))
+    worker.start()
+    _until(lambda: run.view()["status"] == "starting", "the first Start to be assigning the node")
+    second = run.start("claude")  # while the first is still assigning
+    gate.set()
+    worker.join(5)
+    assert second.get("code") == "RUN_ACTIVE" and assigned == ["claude-code"]  # one slot, one assignment
+    run.release()
+
+
+def test_stop_and_release_while_the_node_is_still_being_assigned_holds():
+    """Reaudit R-P2: Stop during `starting` is final — when the assignment comes back, no coordinator starts, and the
+    assignment it made is given back."""
+    import threading
+
+    from proof_cli.studio.agent_run import AgentRun
+
+    gate = threading.Event()
+    assigned, released, started = [], [], []
+
+    class Agent:
+        jobs = {}
+
+        def start(self, *args, **kwargs):
+            started.append(args)
+            return {"error": "The studio is closed."}
+
+        def stop(self, jid):
+            pass
+
+    hooks_kw = dict(agent_name=lambda p: "claude-code", budget=lambda: (40, 60.0), assign=lambda name: (gate.wait(5), assigned.append(name)),
+                    release=lambda name, reason: released.append(name), work_log=lambda: [], record_close=lambda *a: None)
+    run = AgentRun(Agent(), _hooks(**hooks_kw))
+    first = {}
+    worker = threading.Thread(target=lambda: first.update(run.start("claude")))
+    worker.start()
+    _until(lambda: run.view()["status"] == "starting", "the first Start to be assigning the node")
+    stopped = run.release()
+    assert stopped["status"] == "released"
+    gate.set()
+    worker.join(WAIT)
+    assert not worker.is_alive(), "the first Start never came back from its assignment"
+    _until(lambda: released == ["claude-code"] and run.view()["status"] == "released",
+           lambda: f"the late assignment to be given back (released={released}, status={run.view()['status']})")
+    assert first["status"] == "released" and run.view()["status"] == "released"
+    assert assigned == ["claude-code"] and released == ["claude-code"]  # the assignment it had made is given back
+    assert started == [] and not run.active()  # and no turn ever started
+
+
+def test_stop_while_the_turn_is_being_prepared_starts_no_turn(studio, monkeypatch):
+    """Third review T-P1: Stop lands while the manager is still checking the backend (its preflight). No turn may begin
+    after it: the manager asks the run once more before the turn exists, and nothing is written."""
+    import threading
+
+    store, hub, log, queue = studio
+    _queue(queue, [["write", "scratch/after-release.txt", "written after Stop"]])
+    agent = hub.studio("N").agent
+    backend = agent.backend("claude")
+    entered, gate, returned = threading.Event(), threading.Event(), threading.Event()
+    original = backend.preflight
+
+    def slow_preflight(root):
+        entered.set()
+        assert gate.wait(WAIT)
+        try:
+            return original(root)  # `claude auth status`: a subprocess
+        finally:
+            returned.set()
+
+    monkeypatch.setattr(backend, "preflight", slow_preflight)
+    status, started = _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["typesetter"]})
+    assert status == 200 and entered.wait(5) and agent.active is None
+    assert _post(hub, "/studio/N/api/agent/release")[1]["status"] == "released"
+    gate.set()
+    assert returned.wait(WAIT), "the preflight never returned"
+    coordinator = hub.studio("N").run._run.thread  # this Start's own coordinator thread
+    _until(lambda: coordinator is None or not coordinator.is_alive(), "the stopped run's coordinator to end")
+    assert _get(hub, "/studio/N/api/agent/run")[1]["status"] == "released"
+    assert agent.active is None and _turns(log) == []  # no turn ever existed
+    assert not (store.root / "proofs" / "N" / "scratch" / "after-release.txt").exists()
+    assert get_active_claim(store, "N") is None
+
+
+def test_an_old_starts_assignment_coming_back_late_does_not_release_the_new_runs_claim():
+    """Third review T-P2: the first Start is stopped while its assignment is still pending; a second Start under the
+    same name claims the node; when the first assignment comes back, it must not give back what the second holds."""
+    import threading
+    from proof_cli.proof_map import release_node
+    from proof_cli.studio.agent_run import AgentRun
+
+    store = ensure_project(Path(os.environ.get("TMPDIR", "/tmp")) / f"proof-late-assignment-{os.getpid()}-{time.time_ns()}")
+    create_node(store, node_id="N", kind="claim", statement="a claim")
+    entered, gate = threading.Event(), threading.Event()
+    calls: list[str] = []
+
+    def assign(name):
+        calls.append(name)
+        if len(calls) == 1:
+            entered.set()
+            assert gate.wait(5)
+        from proof_cli.proof_map import claim_node
+        claim_node(store, "N", claimant_id=name)
+
+    def release(name, reason=None):
+        claim = get_active_claim(store, "N")
+        if claim is not None and claim.claimant_id == name:
+            release_node(store, "N", claimant_id=name)
+
+    class Agent:  # a turn that cannot start: the second run ends stuck at once, keeping its claim
+        jobs = {}
+
+        def start(self, *args, **kwargs):
+            return {"error": "The studio is closed."}
+
+        def stop(self, jid):
+            pass
+
+    hooks_kw = dict(agent_name=lambda p: "claude-code", budget=lambda: (40, 60.0), assign=assign, release=release,
+                    work_log=lambda: [], record_close=lambda *a: None)
+    run = AgentRun(Agent(), _hooks(**hooks_kw))
+    first = threading.Thread(target=lambda: run.start("claude"))
+    first.start()
+    assert entered.wait(5)
+    assert run.release()["status"] == "released"
+    second = run.start("claude", roles=["numerics"])
+    assert second["status"] in ("running", "stuck") and get_active_claim(store, "N").claimant_id == "claude-code"  # the second holds the node
+    gate.set()
+    first.join(5)
+    time.sleep(0.3)
+    assert get_active_claim(store, "N").claimant_id == "claude-code"  # the late assignment gave nothing back
+    assert run.view()["status"] in ("running", "stuck")  # the second run, untouched by the first's end
+    run.release()
+    assert get_active_claim(store, "N") is None
+
+
+def test_a_late_assignment_after_the_next_run_was_also_stopped_leaves_no_claim():
+    """Fourth review F2: the first Start's assignment is pending; Stop; a second Start claims and is stopped too (claim
+    gone); then the first assignment comes back and claims again — nothing holds the node, so it is given back."""
+    import threading
+    from proof_cli.proof_map import claim_node, release_node
+    from proof_cli.studio.agent_run import AgentRun
+
+    store = ensure_project(Path(os.environ.get("TMPDIR", "/tmp")) / f"proof-double-stop-{os.getpid()}-{time.time_ns()}")
+    create_node(store, node_id="N", kind="claim", statement="a claim")
+    entered, gate = threading.Event(), threading.Event()
+    calls: list[str] = []
+
+    def assign(name):
+        calls.append(name)
+        if len(calls) == 1:
+            entered.set()
+            assert gate.wait(5)
+        claim_node(store, "N", claimant_id=name)
+
+    def release(name, reason=None):
+        claim = get_active_claim(store, "N")
+        if claim is not None and claim.claimant_id == name:
+            release_node(store, "N", claimant_id=name)
+
+    class Agent:
+        jobs = {}
+
+        def start(self, *args, **kwargs):
+            return {"error": "The studio is closed."}
+
+        def stop(self, jid):
+            pass
+
+    hooks_kw = dict(agent_name=lambda p: "claude-code", budget=lambda: (40, 60.0), assign=assign, release=release,
+                    work_log=lambda: [], record_close=lambda *a: None)
+    run = AgentRun(Agent(), _hooks(**hooks_kw))
+    first = threading.Thread(target=lambda: run.start("claude"))
+    first.start()
+    assert entered.wait(5)
+    run.release()
+    run.start("claude", roles=["numerics"])
+    assert get_active_claim(store, "N").claimant_id == "claude-code"
+    run.release()  # the second run too
+    assert get_active_claim(store, "N") is None
+    gate.set()
+    first.join(5)
+    assert get_active_claim(store, "N") is None  # the late assignment's claim was given back
+    assert run.view()["status"] == "released"
+
+
+def test_a_start_waits_while_the_previous_run_is_still_giving_the_node_back():
+    """Sixth review: the decision to give the node back was made under the lock and the release done outside it; a
+    Start arriving in between claimed the node (the same name) and then lost that claim to the release. A Start now
+    waits for a release in progress, and keeps the claim it makes."""
+    import threading
+    from proof_cli.proof_map import claim_node, release_node
+    from proof_cli.studio.agent_run import AgentRun
+
+    store = ensure_project(Path(os.environ.get("TMPDIR", "/tmp")) / f"proof-settle-{os.getpid()}-{time.time_ns()}")
+    create_node(store, node_id="N", kind="claim", statement="a claim")
+    releasing, gate = threading.Event(), threading.Event()
+
+    def release(name, reason=None):
+        releasing.set()
+        assert gate.wait(5)  # the release takes its time: the window the next Start used to slip through
+        claim = get_active_claim(store, "N")
+        if claim is not None and claim.claimant_id == name:
+            release_node(store, "N", claimant_id=name)
+
+    class Agent:
+        jobs = {}
+
+        def start(self, *args, **kwargs):
+            return {"error": "The studio is closed."}  # every run ends stuck at once, keeping its claim
+
+        def stop(self, jid):
+            pass
+
+    hooks_kw = dict(agent_name=lambda p: "claude-code", budget=lambda: (40, 60.0), assign=lambda name: claim_node(store, "N", claimant_id=name),
+                    release=release, work_log=lambda: [], record_close=lambda *a: None)
+    run = AgentRun(Agent(), _hooks(**hooks_kw))
+    run.start("claude")
+    _until(lambda: run.view()["status"] == "stuck", "the run to end stuck")
+    stopper = threading.Thread(target=run.release)
+    stopper.start()
+    assert releasing.wait(5)
+    started: dict = {}
+    second = threading.Thread(target=lambda: started.update(run.start("claude")))
+    second.start()
+    time.sleep(0.3)
+    assert not started, "the Start waits while the node is being given back"
+    gate.set()
+    stopper.join(5)
+    second.join(5)
+    assert started and started["status"] in ("starting", "running", "stuck")  # it began after the release
+    assert get_active_claim(store, "N").claimant_id == "claude-code"  # and its claim is intact
+    run.release()
+    assert get_active_claim(store, "N") is None
+
+
+def test_a_start_right_after_stop_and_release_is_not_ended_by_the_old_coordinator(studio):
+    """Reaudit R-P1: the first run's turn is still being stopped when the second Start begins; when it finally ends,
+    only the first Start ends — the second keeps running its own turn and counts it."""
+    store, hub, log, queue = studio
+    _queue(queue, [["sleep", "20"]], [["sleep", "1.5"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["typesetter"]})
+    agent = hub.studio("N").agent
+    old = _turn_running(hub)
+    assert old is not None and _post(hub, "/studio/N/api/agent/release")[1]["status"] == "released"
+    status, second = _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["numerics"]})
+    assert status == 200 and second["status"] == "running"
+    _until(lambda: agent.active is not None and agent.active is not old and agent.active.proc is not None, "the second Start's turn to start its CLI")
+    assert old.done, "the old turn was stopped before the new one began"
+    state = _get(hub, "/studio/N/api/agent/run")[1]
+    assert (state["status"], state["turns"], state["roles"]) == ("running", 0, ["numerics"])  # the old coordinator's exit changed nothing
+    final = _wait(hub, timeout=30)
+    assert (final["status"], final["reason"], final["turns"]) == ("done", "turn-finished", 1)
+    assert _turns(log)[-1]["role"] == "numerics" and get_active_claim(store, "N").claimant_id == "claude-code"
+
+
+
+# -- seventh review (PR #148) -----------------------------------------------------------------------
+
+
+def _fake_turns(on_turn):
+    """An agent manager whose every turn ends at once after `on_turn(turn)` ran — the project side effects of a turn."""
+    import itertools
+
+    from proof_cli.studio.backends import Job
+
+    class Agent:
+        def __init__(self):
+            self.jobs, self.ids = {}, itertools.count(1)
+
+        def start(self, *args, turn=None, **kwargs):
+            job = Job(next(self.ids))
+            self.jobs[job.id] = job
+            on_turn(turn)
+            job.emit({"t": "done", "changed": [], "session_id": f"session-{job.id}"})
+            with job.cond:
+                job.done = True
+                job.cond.notify_all()
+            return {"job": job.id}
+
+        def stop(self, jid):
+            pass
+
+    return Agent()
+
+
+@pytest.mark.parametrize("role", ["prover", "typesetter", "numerics"])
+def test_no_role_may_run_a_general_shell(tmp_path, role):
+    """ADR-0011/0004: a role's write scope means nothing if it can run a shell that runs anything — `proof review`, a
+    write outside the node. A role's programs are named; an interpreter's inline code (`python3 -c`, `-m`) is denied."""
+    from proof_cli.studio.proof_agent import ProofAgentContext
+
+    args = ProofAgentContext("N", tmp_path, [], role=role).claude_args(True)
+    allowed = args[args.index("--allowedTools") + 1:args.index("--disallowedTools")]
+    denied = args[args.index("--disallowedTools") + 1:]
+    shells = {"bash", "sh", "zsh", "fish", "dash", "ksh", "csh", "tcsh", "env", "xargs", "eval", "exec", "nohup", "sudo", "osascript", "perl", "ruby", "node"}
+    for rule in allowed:
+        assert rule != "Bash" and not rule.startswith("Bash(*"), rule
+        if rule.startswith("Bash("):
+            command = rule[len("Bash("):-1].split()[0]
+            assert command not in shells, rule
+            assert rule != "Bash(proof *)" and "review " not in rule.replace("request-review", ""), rule  # named `proof` commands only
+    # the named ways back to a general shell through an allowed program (final re-review): inline code, stdin, `lake env`,
+    # latexmk's engine commands and rc files. ADR-0010's cooperative contract: these are closed, not every prefix trick.
+    escapes = {
+        "python": ("-c *", "-m *", "-", "- *", "/dev/stdin *"), "python3": ("-c *", "-m *", "-", "- *", "/dev/stdin *"),
+        "sage": ("-c *", "-sh *", "-python *"), "lake": ("env *", "exe *"),
+        "latexmk": ("-e *", "-r *", "-pdflatex=*", "-lualatex=*", "-xelatex=*", "-pdflatex *", "* -pdflatex=*", "* -e *", "* -r *"),
+        "pdflatex": ("-shell-escape *", "--shell-escape *"),
+    }
+    for program, forms in escapes.items():
+        if f"Bash({program} *)" in allowed:
+            missing = [form for form in forms if f"Bash({program} {form})" not in denied]
+            assert not missing, (program, missing)
+
+
+@pytest.mark.parametrize("role", ["prover", "typesetter", "numerics"])
+def test_every_role_puts_an_unclear_direction_in_the_fog_when_it_stops(tmp_path, role):
+    """Spec #145: 停下时写 progress … 说不清的方向 fog add --near — the duty of every role, in its brief and its permissions."""
+    from proof_cli.studio.proof_agent import ProofAgentContext
+
+    context = ProofAgentContext("N", tmp_path, [], role=role, name="claude-code")
+    assert "proof fog add" in context.brief() and "--near N" in context.brief()
+    assert "Bash(proof fog add *)" in context.claude_args(True)
+
+
+def test_several_roles_run_as_a_flow_restricted_to_them_in_the_specs_order(studio):
+    store, hub, log, queue = studio
+    write_key_ideas(store, "N")
+    _queue(queue,
+           [["proof", "node", "progress", "N", "--handoff", "typesetter", "--note", "write it up"]],  # not part of this Start
+           [["proof", "node", "progress", "N", "--handoff", "numerics", "--note", "check n ≤ 100"]],
+           [["write", "out/check.csv", "n\n"]],
+           [REVIEW])
+    status, started = _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["numerics", "prover"]})
+    assert status == 200 and started["roles"] == ["prover", "numerics"]  # the spec's order, whatever order they were asked in
+    state = _wait(hub)
+    turns = _turns(log)
+    assert [turn["role"] for turn in turns] == ["prover", "prover", "numerics", "prover"] and state["reason"] == "review-requested"
+    assert "only the Prover and the Numerics" in turns[0]["prompt"]
+    assert "The Typesetter is not part of this Start" in turns[1]["prompt"]
+    assert "check n ≤ 100" in turns[2]["prompt"]
+
+
+def test_several_roles_without_the_prover_end_when_the_first_hands_nothing_over(studio):
+    store, hub, log, queue = studio
+    _queue(queue,
+           [["proof", "node", "progress", "N", "--handoff", "numerics", "--note", "the table for §3"]],
+           [["write", "out/table.csv", "n\n"]],
+           [["write", "proof.tex", "\\documentclass{amsart}\\begin{document}ok\\end{document}\n"]],
+           [["sleep", "0"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["typesetter", "numerics"]})
+    state = _wait(hub)
+    assert [turn["role"] for turn in _turns(log)] == ["typesetter", "numerics", "typesetter"]
+    assert (state["status"], state["reason"]) == ("done", "turn-finished")
+
+
+def test_progress_narration_alone_does_not_count_as_a_change(studio, monkeypatch):
+    """Spec #145: stuck = turns with no `proof` write, file change or run. A plan, a step or a handoff alone is narration."""
+    from proof_cli.studio import agent_run
+
+    store, hub, log, queue = studio
+    monkeypatch.setattr(agent_run, "STUCK_TURNS", 3)
+    _queue(queue,
+           [["proof", "node", "progress", "N", "--plan", "a", "--plan", "b"]],
+           [["proof", "node", "progress", "N", "--step", "1", "--status", "started"]],
+           [["proof", "node", "progress", "N", "--step", "1", "--status", "done", "--note", "nothing yet"]],
+           [["sleep", "0"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
+    state = _wait(hub)
+    assert state["status"] == "stuck" and "no change in 3 turn(s)" in state["reason"] and len(_turns(log)) == 3
+
+
+def test_a_run_a_proof_write_or_a_file_change_each_count_as_a_change(studio, monkeypatch):
+    from proof_cli.studio import agent_run
+
+    store, hub, log, queue = studio
+    monkeypatch.setattr(agent_run, "STUCK_TURNS", 2)
+    _queue(queue,
+           [["sleep", "0"]],
+           [["tool", "python3 scratch/check.py --n 100"]],  # a run
+           [["sleep", "0"]],
+           [["proof", "fog", "add", "maybe the dual norm", "--near", "N", "--created-by", "claude-code"]],  # a `proof` write
+           [["sleep", "0"]],
+           [["write", "scratch/draft.md", "x"]],  # a file change
+           [["sleep", "0"]], [["sleep", "0"]], [["sleep", "0"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
+    state = _wait(hub)
+    assert state["status"] == "stuck" and len(_turns(log)) == 8, state
+
+
+def test_pause_stops_the_budget_clock_and_resume_continues_with_what_is_left(studio):
+    store, hub, log, queue = studio
+    (store.root / "proof.toml").write_text("[studio]\nbudget = { turns = 3, minutes = 10 }\n")
+    _queue(queue, [["sleep", "0.4"]], [["write", "scratch/a.md", "a"]], [["write", "scratch/b.md", "b"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
+    _turn_running(hub)
+    _post(hub, "/studio/N/api/agent/pause")
+    paused = _wait(hub, until=("paused",))
+    left = paused["minutes_left"]
+    assert 0 < left <= 10
+    time.sleep(3.0)  # the clock is stopped: what is left stays what it was (a wait on nothing, not on a subprocess)
+    assert _get(hub, "/studio/N/api/agent/run")[1]["minutes_left"] == pytest.approx(left, abs=1e-6)
+    _post(hub, "/studio/N/api/agent/resume")
+    # resumed: the deadline moved on by the pause, so what is left is still about what it was — 3 s spent would be 0.05
+    assert _get(hub, "/studio/N/api/agent/run")[1]["minutes_left"] >= left - 0.02
+    state = _wait(hub, until=("done", "stuck", "budget"))
+    assert len(_turns(log)) == 3 and state["status"] == "budget" and "3 turn(s)" in state["reason"], state
+
+
+def test_redirect_with_no_run_is_refused_with_no_run(studio):
+    store, hub, log, queue = studio
+    status, refused = _post(hub, "/studio/N/api/agent/redirect", {"text": "try the dual problem"})
+    assert status == 409 and refused["code"] == "NO_RUN"
+
+
+def test_a_decision_only_a_human_can_make_stops_the_run_as_needs_human_and_names_it(studio):
+    store, hub, log, queue = studio
+    _queue(queue, [["proof", "node", "progress", "N", "--step", "1", "--status", "needs-human", "--note", "choose the L2 or the sup norm"]], [["sleep", "0"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
+    state = _wait(hub)
+    assert state["status"] == "needs-human" and state["decision"] == "choose the L2 or the sup norm" and len(_turns(log)) == 1
+    asked = [e for e in work_log(store, "N") if e.get("kind") == "step" and e.get("status") == "needs-human"]
+    assert asked and asked[0]["note"] == "choose the L2 or the sup norm" and asked[0]["role"] == "prover"
+    assert get_active_claim(store, "N") is not None  # it holds its place for the researcher's answer
+    client = DirectClient(store)
+    client.app.studios = hub
+    node = next(n for n in client.get("/api/map")[1]["data"]["nodes"] if n["id"] == "N")
+    assert node["run"]["status"] == "needs-human" and node["run"]["decision"] == "choose the L2 or the sup norm"
+
+
+def test_the_run_leaves_a_closing_note_on_every_stop(studio):
+    store, hub, log, queue = studio
+    write_key_ideas(store, "N")
+    _queue(queue, [["write", "proof.tex", "\\documentclass{amsart}\\begin{document}ok\\end{document}\n"], REVIEW])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["prover"]})
+    _wait(hub)
+    last = [e for e in work_log(store, "N") if e.get("kind") == "step"][-1]
+    assert (last["status"], last["role"], last["by"]) == ("done", "prover", "claude-code") and "review-requested" in last["note"]
+    _queue(queue, [["sleep", "5"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["typesetter"]})
+    _turn_running(hub)
+    _post(hub, "/studio/N/api/agent/release")
+    last = [e for e in work_log(store, "N") if e.get("kind") == "step"][-1]
+    assert (last["status"], last["role"]) == ("done", "typesetter") and "released" in last["note"]
+
+
+def test_work_log_entries_carry_the_role_of_the_turn_and_each_turn_its_job_session_step_and_transcript(studio):
+    from proof_cli.proof_map import agent_turn_transcript
+
+    store, hub, log, queue = studio
+    _queue(queue,
+           [["proof", "node", "progress", "N", "--plan", "look", "--plan", "compute"], ["proof", "node", "progress", "N", "--step", "1", "--status", "started"],
+            ["proof", "fog", "add", "a direction I can't state yet", "--near", "N", "--created-by", "claude-code"],
+            ["proof", "node", "progress", "N", "--handoff", "numerics", "--note", "compute"]],
+           [["proof", "node", "progress", "N", "--step", "2", "--status", "stuck", "--note", "no interpreter"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
+    _wait(hub)
+    entries = work_log(store, "N")
+    fog = next(e for e in entries if e["kind"] == "fog")
+    assert fog["role"] == "prover" and fog["text"] == "a direction I can't state yet"  # an automatic entry, the role of its turn
+    turns = [e for e in entries if e["kind"] == "turn"]
+    assert [(t["role"], t["step"]) for t in turns] == [("prover", 1), ("numerics", 2)]
+    assert all(t["job"] and t["session_id"] == "stub-session" and t["turn"] for t in turns)
+    # the raw conversation is kept with the project: a new Start, or a restart, still finds it
+    hub.close()
+    again = StudioHub(store)
+    try:
+        answer = again.request("GET", "/studio/N/api/agent/turn", f"turn={turns[0]['turn']}", None, cross_site=False)
+        status, transcript = answer.status, json.loads(answer.body)
+        assert status == 200 and any(e.get("t") == "init" and e.get("session_id") == "stub-session" for e in transcript["events"])
+        assert agent_turn_transcript(store, "N", turns[1]["turn"])["role"] == "numerics"
+    finally:
+        again.close()
+
+
+def test_an_ask_turn_while_the_run_is_paused_gets_no_role_scope_or_pending_redirect(studio):
+    """Seventh review §11: the researcher's Ask turn is not a role's turn — no role brief, no PROOF_AGENT_ROLE, no role
+    permissions, and the redirect waiting for the role's next turn stays waiting."""
+    store, hub, log, queue = studio
+    _queue(queue,
+           [["proof", "node", "progress", "N", "--handoff", "typesetter", "--note", "write it up"], ["sleep", "0.5"]],  # the Prover
+           [["sleep", "0"]],  # the researcher's Ask turn
+           [["sleep", "0"]],  # the Typesetter, after Resume
+           [["proof", "node", "progress", "N", "--step", "1", "--status", "stuck", "--note", "enough"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["prover", "typesetter"]})
+    _turn_running(hub)
+    _post(hub, "/studio/N/api/agent/pause")
+    _wait(hub, until=("paused",))
+    _post(hub, "/studio/N/api/agent/redirect", {"text": "use the sup norm", "role": "typesetter"})
+    status, asked = _post(hub, "/studio/N/api/agent", {"prompt": "what is your plan?", "mode": "ask", "provider": "claude"})
+    assert status == 200, asked
+    agent = hub.studio("N").agent
+    job = agent.jobs[asked["job"]]
+    with job.cond:
+        assert job.cond.wait_for(lambda: job.done, timeout=WAIT), "the Ask turn never ended"
+    ask = _turns(log)[-1]
+    assert ask["role"] is None and "This turn you are" not in ask["brief"] and "use the sup norm" not in ask["prompt"]
+    assert "Edit(./key-ideas.md)" not in ask["argv"]  # not the Typesetter's scope
+    _post(hub, "/studio/N/api/agent/resume")
+    _wait(hub, until=("done", "stuck", "budget"))
+    resumed = _turns(log)[2]
+    assert resumed["role"] == "typesetter" and "use the sup norm" in resumed["prompt"]  # the redirect reached the role's turn
+
+
+def test_a_start_is_refused_when_the_previous_run_is_still_giving_the_node_back(monkeypatch):
+    import threading
+
+    from proof_cli.studio import agent_run
+    from proof_cli.studio.agent_run import AgentRun
+
+    monkeypatch.setattr(agent_run, "SETTLE_WAIT", 0.3)
+    entered, gate = threading.Event(), threading.Event()
+
+    def release(name, reason):
+        entered.set()  # the stopper is inside the release: the node is being given back
+        gate.wait(WAIT)
+
+    run = AgentRun(_fake_turns(lambda turn: None), _hooks(release=release))
+    run.start("claude", roles=["numerics"])
+    _until(lambda: run.view()["status"] in ("done", "stuck"), "the run to end")
+    stopper = threading.Thread(target=run.release)
+    stopper.start()
+    assert entered.wait(WAIT), "the release never began"
+    refused = run.start("claude")
+    gate.set()
+    stopper.join(5)
+    assert refused.get("code") == "RUN_SETTLING" and "still" in refused["error"]
+
+
+def test_a_failed_release_is_not_reported_as_released(studio, monkeypatch):
+    store, hub, log, queue = studio
+    _queue(queue, [["sleep", "5"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["prover"]})
+    _turn_running(hub)
+    run = hub.studio("N").run
+
+    def fails(name, reason):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(run.hooks, "release", fails)
+    status, answer = _post(hub, "/studio/N/api/agent/release")
+    assert status == 500 and answer["code"] == "RELEASE_FAILED" and "database is locked" in answer["error"]
+    state = _get(hub, "/studio/N/api/agent/run")[1]
+    assert state["status"] == "release-failed" and "database is locked" in state["reason"]
+    assert get_active_claim(store, "N") is not None  # and the claim it failed to give back is still there, as it says
+
+
+def test_the_release_reason_says_why_the_node_was_given_back(studio):
+    from proof_cli.storage import list_events
+
+    store, hub, log, queue = studio
+    _queue(queue, [["sleep", "5"]], [["sleep", "5"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["prover"]})
+    first = _turn_running(hub)
+    _post(hub, "/studio/N/api/agent/release")
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["prover"]})
+    agent = hub.studio("N").agent
+    _until(lambda: agent.active is not None and agent.active is not first and agent.active.proc is not None, "the second Start's turn to start its CLI")
+    hub.studio("N").close()
+    reasons = [e.payload["reason"] for e in list_events(store) if e.kind == "proof_map_claim_released"]
+    assert reasons == ["stopped and released by the researcher", "studio closed"]
+
+
+def test_a_late_assignment_after_the_later_run_requested_review_leaves_no_claim():
+    """Fifth review: a review request hands the node over and releases its claim, so a later Start that ended
+    `done / review-requested` left nothing behind: what the stopped Start's late assignment made is its own to give back."""
+    import threading
+
+    from proof_cli.proof_map import claim_node, release_node
+    from proof_cli.studio.agent_run import AgentRun
+
+    store = ensure_project(Path(os.environ.get("TMPDIR", "/tmp")) / f"proof-late-review-{os.getpid()}-{time.time_ns()}")
+    create_node(store, node_id="N", kind="claim", statement="a claim")
+    entered, gate = threading.Event(), threading.Event()
+    calls: list[str] = []
+    log: list[dict] = []
+
+    def assign(name):
+        calls.append(name)
+        if len(calls) == 1:
+            entered.set()
+            assert gate.wait(5)
+        claim_node(store, "N", claimant_id=name)
+
+    def release(name, reason=None):
+        claim = get_active_claim(store, "N")
+        if claim is not None and claim.claimant_id == name:
+            release_node(store, "N", claimant_id=name, reason=reason)
+
+    def requests_review(turn):  # the turn requests review: the node is handed over, and its claim with it
+        release_node(store, "N", claimant_id="claude-code", reason="review requested")
+        log.append({"kind": "review-requested"})
+
+    run = AgentRun(_fake_turns(requests_review), _hooks(assign=assign, release=release, work_log=lambda: list(log)))
+    first = threading.Thread(target=lambda: run.start("claude"))
+    first.start()
+    assert entered.wait(5)
+    run.release()
+    run.start("claude", roles=["prover"])
+    _until(lambda: run.view()["status"] == "done", "the later run to end done")
+    assert (run.view()["status"], run.view()["reason"]) == ("done", "review-requested") and get_active_claim(store, "N") is None
+    gate.set()
+    first.join(5)
+    assert get_active_claim(store, "N") is None  # the late assignment's claim was given back
+
+
+# -- final re-review (PR #148) ----------------------------------------------------------------------
+
+
+def test_what_the_researcher_does_during_a_turn_keeps_its_own_actor_and_no_role(studio):
+    """Only the run's own agent acts as the turn's role: a fog item the researcher adds while the Prover's turn is running
+    is the researcher's, with no role; the Prover's own fog item in the same turn is the Prover's."""
+    from proof_cli.fog import add_fog
+
+    store, hub, log, queue = studio
+    _queue(queue, [["proof", "fog", "add", "the agent's direction", "--near", "N", "--created-by", "claude-code"], ["sleep", "1.2"],
+                   ["proof", "node", "progress", "N", "--step", "1", "--status", "stuck", "--note", "enough"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["prover"]})
+    _until(lambda: any(e["kind"] == "fog" for e in work_log(store, "N")), "the Prover's `proof fog add` to land")
+    add_fog(store, "the researcher's own hunch", near=["N"], created_by="ada")  # mid-turn
+    _wait(hub)
+    fog = {e["text"]: e for e in work_log(store, "N") if e["kind"] == "fog"}
+    assert fog["the agent's direction"]["role"] == "prover"
+    assert fog["the researcher's own hunch"]["role"] is None and fog["the researcher's own hunch"]["by"] == "ada"
+
+
+def test_a_turn_is_marked_started_only_once_it_has_started(studio, monkeypatch):
+    """A turn waiting for the researcher's Ask turn has not started: nothing in that wait is the role's, and a turn that
+    never starts leaves no marker at all."""
+    from proof_cli.storage import list_events
+
+    store, hub, log, queue = studio
+    agent = hub.studio("N").agent
+    monkeypatch.setattr(agent, "start", lambda *a, **k: {"error": "The studio is closed.", "code": None})
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["prover"]})
+    _wait(hub)
+    assert [e for e in list_events(store) if e.kind == "agent_turn"] == []
+
+
+def test_a_decision_wins_over_a_review_request_in_the_same_turn_and_is_logged_once(studio):
+    store, hub, log, queue = studio
+    write_key_ideas(store, "N")
+    _queue(queue, [["write", "proof.tex", "\\documentclass{amsart}\\begin{document}ok\\end{document}\n"], REVIEW,
+                   ["proof", "node", "progress", "N", "--step", "2", "--status", "needs-human", "--note", "keep the n = 0 case?"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
+    state = _wait(hub)
+    assert (state["status"], state["decision"]) == ("needs-human", "keep the n = 0 case?")
+    assert get_workflow_state(store, "N") == "review-needed"  # the review request stands as it is
+    asked = [e for e in work_log(store, "N") if e.get("kind") == "step" and e.get("status") == "needs-human"]
+    assert len(asked) == 1  # the run's closing note does not say it a second time
+
+
+def test_running_the_nodes_program_counts_as_a_change(studio, monkeypatch):
+    """A computation turn's run of `./run.sh` is a run for the stuck rule, as an interpreter's or a compile's is."""
+    from proof_cli.studio import agent_run
+    from proof_cli.studio.proof_agent import is_a_run
+
+    assert is_a_run("./run.sh") and is_a_run("cd out && ./run.sh --n 100") and is_a_run("latexmk -pdf proof.tex")
+    assert not is_a_run("ls out") and not is_a_run("cat run.sh")
+    store, hub, log, queue = studio
+    monkeypatch.setattr(agent_run, "STUCK_TURNS", 2)
+    _queue(queue, [["sleep", "0"]], [["tool", "./run.sh"]], [["sleep", "0"]], [["sleep", "0"]], [["sleep", "0"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["prover", "numerics"]})
+    state = _wait(hub)
+    assert state["status"] == "stuck" and len(_turns(log)) == 4, state

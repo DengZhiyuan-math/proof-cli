@@ -340,3 +340,41 @@ def render_challenge_list(challenges: list[Challenge]) -> str:
     console.print(table)
     return console.export_text()
 
+
+
+def render_work_log(node_id: str, log: list[dict]) -> str:
+    """A node's work log (spec #145): the agent's plan and steps, and what it did through `proof`, in time order."""
+    console = _console()
+    console.rule(f"Work log: {node_id}")
+    if not log:
+        console.print("No agent has reported on this node yet.")
+        return console.export_text()
+    for entry in log:
+        when = str(entry.get("at", ""))[:16].replace("T", " ")
+        who = f"{entry.get('role') or ''}{'·' if entry.get('role') and entry.get('by') else ''}{entry.get('by') or ''}"
+        kind = entry.get("kind")
+        if kind == "plan":
+            body = "plan: " + " → ".join(f"{i}. {step}" for i, step in enumerate(entry.get("plan") or [], start=1))
+        elif kind == "step":
+            status = "needs a human decision" if entry.get("status") == "needs-human" else entry.get("status")
+            body = f"step {entry.get('step')} {status}" + (f" — {entry['note']}" if entry.get("note") else "")
+        elif kind == "turn":
+            body = f"turn {entry.get('turn')} (job {entry.get('job')}" + (f", session {entry['session_id']}" if entry.get("session_id") else "") + ")"
+        elif kind == "handoff":
+            body = f"handed off to {entry.get('to')}" + (f" — {entry['note']}" if entry.get("note") else "")
+        elif kind == "split":
+            body = "split into " + ", ".join(entry.get("nodes") or [])
+        elif kind == "review-requested":
+            body = f"requested review of snapshot v{entry.get('version')}"
+        elif kind == "evidence":
+            body = f"Evidence check {entry.get('outcome')}"
+        elif kind == "fog":
+            body = f"fog {entry.get('fog_id')}: {entry.get('text')}"
+        elif kind == "experiment":
+            body = f"Experiment {entry.get('seq')} on {entry.get('fog_id')}: {entry.get('outcome')}"
+        elif kind == "dependencies":
+            body = f"dependency {entry.get('change')}: {entry.get('dependency')}"
+        else:
+            body = str(kind)
+        console.print(f"{when}  {who:<24} {body}")
+    return console.export_text()
