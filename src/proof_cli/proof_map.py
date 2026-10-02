@@ -1395,9 +1395,15 @@ def record_evidence_check(
     """
     proof = require_candidate_proof(store, candidate_proof_id)
     sha256 = candidate_proof_sha256(store, candidate_proof_id)
+    if sha256 is None:  # it would bind nothing, and read as a check from before binding (PR #147)
+        raise ProofMapError(
+            "SNAPSHOT_UNREADABLE",
+            f"snapshot v{proof.version} of {proof.node_id} is missing or can't be read, so an Evidence check on it "
+            "would bind no snapshot hash: nothing was recorded",
+        )
     if snapshot_sha256 is not None and snapshot_sha256 != sha256:
         current = get_current_candidate_proof(store, proof.node_id)
-        now = f"hashes to {sha256[:12]}…" if sha256 else "can't be read"
+        now = f"hashes to {sha256[:12]}…"
         named = f"v{current.version} ({(candidate_proof_sha256(store, current.id) or 'unreadable')[:12]}…)" if current else "none"
         raise ProofMapError(
             "EVIDENCE_SNAPSHOT_MISMATCH",
