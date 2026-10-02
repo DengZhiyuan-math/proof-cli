@@ -16,9 +16,10 @@ from __future__ import annotations
 import hashlib
 import threading
 from dataclasses import dataclass
+from functools import partial
 from http import HTTPStatus
 from pathlib import Path
-from urllib.parse import parse_qs, unquote
+from urllib.parse import parse_qs, quote, unquote
 
 from .. import proof_map
 from ..domain import Medium, ProofMapNodeKind
@@ -132,7 +133,20 @@ class StudioHub:
                         open_command=lambda: open_command(root),
                     ),
                 )
+                # the agent's compile tool builds through this node's studio (taken from upstream, 2938c05):
+                # a LaTeX node's Typesetter compiles what the researcher sees; a computation node has no build
+                self._studios[node.id].agent.compile_url = partial(self._compile_url, node_id)
             return self._studios[node.id]
+
+    def _compile_url(self, node_id: str) -> str | None:
+        """The studio the agent's compile tool builds through, as of the turn: a LaTeX node's own; a computation
+        node has no build, so none."""
+        return None if self._medium(node_id) == "computation" else self._studio_url(node_id)
+
+    def _studio_url(self, node_id: str) -> str:
+        from .server import project_origin  # the page's pinned origin (a late import: server.py imports this module)
+
+        return f"{project_origin(self.store)}/studio/{quote(node_id, safe='')}/"
 
     def _release(self, node_id: str, name: str, reason: str) -> None:
         """Release the node when the run still holds it (a review request already released it), saying why."""

@@ -134,8 +134,8 @@ SOLO_BRIEF = """\
 KEY_IDEAS_GUIDE = """\
 The key-ideas summary, key-ideas.md, is what the researcher reads first when reviewing the proof, so it
 must say what the proof in proof.tex actually does, not what it should do: read proof.tex (and any file it
-\\input's) and the dependencies it rests on ({dependencies}). Write Markdown, with mathematics as $…$,
-under exactly these four headings: `## 核心思路` (one or two sentences: why the result holds; required),
+\\input's) and the dependencies it rests on ({dependencies}). Write Markdown, with mathematics as $…$
+(display: $$…$$, never a LaTeX environment), under exactly these four headings: `## 核心思路` (one or two sentences: why the result holds; required),
 `## 主要步骤` (3–7 numbered steps, each naming the dependency node it uses, by id; required), `## 难点`
 (where the proof is most likely to be wrong; 「无」 if nothing stands out) and `## 未覆盖` (boundary cases,
 extra assumptions, parts not yet handled; 「无」 if none). If proof.tex has no proof yet, say so under
@@ -149,7 +149,10 @@ it, and the studio records that you drafted it.
 # role's section says what this turn is for and what it never does.
 _PROOF_READS = ("Bash(proof search *)", "Bash(proof retrieve *)", "Bash(proof node show *)", "Bash(proof node list *)", "Bash(proof reference list *)",
                 "Bash(proof memory list *)", "Bash(proof fog list *)", "Bash(proof fog show *)", "Bash(proof node progress *)")
-_TEX_PROGRAMS = ("latexmk", "pdflatex", "xelatex", "lualatex", "tectonic", "bibtex", "biber", "kpsewhich")
+_TEX_LOOKUPS = ("kpsewhich",)   # the Typesetter compiles through the studio's build (its compile tool), not a shell
+# TeX's programs that build, for the stuck rule: a compile in a shell is a run (the Typesetter's goes through the
+# compile tool). Not kpsewhich: a lookup is not a run, or a turn of lookups would hold off the stuck rule.
+_TEX_PROGRAMS = ("latexmk", "pdflatex", "xelatex", "lualatex", "tectonic", "bibtex", "biber")
 
 
 @dataclass(frozen=True)
@@ -192,11 +195,13 @@ Challenge is the researcher's alone: you never do either.
 """ + _STOPPING,
     "typesetter": """\
 This turn you are the **Typesetter** of node {node}. You write the Prover's draft (scratch/proof-draft.md)
-as the node's LaTeX — proof.tex and the files it \\input's — compile it and fix what fails, keep the
-preamble's conventions, and write the text of key-ideas.md from the draft. You do no mathematics:
+as the node's LaTeX — proof.tex and the files it \\input's — compile it with the `compile` tool (the
+studio's own build, whose PDF and problems the researcher sees; never pdflatex or latexmk yourself) and fix
+what fails, keep the preamble's conventions, and write the text of key-ideas.md from the draft. You do no mathematics:
 never supply a missing step or a missing case yourself; when the draft lacks one, report it and end your turn
 (`proof node progress {node} --step N --status done --note "missing: …"`), and the Prover takes it from there.
-You never split the node and never request review. Compile without --shell-escape.
+You never split the node and never request review. In the .tex files display math is a named environment;
+in key-ideas.md it is $$…$$ and inline math $…$.
 {key_ideas}""" + _STOPPING,
     "numerics": """\
 This turn you are the **Numerics** role of node {node}. You write and run the computations: run.sh is the
@@ -220,7 +225,7 @@ ROLES: dict[str, Role] = {
         COMPUTATION,
     ),
     AgentRole.typesetter.value: Role(
-        AgentRole.typesetter.value, _ROLE_BRIEFS["typesetter"], ("./*.tex", "./**/*.tex", "./key-ideas.md"), (*_PROOF_READS, *_EVERY_ROLE), _TEX_PROGRAMS,
+        AgentRole.typesetter.value, _ROLE_BRIEFS["typesetter"], ("./*.tex", "./**/*.tex", "./key-ideas.md"), (*_PROOF_READS, *_EVERY_ROLE), _TEX_LOOKUPS,
     ),
     AgentRole.numerics.value: Role(
         AgentRole.numerics.value, _ROLE_BRIEFS["numerics"],
@@ -281,6 +286,12 @@ class ProofAgentContext:
     # a run's turn (spec #145): which role this turn is; None for the researcher's own turn (an Ask)
     role: str | None = None
 
+    @property
+    def compiles(self) -> bool:
+        """Whether this turn may compile through the studio's build: the Typesetter's, and the solo agent's (an edit
+        turn of the researcher's own); the Prover writes its draft and Numerics its program, neither typesets."""
+        return self.role in (None, AgentRole.typesetter.value)
+
     def key_ideas_guide(self) -> str:
         """How key-ideas.md is written (ADR-0013), naming this node's dependencies as of this turn."""
         deps = ", ".join(f"{dep} (../{dep}/)" for dep in self.dependencies) or "none: it has no dependencies"
@@ -321,10 +332,10 @@ class ProofAgentContext:
         return BRIEF.format(node=self.node_id, name=self.name, library=f", and the library ({library[2:]})" if library else "",
                             work=work.format(node=self.node_id, name=self.name, key_ideas=self.key_ideas_guide()))
 
-    def claude_args(self, edit: bool, scope_rules: list[str] | None = None) -> list[str]:
+    def claude_args(self, edit: bool, scope_rules: list[str] | None = None, tools: list[str] | tuple[str, ...] = ()) -> list[str]:
         """Claude Code's permissions: read the project and library, the web, `proof` and computation;
-        edit only this folder, never its protected files. `--setting-sources user` keeps the
-        repository's own settings and Bash allowlist out."""
+        edit only this folder, never its protected files; `tools`, the studio's own tools for this turn
+        (its compile tool). `--setting-sources user` keeps the repository's own settings and Bash allowlist out."""
         args = [
             "--setting-sources", "user",
             "--permission-prompts", "none",   # nobody can approve here: a call no rule allows is refused
@@ -344,6 +355,7 @@ class ProofAgentContext:
                 allowed += scope_rules
             elif edit:
                 allowed += ["Edit(./**)", "Write(./**)", "MultiEdit(./**)"]
+        allowed += list(tools)
         denied = [f"{tool}(./{path})" for tool in ("Edit", "Write", "MultiEdit") for path in PROTECTED] + inline
         return [*args, "--allowedTools", *allowed, "--disallowedTools", *denied]
 

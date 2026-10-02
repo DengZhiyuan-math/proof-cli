@@ -51,6 +51,9 @@ class AgentManager:
         self.lock = threading.Lock()
         self.active: Job | None = None
         self.closed = False        # set by shutdown(): no turn starts after it
+        # the studio's own URL for the agent's compile tool (mcp_compile.py), asked once per turn
+        # (None: no compile tool, as on a computation node)
+        self.compile_url: Callable[[], str | None] | None = None
 
     def backend(self, provider: str | None) -> Backend | None:
         return self.backends.get(provider or self.default)
@@ -162,6 +165,7 @@ class AgentManager:
         job.root, job.files = self.root_fn(), self.files_fn
         job.context = (self.context_fn(turn) if turn is not None else self.context_fn()) if self.context_fn else None
         job.turn = turn
+        job.compile_url = self.compile_url() if self.compile_url else None
         job.writable = lambda rel: self._writable(job, rel)
         job.before = self._snapshot()
         if begin is not None:
@@ -221,7 +225,7 @@ class AgentManager:
                   "reverted": reverted,
                   "session_id": res.get("session_id") or job.session_id,
                   "duration": res.get("duration") or int((time.time() - t0) * 1000)}
-            for k in ("cost", "usage", "is_error", "subtype", "denials", "stderr"):
+            for k in ("cost", "billing", "usage", "is_error", "subtype", "denials", "denied", "stderr"):
                 if res.get(k) is not None:
                     ev[k] = res[k]
             job.emit(ev)
@@ -255,6 +259,12 @@ class AgentManager:
                 backend.stop(job)
             return {"ok": True}
         return {"ok": False}
+
+    def built(self, result: dict) -> None:
+        """A build the agent ran with its compile tool: the panel shows it as the editor's."""
+        job = self.active
+        if job and not job.done:
+            job.emit({"t": "build", "result": result})
 
     def busy(self) -> bool:
         job = self.active

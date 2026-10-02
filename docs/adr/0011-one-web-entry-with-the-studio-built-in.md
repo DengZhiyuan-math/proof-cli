@@ -33,6 +33,8 @@ The researcher also had two command-line entry points that humans never needed: 
 
 3. **The studio is prism-local's code, taken into proof-cli and then changed freely.** The code is copied, not merged: prism-local at commit `6512eb8` goes into `src/proof_cli/studio/`, with its MIT licence and the licences of the vendored CodeMirror (MIT) and PDF.js (Apache-2.0). The two projects stay independent. Nothing is synced either way, and proof-cli owes prism-local no compatibility.
 
+   _Update (2026-10-01)._ Still copied, never merged as a branch: when prism-local gains something the node page wants, it is taken over by hand, file by file (a three-way merge against the copy point where a file still matches, a port where it doesn't), and what proof-cli has no use for is left out. The first such take is prism-local `2938c05`; `src/proof_cli/studio/README.md` lists each take and what it left out.
+
    Only what the node page needs is kept: the editor, build, SyncTeX, file I/O and the agent panel with its backends. prism-local's multi-project Home, port registry, launcher and idle watchdog are left out, because proof-cli's own server and map do those jobs.
 
 4. **The studio serves nodes, not an origin.**

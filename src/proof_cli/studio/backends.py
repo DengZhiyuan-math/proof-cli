@@ -23,13 +23,21 @@ Events a backend emits through ``job.emit`` (the panel understands exactly these
     {"t": "message_start"}                      a new assistant message begins
     {"t": "delta", "text": str}                 streamed text of that message
     {"t": "text", "text": str}                  a whole message (when not streamed)
-    {"t": "tool", "id": str, "name": str, "summary": str}
+    {"t": "thinking_start"}                     the model starts thinking
+    {"t": "thinking", "text": str}              streamed thinking (where the model shows it)
+    {"t": "tool_start", "id": str, "name": str} a tool call begins (its input still streams)
+    {"t": "tool_live", "id": str, "path"?: str, "text"?: str, "old"?: str, "old_done"?: true}
+                                                the file a Write/Edit is writing, as it streams
+    {"t": "tool", "id": str, "name": str, "summary": str, "path"?: str, "lines"?: [first, last]}
+                                                a tool call, with the file (and lines) a file tool works on
     {"t": "tool_result", "id": str, "error": bool, "preview": str}
+    {"t": "build", "result": dict}              a build the agent ran (agent.py, not backends)
     {"t": "rate", "rate": dict}                 Claude usage limits
     {"t": "error", "message": str}
 
 `run` returns a dict with any of: session_id, exit (0 = success), is_error, subtype,
-cost (USD), duration (ms), usage ({"in": tokens, "out": tokens}), denials (tool
+cost (USD, only when billed per token), billing ("subscription" or "api"), duration
+(ms), usage ({"in": tokens, "out": tokens}), denials (tool
 names refused), stderr.
 """
 from __future__ import annotations
@@ -38,6 +46,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import threading
 from pathlib import Path
 from typing import Callable
@@ -56,6 +65,19 @@ and the compiled PDF.
   files you may change. It replaces the scope of every earlier message.
 - The author reviews every turn's file changes as a diff with an undo button,
   so make focused, minimal edits and say which files you changed.
+- In .tex files, write display math with named LaTeX environments:
+  \\begin{equation} ... \\end{equation} (or equation*, align, align*, gather,
+  multline), never the shortcuts \\[ ... \\] or $$ ... $$. Use \\begin{...}
+  environments rather than shortcuts elsewhere in them too.
+- key-ideas.md is Markdown, not LaTeX: write its math as $...$ inline and
+  $$...$$ for display math, the only delimiters its review page typesets.
+- Read, search and change files with your file tools (Read, Grep, Glob, Edit,
+  Write), not shell commands such as cat, sed, python or rm.
+- To compile, use the compile tool when you have it: it runs the editor's own
+  build (the author's Compile button) and returns the errors with file:line.
+  Compile after substantial edits and fix the errors your changes caused.
+  Never run pdflatex or latexmk yourself. Without the tool, do not compile:
+  the author compiles in the editor.
 - Never commit, push, or run git commands that modify the repository.
 - Keep replies concise. If the project has a CLAUDE.md or AGENTS.md, follow it exactly.
 - Do not claim an argument is correct, or a step proved, unless you checked it.
@@ -70,8 +92,35 @@ def system_append(context=None) -> str:
         return SYSTEM_APPEND
     general = SYSTEM_APPEND.replace(
         "- Keep replies concise. If the project has a CLAUDE.md or AGENTS.md, follow it exactly.\n", "- Keep replies concise.\n"
+    ).replace(  # a role's brief says what it runs (the Numerics role runs programs); only the plain editor's agent has no shell
+        "- Read, search and change files with your file tools (Read, Grep, Glob, Edit,\n"
+        "  Write), not shell commands such as cat, sed, python or rm.\n", ""
     )
     return f"{general}\n{context.brief()}"
+
+
+# The agent's compile tool (mcp_compile.py, taken from upstream 2938c05): an MCP server either CLI starts
+# for the turn, named "studio", with one tool, "compile", that builds through the node's own studio.
+MCP_SERVER = "studio"
+# The compile tool as each CLI names it in its events: Claude Code's `mcp__<server>__<tool>`, Codex's `<server>.<tool>`.
+COMPILE_TOOL_NAMES = frozenset((f"mcp__{MCP_SERVER}__compile", f"{MCP_SERVER}.compile"))
+
+
+def tool_name(name: str | None) -> str | None:
+    """A tool's name as the turn's events carry it, for either CLI: the compile tool is "Compile" (what the stuck
+    rule, the transcript and the live view look for), every other tool its own name."""
+    return "Compile" if name in COMPILE_TOOL_NAMES else name
+
+
+def has_compile_tool(job: "Job") -> bool:
+    """Whether this turn gets the compile tool: the node's studio has a build (a URL), the turn edits (plan
+    mode admits no tool that builds), and its role typesets (the Prover and Numerics don't)."""
+    return bool(job.compile_url) and job.mode == "edit" and (job.context is None or job.context.compiles)
+
+
+def compile_tool_server(url: str) -> dict:
+    """The MCP server's command and arguments, as either CLI's configuration wants them."""
+    return {"command": sys.executable, "args": [str(Path(__file__).with_name("mcp_compile.py")), "--url", url]}
 
 
 def find_bin(env: str, name: str, extra: tuple[str, ...] = ()) -> str | None:
@@ -99,6 +148,7 @@ class Job:
         self.model: str | None = None
         self.effort: str | None = None
         self.scope: list[str] | None = None     # files this turn may change (None: any)
+        self.compile_url: str | None = None     # the node studio this turn's compile tool builds through (None: no tool)
         self.root = Path(".")
         self.files: Callable[[], list[str]] = lambda: []    # editable files
         self.writable: Callable[[str], bool] = lambda rel: False

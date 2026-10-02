@@ -23,7 +23,7 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
   }
 
   const ROLE_WORD = { prover: "Prover", typesetter: "Typesetter", numerics: "Numerics" };
-  const state = { run: null, log: [], folder: "", open: null, read: false, timer: null, redirectBox: null, roleBox: null, shown: "", transcripts: {} };
+  const state = { run: null, log: [], folder: "", open: null, read: false, timer: null, redirectBox: null, roleBox: null, shown: "", transcripts: {}, following: null, followed: new Set(), liveStart: null };
 
   const note = h("p", "", { class: "run-note", role: "status" });
   function tell(text, bad) { note.textContent = text; note.setAttribute("class", bad ? "run-note bad" : "run-note"); }
@@ -161,6 +161,50 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
     return li;
   }
 
+  // A turn's conversation as text: what it said, and each step it took — the tool and where (a file, a command),
+  // a compile and how it went — so the researcher reads what the agent did, not only what it wrote.
+  function transcriptText(events) {
+    const lines = [];
+    for (const ev of events) {
+      if (ev.t === "text") lines.push(ev.text || "");
+      else if (ev.t === "error") lines.push(`! ${ev.message || ""}`);
+      else if (ev.t === "tool") lines.push(`▸ ${ev.name}${ev.summary ? " " + ev.summary : ""}`);
+      else if (ev.t === "thinking_start") lines.push("… thinking");
+      else if (ev.t === "build") lines.push(`▸ Compile: ${buildWord(ev.result || {})}`);
+    }
+    return lines.join("\n");
+  }
+  function buildWord(r) {
+    const errors = (r.diagnostics || []).filter((d) => d.severity === "error").length;
+    return r.cancelled ? "stopped" : r.timed_out ? "timed out" : r.exit === 0 && !errors ? "OK" : errors ? `${errors} error(s)` : `failed (exit ${r.exit})`;
+  }
+
+  // The running turn, watched live: its events are read as they come (the server holds the request until
+  // there are some) and handed to the Files view (app.js studioLive), which shows the agent at work — the
+  // lines it reads, the file as it writes it, the build it ran. One turn is followed at a time. The Files
+  // view's marks (the lines each turn changed) stay through the Start's turns, a role's hand-off included,
+  // and are cleared only when a new Start begins (the run's started_at changes).
+  async function followLoop(job) {
+    const live = globalThis.studioLive;
+    const start = state.run ? state.run.started_at : undefined;
+    if (live && start !== state.liveStart) { state.liveStart = start; live.reset(); }
+    let after = 0;
+    while (state.following === job) {
+      let r;
+      try { r = await api(`/api/agent/events?job=${job}&after=${after}`); } catch (e) { break; }
+      const events = r.events || [];
+      after += events.length;
+      if (live && events.length) live.feed(events);
+      if (r.done || r._status !== 200) break;
+    }
+    state.followed.add(job);  // once: a turn that ended between two polls is not replayed from its first event
+    if (state.following === job) state.following = null;
+  }
+  function follow() {
+    const now = state.run, job = now && now.active ? now.job : null;
+    if (job && state.following !== job && !state.followed.has(job)) { state.following = job; followLoop(job); }
+  }
+
   // A turn, folded under its step (spec #145, story 40): its role, its prompt, the files it changed, and its raw
   // conversation. A finished turn's is read from what the project kept (api/agent/turn), so an earlier Start's
   // turns read the same after a new Start or a restart; the turn running now is read from its job, again on every
@@ -182,7 +226,7 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
       const known = state.transcripts[turn.turn];
       if (known && known.final) return show(known);
       const r = running ? await api(`/api/agent/events?job=${turn.job}&after=0`) : await api(`/api/agent/turn?turn=${encodeURIComponent(turn.turn)}`);
-      const said = (r.events || []).filter((ev) => ev.t === "text" || ev.t === "error").map((ev) => ev.text || ev.message || "").join("\n");
+      const said = transcriptText(r.events || []);
       const kept = { text: said || (running ? "(nothing said yet)" : r._status === 200 ? "(no text in this turn)" : "(this turn's conversation was not kept)"),
                      prompt: r.prompt || "", final: !running && r._status === 200 };
       state.transcripts[turn.turn] = kept;
@@ -247,6 +291,7 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
     if (!state.read && !(state.run && state.run.active) && location.hash !== "#files" && typeof showCentre === "function") showCentre("run", false);
     state.read = true;
     render(force === true);
+    follow();
   }
 
   globalThis.studioRun = {

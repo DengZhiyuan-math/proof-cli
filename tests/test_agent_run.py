@@ -25,7 +25,7 @@ from proof_cli.webapp.studios import StudioHub
 
 SRC = Path(__file__).resolve().parents[1] / "src"
 # each invocation pops one script (a list of commands; ["write", path, text] writes a file, ["tool", command]
-# reports a shell command the agent ran, as Claude Code's stream does) from FAKE_QUEUE and logs how it was
+# reports a shell command the agent ran, as Claude Code's stream does, ["compile"] a use of the compile tool) from FAKE_QUEUE and logs how it was
 # started to FAKE_LOG (one JSON line per turn)
 FAKE_CLAUDE = r'''#!{python}
 import json, os, subprocess, sys
@@ -41,7 +41,9 @@ log = {{"argv": sys.argv[1:], "cwd": os.getcwd(), "role": os.environ.get("PROOF_
 tools = []
 for command in script:
     if command[0] == "tool":
-        tools.append(command[1]); continue
+        tools.append(("Bash", {{"command": command[1]}})); continue
+    if command[0] == "compile":
+        tools.append(("mcp__studio__compile", {{}})); continue
     if command[0] == "write":
         path = os.path.join(os.getcwd(), command[1]); os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         open(path, "w").write(command[2]); continue
@@ -51,8 +53,8 @@ for command in script:
     log["ran"].append({{"argv": command, "code": done.returncode, "out": done.stdout[-2000:], "err": done.stderr[-2000:]}})
 open(os.environ["FAKE_LOG"], "a").write(json.dumps(log) + "\n")
 print(json.dumps({{"type": "system", "subtype": "init", "session_id": "stub-session", "model": "stub"}}))
-for i, tool in enumerate(tools):
-    print(json.dumps({{"type": "assistant", "message": {{"content": [{{"type": "tool_use", "id": f"t{{i}}", "name": "Bash", "input": {{"command": tool}}}}]}}}}))
+for i, (name, given) in enumerate(tools):
+    print(json.dumps({{"type": "assistant", "message": {{"content": [{{"type": "tool_use", "id": f"t{{i}}", "name": name, "input": given}}]}}}}))
 print(json.dumps({{"type": "result", "session_id": "stub-session", "is_error": False, "subtype": "success"}}))
 '''
 
@@ -830,6 +832,79 @@ def test_a_run_a_proof_write_or_a_file_change_each_count_as_a_change(studio, mon
     assert state["status"] == "stuck" and len(_turns(log)) == 8, state
 
 
+def test_a_compile_through_the_tool_counts_as_a_run(studio, monkeypatch):
+    """The merge with #148's stuck rule: the Typesetter compiles with the compile tool, not latexmk in a shell, and
+    that compile is a run as a shell compile was."""
+    from proof_cli.studio import agent_run
+
+    store, hub, log, queue = studio
+    monkeypatch.setattr(agent_run, "STUCK_TURNS", 2)
+    _queue(queue, [["sleep", "0"]], [["compile"]], [["sleep", "0"]], [["sleep", "0"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
+    state = _wait(hub)
+    assert state["status"] == "stuck" and len(_turns(log)) == 4, state
+
+
+def test_a_tex_lookup_alone_is_no_change(studio, monkeypatch):
+    """Last review round: `kpsewhich` is a lookup the Typesetter may run, not a compile, so a turn of lookups alone
+    does not hold off the stuck rule."""
+    from proof_cli.studio import agent_run
+    from proof_cli.studio.proof_agent import is_a_run
+
+    assert not is_a_run("kpsewhich amsmath.sty") and is_a_run("latexmk -pdf proof.tex")
+    store, hub, log, queue = studio
+    monkeypatch.setattr(agent_run, "STUCK_TURNS", 2)
+    _queue(queue, [["tool", "kpsewhich amsmath.sty"]], [["tool", "kpsewhich amsthm.sty"]], [["sleep", "0"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
+    state = _wait(hub)
+    assert state["status"] == "stuck" and "no change in 2 turn(s)" in state["reason"] and len(_turns(log)) == 2, state
+
+
+# a Codex CLI on PATH: each invocation pops one script from FAKE_QUEUE (["compile"]: a call of the studio's compile
+# tool, as `codex exec --json` reports an MCP tool call; anything else is a command it runs) and logs to FAKE_LOG
+FAKE_CODEX = r'''#!{python}
+import json, os, subprocess, sys
+sys.stdin.read()
+queue_path = os.environ["FAKE_QUEUE"]
+queue = json.load(open(queue_path)) if os.path.exists(queue_path) else []
+script = queue.pop(0) if queue else []
+json.dump(queue, open(queue_path, "w"))
+for command in script:
+    if command[0] != "compile":
+        subprocess.run(command, capture_output=True, text=True)
+open(os.environ["FAKE_LOG"], "a").write(json.dumps({{"argv": sys.argv[1:], "role": os.environ.get("PROOF_AGENT_ROLE")}}) + "\n")
+print(json.dumps({{"type": "thread.started", "thread_id": "codex-thread"}}))
+for i, command in enumerate(script):
+    if command[0] == "compile":
+        item = {{"id": f"m{{i}}", "type": "mcp_tool_call", "server": "studio", "tool": "compile", "status": "completed"}}
+        print(json.dumps({{"type": "item.started", "item": item}}))
+        print(json.dumps({{"type": "item.completed", "item": item}}))
+print(json.dumps({{"type": "turn.completed", "usage": {{"input_tokens": 1, "output_tokens": 1}}}}))
+'''
+
+
+def test_a_codex_typesetter_turn_that_only_compiles_is_a_run_and_its_transcript_says_compile(studio, monkeypatch, tmp_path):
+    """Last review round: Codex reports the compile tool as `studio.compile`; it is named `Compile` in one place
+    (backends.tool_name) for both CLIs, so the stuck rule counts it as a run and the turn's transcript says Compile."""
+    from proof_cli.studio import agent_run
+
+    store, hub, log, queue = studio
+    monkeypatch.setenv("CODEX_BIN", str(_executable(tmp_path / "bin" / "codex", FAKE_CODEX.format(python=sys.executable))))
+    monkeypatch.setattr(agent_run, "STUCK_TURNS", 2)
+    _queue(queue, [["proof", "node", "progress", "N", "--handoff", "typesetter", "--note", "typeset it"]],  # narration: idle 1
+           [["compile"]],  # the Typesetter only compiles: a run, idle back to 0
+           [], [])          # the Prover twice with nothing: stuck
+    _post(hub, "/studio/N/api/agent/start", {"provider": "codex"})
+    state = _wait(hub)
+    roles = [t["role"] for t in _turns(log)]
+    assert state["status"] == "stuck" and roles == ["prover", "typesetter", "prover", "prover"], (state["reason"], roles)
+    entries = _get(hub, "/studio/N/api/agent/log")[1]["entries"]
+    first = next(e for e in entries if e["kind"] == "turn" and e["role"] == "typesetter")
+    answer = hub.request("GET", "/studio/N/api/agent/turn", f"turn={first['turn']}", None, cross_site=False)
+    events = json.loads(answer.body)["events"]
+    assert [e["name"] for e in events if e["t"] == "tool"] == ["Compile"]
+
+
 def test_pause_stops_the_budget_clock_and_resume_continues_with_what_is_left(studio):
     store, hub, log, queue = studio
     (store.root / "proof.toml").write_text("[studio]\nbudget = { turns = 3, minutes = 10 }\n")
@@ -1283,6 +1358,145 @@ def test_review_what_it_has_while_paused_ends_the_run_and_resume_does_nothing(st
     run = hub.studio("N").run
     _until(lambda: not (run._run.thread and run._run.thread.is_alive()), "the run's coordinator to stop")  # no turn can follow now
     assert not (store.root / "proofs" / "N" / "scratch" / "after-review.md").exists() and len(_turns(log)) == 1
+
+
+# -- taken from upstream (prism-local 2938c05): the agent compiles through the studio's own build -------------
+
+
+def test_the_typesetter_compiles_through_the_nodes_studio_not_a_shell(studio):
+    from proof_cli.webapp.server import project_origin
+
+    store, hub, log, queue = studio
+    _queue(queue, [["sleep", "0"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["typesetter"]})
+    _wait(hub)
+    argv = _turns(log)[0]["argv"]
+    servers = json.loads(argv[argv.index("--mcp-config") + 1])["mcpServers"]
+    assert servers["studio"]["args"][-2:] == ["--url", f"{project_origin(store)}/studio/N/"] and "--strict-mcp-config" in argv
+    assert "mcp__studio__compile" in argv and "Bash(latexmk *)" not in argv and "Bash(pdflatex *)" not in argv
+
+
+def test_the_typesetter_on_codex_is_configured_with_the_compile_tool_too(studio, monkeypatch):
+    """Fourth review F3: the same brief, the same tool — through Codex's configuration overrides."""
+    from proof_cli.studio.backend_codex import Codex
+    from proof_cli.webapp.server import project_origin
+
+    store, hub, log, queue = studio
+    agent = hub.studio("N").agent
+    seen = []
+    codex = Codex("codex", {"bin": "codex"})
+    agent.backends["codex"] = codex
+    monkeypatch.setattr(codex, "unavailable", lambda: None)
+    monkeypatch.setattr(codex, "preflight", lambda root: None)
+    monkeypatch.setattr(agent, "_run", lambda job, backend: seen.append(backend.command(job)))  # never start Codex
+    _post(hub, "/studio/N/api/agent/start", {"provider": "codex", "roles": ["typesetter"]})
+    _until(lambda: seen, "the Typesetter's Codex turn to be prepared")
+    _post(hub, "/studio/N/api/agent/release")
+    ((cmd, prompt),) = seen
+    assert f'mcp_servers.studio.args=["{__import__("proof_cli.studio.mcp_compile", fromlist=["__file__"]).__file__}", "--url", "{project_origin(store)}/studio/N/"]' in cmd
+    assert "compile it with the `compile` tool" in prompt
+
+
+def test_only_a_typesetting_turn_on_a_latex_node_gets_the_compile_tool(studio):
+    store, hub, log, queue = studio
+    create_node(store, node_id="C", kind="claim", statement="n ≤ 10^4 holds", medium="computation")
+    _queue(queue, [["sleep", "0"]], [["sleep", "0"]])
+    _post(hub, "/studio/C/api/agent/start", {"provider": "claude", "roles": ["numerics"]})
+    _wait(hub, node="C")
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["prover"]})
+    _wait(hub)
+    numerics, prover = _turns(log)
+    assert "--mcp-config" not in numerics["argv"]  # a computation node has no build
+    assert "--mcp-config" not in prover["argv"] and "mcp__studio__compile" not in prover["argv"]  # the Prover does not typeset
+
+
+def test_a_build_the_agent_ran_shows_in_its_turn(studio):
+    """The compile tool posts the build as the agent's: the turn's events carry it, so the page shows it as yours."""
+    store, hub, log, queue = studio
+    _queue(queue, [["sleep", "30"]])  # the turn runs until it is released: the build lands in it however slow the start
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["typesetter"]})
+    agent = hub.studio("N").agent
+    _until(lambda: agent.active and not agent.active.done, "the Typesetter's turn to be running")
+    status, built = _post(hub, "/studio/N/api/build", {"mode": "draft", "by": "agent"})
+    assert status == 200
+    answer = hub.request("GET", "/studio/N/api/agent/events", f"job={agent.active.id}&after=0", None, cross_site=False)
+    events = json.loads(answer.body)["events"]
+    assert any(e["t"] == "build" and e["result"] == built for e in events)
+    _post(hub, "/studio/N/api/agent/release")
+
+
+def _through_the_real_handler(app):
+    """`urllib.request.urlopen` answered by proof-cli's own request handler (webapp/server.py `_Handler`), in
+    process: the request mcp_compile builds is written out as HTTP and read by the handler's real `do_POST` —
+    its Host and Origin checks included — with no socket bound."""
+    import email
+    import io
+    import urllib.error
+    from urllib.parse import urlsplit
+
+    from proof_cli.webapp.server import _Handler
+
+    handler_class = type("InProcessHandler", (_Handler,), {"app": app})
+
+    def urlopen(req, timeout=None):
+        parts = urlsplit(req.full_url)
+        headers = {"Host": parts.netloc, **dict(req.header_items()), "Content-Length": str(len(req.data or b""))}
+        raw = f"{req.get_method()} {parts.path} HTTP/1.1\r\n" + "".join(f"{k}: {v}\r\n" for k, v in headers.items()) + "\r\n"
+        handler = handler_class.__new__(handler_class)
+        handler.rfile, handler.wfile = io.BytesIO(raw.encode() + (req.data or b"")), io.BytesIO()
+        handler.client_address, handler.server, handler.request = ("127.0.0.1", 0), None, None
+        handler.handle_one_request()
+        head, _, body = handler.wfile.getvalue().partition(b"\r\n\r\n")
+        status_line, _, header_text = head.decode().partition("\r\n")
+        code = int(status_line.split()[1])
+        if code >= 400:
+            raise urllib.error.HTTPError(req.full_url, code, status_line, email.message_from_string(header_text), io.BytesIO(body))
+        return io.BytesIO(body)
+
+    return urlopen
+
+
+def test_the_compile_tool_passes_the_servers_own_origin_check_and_a_wrong_origin_is_refused(tmp_path, monkeypatch):
+    """Seventh review: the 403 WRONG_ORIGIN fix, through the real server's `do_POST` rather than a mocked urlopen."""
+    import urllib.error
+    import urllib.request
+
+    from proof_cli.studio import mcp_compile
+    from proof_cli.studio.server import Studio
+    from proof_cli.webapp.server import ReviewApp, project_origin
+
+    store = ensure_project(tmp_path / "project")
+    create_node(store, node_id="N", kind="claim", statement="a claim")
+    built = []
+    monkeypatch.setattr(Studio, "run_build", lambda self, mode, clean=False: (built.append((mode, clean)), {"exit": 0, "diagnostics": []})[1])
+    app = ReviewApp(store)
+    try:
+        monkeypatch.setattr(urllib.request, "urlopen", _through_the_real_handler(app))
+        url = f"{project_origin(store)}/studio/N/"
+        assert mcp_compile.build(url, False) == {"exit": 0, "diagnostics": []} and built == [("draft", False)]
+        text, failed = mcp_compile.report(mcp_compile.build(url, True))
+        assert not failed and text.startswith("Build OK.") and built[-1] == ("draft", True)
+
+        # the same request from another origin: the server refuses it before any build
+        real = urllib.request.Request
+
+        def from_elsewhere(*args, headers=None, **kwargs):
+            return real(*args, headers={**(headers or {}), "Origin": "http://evil.example"}, **kwargs)
+
+        monkeypatch.setattr(urllib.request, "Request", from_elsewhere)
+        with pytest.raises(urllib.error.HTTPError) as refused:
+            mcp_compile.build(url, False)
+        assert refused.value.code == 403 and json.loads(refused.value.read())["error"]["code"] == "WRONG_ORIGIN"
+        assert len(built) == 2
+        # what the agent is told: the refusal's code and message, from the server's answer
+        call = {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "compile"}}
+        told = mcp_compile.answer(call, url)["result"]
+        assert told["isError"] and "WRONG_ORIGIN" in told["content"][0]["text"] and len(built) == 2
+        monkeypatch.setattr(urllib.request, "Request", real)
+        told = mcp_compile.answer(call, f"{project_origin(store)}/studio/NOPE/")["result"]  # a studio's own refusal: flat
+        assert told["isError"] and "NODE_NOT_FOUND" in told["content"][0]["text"], told
+    finally:
+        app.close()
 
 
 def test_the_log_gives_each_changed_file_its_line_and_how_the_page_opens_it(studio):

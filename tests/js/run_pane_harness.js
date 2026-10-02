@@ -55,11 +55,17 @@ class El {
         return known ? { status: 200, json: async () => ({ turn: id, prompt: `Take your turn (${id})…`, events: [{ t: "text", text: said }, { t: "done" }] }) }
                      : { status: 404, json: async () => ({ error: "NO_SUCH_TURN", message: "no recorded turn by that id" }) };
       }
-      if (url.startsWith("api/agent/events")) return { status: 200, json: async () => ({ events: [{ t: "text", text: said }, { t: "done" }], done: true }) };
+      if (url.startsWith("api/agent/events")) {
+        const after = Number((url.match(/after=(\d+)/) || [0, 0])[1]);
+        const events = scenario.events || [{ t: "text", text: said }, { t: "done" }];
+        return { status: 200, json: async () => ({ events: events.slice(after), done: true }) };
+      }
       return { status: 404, json: async () => ({}) };
     },
   };
   globalThis.focusedSet = (el) => { focused = el; };
+  // the Files view's live feed (app.js studioLive): what the pane hands it of the running turn
+  context.studioLive = { fed: [], resets: 0, feed(events) { this.fed.push(...events); }, reset() { this.resets += 1; } };
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, "../../src/proof_cli/studio/static/common.js"), "utf8"), context);  // `api`, NODE
   vm.runInContext(fs.readFileSync(path.join(__dirname, "../../src/proof_cli/studio/static/run.js"), "utf8"), context);
@@ -78,6 +84,7 @@ class El {
     redirect: { text: (pane.all().find((x) => x.cls() === "run-redirect") || { value: "" }).value, role: (pane.all().find((x) => x.cls() === "run-redirect-role") || { value: "" }).value },
     open: pane.all().filter((x) => x.tag === "details" && x.open).map((x) => String(x.attrs["data-turn"])),
     focusedRedirect: !!(focused && focused.cls && focused.cls() === "run-redirect"),
+    live: context.studioLive.fed.map((e) => e.t), resets: context.studioLive.resets,
     transcripts: Object.fromEntries(pane.all().filter((x) => x.tag === "details").map((x) => [String(x.attrs["data-turn"]), (x.all().find((t) => t.cls() === "turn-transcript") || { textContent: "" }).textContent])),
     polls: [...timers], posted: [...posted], dispatched: [...dispatched], centred: [...centred], askedTurns: [...askedTurns],
   });
@@ -103,6 +110,10 @@ class El {
     said = c.final; run = { ...run, job: null, turn: null }; log = [...log, c.recorded]; await context.studioRun.refresh(); await tick(); readings.push(read());
     const d = pane.all().find((x) => x.tag === "details" && x.attrs["data-turn"] === c.turn); d.open = false; await d.listeners.toggle();
     said = "(the backend is not asked again)"; await openTurn(c.turn); readings.push(read());  // closed and opened again: final, from memory
+  }
+  for (const step of scenario.sequence || []) {  // the run goes on: what the next polls read (a hand-off, a new Start)
+    run = step.run; if (step.log) log = step.log;
+    await context.studioRun.refresh(); await tick(); readings.push(read());
   }
   if (scenario.clickFile) {  // the researcher clicks a file a turn changed
     const link = pane.all().find((x) => x.tag === "a" && x.textContent === scenario.clickFile);
