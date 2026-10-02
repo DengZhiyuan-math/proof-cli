@@ -654,7 +654,7 @@ class Studio:
     def run_action(self, action: str, body: dict) -> tuple[int, dict]:
         """The researcher's oversight of the agent's run (spec #145): start, pause, resume, redirect or release — (status, answer)."""
         if self.run is None:
-            return 404, {"error": "NO_RUN", "message": "this folder has no proof map node, so no agent run"}
+            return 404, {"error": "this folder has no proof map node, so no agent run", "code": "NO_RUN"}
         if action == "start":
             provider = str(body.get("provider") or (self.agent.backend(None).id if self.agent.backend(None) else ""))
             roles = body.get("roles") if isinstance(body.get("roles"), list) else None
@@ -667,13 +667,14 @@ class Studio:
         elif action == "redirect":
             text = str(body.get("text") or "").strip()
             if not text:
-                return 400, {"error": "REDIRECT_EMPTY", "message": "say what the agent should do differently"}
+                return 400, {"error": "say what the agent should do differently", "code": "REDIRECT_EMPTY"}
             r = self.run.redirect(text, body.get("role") or None)
         elif action == "release":
             r = self.run.release()
         else:
-            return 404, {"error": "NOT_FOUND", "message": f"no run action {action!r}"}
-        return (self._RUN_STATUS.get(r["error"], 400) if "error" in r else 200), r
+            return 404, {"error": f"no run action {action!r}", "code": "NOT_FOUND"}
+        # the studio's answers, as the agent manager's: {"error": message, "code": CODE}
+        return (self._RUN_STATUS.get(r.get("code"), 400) if "error" in r else 200), r
 
     def stop_runs(self) -> bool:
         with self._admit:
@@ -751,7 +752,7 @@ class Studio:
             return _json(self.run.view() if self.run is not None else {"status": "idle", "reason": "no run on this folder"})
         if path == "/api/agent/turn":  # a run's turn, as recorded with the project: its conversation outlives the studio's memory
             kept = self.run.transcript(q.get("turn") or "") if self.run is not None else None
-            return _json(kept) if kept is not None else _json({"error": "NO_SUCH_TURN", "message": "no recorded turn by that id"}, 404)
+            return _json(kept) if kept is not None else _json({"error": "no recorded turn by that id", "code": "NO_SUCH_TURN"}, 404)
         if path == "/api/agent/events":
             job = self.agent.jobs.get(int(q["job"]))
             if not job:
