@@ -24,7 +24,7 @@ from .. import proof_map
 from ..domain import ProofMapNodeKind
 from ..reviews import git_identity
 from ..storage import ProjectStore, get_current_candidate_proof
-from ..studio.agent_run import RunHooks
+from ..studio.agent_run import ACTIVE, RunHooks
 from ..studio.proof_agent import ProofAgentContext, agent_name, budget, library_folders, open_command
 from ..studio.server import Studio
 from ..authority import candidate_proof_sha256
@@ -101,21 +101,25 @@ class StudioHub:
                 self._studios[node.id] = Studio(
                     folder, fixed_build=NODE_BUILD, hidden=NODE_HIDDEN, agent_scratch="scratch",
                     # the node's proof agent: rooted at the project, reading its library (ADR-0011 point 8),
-                    # and knowing the node's dependencies as of each turn, to draft its key ideas (ADR-0013)
-                    agent_context=lambda: ProofAgentContext(
+                    # and knowing the node's dependencies as of each turn, to draft its key ideas (ADR-0013).
+                    # A run's turn (spec #145) comes with its role and name from the run's own record; the
+                    # researcher's own turn (an Ask) comes with none, whatever the run is doing meanwhile.
+                    agent_context=lambda turn=None: ProofAgentContext(
                         node_id, root, library_folders(root), dependencies=self._dependencies(node_id),
-                        name=self.turn_name(node_id),
+                        name=(turn or {}).get("name") or "studio-agent",
                         on_drafted=lambda agent, data: proof_map.record_key_ideas_draft(self.store, node_id, agent=agent, content=data),
-                        # a run's turn (spec #145): which role, and the researcher's redirect for it
-                        role=self.turn_role(node_id), redirect=self.turn_redirect(node_id),
+                        role=(turn or {}).get("role"),
                     ),
                     run_hooks=RunHooks(
                         agent_name=lambda provider: agent_name(root, provider),
                         budget=lambda: budget(root),
                         assign=lambda name: proof_map.claim_node(self.store, node_id, claimant_id=name),
-                        release=lambda name: self._release(node_id, name),
+                        release=lambda name, reason: self._release(node_id, name, reason),
                         work_log=lambda: proof_map.work_log(self.store, node_id),
-                        record_stuck=lambda role, name, note: proof_map.record_progress(self.store, node_id, role=role, by=name, step=self._last_step(node_id), status="stuck", note=note),
+                        record_close=lambda role, name, status, note: proof_map.record_progress(
+                            self.store, node_id, role=role, by=name, step=self._last_step(node_id), status=status, note=note),
+                        record_turn=lambda turn: proof_map.record_agent_turn(self.store, node_id, **turn),
+                        transcript=lambda turn: proof_map.agent_turn_transcript(self.store, node_id, turn),
                         review_now=lambda: self._review_now(node_id),
                     ),
                     # the node's Medium as of each request, a run recorded as an Evidence check as the page's
@@ -127,29 +131,11 @@ class StudioHub:
                 )
             return self._studios[node.id]
 
-    # -- a run's turn (spec #145): what the context of the turn being started takes from the node's run
-    def _active_run(self, node_id: str):
-        studio = self._studios.get(node_id)
-        run = studio.run if studio is not None else None
-        return run if run is not None and run.active() else None
-
-    def turn_role(self, node_id: str) -> str | None:
-        run = self._active_run(node_id)
-        return run.role_for_turn() if run is not None else None
-
-    def turn_redirect(self, node_id: str) -> str | None:
-        run = self._active_run(node_id)
-        return run.redirect_for_turn() if run is not None else None
-
-    def turn_name(self, node_id: str) -> str:
-        run = self._active_run(node_id)
-        return run.state.name if run is not None and run.state.name else "studio-agent"
-
-    def _release(self, node_id: str, name: str) -> None:
-        """Release the node when the run still holds it (a review request already released it)."""
+    def _release(self, node_id: str, name: str, reason: str) -> None:
+        """Release the node when the run still holds it (a review request already released it), saying why."""
         claim = proof_map.get_active_claim(self.store, node_id)
         if claim is not None and claim.claimant_id == name:
-            proof_map.release_node(self.store, node_id, claimant_id=name, reason="released by the researcher")
+            proof_map.release_node(self.store, node_id, claimant_id=name, reason=reason)
 
     def _review_now(self, node_id: str) -> dict:
         """Review what the agent has (spec #145): freeze a snapshot of the folder as it stands. The researcher asks
@@ -174,12 +160,15 @@ class StudioHub:
         return studio.run_action(action, body or {})
 
     def run_state(self, node_id: str) -> dict | None:
-        """The node's run as the map shows it (spec #145): None when no run is active."""
-        run = self._active_run(node_id)
-        if run is None:
+        """The node's run as the map shows it (spec #145): while it is active, or waiting on a decision only the
+        researcher can make; None otherwise."""
+        studio = self._studios.get(node_id)
+        if studio is None or studio.run is None:
             return None
-        view = run.view()
-        return {"status": view["status"], "role": view["role"], "step": view["step"], "steps": view["steps"]}
+        view = studio.run.view()
+        if view["status"] not in (*ACTIVE, "needs-human"):
+            return None
+        return {"status": view["status"], "role": view["role"], "step": view["step"], "steps": view["steps"], "decision": view["decision"]}
 
     def _medium(self, node_id: str) -> str | None:
         node = proof_map.get_node(self.store, node_id)

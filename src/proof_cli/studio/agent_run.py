@@ -4,13 +4,15 @@ One run is the node's assignee under the project's agent name and works the node
 in turn — Prover, Typesetter, Numerics — each a turn of the same CLI (agent.py) with its own brief,
 environment and write scope (proof_agent.py). The Prover goes first and hands work over through
 `proof node progress --handoff <role>`; a role hands back when it is done; the run brings the Prover
-back after every delegation, telling it what the other role reported. It stops on its own when
-review is requested, when a step reports stuck (or a decision only a human can make), when its
-budget is spent, or when turns stop changing anything. The researcher pauses it (the turn finishes,
-the assignment stays), redirects it (one line for the next turn, optionally for one role), resumes
-it, or stops and releases it. Everything it learns is project state the roles wrote through
-`proof`; the run itself keeps only what the page asks about: its status, its reason, which role
-and turn it is on.
+back after every delegation, telling it what the other role reported. A Start may name the roles it
+runs: one role is one turn; several are the same flow restricted to them, in the spec's order. It
+stops on its own when review is requested, when a step reports stuck or names a decision only a
+human can make, when its budget is spent, or when turns stop changing anything; it leaves a closing
+progress note on every stop. The researcher pauses it (the turn finishes, the assignment stays, the
+budget's clock stops), redirects it (one line for the next turn, optionally for one role), resumes
+it, or stops and releases it. Everything it learns is project state the roles wrote through `proof`;
+the run itself keeps only what the page asks about: its status, its reason, which role and turn it
+is on — and records each turn (its job, session, step and conversation) through its hooks.
 
 Each Start is its own record (`_Start`): the coordinator thread of a Start holds that record and
 nothing else, so a coordinator still winding down after Stop and release can never end, count or
@@ -23,16 +25,23 @@ from __future__ import annotations
 import re
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 from typing import Callable
 
 from ..domain import AGENT_ROLES
+from .proof_agent import is_a_run
 
-STUCK_TURNS = 5      # turns in a row that change nothing — no report, no file, no run, no fog — before the run stops as stuck
+STUCK_TURNS = 5      # turns in a row that change nothing — no `proof` write, no file, no run — before the run stops as stuck
 BUSY_WAIT = 30.0     # seconds a turn waits for the researcher's own Ask turn to end before giving up
-SETTLE_WAIT = 5.0    # seconds a Start waits for a run that is over to finish giving the node back
-# the turn's changes the stuck rule counts: a report, a split, a fog item, an Evidence check, a dependency edit
-_CHANGES = ("plan", "step", "handoff", "split", "fog", "experiment", "evidence", "dependencies", "review-requested")
+SETTLE_WAIT = 5.0    # seconds a Start waits for a run that is over to finish giving the node back, before it is refused
+# the work log entries the stuck rule counts as a change: a `proof` write that is not narration. A plan, a step or a
+# handoff only says what the run means to do or did; a turn that says only that changed nothing.
+_CHANGES = ("split", "fog", "experiment", "evidence", "dependencies", "review-requested")
+ACTIONS = ("start", "pause", "resume", "redirect", "release", "review-now")   # the researcher's oversight, on the studio's and the map's routes
+ACTIVE = ("starting", "running", "pausing", "paused")
+# how a run's end reads as its closing progress note's step status
+_CLOSING = {"done": "done", "released": "done", "stuck": "stuck", "budget": "stuck", "needs-human": "needs-human"}
 
 
 @dataclass
@@ -42,25 +51,34 @@ class RunHooks:
     agent_name: Callable[[str], str]                 # provider -> the name the run works under
     budget: Callable[[], tuple[int, float]]           # (turns, minutes)
     assign: Callable[[str], None]                     # make the node's assignee this name (raises when another holds it)
-    release: Callable[[str], None]                    # release the node when this name is its assignee
+    release: Callable[[str, str], None]               # (name, reason): release the node when this name is its assignee
     work_log: Callable[[], list[dict]]                # the node's work log, oldest first
-    record_stuck: Callable[[str, str, str], None]     # (role, name, note): the run's own last word, as a stuck step
-    review_now: Callable[[], dict]                    # Review what it has: freeze a snapshot of the folder as it stands (as the researcher)
+    record_close: Callable[[str, str, str, str], None]  # (role, name, step status, note): the run's closing progress note
+    # a turn's record: {"phase": "started"|"ended", "turn", "role", "by", "provider"} and, ended, its job, session,
+    # step and conversation (`events`)
+    record_turn: Callable[[dict], None] = lambda turn: None
+    transcript: Callable[[str], dict | None] = lambda turn: None   # a recorded turn's conversation, by its id
+    review_now: Callable[[], dict] = lambda: {}   # Review what it has: freeze a snapshot of the folder as it stands (as the researcher)
 
 
 @dataclass
 class RunState:
-    status: str = "idle"          # idle | starting | running | pausing | paused | released | done | stuck | budget
+    # idle | starting | running | pausing | paused | released | release-failed | done | stuck | budget | needs-human
+    status: str = "idle"
     reason: str = ""
     role: str | None = None
     turns: int = 0
     turns_max: int = 0
     started_at: float | None = None
     deadline: float | None = None
+    paused_at: float | None = None   # while paused: the budget's clock is stopped here (resume moves the deadline on)
     name: str = ""
     provider: str = ""
-    roles: list[str] = field(default_factory=list)   # a single role asked for, or every role
+    roles: list[str] = field(default_factory=list)   # the roles asked for, in the spec's order; empty is every role
     redirect: dict | None = None                     # {"text", "role"} waiting for the next matching turn
+    decision: str | None = None                      # needs-human: the decision only the researcher can make
+    job: int | None = None                           # the turn running now: the agent manager's job id
+    turn: str | None = None                          # and its id in the work log
 
 
 @dataclass
@@ -75,14 +93,8 @@ class _Start:
     thread: threading.Thread | None = None
     handoff: dict | None = None     # the last turn's handoff, for the next turn's prompt
     last_report: dict | None = None # the last turn's last step report, for a role that follows it
-    turn_role: str | None = None
-    turn_redirect: str | None = None
     model: object = None
     effort: object = None
-    turns: list[dict] = field(default_factory=list)  # each turn of this Start: {"job", "role", "prompt", "at"} — the raw conversation is the job's events
-
-
-ACTIVE = ("starting", "running", "pausing", "paused")
 
 
 def first_changed_line(diff: str) -> int:
@@ -101,6 +113,12 @@ def first_changed_line(diff: str) -> int:
     return 1
 
 
+def _changed_files(job) -> list[dict]:
+    """The files a finished turn changed, each with the first line it changed: where the work log opens it."""
+    done = next((e for e in reversed(job.events) if e.get("t") == "done"), {})
+    return [{"path": c.get("path"), "line": first_changed_line(c.get("diff") or "")} for c in done.get("changed") or []]
+
+
 class AgentRun:
     def __init__(self, agent, hooks: RunHooks) -> None:
         self.agent = agent          # the studio's AgentManager
@@ -115,41 +133,45 @@ class AgentRun:
     def state(self) -> RunState:
         return self._run.state
 
-    def role_for_turn(self) -> str | None:
-        return self._run.turn_role
-
-    def redirect_for_turn(self) -> str | None:
-        return self._run.turn_redirect
-
     def active(self) -> bool:
         """The run holds the node's one slot: while it is being started too, so two Starts can't both begin."""
         return self._run.state.status in ACTIVE
 
     def view(self) -> dict:
-        """The run as the page and the map read it: status, reason, role, turns, and where the plan stands."""
+        """The run as the page and the map read it: status, reason, role, turns, the budget left, and where the plan stands."""
         with self._lock:
             state = RunState(**vars(self._run.state))
         log = self.hooks.work_log() if state.status != "idle" else []
         plans = [e for e in log if e.get("kind") == "plan"]
         steps = [e for e in log if e.get("kind") == "step"]
+        left = None
+        if state.deadline is not None:
+            left = max(0.0, (state.deadline - (state.paused_at or time.time())) / 60)
         return {
             "status": state.status, "active": state.status in ACTIVE,
             "reason": state.reason, "role": state.role, "name": state.name, "provider": state.provider,
             "turns": state.turns, "turns_max": state.turns_max, "started_at": state.started_at, "deadline": state.deadline,
-            "roles": list(state.roles), "redirect": state.redirect,
+            "minutes_left": left, "roles": list(state.roles), "redirect": state.redirect, "decision": state.decision,
+            "job": state.job, "turn": state.turn,
             "steps": len(plans[-1]["plan"]) if plans else None, "step": steps[-1]["step"] if steps else None,
             "step_status": steps[-1]["status"] if steps else None,
         }
 
+    def transcript(self, turn: str) -> dict | None:
+        return self.hooks.transcript(turn)
+
     # ------------------------------------------------------------ the researcher's actions
     def start(self, provider: str, *, roles: list[str] | None = None, redirect: str | None = None, model=None, effort=None) -> dict:
-        roles = [role for role in (roles or []) if role in AGENT_ROLES]
+        roles = [role for role in AGENT_ROLES if role in (roles or [])]  # the spec's order, whatever order they came in
         with self._lock:
             # a run that is over may still be giving the node back: begin after it, so this Start's own assignment
             # cannot slip in between the decision and the release and be taken away with it
             deadline = time.monotonic() + SETTLE_WAIT
-            while self._settling and not self.active() and time.monotonic() < deadline:
-                self._wake.wait(0.05)
+            while self._settling and not self.active():
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    return {"error": "RUN_SETTLING", "message": "the previous run is still giving the node back; Start again in a moment"}
+                self._wake.wait(min(0.05, left))
             if self.active():
                 return {"error": "RUN_ACTIVE", "message": "an agent is already working on this node; pause, redirect or release it"}
             run = self._run = _Start(RunState(status="starting"))  # holds the slot while the node is assigned, outside the lock
@@ -170,36 +192,26 @@ class AgentRun:
                 # behind, so what this late assignment made is ours too; one that ended done, stuck or over budget
                 # keeps its claim on purpose, and the late assignment made none.
                 later = self._run.state
-                stopped = self._run is run or later.status in ("idle", "released") or later.reason == "review-requested"
-                if stopped:
+                give_back = self._run is run or later.status in ("idle", "released") or later.reason == "review-requested"
+                if give_back:
                     self._settling += 1  # decided and announced in one breath: a Start arriving now waits for the release
             else:
-                stopped = False
+                give_back = False
                 run.state = RunState(status="running", role=roles[0] if roles else "prover", turns_max=turns_max, started_at=time.time(),
                                      deadline=time.time() + minutes * 60, name=name, provider=provider, roles=roles,
                                      redirect={"text": redirect, "role": None} if redirect else None)
                 run.model, run.effort = model, effort
                 run.thread = threading.Thread(target=self._loop, args=(run,), name=f"agent-run-{name}", daemon=True)
-        if stopped:
-            self._give_back(name)  # the assignment it just made is given back
-        if stopped or run.stop:
+        if give_back:
+            failed = self._give_back(run, name, "late assignment given back")  # the assignment it just made
+            return {**self.view(), **(failed or {})}
+        if run.stop:
             return self.view()
         run.thread.start()
         return self.view()
 
     def work_log(self) -> list[dict]:
         return self.hooks.work_log()
-
-    def turn_list(self) -> list[dict]:
-        """The turns of this Start so far, oldest first, each with whether its job is done — the conversation is read by job."""
-        with self._lock:
-            turns = [dict(turn) for turn in self._run.turns]
-        for turn in turns:
-            job = self.agent.jobs.get(turn["job"])
-            turn["done"] = bool(job and job.done)
-            done = next((e for e in reversed(job.events) if e.get("t") == "done"), {}) if job else {}
-            turn["changed"] = [{"path": c.get("path"), "line": first_changed_line(c.get("diff") or "")} for c in done.get("changed") or []]
-        return turns
 
     def review_now(self) -> dict:
         """Review what it has: a snapshot of the folder as it stands, frozen through the project's own request-review.
@@ -208,14 +220,19 @@ class AgentRun:
         record = self.hooks.review_now()
         with self._lock:
             run = self._run
-            job = run.job if self.active() else None
-            if self.active():
+            ended = self.active()
+            job = run.job if ended else None
+            role, name = run.state.role or "prover", run.state.name
+            if ended:
                 run.stop = True
                 run.pause = False
                 run.state.status, run.state.reason = "done", "review-requested"
+                run.state.paused_at = None
                 self._wake.notify_all()
         if job is not None and not job.done:
             self.agent.stop(job.id)
+        if ended:  # the run's last word, as on every stop
+            self._close_note(role, name, "done", "review-requested")
         return record
 
     def pause(self) -> dict:
@@ -237,33 +254,43 @@ class AgentRun:
 
     def redirect(self, text: str, role: str | None = None) -> dict:
         with self._lock:
-            if self.active():
-                self._run.state.redirect = {"text": text.strip(), "role": role if role in AGENT_ROLES else None}
+            if not self.active():
+                return {"error": "NO_RUN", "message": "no agent is working on this node; Start one, with this line as its first redirect"}
+            self._run.state.redirect = {"text": text.strip(), "role": role if role in AGENT_ROLES else None}
         return self.view()
 
     def release(self, reason: str = "stopped and released by the researcher") -> dict:
         with self._lock:
             run = self._run
-            was, name, job = run.state.status, run.state.name, run.job
+            was, name, job, role = run.state.status, run.state.name, run.job, run.state.role or "prover"
             run.stop = True
             run.pause = False
             run.state.status = "released"
             run.state.reason = reason
+            run.state.paused_at = None
             gives_back = was not in ("idle", "released", "starting")  # a Start still assigning gives its assignment back itself
             if gives_back:
                 self._settling += 1
             self._wake.notify_all()
         if job is not None and not job.done:
             self.agent.stop(job.id)
-        if gives_back:
-            self._give_back(name)
-        return self.view()
+        if was in ("running", "pausing", "paused"):  # the run's last word: an ended run already left its own
+            self._close_note(role, name, "released", reason)
+        failed = self._give_back(run, name, reason) if gives_back else None
+        return {**self.view(), **(failed or {})}
 
-    def _give_back(self, name: str) -> None:
+    def _give_back(self, run: _Start, name: str, reason: str) -> dict | None:
         """Release the node for a run that is over. `_settling` was raised under the lock together with the decision,
-        so a Start arriving meanwhile waits in `start()` instead of claiming the node and losing that claim to this."""
+        so a Start arriving meanwhile waits in `start()` instead of claiming the node and losing that claim to this.
+        A release that fails is not a release: the run says so (`release-failed`), and the error is the answer."""
         try:
-            self.hooks.release(name)
+            self.hooks.release(name, reason)
+            return None
+        except Exception as exc:  # noqa: BLE001 — reported, not swallowed: the node is still assigned
+            message = f"the node is still assigned to {name}: giving it back failed ({type(exc).__name__}: {exc})"
+            with self._lock:
+                run.state.status, run.state.reason = "release-failed", message
+            return {"error": "RELEASE_FAILED", "message": message}
         finally:
             with self._lock:
                 self._settling -= 1
@@ -279,10 +306,14 @@ class AgentRun:
                         return
                     if run.pause:
                         run.state.status = "paused"
+                        run.state.paused_at = time.time()  # the budget's clock stops while the run waits
                         while run.pause and not run.stop:
                             self._wake.wait(1.0)
                         if run.stop:
                             return
+                        if run.state.deadline is not None:  # resumed: what was left of the budget is left still
+                            run.state.deadline += time.time() - run.state.paused_at
+                        run.state.paused_at = None
                     state = run.state
                     if state.turns >= state.turns_max or (state.deadline and time.time() >= state.deadline):
                         ending = ("budget", f"the budget of this Start is spent ({state.turns} turn(s))")
@@ -293,23 +324,24 @@ class AgentRun:
                         redirect = None
                         if state.redirect and state.redirect.get("role") in (None, role):
                             redirect, state.redirect = state.redirect["text"], None
-                        run.turn_role, run.turn_redirect = role, redirect
                         prompt = self._prompt(run, role, redirect)
-                        provider = state.provider
+                        provider, name = state.provider, state.name
                 if ending:
                     self._end(run, *ending)
                     return
                 before = len(self.hooks.work_log())
-                started = self._start_turn(run, prompt, provider)
-                if started is None:
-                    return
-                if "error" in started:
-                    self._end(run, "stuck", f"the turn could not start: {started['error']}")
+                turn = {"turn": uuid.uuid4().hex[:16], "role": role, "by": name, "provider": provider}
+                self._note_turn({**turn, "phase": "started"})
+                started = self._start_turn(run, prompt, provider, {"role": role, "name": name, "redirect": redirect})
+                if started is None or "error" in started:
+                    self._note_turn({**turn, "phase": "ended", "job": None})  # no turn ran
+                    if started is not None:
+                        self._end(run, "stuck", f"the turn could not start: {started['error']}")
                     return
                 job = self.agent.jobs[started["job"]]
                 with self._lock:
-                    run.turns.append({"job": job.id, "role": role, "prompt": prompt, "at": time.time()})
                     deadline = run.state.deadline
+                    run.state.job, run.state.turn = job.id, turn["turn"]
                 over_budget = False
                 with job.cond:
                     while not job.done:
@@ -317,30 +349,46 @@ class AgentRun:
                         if not job.done and not over_budget and deadline and time.time() >= deadline:
                             over_budget = True  # the time budget ends a turn that is still running (spec #145, story 25)
                             self.agent.stop(job.id)
+                log = self.hooks.work_log()
+                new = log[before:]
+                steps = [e["step"] for e in log if e.get("kind") == "step"]
+                self._note_turn({**turn, "phase": "ended", "job": job.id, "step": steps[-1] if steps else None,
+                                 "session_id": next((e["session_id"] for e in reversed(job.events) if e.get("session_id")), None),
+                                 "events": [e for e in job.events if e.get("t") != "delta"],  # the text events hold the whole text
+                                 "prompt": prompt, "changed": _changed_files(job)})
                 with self._lock:
                     run.job = None
+                    run.state.job = run.state.turn = None
                     if run.stop:
                         return
                     run.state.turns += 1
-                    single = bool(run.state.roles)
+                    roles = list(run.state.roles)
                 if over_budget:
                     self._end(run, "budget", f"the time budget of this Start is spent ({run.state.turns} turn(s), the last one stopped)")
                     return
                 done = next((e for e in reversed(job.events) if e.get("t") == "done"), {})
-                new = self.hooks.work_log()[before:]
                 run.handoff = next((e for e in reversed(new) if e.get("kind") == "handoff"), None)
                 run.last_report = next((e for e in reversed(new) if e.get("kind") == "step"), None)
                 if any(e.get("kind") == "review-requested" for e in new):
                     self._end(run, "done", "review-requested")
                     return
+                asked = next((e for e in reversed(new) if e.get("kind") == "step" and e.get("status") == "needs-human"), None)
+                if asked is not None:
+                    self._end(run, "needs-human", asked.get("note") or "a decision only the researcher can make")
+                    return
                 stuck = next((e for e in reversed(new) if e.get("kind") == "step" and e.get("status") == "stuck"), None)
                 if stuck is not None:
                     self._end(run, "stuck", stuck.get("note") or "the agent reported it is stuck")
                     return
-                if single:  # a single role was asked for: one turn
+                if len(roles) == 1:  # a single role was asked for: one turn
                     self._end(run, "done", "turn-finished")
                     return
-                changed = bool(done.get("changed")) or any(e.get("kind") in _CHANGES for e in new)
+                if roles and roles[0] != "prover" and role == roles[0] and self._handed_to(run) is None:
+                    # several roles without the Prover: nobody decides to go on once the first hands nothing over
+                    self._end(run, "done", "turn-finished")
+                    return
+                ran = any(e.get("t") == "tool" and e.get("name") == "Bash" and is_a_run(str(e.get("summary") or "")) for e in job.events)
+                changed = bool(done.get("changed")) or ran or any(e.get("kind") in _CHANGES for e in new)
                 idle_turns = 0 if changed else idle_turns + 1
                 if idle_turns >= STUCK_TURNS:
                     self._end(run, "stuck", f"no change in {idle_turns} turn(s)")
@@ -348,16 +396,23 @@ class AgentRun:
         except Exception as exc:  # noqa: BLE001 — the run ends, and says why
             self._end(run, "stuck", f"{type(exc).__name__}: {exc}")
 
-    def _start_turn(self, run: _Start, prompt: str, provider: str) -> dict | None:
+    def _note_turn(self, turn: dict) -> None:
+        try:
+            self.hooks.record_turn(turn)
+        except Exception:  # noqa: BLE001 — the record is the log's; the run goes on without it
+            pass
+
+    def _start_turn(self, run: _Start, prompt: str, provider: str, turn: dict) -> dict | None:
         """Start the role's turn; the researcher's own Ask turn, if one is running, is waited for. None: released meanwhile —
         before the turn, while it was being prepared (the manager asks `unless` once more before the turn exists), or in
-        the moment it began, in which case it is stopped at once."""
+        the moment it began, in which case it is stopped at once. `turn` (role, name, redirect) goes to the manager as it
+        is, so the role reaches this turn's context and no other."""
         deadline = time.monotonic() + BUSY_WAIT
         while True:
             with self._lock:
                 if run.stop:
                     return None
-            started = self.agent.start(prompt, None, "edit", run.model, run.effort, None, provider, unless=lambda: run.stop)
+            started = self.agent.start(prompt, None, "edit", run.model, run.effort, None, provider, unless=lambda: run.stop, turn=turn)
             if "job" in started:
                 with self._lock:
                     run.job = self.agent.jobs[started["job"]]
@@ -366,25 +421,37 @@ class AgentRun:
                     self.agent.stop(started["job"])
                     return None
                 return started
-            if "called off" in started.get("error", ""):
+            if started.get("code") == "TURN_CALLED_OFF":
                 return None
-            busy = "still working" in started["error"]
-            if not busy or time.monotonic() >= deadline:
+            if started.get("code") != "AGENT_BUSY" or time.monotonic() >= deadline:
                 return started
             time.sleep(0.2)
 
+    def _allowed(self, run: _Start) -> tuple[str, ...]:
+        return tuple(run.state.roles) or AGENT_ROLES
+
+    def _handed_to(self, run: _Start) -> str | None:
+        """The role the last turn handed the work to, when that role is part of this Start."""
+        to = run.handoff.get("to") if run.handoff else None
+        return to if to in self._allowed(run) else None
+
     def _next_role(self, run: _Start) -> str:
-        """Who takes the next turn: the role asked for, the role handed off to, else the Prover."""
-        if run.state.roles:
-            return run.state.roles[0]
-        if run.handoff and run.handoff.get("to") in AGENT_ROLES:
-            return run.handoff["to"]
-        return "prover"
+        """Who takes the next turn: the role handed off to, when this Start runs it; else the first role it runs — the Prover
+        for the whole flow."""
+        return self._handed_to(run) or self._allowed(run)[0]
 
     def _prompt(self, run: _Start, role: str, redirect: str | None) -> str:
-        parts = [f"Take your turn as the {role.capitalize()} on this node. Report your plan or your step with `proof node progress`, and end the turn when the step is done or handed over."]
+        label = lambda name: name.capitalize()  # noqa: E731
+        parts = [f"Take your turn as the {label(role)} on this node. Report your plan or your step with `proof node progress`, and end the turn when the step is done or handed over."]
+        allowed = self._allowed(run)
+        if len(allowed) == 1:
+            parts.append(f"This Start runs only the {label(role)}, for this one turn.")
+        elif len(allowed) < len(AGENT_ROLES):
+            parts.append(f"This Start runs only the {' and the '.join(label(r) for r in allowed)}: hand work only to them.")
         if run.handoff and run.handoff.get("to") == role and run.handoff.get("note"):
             parts.append(f"The {run.handoff.get('role', 'previous role')} handed this to you: {run.handoff['note']}")
+        elif run.handoff and run.handoff.get("to") not in allowed:
+            parts.append(f"The {label(str(run.handoff.get('to')))} is not part of this Start; carry on without it.")
         elif run.last_report and run.last_report.get("role") not in (None, role) and run.last_report.get("note"):
             parts.append(f"The {run.last_report['role']} reports: {run.last_report['note']}")
         if redirect:
@@ -392,14 +459,18 @@ class AgentRun:
         return "\n\n".join(parts)
 
     def _end(self, run: _Start, status: str, reason: str) -> None:
-        """Close this Start, and leave its last word in the work log unless the roles already did."""
+        """Close this Start, and leave its last word in the work log: a progress note on every stop."""
         with self._lock:
             if run.stop:
                 return
             run.state.status, run.state.reason = status, reason
+            if status == "needs-human":
+                run.state.decision = reason
             role, name = run.state.role or "prover", run.state.name
-        if status in ("budget", "stuck") and not reason.startswith("the turn could not start"):
-            try:
-                self.hooks.record_stuck(role, name, reason)
-            except Exception:  # noqa: BLE001 — the note is a courtesy; the state is the record
-                pass
+        self._close_note(role, name, status, reason)
+
+    def _close_note(self, role: str, name: str, status: str, reason: str) -> None:
+        try:
+            self.hooks.record_close(role, name, _CLOSING.get(status, "done"), f"run {status}: {reason}")
+        except Exception:  # noqa: BLE001 — the note is a courtesy; the state is the record
+            pass

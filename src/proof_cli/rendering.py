@@ -356,7 +356,10 @@ def render_work_log(node_id: str, log: list[dict]) -> str:
         if kind == "plan":
             body = "plan: " + " → ".join(f"{i}. {step}" for i, step in enumerate(entry.get("plan") or [], start=1))
         elif kind == "step":
-            body = f"step {entry.get('step')} {entry.get('status')}" + (f" — {entry['note']}" if entry.get("note") else "")
+            status = "needs a human decision" if entry.get("status") == "needs-human" else entry.get("status")
+            body = f"step {entry.get('step')} {status}" + (f" — {entry['note']}" if entry.get("note") else "")
+        elif kind == "turn":
+            body = f"turn {entry.get('turn')} (job {entry.get('job')}" + (f", session {entry['session_id']}" if entry.get("session_id") else "") + ")"
         elif kind == "handoff":
             body = f"handed off to {entry.get('to')}" + (f" — {entry['note']}" if entry.get("note") else "")
         elif kind == "split":

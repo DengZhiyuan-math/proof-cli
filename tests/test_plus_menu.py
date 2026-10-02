@@ -82,6 +82,14 @@ def test_a_snapshot_awaiting_review_adds_a_read_only_check_and_the_researchers_d
     assert _menu(run=IDLE, review={"version": 2}, press="Review snapshot v2…")["calls"] == [["openReview"]]
 
 
+def test_a_run_waiting_on_the_researcher_or_on_its_release_says_so():
+    """PR #148's statuses: needs-human names its decision; release-failed offers giving the node back again."""
+    needs = _menu(run={"status": "needs-human", "active": False, "decision": "pick the norm"})
+    assert "Needs you: pick the norm" in _heads(needs) and _items(needs)[0] == "Start agent"
+    failed = _menu(run={"status": "release-failed", "active": False}, press="Stop and release")
+    assert failed["calls"] == [["release"]]
+
+
 def test_a_page_with_no_run_says_so():
     shown = _menu(run=None)
     assert _heads(shown) == ["The agent", "no run on this page"] and _items(shown) == []

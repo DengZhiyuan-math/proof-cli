@@ -35,8 +35,12 @@ function plusMenu(open) {
   const active = !!(state && state.active);  // the run's own view says whether it is under way
   const rows = [node("div", "menu-head", "The agent")];
   if (!run) rows.push(node("div", "menu-head", "no run on this page"));
-  else if (!active) rows.push(item("Start agent", () => run.start(), "The agent works the node on its own until it requests review or needs you"));
-  else {
+  else if (!active) {
+    if (state && state.status === "needs-human" && state.decision) rows.push(node("div", "menu-head", `Needs you: ${state.decision}`));
+    rows.push(item("Start agent", () => run.start(), "The agent works the node on its own until it requests review or needs you"));
+    // the run ended but could not give the node back (PR #148): try again
+    if (state && state.status === "release-failed") rows.push(item("Stop and release", () => run.release(), "Give the node back: the last try failed"));
+  } else {
     rows.push(item(state.status === "paused" ? "Resume" : "Pause", () => (state.status === "paused" ? run.resume() : run.pause()), "The turn finishes; the agent keeps the node"));
     rows.push(item("Redirect…", () => { showCentre("run"); run.focusRedirect(); }, "One line, handed to its next turn: type it in the run card"));
     rows.push(item("Review what it has", () => run.reviewNow(), "Freeze a snapshot of the folder as it stands and review it"));

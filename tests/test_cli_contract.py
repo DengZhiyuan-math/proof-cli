@@ -188,10 +188,17 @@ def test_human_readable_output_prints_once(tmp_path: Path, args, marker):
 
 
 def _raised_codes() -> dict[str, str]:
-    """Every literal error code the source passes to ProofMapError, RequestError or error_envelope."""
+    """Every literal error code the source passes to ProofMapError, RequestError or error_envelope, or answers as
+    `{"error": CODE}` / `{"code": CODE}` (the studio's own answers, the agent run's refusals — PR #148)."""
     found: dict[str, str] = {}
     for path in SRC.rglob("*.py"):
         for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.Dict):
+                for key, value in zip(node.keys, node.values):
+                    if (isinstance(key, ast.Constant) and key.value in ("error", "code") and isinstance(value, ast.Constant)
+                            and isinstance(value.value, str) and re.fullmatch(r"[A-Z][A-Z0-9_]+", value.value)):
+                        found[value.value] = f"{path.name}:{node.lineno}"
+                continue
             if not isinstance(node, ast.Call):
                 continue
             name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
@@ -207,6 +214,14 @@ def _raised_codes() -> dict[str, str]:
 def test_every_error_code_the_code_raises_is_registered():
     unregistered = {code: where for code, where in _raised_codes().items() if code not in errors.ERROR_CODES}
     assert not unregistered, unregistered
+
+
+def test_the_agent_runs_refusals_are_registered_codes():
+    """PR #148 seventh review: the run's answers are codes an agent or the page may branch on (ADR-0006)."""
+    raised = _raised_codes()
+    for code in ("RUN_ACTIVE", "RUN_SETTLING", "NO_RUN", "REDIRECT_EMPTY", "RUN_REFUSED", "RELEASE_FAILED", "AGENT_BUSY", "TURN_CALLED_OFF"):
+        assert code in errors.ERROR_CODES, code
+        assert code in raised or code == "RUN_REFUSED", code  # RUN_REFUSED is the fallback the map's route passes on
 
 
 def test_the_adr_points_at_the_registry():

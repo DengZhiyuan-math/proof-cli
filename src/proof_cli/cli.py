@@ -916,7 +916,7 @@ def node_progress(
     node_id: str,
     plan: list[str] = typer.Option(None, "--plan", help="A step of the plan; repeat for each step, in order"),
     step: int = typer.Option(None, "--step", help="The step being reported, counting from 1"),
-    status: str = typer.Option("", "--status", help="With --step: started, done or stuck"),
+    status: str = typer.Option("", "--status", help="With --step: started, done, stuck, or needs-human (a decision only the researcher can make, named in --note)"),
     note: str = typer.Option("", "--note", help="A line about the step: what it found, why it is stuck, what the next role should do"),
     handoff: str = typer.Option("", "--handoff", help="Hand the work to this role (prover, typesetter or numerics) and end the turn"),
     role: str = typer.Option("", "--role", help="prover, typesetter or numerics (default: PROOF_AGENT_ROLE, set in the agent's runtime)"),
