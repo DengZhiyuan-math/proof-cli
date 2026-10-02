@@ -137,7 +137,7 @@ Writes and runs the computations — the candidate proof of a `computation` node
 _Avoid_: verifier (an Evidence check's checker), simulator
 
 **Work log**:
-A node's record of what its Proof agent did, in time order: the plan and each step the roles reported with `proof node progress`, merged with what they did through other `proof` commands — a split, a review request, an Evidence check, a fog item, a dependency edit. Project state (events), never a file in the node folder. What the studio's centre shows.
+A node's record of what its Proof agent did, in time order: the plan and each step the roles reported with `proof node progress`, merged with what they did through other `proof` commands — a split, a review request, an Evidence check, a fog item, a dependency edit — each with the role of the turn it happened in — and the turns themselves, each with its job, its backend session and the step it belongs to. Project state (events), never a file in the node folder; a turn's raw conversation is kept beside it under `.proof/agent-turns/`. What the studio's centre shows.
 _Avoid_: transcript (the raw conversation, folded under a step), chat history
 
 **No longer callable** (a Reference review outcome):
