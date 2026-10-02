@@ -149,6 +149,7 @@ ERROR_CODES: dict[str, str] = {
     "RUN_REFUSED": "the run's Start was refused for a reason with no code of its own; the message says why",
     "RELEASE_FAILED": "the run ended but the node could not be given back; it is still assigned, and the message says why",
     "AGENT_BUSY": "the studio's agent is still working on the previous turn",
+    "KEY_IDEAS_AGENT_TURN": "an agent's edit turn is running on this node; key-ideas.md is saved from the page once it ends, so the save stays the researcher's (ADR-0013)",
     "NO_SUCH_TURN": "no turn of a run on this node was recorded under that id",
     "TURN_CALLED_OFF": "the run was stopped while its turn was being prepared, so no turn started",
     "NOT_A_COMPUTATION": "Run is for a node whose Medium is computation; a LaTeX node compiles",

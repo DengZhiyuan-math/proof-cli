@@ -464,7 +464,7 @@ def record_agent_turn(
 
 def agent_turn_transcript(store: ProjectStore, node_id: str, turn: str) -> dict | None:
     """A turn's record with its conversation (`events`), as record_agent_turn kept it; None when there is none."""
-    if not _TURN_ID.fullmatch(turn or "") or not re.fullmatch(r"[A-Za-z0-9._-]+", node_id or ""):
+    if not _TURN_ID.fullmatch(turn or "") or not _SAFE_NODE_ID.fullmatch(node_id or ""):  # as node folders are named
         return None
     try:
         return json.loads((store.root / TURNS_DIR / node_id / f"{turn}.json").read_text(encoding="utf-8"))

@@ -1256,3 +1256,51 @@ def test_a_summary_no_agent_turn_touched_reads_as_the_authors(studio):
     assert _draft_events(store) == []
     record = request_review(store, "N", requested_by="author", rationale="scoped")
     assert record.key_ideas_drafted_by == key_ideas.AUTHOR == "author"
+
+
+def test_a_files_save_of_the_summary_waits_while_an_agent_edit_turn_runs(studio):
+    """Final review: a save of key-ideas.md from the Files view during an agent's edit turn would land in that turn's
+    changes and be recorded as the agent's draft (ADR-0013). It is refused with a registered code until the turn ends;
+    other files save as before."""
+    from proof_cli.errors import ERROR_CODES
+
+    store, hub, log, queue = studio
+    _queue(queue, [["sleep", "2"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["typesetter"]})
+    deadline = time.monotonic() + 10
+    while not (hub.studio("N").agent.active and not hub.studio("N").agent.active.done) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    status, refused = _post(hub, "/studio/N/api/file", {"path": "key-ideas.md", "content": "mine\n"})
+    assert status == 409 and refused["error"] == "KEY_IDEAS_AGENT_TURN" and "KEY_IDEAS_AGENT_TURN" in ERROR_CODES
+    assert not (store.root / "proofs" / "N" / "key-ideas.md").exists()
+    assert _post(hub, "/studio/N/api/file", {"path": "proof.tex", "content": "\\documentclass{amsart}\n"})[0] == 200
+    _wait(hub)
+    assert _post(hub, "/studio/N/api/file", {"path": "key-ideas.md", "content": "mine\n"})[0] == 200  # the turn is over
+    assert _draft_events(store) == []  # and the researcher's own save is never the agent's draft
+
+
+def test_the_turns_finish_hook_is_gone_with_its_last_caller():
+    """Final review: `AgentManager.start(finish=…)` and `Job.finish` served only the old drafting route."""
+    import inspect
+
+    from proof_cli.studio.agent import AgentManager
+    from proof_cli.studio.backends import Job
+
+    assert "finish" not in inspect.signature(AgentManager.start).parameters
+    assert not hasattr(Job(1), "finish")
+
+
+def test_a_turn_transcript_is_read_only_for_a_safe_node_id(studio):
+    """Final review: the node id is checked as node folders are (`_SAFE_NODE_ID`), so `..` never reaches the path."""
+    from proof_cli.proof_map import agent_turn_transcript
+
+    store, hub, log, queue = studio
+    turns = store.root / ".proof" / "agent-turns"
+    (turns / "x").mkdir(parents=True)
+    (turns / "x" / "t1.json").write_text('{"events": []}')
+    assert agent_turn_transcript(store, "x", "t1") == {"events": []}
+    (store.root / ".proof" / "t1.json").write_text('{"events": ["outside"]}')  # what `..` would reach
+    (turns / ".hidden").mkdir()
+    (turns / ".hidden" / "t1.json").write_text('{"events": ["hidden"]}')
+    for bad in ("..", ".hidden", "a/b", ""):
+        assert agent_turn_transcript(store, bad, "t1") is None, bad
