@@ -235,6 +235,26 @@ def test_recording_evidence_on_the_page_refuses_a_hash_that_is_not_the_snapshots
     assert list_evidence_checks(store, v2["id"]) == []
 
 
+def test_recording_evidence_on_the_page_on_an_unreadable_snapshot_is_refused(page):
+    store, client = page
+    v1, _ = _two_snapshots(store, client)
+    shutil.rmtree(store.root / "proofs" / "c1" / "snapshots" / "v1")
+    for extra in ({}, {"snapshot_sha256": v1["sha256"]}):
+        status, body = client.post("/api/node/c1/evidence", {"candidate_proof_id": v1["id"], "outcome": "passed", **extra})
+        assert status >= 400 and body["error"]["code"] == "SNAPSHOT_UNREADABLE" and "v1" in body["error"]["message"]
+    assert list_evidence_checks(store, v1["id"]) == []
+
+
+def test_the_node_page_reads_a_check_on_a_snapshot_lost_since_as_unverifiable(page):
+    store, client = page
+    v1, _ = _two_snapshots(store, client)
+    check = _ok(client.post("/api/node/c1/evidence", {"candidate_proof_id": v1["id"], "outcome": "passed", "run_by": "lean"}))
+    shutil.rmtree(store.root / "proofs" / "c1" / "snapshots" / "v1")
+    (shown,) = [c for c in _ok(client.get("/api/node/c1"))["evidence_checks"] if c["id"] == check["id"]]
+    assert shown["binding"]["state"] == "unverifiable" and shown["binding"]["sha256"] == v1["sha256"]
+    assert shown["snapshot"]["unreadable"] is True
+
+
 # -- no more launching prism-local --------------------------------------------------
 
 
