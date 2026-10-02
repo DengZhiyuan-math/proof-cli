@@ -190,13 +190,16 @@
     return box;
   }
 
+  // whether a node's candidate proof is a program (spec #145): its medium is computation
+  const isComputation = (node) => node.medium === "computation";
+
   async function render() {
     let view;
     try { view = await call(base); } catch (error) { panel.replaceChildren(h("p", `${error.code || "error"}: ${error.message}`)); return; }
     const node = view.node;
     document.title = `${node.id} · proof studio`;
     const name = document.getElementById("projname");
-    if (name) name.textContent = `${node.kind} · ${node.id}`;
+    if (name) name.textContent = `${node.kind}${isComputation(node) ? " · computation" : ""} · ${node.id}`;  // its medium when it is a program (spec #145)
     const deps = h("ul", null, { class: "node-deps" });
     for (const d of view.dependencies) {
       const li = h("li");
