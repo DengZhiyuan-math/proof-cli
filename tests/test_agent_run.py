@@ -1383,9 +1383,7 @@ def test_the_typesetter_on_codex_is_configured_with_the_compile_tool_too(studio,
     monkeypatch.setattr(codex, "preflight", lambda root: None)
     monkeypatch.setattr(agent, "_run", lambda job, backend: seen.append(backend.command(job)))  # never start Codex
     _post(hub, "/studio/N/api/agent/start", {"provider": "codex", "roles": ["typesetter"]})
-    deadline = time.monotonic() + 5
-    while time.monotonic() < deadline and not seen:
-        time.sleep(0.02)
+    _until(lambda: seen, "the Typesetter's Codex turn to be prepared")
     _post(hub, "/studio/N/api/agent/release")
     ((cmd, prompt),) = seen
     assert f'mcp_servers.studio.args=["{__import__("proof_cli.studio.mcp_compile", fromlist=["__file__"]).__file__}", "--url", "{project_origin(store)}/studio/N/"]' in cmd
@@ -1408,12 +1406,10 @@ def test_only_a_typesetting_turn_on_a_latex_node_gets_the_compile_tool(studio):
 def test_a_build_the_agent_ran_shows_in_its_turn(studio):
     """The compile tool posts the build as the agent's: the turn's events carry it, so the page shows it as yours."""
     store, hub, log, queue = studio
-    _queue(queue, [["sleep", "3"]])
+    _queue(queue, [["sleep", "30"]])  # the turn runs until it is released: the build lands in it however slow the start
     _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["typesetter"]})
-    deadline = time.monotonic() + 10
     agent = hub.studio("N").agent
-    while time.monotonic() < deadline and not (agent.active and not agent.active.done):
-        time.sleep(0.02)
+    _until(lambda: agent.active and not agent.active.done, "the Typesetter's turn to be running")
     status, built = _post(hub, "/studio/N/api/build", {"mode": "draft", "by": "agent"})
     assert status == 200
     answer = hub.request("GET", "/studio/N/api/agent/events", f"job={agent.active.id}&after=0", None, cross_site=False)
