@@ -188,8 +188,11 @@ def test_human_readable_output_prints_once(tmp_path: Path, args, marker):
 
 
 _CODE = re.compile(r"[A-Z][A-Z0-9_]+")
-# the calls whose first code-shaped argument is a refusal's code
-_REFUSALS = ("ProofMapError", "RequestError", "error_envelope", "_Refused")
+# the calls whose first code-shaped argument is a refusal's code: the service's and the page's errors, the studio's
+# refusals and its `_err(status, CODE, message)`, the hub's `_error(status, CODE, message)` and NoStudio
+_REFUSALS = ("ProofMapError", "RequestError", "error_envelope", "_Refused", "_err", "_error", "NoStudio")
+# the calls whose first code-shaped argument is a notice's code: errors.notice(CODE, message, …)
+_NOTICES = ("notice",)
 
 
 def _code_of(node) -> str | None:
@@ -218,10 +221,11 @@ def _scan_codes(source: str, where: str) -> tuple[dict[str, str], dict[str, str]
                 if code:
                     (refusals if refusal else notices)[code] = f"{where}:{node.lineno}"
             continue
-        if isinstance(node, ast.Call) and (getattr(node.func, "id", None) or getattr(node.func, "attr", None)) in _REFUSALS:
+        name = (getattr(node.func, "id", None) or getattr(node.func, "attr", None)) if isinstance(node, ast.Call) else None
+        if name in _REFUSALS or name in _NOTICES:
             code = next((code for code in map(_code_of, node.args) if code), None)
             if code:
-                refusals[code] = f"{where}:{node.lineno}"
+                (refusals if name in _REFUSALS else notices)[code] = f"{where}:{node.lineno}"
     return refusals, notices
 
 
@@ -261,11 +265,18 @@ answer = {"error": "a message", "code": "PLANTED_C"}
 old = {"error": "PLANTED_D", "message": "x"}
 envelope = {"ok": False, "error": {"code": "PLANTED_E", "message": "x"}}
 notice = [{"code": "PLANTED_F", "message": "x"}]
+answer = _err(404, "PLANTED_G", "x")
+hub = _error(HTTPStatus.NOT_FOUND, "PLANTED_H", "x")
+told = errors.notice("PLANTED_I", "x", output_bytes=1)
 """, "planted")
-    assert set(refusals) == {"PLANTED_A", "PLANTED_B", "PLANTED_C", "PLANTED_D", "PLANTED_E"} and set(notices) == {"PLANTED_F"}
+    assert set(refusals) == {"PLANTED_A", "PLANTED_B", "PLANTED_C", "PLANTED_D", "PLANTED_E", "PLANTED_G", "PLANTED_H"}
+    assert set(notices) == {"PLANTED_F", "PLANTED_I"}
     # the studio's own refusals are seen, and a notice code used as a refusal is not let through
     studio = _scan_codes((SRC / "studio" / "server.py").read_text(), "server.py")[0]
-    assert {"NOT_A_COMPUTATION", "INVALID_LINE", "OPEN_FAILED", "NOT_A_NODE_FILE", "STUDIO_CLOSED"} <= set(studio)
+    assert {"NOT_A_COMPUTATION", "INVALID_LINE", "OPEN_FAILED", "NOT_A_NODE_FILE", "STUDIO_CLOSED", "NO_SUCH_JOB"} <= set(studio)
+    # the agent manager's answers carry registered codes too (PR #148)
+    agent = _scan_codes((SRC / "studio" / "agent.py").read_text(), "agent.py")[0]
+    assert {"STUDIO_CLOSED", "AGENT_UNKNOWN_PROVIDER", "AGENT_UNAVAILABLE", "AGENT_INVALID_OPTION", "AGENT_BUSY", "TURN_CALLED_OFF"} <= set(agent)
     misused, _ = _scan_codes('{"error": "big", "code": "SNAPSHOT_LARGE_OUTPUT"}', "planted")
     assert "SNAPSHOT_LARGE_OUTPUT" in misused and "SNAPSHOT_LARGE_OUTPUT" not in errors.ERROR_CODES
 

@@ -26,6 +26,13 @@ MODEL_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/\[\]-]{0,119}")
 MAX_TURNS = 50          # turns kept in memory for their events and Undo
 
 
+def _coded(answer: dict, code: str) -> dict:
+    """A backend's own answer in the studio's error shape: an `error` it gives without a code gets `code`."""
+    if isinstance(answer, dict) and "error" in answer and "code" not in answer:
+        return {**answer, "code": code}
+    return answer
+
+
 class AgentManager:
     def __init__(self, root_fn: Callable[[], Path], files_fn: Callable[[], list[str]],
                  writable_fn: Callable[[str], object] | None = None,
@@ -105,21 +112,24 @@ class AgentManager:
         researcher's own turn, which no run's role reaches. `begin` is told the turn's job once the
         turn exists, right before its backend starts (a run marks its turn as started there)."""
         if self.closed:
-            return {"error": "The studio is closed."}
+            return {"error": "The studio is closed.", "code": "STUDIO_CLOSED"}
         backend = self.backend(provider)
         if backend is None:
-            return {"error": f"Unknown provider: {provider}"}
+            return {"error": f"Unknown provider: {provider}", "code": "AGENT_UNKNOWN_PROVIDER"}
         why = backend.unavailable()
         if why:
-            return {"error": why}
+            return {"error": why, "code": "AGENT_UNAVAILABLE"}
         if model and not MODEL_RE.fullmatch(model):
-            return {"error": f"Not a model name: {model}"}
-        bad = backend.check(model, effort) or backend.preflight(self.root_fn())
+            return {"error": f"Not a model name: {model}", "code": "AGENT_INVALID_OPTION"}
+        bad = backend.check(model, effort)
         if bad:
-            return {"error": bad}
+            return {"error": bad, "code": "AGENT_INVALID_OPTION"}
+        bad = backend.preflight(self.root_fn())
+        if bad:
+            return {"error": bad, "code": "AGENT_UNAVAILABLE"}
         with self.lock:
             if self.closed:
-                return {"error": "The studio is closed."}
+                return {"error": "The studio is closed.", "code": "STUDIO_CLOSED"}
             if unless is not None and unless():
                 return {"error": "The turn was called off before it started.", "code": "TURN_CALLED_OFF"}
             if self.active and not self.active.done:
@@ -217,18 +227,18 @@ class AgentManager:
     def commands(self, provider: str | None, refresh: bool = False) -> dict:
         backend = self.backend(provider)
         if backend is None:
-            return {"error": f"Unknown provider: {provider}"}
-        return backend.commands(self.root_fn(), refresh)
+            return {"error": f"Unknown provider: {provider}", "code": "AGENT_UNKNOWN_PROVIDER"}
+        return _coded(backend.commands(self.root_fn(), refresh), "AGENT_UNAVAILABLE")
 
     def probe_rate(self, provider: str | None = None) -> dict:
         backend = self.backend(provider)
         if backend is None or not backend.usage_limits:
-            return {"error": "This provider reports no usage limits."}
+            return {"error": "This provider reports no usage limits.", "code": "AGENT_NO_USAGE_LIMITS"}
         # The probe is a (tiny) model call, so it passes the same check as a turn.
         bad = backend.preflight(self.root_fn())
         if bad:
-            return {"error": bad, "rate": getattr(backend, "rate", None)}
-        return backend.probe_rate()
+            return {"error": bad, "code": "AGENT_UNAVAILABLE", "rate": getattr(backend, "rate", None)}
+        return _coded(backend.probe_rate(), "AGENT_UNAVAILABLE")
 
     def stop(self, jid: int) -> dict:
         job = self.jobs.get(jid)
@@ -278,7 +288,7 @@ class AgentManager:
         """Restore files changed in `turn`, only where they still match the turn's result."""
         job = self.turns.get(turn)
         if not job:
-            return {"error": "unknown turn"}
+            return {"error": "unknown turn", "code": "NO_SUCH_JOB"}
         rels = [rel for rel in sorted(set(job.before) | set(job.after))
                 if job.before.get(rel) != job.after.get(rel)]
         restored = self._restore(job, rels)

@@ -89,6 +89,7 @@ from .storage import (
     upsert_dependency_pin,
 )
 from . import key_ideas
+from .errors import notice
 from .trust_rules import (
     SiblingCitation,
     TrustConditionKind,
@@ -108,6 +109,7 @@ from .vault import (
     preamble_path,
     build_is_current,
     build_pdf_path,
+    NodeFolderLinks,
     frozen_output_bytes,
     large_output_threshold,
     node_folder,
@@ -1163,19 +1165,13 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
     # read once: what is hashed is exactly what is frozen, even if a file changes meanwhile.
     # The key-ideas summary is one of these inputs (ADR-0013): frozen, listed and hashed with
     # the proof, so a change to it alone is a new version, by the same unchanged-check below
-    # A computation's inputs are frozen whole — its hidden environment files, its scripts'
-    # executable bits — and a file that can't be read is refused before anything is written
+    # A computation's inputs are frozen whole — its allowlisted environment files, its scripts'
+    # executable bits; never a secret — and a file that can't be read, or a symbolic link, is
+    # refused before anything is written
     try:
         snapshot = read_working_snapshot(store.root, node_id, node.medium)
-    except OSError as exc:
-        where = Path(exc.filename) if exc.filename else node_folder(store.root, node_id)
-        path = where.relative_to(store.root).as_posix() if where.is_relative_to(store.root) else str(where)
-        raise ProofMapError(
-            "WORKING_FILE_UNREADABLE",
-            f"{path} can't be read ({exc.strerror or exc}): a Review snapshot freezes every input, so nothing was written; "
-            "make it readable, or move it out of the node folder (scratch/ and build/ are never frozen)",
-            details={"path": path},
-        ) from exc
+    except (OSError, NodeFolderLinks) as exc:
+        raise node_folder_error(store.root, node_id, exc, "a Review snapshot") from exc
     contents = snapshot.files
     _require_key_ideas(store, node_id, contents.get(key_ideas.KEY_IDEAS_FILE))
     sha256 = snapshot.digest()
@@ -1253,31 +1249,70 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
                 "resnapshot_after_loss": resnapshot_of,
                 # the summary's provenance: the author's, or the agent's draft confirmed or edited (ADR-0013)
                 "key_ideas_drafted_by": drafted_by,
+                # what the snapshot left out, by path only (ADR-0015): reported, never read
+                "skipped_hidden": list(snapshot.skipped_hidden),
             },
             conn=conn,
         )
     return record
 
 
+def node_folder_error(root: Path, node_id: str, exc: OSError | NodeFolderLinks, reader: str) -> ProofMapError:
+    """The registered refusal for a node folder `reader` (a snapshot, an export) can't read whole:
+    WORKING_FILE_UNREADABLE naming the path, or NODE_FOLDER_SYMLINK listing each link, dangling or not."""
+
+    def shown(where: Path) -> str:
+        return where.relative_to(root).as_posix() if where.is_relative_to(root) else str(where)
+
+    if isinstance(exc, NodeFolderLinks):
+        links = [{"path": shown(path), "dangling": dangling} for path, dangling in exc.links]
+        listed = ", ".join(link["path"] + (" (dangling)" if link["dangling"] else "") for link in links)
+        return ProofMapError(
+            "NODE_FOLDER_SYMLINK",
+            f"{listed}: {reader} follows no symbolic link, so nothing was written; replace each with the file "
+            "it points to, or move it out of the node folder (scratch/ and build/ are never read)",
+            details={"links": links},
+        )
+    path = shown(Path(exc.filename) if exc.filename else node_folder(root, node_id))
+    return ProofMapError(
+        "WORKING_FILE_UNREADABLE",
+        f"{path} can't be read ({exc.strerror or exc}): {reader} reads every file it would carry, so nothing was written; "
+        "make it readable, or move it out of the node folder (scratch/ and build/ are never read)",
+        details={"path": path},
+    )
+
+
 def review_notices(store: ProjectStore, record: CandidateProofRecord) -> list[dict]:
     """What requesting review has to tell the researcher about the snapshot it froze, never a
     refusal: each a registered notice code (`errors.NOTICE_CODES`) with its message and data.
-    SNAPSHOT_LARGE_OUTPUT when a computation froze more of `out/` than `[snapshot]
-    large_output_mb` (default 50 MB) — measured on the snapshot as stored (spec #145)."""
+    SNAPSHOT_SKIPPED_HIDDEN when it left hidden files or folders out (by path, as the request
+    recorded them; never their contents). SNAPSHOT_LARGE_OUTPUT when a computation froze more of
+    `out/` than `[snapshot] large_output_mb` (default 50 MB), measured on the snapshot as stored
+    (spec #145)."""
+    notices: list[dict] = []
+    requested = latest_event(store, "proof_map_review_requested", record.node_id)
+    skipped = (requested.payload.get("skipped_hidden") or []) if requested and requested.payload.get("candidate_proof_id") == record.id else []
+    if skipped:
+        notices.append(notice(
+            "SNAPSHOT_SKIPPED_HIDDEN",
+            f"snapshot v{record.version} left out {len(skipped)} hidden path(s): {', '.join(skipped)}. Secrets (.env, .env.*, .envrc, "
+            ".netrc), hidden folders and dotfiles other than the allowlisted environment files are never frozen",
+            paths=list(skipped),
+        ))
     node = get_proof_map_node(store, record.node_id)
     if node is None or not is_computation(node) or not record.file_path.endswith("/" + SNAPSHOT_MANIFEST):
-        return []
+        return notices
     size = frozen_output_bytes((store.root / record.file_path).parent)
     threshold = large_output_threshold(store.root)
-    if size <= threshold:
-        return []
-    return [{
-        "code": "SNAPSHOT_LARGE_OUTPUT",
-        "message": f"snapshot v{record.version} froze {size / (1024 * 1024):.1f} MB of out/ (above {threshold / (1024 * 1024):g} MB): "
-        "every review snapshot keeps a copy; keep in out/ what the review needs and .gitignore the rest",
-        "output_bytes": size,
-        "threshold_bytes": threshold,
-    }]
+    if size > threshold:
+        notices.append(notice(
+            "SNAPSHOT_LARGE_OUTPUT",
+            f"snapshot v{record.version} froze {size / (1024 * 1024):.1f} MB of out/ (above {threshold / (1024 * 1024):g} MB): "
+            "every review snapshot keeps a copy; keep in out/ what the review needs and .gitignore the rest",
+            output_bytes=size,
+            threshold_bytes=threshold,
+        ))
+    return notices
 
 
 KEY_IDEAS_DRAFTED = "proof_map_key_ideas_drafted"
@@ -1349,12 +1384,26 @@ def record_evidence_check(
     Purely advisory and ungated — an automated checker records its own
     outcome directly, no Human Review needed to log a result. Nothing here
     can close, block, or otherwise touch acceptance_state; the sole write
-    is this check's own row (ADR-0004 point 5). The check is bound to the
-    snapshot's SHA-256, as a decision is: the one the caller checked against,
-    else the snapshot's as it is on disk now.
+    is this check's own row (ADR-0004 point 5).
+
+    The check is bound to a snapshot SHA-256, as a decision is. Given
+    `snapshot_sha256` (the hash of the snapshot the checker ran on), it must be
+    the snapshot's hash now, or the check is refused (EVIDENCE_SNAPSHOT_MISMATCH,
+    naming the node's current snapshot). Omitted, the check is bound to the
+    snapshot's hash at the moment of recording — which says what it was recorded
+    against, not what the checker ran on.
     """
-    require_candidate_proof(store, candidate_proof_id)
-    sha256 = snapshot_sha256 or candidate_proof_sha256(store, candidate_proof_id)
+    proof = require_candidate_proof(store, candidate_proof_id)
+    sha256 = candidate_proof_sha256(store, candidate_proof_id)
+    if snapshot_sha256 is not None and snapshot_sha256 != sha256:
+        current = get_current_candidate_proof(store, proof.node_id)
+        now = f"hashes to {sha256[:12]}…" if sha256 else "can't be read"
+        named = f"v{current.version} ({(candidate_proof_sha256(store, current.id) or 'unreadable')[:12]}…)" if current else "none"
+        raise ProofMapError(
+            "EVIDENCE_SNAPSHOT_MISMATCH",
+            f"snapshot v{proof.version} of {proof.node_id} {now}, not {snapshot_sha256[:12]}…; "
+            f"the node's current snapshot is {named}",
+        )
 
     try:
         resolved_outcome = EvidenceOutcome(outcome)
@@ -1377,6 +1426,22 @@ def record_evidence_check(
         payload={"evidence_check_id": check.id, "outcome": resolved_outcome.value, "run_by": run_by, "candidate_proof_sha256": sha256},
     )
     return check
+
+
+def evidence_binding(check: EvidenceCheck, snapshot_sha256_now: str | None) -> dict:
+    """How an Evidence check's own bound hash reads against its snapshot as it is now: `matches`; `changed`
+    (the snapshot no longer hashes to what the check was bound to); `unbound`, a check recorded before
+    binding, never read as matching; or `unverifiable`, its snapshot can't be read."""
+    bound = check.candidate_proof_sha256
+    if bound is None:
+        state, label = "unbound", "not bound (recorded before binding)"
+    elif snapshot_sha256_now is None:
+        state, label = "unverifiable", f"bound to {bound[:12]}…; the snapshot can't be read"
+    elif bound == snapshot_sha256_now:
+        state, label = "matches", f"bound to {bound[:12]}…"
+    else:
+        state, label = "changed", "snapshot changed since this check"
+    return {"sha256": bound, "state": state, "label": label}
 
 
 def get_evidence_check(store: ProjectStore, check_id: str) -> EvidenceCheck | None:
