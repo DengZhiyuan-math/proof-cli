@@ -51,7 +51,7 @@ def test_a_running_agent_shows_its_role_step_plan_and_the_four_actions():
     (shown,) = _pane(run=RUNNING, log=LOG)
     assert shown["status"] == "running" and shown["where"] == "Typesetter · step 4/5"
     assert [p["text"] for p in shown["plan"]][:2] == ["read what the project holds", "draft the proof"]
-    assert {str(p["step"]): p["status"] for p in shown["plan"]} == {"1": "done", "2": "", "3": "", "4": "started", "5": ""}
+    assert {str(p["step"]): p["status"] for p in shown["plan"]} == {"1": "done", "2": "", "3": "", "4": "started", "5": "next"}
     assert shown["buttons"] == ["Pause", "Redirect", "Review what it has", "Stop and release"]
 
 
@@ -84,12 +84,12 @@ def test_review_what_it_has_freezes_a_snapshot_and_has_the_node_panel_open_the_r
 
 
 def test_the_log_links_to_what_each_entry_produced_and_folds_each_turns_conversation():
-    turns = [{"job": 7, "role": "prover", "prompt": "Take your turn as the Prover…", "at": 1.0, "done": True, "changed": ["scratch/proof-draft.md"]},
+    turns = [{"job": 7, "role": "prover", "prompt": "Take your turn as the Prover…", "at": 1.0, "done": True, "changed": [{"path": "scratch/proof-draft.md", "line": 12}]},
              {"job": 8, "role": "typesetter", "prompt": "Take your turn as the Typesetter…", "at": 2.0, "done": False, "changed": []}]
     (shown,) = _pane(run=RUNNING, log=LOG, turns=turns)
     assert "/#/fog/fog-3" in shown["links"] and "/#/node/N" in shown["links"]  # the fog item in the map's drawer, the Evidence check on the node's page
     assert [t["summary"] for t in shown["turns"]] == ["turn 1 · Prover", "turn 2 · Typesetter · running"]
-    assert shown["turns"][0]["files"] == ["vscode://file//proj/proofs/N/scratch/proof-draft.md"]
+    assert shown["turns"][0]["files"] == ["vscode://file//proj/proofs/N/scratch/proof-draft.md:12"]
 
 
 def test_the_pane_keeps_reading_so_a_start_from_the_map_shows_up():
@@ -134,3 +134,44 @@ def test_a_running_turns_conversation_is_read_on_until_the_turn_is_done_then_kep
     assert polled["transcripts"]["1"] == "first fragment\nthen a lemma"  # a poll with no other news still reads on
     assert finished["transcripts"]["1"] == conversation["final"] and "running" not in finished["turns"][0]["summary"]
     assert reopened["transcripts"]["1"] == conversation["final"]  # final: kept, not asked for again
+
+
+# -- seventh review ---------------------------------------------------------------------------------
+
+CHANGED = [{"job": 7, "role": "numerics", "prompt": "Take your turn as Numerics…", "at": 1.0, "done": True, "changed": [{"path": "check.py", "line": 40}]}]
+
+
+def test_a_changed_file_opens_in_vs_code_at_its_line():
+    """Story 18: "the agent changed check.py line 40" is one click away."""
+    (shown,) = _pane(run=RUNNING, log=LOG, turns=CHANGED)
+    assert shown["turns"][0]["files"] == ["vscode://file//proj/proofs/N/check.py:40"]
+    assert "line 40" in shown["turns"][0]["titles"][0] and "VS Code" in shown["turns"][0]["titles"][0]
+
+
+def test_with_an_open_command_a_changed_file_is_opened_by_the_server_instead():
+    """Story 19: with `[studio] open_command` set, the link asks the studio's server to run it — no vscode:// URL."""
+    command = {"kind": "command", "command": "subl {file}"}
+    shown, clicked = _pane(run=RUNNING, log=LOG, turns=CHANGED, open=command, clickFile="check.py", answer={"ok": True, "kind": "command", "exit": 0})
+    assert not any(href.startswith("vscode:") for href in shown["turns"][0]["files"])
+    assert "subl {file}" in shown["turns"][0]["titles"][0]
+    assert clicked["posted"] == [{"url": "api/open", "body": {"file": "check.py", "line": 40}}] and clicked["prevented"]
+
+
+def test_an_idle_studio_opens_on_start_whatever_files_tab_was_remembered():
+    """Story 42: no agent at work, the centre shows "Start agent on this node" — the remembered Files tab waits for a run."""
+    (idle,) = _pane(run=IDLE, log=[])
+    assert idle["centred"] == [["run", False]]  # shown, and not remembered as the researcher's choice
+    stopped = {**RUNNING, "status": "stuck", "active": False}
+    assert _pane(run=stopped, log=LOG)[0]["centred"] == [["run", False]]
+    assert _pane(run=RUNNING, log=LOG)[0]["centred"] == []  # an agent at work: the remembered view stands
+    assert _pane(run=IDLE, log=[], hash="#files")[0]["centred"] == []  # a link to #files asks for Files
+
+
+def test_the_plan_says_in_words_which_steps_are_done_the_current_step_and_its_role_and_the_next():
+    """Story 36: the plan's state is in the page's text, not only in its classes."""
+    (shown,) = _pane(run=RUNNING, log=LOG)
+    marks = {str(p["step"]): p["mark"] for p in shown["plan"]}
+    assert marks == {"1": "done", "2": "", "3": "", "4": "current step · Typesetter", "5": "next"}
+    between = [*LOG[:-3], {**LOG[5], "status": "done"}]  # step 4 done, nothing started yet
+    marks = {str(p["step"]): p["mark"] for p in _pane(run=RUNNING, log=between)[0]["plan"]}
+    assert marks == {"1": "done", "2": "", "3": "", "4": "done", "5": "next"}

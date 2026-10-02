@@ -22,7 +22,7 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
   }
 
   const ROLE_WORD = { prover: "Prover", typesetter: "Typesetter", numerics: "Numerics" };
-  const state = { run: null, log: [], turns: [], folder: "", timer: null, redirectBox: null, roleBox: null, shown: "", transcripts: {} };
+  const state = { run: null, log: [], turns: [], folder: "", open: null, read: false, timer: null, redirectBox: null, roleBox: null, shown: "", transcripts: {} };
 
   const note = h("p", "", { class: "run-note", role: "status" });
   function tell(text, bad) { note.textContent = text; note.setAttribute("class", bad ? "run-note bad" : "run-note"); }
@@ -86,11 +86,12 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
     const plan = [...state.log].reverse().find((e) => e.kind === "plan");
     if (plan) {
       const steps = h("ol", null, { class: "run-plan" });
-      const reports = state.log.filter((e) => e.kind === "step");
+      const marks = planMarks(plan, state.log.filter((e) => e.kind === "step"));
       plan.plan.forEach((text, i) => {
-        const n = i + 1;
-        const last = [...reports].reverse().find((e) => e.step === n);
-        steps.append(h("li", text, { class: last ? last.status : "", "data-step": n }));
+        const mark = marks[i];
+        const li = h("li", text, { class: mark.status, "data-step": i + 1 });
+        if (mark.label) li.append(" ", h("span", mark.label, { class: "plan-mark" }));
+        steps.append(li);
       });
       card.append(steps);
     }
@@ -98,8 +99,40 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
     return card;
   }
 
-  // a file the agent changed, opened where files are edited: in VS Code, at its line when one is known
-  const fileLink = (rel) => h("a", rel, { href: `vscode://file/${state.folder}/${rel}`, class: "log-file", title: `Open ${rel} in VS Code` });
+  // The plan's steps in words, not only in a style (spec #145, story 36): each step's last report — done, stuck — and
+  // which is the current step, with the role working it, and which comes next.
+  function planMarks(plan, reports) {
+    const last = plan.plan.map((_, i) => [...reports].reverse().find((e) => e.step === i + 1) || null);
+    const latest = reports[reports.length - 1];
+    const current = latest && latest.status === "started" && latest.step <= plan.plan.length ? latest.step : null;
+    const after = current || Math.max(0, ...last.map((r, i) => (r && r.status === "done" ? i + 1 : 0)));
+    const next = plan.plan.findIndex((_, i) => i + 1 > after && !(last[i] && last[i].status === "done")) + 1 || null;
+    return last.map((report, i) => {
+      const n = i + 1;
+      if (n === current) return { status: "started", label: `current step · ${ROLE_WORD[latest.role] || latest.role || "agent"}` };
+      if (report && report.status === "done") return { status: "done", label: "done" };
+      if (report && report.status === "stuck") return { status: "stuck", label: "stuck" };
+      if (n === next) return { status: "next", label: "next" };
+      return { status: "", label: "" };
+    });
+  }
+
+  // A file the agent changed, opened where files are edited, at the line the turn changed (spec #145, stories 18–19):
+  // through the vscode:// scheme, or — when the project names an `[studio] open_command` — by the studio's server running it.
+  function fileLink(change) {
+    const rel = change.path, line = change.line || 1;
+    const how = state.open || { kind: "scheme", url: `vscode://file/${state.folder}` };
+    if (how.kind === "command") {
+      const link = h("a", rel, { href: "#", class: "log-file", title: `Open ${rel} at line ${line} with: ${how.command}` });
+      link.onclick = async (event) => {
+        if (event && event.preventDefault) event.preventDefault();
+        const r = await api("/api/open", { file: rel, line });
+        if (!r.ok) tell(r.error || `the open command failed (exit ${r.exit})`, true);
+      };
+      return link;
+    }
+    return h("a", rel, { href: `${how.url}/${rel}:${line}`, class: "log-file", title: `Open ${rel} at line ${line} in VS Code` });
+  }
 
   // one work-log entry as a line: time, role, what happened, and a link to what it produced
   function entry(e) {
@@ -129,7 +162,7 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
     details.append(summary);
     const body = h("div", null, { class: "turn-body" });
     body.append(h("p", turn.prompt, { class: "turn-prompt" }));
-    if (turn.changed && turn.changed.length) { const files = h("p", "changed: ", { class: "turn-files" }); turn.changed.forEach((rel, i) => { if (i) files.append(", "); files.append(fileLink(rel)); }); body.append(files); }
+    if (turn.changed && turn.changed.length) { const files = h("p", "changed: ", { class: "turn-files" }); turn.changed.forEach((change, i) => { if (i) files.append(", "); files.append(fileLink(change)); }); body.append(files); }
     const transcript = h("pre", "", { class: "turn-transcript" });
     body.append(transcript);
     // The conversation is read when the turn is opened. Only a finished turn's is final: a running turn's is read
@@ -193,6 +226,11 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
     state.log = log._status === 200 && Array.isArray(log.entries) ? log.entries : [];
     state.turns = log._status === 200 && Array.isArray(log.turns) ? log.turns : [];
     state.folder = log.folder || state.folder;
+    state.open = (log._status === 200 && log.open) || state.open;
+    // A studio with no agent at work opens on "Start agent on this node", whatever Files tab was remembered
+    // (spec #145, story 42); only a link to #files, or a run under way, leaves the remembered view
+    if (!state.read && !(state.run && state.run.active) && location.hash !== "#files" && typeof showCentre === "function") showCentre("run", false);
+    state.read = true;
     render(force === true);
   }
 
