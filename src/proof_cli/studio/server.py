@@ -28,7 +28,8 @@ from pathlib import Path
 from typing import Callable
 
 from . import build, httpbase
-from .agent_run import AgentRun, RunHooks, refusal
+from .agent_run import ACTIONS, AgentRun, RunHooks
+from ..errors import ERROR_CODES
 from ..key_ideas import KEY_IDEAS_FILE
 from ..vault import RUN_SCRIPT
 from .agent import NO_WINDOW, AgentManager
@@ -336,6 +337,15 @@ def program_argv(script: Path) -> list[str]:
     return ["/bin/sh", str(script)]
 
 
+def refusal(exc: Exception) -> dict | None:
+    """A service's refusal as the answer to a request — its code (a registered one, else RUN_REFUSED) and message —
+    or None for anything that is not one."""
+    code = getattr(exc, "code", None)
+    if not code:
+        return None
+    return {"error": code if code in ERROR_CODES else "RUN_REFUSED", "message": getattr(exc, "message", None) or str(exc)}
+
+
 class Studio:
     """One folder's studio: its settings, files, build, SyncTeX and agent, with its own locks.
 
@@ -351,7 +361,7 @@ class Studio:
 
     def __init__(self, root: Path, *, fixed_build: tuple[str, str] | None = None,
                  hidden: tuple[str, ...] = (), agent_scratch: str | None = None,
-                 agent_context: Callable[[], object] | None = None,
+                 agent_context: Callable[..., object] | None = None,
                  node_medium: Callable[[], str | None] | None = None,
                  on_run: Callable[[str, str, object, object], dict] | None = None,
                  working_digest: Callable[[], object] | None = None,
@@ -379,7 +389,8 @@ class Studio:
         self.running_build = None           # the build in progress, for /api/build/stop
         self._git_prefix: str | None = None
         self.sync = SyncTex(self)
-        # agent_context: a node's proof agent (proof_agent.py), made fresh for each turn
+        # agent_context: a node's proof agent (proof_agent.py), made fresh for each turn — given the run's turn
+        # (role, name, redirect) when a run started it, nothing for the researcher's own turn
         self.agent = AgentManager(lambda: self.root, self.agent_files, self.agent_writable, context_fn=agent_context)
         # the agent's run on this node (agent_run.py, spec #145): Start once, then autonomous, under the researcher's eye
         self.run = AgentRun(self.agent, run_hooks) if run_hooks is not None else None
@@ -401,7 +412,7 @@ class Studio:
             running.stop()      # registered before it runs anything, so nothing starts
         self.stop_runs()        # a computation's runs too (ADR-0011: programs are limited per folder)
         if self.run is not None and self.run.active():
-            self.run.release("the studio is closing")
+            self.run.release("studio closed")
         self.agent.shutdown()
 
     # ------------------------------------------------------------ the agent's files
@@ -686,6 +697,9 @@ class Studio:
         return {"exit": rc, "output": out, "seconds": seconds, "cancelled": cancelled, "timed_out": runner.timed_out,
                 "outcome": outcome, "evidence": recorded.get("evidence"), "note": recorded.get("note") or ""}
 
+    # how a refusal of the run reads over HTTP: a conflict with the run as it stands, or a failure to give the node back
+    _RUN_STATUS = {"RUN_ACTIVE": 409, "RUN_SETTLING": 409, "NO_RUN": 409, "RELEASE_FAILED": 500}
+
     def run_action(self, action: str, body: dict) -> tuple[int, dict]:
         """The researcher's oversight of the agent's run (spec #145): start, pause, resume, redirect or release — (status, answer)."""
         if self.run is None:
@@ -693,29 +707,33 @@ class Studio:
         if action == "start":
             provider = str(body.get("provider") or (self.agent.backend(None).id if self.agent.backend(None) else ""))
             roles = body.get("roles") if isinstance(body.get("roles"), list) else None
-            r = self.run.start(provider, roles=roles, redirect=str(body.get("redirect") or "") or None,
-                               model=body.get("model") or None, effort=body.get("effort") or None)
-            return (409 if r.get("error") == "RUN_ACTIVE" else 400 if "error" in r else 200), r
-        if action == "pause":
-            return 200, self.run.pause()
-        if action == "resume":
-            return 200, self.run.resume()
-        if action == "redirect":
+            try:
+                r = self.run.start(provider, roles=roles, redirect=str(body.get("redirect") or "") or None,
+                                   model=body.get("model") or None, effort=body.get("effort") or None)
+            except Exception as exc:  # noqa: BLE001 — the node could not be assigned: the refusal is the answer
+                return 400, refusal(exc) or {"error": "RUN_REFUSED", "message": f"{type(exc).__name__}: {exc}"}
+        elif action == "pause":
+            r = self.run.pause()
+        elif action == "resume":
+            r = self.run.resume()
+        elif action == "redirect":
             text = str(body.get("text") or "").strip()
             if not text:
                 return 400, {"error": "REDIRECT_EMPTY", "message": "say what the agent should do differently"}
-            return 200, self.run.redirect(text, body.get("role") or None)
-        if action == "release":
-            return 200, self.run.release()
-        if action == "review-now":  # Review what it has: a snapshot of the folder as it stands
+            r = self.run.redirect(text, body.get("role") or None)
+        elif action == "release":
+            r = self.run.release()
+        elif action == "review-now":  # Review what it has: a snapshot of the folder as it stands
             try:
-                return 200, self.run.review_now()
+                r = self.run.review_now()
             except Exception as exc:  # noqa: BLE001 — a refusal (no key ideas yet, nothing new, …) is the answer; anything else is a bug
                 answer = refusal(exc)
                 if answer is None:
                     raise
                 return 409, answer
-        return 404, {"error": "NOT_FOUND", "message": f"no run action {action!r}"}
+        else:
+            return 404, {"error": "NOT_FOUND", "message": f"no run action {action!r}"}
+        return (self._RUN_STATUS.get(r["error"], 400) if "error" in r else 200), r
 
     def stop_runs(self) -> bool:
         with self._admit:
@@ -791,9 +809,11 @@ class Studio:
                                "folder": str(self.root), "medium": self.medium(), "open": self.how_to_open()})
         if path == "/api/agent/run":
             return _json(self.run.view() if self.run is not None else {"status": "idle", "reason": "no run on this folder"})
-        if path == "/api/agent/log":  # the node's work log (spec #145): what the agent planned, did and handed over, and the run's turns
-            return _json({"entries": self.run.work_log() if self.run is not None else [], "turns": self.run.turn_list() if self.run is not None else [],
-                          "folder": str(self.root)})
+        if path == "/api/agent/log":  # the node's work log (spec #145): what the agent planned, did and handed over, the run's turns, and how files open
+            return _json({"entries": self.run.work_log() if self.run is not None else [], "folder": str(self.root), "open": self.how_to_open()})
+        if path == "/api/agent/turn":  # a run's turn, as recorded with the project: its conversation outlives the studio's memory
+            kept = self.run.transcript(q.get("turn") or "") if self.run is not None else None
+            return _json(kept) if kept is not None else _json({"error": "NO_SUCH_TURN", "message": "no recorded turn by that id"}, 404)
         if path == "/api/agent/events":
             job = self.agent.jobs.get(int(q["job"]))
             if not job:
@@ -892,7 +912,7 @@ class Studio:
             return _json(r, 409 if r.get("busy") else 200)
         if path == "/api/build/stop":
             return _json({"ok": self.stop_build()})
-        if path.startswith("/api/agent/") and path.split("/")[3] in ("start", "pause", "resume", "redirect", "release", "review-now"):
+        if path.startswith("/api/agent/") and path.split("/")[3] in ACTIONS:
             status, data = self.run_action(path.split("/")[3], body)
             return _json(data, status)
         if path == "/api/run":

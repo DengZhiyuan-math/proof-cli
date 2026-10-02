@@ -544,12 +544,15 @@ pre.panel-view { font: 12px/1.5 var(--mono); white-space: pre-wrap; color: var(-
 .run-line { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; font-size: 13px; }
 .run-status { font-weight: 700; text-transform: capitalize; }
 .run-status.running, .run-status.starting { color: var(--accent); } .run-status.paused, .run-status.pausing { color: var(--warn); }
-.run-status.done { color: var(--ok); } .run-status.stuck, .run-status.budget { color: var(--err); } .run-status.idle, .run-status.released { color: var(--muted); }
+.run-status.done { color: var(--ok); } .run-status.stuck, .run-status.budget, .run-status.release-failed { color: var(--err); } .run-status.idle, .run-status.released { color: var(--muted); }
+.run-status.needs-human { color: var(--warn); } .run-decision { margin: 0; font-size: 13px; font-weight: 600; color: var(--warn); }
 .run-where { font-weight: 600; } .run-meta, .run-reason { color: var(--muted); font-size: 12px; } .run-reason::before { content: "— "; }
 .run-hint { margin: 0; color: var(--muted); font-size: 12px; }
 .run-plan { margin: 0; padding-left: 22px; display: grid; gap: 3px; font-size: 13px; }
 .run-plan li.done { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--faint); }
 .run-plan li.started { font-weight: 600; } .run-plan li.stuck { color: var(--err); font-weight: 600; }
+.plan-mark { margin-left: 6px; font-size: 11px; font-weight: 600; color: var(--muted); }  /* the step's state in words (story 36) */
+.run-plan li.done .plan-mark { text-decoration: none; display: inline-block; }
 .run-controls { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .run-controls .run-redirect { flex: 1; min-width: 180px; }
 .run-controls button.danger { color: var(--err); }
@@ -563,8 +566,7 @@ pre.panel-view { font: 12px/1.5 var(--mono); white-space: pre-wrap; color: var(-
 .log-body { color: var(--text); word-break: break-word; }
 .work-log li.log-step .log-body, .work-log li.log-plan .log-body { color: var(--text2); }
 .work-log li.log-review-requested { border-left: 3px solid var(--warn); }
-.turns { display: grid; gap: 4px; }
-.log-turn { background: var(--panel2); border-radius: 8px; box-shadow: var(--shadow-card); padding: 6px 10px; font-size: 12.5px; }
+.log-turn { font-size: 12.5px; }  /* a turn's conversation, folded inside its work-log entry, under its step */
 .log-turn summary { cursor: pointer; color: var(--text2); font-weight: 500; }
 .turn-body { display: grid; gap: 6px; padding: 6px 0 2px; }
 .turn-prompt, .turn-files { margin: 0; color: var(--muted); font-size: 12px; }

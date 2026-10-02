@@ -51,7 +51,7 @@ def test_a_running_agent_shows_its_role_step_plan_and_the_four_actions():
     (shown,) = _pane(run=RUNNING, log=LOG)
     assert shown["status"] == "running" and shown["where"] == "Typesetter · step 4/5"
     assert [p["text"] for p in shown["plan"]][:2] == ["read what the project holds", "draft the proof"]
-    assert {str(p["step"]): p["status"] for p in shown["plan"]} == {"1": "done", "2": "", "3": "", "4": "started", "5": ""}
+    assert {str(p["step"]): p["status"] for p in shown["plan"]} == {"1": "done", "2": "", "3": "", "4": "started", "5": "next"}
     assert shown["buttons"] == ["Pause", "Redirect", "Review what it has", "Stop and release"]
 
 
@@ -83,13 +83,28 @@ def test_review_what_it_has_freezes_a_snapshot_and_has_the_node_panel_open_the_r
     assert frozen["dispatched"] == [{"type": "proof:node-changed", "detail": {"review": True}}]
 
 
-def test_the_log_links_to_what_each_entry_produced_and_folds_each_turns_conversation():
-    turns = [{"job": 7, "role": "prover", "prompt": "Take your turn as the Prover…", "at": 1.0, "done": True, "changed": ["scratch/proof-draft.md"]},
-             {"job": 8, "role": "typesetter", "prompt": "Take your turn as the Typesetter…", "at": 2.0, "done": False, "changed": []}]
+def _turn(turn, role, step, **more):
+    """A turn's entry in the work log, as the project records it (PR #148): its job, session, step and transcript."""
+    return {"at": "2026-10-01T09:38:00+00:00", "kind": "turn", "turn": turn, "role": role, "by": "claude-code", "provider": "claude",
+            "job": 7, "session_id": "s", "step": step, "transcript": f".proof/agent-turns/N/{turn}.json", "changed": [], **more}
+
+
+def test_the_log_links_to_what_each_entry_produced_and_folds_each_turns_conversation_under_its_step():
+    turns = [_turn("t1", "prover", 1, changed=[{"path": "scratch/proof-draft.md", "line": 12}]), _turn("t2", "typesetter", 4)]
     (shown,) = _pane(run=RUNNING, log=LOG, turns=turns)
     assert "/#/fog/fog-3" in shown["links"] and "/#/node/N" in shown["links"]  # the fog item in the map's drawer, the Evidence check on the node's page
-    assert [t["summary"] for t in shown["turns"]] == ["turn 1 · Prover", "turn 2 · Typesetter · running"]
-    assert shown["turns"][0]["files"] == ["vscode://file//proj/proofs/N/scratch/proof-draft.md"]
+    assert [t["summary"] for t in shown["turns"]] == ["step 1 · Prover's turn — its conversation", "step 4 · Typesetter's turn — its conversation"]
+    assert shown["turns"][0]["files"] == ["vscode://file//proj/proofs/N/scratch/proof-draft.md:12"]
+    assert [e["kind"] for e in shown["log"]][-2:] == ["turn", "turn"]  # in the log, after the step they belong to
+
+
+def test_an_earlier_starts_turn_reads_its_conversation_from_what_the_project_kept():
+    """Story 40: a finished turn's conversation is read from api/agent/turn — the project's record, which outlives the
+    studio's memory (a new Start, a restart) — and, being final, is not asked for again."""
+    turns = [_turn("t1", "prover", 1)]
+    _, typed, _ = _pane(run=RUNNING, log=LOG, turns=turns, said="I read L1 first.", typed="", open=["t1"])
+    assert typed["transcripts"]["t1"] == "I read L1 first." and typed["turns"][0]["prompt"] == "Take your turn (t1)…"
+    assert typed["askedTurns"] == ["t1"]
 
 
 def test_the_pane_keeps_reading_so_a_start_from_the_map_shows_up():
@@ -110,41 +125,95 @@ def test_a_stopped_run_says_why():
 
 
 def test_a_poll_keeps_the_redirect_being_typed_the_open_conversation_and_the_focus():
-    turns = [{"job": 7, "role": "prover", "prompt": "Take your turn as the Prover…", "at": 1.0, "done": True, "changed": []}]
-    _, typed, polled = _pane(run=RUNNING, log=LOG, turns=turns, typed="try the dual problem", role="prover", open=[1])
-    assert typed["redirect"] == {"text": "try the dual problem", "role": "prover"} and typed["open"] == ["1"] and typed["focusedRedirect"]
-    assert polled["redirect"] == {"text": "try the dual problem", "role": "prover"} and polled["open"] == ["1"] and polled["focusedRedirect"]  # nothing new: nothing rebuilt
+    turns = [_turn("t1", "prover", 1)]
+    _, typed, polled = _pane(run=RUNNING, log=LOG, turns=turns, typed="try the dual problem", role="prover", open=["t1"])
+    assert typed["redirect"] == {"text": "try the dual problem", "role": "prover"} and typed["open"] == ["t1"] and typed["focusedRedirect"]
+    assert polled["redirect"] == {"text": "try the dual problem", "role": "prover"} and polled["open"] == ["t1"] and polled["focusedRedirect"]  # nothing new: nothing rebuilt
 
 
 def test_a_poll_that_brings_news_rebuilds_but_still_keeps_what_was_in_hand():
-    turns = [{"job": 7, "role": "prover", "prompt": "Take your turn as the Prover…", "at": 1.0, "done": True, "changed": []}]
+    turns = [_turn("t1", "prover", 1)]
     news = {"at": "2026-10-01T09:40:00+00:00", "kind": "step", "role": "typesetter", "by": "claude-code", "step": 4, "status": "done", "note": "typeset"}
-    _, _, polled = _pane(run=RUNNING, log=LOG, turns=turns, typed="try the dual problem", role="prover", open=[1], changed=news)
+    _, _, polled = _pane(run=RUNNING, log=LOG, turns=turns, typed="try the dual problem", role="prover", open=["t1"], changed=news)
     assert any("step 4 done" in e["text"] for e in polled["log"])  # the new entry is shown
-    assert polled["redirect"]["text"] == "try the dual problem" and polled["open"] == ["1"] and polled["focusedRedirect"]
+    assert polled["redirect"]["text"] == "try the dual problem" and polled["open"] == ["t1"] and polled["focusedRedirect"]
 
 
 def test_a_running_turns_conversation_is_read_on_until_the_turn_is_done_then_kept():
     """Reaudit R-P3: the conversation opened while the turn runs is not frozen at its first fragment — each poll and each
-    opening reads on; once the turn is done, what was last read is final and shown again without asking."""
-    turns = [{"job": 7, "role": "prover", "prompt": "Take your turn as the Prover…", "at": 1.0, "done": False, "changed": []}]
-    conversation = {"turn": 1, "more": "first fragment\nthen a lemma", "final": "first fragment\nthen a lemma\ncompleted proof"}
-    _, opened, polled, finished, reopened = _pane(run=RUNNING, log=LOG, turns=turns, said="first fragment", conversation=conversation)
-    assert opened["transcripts"]["1"] == "first fragment" and "running" in opened["turns"][0]["summary"]
-    assert polled["transcripts"]["1"] == "first fragment\nthen a lemma"  # a poll with no other news still reads on
-    assert finished["transcripts"]["1"] == conversation["final"] and "running" not in finished["turns"][0]["summary"]
-    assert reopened["transcripts"]["1"] == conversation["final"]  # final: kept, not asked for again
+    opening reads on from its job; once the turn is recorded, its kept conversation is final and shown again without asking."""
+    running = {**RUNNING, "job": 7, "turn": "t9"}
+    conversation = {"turn": "t9", "more": "first fragment\nthen a lemma", "final": "first fragment\nthen a lemma\ncompleted proof",
+                    "recorded": _turn("t9", "typesetter", 4)}
+    _, opened, polled, finished, reopened = _pane(run=running, log=LOG, said="first fragment", conversation=conversation)
+    assert opened["transcripts"]["t9"] == "first fragment" and "running" in opened["turns"][0]["summary"]
+    assert "step 4 · Typesetter" in opened["turns"][0]["summary"]  # under the step it is on
+    assert polled["transcripts"]["t9"] == "first fragment\nthen a lemma"  # a poll with no other news still reads on
+    assert finished["transcripts"]["t9"] == conversation["final"] and "running" not in finished["turns"][0]["summary"]
+    assert finished["open"] == ["t9"]  # the same fold, still open, now the recorded turn
+    assert reopened["transcripts"]["t9"] == conversation["final"] and reopened["askedTurns"] == ["t9"]  # final: not asked for again
+
+
+def test_a_run_that_needs_the_researcher_says_what_it_needs_and_a_failed_release_can_be_retried():
+    needs = {**RUNNING, "status": "needs-human", "active": False, "decision": "is the constant allowed to depend on n?"}
+    (shown,) = _pane(run=needs, log=LOG)
+    assert shown["status"] == "needs-human" and "Needs you: is the constant allowed to depend on n?" in shown["text"]
+    assert shown["buttons"][0] == "Start agent"
+    failed = {**RUNNING, "status": "release-failed", "active": False, "reason": "the node is still assigned to claude-code"}
+    (shown,) = _pane(run=failed, log=LOG)
+    assert "still assigned" in shown["text"] and "Stop and release" in shown["buttons"]
+
+
+# -- seventh review ---------------------------------------------------------------------------------
+
+CHANGED = [_turn("t5", "numerics", 2, changed=[{"path": "check.py", "line": 40}])]
+
+
+def test_a_changed_file_opens_in_vs_code_at_its_line():
+    """Story 18: "the agent changed check.py line 40" is one click away."""
+    (shown,) = _pane(run=RUNNING, log=LOG, turns=CHANGED)
+    assert shown["turns"][0]["files"] == ["vscode://file//proj/proofs/N/check.py:40"]
+    assert "line 40" in shown["turns"][0]["titles"][0] and "VS Code" in shown["turns"][0]["titles"][0]
+
+
+def test_with_an_open_command_a_changed_file_is_opened_by_the_server_instead():
+    """Story 19: with `[studio] open_command` set, the link asks the studio's server to run it — no vscode:// URL."""
+    command = {"kind": "command", "command": "subl {file}"}
+    shown, clicked = _pane(run=RUNNING, log=LOG, turns=CHANGED, open=command, clickFile="check.py", answer={"ok": True, "kind": "command", "exit": 0})
+    assert not any(href.startswith("vscode:") for href in shown["turns"][0]["files"])
+    assert "subl {file}" in shown["turns"][0]["titles"][0]
+    assert clicked["posted"] == [{"url": "api/open", "body": {"file": "check.py", "line": 40}}] and clicked["prevented"]
+
+
+def test_an_idle_studio_opens_on_start_whatever_files_tab_was_remembered():
+    """Story 42: no agent at work, the centre shows "Start agent on this node" — the remembered Files tab waits for a run."""
+    (idle,) = _pane(run=IDLE, log=[])
+    assert idle["centred"] == [["run", False]]  # shown, and not remembered as the researcher's choice
+    stopped = {**RUNNING, "status": "stuck", "active": False}
+    assert _pane(run=stopped, log=LOG)[0]["centred"] == [["run", False]]
+    assert _pane(run=RUNNING, log=LOG)[0]["centred"] == []  # an agent at work: the remembered view stands
+    assert _pane(run=IDLE, log=[], hash="#files")[0]["centred"] == []  # a link to #files asks for Files
+
+
+def test_the_plan_says_in_words_which_steps_are_done_the_current_step_and_its_role_and_the_next():
+    """Story 36: the plan's state is in the page's text, not only in its classes."""
+    (shown,) = _pane(run=RUNNING, log=LOG)
+    marks = {str(p["step"]): p["mark"] for p in shown["plan"]}
+    assert marks == {"1": "done", "2": "", "3": "", "4": "current step · Typesetter", "5": "next"}
+    between = [*LOG[:-3], {**LOG[5], "status": "done"}]  # step 4 done, nothing started yet
+    marks = {str(p["step"]): p["mark"] for p in _pane(run=RUNNING, log=between)[0]["plan"]}
+    assert marks == {"1": "done", "2": "", "3": "", "4": "done", "5": "next"}
 
 
 def test_a_turns_transcript_reads_its_steps_and_the_running_turn_is_handed_to_the_files_view():
     """From upstream 2938c05, watched the proof-cli way: the transcript shows each step the agent took, and the
     running turn's events are read as they come and handed to the Files view (app.js studioLive)."""
-    turns = [{"job": 7, "role": "typesetter", "prompt": "Take your turn as the Typesetter…", "at": 1.0, "done": False, "changed": []}]
+    running = {**RUNNING, "job": 7, "turn": "t9", "started_at": 100.0}
     events = [{"t": "tool_start", "id": "r1", "name": "Read"}, {"t": "tool", "id": "r1", "name": "Read", "summary": "sec/a.tex", "path": "sec/a.tex", "lines": [20, 30]},
               {"t": "tool_result", "id": "r1", "error": False}, {"t": "thinking_start"}, {"t": "text", "text": "I rewrote §2."},
               {"t": "build", "result": {"exit": 0, "diagnostics": []}}, {"t": "done"}]
-    _, opened, polled = _pane(run=RUNNING, log=LOG, turns=turns, events=events, typed="x", open=[1])
-    assert opened["transcripts"]["1"] == "▸ Read sec/a.tex\n… thinking\nI rewrote §2.\n▸ Compile: OK"
+    _, opened, polled = _pane(run=running, log=LOG, events=events, typed="x", open=["t9"])
+    assert opened["transcripts"]["t9"] == "▸ Read sec/a.tex\n… thinking\nI rewrote §2.\n▸ Compile: OK"
     assert opened["live"] == [e["t"] for e in events] and opened["resets"] == 1  # every event once, after a reset for the new Start
     assert polled["live"] == opened["live"] and polled["resets"] == 1  # the next poll does not follow the same turn again
 
@@ -152,14 +221,13 @@ def test_a_turns_transcript_reads_its_steps_and_the_running_turn_is_handed_to_th
 def test_the_files_views_marks_are_reset_by_a_new_start_not_by_each_turn():
     """Seventh review: the Files view keeps what the Prover changed when the Typesetter's turn comes (a role's
     hand-off is the same Start); only a new Start clears last run's marks."""
-    running = {**RUNNING, "started_at": 100.0}
-    prover = {"job": 7, "role": "prover", "prompt": "Take your turn as the Prover…", "at": 1.0, "done": False, "changed": []}
-    typesetter = {"job": 8, "role": "typesetter", "prompt": "Take your turn as the Typesetter…", "at": 2.0, "done": False, "changed": []}
-    again = {"job": 9, "role": "prover", "prompt": "Take your turn as the Prover…", "at": 3.0, "done": False, "changed": []}
+    prover = {**RUNNING, "role": "prover", "job": 7, "turn": "t1", "started_at": 100.0}
+    typesetter = {**prover, "role": "typesetter", "job": 8, "turn": "t2"}
+    again = {**prover, "job": 9, "turn": "t3", "started_at": 200.0}
     events = [{"t": "tool", "id": "w1", "name": "Edit", "summary": "proof.tex", "path": "proof.tex"}, {"t": "tool_result", "id": "w1", "error": False}, {"t": "done"}]
-    first, handed_off, restarted = _pane(run=running, log=LOG, turns=[prover], events=events, sequence=[
-        {"run": running, "turns": [{**prover, "done": True}, typesetter]},
-        {"run": {**running, "started_at": 200.0}, "turns": [again]},
+    first, handed_off, restarted = _pane(run=prover, log=LOG, events=events, sequence=[
+        {"run": typesetter, "log": [*LOG, _turn("t1", "prover", 1, job=7)]},
+        {"run": again},
     ])
     assert first["resets"] == 1 and first["live"] == ["tool", "tool_result", "done"]
     assert handed_off["resets"] == 1 and len(handed_off["live"]) == 6  # the Typesetter's turn followed, the marks kept

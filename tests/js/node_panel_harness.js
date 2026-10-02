@@ -1,6 +1,6 @@
 // Runs the studio's real node panel (src/proof_cli/studio/static/node.js) against a minimal DOM.
 // argv[2]: JSON {view, saveAll: true|false|null, press: a button label or a list of them,
-// rationale, draft: true (the "+" menu's "Draft key ideas"), katex: false, answer, confirm}.
+// rationale, katex: false, answer, confirm}.
 // Prints what happened: the events, the review sheet's text, links and buttons, the panel's.
 const fs = require("fs"), path = require("path"), vm = require("vm");
 
@@ -25,7 +25,6 @@ class El {
     location: {},
     confirm: () => { events.push("confirm"); return scenario.confirm !== false; },
     openReadOnly: (name, text) => { events.push({ openReadOnly: name, text }); },
-    draftKeyIdeas: async () => { events.push("draftKeyIdeas"); },
     fetch: async (url, options = {}) => {
       if (options.method === "POST") events.push({ post: url, body: JSON.parse(options.body) });
       return { json: async () => ({ ok: true, data: options.method === "POST" ? (scenario.answer || { version: 2 }) : scenario.view }) };
@@ -44,12 +43,6 @@ class El {
   if (deps) { out.deps = deps.text(); out.links = deps.all().filter((x) => x.tag === "a").map((x) => x.attrs.href); }
   // what the last action said: the review sheet's note, else the node panel's
   const note = () => [card, panel].map((where) => (where.querySelector(".node-note") || { textContent: "" }).textContent).find(Boolean) || "";
-  if (scenario.draft) {  // the "+" menu's "Draft key ideas", offered only while the node has none
-    const offer = context.studioKeyIdeas && context.studioKeyIdeas();
-    out.draftOffered = !!offer;
-    if (offer) await offer.draft();
-    out.note = note();
-  }
   if (scenario.press) {  // buttons by their labels, in order: a decision, then Record
     const why = everything().find((x) => x.attrs.class === "review-why");
     if (why && scenario.rationale) why.value = scenario.rationale;

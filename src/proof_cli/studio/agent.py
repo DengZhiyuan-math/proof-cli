@@ -95,13 +95,16 @@ class AgentManager:
               model: str | None = None, effort: str | None = None,
               scope: list[str] | None = None, provider: str | None = None,
               finish: Callable[[], None] | None = None,
-              unless: Callable[[], bool] | None = None) -> dict:
+              unless: Callable[[], bool] | None = None,
+              turn: dict | None = None) -> dict:
         """Run one turn. `scope` (project-relative files) limits which files the agent may
         change in edit mode; None lets it change any file and create new ones. `finish` runs
         once the backend is done, before the turn's changes are read, so its own changes are
         part of the turn (and of its Undo). `unless` is asked once more, after the checks and
         the preflight, right before the turn exists: true, and no turn starts (a run stopped
-        while its turn was being prepared)."""
+        while its turn was being prepared). `turn` is a run's turn (agent_run.py): its role,
+        name and redirect, handed to the node's context as they are — None for the
+        researcher's own turn, which no run's role reaches."""
         if self.closed:
             return {"error": "The studio is closed."}
         backend = self.backend(provider)
@@ -119,9 +122,9 @@ class AgentManager:
             if self.closed:
                 return {"error": "The studio is closed."}
             if unless is not None and unless():
-                return {"error": "The turn was called off before it started."}
+                return {"error": "The turn was called off before it started.", "code": "TURN_CALLED_OFF"}
             if self.active and not self.active.done:
-                return {"error": "The agent is still working on the previous message."}
+                return {"error": "The agent is still working on the previous message.", "code": "AGENT_BUSY"}
             job = Job(next(self.ids))
             job.provider = backend.id   # before it is visible as active: stop() finds its backend
             self.jobs[job.id] = job
@@ -144,7 +147,8 @@ class AgentManager:
         job.provider, job.prompt, job.session_id = backend.id, prompt, session_id
         job.mode, job.model, job.effort = mode if mode in ("edit", "ask") else "ask", model, effort
         job.root, job.files = self.root_fn(), self.files_fn
-        job.context = self.context_fn() if self.context_fn else None
+        job.context = (self.context_fn(turn) if turn is not None else self.context_fn()) if self.context_fn else None
+        job.turn = turn
         job.server_url = self.compile_url() if self.compile_url else None
         job.writable = lambda rel: self._writable(job, rel)
         job.finish = finish
