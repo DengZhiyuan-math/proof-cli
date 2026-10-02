@@ -455,6 +455,16 @@ def test_an_evidence_check_without_a_snapshot_record_still_shows():
     assert "passed" in shown["text"] and "cp-v1" in shown["text"]
 
 
+def test_an_evidence_check_whose_snapshot_changed_since_it_is_flagged_and_an_unbound_one_says_so():
+    changed = {**_check("ev-2", "cp-v2", 2, SHA_V2, current=True), "binding": {"sha256": SHA_V1, "state": "changed", "label": "snapshot changed since this check"}}
+    unbound = {**_check("ev-3", "cp-v2", 2, SHA_V2, current=True), "binding": {"sha256": None, "state": "unbound", "label": "not bound (recorded before binding)"}}
+    matches = {**_check("ev-4", "cp-v2", 2, SHA_V2, current=True), "binding": {"sha256": SHA_V2, "state": "matches", "label": f"bound to {SHA_V2[:12]}…"}}
+    shown_changed, shown_unbound, shown_matches = _evidence([changed, unbound, matches])
+    assert shown_changed["warnings"] == ["snapshot changed since this check"] and SHA_V1[:12] in shown_changed["text"]
+    assert "not bound (recorded before binding)" in shown_unbound["text"] and shown_unbound["warnings"] == []
+    assert shown_matches["warnings"] == [] and "changed" not in shown_matches["text"]
+
+
 # -- Trusted by rule (ADR-0014): the review page's own section, the rules sheet, the chips ------------
 
 TRUSTED = [{"node_id": "ref_bw", "statement": "Bolzano-Weierstrass", "citation": CITATION, "trust_rule": ["textbooks"],

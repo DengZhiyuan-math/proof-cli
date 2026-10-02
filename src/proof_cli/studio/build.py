@@ -22,6 +22,7 @@ error report.
 """
 from __future__ import annotations
 
+import collections
 import hashlib
 import json
 import os
@@ -271,18 +272,26 @@ class _Tail:
     """What a program printed, as its last `limit` bytes: a chatty program can't fill the server's memory."""
 
     def __init__(self, limit: int):
-        self.limit, self.dropped, self.data = limit, 0, bytearray()
+        self.limit, self.dropped, self.size = limit, 0, 0
+        self.chunks: collections.deque[bytes] = collections.deque()
 
     def drain(self, stream) -> None:
+        """Read `stream` to its end, keeping chunks while they fit and dropping whole ones from the front:
+        each byte is kept and dropped at most once, so a chatty program costs time linear in its output."""
         for chunk in iter(lambda: stream.read(65536), b""):
-            self.data += chunk
-            if len(self.data) > self.limit:
-                cut = len(self.data) - self.limit
-                del self.data[:cut]
-                self.dropped += cut
+            self.chunks.append(chunk)
+            self.size += len(chunk)
+            while self.size - len(self.chunks[0]) >= self.limit:
+                self.size -= len(first := self.chunks.popleft())
+                self.dropped += len(first)
 
     def text(self) -> str:
-        out = self.data.decode("utf-8", "replace")
+        data = b"".join(self.chunks)
+        if len(data) > self.limit:  # the oldest kept chunk only partly fits
+            self.dropped += len(data) - self.limit
+            data = data[-self.limit:]
+            self.chunks, self.size = collections.deque([data]), len(data)
+        out = data.decode("utf-8", "replace")
         if not self.dropped:
             return out
         return f"[… {self.dropped} bytes of earlier output dropped: only the last {self.limit} bytes are kept]\n" + out

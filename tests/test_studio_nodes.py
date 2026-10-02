@@ -160,14 +160,14 @@ def test_an_imported_result_or_unknown_node_has_no_studio(hub):
     store, hub = hub
     create_node(store, node_id="ref", kind="imported_result", statement="K", source_locator="doi:k", source_version="v1")
     status, body = _get(hub, "/studio/ref/api/tree")
-    assert (status, body["error"]["code"]) == (404, "NO_STUDIO")
-    assert _get(hub, "/studio/nope/")[1]["error"]["code"] == "NODE_NOT_FOUND"
+    assert (status, body["code"]) == (404, "NO_STUDIO") and "imported result" in body["error"]  # {"error": message, "code": CODE}
+    assert _get(hub, "/studio/nope/")[1]["code"] == "NODE_NOT_FOUND"
 
 
 def test_a_cross_site_request_reaches_no_studio_api(hub):
     store, hub = hub
     status, body = _get(hub, "/studio/A/api/tree", cross_site=True)
-    assert (status, body["error"]["code"]) == (403, "CROSS_SITE")
+    assert (status, body["code"]) == (403, "CROSS_SITE")
 
 
 def test_the_page_needs_its_trailing_slash_for_relative_urls(hub):

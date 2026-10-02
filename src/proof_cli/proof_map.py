@@ -1194,12 +1194,26 @@ def record_evidence_check(
     Purely advisory and ungated — an automated checker records its own
     outcome directly, no Human Review needed to log a result. Nothing here
     can close, block, or otherwise touch acceptance_state; the sole write
-    is this check's own row (ADR-0004 point 5). The check is bound to the
-    snapshot's SHA-256, as a decision is: the one the caller checked against,
-    else the snapshot's as it is on disk now.
+    is this check's own row (ADR-0004 point 5).
+
+    The check is bound to a snapshot SHA-256, as a decision is. Given
+    `snapshot_sha256` (the hash of the snapshot the checker ran on), it must be
+    the snapshot's hash now, or the check is refused (EVIDENCE_SNAPSHOT_MISMATCH,
+    naming the node's current snapshot). Omitted, the check is bound to the
+    snapshot's hash at the moment of recording — which says what it was recorded
+    against, not what the checker ran on.
     """
-    require_candidate_proof(store, candidate_proof_id)
-    sha256 = snapshot_sha256 or candidate_proof_sha256(store, candidate_proof_id)
+    proof = require_candidate_proof(store, candidate_proof_id)
+    sha256 = candidate_proof_sha256(store, candidate_proof_id)
+    if snapshot_sha256 is not None and snapshot_sha256 != sha256:
+        current = get_current_candidate_proof(store, proof.node_id)
+        now = f"hashes to {sha256[:12]}…" if sha256 else "can't be read"
+        named = f"v{current.version} ({(candidate_proof_sha256(store, current.id) or 'unreadable')[:12]}…)" if current else "none"
+        raise ProofMapError(
+            "EVIDENCE_SNAPSHOT_MISMATCH",
+            f"snapshot v{proof.version} of {proof.node_id} {now}, not {snapshot_sha256[:12]}…; "
+            f"the node's current snapshot is {named}",
+        )
 
     try:
         resolved_outcome = EvidenceOutcome(outcome)
@@ -1222,6 +1236,22 @@ def record_evidence_check(
         payload={"evidence_check_id": check.id, "outcome": resolved_outcome.value, "run_by": run_by, "candidate_proof_sha256": sha256},
     )
     return check
+
+
+def evidence_binding(check: EvidenceCheck, snapshot_sha256_now: str | None) -> dict:
+    """How an Evidence check's own bound hash reads against its snapshot as it is now: `matches`; `changed`
+    (the snapshot no longer hashes to what the check was bound to); `unbound`, a check recorded before
+    binding, never read as matching; or `unverifiable`, its snapshot can't be read."""
+    bound = check.candidate_proof_sha256
+    if bound is None:
+        state, label = "unbound", "not bound (recorded before binding)"
+    elif snapshot_sha256_now is None:
+        state, label = "unverifiable", f"bound to {bound[:12]}…; the snapshot can't be read"
+    elif bound == snapshot_sha256_now:
+        state, label = "matches", f"bound to {bound[:12]}…"
+    else:
+        state, label = "changed", "snapshot changed since this check"
+    return {"sha256": bound, "state": state, "label": label}
 
 
 def get_evidence_check(store: ProjectStore, check_id: str) -> EvidenceCheck | None:

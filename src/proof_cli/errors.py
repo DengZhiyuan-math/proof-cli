@@ -142,6 +142,15 @@ ERROR_CODES: dict[str, str] = {
     "NOT_A_NODE_FILE": "the file to open is not an editable file of this node's folder",
     "INVALID_LINE": "the line to open a file at is a positive whole number",
     "OPEN_FAILED": "the project's [studio] open_command could not start, or exited non-zero",
+    "NOT_UTF8": "the file is not UTF-8 text; the studio edits UTF-8 files only",
+    "STUDIO_REQUEST_INVALID": "the studio's request is malformed or names something it may not touch; the message says what",
+    "STUDIO_FILE_ERROR": "the studio could not read or write a file (locked by another program, say); the message says which",
+    "NO_SUCH_JOB": "no agent job of this studio by that id",
+    "NO_SYNCTEX": "no SyncTeX data yet: build first",
+    "NO_SYNCTEX_MATCH": "SyncTeX knows no place for that position",
+    "NOT_A_NODE_STUDIO": "only a proof map node's studio drafts key ideas",
+    "KEY_IDEAS_EXISTS": "key-ideas.md already exists: edit it, or remove it to have the agent draft it afresh",
+    "EVIDENCE_SNAPSHOT_MISMATCH": "the snapshot hash an Evidence check names is not the snapshot's hash now; the message names the node's current snapshot",
 }
 
 
