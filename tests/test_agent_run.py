@@ -263,7 +263,7 @@ def test_only_one_run_per_node_and_a_single_role_can_be_asked_for(studio):
     _queue(queue, [["sleep", "1"]], [["sleep", "0"]])
     assert _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["typesetter"]})[0] == 200
     status, again = _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
-    assert status == 409 and again["error"] == "RUN_ACTIVE"
+    assert status == 409 and again["code"] == "RUN_ACTIVE"
     _wait(hub)
     assert [turn["role"] for turn in _turns(log)] == ["typesetter"]
 
@@ -290,7 +290,7 @@ def test_start_is_refused_while_someone_else_holds_the_node_and_leaves_no_run_be
     store, hub, log, queue = studio
     claim_node(store, "N", claimant_id="ada")
     status, refused = _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
-    assert status == 400 and refused["error"] == "CLAIM_CONFLICT"  # the service's own refusal, as it stands
+    assert status == 400 and refused["code"] == "CLAIM_CONFLICT"  # the service's own refusal, as it stands
     assert _get(hub, "/studio/N/api/agent/run")[1]["status"] == "idle"
     assert get_active_claim(store, "N").claimant_id == "ada" and not _turns(log)
 
@@ -358,7 +358,7 @@ def test_a_second_start_while_the_first_is_still_being_assigned_is_refused():
     second = run.start("claude")  # while the first is still assigning
     gate.set()
     worker.join(5)
-    assert second.get("error") == "RUN_ACTIVE" and assigned == ["claude-code"]  # one slot, one assignment
+    assert second.get("code") == "RUN_ACTIVE" and assigned == ["claude-code"]  # one slot, one assignment
     run.release()
 
 
@@ -709,9 +709,18 @@ def test_no_role_may_run_a_general_shell(tmp_path, role):
             command = rule[len("Bash("):-1].split()[0]
             assert command not in shells, rule
             assert rule != "Bash(proof *)" and "review " not in rule.replace("request-review", ""), rule  # named `proof` commands only
-    for interpreter in ("python", "python3", "sage"):
-        if f"Bash({interpreter} *)" in allowed:
-            assert f"Bash({interpreter} -c *)" in denied and f"Bash({interpreter} -m *)" in denied, interpreter
+    # the named ways back to a general shell through an allowed program (final re-review): inline code, stdin, `lake env`,
+    # latexmk's engine commands and rc files. ADR-0010's cooperative contract: these are closed, not every prefix trick.
+    escapes = {
+        "python": ("-c *", "-m *", "-", "- *", "/dev/stdin *"), "python3": ("-c *", "-m *", "-", "- *", "/dev/stdin *"),
+        "sage": ("-c *", "-sh *", "-python *"), "lake": ("env *", "exe *"),
+        "latexmk": ("-e *", "-r *", "-pdflatex=*", "-lualatex=*", "-xelatex=*", "-pdflatex *", "* -pdflatex=*", "* -e *", "* -r *"),
+        "pdflatex": ("-shell-escape *", "--shell-escape *"),
+    }
+    for program, forms in escapes.items():
+        if f"Bash({program} *)" in allowed:
+            missing = [form for form in forms if f"Bash({program} {form})" not in denied]
+            assert not missing, (program, missing)
 
 
 @pytest.mark.parametrize("role", ["prover", "typesetter", "numerics"])
@@ -809,7 +818,7 @@ def test_pause_stops_the_budget_clock_and_resume_continues_with_what_is_left(stu
 def test_redirect_with_no_run_is_refused_with_no_run(studio):
     store, hub, log, queue = studio
     status, refused = _post(hub, "/studio/N/api/agent/redirect", {"text": "try the dual problem"})
-    assert status == 409 and refused["error"] == "NO_RUN"
+    assert status == 409 and refused["code"] == "NO_RUN"
 
 
 def test_a_decision_only_a_human_can_make_stops_the_run_as_needs_human_and_names_it(studio):
@@ -920,7 +929,7 @@ def test_a_start_is_refused_when_the_previous_run_is_still_giving_the_node_back(
     refused = run.start("claude")
     gate.set()
     stopper.join(5)
-    assert refused.get("error") == "RUN_SETTLING" and "still" in refused["message"]
+    assert refused.get("code") == "RUN_SETTLING" and "still" in refused["error"]
 
 
 def test_a_failed_release_is_not_reported_as_released(studio, monkeypatch):
@@ -935,7 +944,7 @@ def test_a_failed_release_is_not_reported_as_released(studio, monkeypatch):
 
     monkeypatch.setattr(run.hooks, "release", fails)
     status, answer = _post(hub, "/studio/N/api/agent/release")
-    assert status == 500 and answer["error"] == "RELEASE_FAILED" and "database is locked" in answer["message"]
+    assert status == 500 and answer["code"] == "RELEASE_FAILED" and "database is locked" in answer["error"]
     state = _get(hub, "/studio/N/api/agent/run")[1]
     assert state["status"] == "release-failed" and "database is locked" in state["reason"]
     assert get_active_claim(store, "N") is not None  # and the claim it failed to give back is still there, as it says
@@ -1001,6 +1010,54 @@ def test_a_late_assignment_after_the_later_run_requested_review_leaves_no_claim(
     assert get_active_claim(store, "N") is None  # the late assignment's claim was given back
 
 
+# -- final re-review (PR #148) ----------------------------------------------------------------------
+
+
+def test_what_the_researcher_does_during_a_turn_keeps_its_own_actor_and_no_role(studio):
+    """Only the run's own agent acts as the turn's role: a fog item the researcher adds while the Prover's turn is running
+    is the researcher's, with no role; the Prover's own fog item in the same turn is the Prover's."""
+    from proof_cli.fog import add_fog
+
+    store, hub, log, queue = studio
+    _queue(queue, [["proof", "fog", "add", "the agent's direction", "--near", "N", "--created-by", "claude-code"], ["sleep", "1.2"],
+                   ["proof", "node", "progress", "N", "--step", "1", "--status", "stuck", "--note", "enough"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["prover"]})
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and not any(e["kind"] == "fog" for e in work_log(store, "N")):
+        time.sleep(0.05)
+    add_fog(store, "the researcher's own hunch", near=["N"], created_by="ada")  # mid-turn
+    _wait(hub)
+    fog = {e["text"]: e for e in work_log(store, "N") if e["kind"] == "fog"}
+    assert fog["the agent's direction"]["role"] == "prover"
+    assert fog["the researcher's own hunch"]["role"] is None and fog["the researcher's own hunch"]["by"] == "ada"
+
+
+def test_a_turn_is_marked_started_only_once_it_has_started(studio, monkeypatch):
+    """A turn waiting for the researcher's Ask turn has not started: nothing in that wait is the role's, and a turn that
+    never starts leaves no marker at all."""
+    from proof_cli.storage import list_events
+
+    store, hub, log, queue = studio
+    agent = hub.studio("N").agent
+    monkeypatch.setattr(agent, "start", lambda *a, **k: {"error": "The studio is closed.", "code": None})
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["prover"]})
+    _wait(hub)
+    assert [e for e in list_events(store) if e.kind == "agent_turn"] == []
+
+
+def test_a_decision_wins_over_a_review_request_in_the_same_turn_and_is_logged_once(studio):
+    store, hub, log, queue = studio
+    write_key_ideas(store, "N")
+    _queue(queue, [["write", "proof.tex", "\\documentclass{amsart}\\begin{document}ok\\end{document}\n"], REVIEW,
+                   ["proof", "node", "progress", "N", "--step", "2", "--status", "needs-human", "--note", "keep the n = 0 case?"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
+    state = _wait(hub)
+    assert (state["status"], state["decision"]) == ("needs-human", "keep the n = 0 case?")
+    assert get_workflow_state(store, "N") == "review-needed"  # the review request stands as it is
+    asked = [e for e in work_log(store, "N") if e.get("kind") == "step" and e.get("status") == "needs-human"]
+    assert len(asked) == 1  # the run's closing note does not say it a second time
+
+
 # -- what the studio's centre reads and does (spec #145, part 4) ---------------------------------------
 
 
@@ -1057,14 +1114,14 @@ def test_a_refused_review_what_it_has_leaves_the_holders_claim(studio):
     store, hub, log, queue = studio
     claim_node(store, "N", claimant_id="alice")
     status, refused = _post(hub, "/studio/N/api/agent/review-now")  # no key ideas: refused before anything changes
-    assert status == 409 and refused["error"] == "KEY_IDEAS_REQUIRED"
+    assert status == 409 and refused["code"] == "KEY_IDEAS_REQUIRED"
     assert get_active_claim(store, "N").claimant_id == "alice"
 
 
 def test_review_what_it_has_is_refused_when_nothing_can_be_frozen(studio):
     store, hub, log, queue = studio
     status, refused = _post(hub, "/studio/N/api/agent/review-now")  # no key ideas yet: the service refuses, and says so
-    assert status == 409 and refused["error"] == "KEY_IDEAS_REQUIRED"
+    assert status == 409 and refused["code"] == "KEY_IDEAS_REQUIRED"
 
 
 def test_every_starts_turns_stay_in_the_log_under_their_steps_after_a_new_start_and_a_restart(studio):
@@ -1271,7 +1328,7 @@ def test_a_files_save_of_the_summary_waits_while_an_agent_edit_turn_runs(studio)
     while not (hub.studio("N").agent.active and not hub.studio("N").agent.active.done) and time.monotonic() < deadline:
         time.sleep(0.05)
     status, refused = _post(hub, "/studio/N/api/file", {"path": "key-ideas.md", "content": "mine\n"})
-    assert status == 409 and refused["error"] == "KEY_IDEAS_AGENT_TURN" and "KEY_IDEAS_AGENT_TURN" in ERROR_CODES
+    assert status == 409 and refused["code"] == "KEY_IDEAS_AGENT_TURN" and "KEY_IDEAS_AGENT_TURN" in ERROR_CODES
     assert not (store.root / "proofs" / "N" / "key-ideas.md").exists()
     assert _post(hub, "/studio/N/api/file", {"path": "proof.tex", "content": "\\documentclass{amsart}\n"})[0] == 200
     _wait(hub)

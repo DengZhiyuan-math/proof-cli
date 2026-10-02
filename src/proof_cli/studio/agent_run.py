@@ -170,10 +170,10 @@ class AgentRun:
             while self._settling and not self.active():
                 left = deadline - time.monotonic()
                 if left <= 0:
-                    return {"error": "RUN_SETTLING", "message": "the previous run is still giving the node back; Start again in a moment"}
+                    return {"error": "the previous run is still giving the node back; Start again in a moment", "code": "RUN_SETTLING"}
                 self._wake.wait(min(0.05, left))
             if self.active():
-                return {"error": "RUN_ACTIVE", "message": "an agent is already working on this node; pause, redirect or release it"}
+                return {"error": "an agent is already working on this node; pause, redirect or release it", "code": "RUN_ACTIVE"}
             run = self._run = _Start(RunState(status="starting"))  # holds the slot while the node is assigned, outside the lock
         try:
             turns_max, minutes = self.hooks.budget()
@@ -255,7 +255,7 @@ class AgentRun:
     def redirect(self, text: str, role: str | None = None) -> dict:
         with self._lock:
             if not self.active():
-                return {"error": "NO_RUN", "message": "no agent is working on this node; Start one, with this line as its first redirect"}
+                return {"error": "no agent is working on this node; Start one, with this line as its first redirect", "code": "NO_RUN"}
             self._run.state.redirect = {"text": text.strip(), "role": role if role in AGENT_ROLES else None}
         return self.view()
 
@@ -290,7 +290,7 @@ class AgentRun:
             message = f"the node is still assigned to {name}: giving it back failed ({type(exc).__name__}: {exc})"
             with self._lock:
                 run.state.status, run.state.reason = "release-failed", message
-            return {"error": "RELEASE_FAILED", "message": message}
+            return {"error": message, "code": "RELEASE_FAILED"}
         finally:
             with self._lock:
                 self._settling -= 1
@@ -331,10 +331,16 @@ class AgentRun:
                     return
                 before = len(self.hooks.work_log())
                 turn = {"turn": uuid.uuid4().hex[:16], "role": role, "by": name, "provider": provider}
-                self._note_turn({**turn, "phase": "started"})
-                started = self._start_turn(run, prompt, provider, {"role": role, "name": name, "redirect": redirect})
+                began: list = []
+
+                def begin(job, turn=turn, began=began):  # the turn exists and its backend is about to start
+                    began.append(job)
+                    self._note_turn({**turn, "phase": "started", "job": job.id})
+
+                started = self._start_turn(run, prompt, provider, {"role": role, "name": name, "redirect": redirect}, begin)
                 if started is None or "error" in started:
-                    self._note_turn({**turn, "phase": "ended", "job": None})  # no turn ran
+                    if began:  # it began and was stopped at once: close its marker
+                        self._note_turn({**turn, "phase": "ended", "job": None})
                     if started is not None:
                         self._end(run, "stuck", f"the turn could not start: {started['error']}")
                     return
@@ -369,12 +375,14 @@ class AgentRun:
                 done = next((e for e in reversed(job.events) if e.get("t") == "done"), {})
                 run.handoff = next((e for e in reversed(new) if e.get("kind") == "handoff"), None)
                 run.last_report = next((e for e in reversed(new) if e.get("kind") == "step"), None)
-                if any(e.get("kind") == "review-requested" for e in new):
-                    self._end(run, "done", "review-requested")
-                    return
+                # a decision only the researcher can make comes first: a review request in the same turn stands as it is,
+                # but the run stops for the decision, which would otherwise be lost under "done"
                 asked = next((e for e in reversed(new) if e.get("kind") == "step" and e.get("status") == "needs-human"), None)
                 if asked is not None:
                     self._end(run, "needs-human", asked.get("note") or "a decision only the researcher can make")
+                    return
+                if any(e.get("kind") == "review-requested" for e in new):
+                    self._end(run, "done", "review-requested")
                     return
                 stuck = next((e for e in reversed(new) if e.get("kind") == "step" and e.get("status") == "stuck"), None)
                 if stuck is not None:
@@ -402,7 +410,7 @@ class AgentRun:
         except Exception:  # noqa: BLE001 — the record is the log's; the run goes on without it
             pass
 
-    def _start_turn(self, run: _Start, prompt: str, provider: str, turn: dict) -> dict | None:
+    def _start_turn(self, run: _Start, prompt: str, provider: str, turn: dict, begin=None) -> dict | None:
         """Start the role's turn; the researcher's own Ask turn, if one is running, is waited for. None: released meanwhile —
         before the turn, while it was being prepared (the manager asks `unless` once more before the turn exists), or in
         the moment it began, in which case it is stopped at once. `turn` (role, name, redirect) goes to the manager as it
@@ -412,7 +420,7 @@ class AgentRun:
             with self._lock:
                 if run.stop:
                     return None
-            started = self.agent.start(prompt, None, "edit", run.model, run.effort, None, provider, unless=lambda: run.stop, turn=turn)
+            started = self.agent.start(prompt, None, "edit", run.model, run.effort, None, provider, unless=lambda: run.stop, turn=turn, begin=begin)
             if "job" in started:
                 with self._lock:
                     run.job = self.agent.jobs[started["job"]]
@@ -459,7 +467,8 @@ class AgentRun:
         return "\n\n".join(parts)
 
     def _end(self, run: _Start, status: str, reason: str) -> None:
-        """Close this Start, and leave its last word in the work log: a progress note on every stop."""
+        """Close this Start, and leave its last word in the work log: a progress note on every stop — except a decision,
+        whose own needs-human step, the role's, is already that last word."""
         with self._lock:
             if run.stop:
                 return
@@ -467,7 +476,8 @@ class AgentRun:
             if status == "needs-human":
                 run.state.decision = reason
             role, name = run.state.role or "prover", run.state.name
-        self._close_note(role, name, status, reason)
+        if status != "needs-human":
+            self._close_note(role, name, status, reason)
 
     def _close_note(self, role: str, name: str, status: str, reason: str) -> None:
         try:

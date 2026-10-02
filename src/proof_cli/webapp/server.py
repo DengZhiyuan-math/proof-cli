@@ -408,7 +408,7 @@ class ReviewApp:
             raise RequestError(HTTPStatus.NOT_FOUND, "NOT_FOUND", f"no run action {action!r}")
         status, data = self.studios.run_action(node_id, action, body)
         if status >= 400:
-            raise RequestError(HTTPStatus(status), str(data.get("error") or "RUN_REFUSED"), str(data.get("message") or data.get("error") or "refused"))
+            raise RequestError(HTTPStatus(status), str(data.get("code") or "RUN_REFUSED"), str(data.get("error") or "refused"))
         return data
 
     @staticmethod

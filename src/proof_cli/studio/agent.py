@@ -97,13 +97,15 @@ class AgentManager:
               model: str | None = None, effort: str | None = None,
               scope: list[str] | None = None, provider: str | None = None,
               unless: Callable[[], bool] | None = None,
-              turn: dict | None = None) -> dict:
+              turn: dict | None = None,
+              begin: Callable[[Job], None] | None = None) -> dict:
         """Run one turn. `scope` (project-relative files) limits which files the agent may
         change in edit mode; None lets it change any file and create new ones. `unless` is asked once more, after the checks and
         the preflight, right before the turn exists: true, and no turn starts (a run stopped
         while its turn was being prepared). `turn` is a run's turn (agent_run.py): its role,
         name and redirect, handed to the node's context as they are — None for the
-        researcher's own turn, which no run's role reaches."""
+        researcher's own turn, which no run's role reaches. `begin` is told the turn's job once the
+        turn exists, right before its backend starts (a run marks its turn as started there)."""
         if self.closed:
             return {"error": "The studio is closed."}
         backend = self.backend(provider)
@@ -150,6 +152,11 @@ class AgentManager:
         job.turn = turn
         job.writable = lambda rel: self._writable(job, rel)
         job.before = self._snapshot()
+        if begin is not None:
+            try:
+                begin(job)
+            except Exception as e:  # noqa: BLE001 — the turn is registered as active: it must still run and end
+                job.emit({"t": "error", "message": f"{type(e).__name__}: {e}"})
         threading.Thread(target=self._run, args=(job, backend), daemon=True).start()
         return {"job": job.id, "provider": backend.id}
 
