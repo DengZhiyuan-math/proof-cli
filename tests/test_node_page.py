@@ -221,17 +221,23 @@ def test_the_studio_page_carries_the_node_panel_the_run_pane_and_the_oversight_m
     the researcher's oversight, with one-off tasks run as a role's turn — never a prompt the researcher writes."""
     index = (STUDIO_STATIC / "index.html").read_text()
     assert 'src="static/node.js"' in index and 'src="static/run.js"' in index and 'id="node-panel"' in index and 'id="run-pane"' in index
-    assert 'id="chat-plus"' in index and 'id="plus-menu"' in index and 'id="tab-files"' in index
-    assert '<option value="edit">' not in index  # the chat is Ask only
+    assert 'id="chat-plus"' in index and 'id="plus-menu"' in index and 'id="tab-files"' in index and 'src="static/menu.js"' in index
+    assert 'id="chat-mode"' not in index  # the chat is Ask only: no mode to choose (seventh review)
     panel = (STUDIO_STATIC / "node.js").read_text()
     for action in ("claim", "unassign", "split", "depend", "request-review", "challenge", "evidence"):
         assert f'"/{action}"' not in panel, action  # the agent does these, through `proof`
-    agent = (STUDIO_STATIC / "app.js").read_text()
-    assert '"Prove it"' not in agent  # it is Start
-    for label in ("Start agent", "Pause", "Redirect…", "Review what it has", "Stop and release"):
-        assert f'"{label}"' in agent, label
-    for label in ("Prover · propose a split", "Typesetter · draft key ideas", "Numerics · run a check"):
-        assert f'["{label}",' in agent, label
+    # what the "+" menu shows and does is harnessed: tests/test_plus_menu.py
+
+
+def test_the_chat_has_no_edit_path_left():
+    """Seventh review: the one-option mode select, its plumbing and the prompt-driven key-ideas edit turn are gone —
+    the chat only asks; key ideas are the Typesetter's, from the "+" menu."""
+    app = (STUDIO_STATIC / "app.js").read_text()
+    for gone in ("#chat-mode", "chat.mode", "editTurn", "draftKeyIdeas", "/api/key-ideas/draft", "mode: { args"):
+        assert gone not in app, gone
+    assert "studioKeyIdeas" not in (STUDIO_STATIC / "node.js").read_text()
+    shared = "Write key-ideas.md from the draft and proof.tex"
+    assert sum((STUDIO_STATIC / name).read_text().count(shared) for name in ("app.js", "node.js", "menu.js", "run.js")) == 1
 
 
 # -- the panel in the browser (PR #76 audit), run for real under node ------------------
@@ -341,22 +347,13 @@ def test_an_old_snapshot_without_a_summary_is_reviewed_with_a_note_and_a_link():
     assert "MAIN" not in shown["review"]
 
 
-def test_the_agent_panel_offers_the_proof_agents_draft_when_the_node_has_no_summary():
-    """The node panel says what is missing; the draft is the proof agent's, from its "+" menu."""
-    missing = {**VIEW, "key_ideas_working": {"exists": False, "missing": ["key-ideas.md"]}}
-    drafted = _panel(view=missing, draft=True)
-    assert drafted["draftOffered"] and "draftKeyIdeas" in drafted["events"]
-    assert "request review to confirm" in drafted["note"]
-    assert "No key-ideas.md yet" in drafted["text"] and not drafted["buttons"]  # a hint, not a button
-    # with a summary in place there is nothing to draft; an incomplete one says what it lacks
-    assert not _panel(view=REVIEW_VIEW, draft=True)["draftOffered"]
-    partial = _panel(view={**VIEW, "key_ideas_working": {"exists": True, "missing": ["主要步骤"]}}, draft=True)
-    assert "主要步骤" in partial["text"] and not partial["draftOffered"]
-
-
-def test_the_studio_page_can_draft_key_ideas_through_the_agent_panel():
-    app = (STUDIO_STATIC / "app.js").read_text()
-    assert "async function draftKeyIdeas()" in app and '"/api/key-ideas/draft"' in app
+def test_the_node_panel_says_what_the_summary_lacks_and_who_drafts_it():
+    """The node panel says what is missing; the draft is the Typesetter's, from the "+" menu (seventh review)."""
+    missing = _panel(view={**VIEW, "key_ideas_working": {"exists": False, "missing": ["key-ideas.md"]}})
+    assert "No key-ideas.md yet" in missing["text"] and "Typesetter · draft key ideas" in missing["text"]
+    assert not missing["buttons"]  # a hint, not a button
+    partial = _panel(view={**VIEW, "key_ideas_working": {"exists": True, "missing": ["主要步骤"]}})
+    assert "主要步骤" in partial["text"] and "No key-ideas.md yet" not in partial["text"]
 
 
 def test_a_decision_from_the_studio_carries_its_binding_and_the_snapshot_it_showed():

@@ -1,5 +1,6 @@
 // Runs the studio's real run pane (src/proof_cli/studio/static/run.js) against a minimal DOM.
-// argv[2]: JSON {run, log, press: a button label or a list, redirect: text, role: a select value, answer}.
+// argv[2]: JSON {run, log, press: a button label or a list, redirect: text, role: a select value, answer,
+// open: how the log says files open, hash: the page's #, clickFile: a changed file's path to click}.
 // Prints what the pane shows and what it posted.
 const fs = require("fs"), path = require("path"), vm = require("vm");
 
@@ -22,7 +23,7 @@ class El {
 
 (async () => {
   const scenario = JSON.parse(process.argv[2]);
-  const pane = new El("section"), posted = [], dispatched = [];
+  const pane = new El("section"), posted = [], dispatched = [], centred = [];
   let focused = null;
   let run = scenario.run, log = scenario.log || [];
   const timers = [];
@@ -33,7 +34,8 @@ class El {
     CustomEvent: class { constructor(type, init) { this.type = type; this.detail = init && init.detail; } },
     setTimeout: (fn, ms) => { timers.push(ms); return timers.length; }, clearTimeout: () => {},
     // what common.js needs: the page's URL (the node id comes from it), storage, the system theme, the platform
-    location: { pathname: "/studio/N/", hash: "" }, localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    location: { pathname: "/studio/N/", hash: scenario.hash || "" },
+    showCentre: (which, remember) => centred.push([which, remember]),  // app.js's: which view the centre shows localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
     matchMedia: () => ({ matches: false, addEventListener() {} }), navigator: { platform: "MacIntel", userAgent: "" }, window: {},
     fetch: async (url, options = {}) => {
       if (options.method === "POST") {
@@ -43,7 +45,7 @@ class El {
         return { status: scenario.refuse ? 409 : 200, json: async () => (scenario.refuse ? { error: "RUN_ACTIVE", message: "already working" } : answer) };
       }
       if (url === "api/agent/run") return { status: 200, json: async () => run };
-      if (url === "api/agent/log") return { status: 200, json: async () => ({ entries: log, turns: scenario.turns || [], folder: "/proj/proofs/N" }) };
+      if (url === "api/agent/log") return { status: 200, json: async () => ({ entries: log, turns: scenario.turns || [], folder: "/proj/proofs/N", open: scenario.open || { kind: "scheme", url: "vscode://file//proj/proofs/N" } }) };
       if (url.startsWith("api/agent/events")) return { status: 200, json: async () => ({ events: [{ t: "text", text: said }, { t: "done" }], done: true }) };
       return { status: 404, json: async () => ({}) };
     },
@@ -58,17 +60,17 @@ class El {
     buttons: pane.all().filter((x) => x.tag === "button").map((x) => x.textContent),
     status: (pane.all().find((x) => x.cls().startsWith("run-status")) || { textContent: "" }).textContent,
     where: (pane.all().find((x) => x.cls() === "run-where") || { textContent: "" }).textContent,
-    plan: pane.all().filter((x) => x.tag === "li" && x.attrs["data-step"]).map((x) => ({ step: x.attrs["data-step"], text: x.textContent, status: x.cls() })),
+    plan: pane.all().filter((x) => x.tag === "li" && x.attrs["data-step"]).map((x) => ({ step: x.attrs["data-step"], text: x.textContent, status: x.cls(), mark: (x.children.find((c) => typeof c === "object" && c.cls() === "plan-mark") || { textContent: "" }).textContent })),
     log: pane.all().filter((x) => x.tag === "li" && x.attrs["data-kind"]).map((x) => ({ kind: x.attrs["data-kind"], text: x.text() })),
     links: pane.all().filter((x) => x.tag === "a").map((x) => x.attrs.href),
     note: (pane.all().find((x) => x.cls().startsWith("run-note")) || { textContent: "" }).textContent,
-    turns: pane.all().filter((x) => x.tag === "details").map((x) => ({ summary: x.children.find((c) => c.tag === "summary").textContent, files: x.all().filter((a) => a.tag === "a").map((a) => a.attrs.href) })),
+    turns: pane.all().filter((x) => x.tag === "details").map((x) => ({ summary: x.children.find((c) => c.tag === "summary").textContent, files: x.all().filter((a) => a.tag === "a").map((a) => a.attrs.href), titles: x.all().filter((a) => a.tag === "a").map((a) => a.attrs.title) })),
     // what the researcher has in hand (audit P3): the redirect draft and its role, which turns are open, whether the draft has the focus
     redirect: { text: (pane.all().find((x) => x.cls() === "run-redirect") || { value: "" }).value, role: (pane.all().find((x) => x.cls() === "run-redirect-role") || { value: "" }).value },
     open: pane.all().filter((x) => x.tag === "details" && x.open).map((x) => String(x.attrs["data-turn"])),
     focusedRedirect: !!(focused && focused.cls && focused.cls() === "run-redirect"),
     transcripts: Object.fromEntries(pane.all().filter((x) => x.tag === "details").map((x) => [String(x.attrs["data-turn"]), (x.all().find((t) => t.cls() === "turn-transcript") || { textContent: "" }).textContent])),
-    polls: [...timers], posted: [...posted], dispatched: [...dispatched],
+    polls: [...timers], posted: [...posted], dispatched: [...dispatched], centred: [...centred],
   });
   const readings = [read()];
   if (scenario.typed !== undefined) {  // the researcher types a redirect, picks its role, opens a turn's conversation, then a poll comes
@@ -91,6 +93,13 @@ class El {
     said = c.final; scenario.turns[c.turn - 1].done = true; await context.studioRun.refresh(); await tick(); readings.push(read());  // the turn is done
     const d = pane.all().find((x) => x.tag === "details" && Number(x.attrs["data-turn"]) === c.turn); d.open = false; await d.listeners.toggle();
     said = "(the backend is not asked again)"; await openTurn(c.turn); readings.push(read());  // closed and opened again: final, from memory
+  }
+  if (scenario.clickFile) {  // the researcher clicks a file a turn changed
+    const link = pane.all().find((x) => x.tag === "a" && x.textContent === scenario.clickFile);
+    let prevented = false;
+    if (link.onclick) await link.onclick({ preventDefault: () => { prevented = true; } });
+    for (let i = 0; i < 4; i++) await new Promise(setImmediate);
+    readings.push({ ...read(), prevented });
   }
   for (const label of [].concat(scenario.press || [])) {
     if (scenario.redirect !== undefined) { const box = pane.all().find((x) => x.cls() === "run-redirect"); if (box) box.value = scenario.redirect; }

@@ -1023,7 +1023,7 @@ def release_node(
     return claim.model_copy(update={"released_by": claimant_id, "release_reason": release_reason, "released_at": released_at})
 
 
-def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rationale: str) -> CandidateProofRecord:
+def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rationale: str, unassign: bool = False) -> CandidateProofRecord:
     """Snapshot a node's working `proof.tex` for review (ADR-0010).
 
     The working sources are edited freely — in the node's studio, by agents —
@@ -1040,6 +1040,10 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
     version (ADR-0013). Requesting review is how its author confirms a draft the agent wrote.
     Needs no claim. A node someone has claimed is theirs to hand over, and
     their claim ends here, as a wayfinder ticket's does when its work is.
+    `unassign` is the researcher's request on a node someone else holds (the studio's
+    Review what it has, spec #145): the holder's claim is ended in the same write, as an
+    unassignment by `requested_by` — who may clear any claim (ADR-0010) — and the request
+    is recorded as theirs, never as the holder's.
     """
     node = require_node(store, node_id)
     if node.kind == ProofMapNodeKind.imported_result:
@@ -1071,7 +1075,8 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
     # back, before its write lock does, so no later request can have taken their version yet.
     with store.transaction() as conn:
         claim = get_active_claim(store, node_id, conn=conn)
-        if claim is not None and claim.claimant_id != requested_by:  # a node someone holds is theirs to hand over
+        unassigned = claim.claimant_id if claim is not None and claim.claimant_id != requested_by else None
+        if unassigned is not None and not unassign:  # a node someone holds is theirs to hand over
             raise _not_claimant(node_id, claim)
         node = require_node(store, node_id)  # its dependencies as of the write lock, recorded with the snapshot
         current = get_current_candidate_proof(store, node_id, conn=conn)
@@ -1123,7 +1128,8 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
 
         pin_dependencies(store, node)
         if claim is not None:
-            mark_claim_released(store, claim.id, released_by=requested_by, reason="review requested", released_at=utc_now(), conn=conn)
+            reason = f"unassigned by {requested_by}: review requested" if unassigned is not None else "review requested"
+            mark_claim_released(store, claim.id, released_by=requested_by, reason=reason, released_at=utc_now(), conn=conn)
         append_event(
             store,
             "proof_map_review_requested",
@@ -1136,6 +1142,7 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
                 "file_path": record.file_path,
                 "sha256": sha256,
                 "requested_by": requested_by,
+                "unassigned": unassigned,  # whose claim this request ended, when it was not the requester's own
                 "resnapshot_after_loss": resnapshot_of,
                 # the summary's provenance: the author's, or the agent's draft confirmed or edited (ADR-0013)
                 "key_ideas_drafted_by": drafted_by,

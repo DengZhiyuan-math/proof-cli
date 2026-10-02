@@ -123,14 +123,7 @@ function persistSession() {
 /* ------------------------------------------------------------------ save & external changes */
 // One save per tab at a time: a second save waits for the first, so two writes never
 // race on the server (the second would otherwise look like a change made on disk).
-// While the agent works in Edit mode, nothing is written: your edits would end up in its
-// turn's diff (and its Undo). They are saved when the turn ends; a file the agent changed
-// meanwhile gets the conflict banner instead.
 function saveTab(t, force = false) {
-  if (C.editTurn) {
-    if (!C.heldNote) { C.heldNote = true; toast("Your edits are saved when the agent's turn ends."); }
-    return Promise.resolve(false);
-  }
   const run = () => saveTabNow(t, force);
   t.saving = (t.saving || Promise.resolve()).then(run, run);
   return t.saving;
@@ -394,14 +387,15 @@ async function runProgram() {
 }
 
 // The centre (spec #145, decided in #144): the agent's work log by default; the editor and the PDF — or the
-// program and out/ — behind the Files tab. #files opens on Files; the choice is remembered per node.
-function showCentre(which) {
+// program and out/ — behind the Files tab. #files opens on Files; the choice is remembered per node, and
+// applies while an agent is at work: with none, run.js opens the centre on Start (spec #145, story 42).
+function showCentre(which, remember = true) {
   const files = which === "files";
   $("#run-pane").hidden = files;
   $("#editor-pane").hidden = !files; $("#pdf-pane").hidden = !files;
   for (const g of document.querySelectorAll('.gutter[data-resize="pdf"]')) g.hidden = !files;
   $("#tab-log").setAttribute("aria-selected", String(!files)); $("#tab-files").setAttribute("aria-selected", String(files));
-  store.set("centre", which);
+  if (remember) store.set("centre", which);
   if (files) cm.refresh();
 }
 $("#tab-log").onclick = () => showCentre("run");
@@ -440,8 +434,7 @@ const plural = (n, w, ws = w + "s") => `${n} ${n === 1 ? w : ws}`;
 
 async function compile(clean = false) {
   if (S.building) return;
-  if (C.editTurn) toast("Compiling the files on disk; your edits are saved when the agent's turn ends.");
-  else if (!(await saveAll())) return;
+  if (!(await saveAll())) return;
   const mode = BUILD.mode;
   S.building = true;
   const st = $("#build-status");
@@ -729,8 +722,6 @@ function chatHidden(h) {
 }
 chatHidden(store.get("chat.hidden", false));
 $("#btn-chat").onclick = () => chatHidden(!$("#chat").classList.contains("hidden"));
-$("#chat-mode").value = store.get("chat.mode", "ask");  // the chat is Ask only (spec #145); an older remembered mode no longer exists
-$("#chat-mode").onchange = (e) => store.set("chat.mode", e.target.value);
 
 // Minimal, safe rendering: escape first, then code fences, inline code, bold, file:line links.
 function renderMd(text) {
@@ -761,18 +752,14 @@ function saveChatLog() { store.set("chat.log", $("#chat-log").innerHTML.slice(-4
 function chatIntro() {
   chatAppend(`This is the node's proof agent: it reads the project, its library and the web, runs
 <code>proof</code> and computations, and writes this node's proof. Pick Claude Code or Codex CLI above.
-<b>Edit</b> mode may change files — every turn ends with a diff and an Undo button.
-<b>Ask</b> mode is read-only. Type <code>@</code> to point the agent at a file or the selection
-(or select text and press <code>${keys("⌘L")}</code>): it may then change only those files.
-Without <code>@</code>, it may change any file in the project. Type <code>/</code> for commands.
+Here you only <b>Ask</b>: read-only questions about the node — the agent works it from its run, in the centre.
+Type <code>@</code> to point it at a file or the selection (or select text and press <code>${keys("⌘L")}</code>).
+Type <code>/</code> for commands.
 Commits, pushes and non-allowlisted shell commands are not permitted from here.`, "msg intro");
 }
 
 /* Mentions. "@path" points the agent at a file, "@path:12-18" at those lines (made from the
-   editor selection). With mentions, the agent may change only the mentioned files: the
-   server enforces that (Claude Code permission rules, the API tools' checks, or undoing
-   Codex's writes outside them after the turn). Without any, it may change any
-   file in the project and create new ones. */
+   editor selection): what the question is about. The chat is Ask only (spec #145): it changes nothing. */
 const MENTION_RE = /(^|\s)@([^\s@]+)/g;
 C.snips = store.get("chat.snips", {});      // "@file:a-b" -> the text selected when it was made
 
@@ -810,34 +797,23 @@ async function referenceBlock(mentions) {
   }
   return b + "[/Referenced]";
 }
-function describeScope(mentions, mode) {
-  if (mode === "ask") return "Ask mode: read-only";
-  if (!mentions.length) return "Scope: whole workspace (any file, new files allowed)";
-  return "Scope: only " + mentions.map(rangeLabel).join(", ");
+function describeScope(mentions) {
+  return "Ask: read-only" + (mentions.length ? " · about " + mentions.map(rangeLabel).join(", ") : "");
 }
-const SCOPE_ICONS = {
-  wide: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5A1.5 1.5 0 0 1 5 6h4.2l1.8 2H19a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5z"/></svg>',
-  narrow: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3.5h6.5L18 8v11a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 19V5a1.5 1.5 0 0 1 1-1.5z"/><path d="M13.5 3.5V8H18"/></svg>',
-  ask: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5.5" y="10.5" width="13" height="9.5" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/></svg>',
-};
+const ASK_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5.5" y="10.5" width="13" height="9.5" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/></svg>';
 function updateScope() {
-  const ms = parseMentions($("#chat-input").value), mode = $("#chat-mode").value;
   const el = $("#chat-scope");
-  const scope = describeScope(ms, mode);
-  // shown as a small grey icon beside "+" (a folder: any file in the project; a page: only the
-  // @-mentioned files; a lock: read-only); the words are its tooltip and its label
-  const kind = mode === "ask" ? "ask" : ms.length ? "narrow" : "wide";
-  el.innerHTML = SCOPE_ICONS[kind];
-  el.className = kind;
+  const scope = describeScope(parseMentions($("#chat-input").value));
+  // a small grey lock beside "+": the chat is read-only; the words are its tooltip and its label
+  el.innerHTML = ASK_ICON;
+  el.className = "ask";
   el.setAttribute("aria-label", scope);
-  el.title = scope + "\nType @ to point the agent at a file or at the editor selection. "
-    + "With @-mentions it may change only those files; without, any file in the project.";
+  el.title = scope + "\nType @ to point the agent at a file or at the editor selection.";
 }
 function mentionHtml(text) {
   return esc(text).replace(/(^|\s)(@[^\s@]+)/g, '$1<span class="mention">$2</span>');
 }
 $("#chat-input").addEventListener("input", updateScope);
-$("#chat-mode").addEventListener("change", updateScope);
 
 // Insert a mention at the caret (⌘L, or picking one from the @ menu).
 function insertMention(token, snip, replaceFrom) {
@@ -856,70 +832,11 @@ function insertMention(token, snip, replaceFrom) {
   updateScope(); inp.focus();
 }
 
-/* The "+" menu: what the proof agent does on this node (ADR-0006) — prove it, split it, request
-   review, open a Challenge, record an Evidence check — and, when a snapshot awaits review, the
-   researcher's own decision on it (node.js offers it through globalThis.studioReview). An agent
-   item writes its request into the message box, to add to and send; the agent carries it out
-   through `proof`. The decision opens the review sheet and is never the agent's (ADR-0010). */
-// One-off tasks (spec #145): each runs as a single role's turn of the run, with the task as its redirect —
-// never a prompt the researcher has to write. The old prove-it prompt is gone: proving is what Start does.
-const AGENT_TASKS = [
-  ["Prover · propose a split", "prover", "This node is too large to prove directly. Propose Claims that together prove it, then split the node into them."],
-  ["Prover · edit dependencies", "prover", "Change one of this node's dependency edges: add a Lemma the proof uses, remove one it doesn't, or move one onto a split child."],
-  ["Prover · open a Challenge", "prover", "Open a Challenge on the dependency that may no longer hold, and say why."],
-  ["Typesetter · draft key ideas", "typesetter", "Write key-ideas.md from the draft and proof.tex: 核心思路, 主要步骤, 难点, 未覆盖."],
-  ["Typesetter · compile and fix", "typesetter", "Compile proof.tex and fix what fails, without changing the mathematics."],
-  ["Numerics · run a check", "numerics", "Run the computation that checks this node's statement and record what it showed."],
-];
-function askAgent(request, mode) {
-  if (mode) { $("#chat-mode").value = mode; store.set("chat.mode", mode); }
+// The "+" menu is menu.js. A read-only request from it is written into the message box, to add to and send.
+function askAgent(request) {
   const inp = $("#chat-input");
   inp.value = request; inp.focus(); inp.setSelectionRange(request.length, request.length); updateScope();
 }
-function plusMenu(open) {
-  const menu = $("#plus-menu");
-  if (open === undefined) open = menu.hidden;
-  $("#chat-plus").setAttribute("aria-expanded", String(open));
-  if (!open) { menu.hidden = true; return; }
-  const node = (tag, cls, text) => { const e = document.createElement(tag); e.className = cls; if (text) e.textContent = text; return e; };
-  const item = (label, run, title, cls = "") => {
-    const b = node("button", `menu-item ${cls}`.trim(), label);
-    b.type = "button"; b.setAttribute("role", "menuitem"); if (title) b.title = title;
-    b.onclick = () => { plusMenu(false); run(); };
-    return b;
-  };
-  const review = typeof globalThis.studioReview === "function" ? globalThis.studioReview() : null;
-  const run = globalThis.studioRun || null;
-  const state = run ? run.state() : null;
-  const active = !!(state && ["running", "pausing", "paused", "starting"].includes(state.status));
-  // the researcher's oversight first (spec #145): Start once, then Pause / Resume, Redirect, Review what it has, Stop and release
-  const rows = [node("div", "menu-head", "The agent")];
-  if (!run) rows.push(node("div", "menu-head", "no run on this page"));
-  else if (!active) rows.push(item("Start agent", () => run.start(), "The agent works the node on its own until it requests review or needs you"));
-  else {
-    rows.push(item(state.status === "paused" ? "Resume" : "Pause", () => (state.status === "paused" ? run.resume() : run.pause()), "The turn finishes; the agent keeps the node"));
-    rows.push(item("Redirect…", () => { showCentre("run"); run.focusRedirect(); }, "One line, handed to its next turn: type it in the run card"));
-    rows.push(item("Review what it has", () => run.reviewNow(), "Freeze a snapshot of the folder as it stands and review it"));
-    rows.push(item("Stop and release", () => run.release(), "End the run and unassign the node"));
-  }
-  if (run) {
-    rows.push(node("hr", "menu-sep"), node("div", "menu-head", "One-off task (one role, one turn)"));
-    for (const [label, role, task] of AGENT_TASKS) {
-      const row = item(label, () => run.start([role], task), active ? "Finish or stop the run first" : task);
-      row.disabled = active;
-      rows.push(row);
-    }
-  }
-  if (review) rows.push(item(`Check snapshot v${review.version}`, () => askAgent(review.check, "ask"), "Read-only: the agent reports what does not hold"));
-  if (review) rows.push(node("hr", "menu-sep"), node("div", "menu-head", "Your decision"), item(`Review snapshot v${review.version}…`, review.open, "Accept, request a revision or reject: recorded as you", "decide"));
-  $("#review-card").hidden = true;
-  menu.replaceChildren(...rows);
-  menu.hidden = false;
-}
-$("#chat-plus").addEventListener("click", (e) => { e.stopPropagation(); plusMenu(); });
-document.addEventListener("click", (e) => { if (!e.target.closest("#plus-menu, #chat-plus")) plusMenu(false); });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") { plusMenu(false); $("#review-card").hidden = true; } });
-
 async function chatSend() {
   if (C.job) return;
   const text = $("#chat-input").value.trim();
@@ -932,42 +849,23 @@ async function chatSend() {
     return runLocal(slash[1], (slash[2] || "").trim());
   }
   if (!(await saveAll())) return toast("Resolve the save conflict before asking the agent.");
-  const mode = $("#chat-mode").value;
   const mentions = parseMentions(text);
   const refs = await referenceBlock(mentions);
   let prompt;
   if (slash) { await loadCatalog(); prompt = slashPrompt(text, refs); }
   else prompt = refs ? refs + "\n\n" + text : text;
-  // Only the mentioned files may change; without mentions, the whole project.
-  const scope = mode === "edit" && mentions.length ? [...new Set(mentions.map((m) => m.file))] : null;
   const provider = C.provider;
-  const r = await api("/api/agent", { prompt, session_id: C.session, mode, model: C.model, effort: C.effort, scope, provider });
+  const r = await api("/api/agent", { prompt, session_id: C.session, model: C.model, effort: C.effort, provider });
   if (r.error) return chatAppend(`<div class="err">${esc(r.error)}</div>`, "card");
   $("#chat-input").value = ""; updateScope();
   const extra = [provLabel(), C.model, C.effort && "effort " + C.effort].filter(Boolean).join(" · ");
-  chatAppend(`${mentionHtml(text)}<span class="ctx">${esc(describeScope(mentions, mode))}${extra ? " · " + esc(extra) : ""}</span>`, "msg user");
-  await followTurn(r, mode, provider);
-}
-
-// The proof agent drafts the node's missing key-ideas.md (ADR-0013) from proof.tex and the
-// dependencies, in one edit turn that may write only that file; the author then edits it, and
-// requesting review confirms it. Called from the node panel; the turn shows in the agent panel.
-async function draftKeyIdeas() {
-  if (C.job) throw Object.assign(new Error("The agent is still working on the previous message."), { code: "AGENT_BUSY" });
-  if (!(await saveAll())) throw Object.assign(new Error("Resolve the save conflict before asking the agent."), { code: "SAVE_CONFLICT" });
-  const provider = C.provider;
-  const r = await api("/api/key-ideas/draft", { session_id: C.session, model: C.model, effort: C.effort, provider });
-  if (r.error) throw Object.assign(new Error(r.error), { code: "DRAFT_REFUSED" });
-  chatHidden(false);
-  chatAppend(`Draft key-ideas.md from proof.tex and the dependencies<span class="ctx">may change only key-ideas.md · ${esc(provLabel())}</span>`, "msg user");
-  await followTurn(r, "edit", provider);
-  if (S.files.some((f) => f.path === "key-ideas.md")) await openFile("key-ideas.md");  // for the author to read and edit
+  chatAppend(`${mentionHtml(text)}<span class="ctx">${esc(describeScope(mentions))}${extra ? " · " + esc(extra) : ""}</span>`, "msg user");
+  await followTurn(r, provider);
 }
 
 // Follow one agent turn's events into the chat log until it is done.
-async function followTurn(r, mode, provider) {
+async function followTurn(r, provider) {
   C.job = r.job; C.cur = null;
-  C.editTurn = mode === "edit"; C.heldNote = false;       // saves wait for the turn (see saveTab)
   const tools = new Map();
   $("#chat-send").textContent = "Stop"; $("#chat-send").classList.remove("primary");
   $("#chat-status").className = "status busy"; $("#chat-status").textContent = "working…";
@@ -1011,7 +909,7 @@ async function followTurn(r, mode, provider) {
       after += d.events.length; done = d.done;
     }
   } finally {            // whatever happened above, the panel and saving work again
-    C.job = null; C.editTurn = false;
+    C.job = null;
     $("#chat-send").textContent = "Send"; $("#chat-send").classList.add("primary");
     $("#chat-status").className = "status"; $("#chat-status").textContent = "";
     saveChatLog();
@@ -1174,7 +1072,6 @@ const LOCAL = {
   model: { args: "[name]", desc: "Show or set the model for the next messages" },
   effort: { args: "[level]", desc: "Show or set the effort level" },
   skills: { args: "", desc: "List the skills Claude Code can use in this project" },
-  mode: { args: "edit|ask", desc: "Edit (may change files) or Ask (read-only)" },
   clear: { args: "", desc: "Start a new conversation" },
   new: { args: "", desc: "Start a new conversation" },
 };
@@ -1232,9 +1129,6 @@ async function runLocal(name, arg) {
     if (last && last.textContent === "Loading skills…") last.remove();
     if (!cat) return sysNote(`<span class="err">Could not ask Claude Code for its skills.</span>`);
     return sysNote(`<b>${cat.skills.length} skills</b> (click one to use it):\n${chipList(cat.skills)}\n\n<small>Refresh with <code>/skills refresh</code>.</small>`);
-  }
-  if (name === "mode") {
-    return sysNote(`Mode is <b>Ask (read-only)</b>: the agent is driven from its run, not from here (spec #145).`);
   }
   if (name === "clear" || name === "new") return $("#chat-new").onclick();
 }

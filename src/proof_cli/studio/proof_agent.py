@@ -213,7 +213,7 @@ when you are done, and stop with `--step N --status stuck --note "<why>"` when t
 ROLES: dict[str, Role] = {
     AgentRole.prover.value: Role(
         AgentRole.prover.value, _ROLE_BRIEFS["prover"], ("./scratch/**",),
-        (*_PROOF_READS, "Bash(proof node split *)", "Bash(proof node depend *)", "Bash(proof node request-review *)", "Bash(proof node challenge *)",
+        (*_PROOF_READS, "Bash(proof node split *)", "Bash(proof node depend *)", "Bash(proof node request-review *)", "Bash(proof challenge open *)",
          "Bash(proof fog add *)", "Bash(proof fog edit *)", "Bash(proof fog drop *)", "Bash(proof fog reopen *)", "Bash(proof fog crystallize *)"),
         COMPUTATION,
     ),

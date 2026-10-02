@@ -20,6 +20,7 @@ and written outside it, as the agent manager does with its backends.
 
 from __future__ import annotations
 
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -44,7 +45,7 @@ class RunHooks:
     release: Callable[[str], None]                    # release the node when this name is its assignee
     work_log: Callable[[], list[dict]]                # the node's work log, oldest first
     record_stuck: Callable[[str, str, str], None]     # (role, name, note): the run's own last word, as a stuck step
-    review_now: Callable[[], dict]                    # Review what it has: freeze a snapshot of the folder as it stands (in the assignee's name)
+    review_now: Callable[[], dict]                    # Review what it has: freeze a snapshot of the folder as it stands (as the researcher)
 
 
 @dataclass
@@ -84,10 +85,20 @@ class _Start:
 ACTIVE = ("starting", "running", "pausing", "paused")
 
 
-def refusal(exc: Exception) -> dict | None:
-    """A service's refusal as an answer — its code and message — or None for anything that is not one."""
-    code = getattr(exc, "code", None)
-    return {"error": code, "message": getattr(exc, "message", None) or str(exc)} if code else None
+def first_changed_line(diff: str) -> int:
+    """The first line a unified diff changes, in the new file: where "the agent changed check.py line 40" opens (spec #145)."""
+    line = None
+    for text in diff.splitlines():
+        hunk = re.match(r"@@ -\d+(?:,\d+)? \+(\d+)", text)
+        if hunk:
+            if line is not None:
+                break  # the first hunk had no change of its own: never so in a unified diff
+            line = int(hunk.group(1))
+        elif line is not None:
+            if text.startswith(("+", "-")):
+                return max(line, 1)
+            line += 1
+    return 1
 
 
 class AgentRun:
@@ -146,14 +157,11 @@ class AgentRun:
             turns_max, minutes = self.hooks.budget()
             name = self.hooks.agent_name(provider)
             self.hooks.assign(name)  # another assignee, a blocked or rejected node: refused here, and no run begins
-        except Exception as exc:  # noqa: BLE001 — a refusal is the answer; the slot is given back either way
+        except Exception:  # the node could not be assigned (the server answers with the refusal): the slot is given back
             with self._lock:
                 if not run.stop:
                     run.state.status = "idle"
-            answer = refusal(exc)
-            if answer is None:
-                raise
-            return answer
+            raise
         with self._lock:
             if run.stop:  # stopped and released while the node was being assigned: this Start is over before it began
                 run.state.name = name
@@ -190,7 +198,7 @@ class AgentRun:
             job = self.agent.jobs.get(turn["job"])
             turn["done"] = bool(job and job.done)
             done = next((e for e in reversed(job.events) if e.get("t") == "done"), {}) if job else {}
-            turn["changed"] = [c.get("path") for c in done.get("changed") or []]
+            turn["changed"] = [{"path": c.get("path"), "line": first_changed_line(c.get("diff") or "")} for c in done.get("changed") or []]
         return turns
 
     def review_now(self) -> dict:

@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import build, httpbase
-from .agent_run import AgentRun, RunHooks, refusal
+from .agent_run import AgentRun, RunHooks
 from ..key_ideas import KEY_IDEAS_FILE
 from ..vault import RUN_SCRIPT
 from .agent import NO_WINDOW, AgentManager
@@ -295,6 +295,12 @@ def program_argv(script: Path) -> list[str]:
         if interpreter:
             return [*interpreter, str(script)]
     return ["/bin/sh", str(script)]
+
+
+def refusal(exc: Exception) -> dict | None:
+    """A service's refusal as the answer to a request — its code and message — or None for anything that is not one."""
+    code = getattr(exc, "code", None)
+    return {"error": code, "message": getattr(exc, "message", None) or str(exc)} if code else None
 
 
 class Studio:
@@ -654,8 +660,14 @@ class Studio:
         if action == "start":
             provider = str(body.get("provider") or (self.agent.backend(None).id if self.agent.backend(None) else ""))
             roles = body.get("roles") if isinstance(body.get("roles"), list) else None
-            r = self.run.start(provider, roles=roles, redirect=str(body.get("redirect") or "") or None,
-                               model=body.get("model") or None, effort=body.get("effort") or None)
+            try:
+                r = self.run.start(provider, roles=roles, redirect=str(body.get("redirect") or "") or None,
+                                   model=body.get("model") or None, effort=body.get("effort") or None)
+            except Exception as exc:  # noqa: BLE001 — the node could not be assigned: a refusal is the answer; anything else is a bug
+                answer = refusal(exc)
+                if answer is None:
+                    raise
+                return 400, answer
             return (409 if r.get("error") == "RUN_ACTIVE" else 400 if "error" in r else 200), r
         if action == "pause":
             return 200, self.run.pause()
@@ -752,9 +764,9 @@ class Studio:
                                "folder": str(self.root), "medium": self.medium(), "open": self.how_to_open()})
         if path == "/api/agent/run":
             return _json(self.run.view() if self.run is not None else {"status": "idle", "reason": "no run on this folder"})
-        if path == "/api/agent/log":  # the node's work log (spec #145): what the agent planned, did and handed over, and the run's turns
-            return _json({"entries": self.run.work_log() if self.run is not None else [], "turns": self.run.turn_list() if self.run is not None else [],
-                          "folder": str(self.root)})
+        if path == "/api/agent/log":  # the node's work log (spec #145): what the agent planned, did and handed over, the run's turns, and how files open
+            entries, turns = (self.run.work_log(), self.run.turn_list()) if self.run is not None else ([], [])
+            return _json({"entries": entries, "turns": turns, "folder": str(self.root), "open": self.how_to_open()})
         if path == "/api/agent/events":
             job = self.agent.jobs.get(int(q["job"]))
             if not job:

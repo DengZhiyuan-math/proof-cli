@@ -476,6 +476,8 @@ pre.panel-view { font: 12px/1.5 var(--mono); white-space: pre-wrap; color: var(-
 .run-plan { margin: 0; padding-left: 22px; display: grid; gap: 3px; font-size: 13px; }
 .run-plan li.done { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--faint); }
 .run-plan li.started { font-weight: 600; } .run-plan li.stuck { color: var(--err); font-weight: 600; }
+.plan-mark { margin-left: 6px; font-size: 11px; font-weight: 600; color: var(--muted); }  /* the step's state in words (story 36) */
+.run-plan li.done .plan-mark { text-decoration: none; display: inline-block; }
 .run-controls { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .run-controls .run-redirect { flex: 1; min-width: 180px; }
 .run-controls button.danger { color: var(--err); }

@@ -669,20 +669,52 @@ def test_the_studio_serves_the_work_log(studio):
     assert status == 200 and [e["kind"] for e in served["entries"]][:3] == ["claimed", "plan", "step"]
 
 
-def test_review_what_it_has_freezes_a_snapshot_in_the_runs_name_and_ends_the_run(studio):
+def test_review_what_it_has_is_recorded_under_the_researcher_and_ends_the_run(studio):
+    """Seventh review: the researcher asked for the review, so it is recorded as the researcher — the page's git
+    identity, as every page-initiated human action is — not as the agent that holds the node. The run's claim ends
+    with it (the researcher unassigns the node in the same request), so the run ends as any review request ends it."""
+    from proof_cli.proof_map import list_candidate_proofs
+    from proof_cli.reviews import git_identity
+
     store, hub, log, queue = studio
     write_key_ideas(store, "N")
     _queue(queue, [["write", "proof.tex", "\\documentclass{amsart}\\begin{document}half\\end{document}\n"], ["sleep", "2"]], [["sleep", "0"]])
     _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
     time.sleep(1.2)
+    assert get_active_claim(store, "N").claimant_id == "claude-code"
     status, frozen = _post(hub, "/studio/N/api/agent/review-now")
     assert status == 200 and frozen["version"] == 1
     assert get_workflow_state(store, "N") == "review-needed"
-    from proof_cli.proof_map import list_candidate_proofs
     (proof,) = list_candidate_proofs(store, "N")
-    assert proof.submitted_by == "claude-code"  # the node is the run's: the request is made in its name, and ends it
+    assert proof.submitted_by == git_identity(store.root) != "claude-code"
+    (requested,) = [e for e in work_log(store, "N") if e["kind"] == "review-requested"]
+    assert requested["by"] == git_identity(store.root)
     state = _wait(hub)
     assert state["status"] == "done" and state["reason"] == "review-requested" and get_active_claim(store, "N") is None
+
+
+def test_review_what_it_has_on_a_node_another_person_holds_is_recorded_under_the_researcher(studio):
+    from proof_cli.proof_map import claim_node, list_candidate_proofs
+    from proof_cli.reviews import git_identity
+
+    store, hub, log, queue = studio
+    write_key_ideas(store, "N")
+    claim_node(store, "N", claimant_id="alice")
+    status, frozen = _post(hub, "/studio/N/api/agent/review-now")
+    assert status == 200 and frozen["version"] == 1
+    (proof,) = list_candidate_proofs(store, "N")
+    assert proof.submitted_by == git_identity(store.root) != "alice"
+    assert get_active_claim(store, "N") is None  # handed over: the researcher unassigned it in the same request
+
+
+def test_a_refused_review_what_it_has_leaves_the_holders_claim(studio):
+    from proof_cli.proof_map import claim_node
+
+    store, hub, log, queue = studio
+    claim_node(store, "N", claimant_id="alice")
+    status, refused = _post(hub, "/studio/N/api/agent/review-now")  # no key ideas: refused before anything changes
+    assert status == 409 and refused["error"] == "KEY_IDEAS_REQUIRED"
+    assert get_active_claim(store, "N").claimant_id == "alice"
 
 
 def test_review_what_it_has_is_refused_when_nothing_can_be_frozen(studio):
@@ -712,12 +744,48 @@ def test_the_chat_route_is_ask_only_whatever_the_body_says(studio):
     assert job.mode == "ask"  # the backend gets no Edit permission in this mode; what the stub wrote directly says nothing about that
 
 
+def _cli_commands() -> set[str]:
+    """Every `proof` command the CLI really has, as `group … command`, walked from its command tree."""
+    import typer
+
+    from proof_cli.cli import app
+
+    def leaves(command, path=()):
+        if hasattr(command, "commands"):
+            for name, sub in command.commands.items():
+                yield from leaves(sub, (*path, name))
+        else:
+            yield " ".join(path)
+
+    return set(leaves(typer.main.get_command(app)))
+
+
+def _proof_rule_command(rule: str) -> str:
+    """`Bash(proof node split *)` → `node split`."""
+    assert rule.startswith("Bash(proof ") and rule.endswith(" *)"), rule
+    return rule[len("Bash(proof "):-len(" *)")]
+
+
 def test_the_prover_may_open_a_challenge(studio):
+    """Seventh review: the rule names the CLI's real command (ADR-0006: `proof challenge open`), not one that
+    does not exist — a permission for a command the CLI lacks lets the agent do nothing."""
     store, hub, log, queue = studio
     _queue(queue, [["sleep", "0"]])
     _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["prover"]})
     _wait(hub)
-    assert "Bash(proof node challenge *)" in _turns(log)[0]["argv"]
+    argv = _turns(log)[0]["argv"]
+    challenge = [rule for rule in argv if rule.startswith("Bash(proof") and "challenge" in rule]
+    assert challenge == ["Bash(proof challenge open *)"]
+    assert _proof_rule_command(challenge[0]) in _cli_commands()
+
+
+def test_every_roles_proof_rules_name_real_commands():
+    from proof_cli.studio.proof_agent import ROLES
+
+    known = _cli_commands()
+    for role in ROLES.values():
+        for rule in role.proof:
+            assert _proof_rule_command(rule) in known, (role.name, rule)
 
 
 def test_review_what_it_has_while_paused_ends_the_run_and_resume_does_nothing(studio):
@@ -734,3 +802,21 @@ def test_review_what_it_has_while_paused_ends_the_run_and_resume_does_nothing(st
     assert _post(hub, "/studio/N/api/agent/resume")[1]["status"] == "done"  # nothing to resume
     time.sleep(0.8)
     assert not (store.root / "proofs" / "N" / "scratch" / "after-review.md").exists() and len(_turns(log)) == 1
+
+
+def test_the_log_gives_each_changed_file_its_line_and_how_the_page_opens_it(studio):
+    """Seventh review (spec #145, stories 18–19): a file a turn changed is listed with the first line it changed, and
+    the log says how the page opens it — the vscode:// scheme, or the project's `[studio] open_command` when set."""
+    store, hub, log, queue = studio
+    folder = store.root / "proofs" / "N"
+    (folder / "scratch").mkdir(exist_ok=True)
+    (folder / "scratch" / "draft.md").write_text("one\ntwo\nthree\nfour\nfive\nsix\n")
+    _queue(queue, [["write", "scratch/draft.md", "one\ntwo\nthree\nFOUR\nfive\nsix\n"], ["write", "scratch/new.md", "fresh\n"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["prover"]})
+    _wait(hub)
+    served = _get(hub, "/studio/N/api/agent/log")[1]
+    (turn,) = served["turns"]
+    assert {c["path"]: c["line"] for c in turn["changed"]} == {"scratch/draft.md": 4, "scratch/new.md": 1}
+    assert served["open"] == {"kind": "scheme", "url": f"vscode://file/{folder}"}
+    (store.root / "proof.toml").write_text('[studio]\nopen_command = "subl {file}"\n')
+    assert _get(hub, "/studio/N/api/agent/log")[1]["open"] == {"kind": "command", "command": "subl {file}"}

@@ -152,12 +152,12 @@ class StudioHub:
             proof_map.release_node(self.store, node_id, claimant_id=name, reason="released by the researcher")
 
     def _review_now(self, node_id: str) -> dict:
-        """Review what the agent has (spec #145): freeze a snapshot of the folder as it stands. A node someone holds
-        is theirs to hand over, so the request is made in the assignee's name — the run's — which ends the run as
-        a review request does; an unheld node is frozen as the researcher."""
-        claim = proof_map.get_active_claim(self.store, node_id)
-        requested_by = claim.claimant_id if claim is not None else git_identity(self.store.root)
-        record = proof_map.request_review(self.store, node_id, requested_by=requested_by, rationale="the researcher reviews what the agent has, as it stands")
+        """Review what the agent has (spec #145): freeze a snapshot of the folder as it stands. The researcher asks
+        for it, so it is recorded as the researcher — the page's git identity, as every page-initiated human action
+        is — whoever holds the node: the holder's claim (the run's, or another person's) ends in the same request,
+        an unassignment by the researcher, so the run ends as any review request ends it."""
+        record = proof_map.request_review(self.store, node_id, requested_by=git_identity(self.store.root),
+                                          rationale="the researcher reviews what the agent has, as it stands", unassign=True)
         return record.model_dump(mode="json")
 
     def _last_step(self, node_id: str) -> int:
