@@ -786,3 +786,29 @@ def test_node_show_json_shows_each_evidence_checks_own_binding(tmp_path: Path):
     assert checks[ids[0]]["binding"]["state"] == "changed" and checks[ids[0]]["binding"]["label"] == "snapshot changed since this check"
     assert checks[ids[0]]["binding"]["sha256"] == sha  # the check's own hash, not the snapshot's new one
     assert checks[ids[1]]["binding"]["state"] == "unbound"  # never read as matching
+
+
+def test_node_evidence_record_on_an_unreadable_snapshot_is_refused(tmp_path: Path):
+    import shutil
+
+    proof_id = _create_claimed_and_submitted(tmp_path)
+    shutil.rmtree(tmp_path / "proofs" / "clm_1" / "snapshots" / "v1")
+    for extra in ([], ["--snapshot-sha256", "0" * 64]):
+        result = runner.invoke(app, ["node", "evidence", "record", proof_id, "passed", *extra, "--root", str(tmp_path), "--json"])
+        assert result.exit_code != 0
+        error = json.loads(result.stdout)["error"]
+        assert error["code"] == "SNAPSHOT_UNREADABLE" and "v1" in error["message"]
+    shown = json.loads(runner.invoke(app, ["node", "show", "clm_1", "--root", str(tmp_path), "--json"]).stdout)["data"]
+    assert shown["evidence_checks"] == []  # nothing stored, so nothing reads as unbound
+
+
+def test_node_show_json_reads_a_check_on_a_snapshot_lost_since_as_unverifiable(tmp_path: Path):
+    import shutil
+
+    proof_id = _create_claimed_and_submitted(tmp_path)
+    sha = _sha_of(tmp_path, proof_id)
+    runner.invoke(app, ["node", "evidence", "record", proof_id, "passed", "--root", str(tmp_path), "--json"])
+    shutil.rmtree(tmp_path / "proofs" / "clm_1" / "snapshots" / "v1")
+    (check,) = json.loads(runner.invoke(app, ["node", "show", "clm_1", "--root", str(tmp_path), "--json"]).stdout)["data"]["evidence_checks"]
+    assert check["binding"]["state"] == "unverifiable" and check["binding"]["sha256"] == sha
+    assert "can't be read" in check["binding"]["label"] and "not bound" not in check["binding"]["label"]

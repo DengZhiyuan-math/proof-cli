@@ -261,6 +261,13 @@ def read_working_snapshot(root: Path, node_id: str, medium: Medium | None = None
     return SnapshotContents(files, executable, tuple(scan.hidden))
 
 
+def working_links(root: Path, node_id: str, medium: Medium | None = None) -> list[tuple[Path, bool]]:
+    """The symbolic links a snapshot of the node would meet where it reads a file or folder (each with whether it
+    dangles): what `read_working_snapshot` refuses with `NodeFolderLinks`. A Run's Evidence check (#147) refuses
+    only those among the inputs; a link under `out/` is an output, and outputs may differ."""
+    return list(_working_scan(root, node_id, medium).links)
+
+
 def working_inputs_digest(root: Path, node_id: str, medium: Medium | None = None) -> str:
     """The inputs digest of the node folder as it is now: equal to a snapshot's
     `frozen_inputs_digest` exactly when no input changed since it was frozen (`out/` may have).
