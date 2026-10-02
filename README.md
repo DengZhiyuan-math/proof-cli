@@ -35,8 +35,11 @@ proof node create C3 claim "For every n ≤ 10^4 …" --medium computation   # a
 #   agent_name = "claude-code"      # the name the run claims and records under (default: the provider's)
 #   budget_turns = 40               # per Start; budget_minutes = 60
 proof node progress N              # the node's work log: what the agent planned, did, handed over
-# In a computation node's studio, Run executes run.sh (its exit code is an Evidence check: 0 passed, otherwise
-# failed) and Open in VS Code hands the folder to the editor — vscode://file/<folder>, or the command proof.toml names:
+# In a computation node's studio, Run executes run.sh (its exit code is an Evidence check on the current snapshot:
+# 0 passed, otherwise failed — recorded only when the run completes with the snapshot's frozen inputs, untouched;
+# see ADR-0015). run.sh runs as you, with your full environment, and can write anywhere you can (ADR-0010's
+# cooperative model, not a sandbox); the page keeps the last 8 MB of its output.
+# Open in VS Code hands the folder to the editor — vscode://file/<folder>, or the command proof.toml names:
 #   [studio]
 #   open_command = "code {folder}"     # {folder} and {file} are filled in; run by the page's server
 ```
@@ -77,6 +80,9 @@ A request without `key-ideas.md`, or with 核心思路 or 主要步骤 empty, is
   # proof.toml, at the project root
   [studio]
   library = ["~/papers", "../lecture-notes"]
+
+  [snapshot]
+  large_output_mb = 50   # a computation snapshot freezing more of out/ gives the SNAPSHOT_LARGE_OUTPUT notice
   ```
 - **An imported result's page** shows its source, trust level and dependents, and its Reference review.
 

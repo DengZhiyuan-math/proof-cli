@@ -1058,6 +1058,21 @@ def test_a_decision_wins_over_a_review_request_in_the_same_turn_and_is_logged_on
     assert len(asked) == 1  # the run's closing note does not say it a second time
 
 
+def test_running_the_nodes_program_counts_as_a_change(studio, monkeypatch):
+    """A computation turn's run of `./run.sh` is a run for the stuck rule, as an interpreter's or a compile's is."""
+    from proof_cli.studio import agent_run
+    from proof_cli.studio.proof_agent import is_a_run
+
+    assert is_a_run("./run.sh") and is_a_run("cd out && ./run.sh --n 100") and is_a_run("latexmk -pdf proof.tex")
+    assert not is_a_run("ls out") and not is_a_run("cat run.sh")
+    store, hub, log, queue = studio
+    monkeypatch.setattr(agent_run, "STUCK_TURNS", 2)
+    _queue(queue, [["sleep", "0"]], [["tool", "./run.sh"]], [["sleep", "0"]], [["sleep", "0"]], [["sleep", "0"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["prover", "numerics"]})
+    state = _wait(hub)
+    assert state["status"] == "stuck" and len(_turns(log)) == 4, state
+
+
 # -- what the studio's centre reads and does (spec #145, part 4) ---------------------------------------
 
 
@@ -1243,15 +1258,48 @@ def test_the_log_gives_each_changed_file_its_line_and_how_the_page_opens_it(stud
     folder = store.root / "proofs" / "N"
     (folder / "scratch").mkdir(exist_ok=True)
     (folder / "scratch" / "draft.md").write_text("one\ntwo\nthree\nfour\nfive\nsix\n")
-    _queue(queue, [["write", "scratch/draft.md", "one\ntwo\nthree\nFOUR\nfive\nsix\n"], ["write", "scratch/new.md", "fresh\n"]])
+    _queue(queue, [["write", "scratch/draft.md", "one\ntwo\nthree\nFOUR\nfive\nsix\n"], ["write", "scratch/my #1.md", "fresh\n"]])
     _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["prover"]})
     _wait(hub)
     served = _get(hub, "/studio/N/api/agent/log")[1]
     (turn,) = [e for e in served["entries"] if e["kind"] == "turn"]
-    assert {c["path"]: c["line"] for c in turn["changed"]} == {"scratch/draft.md": 4, "scratch/new.md": 1}
-    assert served["open"] == {"kind": "scheme", "url": f"vscode://file/{folder}"}
+    assert {c["path"]: c["line"] for c in turn["changed"]} == {"scratch/draft.md": 4, "scratch/my #1.md": 1}
+    # one way to build the link: the server's vscode_url (#147), percent-encoded — a `#` or a space stays in the path
+    from proof_cli.studio.server import vscode_url
+
+    links = {c["path"]: c["url"] for c in turn["changed"]}
+    assert links == {"scratch/draft.md": vscode_url(folder / "scratch" / "draft.md", 4), "scratch/my #1.md": vscode_url(folder / "scratch" / "my #1.md", 1)}
+    assert "%20%231.md:1" in links["scratch/my #1.md"]
+    assert served["open"] == {"kind": "scheme", "url": vscode_url(folder)}
     (store.root / "proof.toml").write_text('[studio]\nopen_command = "subl {file}"\n')
-    assert _get(hub, "/studio/N/api/agent/log")[1]["open"] == {"kind": "command", "command": "subl {file}"}
+    commanded = _get(hub, "/studio/N/api/agent/log")[1]
+    assert commanded["open"] == {"kind": "command", "command": "subl {file}"}
+    assert all("url" not in c for e in commanded["entries"] if e["kind"] == "turn" for c in e["changed"])  # the server opens it
+
+
+def test_an_agent_job_is_an_edit_turn_from_the_moment_it_is_visible(studio):
+    """Final review: the job became the manager's active one a moment before its mode was set, so a key-ideas.md save
+    in that instant was not refused. Its mode is set before anyone can see it."""
+    store, hub, log, queue = studio
+    agent = hub.studio("N").agent
+    seen = []
+
+    class Watched(type(agent)):
+        @property
+        def active(self):
+            return self.__dict__.get("_active")
+
+        @active.setter
+        def active(self, job):
+            seen.append(job.mode if job is not None else None)
+            self.__dict__["_active"] = job
+
+    agent.__dict__["_active"] = agent.__dict__.pop("active", None)
+    agent.__class__ = Watched
+    _queue(queue, [["sleep", "0"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["typesetter"]})
+    _wait(hub)
+    assert "edit" in seen and "ask" not in seen  # never visible as active in the default (ask) mode
 
 
 # -- ADR-0013: a key-ideas summary an agent turn wrote is recorded as the agent's draft ------------------
