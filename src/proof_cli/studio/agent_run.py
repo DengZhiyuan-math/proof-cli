@@ -22,6 +22,7 @@ and written outside it, as the agent manager does with its backends.
 
 from __future__ import annotations
 
+import re
 import threading
 import time
 import uuid
@@ -29,7 +30,6 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from ..domain import AGENT_ROLES
-from ..errors import ERROR_CODES
 from .proof_agent import is_a_run
 
 STUCK_TURNS = 5      # turns in a row that change nothing — no `proof` write, no file, no run — before the run stops as stuck
@@ -38,7 +38,7 @@ SETTLE_WAIT = 5.0    # seconds a Start waits for a run that is over to finish gi
 # the work log entries the stuck rule counts as a change: a `proof` write that is not narration. A plan, a step or a
 # handoff only says what the run means to do or did; a turn that says only that changed nothing.
 _CHANGES = ("split", "fog", "experiment", "evidence", "dependencies", "review-requested")
-ACTIONS = ("start", "pause", "resume", "redirect", "release")   # the researcher's oversight, on the studio's and the map's routes
+ACTIONS = ("start", "pause", "resume", "redirect", "release", "review-now")   # the researcher's oversight, on the studio's and the map's routes
 ACTIVE = ("starting", "running", "pausing", "paused")
 # how a run's end reads as its closing progress note's step status
 _CLOSING = {"done": "done", "released": "done", "stuck": "stuck", "budget": "stuck", "needs-human": "needs-human"}
@@ -58,6 +58,7 @@ class RunHooks:
     # step and conversation (`events`)
     record_turn: Callable[[dict], None] = lambda turn: None
     transcript: Callable[[str], dict | None] = lambda turn: None   # a recorded turn's conversation, by its id
+    review_now: Callable[[], dict] = lambda: {}   # Review what it has: freeze a snapshot of the folder as it stands (as the researcher)
 
 
 @dataclass
@@ -96,6 +97,28 @@ class _Start:
     effort: object = None
 
 
+def first_changed_line(diff: str) -> int:
+    """The first line a unified diff changes, in the new file: where "the agent changed check.py line 40" opens (spec #145)."""
+    line = None
+    for text in diff.splitlines():
+        hunk = re.match(r"@@ -\d+(?:,\d+)? \+(\d+)", text)
+        if hunk:
+            if line is not None:
+                break  # the first hunk had no change of its own: never so in a unified diff
+            line = int(hunk.group(1))
+        elif line is not None:
+            if text.startswith(("+", "-")):
+                return max(line, 1)
+            line += 1
+    return 1
+
+
+def _changed_files(job) -> list[dict]:
+    """The files a finished turn changed, each with the first line it changed: where the work log opens it."""
+    done = next((e for e in reversed(job.events) if e.get("t") == "done"), {})
+    return [{"path": c.get("path"), "line": first_changed_line(c.get("diff") or "")} for c in done.get("changed") or []]
+
+
 class AgentRun:
     def __init__(self, agent, hooks: RunHooks) -> None:
         self.agent = agent          # the studio's AgentManager
@@ -125,7 +148,8 @@ class AgentRun:
         if state.deadline is not None:
             left = max(0.0, (state.deadline - (state.paused_at or time.time())) / 60)
         return {
-            "status": state.status, "reason": state.reason, "role": state.role, "name": state.name, "provider": state.provider,
+            "status": state.status, "active": state.status in ACTIVE,
+            "reason": state.reason, "role": state.role, "name": state.name, "provider": state.provider,
             "turns": state.turns, "turns_max": state.turns_max, "started_at": state.started_at, "deadline": state.deadline,
             "minutes_left": left, "roles": list(state.roles), "redirect": state.redirect, "decision": state.decision,
             "job": state.job, "turn": state.turn,
@@ -155,12 +179,11 @@ class AgentRun:
             turns_max, minutes = self.hooks.budget()
             name = self.hooks.agent_name(provider)
             self.hooks.assign(name)  # another assignee, a blocked or rejected node: refused here, and no run begins
-        except Exception as exc:  # noqa: BLE001 — the refusal is the answer; the slot is given back
+        except Exception:  # the node could not be assigned (the server answers with the refusal): the slot is given back
             with self._lock:
                 if not run.stop:
                     run.state.status = "idle"
-            code = getattr(exc, "code", None)
-            return {"error": getattr(exc, "message", None) or str(exc), "code": code if code in ERROR_CODES else "RUN_REFUSED"}
+            raise
         with self._lock:
             if run.stop:  # stopped and released while the node was being assigned: this Start is over before it began
                 run.state.name = name
@@ -186,6 +209,31 @@ class AgentRun:
             return self.view()
         run.thread.start()
         return self.view()
+
+    def work_log(self) -> list[dict]:
+        return self.hooks.work_log()
+
+    def review_now(self) -> dict:
+        """Review what it has: a snapshot of the folder as it stands, frozen through the project's own request-review.
+        A review request hands the node over, so a successful freeze ends the run — paused or running — and nothing
+        resumes it: the researcher's review is what happens next (audit P4)."""
+        record = self.hooks.review_now()
+        with self._lock:
+            run = self._run
+            ended = self.active()
+            job = run.job if ended else None
+            role, name = run.state.role or "prover", run.state.name
+            if ended:
+                run.stop = True
+                run.pause = False
+                run.state.status, run.state.reason = "done", "review-requested"
+                run.state.paused_at = None
+                self._wake.notify_all()
+        if job is not None and not job.done:
+            self.agent.stop(job.id)
+        if ended:  # the run's last word, as on every stop
+            self._close_note(role, name, "done", "review-requested")
+        return record
 
     def pause(self) -> dict:
         with self._lock:
@@ -312,7 +360,8 @@ class AgentRun:
                 steps = [e["step"] for e in log if e.get("kind") == "step"]
                 self._note_turn({**turn, "phase": "ended", "job": job.id, "step": steps[-1] if steps else None,
                                  "session_id": next((e["session_id"] for e in reversed(job.events) if e.get("session_id")), None),
-                                 "events": [e for e in job.events if e.get("t") != "delta"]})  # the text events hold the whole text
+                                 "events": [e for e in job.events if e.get("t") != "delta"],  # the text events hold the whole text
+                                 "prompt": prompt, "changed": _changed_files(job)})
                 with self._lock:
                     run.job = None
                     run.state.job = run.state.turn = None

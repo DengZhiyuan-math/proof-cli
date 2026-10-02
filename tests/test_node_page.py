@@ -264,16 +264,28 @@ def test_no_page_offers_open_in_prism_local():
         assert "prism-local" not in text.lower() and "PROOF_CLI_PRISM_LOCAL" not in text, path.name
 
 
-def test_the_studio_page_carries_the_node_panel_and_the_agents_actions():
-    """The node panel shows the node and who holds it; what the proof agent does is asked of it from its panel."""
+def test_the_studio_page_carries_the_node_panel_the_run_pane_and_the_oversight_menu():
+    """The node panel shows the node and who holds it; the centre is the agent's run (spec #145); the "+" menu is
+    the researcher's oversight, with one-off tasks run as a role's turn — never a prompt the researcher writes."""
     index = (STUDIO_STATIC / "index.html").read_text()
-    assert 'src="static/node.js"' in index and 'id="node-panel"' in index and 'id="chat-plus"' in index and 'id="plus-menu"' in index
+    assert 'src="static/node.js"' in index and 'src="static/run.js"' in index and 'id="node-panel"' in index and 'id="run-pane"' in index
+    assert 'id="chat-plus"' in index and 'id="plus-menu"' in index and 'id="tab-files"' in index and 'src="static/menu.js"' in index
+    assert 'id="chat-mode"' not in index  # the chat is Ask only: no mode to choose (seventh review)
     panel = (STUDIO_STATIC / "node.js").read_text()
     for action in ("claim", "unassign", "split", "depend", "request-review", "challenge", "evidence"):
         assert f'"/{action}"' not in panel, action  # the agent does these, through `proof`
-    agent = (STUDIO_STATIC / "app.js").read_text()
-    for label in ("Prove it", "Request review", "Split into claims", "Edit dependencies", "Open a Challenge", "Record evidence"):
-        assert f'["{label}",' in agent, label
+    # what the "+" menu shows and does is harnessed: tests/test_plus_menu.py
+
+
+def test_the_chat_has_no_edit_path_left():
+    """Seventh review: the one-option mode select, its plumbing and the prompt-driven key-ideas edit turn are gone —
+    the chat only asks; key ideas are the Typesetter's, from the "+" menu."""
+    app = (STUDIO_STATIC / "app.js").read_text()
+    for gone in ("#chat-mode", "chat.mode", "editTurn", "draftKeyIdeas", "/api/key-ideas/draft", "mode: { args"):
+        assert gone not in app, gone
+    assert "studioKeyIdeas" not in (STUDIO_STATIC / "node.js").read_text()
+    shared = "Write key-ideas.md from the draft and proof.tex"
+    assert sum((STUDIO_STATIC / name).read_text().count(shared) for name in ("app.js", "node.js", "menu.js", "run.js")) == 1
 
 
 # -- the panel in the browser (PR #76 audit), run for real under node ------------------
@@ -383,22 +395,13 @@ def test_an_old_snapshot_without_a_summary_is_reviewed_with_a_note_and_a_link():
     assert "MAIN" not in shown["review"]
 
 
-def test_the_agent_panel_offers_the_proof_agents_draft_when_the_node_has_no_summary():
-    """The node panel says what is missing; the draft is the proof agent's, from its "+" menu."""
-    missing = {**VIEW, "key_ideas_working": {"exists": False, "missing": ["key-ideas.md"]}}
-    drafted = _panel(view=missing, draft=True)
-    assert drafted["draftOffered"] and "draftKeyIdeas" in drafted["events"]
-    assert "request review to confirm" in drafted["note"]
-    assert "No key-ideas.md yet" in drafted["text"] and not drafted["buttons"]  # a hint, not a button
-    # with a summary in place there is nothing to draft; an incomplete one says what it lacks
-    assert not _panel(view=REVIEW_VIEW, draft=True)["draftOffered"]
-    partial = _panel(view={**VIEW, "key_ideas_working": {"exists": True, "missing": ["主要步骤"]}}, draft=True)
-    assert "主要步骤" in partial["text"] and not partial["draftOffered"]
-
-
-def test_the_studio_page_can_draft_key_ideas_through_the_agent_panel():
-    app = (STUDIO_STATIC / "app.js").read_text()
-    assert "async function draftKeyIdeas()" in app and '"/api/key-ideas/draft"' in app
+def test_the_node_panel_says_what_the_summary_lacks_and_who_drafts_it():
+    """The node panel says what is missing; the draft is the Typesetter's, from the "+" menu (seventh review)."""
+    missing = _panel(view={**VIEW, "key_ideas_working": {"exists": False, "missing": ["key-ideas.md"]}})
+    assert "No key-ideas.md yet" in missing["text"] and "Typesetter · draft key ideas" in missing["text"]
+    assert not missing["buttons"]  # a hint, not a button
+    partial = _panel(view={**VIEW, "key_ideas_working": {"exists": True, "missing": ["主要步骤"]}})
+    assert "主要步骤" in partial["text"] and "No key-ideas.md yet" not in partial["text"]
 
 
 def test_a_decision_from_the_studio_carries_its_binding_and_the_snapshot_it_showed():
@@ -571,3 +574,36 @@ def test_a_frozen_output_that_could_carry_script_is_served_as_a_download_never_a
     assert _ok(client.get("/api/node/N/snapshot/file?path=out/report.html"))["type"] == "application/octet-stream"  # served as a download
     assert _ok(client.get("/api/node/N/snapshot/file?path=out/plot.svg"))["type"] == "application/octet-stream"
     assert _ok(client.get("/api/node/N/snapshot/file?path=out/plot.png"))["type"] == "image/png"  # a raster image shows inline
+
+
+def test_the_centres_tab_bar_stays_in_both_views_and_the_first_visit_keeps_the_work_log():
+    """Fourth review F1: the Work log · Files tabs and the bar's Run/Compile live in the centre column above what is
+    shown; the Files view hides the work log only, and the first visit's preloaded file does not switch the view."""
+    from html.parser import HTMLParser
+
+    class Tree(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.stack, self.parents = [], {}
+
+        def handle_starttag(self, tag, attrs):
+            attrs = dict(attrs)
+            if "id" in attrs:
+                self.parents[attrs["id"]] = list(self.stack)
+            if tag not in ("link", "meta", "input", "br", "hr", "img"):
+                self.stack.append(attrs.get("id") or tag)
+
+        def handle_endtag(self, tag):
+            if self.stack:
+                self.stack.pop()
+
+    tree = Tree()
+    tree.feed((STUDIO_STATIC / "index.html").read_text())
+    assert "centre" in tree.parents["centre-tabs"] and "centre-body" not in tree.parents["centre-tabs"]  # the bar is above both views
+    for pane in ("run-pane", "editor-pane", "pdf-pane"):
+        assert "centre-body" in tree.parents[pane], pane  # and both views are below it
+    app = (STUDIO_STATIC / "app.js").read_text()
+    centre = app[app.index("function showCentre"):app.index("$(\"#tab-log\").onclick")]
+    assert '$("#run-pane").hidden = files;' in centre and "#centre\")" not in centre and "run-stage" not in app
+    init = app[app.index("async function init()"):]
+    assert "await openFile(BUILD.main, undefined, false)" in init  # preloaded behind the Files tab, the work log stays

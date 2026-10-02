@@ -121,6 +121,7 @@ class StudioHub:
                             self.store, node_id, role=role, by=name, step=self._last_step(node_id), status=status, note=note),
                         record_turn=lambda turn: proof_map.record_agent_turn(self.store, node_id, **turn),
                         transcript=lambda turn: proof_map.agent_turn_transcript(self.store, node_id, turn),
+                        review_now=lambda: self._review_now(node_id),
                     ),
                     # the node's Medium as of each request, a run recorded as an Evidence check as the page's
                     # identity, and the project's optional open command (spec #145)
@@ -138,6 +139,15 @@ class StudioHub:
         claim = proof_map.get_active_claim(self.store, node_id)
         if claim is not None and claim.claimant_id == name:
             proof_map.release_node(self.store, node_id, claimant_id=name, reason=reason)
+
+    def _review_now(self, node_id: str) -> dict:
+        """Review what the agent has (spec #145): freeze a snapshot of the folder as it stands. The researcher asks
+        for it, so it is recorded as the researcher — the page's git identity, as every page-initiated human action
+        is — whoever holds the node: the holder's claim (the run's, or another person's) ends in the same request,
+        an unassignment by the researcher, so the run ends as any review request ends it."""
+        record = proof_map.request_review(self.store, node_id, requested_by=git_identity(self.store.root),
+                                          rationale="the researcher reviews what the agent has, as it stands", unassign=True)
+        return record.model_dump(mode="json")
 
     def _last_step(self, node_id: str) -> int:
         steps = [e["step"] for e in proof_map.work_log(self.store, node_id) if e.get("kind") == "step"]

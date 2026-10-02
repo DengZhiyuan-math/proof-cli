@@ -117,15 +117,15 @@ proof-cli's own local web page, the map's home, and the researcher's one entry: 
 _Avoid_: review app (its ADR-0009 name), dashboard, admin panel
 
 **Studio**:
-A local node's page on the proof map page: a LaTeX workspace over the node's folder `proofs/<node-id>/`, built from prism-local's code and served by the map's own server. It has an editor, compile (`proof.tex` → `build/proof.pdf`, when TeX or Tectonic is installed), the PDF with SyncTeX both ways, the proof agent, and a node panel for claim, split, request review, Challenge, Evidence check and the node's Review decisions. Its review view shows the snapshot's Key-ideas summary and the decisions, not the frozen LaTeX or PDF, which the node's page shows (ADR-0013). Its editor writes only the node's working sources; snapshots, build output and `reviews.jsonl` are never edited there. An imported result has no studio. See ADR-0011.
-_Avoid_: prism-local (the separate project it was copied from), editor window
+A local node's page on the proof map page: the Proof agent's workbench, watched by the researcher. Its centre is the node's Work log — the run's plan, its role and step, and the oversight actions (Start, Pause, Redirect, Resume, Stop and release, and Review what it has, which freezes a snapshot and, as any review request does, hands the node over) — and the editor and PDF, or a `computation` node's program and `out/`, are its Files view; a computation node's bar offers Run and Open in VS Code where a LaTeX node's offers Compile. It has a node panel for the node's state and dependencies, the review sheet for the researcher's decisions, and an Ask box for read-only questions to the agent. Served by the map's own server; built from prism-local's code. See ADR-0011, ADR-0015, ADR-0016.
+_Avoid_: prism-local (the separate project it was copied from), editor window, LaTeX editor
 
 **Proof agent**:
 The agent run a node's studio starts and the researcher watches: one run holds the node's claim under the project's agent name and works the node to a review request on its own, as three roles in turn — Prover, Typesetter and Numerics. It reads the whole project, the library folders `proof.toml` lists, and the web; it runs `proof` and computation; it writes files only in the node's folder, within each role's scope, and changes project state only through `proof`. It runs in the node's folder with `PROOF_ROOT` set to the project, on the Claude Code or the Codex CLI, with explicit permissions and none of the repository's own instructions. It reports its plan and each step with `proof node progress`, stops for a review request, a decision only a human can make, its budget or when stuck, and never makes a Review decision. Started once, from the map, the node page or the studio; paused, redirected, resumed or released by the researcher. See ADR-0011, ADR-0016.
 _Avoid_: assistant, chat, agent panel (the panel is where it is watched), prompt-driven
 
 **Prover** (a Proof agent role):
-Finds the proof — retrieval first, then reasoning — and writes its structure as a draft in `scratch/`; decides when to split the node and when to request review; hands work to the Typesetter or Numerics and takes it back.
+Finds the proof — retrieval first, then reasoning — and writes its structure as a draft in `scratch/`; decides when to split the node and when to request review; may open a Challenge on a dependency that may no longer hold (`proof challenge open`; dismissing or resolving one stays the researcher's); hands work to the Typesetter or Numerics and takes it back.
 _Avoid_: solver, assistant
 
 **Typesetter** (a Proof agent role):
