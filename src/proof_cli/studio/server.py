@@ -30,6 +30,7 @@ from typing import Callable, Mapping, TypedDict
 from urllib.parse import quote
 
 from . import build, httpbase
+from .agent_run import ACTIONS, AgentRun, RunHooks
 from ..key_ideas import KEY_IDEAS_FILE
 from ..vault import RUN_SCRIPT
 from .agent import NO_WINDOW, AgentManager
@@ -379,8 +380,9 @@ class Studio:
 
     def __init__(self, root: Path, *, fixed_build: tuple[str, str] | None = None,
                  hidden: tuple[str, ...] = (), agent_scratch: str | None = None,
-                 agent_context: Callable[[], object] | None = None,
-                 computation: ComputationHooks | None = None) -> None:
+                 agent_context: Callable[..., object] | None = None,
+                 computation: ComputationHooks | None = None,
+                 run_hooks: RunHooks | None = None) -> None:
         self.computation = computation  # a proof map node's Medium, its runs' Evidence and its editor (spec #145)
         self.running_runs: list[build.Runner] = []  # runs may be concurrent, each its own Evidence check
         self.fixed_build = fixed_build
@@ -396,8 +398,11 @@ class Studio:
         self.running_build = None           # the build in progress, for /api/build/stop
         self._git_prefix: str | None = None
         self.sync = SyncTex(self)
-        # agent_context: a node's proof agent (proof_agent.py), made fresh for each turn
+        # agent_context: a node's proof agent (proof_agent.py), made fresh for each turn — given the run's turn
+        # (role, name, redirect) when a run started it, nothing for the researcher's own turn
         self.agent = AgentManager(lambda: self.root, self.agent_files, self.agent_writable, context_fn=agent_context)
+        # the agent's run on this node (agent_run.py, spec #145): Start once, then autonomous, under the researcher's eye
+        self.run = AgentRun(self.agent, run_hooks) if run_hooks is not None else None
 
     def refresh_config(self) -> None:
         """Load prism.json again when it changed, so a new engine or outdir applies at once."""
@@ -415,6 +420,8 @@ class Studio:
         if running is not None:
             running.stop()      # registered before it runs anything, so nothing starts
         self.stop_runs()        # a computation's runs too (ADR-0011: programs are limited per folder)
+        if self.run is not None and self.run.active():
+            self.run.release("studio closed")
         self.agent.shutdown()
 
     # ------------------------------------------------------------ the agent's files
@@ -703,6 +710,34 @@ class Studio:
         return {"exit": rc, "output": out + (f"\n\n[{note}]" if note else ""), "seconds": seconds, "cancelled": cancelled,
                 "timed_out": runner.timed_out, "outcome": outcome, "evidence": recorded.get("evidence"), "note": note}
 
+    # how a refusal of the run reads over HTTP: a conflict with the run as it stands, or a failure to give the node back
+    _RUN_STATUS = {"RUN_ACTIVE": 409, "RUN_SETTLING": 409, "NO_RUN": 409, "RELEASE_FAILED": 500}
+
+    def run_action(self, action: str, body: dict) -> tuple[int, dict]:
+        """The researcher's oversight of the agent's run (spec #145): start, pause, resume, redirect or release — (status, answer)."""
+        if self.run is None:
+            return 404, {"error": "this folder has no proof map node, so no agent run", "code": "NO_RUN"}
+        if action == "start":
+            provider = str(body.get("provider") or (self.agent.backend(None).id if self.agent.backend(None) else ""))
+            roles = body.get("roles") if isinstance(body.get("roles"), list) else None
+            r = self.run.start(provider, roles=roles, redirect=str(body.get("redirect") or "") or None,
+                               model=body.get("model") or None, effort=body.get("effort") or None)
+        elif action == "pause":
+            r = self.run.pause()
+        elif action == "resume":
+            r = self.run.resume()
+        elif action == "redirect":
+            text = str(body.get("text") or "").strip()
+            if not text:
+                return 400, {"error": "say what the agent should do differently", "code": "REDIRECT_EMPTY"}
+            r = self.run.redirect(text, body.get("role") or None)
+        elif action == "release":
+            r = self.run.release()
+        else:
+            return 404, {"error": f"no run action {action!r}", "code": "NOT_FOUND"}
+        # the studio's answers, as the agent manager's: {"error": message, "code": CODE}
+        return (self._RUN_STATUS.get(r.get("code"), 400) if "error" in r else 200), r
+
     def stop_runs(self) -> bool:
         with self._admit:
             runs = list(self.running_runs)
@@ -777,6 +812,11 @@ class Studio:
                                "build": {m: self.cfg.describe(m) for m in self.cfg.modes},
                                # the node's Medium, its folder and how to hand it to an editor (spec #145)
                                "folder": str(self.root), "medium": self.medium(), "open": self.how_to_open()})
+        if path == "/api/agent/run":
+            return _json(self.run.view() if self.run is not None else {"status": "idle", "reason": "no run on this folder"})
+        if path == "/api/agent/turn":  # a run's turn, as recorded with the project: its conversation outlives the studio's memory
+            kept = self.run.transcript(q.get("turn") or "") if self.run is not None else None
+            return _json(kept) if kept is not None else _json({"error": "no recorded turn by that id", "code": "NO_SUCH_TURN"}, 404)
         if path == "/api/agent/events":
             job = self.agent.jobs.get(int(q["job"]))
             if not job:
@@ -872,6 +912,9 @@ class Studio:
             return _json(r, 409 if r.get("busy") else 200)
         if path == "/api/build/stop":
             return _json({"ok": self.stop_build()})
+        if path.startswith("/api/agent/") and path.split("/")[3] in ACTIONS:
+            status, data = self.run_action(path.split("/")[3], body)
+            return _json(data, status)
         if path in ("/api/run", "/api/open"):
             # refused in the run-refusal shape, {"error": message, "code": CODE}, as the agent's run is
             try:

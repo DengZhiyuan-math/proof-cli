@@ -24,7 +24,8 @@ from .. import proof_map
 from ..domain import Medium, ProofMapNodeKind
 from ..reviews import git_identity
 from ..storage import ProjectStore, get_current_candidate_proof
-from ..studio.proof_agent import ProofAgentContext, library_folders, open_command
+from ..studio.agent_run import ACTIVE, RunHooks
+from ..studio.proof_agent import ProofAgentContext, agent_name, budget, library_folders, open_command
 from ..studio.server import ComputationHooks, FinishedRun, RunInputs, RunRecord, Studio
 from ..vault import (SNAPSHOT_MANIFEST, frozen_digests, frozen_role, inputs_digest, is_executable, node_folder,
                      working_inputs, working_links)
@@ -101,10 +102,25 @@ class StudioHub:
                 self._studios[node.id] = Studio(
                     folder, fixed_build=NODE_BUILD, hidden=NODE_HIDDEN, agent_scratch="scratch",
                     # the node's proof agent: rooted at the project, reading its library (ADR-0011 point 8),
-                    # and knowing the node's dependencies as of each turn, to draft its key ideas (ADR-0013)
-                    agent_context=lambda: ProofAgentContext(
+                    # and knowing the node's dependencies as of each turn, to draft its key ideas (ADR-0013).
+                    # A run's turn (spec #145) comes with its role and name from the run's own record; the
+                    # researcher's own turn (an Ask) comes with none, whatever the run is doing meanwhile.
+                    agent_context=lambda turn=None: ProofAgentContext(
                         node_id, root, library_folders(root), dependencies=self._dependencies(node_id),
+                        name=(turn or {}).get("name") or "studio-agent",
                         on_drafted=lambda agent, data: proof_map.record_key_ideas_draft(self.store, node_id, agent=agent, content=data),
+                        role=(turn or {}).get("role"),
+                    ),
+                    run_hooks=RunHooks(
+                        agent_name=lambda provider: agent_name(root, provider),
+                        budget=lambda: budget(root),
+                        assign=lambda name: proof_map.claim_node(self.store, node_id, claimant_id=name),
+                        release=lambda name, reason: self._release(node_id, name, reason),
+                        work_log=lambda: proof_map.work_log(self.store, node_id),
+                        record_close=lambda role, name, status, note: proof_map.record_progress(
+                            self.store, node_id, role=role, by=name, step=self._last_step(node_id), status=status, note=note),
+                        record_turn=lambda turn: proof_map.record_agent_turn(self.store, node_id, **turn),
+                        transcript=lambda turn: proof_map.agent_turn_transcript(self.store, node_id, turn),
                     ),
                     # the node's Medium as of each request, a run recorded as an Evidence check as the page's
                     # identity, and the project's optional open command (spec #145)
@@ -116,6 +132,36 @@ class StudioHub:
                     ),
                 )
             return self._studios[node.id]
+
+    def _release(self, node_id: str, name: str, reason: str) -> None:
+        """Release the node when the run still holds it (a review request already released it), saying why."""
+        claim = proof_map.get_active_claim(self.store, node_id)
+        if claim is not None and claim.claimant_id == name:
+            proof_map.release_node(self.store, node_id, claimant_id=name, reason=reason)
+
+    def _last_step(self, node_id: str) -> int:
+        steps = [e["step"] for e in proof_map.work_log(self.store, node_id) if e.get("kind") == "step"]
+        return steps[-1] if steps else 1
+
+    def run_action(self, node_id: str, action: str, body: dict) -> tuple[int, dict]:
+        """The researcher's oversight of a node's run through the map's own API (spec #145): (status, the studio's answer)."""
+        try:
+            studio = self.studio(node_id)
+        except NoStudio as exc:
+            code, message = exc.args
+            return int(HTTPStatus.NOT_FOUND), {"error": message, "code": code}
+        return studio.run_action(action, body or {})
+
+    def run_state(self, node_id: str) -> dict | None:
+        """The node's run as the map shows it (spec #145): while it is active, or waiting on a decision only the
+        researcher can make; None otherwise."""
+        studio = self._studios.get(node_id)
+        if studio is None or studio.run is None:
+            return None
+        view = studio.run.view()
+        if view["status"] not in (*ACTIVE, "needs-human"):
+            return None
+        return {"status": view["status"], "role": view["role"], "step": view["step"], "steps": view["steps"], "decision": view["decision"]}
 
     def _medium(self, node_id: str) -> str | None:
         node = proof_map.get_node(self.store, node_id)

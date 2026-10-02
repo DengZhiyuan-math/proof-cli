@@ -25,6 +25,13 @@ proof node show <id>
 proof trust-rule list   # the Trust rules in force (read-only; declared on the page)
 proof fog list          # the Proof fog: difficulties not yet precise enough to be a Claim
 proof node create C3 claim "For every n ≤ 10^4 …" --medium computation   # a node established by a program: run.sh, outputs in out/
+# The Proof agent works a node on its own once started (from the map, the node page or the studio): a run of three
+# roles — Prover, Typesetter, Numerics — that reports its plan and steps (`proof node progress`), stops for a review
+# request, a decision, its budget or when stuck, and that you pause, redirect, resume or release. In proof.toml:
+#   [studio]
+#   agent_name = "claude-code"      # the name the run claims and records under (default: the provider's)
+#   budget_turns = 40               # per Start; budget_minutes = 60
+proof node progress N              # the node's work log: what the agent planned, did, handed over
 # In a computation node's studio, Run executes run.sh (its exit code is an Evidence check on the current snapshot:
 # 0 passed, otherwise failed — recorded only when the run completes with the snapshot's frozen inputs, untouched;
 # see ADR-0015; a checker recording one by hand names the snapshot it ran on with

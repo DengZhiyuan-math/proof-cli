@@ -48,6 +48,7 @@ from ..storage import (
 from ..authority import candidate_proof_sha256
 from .. import key_ideas
 from ..vault import OUT_DIR, SNAPSHOT_MANIFEST, archived_pdf_path, build_pdf_path, frozen_key_ideas, node_folder, snapshot_folder_file, snapshot_folder_files
+from ..studio.agent_run import ACTIONS as RUN_ACTIONS
 from .studios import StudioHub
 
 
@@ -342,6 +343,7 @@ class ReviewApp:
                     "kind": node.kind.value,
                     "display_label": node.display_label,
                     "medium": node.medium.value if node.medium is not None else None,  # what its candidate proof is made of (spec #145)
+                    "run": self.studios.run_state(node.id),  # the agent's run on it, when one is active (spec #145)
                     "statement": node.statement,
                     "dependencies": node.dependencies,
                     "workflow_state": workflow,
@@ -401,6 +403,15 @@ class ReviewApp:
 
     def _actor(self) -> str:
         return git_identity(self.store.root)
+
+    def run_action(self, node_id: str, action: str, body: dict) -> dict:
+        """Start, pause, resume, redirect or release the Proof agent's run on a node, from the map or the node's page (spec #145)."""
+        if action not in RUN_ACTIONS:
+            raise RequestError(HTTPStatus.NOT_FOUND, "NOT_FOUND", f"no run action {action!r}")
+        status, data = self.studios.run_action(node_id, action, body)
+        if status >= 400:
+            raise RequestError(HTTPStatus(status), str(data.get("code") or "RUN_REFUSED"), str(data.get("error") or "refused"))
+        return data
 
     @staticmethod
     def page_of(node) -> str:
@@ -555,6 +566,7 @@ class ReviewApp:
             "citation": proof_map.node_citation(store, node),
             # the open fog near this node, and the fog item it was crystallized from (ADR-0008, spec #136)
             "fog_near": [proof_fog.fog_view(store, item) for item in proof_fog.fog_near(store, node_id)],
+            "run": self.studios.run_state(node_id),
             "crystallized_from": origin.id if (origin := proof_fog.crystallized_from(store, node_id)) is not None else None,
             "dependents": sorted(other.id for other in proof_map.list_nodes(store) if node_id in other.dependencies),
             "pdfs": self._pdfs(node_id, proof),
@@ -794,6 +806,9 @@ class _Handler(BaseHTTPRequestHandler):
         if route is None and path.startswith("/api/fog/"):  # the fog drawer: /api/fog/<fog-id>/<action>
             fog_id, _, action = path.removeprefix("/api/fog/").rpartition("/")
             route = lambda: self.app.fog_action(unquote(fog_id), action, body)
+        if route is None and path.startswith("/api/node/") and "/agent/" in path:  # the agent's run, from the map or the node page (spec #145)
+            node_id, _, action = path.removeprefix("/api/node/").rpartition("/agent/")
+            route = lambda: self.app.run_action(unquote(node_id), action, body)
         if route is None:
             return self._error(HTTPStatus.NOT_FOUND, "NOT_FOUND", self.path)
         self._guarded(route)

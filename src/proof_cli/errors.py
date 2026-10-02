@@ -135,6 +135,13 @@ ERROR_CODES: dict[str, str] = {
     "INVALID_REQUEST": "the page's request is missing what the action needs (a node id, which snapshot, …)",
     "NOT_FOUND": "no such page route or node action, or (a legacy command under --json) no such contract, reference or target",
     "NOT_THIS_NODE": "the snapshot, Candidate proof or review named belongs to another node",
+    # the page's write checks, before any action runs (ADR-0007)
+    "WRONG_HOST": "the request names another host than the app's pinned origin",
+    "WRONG_ORIGIN": "a write came from another origin than the app's own page",
+    "JSON_REQUIRED": "a write's body is application/json",
+    "BAD_LENGTH": "the request's Content-Length is missing a number or negative",
+    "BODY_TOO_LARGE": "the request body is larger than the app accepts",
+    "MALFORMED_JSON": "the request body isn't a JSON object",
     # -- a node's studio (ADR-0011), and a computation's Run and Open in VS Code (ADR-0015, spec #145) --
     "NO_STUDIO": "an imported result has no studio: it has no proof to write",
     "STUDIO_CLOSED": "the studio is closed: the proof map's server is shutting down",
@@ -152,6 +159,28 @@ ERROR_CODES: dict[str, str] = {
     "NOT_A_NODE_STUDIO": "only a proof map node's studio drafts key ideas",
     "KEY_IDEAS_EXISTS": "key-ideas.md already exists: edit it, or remove it to have the agent draft it afresh",
     "EVIDENCE_SNAPSHOT_MISMATCH": "the snapshot hash an Evidence check names is not the snapshot's hash now; the message names the node's current snapshot",
+    # -- the Proof agent's work log (ADR-0016, spec #145) --
+    "ROLE_REQUIRED": "a progress report names the role that makes it: PROOF_AGENT_ROLE in the agent's runtime, or --role",
+    "INVALID_ROLE": "the Proof agent role is not prover, typesetter or numerics",
+    "INVALID_PROGRESS_STATUS": "a step's status is started, done, stuck or needs-human",
+    "INVALID_PROGRESS_STEP": "steps count from 1",
+    "PROGRESS_STATUS_REQUIRED": "a step report needs its status",
+    "PROGRESS_EMPTY": "a progress report is a plan, a step or a handoff; this one is none of them",
+    "DECISION_REQUIRED": "a step that needs a human decision names the decision in --note",
+    # -- the Proof agent's run, through the studio and the map (ADR-0016, spec #145) --
+    "RUN_ACTIVE": "an agent is already working on this node: pause, redirect or release it first",
+    "RUN_SETTLING": "the previous run is still giving the node back; Start again in a moment",
+    "NO_RUN": "no agent run to act on: the folder is not a proof map node, or no run is active on it",
+    "REDIRECT_EMPTY": "a Redirect needs its one line of text",
+    "RUN_REFUSED": "the run's Start was refused for a reason with no code of its own; the message says why",
+    "RELEASE_FAILED": "the run ended but the node could not be given back; it is still assigned, and the message says why",
+    "AGENT_BUSY": "the studio's agent is still working on the previous turn",
+    "NO_SUCH_TURN": "no turn of a run on this node was recorded under that id",
+    "AGENT_UNKNOWN_PROVIDER": "the studio has no agent backend by that name (claude, codex)",
+    "AGENT_UNAVAILABLE": "the agent's CLI can't run a turn here: not installed, not logged in, or it refused; the message says why",
+    "AGENT_INVALID_OPTION": "the model or effort asked for is not one the agent's CLI accepts",
+    "AGENT_NO_USAGE_LIMITS": "this agent backend reports no usage limits to probe",
+    "TURN_CALLED_OFF": "the run was stopped while its turn was being prepared, so no turn started",
 }
 
 

@@ -512,12 +512,21 @@ function short(text, length) { return text.length > length ? text.slice(0, lengt
 // one "attention" icon, the word saying which), then the frontier, a claim, a review request,
 // a rejected route, blocked, accepted. A frontier node with a warning keeps its frontier mark too,
 // a small blue badge beside the warning's (ADR-0008): see drawDag.
+// where the agent's run on a node is (spec #145): "Typesetter · step 4/5", "Prover · paused", "Numerics · needs you"
+function runWhere(run) {
+  const role = run.role ? run.role.charAt(0).toUpperCase() + run.role.slice(1) : "Agent";
+  if (run.status === "needs-human") return `${role} · needs you`;
+  if (run.step && run.steps) return `${role} · step ${run.step}/${run.steps}`;
+  return run.status === "paused" ? `${role} · paused` : role;
+}
+
 function tagOf(n) {
   if (n.integrity_state === "challenged") return ["challenged", "attention"];
   if (n.integrity_state === "potentially-stale") return ["dependency changed", "attention"];
   if (n.acceptance_state === "unverifiable") return ["decision outdated", "attention"];
   if (["rejected", "no-longer-callable"].includes(n.acceptance_state)) return [n.acceptance_state === "rejected" ? "rejected" : "no longer callable", "rejected"];
   if (n.frontier) return ["ready", "ready"];
+  if (n.run && n.run.status !== "idle") return [runWhere(n.run), n.run.status === "needs-human" ? "attention" : "claimed"];  // the agent's run (spec #145)
   if (n.assignee) return [n.assignee, "claimed"];
   if (n.workflow_state === "review-needed") return ["awaiting review", "review"];
   if (n.workflow_state === "revision-requested") return ["revision requested", "review"];
@@ -764,6 +773,21 @@ function drawDag(nodes) {
     g.append(status, statusIcon(statusKind, left + BOX.w - 6, top + 6, 30));
     // the frontier is its own, strongest signal (ADR-0008): a warning is shown beside it, never in its place
     if (n.frontier && warningOf(n)) g.append(statusIcon("ready", left + BOX.w - 36, top + 6, 22));
+    // Start agent from the card (spec #145): a local node nobody holds; the click never opens the node
+    if (n.kind !== "imported_result" && !n.assignee && !n.run && !rejected(n)) {
+      const start = svg("g", { class: "start", role: "button", tabindex: 0, "aria-label": `Start the agent on ${n.id}` });
+      start.append(svg("rect", { x: left + BOX.w - 78, y: top + BOX.h - 26, width: 66, height: 18, rx: 9 }));
+      const label = svg("text", { x: left + BOX.w - 45, y: top + BOX.h - 13, "text-anchor": "middle" });
+      label.textContent = "▶ Start";
+      start.append(label);
+      start.addEventListener("click", async (event) => {
+        event.stopPropagation(); event.preventDefault();
+        try { await api(`/api/node/${encodeURIComponent(n.id)}/agent/start`, {}); } catch (error) { showError(error); return; }
+        say(`Agent started on ${n.id}.`, "ok");
+        await refresh();
+      });
+      g.append(start);
+    }
     // hovering shows the current snapshot's 核心思路 (ADR-0013), under the statement it proves
     const title = svg("title");
     title.textContent = n.core_idea ? `${n.statement}\n核心思路：${n.core_idea}` : n.statement;
@@ -941,6 +965,7 @@ async function showNode(nodeId) {
   const axis = (name, value, text = value) => { const cell = el("div"); cell.append(el("span", name, { class: "lbl" }), stateChip(value, text, `${name}: ${text}`)); return cell; };
   const acceptance = acceptanceText({ acceptance_state: view.acceptance_state, trust_rule: view.trust_rule });
   $("node-axes").replaceChildren(axis("workflow", view.workflow_state), axis("acceptance", view.acceptance_state, acceptance), axis("integrity", view.integrity_state));
+  showRunControls(node, view);
   const nodeWarnings = el("ul");
   showWarnings(view.warnings, nodeWarnings);
   $("node-warnings").replaceChildren(el("h3", "Warnings for this node"), nodeWarnings);
@@ -1019,6 +1044,36 @@ function evidenceItem(c) {
     li.append(" ", chip);
   }
   return li;
+}
+
+// the Proof agent's run on a local node (spec #145): Start once, then the oversight actions — never a prompt
+function showRunControls(node, view) {
+  const box = $("node-run");
+  box.replaceChildren();
+  if (node.kind === "imported_result" || view.acceptance_state === "rejected") return;
+  const run = view.run;
+  const post = async (action, body) => {
+    try { await api(`/api/node/${encodeURIComponent(node.id)}/agent/${action}`, body || {}); } catch (error) { showError(error); return; }
+    say(`Agent run: ${action}.`, "ok");
+    await route();
+  };
+  const button = (text, action, body, primary) => { const b = el("button", text, { type: "button", class: primary ? "primary" : "" }); b.addEventListener("click", () => post(action, body)); return b; };
+  if (!run) {
+    box.append(button("Start agent", "start", {}, true), el("span", "The agent works the node on its own, as Prover, Typesetter and Numerics, until it requests review or needs you.", { class: "hint" }));
+    return;
+  }
+  if (run.status === "needs-human") {  // the run stopped for a decision only the researcher can make: it names it
+    box.append(el("span", `${runWhere(run)}: ${run.decision || "a decision"}`, { class: "run-where" }), button("Start agent", "start", {}, true), button("Stop and release", "release", {}));
+    return;
+  }
+  const where = `${run.step && run.steps ? runWhere(run) : runWhere({ role: run.role })} · ${run.status}`;
+  box.append(el("span", where, { class: "run-where" }));
+  if (run.status === "paused") box.append(button("Resume", "resume", {}));
+  else if (run.status === "running") box.append(button("Pause", "pause", {}));
+  const redirect = el("input", null, { type: "text", placeholder: "Redirect: one line for its next turn", "aria-label": "Redirect the agent" });
+  const send = el("button", "Redirect", { type: "button" });
+  send.addEventListener("click", () => { if (redirect.value.trim()) post("redirect", { text: redirect.value.trim() }); });
+  box.append(redirect, send, button("Stop and release", "release", {}));
 }
 
 // the node's fog (ADR-0008): the item it was crystallized from, looked up in the fog table, and the open fog near it
