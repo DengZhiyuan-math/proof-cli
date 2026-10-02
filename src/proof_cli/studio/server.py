@@ -307,10 +307,12 @@ def _line(value) -> int | None:
 @dataclass(frozen=True)
 class RunInputs:
     """The state of a computation's inputs at one moment: their inputs digest (as a snapshot's frozen inputs
-    are hashed) and a stamp of each input by its path (size, mtime, ctime, inode)."""
+    are hashed) and a stamp of each input by its path (size, mtime, ctime, inode) — or, when the folder
+    couldn't be read whole (an unreadable file, a symbolic link), why not."""
 
     digest: str
     stamps: Mapping[str, str]
+    unreadable: str | None = None
 
 
 @dataclass(frozen=True)
@@ -342,7 +344,7 @@ class ComputationHooks:
     folder to an editor."""
 
     medium: Callable[[], str | None]
-    run_inputs: Callable[[], RunInputs | None]
+    run_inputs: Callable[[], RunInputs]
     record_run: Callable[[FinishedRun], RunRecord]
     open_command: Callable[[], str | None]
 

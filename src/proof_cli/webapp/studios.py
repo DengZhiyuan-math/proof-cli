@@ -25,8 +25,8 @@ from ..reviews import git_identity
 from ..storage import ProjectStore, get_current_candidate_proof
 from ..studio.proof_agent import ProofAgentContext, library_folders, open_command
 from ..studio.server import ComputationHooks, FinishedRun, RunInputs, RunRecord, Studio
-from ..vault import (SNAPSHOT_MANIFEST, frozen_digests, frozen_role, node_folder, read_working_snapshot,
-                     working_inputs)
+from ..vault import (SNAPSHOT_MANIFEST, NodeFolderLinks, frozen_digests, frozen_role, node_folder,
+                     read_working_snapshot, working_inputs)
 
 STUDIO_STATIC = Path(__file__).resolve().parent.parent / "studio" / "static"
 # the node's build: what vault.build_is_current checks and review archives (ADR-0010)
@@ -120,18 +120,19 @@ class StudioHub:
         node = proof_map.get_node(self.store, node_id)
         return node.medium.value if node is not None and node.medium is not None else None
 
-    def _run_inputs(self, node_id: str) -> RunInputs | None:
+    def _run_inputs(self, node_id: str) -> RunInputs:
         """The state of the program's inputs (`vault.frozen_role` is `input`: its scripts, data and hidden environment
         files, never `out/`): their inputs digest, as `frozen_inputs_digest` hashes a snapshot's, and a stamp of each
         (size, mtime, ctime, inode). An input edited during a run and put back before it ends has its content as
-        before but not its stamp (audit R-S1); its ctime no program can set back. None when an input can't be read."""
+        before but not its stamp (audit R-S1); its ctime no program can set back. A folder that can't be read whole
+        — an unreadable file, a symbolic link (NODE_FOLDER_SYMLINK) — is no state to compare, and says why."""
         try:
             paths = {rel: path for rel, path in working_inputs(self.store.root, node_id, Medium.computation).items()
                      if frozen_role(rel) == "input"}
             stamps = {rel: f"{st.st_size}:{st.st_mtime_ns}:{st.st_ctime_ns}:{st.st_ino}" for rel, path in paths.items() for st in [path.stat()]}
             digest = read_working_snapshot(self.store.root, node_id, Medium.computation).inputs_digest()
-        except OSError:
-            return None
+        except (OSError, NodeFolderLinks) as exc:
+            return RunInputs("", {}, proof_map.node_folder_error(self.store.root, node_id, exc, "a run's Evidence check").message)
         return RunInputs(digest, stamps)
 
     @staticmethod
@@ -159,6 +160,9 @@ class StudioHub:
         version = f"snapshot v{proof.version}"
         if run.before is None or run.after is None:
             return {"evidence": None, "note": f"an input could not be read — not recorded against {version}"}
+        unreadable = run.before.unreadable or run.after.unreadable
+        if unreadable:
+            return {"evidence": None, "note": f"the node folder could not be read whole — not recorded against {version}: {unreadable}"}
         changed = self._changed_during(run.before, run.after)
         if changed:
             return {"evidence": None, "note": f"{changed} — not recorded against {version}"}
