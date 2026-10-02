@@ -1,12 +1,16 @@
-"""The agent's compile tool: a minimal MCP server (stdio) for Claude Code.
+"""The agent's compile tool: a minimal MCP server (stdio) for the Claude Code and Codex CLIs.
 
     python mcp_compile.py --url http://127.0.0.1:8765/studio/L1/
 
-Claude Code starts it for each turn of a LaTeX node's agent (backend_claude.py) and offers
-its one tool, `compile`. The tool asks the node's studio to build, exactly as the Compile
-button does (same engine, settings and build folder; the PDF on the page reloads and its
-Problems list fills), and answers with the errors and warnings and their file:line. So the
-agent compiles and fixes what fails without any shell. Taken from prism-local (2938c05).
+Either CLI starts it for each turn that gets the tool (backends.has_compile_tool: a LaTeX node's
+typesetting edit turns) and offers its one tool, `compile`: Claude Code through `--mcp-config`
+(backend_claude.py), Codex through its `-c mcp_servers.studio.*` overrides (backend_codex.py).
+The tool asks the node's studio to build, exactly as the Compile button does (same engine,
+settings and build folder; the PDF on the page reloads and its Problems list fills), and
+answers with the errors and warnings and their file:line. So the agent compiles and fixes
+what fails without any shell. Taken from prism-local (2938c05).
+
+Unverified: whether Codex's sandbox lets this server's request reach the studio on localhost.
 
 The protocol is JSON-RPC 2.0, one message per line on stdin/stdout.
 """

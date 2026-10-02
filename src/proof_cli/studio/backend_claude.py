@@ -24,7 +24,7 @@ import time
 from pathlib import Path
 
 from .fsutil import read_json
-from .backends import MCP_SERVER, NO_WINDOW, TREE, CliBackend, Job, compile_tool_server, compiles, find_bin, kill_tree, system_append
+from .backends import MCP_SERVER, NO_WINDOW, TREE, CliBackend, Job, compile_tool_server, find_bin, has_compile_tool, kill_tree, system_append
 
 MODES = {"edit": "acceptEdits", "ask": "plan"}
 
@@ -126,6 +126,11 @@ def account_problem(info: dict, allowed: str) -> str | None:
 
 
 COMPILE_TOOL = f"mcp__{MCP_SERVER}__compile"       # the compile tool (backends.compile_tool_server), as Claude Code names it
+
+
+def tool_name(name: str | None) -> str | None:
+    """A tool's name as the page shows it: the compile tool is "Compile", every other tool its own name."""
+    return "Compile" if name == COMPILE_TOOL else name
 
 
 def _loads_compile_tool(block: dict) -> bool:
@@ -306,7 +311,7 @@ class ClaudeCode(CliBackend):
                "--append-system-prompt", system_append(job.context)]
         # The compile tool (mcp_compile.py): the studio's own build, the one the researcher sees — no
         # shell needed to compile, and no other MCP server is loaded.
-        tools = [COMPILE_TOOL] if compiles(job) else []
+        tools = [COMPILE_TOOL] if has_compile_tool(job) else []
         if tools:
             cmd += ["--mcp-config", json.dumps({"mcpServers": {MCP_SERVER: compile_tool_server(job.server_url)}}), "--strict-mcp-config"]
         if job.context:
@@ -357,7 +362,7 @@ class ClaudeCode(CliBackend):
                     fields["old"] = LiveInput("old_string")
                 st.setdefault("live", {})[ev.get("index")] = (block.get("id"), fields)
                 job.emit({"t": "tool_start", "id": block.get("id"),
-                          "name": "Compile" if name == COMPILE_TOOL else name})
+                          "name": tool_name(name)})
             elif et == "content_block_delta" and delta.get("type") == "input_json_delta":
                 tid, fields = st.get("live", {}).get(ev.get("index"), (None, {}))
                 if fields:
@@ -385,8 +390,7 @@ class ClaudeCode(CliBackend):
                     if _loads_compile_tool(block):
                         continue
                     job.emit({"t": "tool", "id": block.get("id"),
-                              "name": "Compile" if block.get("name") == COMPILE_TOOL
-                              else block.get("name"),
+                              "name": tool_name(block.get("name")),
                               "summary": _summarize_tool(block.get("name", ""),
                                                          block.get("input") or {}, job.root),
                               **_tool_place(block.get("name", ""), block.get("input") or {},

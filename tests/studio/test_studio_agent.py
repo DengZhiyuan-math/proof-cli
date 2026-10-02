@@ -425,6 +425,8 @@ class CompileTool(unittest.TestCase):
                     job_for(mode="edit", root=tmpdir(), server_url="http://127.0.0.1:9/studio/N/", context=ProofAgentContext("N", tmpdir(), role="prover")),
                     job_for(mode="edit", root=tmpdir(), context=ctx)):
             self.assertFalse(any(x.startswith("mcp_servers.") for x in codex.command(job)[0]), job.mode)
+        from proof_cli.studio import mcp_compile
+        self.assertIn("Claude Code and Codex", mcp_compile.__doc__.splitlines()[0])  # seventh review: its docstring says so
 
     def test_an_ask_turn_has_no_tool(self):
         """Plan mode admits no tool that builds: offering it would only make a refused step."""
@@ -452,6 +454,27 @@ class CompileTool(unittest.TestCase):
         self.assertEqual(req.get_header("Content-type"), "application/json")
         self.assertEqual(json.loads(req.data), {"mode": "draft", "clean": False, "by": "agent"})
 
+    def test_one_name_for_the_tool_in_events(self):
+        """Seventh review: the tool shows as "Compile" through one helper, wherever Claude Code names it."""
+        from proof_cli.studio import backend_claude
+        self.assertEqual(backend_claude.tool_name(backend_claude.COMPILE_TOOL), "Compile")
+        self.assertEqual(backend_claude.tool_name("Read"), "Read")
+        self.assertEqual(backend_claude.tool_name(None), None)
+        j, st = job_for(root=tmpdir()), {}
+        self.claude.handle({"type": "stream_event", "parent_tool_use_id": None, "event": {"type": "content_block_start", "index": 0, "content_block": {
+            "type": "tool_use", "id": "c1", "name": backend_claude.COMPILE_TOOL}}}, j, st)
+        self.claude.handle({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": "c1", "name": backend_claude.COMPILE_TOOL, "input": {}}]}}, j, st)
+        self.assertEqual([e["name"] for e in j.events if e["t"] in ("tool_start", "tool")], ["Compile", "Compile"])
+
+    def test_the_rule_and_the_attribute_have_their_own_names(self):
+        """Seventh review: `has_compile_tool(job)` decides; a context's `compiles` says whether its role typesets."""
+        from proof_cli.studio.proof_agent import ProofAgentContext
+        self.assertFalse(hasattr(backends, "compiles"))
+        ctx = ProofAgentContext("N", tmpdir(), role="typesetter")
+        self.assertTrue(backends.has_compile_tool(job_for(mode="edit", server_url="http://127.0.0.1:9/studio/N/", context=ctx)))
+        self.assertFalse(hasattr(manager(Path("."), plain=Codex("plain", {"bin": "codex"})), "server_url"))  # the manager's is compile_url
+
     def test_protocol(self):
         from proof_cli.studio import mcp_compile
         a = mcp_compile.answer({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}}, "u")
@@ -471,6 +494,32 @@ class CompileTool(unittest.TestCase):
         text, failed = mcp_compile.report({"exit": 0, "diagnostics": []})
         self.assertFalse(failed)
         self.assertTrue(text.startswith("Build OK."))
+
+
+class DisplayMathRule(unittest.TestCase):
+    """Seventh review: the rule against $$ is LaTeX's; key-ideas.md is Markdown and is typeset only from $…$ and
+    $$…$$ (ADR-0013, mathtext.js), so the instructions every turn gets scope it to .tex files and say so."""
+
+    def bullets(self, text):
+        return ["- " + b for b in text.split("\n- ")[1:]]
+
+    def test_the_rule_is_for_tex_files_and_key_ideas_keeps_its_dollars(self):
+        from proof_cli.studio.proof_agent import ProofAgentContext
+        for text in (backends.system_append(), backends.system_append(ProofAgentContext("N", tmpdir()))):
+            rules = [b for b in self.bullets(text) if "display math" in b]
+            tex = [b for b in rules if "never" in b]
+            self.assertEqual(len(tex), 1, rules)
+            self.assertTrue(tex[0].startswith("- In .tex files,"), tex[0])
+            self.assertIn("$$ ... $$", tex[0])
+            (md,) = [b for b in rules if "key-ideas.md" in b]
+            self.assertNotIn("never", md)
+            self.assertIn("$...$", md)
+            self.assertIn("$$...$$", md)
+
+    def test_the_draft_brief_names_both_delimiters(self):
+        from proof_cli.studio.proof_agent import KEY_IDEAS_BRIEF
+        self.assertIn("$…$", KEY_IDEAS_BRIEF)
+        self.assertIn("$$…$$", KEY_IDEAS_BRIEF)
 
 
 class ClaudeBilling(unittest.TestCase):

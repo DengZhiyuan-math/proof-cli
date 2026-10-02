@@ -145,5 +145,22 @@ def test_a_turns_transcript_reads_its_steps_and_the_running_turn_is_handed_to_th
               {"t": "build", "result": {"exit": 0, "diagnostics": []}}, {"t": "done"}]
     _, opened, polled = _pane(run=RUNNING, log=LOG, turns=turns, events=events, typed="x", open=[1])
     assert opened["transcripts"]["1"] == "▸ Read sec/a.tex\n… thinking\nI rewrote §2.\n▸ Compile: OK"
-    assert opened["live"] == [e["t"] for e in events] and opened["resets"] == 1  # every event once, after a reset for the new turn
+    assert opened["live"] == [e["t"] for e in events] and opened["resets"] == 1  # every event once, after a reset for the new Start
     assert polled["live"] == opened["live"] and polled["resets"] == 1  # the next poll does not follow the same turn again
+
+
+def test_the_files_views_marks_are_reset_by_a_new_start_not_by_each_turn():
+    """Seventh review: the Files view keeps what the Prover changed when the Typesetter's turn comes (a role's
+    hand-off is the same Start); only a new Start clears last run's marks."""
+    running = {**RUNNING, "started_at": 100.0}
+    prover = {"job": 7, "role": "prover", "prompt": "Take your turn as the Prover…", "at": 1.0, "done": False, "changed": []}
+    typesetter = {"job": 8, "role": "typesetter", "prompt": "Take your turn as the Typesetter…", "at": 2.0, "done": False, "changed": []}
+    again = {"job": 9, "role": "prover", "prompt": "Take your turn as the Prover…", "at": 3.0, "done": False, "changed": []}
+    events = [{"t": "tool", "id": "w1", "name": "Edit", "summary": "proof.tex", "path": "proof.tex"}, {"t": "tool_result", "id": "w1", "error": False}, {"t": "done"}]
+    first, handed_off, restarted = _pane(run=running, log=LOG, turns=[prover], events=events, sequence=[
+        {"run": running, "turns": [{**prover, "done": True}, typesetter]},
+        {"run": {**running, "started_at": 200.0}, "turns": [again]},
+    ])
+    assert first["resets"] == 1 and first["live"] == ["tool", "tool_result", "done"]
+    assert handed_off["resets"] == 1 and len(handed_off["live"]) == 6  # the Typesetter's turn followed, the marks kept
+    assert restarted["resets"] == 2 and len(restarted["live"]) == 9  # a new Start: last run's marks go

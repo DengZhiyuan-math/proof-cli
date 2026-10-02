@@ -22,7 +22,7 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
   }
 
   const ROLE_WORD = { prover: "Prover", typesetter: "Typesetter", numerics: "Numerics" };
-  const state = { run: null, log: [], turns: [], folder: "", timer: null, redirectBox: null, roleBox: null, shown: "", transcripts: {}, following: null, followed: new Set() };
+  const state = { run: null, log: [], turns: [], folder: "", timer: null, redirectBox: null, roleBox: null, shown: "", transcripts: {}, following: null, followed: new Set(), liveStart: null };
 
   const note = h("p", "", { class: "run-note", role: "status" });
   function tell(text, bad) { note.textContent = text; note.setAttribute("class", bad ? "run-note bad" : "run-note"); }
@@ -142,10 +142,13 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
 
   // The running turn, watched live: its events are read as they come (the server holds the request until
   // there are some) and handed to the Files view (app.js studioLive), which shows the agent at work — the
-  // lines it reads, the file as it writes it, the build it ran. One turn is followed at a time.
+  // lines it reads, the file as it writes it, the build it ran. One turn is followed at a time. The Files
+  // view's marks (the lines each turn changed) stay through the Start's turns, a role's hand-off included,
+  // and are cleared only when a new Start begins (the run's started_at changes).
   async function followLoop(job) {
     const live = globalThis.studioLive;
-    if (live) live.reset();
+    const start = state.run ? state.run.started_at : undefined;
+    if (live && start !== state.liveStart) { state.liveStart = start; live.reset(); }
     let after = 0;
     while (state.following === job) {
       let r;

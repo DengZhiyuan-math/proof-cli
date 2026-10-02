@@ -9,6 +9,13 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = "static/vendor/pdf.worker.js";
 const RENDER_PX = 600, KEEP_PX = 2400;
 const PAGE_PAD = 12, PAGE_GAP = 12;          // #pdf-pages padding and gap (app.css)
 
+// A PDF's link to the web, if it is one: an http(s) URL, else null. PDF.js's `url` is already validated;
+// its `unsafeUrl` is the raw string, never used. Anything else (javascript:, file:, data:, mailto:) is no link.
+function webUrl(u) {
+  try { const url = new URL(String(u)); return url.protocol === "https:" || url.protocol === "http:" ? url.href : null; }
+  catch (e) { return null; }
+}
+
 const PV = {
   pdf: null, mtime: null, scale: 0, eff: 1, views: [], scaleKey: "scale",
   onInverse: null,              // ({page, x, y}) in PDF points from the top-left
@@ -97,7 +104,8 @@ const PV = {
     // Top-level entries open, deeper ones closed (▸ opens them).
     const list = (items, depth) => "<ul>" + items.map((it) => {
       const kids = it.items && it.items.length;
-      const data = it.url ? `data-url="${esc(it.url)}"` : it.dest ? `data-dest="${esc(JSON.stringify(it.dest))}"` : "";
+      const url = it.url ? webUrl(it.url) : null;
+      const data = url ? `data-url="${esc(url)}"` : it.dest && !it.url ? `data-dest="${esc(JSON.stringify(it.dest))}"` : "";
       return `<li class="${kids && depth >= 1 ? "shut" : ""}"><div class="ol-row" style="padding-left:${4 + depth * 14}px">`
         + `<span class="tw">${kids ? "▾" : ""}</span><a class="ol-item" ${data} title="${esc(it.title)}">${esc(it.title)}</a></div>`
         + (kids ? list(it.items, depth + 1) : "") + "</li>";
@@ -370,7 +378,7 @@ const PV = {
   },
 
   // The page's links (hyperref: refs, citations, the contents, URLs) as boxes over the canvas.
-  // A link inside the document jumps there; a URL opens in a new tab.
+  // A link inside the document jumps there; an http(s) URL opens in a new tab; nothing else is a link (webUrl).
   async links(pv) {
     const annots = await pv.page.getAnnotations({ intent: "display" }).catch(() => []);
     for (const a of annots) {
@@ -380,10 +388,11 @@ const PV = {
       el.className = "pdf-link";
       Object.assign(el.style, { left: Math.min(x1, x2) + "px", top: Math.min(y1, y2) + "px",
         width: Math.abs(x2 - x1) + "px", height: Math.abs(y2 - y1) + "px" });
-      if (a.url || a.unsafeUrl) {
-        el.href = a.url || a.unsafeUrl; el.target = "_blank"; el.rel = "noopener noreferrer";
-        el.title = el.href;
-      } else if (a.dest) {
+      const url = a.url ? webUrl(a.url) : null;
+      if (url) {
+        el.href = url; el.target = "_blank"; el.rel = "noopener noreferrer";
+        el.title = url;
+      } else if (a.dest && !a.url) {
         el.href = "#"; el.dataset.dest = JSON.stringify(a.dest);
       } else continue;
       pv.div.appendChild(el);

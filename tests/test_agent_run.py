@@ -803,3 +803,70 @@ def test_a_build_the_agent_ran_shows_in_its_turn(studio):
     events = json.loads(answer.body)["events"]
     assert any(e["t"] == "build" and e["result"] == built for e in events)
     _post(hub, "/studio/N/api/agent/release")
+
+
+def _through_the_real_handler(app):
+    """`urllib.request.urlopen` answered by proof-cli's own request handler (webapp/server.py `_Handler`), in
+    process: the request mcp_compile builds is written out as HTTP and read by the handler's real `do_POST` —
+    its Host and Origin checks included — with no socket bound."""
+    import email
+    import io
+    import urllib.error
+    from urllib.parse import urlsplit
+
+    from proof_cli.webapp.server import _Handler
+
+    handler_class = type("InProcessHandler", (_Handler,), {"app": app})
+
+    def urlopen(req, timeout=None):
+        parts = urlsplit(req.full_url)
+        headers = {"Host": parts.netloc, **dict(req.header_items()), "Content-Length": str(len(req.data or b""))}
+        raw = f"{req.get_method()} {parts.path} HTTP/1.1\r\n" + "".join(f"{k}: {v}\r\n" for k, v in headers.items()) + "\r\n"
+        handler = handler_class.__new__(handler_class)
+        handler.rfile, handler.wfile = io.BytesIO(raw.encode() + (req.data or b"")), io.BytesIO()
+        handler.client_address, handler.server, handler.request = ("127.0.0.1", 0), None, None
+        handler.handle_one_request()
+        head, _, body = handler.wfile.getvalue().partition(b"\r\n\r\n")
+        status_line, _, header_text = head.decode().partition("\r\n")
+        code = int(status_line.split()[1])
+        if code >= 400:
+            raise urllib.error.HTTPError(req.full_url, code, status_line, email.message_from_string(header_text), io.BytesIO(body))
+        return io.BytesIO(body)
+
+    return urlopen
+
+
+def test_the_compile_tool_passes_the_servers_own_origin_check_and_a_wrong_origin_is_refused(tmp_path, monkeypatch):
+    """Seventh review: the 403 WRONG_ORIGIN fix, through the real server's `do_POST` rather than a mocked urlopen."""
+    import urllib.error
+    import urllib.request
+
+    from proof_cli.studio import mcp_compile
+    from proof_cli.studio.server import Studio
+    from proof_cli.webapp.server import ReviewApp, project_origin
+
+    store = ensure_project(tmp_path / "project")
+    create_node(store, node_id="N", kind="claim", statement="a claim")
+    built = []
+    monkeypatch.setattr(Studio, "run_build", lambda self, mode, clean=False: (built.append((mode, clean)), {"exit": 0, "diagnostics": []})[1])
+    app = ReviewApp(store)
+    try:
+        monkeypatch.setattr(urllib.request, "urlopen", _through_the_real_handler(app))
+        url = f"{project_origin(store)}/studio/N/"
+        assert mcp_compile.build(url, False) == {"exit": 0, "diagnostics": []} and built == [("draft", False)]
+        text, failed = mcp_compile.report(mcp_compile.build(url, True))
+        assert not failed and text.startswith("Build OK.") and built[-1] == ("draft", True)
+
+        # the same request from another origin: the server refuses it before any build
+        real = urllib.request.Request
+
+        def from_elsewhere(*args, headers=None, **kwargs):
+            return real(*args, headers={**(headers or {}), "Origin": "http://evil.example"}, **kwargs)
+
+        monkeypatch.setattr(urllib.request, "Request", from_elsewhere)
+        with pytest.raises(urllib.error.HTTPError) as refused:
+            mcp_compile.build(url, False)
+        assert refused.value.code == 403 and json.loads(refused.value.read())["error"]["code"] == "WRONG_ORIGIN"
+        assert len(built) == 2
+    finally:
+        app.close()

@@ -65,10 +65,12 @@ and the compiled PDF.
   files you may change. It replaces the scope of every earlier message.
 - The author reviews every turn's file changes as a diff with an undo button,
   so make focused, minimal edits and say which files you changed.
-- Write display math with named LaTeX environments: \\begin{equation} ...
-  \\end{equation} (or equation*, align, align*, gather, multline), never the
-  shortcuts \\[ ... \\] or $$ ... $$. Use \\begin{...} environments rather than
-  shortcuts elsewhere too.
+- In .tex files, write display math with named LaTeX environments:
+  \\begin{equation} ... \\end{equation} (or equation*, align, align*, gather,
+  multline), never the shortcuts \\[ ... \\] or $$ ... $$. Use \\begin{...}
+  environments rather than shortcuts elsewhere in them too.
+- key-ideas.md is Markdown, not LaTeX: write its math as $...$ inline and
+  $$...$$ for display math, the only delimiters its review page typesets.
 - Read, search and change files with your file tools (Read, Grep, Glob, Edit,
   Write), not shell commands such as cat, sed, python or rm.
 - To compile, use the compile tool when you have it: it runs the editor's own
@@ -102,7 +104,7 @@ def system_append(context=None) -> str:
 MCP_SERVER = "studio"
 
 
-def compiles(job: "Job") -> bool:
+def has_compile_tool(job: "Job") -> bool:
     """Whether this turn gets the compile tool: the node's studio has a build (a URL), the turn edits (plan
     mode admits no tool that builds), and its role typesets (the Prover and Numerics don't)."""
     return bool(job.server_url) and job.mode == "edit" and (job.context is None or job.context.compiles)

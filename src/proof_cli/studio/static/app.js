@@ -54,16 +54,25 @@ function modeFor(path) { return path.endsWith(".md") ? "markdown" : "stex"; }
 function activeTab() { return S.tabs.find((t) => t.path === S.active) || null; }
 function isDirty(t) { return !t.doc.isClean(t.gen); }
 
-async function openFile(path, line, reveal = true) {
-  if (reveal) showCentre("files");  // a file the researcher opens is read in the Files view; a preload or the agent's edit stays where the researcher is (spec #145)
+// The tab of `path`, read from disk into a new one when it has none (null: it can't be read).
+async function loadTab(path) {
   let t = S.tabs.find((x) => x.path === path);
-  if (!t) {
-    const r = await api("/api/file?path=" + encodeURIComponent(path));
-    if (r._status !== 200) return toast(`Cannot open ${path}: ${r.error || r._status}`);
-    const doc = CodeMirror.Doc(r.content, modeFor(path));
-    t = { path, doc, mtime: r.mtime, gen: doc.changeGeneration(true) };
-    S.tabs.push(t);
-  }
+  if (t) return t;
+  const r = await api("/api/file?path=" + encodeURIComponent(path));
+  if (r._status !== 200) { toast(`Cannot open ${path}: ${r.error || r._status}`); return null; }
+  t = S.tabs.find((x) => x.path === path);       // opened meanwhile
+  if (t) return t;
+  const doc = CodeMirror.Doc(r.content, modeFor(path));
+  t = { path, doc, mtime: r.mtime, gen: doc.changeGeneration(true) };
+  S.tabs.push(t);
+  return t;
+}
+
+async function openFile(path, line, reveal = true) {
+  if (reveal) showCentre("files");  // a file the researcher opens is read in the Files view; a preload stays where the researcher is (spec #145)
+  const t = await loadTab(path);
+  if (!t) return;
+  if (OFFERED.has(path)) { if (line === undefined) line = OFFERED.get(path); OFFERED.delete(path); }  // opened: go to the agent's change
   S.active = path;
   cm.swapDoc(t.doc);
   cm.setOption("readOnly", !!t.readOnly);   // a Review snapshot's file is read, never edited
@@ -88,6 +97,20 @@ function openReadOnly(path, content) {
   return openFile(path);
 }
 
+/* A file the agent changed (AV.end), offered rather than opened: the researcher stays on the tab they are reading,
+   and the changed file's tab is added behind it and marked until they open it, which goes to the change. A new
+   Start, the next Ask message or an Undo clears the marks (AH.clear). */
+const OFFERED = new Map();   // path -> the line the agent changed (1-based)
+async function offerFile(path, line) {
+  if (path === S.active) return;                       // on screen already: its changed lines are marked
+  if (!S.active) return openFile(path, line, false);   // nothing of the researcher's in the editor to keep
+  if (!(await loadTab(path))) return;
+  if (path === S.active) return;
+  OFFERED.set(path, line);
+  AH.apply(path);
+  renderTabs(); persistSession();
+}
+
 function jumpToLine(line) {
   const l = Math.max(0, Math.min(line - 1, cm.lineCount() - 1));
   cm.setCursor({ line: l, ch: 0 });
@@ -102,6 +125,7 @@ async function closeTab(path) {
   if (t && isDirty(t) && !t.conflict) await saveTab(t);      // autosave may still be pending
   if (t && isDirty(t) && !confirm(`${path} has unsaved changes. Close anyway?`)) return;
   S.tabs = S.tabs.filter((x) => x.path !== path);
+  OFFERED.delete(path);
   if (S.active === path) {
     const next = S.tabs[S.tabs.length - 1];
     if (next) return openFile(next.path);
@@ -112,7 +136,7 @@ async function closeTab(path) {
 
 function renderTabs() {
   $("#tabs").innerHTML = S.tabs.map((t) => `
-    <div class="tab ${t.path === S.active ? "active" : ""} ${isDirty(t) ? "dirty" : ""} ${t.readOnly ? "readonly" : ""}" data-path="${esc(t.path)}" title="${esc(t.path)}${t.readOnly ? " (read-only: a Review snapshot)" : ""}">
+    <div class="tab ${t.path === S.active ? "active" : ""} ${isDirty(t) ? "dirty" : ""} ${t.readOnly ? "readonly" : ""} ${OFFERED.has(t.path) ? "agent-changed" : ""}" data-path="${esc(t.path)}" title="${esc(t.path)}${t.readOnly ? " (read-only: a Review snapshot)" : ""}${OFFERED.has(t.path) ? " (changed by the agent: open it to see the change)" : ""}">
       <span class="name">${esc(t.readOnly ? t.path : t.path.split("/").pop())}</span><span class="close" data-close="${esc(t.path)}">×</span>
     </div>`).join("");
   AH.refresh();
@@ -957,8 +981,9 @@ document.addEventListener("click", (e) => { if (!e.target.closest("#plus-menu, #
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") { plusMenu(false); $("#review-card").hidden = true; } });
 
 /* Where the agent works, marked in the editor: the lines it reads (blue), the passage it is
-   rewriting (amber, pulsing), and the lines it changed this turn (green, until your next
-   message or Undo). The file it is on gets a pulsing dot in the tabs and the file list.
+   rewriting (amber, pulsing), and the lines it changed (green, until your next Ask
+   message, an Undo or a new Start of the run; a hand-off between the run's roles keeps them).
+   The file it is on gets a pulsing dot in the tabs and the file list.
    Marks are line classes on the tab's document, kept here by line number so they come back
    when a tab is opened or reloaded from disk. */
 const AH = {
@@ -978,6 +1003,7 @@ const AH = {
       this.marks.set(path, kind ? list.filter((m) => m.kind !== kind) : []);
       this.apply(path);
     }
+    if ((kind === null || kind === "changed") && OFFERED.size) { OFFERED.clear(); renderTabs(); }   // the tabs' marks go with them
   },
 
   // Put the marks of `path` on its tab's document (after a swap, a reload, a change).
@@ -1098,8 +1124,8 @@ const AV = {
     }
     if (this.id !== null) return;                       // the next step already took the view
     $("#agent-view").hidden = true;
-    // Show the result where it is, unless you hid the agent's view.
-    if (!this.hidden && S.files.some((f) => f.path === path)) openFile(path, line, false);  // in the editor; the view the researcher is on stays
+    // Offer the result, never switch to it: the tab and the view the researcher is on stay (seventh review).
+    if (S.files.some((f) => f.path === path)) offerFile(path, line);
   },
 };
 
@@ -1717,6 +1743,6 @@ globalThis.studioLive = {
     }
     AV.render();
   },
-  // A new Start: last run's marks go.
+  // Called by the run pane only when a new Start begins (not at each turn): last run's marks go.
   reset() { AV.hidden = false; AH.clear(); liveNames.clear(); },
 };

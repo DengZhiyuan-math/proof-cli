@@ -134,7 +134,7 @@ researcher reads first when reviewing the proof, so it must say what the proof i
 actually does, not what it should do. Read proof.tex (and any file it \\input's) and the
 dependencies it rests on: {dependencies}. Don't change the proof, and write no other file.
 
-Write Markdown, with mathematics as $…$, under exactly these four headings:
+Write Markdown, with mathematics as $…$ (display: $$…$$), under exactly these four headings:
 
 ## 核心思路
 One or two sentences: why the result holds. (Required.)

@@ -15,11 +15,10 @@ by itself: the agent manager reverts its writes outside them after the turn.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
-import json
-
-from .backends import MCP_SERVER, CliBackend, Job, compile_tool_server, compiles, find_bin, system_append
+from .backends import MCP_SERVER, CliBackend, Job, compile_tool_server, find_bin, has_compile_tool, system_append
 
 SANDBOX = {"edit": "workspace-write", "ask": "read-only"}
 
@@ -70,7 +69,7 @@ class Codex(CliBackend):
             cmd += ["-m", job.model]
         if job.effort:
             cmd += ["-c", f"model_reasoning_effort={job.effort}"]
-        if compiles(job):
+        if has_compile_tool(job):
             # the compile tool, as a config override: `-c` values are TOML, and a JSON string or array of strings is one
             server = compile_tool_server(job.server_url)
             cmd += ["-c", f"mcp_servers.{MCP_SERVER}.command={json.dumps(server['command'])}",

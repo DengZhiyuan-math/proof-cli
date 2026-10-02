@@ -99,6 +99,10 @@ class El {
     const d = pane.all().find((x) => x.tag === "details" && Number(x.attrs["data-turn"]) === c.turn); d.open = false; await d.listeners.toggle();
     said = "(the backend is not asked again)"; await openTurn(c.turn); readings.push(read());  // closed and opened again: final, from memory
   }
+  for (const step of scenario.sequence || []) {  // the run goes on: what the next polls read (a hand-off, a new Start)
+    run = step.run; scenario.turns = step.turns;
+    await context.studioRun.refresh(); await tick(); readings.push(read());
+  }
   for (const label of [].concat(scenario.press || [])) {
     if (scenario.redirect !== undefined) { const box = pane.all().find((x) => x.cls() === "run-redirect"); if (box) box.value = scenario.redirect; }
     if (scenario.role !== undefined) { for (const sel of pane.all().filter((x) => x.tag === "select")) sel.value = scenario.role; }
