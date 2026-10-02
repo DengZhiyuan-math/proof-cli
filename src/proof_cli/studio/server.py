@@ -26,7 +26,7 @@ import time
 import webbrowser
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Mapping, TypedDict
 from urllib.parse import quote
 
 from . import build, httpbase
@@ -35,12 +35,8 @@ from ..errors import ERROR_CODES
 from ..key_ideas import KEY_IDEAS_FILE
 from ..vault import RUN_SCRIPT
 from .agent import NO_WINDOW, AgentManager
-from .fsutil import EDITABLE_SUFFIXES, SKIP_DIRS, with_line_ends_of, write_bytes
+from .fsutil import COMPUTATION_SUFFIXES, EDITABLE_SUFFIXES, SKIP_DIRS, with_line_ends_of, write_bytes
 from .texutil import group, plain_text
-
-# what a computation node's studio edits besides the LaTeX suffixes (spec #145): its program, its data, its logs —
-# matched case-insensitively, so `.R` is `.r`
-COMPUTATION_SUFFIXES = {".sh", ".py", ".sage", ".lean", ".jl", ".r", ".m", ".gp", ".mac", ".csv", ".json", ".log", ".toml", ".yml", ".yaml", ".cfg", ".ini"}
 
 MAX_FILES = 3000
 
@@ -283,8 +279,9 @@ def _json(obj, code=200) -> Response:
     return Response(code, json.dumps(obj).encode("utf-8"))
 
 
-def _err(code, msg) -> Response:
-    return _json({"error": msg}, code)
+def _err(status: int, code: str, msg: str) -> Response:
+    """Every studio error has one shape, {"error": message, "code": CODE}, with a registered code (errors.py)."""
+    return _json({"error": msg, "code": code}, status)
 
 
 def vscode_url(path: Path, line: int | None = None) -> str:
@@ -304,9 +301,39 @@ def _line(value) -> int | None:
     """The page's `line`: a positive whole number, or nothing; anything else is the page's mistake (INVALID_LINE)."""
     if value is None or value == "":
         return None
-    if isinstance(value, bool) or not (isinstance(value, int) or (isinstance(value, str) and value.isdigit())) or int(value) < 1:
+    if isinstance(value, bool) or not (isinstance(value, int) or (isinstance(value, str) and value.isdecimal() and value.isascii())) or int(value) < 1:
         raise _Refused("INVALID_LINE", f"line must be a positive whole number, not {value!r}")
     return int(value)
+
+
+@dataclass(frozen=True)
+class RunInputs:
+    """The state of a computation's inputs at one moment: their inputs digest (as a snapshot's frozen inputs
+    are hashed) and a stamp of each input by its path (size, mtime, ctime, inode) — or, when the folder
+    couldn't be read whole (an unreadable file, a symbolic link), why not."""
+
+    digest: str
+    stamps: Mapping[str, str]
+    unreadable: str | None = None
+
+
+@dataclass(frozen=True)
+class FinishedRun:
+    """A run of run.sh as it ended: its outcome and notes, its inputs before and after it (None when one
+    couldn't be read), and `stopped` ("stopped", "timed out") when it did not complete."""
+
+    outcome: str
+    notes: str
+    before: RunInputs | None
+    after: RunInputs | None
+    stopped: str | None
+
+
+class RunRecord(TypedDict):
+    """What became of a finished run: the Evidence check recorded (its JSON), or None and why not."""
+
+    evidence: dict | None
+    note: str
 
 
 @dataclass(frozen=True)
@@ -314,13 +341,13 @@ class ComputationHooks:
     """What a proof map node's studio asks the project about its computation (spec #145).
 
     `medium()` is the node's Medium as of now: Run exists for a computation. `run_inputs()` is the state of the
-    program's inputs, read before and after a run, and `record_run(...)` records a finished run as an Evidence
-    check when the Evidence rule holds (ADR-0015), answering {"evidence": check or None, "note": why not}.
-    `open_command()` is the project's optional way to hand the folder to an editor."""
+    program's inputs, read before and after a run, and `record_run(run)` records a finished run as an Evidence
+    check when the Evidence rule holds (ADR-0015). `open_command()` is the project's optional way to hand the
+    folder to an editor."""
 
     medium: Callable[[], str | None]
-    run_inputs: Callable[[], object]
-    record_run: Callable[..., dict]
+    run_inputs: Callable[[], RunInputs]
+    record_run: Callable[[FinishedRun], RunRecord]
     open_command: Callable[[], str | None]
 
 
@@ -690,9 +717,9 @@ class Studio:
         outcome = "passed" if rc == 0 else "failed" if rc is not None else "error"
         what = "stopped" if cancelled else "timed out" if runner.timed_out else f"exit {rc}" if rc is not None else "could not start"
         after = self.computation.run_inputs() if self.computation else None
-        recorded = (self.computation.record_run(outcome=outcome, notes=f"./{RUN_SCRIPT}: {what} after {seconds}s", before=before,
-                                                after=after, stopped=what if runner.stopped.is_set() else None)
-                    if self.computation else {"evidence": None, "note": ""})
+        recorded: RunRecord = (self.computation.record_run(FinishedRun(
+            outcome=outcome, notes=f"./{RUN_SCRIPT}: {what} after {seconds}s", before=before, after=after,
+            stopped=what if runner.stopped.is_set() else None)) if self.computation else {"evidence": None, "note": ""})
         note = recorded.get("note") or ""
         return {"exit": rc, "output": out + (f"\n\n[{note}]" if note else ""), "seconds": seconds, "cancelled": cancelled,
                 "timed_out": runner.timed_out, "outcome": outcome, "evidence": recorded.get("evidence"), "note": note}
@@ -781,13 +808,13 @@ class Studio:
         try:
             return self._get(path, q)
         except UnicodeDecodeError:
-            return _err(415, "This file is not UTF-8 text; the studio edits UTF-8 files only.")
+            return _err(415, "NOT_UTF8", "This file is not UTF-8 text; the studio edits UTF-8 files only.")
         except (ValueError, KeyError) as e:
-            return _err(400, str(e))
+            return _err(400, "STUDIO_REQUEST_INVALID", str(e))
         except FileNotFoundError:
-            return _err(404, "file not found")
+            return _err(404, "NOT_FOUND", "file not found")
         except OSError as e:                 # e.g. the file is locked by another program
-            return _err(500, f"{type(e).__name__}: {e}")
+            return _err(500, "STUDIO_FILE_ERROR", f"{type(e).__name__}: {e}")
 
     def _get(self, path, q):
         if path == "/api/ping":
@@ -796,7 +823,7 @@ class Studio:
             return _json({"mtime": mtime(self.cfg.pdf) if self.cfg.pdf.exists() else None})
         if path == "/pdf":
             if not self.cfg.pdf.exists():
-                return _err(404, "no PDF yet")
+                return _err(404, "NO_PDF", "no PDF yet")
             return Response(200, self.cfg.pdf.read_bytes(), "application/pdf")
         if path == "/api/tree":
             st = self.git_status()
@@ -822,11 +849,11 @@ class Studio:
             return _json({"entries": entries, "folder": str(self.root), "open": how})
         if path == "/api/agent/turn":  # a run's turn, as recorded with the project: its conversation outlives the studio's memory
             kept = self.run.transcript(q.get("turn") or "") if self.run is not None else None
-            return _json(kept) if kept is not None else _json({"error": "no recorded turn by that id", "code": "NO_SUCH_TURN"}, 404)
+            return _json(kept) if kept is not None else _err(404, "NO_SUCH_TURN", "no recorded turn by that id")
         if path == "/api/agent/events":
             job = self.agent.jobs.get(int(q["job"]))
             if not job:
-                return _err(404, "unknown job")
+                return _err(404, "NO_SUCH_JOB", "unknown job")
             evs, done = job.wait_events(int(q.get("after", 0)), 20.0)
             return _json({"events": evs, "done": done})
         if path == "/api/agent/commands":
@@ -854,25 +881,25 @@ class Studio:
         if path == "/api/synctex/forward":
             with self.sync_lock:
                 if not self.sync.load():
-                    return _err(404, "no synctex data; build first")
+                    return _err(404, "NO_SYNCTEX", "no synctex data; build first")
                 r = self.sync.forward(q["file"], int(q["line"]))
-            return _json(r or {"error": "no match"}, 200 if r else 404)
+            return _json(r) if r else _err(404, "NO_SYNCTEX_MATCH", "no match")
         if path == "/api/synctex/inverse":
             with self.sync_lock:
                 if not self.sync.load():
-                    return _err(404, "no synctex data; build first")
+                    return _err(404, "NO_SYNCTEX", "no synctex data; build first")
                 r = self.sync.inverse(int(q["page"]), float(q["x"]), float(q["y"]))
-            return _json(r or {"error": "no match"}, 200 if r else 404)
-        return _err(404, "not found")
+            return _json(r) if r else _err(404, "NO_SYNCTEX_MATCH", "no match")
+        return _err(404, "NOT_FOUND", "not found")
 
     def post(self, path: str, body: dict) -> Response:
         self.refresh_config()
         try:
             return self._post(path, body)
         except (ValueError, KeyError) as e:
-            return _err(400, str(e))
+            return _err(400, "STUDIO_REQUEST_INVALID", str(e))
         except OSError as e:                 # e.g. the file is locked by another program
-            return _err(500, f"{type(e).__name__}: {e}")
+            return _err(500, "STUDIO_FILE_ERROR", f"{type(e).__name__}: {e}")
 
     def _post(self, path, body):
         if path == "/api/file":
@@ -914,10 +941,10 @@ class Studio:
                     raise _Refused("NOT_A_COMPUTATION", "Run is for a node whose Medium is computation; a LaTeX node compiles")
                 return _json(self.run_program())
             except _Refused as refused:
-                return _json({"error": refused.message, "code": refused.code}, self._REFUSAL_STATUS.get(refused.code, 400))
+                return _err(self._REFUSAL_STATUS.get(refused.code, 400), refused.code, refused.message)
         if path == "/api/run/stop":
             return _json({"stopped": self.stop_runs()})
-        return _err(404, "not found")
+        return _err(404, "NOT_FOUND", "not found")
 
     # how a refused run or open reads over HTTP
     _REFUSAL_STATUS = {"NOT_A_COMPUTATION": 409, "STUDIO_CLOSED": 503, "NOT_A_NODE_FILE": 400, "INVALID_LINE": 400, "OPEN_FAILED": 502}
