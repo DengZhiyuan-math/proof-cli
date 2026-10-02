@@ -516,10 +516,17 @@ class DisplayMathRule(unittest.TestCase):
             self.assertIn("$...$", md)
             self.assertIn("$$...$$", md)
 
-    def test_the_draft_brief_names_both_delimiters(self):
-        from proof_cli.studio.proof_agent import KEY_IDEAS_BRIEF
-        self.assertIn("$…$", KEY_IDEAS_BRIEF)
-        self.assertIn("$$…$$", KEY_IDEAS_BRIEF)
+    def test_the_typesetters_brief_has_the_key_ideas_guide_and_both_rules(self):
+        """The merge with #149's KEY_IDEAS_GUIDE: the Typesetter, who writes key-ideas.md, is told both delimiters
+        there and the environments rule for the .tex files, and nothing tells it to avoid $$ in key-ideas.md."""
+        from proof_cli.studio.proof_agent import KEY_IDEAS_GUIDE, ProofAgentContext
+        self.assertIn("$…$", KEY_IDEAS_GUIDE)
+        self.assertIn("$$…$$", KEY_IDEAS_GUIDE)
+        text = backends.system_append(ProofAgentContext("N", tmpdir(), role="typesetter"))
+        self.assertIn("## 核心思路", text)  # the guide itself
+        self.assertIn("- In .tex files, write display math with named LaTeX environments", text)
+        self.assertIn("In the .tex files display math is a named environment;\nin key-ideas.md it is $$…$$ and inline math $…$.", text)
+        self.assertNotIn("Compile without --shell-escape", text)  # it compiles with the tool, never in a shell
 
 
 class ClaudeBilling(unittest.TestCase):
