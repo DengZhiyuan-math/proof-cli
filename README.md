@@ -37,7 +37,8 @@ proof node create C3 claim "For every n ≤ 10^4 …" --medium computation   # a
 proof node progress N              # the node's work log: what the agent planned, did, handed over
 # In a computation node's studio, Run executes run.sh (its exit code is an Evidence check on the current snapshot:
 # 0 passed, otherwise failed — recorded only when the run completes with the snapshot's frozen inputs, untouched;
-# see ADR-0015). run.sh runs as you, with your full environment, and can write anywhere you can (ADR-0010's
+# see ADR-0015; a checker recording one by hand names the snapshot it ran on with
+# `proof node evidence record <proof> <outcome> --snapshot-sha256 <sha>`). run.sh runs as you, with your full environment, and can write anywhere you can (ADR-0010's
 # cooperative model, not a sandbox); the page keeps the last 8 MB of its output.
 # Open in VS Code hands the folder to the editor — vscode://file/<folder>, or the command proof.toml names:
 #   [studio]

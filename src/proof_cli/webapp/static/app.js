@@ -1030,9 +1030,14 @@ function evidenceItem(c) {
   } else {
     li.append(el("span", `snapshot v${s.version}${hash}`, { class: "mono evidence-snap", title }), " · frozen at ", el("code", s.location));
   }
+  // the check's own bound hash (PR #147): flagged when the snapshot changed since, said plainly when unbound
+  const b = c.binding;
+  if (b && b.state === "unbound") li.append(" · ", el("span", b.label, { class: "evidence-binding" }));
+  else if (b && b.sha256 && b.state !== "matches") li.append(" · ", el("span", `bound to ${b.sha256.slice(0, 12)}…`, { class: "mono evidence-binding", title: b.sha256 }));
   const marks = [];
   if (!s.current) marks.push(`for an older version v${s.version}`);
   if (s.unreadable) marks.push("snapshot unreadable");
+  if (b && b.state === "changed") marks.push(b.label);
   for (const text of marks) {
     const chip = stateChip("unverifiable", text, text);  // the map's attention triangle and colour
     chip.classList.add("state-chip", "warning");

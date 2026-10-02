@@ -737,3 +737,52 @@ def test_migrate_dependents_points_at_the_page_of_the_project_proof_root_names(t
     result = runner.invoke(app, ["node", "migrate-dependents", "ref_1", "ref_2", "--json"])
     error = json.loads(result.stdout)["error"]
     assert error["code"] == "HUMAN_REVIEW_REQUIRED" and error["url"].startswith("http://localhost:")
+
+
+# -- an Evidence check binds a snapshot hash, and node show says whether it still matches (PR #147) --------
+
+
+def _sha_of(tmp_path: Path, proof_id: str) -> str:
+    from proof_cli.authority import candidate_proof_sha256
+
+    return candidate_proof_sha256(load_project(tmp_path), proof_id)
+
+
+def test_node_evidence_record_binds_the_given_snapshot_hash_or_refuses_another(tmp_path: Path):
+    proof_id = _create_claimed_and_submitted(tmp_path)
+    sha = _sha_of(tmp_path, proof_id)
+    bound = runner.invoke(app, ["node", "evidence", "record", proof_id, "passed", "--snapshot-sha256", sha, "--root", str(tmp_path), "--json"])
+    assert bound.exit_code == 0 and json.loads(bound.stdout)["data"]["candidate_proof_sha256"] == sha
+    wrong = runner.invoke(app, ["node", "evidence", "record", proof_id, "passed", "--snapshot-sha256", "0" * 64, "--root", str(tmp_path), "--json"])
+    assert wrong.exit_code != 0
+    error = json.loads(wrong.stdout)["error"]
+    assert error["code"] == "EVIDENCE_SNAPSHOT_MISMATCH" and "v1" in error["message"] and sha[:12] in error["message"]
+    # omitted: the snapshot's hash at the moment of recording
+    default = runner.invoke(app, ["node", "evidence", "record", proof_id, "failed", "--root", str(tmp_path), "--json"])
+    assert json.loads(default.stdout)["data"]["candidate_proof_sha256"] == sha
+
+
+def test_node_show_json_shows_each_evidence_checks_own_binding(tmp_path: Path):
+    import sqlite3
+
+    proof_id = _create_claimed_and_submitted(tmp_path)
+    sha = _sha_of(tmp_path, proof_id)
+    ids = [json.loads(runner.invoke(app, ["node", "evidence", "record", proof_id, "passed", "--root", str(tmp_path), "--json"]).stdout)["data"]["id"]
+           for _ in range(2)]
+    with sqlite3.connect(tmp_path / ".proof" / "project.sqlite3") as conn:  # a row from before binding
+        conn.execute("UPDATE evidence_checks SET candidate_proof_sha256 = NULL WHERE id = ?", (ids[1],))
+
+    def shown():
+        data = json.loads(runner.invoke(app, ["node", "show", "clm_1", "--root", str(tmp_path), "--json"]).stdout)["data"]
+        return {c["id"]: c for c in data["evidence_checks"]}
+
+    checks = shown()
+    assert checks[ids[0]]["binding"] == {"sha256": sha, "state": "matches", "label": f"bound to {sha[:12]}…"}
+    assert checks[ids[1]]["binding"]["state"] == "unbound" and checks[ids[1]]["binding"]["label"] == "not bound (recorded before binding)"
+    assert checks[ids[0]]["snapshot_version"] == 1
+    frozen = next((tmp_path / "proofs" / "clm_1" / "snapshots" / "v1").rglob("proof.tex"))
+    frozen.write_text(frozen.read_text() + "% edited after the check\n")
+    checks = shown()
+    assert checks[ids[0]]["binding"]["state"] == "changed" and checks[ids[0]]["binding"]["label"] == "snapshot changed since this check"
+    assert checks[ids[0]]["binding"]["sha256"] == sha  # the check's own hash, not the snapshot's new one
+    assert checks[ids[1]]["binding"]["state"] == "unbound"  # never read as matching

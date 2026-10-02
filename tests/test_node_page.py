@@ -207,6 +207,34 @@ def test_an_evidence_check_on_an_unreadable_snapshot_still_shows(page):
     assert shown["snapshot"]["sha256"] == v1["sha256"]  # what it was frozen as, still named
 
 
+def test_the_node_page_shows_each_evidence_checks_own_binding(page):
+    import sqlite3
+
+    store, client = page
+    _, v2 = _two_snapshots(store, client)
+    sha = candidate_proof_sha256(store, v2["id"])
+    bound = _ok(client.post("/api/node/c1/evidence", {"candidate_proof_id": v2["id"], "outcome": "passed", "run_by": "lean", "snapshot_sha256": sha}))
+    old = _ok(client.post("/api/node/c1/evidence", {"candidate_proof_id": v2["id"], "outcome": "passed", "run_by": "lean"}))
+    assert bound["candidate_proof_sha256"] == old["candidate_proof_sha256"] == sha
+    with sqlite3.connect(store.root / ".proof" / "project.sqlite3") as conn:
+        conn.execute("UPDATE evidence_checks SET candidate_proof_sha256 = NULL WHERE id = ?", (old["id"],))
+    checks = {c["id"]: c for c in _ok(client.get("/api/node/c1"))["evidence_checks"]}
+    assert checks[bound["id"]]["binding"]["state"] == "matches" and checks[bound["id"]]["binding"]["sha256"] == sha
+    assert checks[old["id"]]["binding"]["state"] == "unbound"
+    frozen = next((store.root / "proofs" / "c1" / "snapshots" / "v2").rglob("proof.tex"))
+    frozen.write_text("changed after the check\n")
+    checks = {c["id"]: c for c in _ok(client.get("/api/node/c1"))["evidence_checks"]}
+    assert checks[bound["id"]]["binding"]["state"] == "changed" and checks[old["id"]]["binding"]["state"] == "unbound"
+
+
+def test_recording_evidence_on_the_page_refuses_a_hash_that_is_not_the_snapshots(page):
+    store, client = page
+    _, v2 = _two_snapshots(store, client)
+    status, body = client.post("/api/node/c1/evidence", {"candidate_proof_id": v2["id"], "outcome": "passed", "snapshot_sha256": "0" * 64})
+    assert status >= 400 and body["error"]["code"] == "EVIDENCE_SNAPSHOT_MISMATCH" and "v2" in body["error"]["message"]
+    assert list_evidence_checks(store, v2["id"]) == []
+
+
 # -- no more launching prism-local --------------------------------------------------
 
 
