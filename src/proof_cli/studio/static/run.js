@@ -30,7 +30,7 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
 
   async function act(action, body) {
     const r = await api(`/api/agent/${action}`, body || {});
-    if (r._status >= 400) { tell(`${r.error || "refused"}: ${r.message || ""}`.trim(), true); return r; }
+    if (r._status >= 400) { tell(`${r.code || "refused"}: ${r.error || ""}`.trim(), true); return r; }
     if (action === "start") tell(`Started as ${r.name || "the agent"}.`);
     else if (action === "review-now") {
       // a review request hands the node over (CONTEXT: a claim ends when its holder requests review): the run ends here,

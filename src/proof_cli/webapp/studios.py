@@ -170,7 +170,7 @@ class StudioHub:
             studio = self.studio(node_id)
         except NoStudio as exc:
             code, message = exc.args
-            return int(HTTPStatus.NOT_FOUND), {"error": code, "message": message}
+            return int(HTTPStatus.NOT_FOUND), {"error": message, "code": code}
         return studio.run_action(action, body or {})
 
     def run_state(self, node_id: str) -> dict | None:

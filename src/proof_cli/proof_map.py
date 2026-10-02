@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shutil
 import sqlite3
@@ -456,7 +457,10 @@ def record_agent_turn(
             path = TURNS_DIR / node_id / f"{turn}.json"
             target = store.root / path
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(json.dumps({**payload, "prompt": prompt, "events": events}, ensure_ascii=False), encoding="utf-8")
+            # write-then-rename, as the project's own side files are: a reader never sees half a transcript
+            tmp = target.with_name(f"{target.name}.{uuid.uuid4().hex}.tmp")
+            tmp.write_text(json.dumps({**payload, "prompt": prompt, "events": events}, ensure_ascii=False), encoding="utf-8")
+            os.replace(tmp, target)
             payload["transcript"] = path.as_posix()
     with store.transaction() as conn:
         append_event(store, TURN_EVENT, f"{role} on {node_id}: turn {turn} {phase}", entity_id=node_id, payload=payload, conn=conn)
@@ -464,7 +468,7 @@ def record_agent_turn(
 
 def agent_turn_transcript(store: ProjectStore, node_id: str, turn: str) -> dict | None:
     """A turn's record with its conversation (`events`), as record_agent_turn kept it; None when there is none."""
-    if not _TURN_ID.fullmatch(turn or "") or not re.fullmatch(r"[A-Za-z0-9._-]+", node_id or ""):
+    if not _TURN_ID.fullmatch(turn or "") or not _SAFE_NODE_ID.fullmatch(node_id or ""):  # as node folders are named
         return None
     try:
         return json.loads((store.root / TURNS_DIR / node_id / f"{turn}.json").read_text(encoding="utf-8"))
@@ -474,22 +478,22 @@ def agent_turn_transcript(store: ProjectStore, node_id: str, turn: str) -> dict 
 
 def work_log(store: ProjectStore, node_id: str) -> list[dict]:
     """The node's work log: the agent's reports merged, in time order, with what it did through `proof` and its turns.
-    What happened during a run's turn carries that turn's role; what happened outside one (the researcher's own split,
-    a fog item from the map) has none."""
+    What the run's agent did during one of its turns carries that turn's role; anything else — outside a turn, or by
+    someone else while a turn runs (the researcher's own split, a fog item from the map) — keeps its own actor and has none."""
     require_node(store, node_id)
     proof_ids = {proof.id for proof in list_candidate_proofs(store, node_id)}
     fog = {item.id: item for item in list_fog_items(store)}
     near_fog = {fog_id for fog_id, item in fog.items() if node_id in item.near}  # the fog about this node: its Experiments belong here
     entries: list[dict] = []
-    turn_role: str | None = None  # the role of the turn running at this point of the log
+    turn: dict | None = None  # the run's turn running at this point of the log: its role, and the agent name it acts as
     for event in list_events(store):
         at = event.created_at.isoformat()
         payload = event.payload or {}
         if event.kind == TURN_EVENT and event.entity_id == node_id:
             if payload.get("phase") == "started":
-                turn_role = payload.get("role")
+                turn = payload
                 continue
-            turn_role = None
+            turn = None
             if payload.get("job") is not None:  # a turn that never began (stopped before it existed) has nothing to show
                 entries.append({"at": at, "kind": "turn", **{key: value for key, value in payload.items() if key != "phase"}})
             continue
@@ -511,8 +515,8 @@ def work_log(store: ProjectStore, node_id: str) -> list[dict]:
             entries.append({"at": at, "kind": "dependencies", "by": payload.get("edited_by") or payload.get("by"), "change": event.kind.rsplit("_", 1)[1], "dependency": payload.get("dependency_id") or payload.get("dependency")})
         elif event.kind in ("proof_map_node_claimed", "proof_map_claim_reassigned") and event.entity_id == node_id:
             entries.append({"at": at, "kind": "claimed", "by": payload.get("claimant_id") or payload.get("assignee")})
-        for entry in entries[before:]:
-            entry.setdefault("role", turn_role)  # an automatic entry: the role of the turn it happened in, if any
+        for entry in entries[before:]:  # an automatic entry: the role of the turn it happened in, when the run's agent did it
+            entry.setdefault("role", turn.get("role") if turn is not None and entry.get("by") == turn.get("by") else None)
     return entries
 
 
