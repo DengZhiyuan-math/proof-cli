@@ -426,8 +426,10 @@ def test_stop_and_release_while_the_node_is_still_being_assigned_holds():
     stopped = run.release()
     assert stopped["status"] == "released"
     gate.set()
-    worker.join(5)
-    time.sleep(0.2)
+    worker.join(WAIT)
+    assert not worker.is_alive(), "the first Start never came back from its assignment"
+    _until(lambda: released == ["claude-code"] and run.view()["status"] == "released",
+           lambda: f"the late assignment to be given back (released={released}, status={run.view()['status']})")
     assert first["status"] == "released" and run.view()["status"] == "released"
     assert assigned == ["claude-code"] and released == ["claude-code"]  # the assignment it had made is given back
     assert started == [] and not run.active()  # and no turn ever started
@@ -1024,13 +1026,18 @@ def test_a_start_is_refused_when_the_previous_run_is_still_giving_the_node_back(
     from proof_cli.studio.agent_run import AgentRun
 
     monkeypatch.setattr(agent_run, "SETTLE_WAIT", 0.3)
-    gate = threading.Event()
-    run = AgentRun(_fake_turns(lambda turn: None), _hooks(release=lambda name, reason: gate.wait(5)))
+    entered, gate = threading.Event(), threading.Event()
+
+    def release(name, reason):
+        entered.set()  # the stopper is inside the release: the node is being given back
+        gate.wait(WAIT)
+
+    run = AgentRun(_fake_turns(lambda turn: None), _hooks(release=release))
     run.start("claude", roles=["numerics"])
     _until(lambda: run.view()["status"] in ("done", "stuck"), "the run to end")
     stopper = threading.Thread(target=run.release)
     stopper.start()
-    time.sleep(0.1)
+    assert entered.wait(WAIT), "the release never began"
     refused = run.start("claude")
     gate.set()
     stopper.join(5)
