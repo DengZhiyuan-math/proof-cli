@@ -1999,16 +1999,25 @@ def exchange_export(
 ) -> None:
     """The project as one bundle: the proof map, its Proof vault files and its side state (#31).
     Its contracts' and references' trust fields are legacy (ADR-0012); an importer resets them."""
-    bundle_json = cmd_exchange_export(_root(root), note=note)  # led by the legacy notice
+    try:
+        bundle_json = cmd_exchange_export(_root(root), note=note)  # led by the legacy notice
+    except ProofMapError as exc:  # a node folder it can't read whole: an unreadable file, a symbolic link
+        _emit_error(exc, json_output, command="exchange.export")
+        raise typer.Exit(code=1)
     if output:
         Path(output).write_text(bundle_json + "\n", encoding="utf-8")
         bundle = parse_bundle(bundle_json)
         counts = inspect_exchange_bundle(bundle).section_counts
-        summary = {"legacy_notice": LEGACY_TRUST_NOTICE, "path": output, "bundle_id": bundle.id, "section_counts": counts}
+        summary = {
+            "legacy_notice": LEGACY_TRUST_NOTICE, "path": output, "bundle_id": bundle.id, "section_counts": counts,
+            "notices": bundle.notices,  # SNAPSHOT_EXPORTED_UNVERIFIABLE per snapshot it had to leave files out of
+        }
         if json_output:
             typer.echo(dump_envelope(success_envelope("exchange.export", summary)))
         else:
             typer.echo(f"Wrote bundle {bundle.id} to {output}: {counts['proof_map_nodes']} node(s), {counts['vault_files']} vault file(s)")
+            for item in bundle.notices:
+                typer.echo(f"Note ({item['code']}): {item['message']}")
         return
     _emit_legacy_json("exchange.export", json_output, lambda: bundle_json)
 

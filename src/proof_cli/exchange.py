@@ -89,7 +89,7 @@ from .governance import (
     list_reusable_asset_records,
 )
 from .memory import HandoffSnapshot, LayeredMemory, latest_handoff_snapshot, load_memory, save_memory
-from .proof_map import ProofMapError, node_id_problem, note_trust_rule_matches
+from .proof_map import ProofMapError, node_folder_error, node_id_problem, note_trust_rule_matches
 from .proof_state import load_state, save_state
 from .publication import PublicationWorkspace, load_publication_workspace, save_publication_workspace
 from .references import ReferenceRecord, ReferenceReviewRecord
@@ -124,7 +124,17 @@ from .storage import (
     upsert_dependency_pin,
 )
 from .theorems import list_theorems
-from .vault import SNAPSHOT_MANIFEST, exchanged_files, is_executable, preamble_path, snapshot_digest_of
+from .errors import notice
+from .vault import (
+    SNAPSHOT_MANIFEST,
+    NodeFolderLinks,
+    exchanged_files,
+    is_executable,
+    is_secret_path,
+    preamble_path,
+    set_executable,
+    snapshot_digest_of,
+)
 
 SHARED_PREAMBLE = "proofs/preamble.tex"
 RELEASED_BY = "exchange-import"
@@ -176,6 +186,12 @@ class ExchangeBundle(BaseModel):
     # for reference only: they never count here (ADR-0010). A bundle from
     # before ADR-0010 carried signatures instead; they're ignored.
     review_decisions: list[dict] = Field(default_factory=list)
+    # frozen files an export left out of a snapshot — secrets, or hidden or cache files an older
+    # rule froze (ADR-0015) — by their path from the project root: never their contents. The
+    # importer reads such a snapshot as unverifiable rather than refusing the bundle
+    withheld_files: list[str] = Field(default_factory=list)
+    # what the export has to tell (errors.NOTICE_CODES): SNAPSHOT_EXPORTED_UNVERIFIABLE per snapshot
+    notices: list[dict] = Field(default_factory=list)
 
 
 class ExchangeImportReport(BaseModel):
@@ -228,15 +244,36 @@ IMPORTED_SECTIONS = (
 # -- export ------------------------------------------------------------------------------
 
 
-def _vault_files(store: ProjectStore, nodes: list[ProofMapNode]) -> list[VaultFile]:
+def _vault_files(store: ProjectStore, nodes: list[ProofMapNode]) -> tuple[list[VaultFile], list[str], list[dict]]:
+    """The vault files a bundle carries, the frozen files it withholds, and a notice per snapshot
+    that withholding leaves unverifiable. A secret (.env, .env.*, .envrc, .netrc) is never read."""
     files: list[VaultFile] = []
+    withheld: list[str] = []
+    notices: list[dict] = []
     preamble = preamble_path(store.root)
     if preamble.is_file():
         files.append(VaultFile.of(SHARED_PREAMBLE, preamble.read_bytes()))
     for node in nodes:
-        for rel, path in exchanged_files(store.root, node.id, node.medium).items():
+        try:
+            exchanged = exchanged_files(store.root, node.id, node.medium)
+        except (OSError, NodeFolderLinks) as exc:
+            raise node_folder_error(store.root, node.id, exc, "an exchange export") from exc
+        for rel, path in exchanged.files.items():
+            if is_secret_path(rel):  # the hard deny, once more, whatever the walk allowed
+                continue
             files.append(VaultFile.of(rel, path.read_bytes(), executable=is_computation(node) and is_executable(path)))
-    return files
+        for folder, missing in sorted(exchanged.withheld.items()):
+            withheld += [f"{folder}{'shared/' + rel[3:] if rel.startswith('../') else 'node/' + rel}" for rel in missing]
+            version = folder.rstrip("/").rsplit("/", 1)[-1].removeprefix("v")
+            notices.append(notice(
+                "SNAPSHOT_EXPORTED_UNVERIFIABLE",
+                f"snapshot {folder} of {node.id} is exported without {len(missing)} frozen file(s) ({', '.join(missing)}): "
+                "secrets and hidden or cache files are never exported, so it won't verify where the bundle is imported",
+                node_id=node.id,
+                version=int(version) if version.isdigit() else version,
+                paths=missing,
+            ))
+    return files, withheld, notices
 
 
 def export_exchange_bundle(store: ProjectStore, *, note: str = "") -> ExchangeBundle:
@@ -265,8 +302,8 @@ def export_exchange_bundle(store: ProjectStore, *, note: str = "") -> ExchangeBu
         dependency_pins=list_all_dependency_pins(store),
         challenges=list_challenges(store),
         evidence_checks=list_all_evidence_checks(store),
-        vault_files=_vault_files(store, nodes),
     )
+    bundle.vault_files, bundle.withheld_files, bundle.notices = _vault_files(store, nodes)
     bundle.review_decisions = [
         {key: (value.model_dump(mode="json") if hasattr(value, "model_dump") else value) for key, value in row.items()}
         for row in list_decisions(store)
@@ -494,14 +531,22 @@ def _plan_vault_files(store: ProjectStore, bundle: ExchangeBundle, plan: _Plan, 
     return carried
 
 
-def _check_snapshot(plan: _Plan, proof: CandidateProofRecord, carried: dict[str, bytes]) -> None:
-    """The snapshot the index row names travels in the bundle, with the SHA-256 the row records."""
+def _check_snapshot(plan: _Plan, proof: CandidateProofRecord, carried: dict[str, bytes], withheld: set[str] = frozenset()) -> None:
+    """The snapshot the index row names travels in the bundle, with the SHA-256 the row records —
+    unless the export declared files of it withheld (ADR-0015): it then arrives, and reads, unverifiable."""
     if proof.file_path.endswith("/" + SNAPSHOT_MANIFEST):
         folder = proof.file_path.removesuffix(SNAPSHOT_MANIFEST)
         digest = snapshot_digest_of(carried.get(proof.file_path), lambda rel: carried.get(folder + rel))
     else:
         data = carried.get(proof.file_path)
         digest = hashlib.sha256(data).hexdigest() if data is not None else None
+    folder_path = proof.file_path.removesuffix(SNAPSHOT_MANIFEST)
+    if (digest is None or (proof.sha256 is not None and digest != proof.sha256)) and any(path.startswith(folder_path) for path in withheld):
+        plan.warnings.append(
+            f"candidate proof {proof.id} (v{proof.version} of {proof.node_id}) arrives unverifiable: "
+            "its export withheld frozen files (secrets, or hidden or cache files), so nothing can be decided on it here"
+        )
+        return
     if digest is None:
         plan.problem(
             "VAULT_FILE_MISSING",
@@ -611,8 +656,9 @@ def _plan_import(store: ProjectStore, bundle: ExchangeBundle) -> _Plan:
     # -- the Proof vault --
     carried = _plan_vault_files(store, bundle, plan, new_ids, local_ids)
     if proofs_ok:
+        withheld = {path for path in bundle.withheld_files if isinstance(path, str)}
         for proof in plan.proofs:
-            _check_snapshot(plan, proof, carried)
+            _check_snapshot(plan, proof, carried, withheld)
 
     # -- the legacy registry: records only, never trust --
     plan.contracts = [_untrusted_contract(c) for c in _new_only(plan, "theorem_contracts", bundle.theorem_contracts, {c.id for c in list_theorems(store)})]
@@ -716,7 +762,7 @@ def _write_files(store: ProjectStore, files: list[tuple[str, bytes]], executable
         target.parent.mkdir(parents=True, exist_ok=True)
         _write_vault_file(target, data)
         if rel in executable:
-            target.chmod(target.stat().st_mode | 0o111)
+            set_executable(target)
 
 
 def _write_import(store: ProjectStore, bundle: ExchangeBundle, plan: _Plan) -> ExchangeImportReport:

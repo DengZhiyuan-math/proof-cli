@@ -47,7 +47,8 @@ ERROR_CODES: dict[str, str] = {
     "RUN_SCRIPT_MISSING": "a computation node has no run.sh: its review needs the program that is its candidate proof (spec #145)",
     "INVALID_MEDIUM": "the medium is not latex or computation (spec #145)",
     "MEDIUM_NOT_APPLICABLE": "an imported result has no candidate proof, so no medium (spec #145)",
-    "WORKING_FILE_UNREADABLE": "a file or folder the Review snapshot would freeze can't be read; `path` names it, and nothing was written",
+    "WORKING_FILE_UNREADABLE": "a file or folder a Review snapshot would freeze, or an exchange export carry, can't be read; `path` names it, and nothing was written",
+    "NODE_FOLDER_SYMLINK": "a node folder holds a symbolic link where a Review snapshot or an exchange export would read; neither follows links. `links` lists each, its `path` and whether it is `dangling`",
     "WORKING_PROOF_UNCHANGED": "the working proof is the snapshot already under review",
     "KEY_IDEAS_REQUIRED": "requesting review needs the node's key-ideas.md, with 核心思路 and 主要步骤 filled in (ADR-0013); `missing` names what is absent",
     "CANDIDATE_PROOF_NOT_FOUND": "no Candidate proof has this id",
@@ -158,4 +159,12 @@ NOTICE_CODES: dict[str, str] = {
     # A notice is what a command that succeeded has to tell its caller, never a refusal: under
     # --json it is `data.notices`, a list of {code, message, …}; the code is stable like an error's.
     "SNAPSHOT_LARGE_OUTPUT": "the Review snapshot froze more of a computation's out/ than `[snapshot] large_output_mb` in proof.toml (default 50); `output_bytes` and `threshold_bytes` say how much (spec #145)",
+    "SNAPSHOT_SKIPPED_HIDDEN": "the Review snapshot left hidden files or folders out (secrets, dotfiles not on the allowlist, hidden folders); `paths` lists them by path, never their contents (ADR-0015)",
+    "SNAPSHOT_EXPORTED_UNVERIFIABLE": "an exchange export left frozen files out of a snapshot (secrets, or hidden or cache files an older rule froze), so it no longer verifies where it is imported; `node_id`, `version` and `paths` say which (ADR-0015)",
 }
+
+
+def notice(code: str, message: str, **data) -> dict:
+    """One notice, as `data.notices` carries it; `code` must be in NOTICE_CODES (KeyError otherwise)."""
+    NOTICE_CODES[code]
+    return {"code": code, "message": message, **data}

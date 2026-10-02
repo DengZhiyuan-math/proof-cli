@@ -7,6 +7,8 @@ snapshot must freeze the inputs completely and faithfully, executable bits inclu
 which frozen paths are inputs. A LaTeX snapshot is frozen and hashed exactly as before.
 """
 
+import ast
+import base64
 import hashlib
 import json
 import os
@@ -25,6 +27,7 @@ from proof_cli.exchange import bundle_to_json, export_exchange_bundle, import_ex
 from proof_cli.proof_map import ProofMapError, create_node, request_review
 from proof_cli.storage import ensure_project, list_all_candidate_proofs
 from proof_cli.vault import (
+    HIDDEN_INPUTS,
     frozen_inputs_digest,
     frozen_role,
     manifest_digest,
@@ -116,13 +119,130 @@ def test_the_cli_answers_an_unreadable_file_with_its_code_not_an_internal_error(
 # -- the inputs, frozen completely ---------------------------------------------------------------------
 
 
-def test_hidden_environment_files_at_the_node_root_are_frozen(tmp_path: Path):
+@pytest.mark.parametrize("name", sorted(HIDDEN_INPUTS))
+def test_each_allowlisted_environment_file_at_the_node_root_is_frozen(tmp_path: Path, name: str):
     store = ensure_project(tmp_path)
     folder = _computation(store)
-    for name in (".python-version", ".envrc", ".tool-versions"):
-        (folder / name).write_text("3.11\n")
-    frozen = snapshot_folder_files(_snapshot(store, _review(store)))
-    assert {".python-version", ".envrc", ".tool-versions"} <= set(frozen)
+    (folder / name).write_text("3.11\n")
+    assert name in snapshot_folder_files(_snapshot(store, _review(store)))
+
+
+def test_the_allowlist_is_exactly_the_researchers(tmp_path: Path):
+    assert HIDDEN_INPUTS == {".python-version", ".tool-versions", ".nvmrc", ".node-version", ".ruby-version"}
+
+
+SECRET = "MARKER-7f3a9c-do-not-leak"
+
+
+def _plant_secrets(folder: Path) -> None:
+    for name in (".env", ".env.local", ".envrc", ".netrc", ".foo"):
+        (folder / name).write_text(f"TOKEN={SECRET}\n")
+    (folder / "lib").mkdir(exist_ok=True)
+    (folder / "lib" / ".python-version").write_text("3.11\n")  # allowlisted only at the root
+
+
+def test_secrets_and_unknown_dotfiles_are_not_frozen_and_only_their_paths_are_reported(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    folder = _computation(store)
+    _plant_secrets(folder)
+    (folder / ".cache" / "deep").mkdir(parents=True)
+    (folder / ".cache" / "deep" / "x").write_text(SECRET)
+    result = runner.invoke(app, ["node", "request-review", "c1", "--rationale", "r", "--root", str(tmp_path), "--json"])
+    assert result.exit_code == 0, result.output
+    assert SECRET not in result.stdout
+    data = json.loads(result.stdout)["data"]
+    frozen = snapshot_folder_files(folder / "snapshots" / "v1")
+    assert not {".env", ".env.local", ".envrc", ".netrc", ".foo", "lib/.python-version"} & set(frozen)
+    assert not any(rel.startswith(".cache") for rel in frozen)
+    (notice,) = [n for n in data["notices"] if n["code"] == "SNAPSHOT_SKIPPED_HIDDEN"]
+    assert notice["paths"] == [".cache/", ".env", ".env.local", ".envrc", ".foo", ".netrc", "lib/.python-version"]
+    assert all(SECRET not in json.dumps(n) for n in data["notices"])
+
+
+def test_skipped_hidden_paths_are_printed_in_text_mode(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    folder = _computation(store)
+    (folder / ".env").write_text(f"TOKEN={SECRET}\n")
+    result = runner.invoke(app, ["node", "request-review", "c1", "--rationale", "r", "--root", str(tmp_path)])
+    assert result.exit_code == 0, result.output
+    assert "SNAPSHOT_SKIPPED_HIDDEN" in result.output and ".env" in result.output and SECRET not in result.output
+
+
+@pytest.mark.parametrize("name", [".env", ".env.production", ".envrc", ".netrc"])
+def test_a_secret_is_denied_even_if_it_were_allowlisted(tmp_path: Path, monkeypatch, name: str):
+    from proof_cli import vault
+
+    monkeypatch.setattr(vault, "HIDDEN_INPUTS", vault.HIDDEN_INPUTS | {name})
+    store = ensure_project(tmp_path)
+    folder = _computation(store)
+    (folder / name).write_text(SECRET)
+    assert name not in snapshot_folder_files(_snapshot(store, _review(store)))
+    bundle = bundle_to_json(export_exchange_bundle(store))
+    assert SECRET not in bundle and base64.b64encode(SECRET.encode()).decode() not in bundle
+
+
+def test_a_latex_node_freezes_no_hidden_file_either(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="t1", kind="claim", statement="a written proof")
+    (tmp_path / "proofs" / "t1" / ".python-version").write_text("3.11\n")
+    proof = submit_proof(store, "t1", claimant_id="agent_a", scoping_rationale="r", content="\\begin{proof}ok\\end{proof}\n")
+    assert ".python-version" not in snapshot_folder_files(_snapshot(store, proof))
+
+
+# -- a snapshot frozen before the allowlist: its secrets never leave in an export ---------------------------
+
+
+def _old_snapshot_with_secrets(store, monkeypatch):
+    """A computation snapshot frozen by the rule before the allowlist, which froze every root dotfile."""
+    from proof_cli import vault
+
+    folder = _computation(store)
+    (folder / ".env").write_text(f"API_KEY={SECRET}\n")
+    (folder / ".netrc").write_text(f"machine example.org password {SECRET}\n")
+    (folder / ".python-version").write_text("3.11\n")
+    with monkeypatch.context() as old:
+        old.setattr(vault, "is_secret_path", lambda rel: False)
+        old.setattr(vault, "HIDDEN_INPUTS", frozenset({".env", ".netrc", ".python-version"}))
+        proof = _review(store)
+    assert {".env", ".netrc"} <= set(snapshot_folder_files(_snapshot(store, proof)))
+    (folder / ".env").unlink()
+    (folder / ".netrc").unlink()
+    return proof
+
+
+def test_exporting_an_old_snapshot_leaves_its_secrets_out_and_says_it_no_longer_verifies(tmp_path: Path, monkeypatch):
+    source = ensure_project(tmp_path / "source")
+    proof = _old_snapshot_with_secrets(source, monkeypatch)
+    raw = bundle_to_json(export_exchange_bundle(source))
+    assert SECRET not in raw and base64.b64encode(SECRET.encode()).decode()[:16] not in raw
+    bundle = parse_bundle(raw)
+    assert not any(Path(f.path).name in (".env", ".netrc") for f in bundle.vault_files)
+    assert any(f.path.endswith("/node/.python-version") for f in bundle.vault_files)
+    (notice,) = bundle.notices
+    assert notice["code"] == "SNAPSHOT_EXPORTED_UNVERIFIABLE" and notice["node_id"] == "c1" and notice["version"] == proof.version
+    assert "SNAPSHOT_EXPORTED_UNVERIFIABLE" in errors.NOTICE_CODES
+
+
+def test_importing_a_bundle_with_a_withheld_snapshot_reads_it_unverifiable_and_does_not_crash(tmp_path: Path, monkeypatch):
+    source = ensure_project(tmp_path / "source")
+    proof = _old_snapshot_with_secrets(source, monkeypatch)
+    target = ensure_project(tmp_path / "target")
+    report = import_exchange_bundle(target, parse_bundle(bundle_to_json(export_exchange_bundle(source))))
+    assert candidate_proof_sha256(target, proof.id) is None  # unverifiable here, as a lost snapshot is
+    assert any("c1" in warning and "unverifiable" in warning for warning in report.warnings)
+    assert not (target.root / "proofs" / "c1" / "snapshots" / f"v{proof.version}" / "node" / ".env").exists()
+
+
+def test_a_bundle_whose_snapshot_misses_a_file_it_did_not_declare_withheld_is_still_refused(tmp_path: Path):
+    source = ensure_project(tmp_path / "source")
+    _computation(source)
+    _review(source)
+    raw = json.loads(bundle_to_json(export_exchange_bundle(source)))
+    raw["vault_files"] = [f for f in raw["vault_files"] if not f["path"].endswith("/node/check.py")]
+    target = ensure_project(tmp_path / "target")
+    with pytest.raises(ProofMapError) as caught:
+        import_exchange_bundle(target, raw)
+    assert caught.value.code == "VAULT_FILE_MISSING"
 
 
 def test_vcs_folders_tool_caches_and_bytecode_are_never_frozen(tmp_path: Path):
@@ -228,10 +348,19 @@ def test_a_snapshot_with_a_format_1_manifest_still_verifies(tmp_path: Path):
 @pytest.mark.parametrize(
     ("path", "role"),
     [("run.sh", "input"), ("check.py", "input"), (".python-version", "input"), ("data/cases.txt", "input"),
-     ("key-ideas.md", "input"), ("outline.txt", "input"), ("out/table.csv", "output"), ("out/fig/a.png", "output")],
+     ("key-ideas.md", "summary"), ("notes/key-ideas.md", "input"), ("outline.txt", "input"),
+     ("out/table.csv", "output"), ("out/fig/a.png", "output"), ("../preamble.tex", "input")],
 )
-def test_each_frozen_path_is_an_input_or_an_output(path: str, role: str):
+def test_each_frozen_path_is_an_input_an_output_or_the_summary(path: str, role: str):
     assert frozen_role(path) == role
+
+
+def test_a_summary_only_edit_leaves_the_inputs_digest_unchanged(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    folder = _computation(store)
+    frozen = frozen_inputs_digest(_snapshot(store, _review(store)))
+    (folder / "key-ideas.md").write_text((folder / "key-ideas.md").read_text() + "\nOne more remark.\n")
+    assert working_inputs_digest(tmp_path, "c1", Medium.computation) == frozen
 
 
 def test_the_inputs_digest_ignores_out_and_sees_every_input_and_its_mode(tmp_path: Path):
@@ -291,3 +420,128 @@ def test_the_large_output_notice_defaults_to_50_mb_and_prints_in_text_mode(tmp_p
     (tmp_path / "proof.toml").write_text("[snapshot]\nlarge_output_mb = 0.002\n")
     result = runner.invoke(app, ["node", "request-review", "c1", "--rationale", "covered", "--root", str(tmp_path)])
     assert result.exit_code == 0 and "SNAPSHOT_LARGE_OUTPUT" in result.output
+
+
+# -- an export walks the node folder as a snapshot does ------------------------------------------------------
+
+
+def test_an_export_carries_no_tool_cache_or_bytecode(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    folder = _computation(store)
+    (folder / "__pycache__").mkdir()
+    (folder / "__pycache__" / "check.cpython-311.pyc").write_bytes(b"\0")
+    (folder / "lib.pyc").write_bytes(b"\0")
+    _review(store)
+    paths = [f.path for f in export_exchange_bundle(store).vault_files]
+    assert not any("__pycache__" in path or path.endswith(".pyc") for path in paths)
+    assert "proofs/c1/run.sh" in paths and "proofs/c1/out/table.csv" in paths
+
+
+@as_root
+def test_an_export_reports_an_unreadable_folder_rather_than_skipping_it(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    folder = _computation(store)
+    (folder / "data").mkdir()
+    (folder / "data").chmod(0)
+    try:
+        with pytest.raises(ProofMapError) as caught:
+            export_exchange_bundle(store)
+    finally:
+        (folder / "data").chmod(0o755)
+    assert caught.value.code == "WORKING_FILE_UNREADABLE" and caught.value.details["path"] == "proofs/c1/data"
+
+
+# -- symbolic links: refused, in a snapshot and an export alike ---------------------------------------------
+
+
+@pytest.mark.parametrize("dangling", [False, True], ids=["link", "dangling-link"])
+def test_a_symbolic_link_in_the_node_folder_is_refused_by_review_and_export(tmp_path: Path, dangling: bool):
+    store = ensure_project(tmp_path)
+    folder = _computation(store)
+    target = tmp_path / ("missing.txt" if dangling else "elsewhere.txt")
+    if not dangling:
+        target.write_text("outside the node folder\n")
+    (folder / "data.txt").symlink_to(target)
+    with pytest.raises(ProofMapError) as caught:
+        _review(store)
+    assert caught.value.code == "NODE_FOLDER_SYMLINK"
+    (link,) = caught.value.details["links"]
+    assert link["path"] == "proofs/c1/data.txt" and link["dangling"] is dangling
+    assert not (folder / "snapshots").exists()
+    with pytest.raises(ProofMapError) as exported:
+        export_exchange_bundle(store)
+    assert exported.value.code == "NODE_FOLDER_SYMLINK"
+    assert "NODE_FOLDER_SYMLINK" in errors.ERROR_CODES
+
+
+def test_a_linked_folder_in_the_node_folder_is_refused(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    folder = _computation(store)
+    (tmp_path / "shared-data").mkdir()
+    (folder / "data").symlink_to(tmp_path / "shared-data", target_is_directory=True)
+    with pytest.raises(ProofMapError) as caught:
+        _review(store)
+    assert caught.value.code == "NODE_FOLDER_SYMLINK" and caught.value.details["links"][0]["path"] == "proofs/c1/data"
+
+
+# -- verification checks the manifest's format and the stored modes ----------------------------------------
+
+
+@pytest.mark.parametrize("fmt", [None, 0, 3, "2"])
+def test_a_manifest_of_an_unknown_format_is_unverifiable(tmp_path: Path, fmt):
+    store = ensure_project(tmp_path)
+    _computation(store)
+    proof = _review(store)
+    manifest_path = store.root / proof.file_path
+    manifest = json.loads(manifest_path.read_text())
+    if fmt is None:
+        del manifest["format"]
+    else:
+        manifest["format"] = fmt
+    manifest_path.write_text(json.dumps(manifest))
+    assert candidate_proof_sha256(store, proof.id) is None
+
+
+def test_a_stored_script_that_lost_its_executable_bit_is_unverifiable(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    _computation(store)
+    proof = _review(store)
+    assert candidate_proof_sha256(store, proof.id) == proof.sha256
+    (_snapshot(store, proof) / "node" / "run.sh").chmod(0o644)
+    assert candidate_proof_sha256(store, proof.id) is None
+
+
+def test_import_sets_an_executable_bit_only_where_the_file_is_readable(tmp_path: Path):
+    source = ensure_project(tmp_path / "source")
+    _computation(source)
+    proof = _review(source)
+    target = ensure_project(tmp_path / "target")
+    import_exchange_bundle(target, parse_bundle(bundle_to_json(export_exchange_bundle(source))))
+    for path in (target.root / "proofs" / "c1" / "run.sh", _snapshot(target, proof) / "node" / "run.sh"):
+        mode = stat.S_IMODE(path.stat().st_mode)
+        assert mode & stat.S_IXUSR
+        assert bool(mode & stat.S_IXGRP) == bool(mode & stat.S_IRGRP)
+        assert bool(mode & stat.S_IXOTH) == bool(mode & stat.S_IROTH)
+        assert not mode & (stat.S_IWGRP | stat.S_IWOTH)
+
+
+# -- every notice code emitted is registered ---------------------------------------------------------------
+
+
+def test_every_notice_code_the_code_emits_is_registered():
+    src = Path(errors.__file__).parent
+    emitted: dict[str, str] = {}
+    for path in src.rglob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.Call) and (getattr(node.func, "id", None) or getattr(node.func, "attr", None)) == "notice":
+                first = node.args[0] if node.args else None
+                assert isinstance(first, ast.Constant), f"{path.name}:{node.lineno}: a notice's code is a literal"
+                emitted[first.value] = f"{path.name}:{node.lineno}"
+    assert {"SNAPSHOT_LARGE_OUTPUT", "SNAPSHOT_SKIPPED_HIDDEN", "SNAPSHOT_EXPORTED_UNVERIFIABLE"} <= set(emitted)
+    unregistered = {code: where for code, where in emitted.items() if code not in errors.NOTICE_CODES}
+    assert not unregistered, unregistered
+
+
+def test_an_unregistered_notice_code_cannot_be_emitted():
+    with pytest.raises(KeyError):
+        errors.notice("NOT_A_NOTICE", "nothing")
