@@ -25,8 +25,6 @@
     return json.data;
   }
 
-  const note = h("p", "", { class: "node-note", role: "status" });
-  function tell(text, bad) { note.textContent = text; note.classList.toggle("bad", !!bad); }
   // what a decision did, under the review sheet
   const reviewNote = h("p", "", { class: "node-note", role: "status" });
   function tellReview(text, bad) { reviewNote.textContent = text; reviewNote.classList.toggle("bad", !!bad); }
@@ -215,9 +213,8 @@
     // there is none; the author edits it, and requesting review confirms it
     const working = view.key_ideas_working;
     const summary = [];
-    const needsDraft = !!(working && !working.exists);
-    if (needsDraft) {
-      summary.push(h("p", "No key-ideas.md yet: a review request needs one (核心思路, 主要步骤, 难点, 未覆盖). Draft it with the proof agent from its \"+\" menu.", { class: "node-hint" }));
+    if (working && !working.exists) {
+      summary.push(h("p", "No key-ideas.md yet: a review request needs one (核心思路, 主要步骤, 难点, 未覆盖). The Typesetter drafts it: \"+\" → Ask the agent to… → Typesetter · draft key ideas.", { class: "node-hint" }));
     } else if (working && working.missing.length) {
       summary.push(h("p", `key-ideas.md still leaves ${working.missing.join(" and ")} empty: fill it in before requesting review.`, { class: "node-hint" }));
     }
@@ -226,9 +223,8 @@
       ...node.assumptions.map((a) => h("p", `assuming ${a}`, { class: "node-assumption" })),
       axes(view, claimed),
       h("h4", "Depends on"), deps,
-      // what the node needs before review (ADR-0013); drafting it is the proof agent's, from its "+" menu
+      // what the node needs before review (ADR-0013); drafting it is the Typesetter's, from the "+" menu
       ...summary,
-      note,
     );
     // the review is a sheet over the agent panel, opened from its "+" menu; the note under it
     // reports what a decision did. The "+" carries a dot while a snapshot awaits a decision.
@@ -240,17 +236,6 @@
     }
     const plus = document.getElementById("chat-plus");
     if (plus && plus.classList) plus.classList.toggle("has-review", reviewable);
-    // the "+" menu offers the proof agent's draft of key-ideas.md while the node has none
-    globalThis.studioKeyIdeas = () => (needsDraft ? {
-      draft: async () => {
-        // the Typesetter's job (spec #145): one turn of that role, started from the run — never a prompt-driven edit turn
-        if (globalThis.studioRun) { await globalThis.studioRun.start(["typesetter"], "Write key-ideas.md from the draft and proof.tex: 核心思路, 主要步骤, 难点, 未覆盖."); tell("The Typesetter drafts key-ideas.md: read and edit it, then request review to confirm it."); await render(); return; }
-        if (typeof draftKeyIdeas !== "function") { tell("The agent panel isn't available on this page.", true); return; }
-        try { await draftKeyIdeas(); tell("The proof agent drafted key-ideas.md: read and edit it, then request review to confirm it."); }
-        catch (error) { tell(`${error.code || "error"}: ${error.message}`, true); }
-        await render();
-      },
-    } : null);
     globalThis.studioReview = () => (reviewable ? {
       version: proof.version,
       check: `Check snapshot v${proof.version} of this node before I decide: read every frozen file, verify each step against the dependencies it cites, and report what does not hold. Change nothing.`,

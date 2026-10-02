@@ -512,13 +512,21 @@ function short(text, length) { return text.length > length ? text.slice(0, lengt
 // one "attention" icon, the word saying which), then the frontier, a claim, a review request,
 // a rejected route, blocked, accepted. A frontier node with a warning keeps its frontier mark too,
 // a small blue badge beside the warning's (ADR-0008): see drawDag.
+// where the agent's run on a node is (spec #145): "Typesetter · step 4/5", "Prover · paused", "Numerics · needs you"
+function runWhere(run) {
+  const role = run.role ? run.role.charAt(0).toUpperCase() + run.role.slice(1) : "Agent";
+  if (run.status === "needs-human") return `${role} · needs you`;
+  if (run.step && run.steps) return `${role} · step ${run.step}/${run.steps}`;
+  return run.status === "paused" ? `${role} · paused` : role;
+}
+
 function tagOf(n) {
   if (n.integrity_state === "challenged") return ["challenged", "attention"];
   if (n.integrity_state === "potentially-stale") return ["dependency changed", "attention"];
   if (n.acceptance_state === "unverifiable") return ["decision outdated", "attention"];
   if (["rejected", "no-longer-callable"].includes(n.acceptance_state)) return [n.acceptance_state === "rejected" ? "rejected" : "no longer callable", "rejected"];
   if (n.frontier) return ["ready", "ready"];
-  if (n.run && n.run.status !== "idle") return [`${n.run.role || "agent"}${n.run.step && n.run.steps ? ` · step ${n.run.step}/${n.run.steps}` : n.run.status === "paused" ? " · paused" : ""}`, "claimed"];  // the agent's run (spec #145)
+  if (n.run && n.run.status !== "idle") return [runWhere(n.run), n.run.status === "needs-human" ? "attention" : "claimed"];  // the agent's run (spec #145)
   if (n.assignee) return [n.assignee, "claimed"];
   if (n.workflow_state === "review-needed") return ["awaiting review", "review"];
   if (n.workflow_state === "revision-requested") return ["revision requested", "review"];
@@ -1047,7 +1055,11 @@ function showRunControls(node, view) {
     box.append(button("Start agent", "start", {}, true), el("span", "The agent works the node on its own, as Prover, Typesetter and Numerics, until it requests review or needs you.", { class: "hint" }));
     return;
   }
-  const where = `${run.role || "agent"}${run.step && run.steps ? ` · step ${run.step}/${run.steps}` : ""} · ${run.status}`;
+  if (run.status === "needs-human") {  // the run stopped for a decision only the researcher can make: it names it
+    box.append(el("span", `${runWhere(run)}: ${run.decision || "a decision"}`, { class: "run-where" }), button("Start agent", "start", {}, true), button("Stop and release", "release", {}));
+    return;
+  }
+  const where = `${run.step && run.steps ? runWhere(run) : runWhere({ role: run.role })} · ${run.status}`;
   box.append(el("span", where, { class: "run-where" }));
   if (run.status === "paused") box.append(button("Resume", "resume", {}));
   else if (run.status === "running") box.append(button("Pause", "pause", {}));
