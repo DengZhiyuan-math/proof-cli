@@ -269,6 +269,38 @@ def test_an_input_edited_before_the_run_records_nothing_but_the_run_still_execut
     assert list_evidence_checks(store, proof.id) == []
 
 
+def test_only_a_hidden_root_file_differing_from_the_snapshot_records_nothing(hub):
+    """A hidden environment file at the node root (`.python-version`) is an input the snapshot froze (#146)."""
+    store, hub = hub
+    folder = store.root / "proofs" / "N"
+    (folder / ".python-version").write_text("3.11\n")
+    _script(store, "N", "exit 0\n")
+    proof = _reviewed(store)
+    (folder / ".python-version").write_text("3.12\n")
+    status, result = _post(hub, "/studio/N/api/run")
+    assert status == 200 and result["exit"] == 0
+    assert result["evidence"] is None and "inputs differ from snapshot v1" in result["note"]
+    assert list_evidence_checks(store, proof.id) == []
+    (folder / ".python-version").write_text("3.11\n")  # put back as frozen: the next run counts
+    assert _post(hub, "/studio/N/api/run")[1]["evidence"]["outcome"] == "passed"
+
+
+def test_an_unreadable_input_records_nothing_and_does_not_crash(hub):
+    store, hub = hub
+    folder = store.root / "proofs" / "N"
+    _script(store, "N", "exit 0\n")
+    (folder / "data.csv").write_text("n\n1\n")
+    proof = _reviewed(store)
+    (folder / "data.csv").chmod(0)
+    try:
+        status, result = _post(hub, "/studio/N/api/run")
+    finally:
+        (folder / "data.csv").chmod(0o644)
+    assert status == 200 and result["exit"] == 0
+    assert result["evidence"] is None and "could not be read" in result["note"] and "not recorded" in result["note"]
+    assert list_evidence_checks(store, proof.id) == []
+
+
 def test_the_evidence_record_binds_the_snapshot_hash(hub):
     from proof_cli.authority import candidate_proof_sha256
 
