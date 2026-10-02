@@ -1153,6 +1153,22 @@ def test_the_prover_may_open_a_challenge(studio):
     assert _proof_rule_command(challenge[0]) in _cli_commands()
 
 
+def test_only_opening_a_challenge_is_agent_reachable_and_the_prover_is_told_so():
+    """The researcher confirmed (PR #149): the Prover may open a Challenge (ADR-0005, ADR-0011); dismissing or
+    resolving one stays human-only, so no role may reach any other challenge command, nor `proof` at large."""
+    from proof_cli.studio.proof_agent import ROLES, ProofAgentContext
+
+    challenge_commands = {c for c in _cli_commands() if c.startswith("challenge ")}
+    assert "challenge dismiss" in challenge_commands  # the human-only path the roles must not reach
+    for role in ROLES.values():
+        rules = [*role.proof, *role.commands]
+        assert "Bash(proof *)" not in rules and "Bash(proof challenge *)" not in rules, role.name
+        reached = {_proof_rule_command(r) for r in role.proof if r.startswith("Bash(proof challenge")}
+        assert reached == ({"challenge open"} if role.name == "prover" else set()), role.name
+    brief = ProofAgentContext("N", Path("/p"), role="prover", name="claude-code").brief()
+    assert "proof challenge open" in brief and "Dismissing or resolving a\nChallenge is the researcher's alone" in brief
+
+
 def test_every_roles_proof_rules_name_real_commands():
     from proof_cli.studio.proof_agent import ROLES
 
@@ -1330,3 +1346,64 @@ def test_the_log_gives_each_changed_file_its_line_and_how_the_page_opens_it(stud
     assert served["open"] == {"kind": "scheme", "url": f"vscode://file/{folder}"}
     (store.root / "proof.toml").write_text('[studio]\nopen_command = "subl {file}"\n')
     assert _get(hub, "/studio/N/api/agent/log")[1]["open"] == {"kind": "command", "command": "subl {file}"}
+
+
+# -- ADR-0013: a key-ideas summary an agent turn wrote is recorded as the agent's draft ------------------
+
+
+def _typeset_key_ideas(hub, queue, text):
+    """The "+" menu's Typesetter · draft key ideas: one Typesetter turn of the run, which writes key-ideas.md."""
+    _queue(queue, [["write", "key-ideas.md", text]])
+    status, _ = _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["typesetter"],
+                                                         "redirect": "Write key-ideas.md from the draft and proof.tex: 核心思路, 主要步骤, 难点, 未覆盖."})
+    assert status == 200
+    _wait(hub)
+    _post(hub, "/studio/N/api/agent/release")  # the one turn is over: the node is the author's to submit
+
+
+def _draft_events(store):
+    from proof_cli.storage import list_events
+
+    return [e for e in list_events(store) if e.kind == "proof_map_key_ideas_drafted"]
+
+
+def test_a_summary_the_typesetter_drafted_and_the_author_left_as_it_is_reads_as_the_agents_confirmed(studio):
+    from _proofs import KEY_IDEAS
+
+    from proof_cli import key_ideas
+    from proof_cli.proof_map import request_review
+
+    store, hub, log, queue = studio
+    _typeset_key_ideas(hub, queue, KEY_IDEAS)
+    (drafted,) = _draft_events(store)  # the agent's name and the digest of what it left
+    assert drafted.payload == {"drafted_by": "claude-code", "sha256": key_ideas.digest(KEY_IDEAS.encode())}
+    record = request_review(store, "N", requested_by="author", rationale="scoped")
+    assert record.key_ideas_drafted_by == key_ideas.AGENT_CONFIRMED == "agent (confirmed by author at request-review)"
+
+
+def test_a_summary_the_typesetter_drafted_and_the_author_edited_reads_as_edited(studio):
+    from _proofs import KEY_IDEAS
+
+    from proof_cli import key_ideas
+    from proof_cli.proof_map import request_review
+
+    store, hub, log, queue = studio
+    _typeset_key_ideas(hub, queue, KEY_IDEAS)
+    write_key_ideas(store, "N", KEY_IDEAS.replace("compactness", "compactness and continuity"))  # the author's edit
+    record = request_review(store, "N", requested_by="author", rationale="scoped")
+    assert record.key_ideas_drafted_by == key_ideas.AGENT_EDITED == "agent draft, edited by author"
+
+
+def test_a_summary_no_agent_turn_touched_reads_as_the_authors(studio):
+    from proof_cli import key_ideas
+    from proof_cli.proof_map import request_review
+
+    store, hub, log, queue = studio
+    write_key_ideas(store, "N")  # the author's own
+    _queue(queue, [["write", "scratch/draft.md", "a draft\n"]])  # an agent turn that leaves key-ideas.md alone
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["prover"]})
+    _wait(hub)
+    _post(hub, "/studio/N/api/agent/release")
+    assert _draft_events(store) == []
+    record = request_review(store, "N", requested_by="author", rationale="scoped")
+    assert record.key_ideas_drafted_by == key_ideas.AUTHOR == "author"

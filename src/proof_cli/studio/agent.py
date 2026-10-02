@@ -186,6 +186,14 @@ class AgentManager:
                 if a != b:
                     changed.append({"path": rel, "diff": self._diff(rel, a, b),
                                     "created": a is None, "deleted": b is None})
+            # What the turn left may need recording in project state: a key-ideas summary an agent turn wrote is the
+            # agent's draft (ADR-0013), whichever turn wrote it — a run's role, a one-off task from the "+" menu.
+            ended = getattr(job.context, "turn_ended", None)
+            if ended is not None and job.mode == "edit":
+                try:
+                    ended(job.root, [c["path"] for c in changed if not c["deleted"]])
+                except Exception as e:  # noqa: BLE001 — report it; the turn still ends
+                    job.emit({"t": "error", "message": f"{type(e).__name__}: {e}"})
             # Undo needs only the files this turn changed: keep just those in memory.
             keep = [c["path"] for c in changed]
             job.before = {r: job.before.get(r) for r in keep}

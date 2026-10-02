@@ -125,7 +125,7 @@ The agent run a node's studio starts and the researcher watches: one run holds t
 _Avoid_: assistant, chat, agent panel (the panel is where it is watched), prompt-driven
 
 **Prover** (a Proof agent role):
-Finds the proof — retrieval first, then reasoning — and writes its structure as a draft in `scratch/`; decides when to split the node and when to request review; hands work to the Typesetter or Numerics and takes it back.
+Finds the proof — retrieval first, then reasoning — and writes its structure as a draft in `scratch/`; decides when to split the node and when to request review; may open a Challenge on a dependency that may no longer hold (`proof challenge open`; dismissing or resolving one stays the researcher's); hands work to the Typesetter or Numerics and takes it back.
 _Avoid_: solver, assistant
 
 **Typesetter** (a Proof agent role):
