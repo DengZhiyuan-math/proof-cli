@@ -187,35 +187,87 @@ def test_human_readable_output_prints_once(tmp_path: Path, args, marker):
 # -- error codes are written down in one place ----------------------------------------
 
 
-def _raised_codes() -> dict[str, str]:
-    """Every literal error code the source passes to ProofMapError, RequestError or error_envelope, or answers as
-    `{"error": CODE}` / `{"code": CODE}` (the studio's own answers, the agent run's refusals — PR #148)."""
-    found: dict[str, str] = {}
+_CODE = re.compile(r"[A-Z][A-Z0-9_]+")
+# the calls whose first code-shaped argument is a refusal's code
+_REFUSALS = ("ProofMapError", "RequestError", "error_envelope", "_Refused")
+
+
+def _code_of(node) -> str | None:
+    return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) and _CODE.fullmatch(node.value) else None
+
+
+def _scan_codes(source: str, where: str) -> tuple[dict[str, str], dict[str, str]]:
+    """(refusals, notices) in one module's source: every literal code it refuses with — passed to ProofMapError,
+    RequestError, error_envelope or the studio's _Refused, or answered as `{"error": CODE}`, `{"error": …, "code": CODE}`
+    or `{"error": {"code": CODE}}` — and every literal code it tells as a notice: a `{"code": CODE, …}` with no `error`."""
+    refusals: dict[str, str] = {}
+    notices: dict[str, str] = {}
+    tree = ast.parse(source)
+    inside_error = set()  # dicts that are an `error` value: {"error": {"code": CODE, …}} is a refusal
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Dict):
+            for key, value in zip(node.keys, node.values):
+                if isinstance(key, ast.Constant) and key.value == "error" and isinstance(value, ast.Dict):
+                    inside_error.add(id(value))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Dict):
+            fields = {key.value: value for key, value in zip(node.keys, node.values) if isinstance(key, ast.Constant)}
+            refusal = "error" in fields or id(node) in inside_error
+            for name in ("error", "code"):
+                code = _code_of(fields.get(name))
+                if code:
+                    (refusals if refusal else notices)[code] = f"{where}:{node.lineno}"
+            continue
+        if isinstance(node, ast.Call) and (getattr(node.func, "id", None) or getattr(node.func, "attr", None)) in _REFUSALS:
+            code = next((code for code in map(_code_of, node.args) if code), None)
+            if code:
+                refusals[code] = f"{where}:{node.lineno}"
+    return refusals, notices
+
+
+def _codes() -> tuple[dict[str, str], dict[str, str]]:
+    refusals: dict[str, str] = {}
+    notices: dict[str, str] = {}
     for path in SRC.rglob("*.py"):
-        for node in ast.walk(ast.parse(path.read_text())):
-            if isinstance(node, ast.Dict):
-                for key, value in zip(node.keys, node.values):
-                    if (isinstance(key, ast.Constant) and key.value in ("error", "code") and isinstance(value, ast.Constant)
-                            and isinstance(value.value, str) and re.fullmatch(r"[A-Z][A-Z0-9_]+", value.value)):
-                        found[value.value] = f"{path.name}:{node.lineno}"
-                continue
-            if not isinstance(node, ast.Call):
-                continue
-            name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
-            if name not in ("ProofMapError", "RequestError", "error_envelope"):
-                continue
-            for arg in node.args:
-                if isinstance(arg, ast.Constant) and isinstance(arg.value, str) and re.fullmatch(r"[A-Z][A-Z0-9_]+", arg.value):
-                    found[arg.value] = f"{path.name}:{node.lineno}"
-                    break
-    return found
+        found_refusals, found_notices = _scan_codes(path.read_text(), path.name)
+        refusals.update(found_refusals)
+        notices.update(found_notices)
+    return refusals, notices
+
+
+def _raised_codes() -> dict[str, str]:
+    return _codes()[0]
 
 
 def test_every_error_code_the_code_raises_is_registered():
-    # a `{"code": …}` answer may be a notice (#146) rather than a refusal: either registry lists it
-    registered = {**errors.ERROR_CODES, **errors.NOTICE_CODES}
-    unregistered = {code: where for code, where in _raised_codes().items() if code not in registered}
+    """A refusal's code is an error code (ERROR_CODES) — being a notice's is not enough — and a notice's is a notice code."""
+    refusals, notices = _codes()
+    unregistered = {code: where for code, where in refusals.items() if code not in errors.ERROR_CODES}
     assert not unregistered, unregistered
+    not_notices = {code: where for code, where in notices.items() if code not in errors.NOTICE_CODES}
+    assert not not_notices, not_notices
+
+
+def test_error_codes_and_notice_codes_do_not_overlap():
+    assert errors.ERROR_CODES.keys().isdisjoint(errors.NOTICE_CODES)
+
+
+def test_the_scanner_sees_each_kind_of_refusal_and_notice():
+    """The scan bites: each way of refusing or noticing is found, and a notice code is not a refusal's."""
+    refusals, notices = _scan_codes("""
+raise ProofMapError("PLANTED_A", "x")
+raise _Refused("PLANTED_B", "x")
+answer = {"error": "a message", "code": "PLANTED_C"}
+old = {"error": "PLANTED_D", "message": "x"}
+envelope = {"ok": False, "error": {"code": "PLANTED_E", "message": "x"}}
+notice = [{"code": "PLANTED_F", "message": "x"}]
+""", "planted")
+    assert set(refusals) == {"PLANTED_A", "PLANTED_B", "PLANTED_C", "PLANTED_D", "PLANTED_E"} and set(notices) == {"PLANTED_F"}
+    # the studio's own refusals are seen, and a notice code used as a refusal is not let through
+    studio = _scan_codes((SRC / "studio" / "server.py").read_text(), "server.py")[0]
+    assert {"NOT_A_COMPUTATION", "INVALID_LINE", "OPEN_FAILED", "NOT_A_NODE_FILE", "STUDIO_CLOSED"} <= set(studio)
+    misused, _ = _scan_codes('{"error": "big", "code": "SNAPSHOT_LARGE_OUTPUT"}', "planted")
+    assert "SNAPSHOT_LARGE_OUTPUT" in misused and "SNAPSHOT_LARGE_OUTPUT" not in errors.ERROR_CODES
 
 
 def test_the_agent_runs_refusals_are_registered_codes():
