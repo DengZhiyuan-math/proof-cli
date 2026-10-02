@@ -537,6 +537,12 @@ def test_every_notice_code_the_code_emits_is_registered():
                 first = node.args[0] if node.args else None
                 assert isinstance(first, ast.Constant), f"{path.name}:{node.lineno}: a notice's code is a literal"
                 emitted[first.value] = f"{path.name}:{node.lineno}"
+            elif isinstance(node, ast.Dict):
+                # a hand-written {"code": X, …} is a notice too (an error is raised or carried under "error")
+                fields = {key.value: value for key, value in zip(node.keys, node.values) if isinstance(key, ast.Constant)}
+                code = fields.get("code")
+                if isinstance(code, ast.Constant) and isinstance(code.value, str) and "error" not in fields:
+                    emitted[code.value] = f"{path.name}:{node.lineno}"
     assert {"SNAPSHOT_LARGE_OUTPUT", "SNAPSHOT_SKIPPED_HIDDEN", "SNAPSHOT_EXPORTED_UNVERIFIABLE"} <= set(emitted)
     unregistered = {code: where for code, where in emitted.items() if code not in errors.NOTICE_CODES}
     assert not unregistered, unregistered
@@ -545,3 +551,111 @@ def test_every_notice_code_the_code_emits_is_registered():
 def test_an_unregistered_notice_code_cannot_be_emitted():
     with pytest.raises(KeyError):
         errors.notice("NOT_A_NOTICE", "nothing")
+
+
+# -- a withheld file leaves no content and no hash in an export (Q41) ----------------------------------------
+
+
+def _traces(store) -> list[str]:
+    """Every string that would betray the withheld secrets of `_old_snapshot_with_secrets`: their text, their
+    SHA-256 (hex, and base64 of hex and of the raw digest), the secret in base64 at each alignment."""
+    env = f"API_KEY={SECRET}\n".encode()
+    netrc = f"machine example.org password {SECRET}\n".encode()
+    traces = [SECRET]
+    for data in (env, netrc):
+        digest = hashlib.sha256(data)
+        traces += [digest.hexdigest(), base64.b64encode(digest.digest()).decode(), base64.b64encode(digest.hexdigest().encode()).decode()[:40]]
+    for pad in ("", "x", "xy"):
+        traces.append(base64.b64encode((pad + SECRET).encode()).decode()[4:24])
+    return traces
+
+
+def _assert_no_trace(text: str, store, proof) -> None:
+    for trace in _traces(store):
+        assert trace not in text, trace
+    assert proof.sha256 not in text  # the snapshot's own digest would let a guess at the secret be checked
+
+
+def test_an_export_of_an_old_snapshot_carries_no_content_and_no_hash_of_what_it_withholds(tmp_path: Path, monkeypatch):
+    source = ensure_project(tmp_path / "source")
+    proof = _old_snapshot_with_secrets(source, monkeypatch)
+    raw = bundle_to_json(export_exchange_bundle(source))
+    _assert_no_trace(raw, source, proof)
+    bundle = parse_bundle(raw)
+    (manifest,) = [f for f in bundle.vault_files if f.path.endswith(f"/v{proof.version}/manifest.json")]
+    carried = json.loads(base64.b64decode(manifest.content_base64))
+    assert not {".env", ".netrc"} & set(carried["files"]) and not {".env", ".netrc"} & set(carried.get("executable", []))
+    assert carried["unverifiable"]  # says why it can't verify
+    assert {"proofs/c1/snapshots/v1/node/.env", "proofs/c1/snapshots/v1/node/.netrc"} <= set(bundle.withheld_files)  # paths only
+
+
+@pytest.mark.parametrize("flags", [["--json"], ["--output", "bundle.json"], ["--output", "bundle.json", "--json"]], ids=["json", "output", "output-json"])
+def test_the_cli_export_carries_no_trace_of_a_withheld_secret(tmp_path: Path, monkeypatch, flags):
+    source = ensure_project(tmp_path / "source")
+    proof = _old_snapshot_with_secrets(source, monkeypatch)
+    flags = [str(tmp_path / f) if f.endswith(".json") else f for f in flags]
+    result = runner.invoke(app, ["exchange", "export", "--root", str(source.root), *flags])
+    assert result.exit_code == 0, result.output
+    _assert_no_trace(result.output, source, proof)
+    if "--output" in flags:
+        _assert_no_trace((tmp_path / "bundle.json").read_text(), source, proof)
+
+
+# -- the exec bits travel with the snapshot, whatever the node's medium is now --------------------------------
+
+
+def test_a_computation_snapshot_survives_a_medium_change_and_an_exchange_verified(tmp_path: Path):
+    from proof_cli.proof_map import set_medium
+
+    source = ensure_project(tmp_path / "source")
+    _computation(source)
+    proof = _review(source)
+    set_medium(source, "c1", "latex", edited_by="human")
+    target = ensure_project(tmp_path / "target")
+    report = import_exchange_bundle(target, parse_bundle(bundle_to_json(export_exchange_bundle(source))))
+    assert candidate_proof_sha256(target, proof.id) == proof.sha256
+    assert os.access(_snapshot(target, proof) / "node" / "run.sh", os.X_OK)
+    assert not report.warnings
+
+
+@pytest.mark.parametrize("edit", ["drop", "add"])
+def test_a_bundle_whose_executable_flags_disagree_with_its_manifest_reads_unverifiable_with_a_warning(tmp_path: Path, edit: str):
+    source = ensure_project(tmp_path / "source")
+    _computation(source)
+    proof = _review(source)
+    raw = json.loads(bundle_to_json(export_exchange_bundle(source)))
+    name = "run.sh" if edit == "drop" else "check.py"
+    (stored,) = [f for f in raw["vault_files"] if f["path"] == f"proofs/c1/snapshots/v{proof.version}/node/{name}"]
+    stored["executable"] = edit == "add"
+    target = ensure_project(tmp_path / "target")
+    report = import_exchange_bundle(target, raw)
+    assert candidate_proof_sha256(target, proof.id) is None
+    assert any("executable" in warning and proof.id in warning for warning in report.warnings)
+
+
+def test_a_format_1_latex_snapshot_exchanges_unchanged(tmp_path: Path):
+    source = ensure_project(tmp_path / "source")
+    create_node(source, node_id="t1", kind="claim", statement="a written proof")
+    proof = submit_proof(source, "t1", claimant_id="agent_a", scoping_rationale="r", content="\\begin{proof}ok\\end{proof}\n")
+    manifest_path = source.root / proof.file_path
+    old = {"format": 1, "files": json.loads(manifest_path.read_text())["files"]}  # as written before format 2
+    manifest_path.write_text(json.dumps(old, indent=1, sort_keys=True) + "\n")
+    assert candidate_proof_sha256(source, proof.id) == proof.sha256
+    target = ensure_project(tmp_path / "target")
+    report = import_exchange_bundle(target, parse_bundle(bundle_to_json(export_exchange_bundle(source))))
+    assert candidate_proof_sha256(target, proof.id) == proof.sha256 and not report.warnings
+    assert (target.root / proof.file_path).read_bytes() == manifest_path.read_bytes()
+
+
+# -- set_executable adds x where r is set, and nothing else ---------------------------------------------------
+
+
+@pytest.mark.parametrize(("before", "after"), [(0o444, 0o555), (0o644, 0o755), (0o600, 0o700), (0o640, 0o750), (0o666, 0o777)])
+def test_set_executable_adds_x_only_where_r_is_set_and_never_write(tmp_path: Path, before: int, after: int):
+    from proof_cli.vault import set_executable
+
+    path = tmp_path / "script"
+    path.write_text("x")
+    path.chmod(before)
+    set_executable(path)
+    assert stat.S_IMODE(path.stat().st_mode) == after
