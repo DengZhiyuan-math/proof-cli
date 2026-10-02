@@ -131,11 +131,13 @@ def test_automatic_entries_take_the_role_of_the_turn_that_made_them_and_a_turn_k
     add_fog(store, "the researcher's own hunch", near=["N"], created_by="ada")  # outside any turn: no role
     record_agent_turn(store, "N", phase="started", turn="t1", role="numerics", by="claude-code", provider="claude")
     add_fog(store, "the ratio may stay below 2", near=["N"], created_by="claude-code")
+    add_fog(store, "ada's note during the turn", near=["N"], created_by="ada")  # the researcher's, though a turn is running
     record_agent_turn(store, "N", phase="ended", turn="t1", role="numerics", by="claude-code", provider="claude",
                       job=3, session_id="s-1", step=2, events=[{"t": "init", "session_id": "s-1"}, {"t": "text", "text": "checked n ≤ 100"}])
     log = work_log(store, "N")
     fog = [entry for entry in log if entry["kind"] == "fog"]
-    assert [(entry["role"], entry["text"]) for entry in fog] == [(None, "the researcher's own hunch"), ("numerics", "the ratio may stay below 2")]
+    assert [(entry["role"], entry["text"]) for entry in fog] == [
+        (None, "the researcher's own hunch"), ("numerics", "the ratio may stay below 2"), (None, "ada's note during the turn")]
     (turn,) = [entry for entry in log if entry["kind"] == "turn"]
     assert (turn["role"], turn["job"], turn["session_id"], turn["step"], turn["turn"]) == ("numerics", 3, "s-1", 2, "t1")
     kept = agent_turn_transcript(store, "N", "t1")
