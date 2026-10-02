@@ -299,12 +299,12 @@ def program_argv(script: Path) -> list[str]:
 
 
 def refusal(exc: Exception) -> dict | None:
-    """A service's refusal as the answer to a request — its code (a registered one, else RUN_REFUSED) and message —
-    or None for anything that is not one."""
+    """A service's refusal as the answer to a request, in the studio's shape {"error": message, "code": CODE} (a
+    registered code, else RUN_REFUSED), or None for anything that is not one."""
     code = getattr(exc, "code", None)
     if not code:
         return None
-    return {"error": code if code in ERROR_CODES else "RUN_REFUSED", "message": getattr(exc, "message", None) or str(exc)}
+    return {"error": getattr(exc, "message", None) or str(exc), "code": code if code in ERROR_CODES else "RUN_REFUSED"}
 
 
 class Studio:
@@ -491,7 +491,7 @@ class Studio:
         if self.agent.context_fn is not None and p == (self.root / KEY_IDEAS_FILE).resolve() and self.agent.edit_turn_running():
             # it would land in the agent's turn and be recorded as the agent's draft (ADR-0013): the researcher's own
             # summary is saved once the turn is over
-            return {"error": "KEY_IDEAS_AGENT_TURN", "message": f"an agent turn is editing this node; save {KEY_IDEAS_FILE} when it ends, so it stays yours"}, 409
+            return {"error": f"an agent turn is editing this node; save {KEY_IDEAS_FILE} when it ends, so it stays yours", "code": "KEY_IDEAS_AGENT_TURN"}, 409
         with self.save_lock:     # check-then-write must not interleave with another save
             if p.exists() and base_mtime is not None and abs(mtime(p) - base_mtime) > 1e-6 \
                     and not force:
@@ -668,7 +668,7 @@ class Studio:
     def run_action(self, action: str, body: dict) -> tuple[int, dict]:
         """The researcher's oversight of the agent's run (spec #145): start, pause, resume, redirect or release — (status, answer)."""
         if self.run is None:
-            return 404, {"error": "NO_RUN", "message": "this folder has no proof map node, so no agent run"}
+            return 404, {"error": "this folder has no proof map node, so no agent run", "code": "NO_RUN"}
         if action == "start":
             provider = str(body.get("provider") or (self.agent.backend(None).id if self.agent.backend(None) else ""))
             roles = body.get("roles") if isinstance(body.get("roles"), list) else None
@@ -676,7 +676,7 @@ class Studio:
                 r = self.run.start(provider, roles=roles, redirect=str(body.get("redirect") or "") or None,
                                    model=body.get("model") or None, effort=body.get("effort") or None)
             except Exception as exc:  # noqa: BLE001 — the node could not be assigned: the refusal is the answer
-                return 400, refusal(exc) or {"error": "RUN_REFUSED", "message": f"{type(exc).__name__}: {exc}"}
+                return 400, refusal(exc) or {"error": f"{type(exc).__name__}: {exc}", "code": "RUN_REFUSED"}
         elif action == "pause":
             r = self.run.pause()
         elif action == "resume":
@@ -684,7 +684,7 @@ class Studio:
         elif action == "redirect":
             text = str(body.get("text") or "").strip()
             if not text:
-                return 400, {"error": "REDIRECT_EMPTY", "message": "say what the agent should do differently"}
+                return 400, {"error": "say what the agent should do differently", "code": "REDIRECT_EMPTY"}
             r = self.run.redirect(text, body.get("role") or None)
         elif action == "release":
             r = self.run.release()
@@ -697,8 +697,9 @@ class Studio:
                     raise
                 return 409, answer
         else:
-            return 404, {"error": "NOT_FOUND", "message": f"no run action {action!r}"}
-        return (self._RUN_STATUS.get(r["error"], 400) if "error" in r else 200), r
+            return 404, {"error": f"no run action {action!r}", "code": "NOT_FOUND"}
+        # the studio's answers, as the agent manager's: {"error": message, "code": CODE}
+        return (self._RUN_STATUS.get(r.get("code"), 400) if "error" in r else 200), r
 
     def stop_runs(self) -> bool:
         with self._admit:
@@ -778,7 +779,7 @@ class Studio:
             return _json({"entries": self.run.work_log() if self.run is not None else [], "folder": str(self.root), "open": self.how_to_open()})
         if path == "/api/agent/turn":  # a run's turn, as recorded with the project: its conversation outlives the studio's memory
             kept = self.run.transcript(q.get("turn") or "") if self.run is not None else None
-            return _json(kept) if kept is not None else _json({"error": "NO_SUCH_TURN", "message": "no recorded turn by that id"}, 404)
+            return _json(kept) if kept is not None else _json({"error": "no recorded turn by that id", "code": "NO_SUCH_TURN"}, 404)
         if path == "/api/agent/events":
             job = self.agent.jobs.get(int(q["job"]))
             if not job:
