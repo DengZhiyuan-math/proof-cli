@@ -552,3 +552,56 @@ def test_a_studio_error_is_one_shape(hub):
     for status, body in (_get(hub, "/studio/N/api/nothing-here"), _get(hub, "/studio/N/api/file"),
                          _post(hub, "/studio/N/api/agent/stop", {}), _get(hub, "/studio/N/pdf")):
         assert status >= 400 and set(body) == {"error", "code"}, body
+
+
+# -- after #146's roles: the summary and secrets are no inputs; a link is no crash -------------------------
+
+
+def test_a_key_ideas_only_edit_after_the_snapshot_does_not_block_recording(hub):
+    store, hub = hub
+    _script(store, "N", "exit 0\n")
+    proof = _reviewed(store)
+    summary = store.root / "proofs" / "N" / "key-ideas.md"
+    summary.write_text(summary.read_text() + "\nA sharper sentence about the main step.\n")  # role "summary", not "input"
+    result = _post(hub, "/studio/N/api/run")[1]
+    assert result["evidence"]["outcome"] == "passed" and result["note"] == ""
+    assert [c.outcome.value for c in list_evidence_checks(store, proof.id)] == ["passed"]
+
+
+def test_a_dotenv_file_is_never_frozen_and_never_moves_the_inputs_digest(hub):
+    from proof_cli.domain import Medium
+    from proof_cli.vault import working_inputs_digest
+
+    store, hub = hub
+    folder = store.root / "proofs" / "N"
+    _script(store, "N", "exit 0\n")
+    before = working_inputs_digest(store.root, "N", Medium.computation)
+    (folder / ".env").write_text("API_TOKEN=secret\n")
+    assert working_inputs_digest(store.root, "N", Medium.computation) == before
+    proof = _reviewed(store)
+    assert not list((store.root / proof.file_path).parent.rglob(".env"))  # never frozen
+    (folder / ".env").write_text("API_TOKEN=another\n")  # and changing it changes no input
+    assert _post(hub, "/studio/N/api/run")[1]["evidence"]["outcome"] == "passed"
+
+
+def test_a_symlink_appearing_during_the_run_records_nothing_and_does_not_crash(hub):
+    store, hub = hub
+    _script(store, "N", "ln -s run.sh alias.sh\nexit 0\n")
+    proof = _reviewed(store)
+    status, result = _post(hub, "/studio/N/api/run")
+    assert status == 200 and result["exit"] == 0 and result["evidence"] is None
+    assert "alias.sh" in result["note"] and "symbolic link" in result["note"] and "not recorded" in result["note"]
+    assert list_evidence_checks(store, proof.id) == []
+
+
+def test_frozen_digests_agree_with_the_vaults_own(hub):
+    from proof_cli.vault import frozen_digests, frozen_inputs_digest, snapshot_folder_digest
+
+    store, hub = hub
+    folder = store.root / "proofs" / "N"
+    (folder / "out").mkdir()
+    (folder / "out" / "t.csv").write_text("n\n")
+    (folder / ".python-version").write_text("3.11\n")
+    _script(store, "N", "exit 0\n")
+    snapshot = (store.root / _reviewed(store).file_path).parent
+    assert frozen_digests(snapshot) == (snapshot_folder_digest(snapshot), frozen_inputs_digest(snapshot))

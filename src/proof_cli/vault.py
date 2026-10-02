@@ -389,15 +389,12 @@ def frozen_inputs_digest(folder: Path) -> str | None:
 
 
 def frozen_digests(folder: Path) -> tuple[str, str] | None:
-    """A snapshot folder's SHA-256 (`snapshot_folder_digest`) and its `frozen_inputs_digest`, from one read of
-    its files: the hash a Run's Evidence check is bound to is the hash of the inputs it was compared with
-    (#147). None if the snapshot is gone or unreadable."""
-    try:
-        names, executable = _read_manifest(folder)
-        entries = {rel: hashlib.sha256((folder / _stored(rel)).read_bytes()).hexdigest() for rel in names}
-    except _UNREADABLE:
-        return None
-    return manifest_digest(entries, executable), inputs_digest(entries, executable)
+    """A snapshot folder's SHA-256 and its inputs digest, together: what a Run's Evidence check is bound to,
+    and what its inputs were compared with (#147). Exactly `snapshot_folder_digest` and
+    `frozen_inputs_digest`; None if either can't be had (the snapshot is gone, unreadable, or lost a
+    recorded executable bit). The record checks the bound hash against the snapshot once more."""
+    snapshot, inputs = snapshot_folder_digest(folder), frozen_inputs_digest(folder)
+    return (snapshot, inputs) if snapshot is not None and inputs is not None else None
 
 
 def frozen_output_bytes(folder: Path) -> int:
