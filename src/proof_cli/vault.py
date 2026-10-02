@@ -273,15 +273,13 @@ def is_executable(path: Path) -> bool:
 
 
 def set_executable(path: Path) -> None:
-    """Make `path` executable as 0o755 is: the user rwx; group and others r-x where they could
-    read it, never writable."""
+    """Make `path` executable: an x bit for the user, group and others each where they may read it
+    (0o644 becomes 0o755, 0o444 0o555); the write bits stay as they were, never granted."""
     mode = stat.S_IMODE(path.stat().st_mode)
-    new = stat.S_IRWXU
-    if mode & stat.S_IRGRP:
-        new |= stat.S_IRGRP | stat.S_IXGRP
-    if mode & stat.S_IROTH:
-        new |= stat.S_IROTH | stat.S_IXOTH
-    path.chmod(new)
+    for read, run in ((stat.S_IRUSR, stat.S_IXUSR), (stat.S_IRGRP, stat.S_IXGRP), (stat.S_IROTH, stat.S_IXOTH)):
+        if mode & read:
+            mode |= run
+    path.chmod(mode)
 
 
 def _stored(rel: str) -> str:
@@ -289,6 +287,9 @@ def _stored(rel: str) -> str:
 
 
 MANIFEST_FORMATS = (1, 2)
+# set in a manifest an export stripped of withheld files, or an import found disagreeing with the
+# bundle's executable flags: the snapshot is unverifiable, and the value says why (ADR-0015)
+UNVERIFIABLE = "unverifiable"
 
 
 def _manifest_names(manifest: object) -> tuple[list[str], list[str]]:
@@ -298,6 +299,8 @@ def _manifest_names(manifest: object) -> tuple[list[str], list[str]]:
     version = manifest.get("format")  # type: ignore[union-attr]
     if type(version) is not int or version not in MANIFEST_FORMATS:
         raise ValueError(f"unknown snapshot manifest format: {version!r}")
+    if UNVERIFIABLE in manifest:  # type: ignore[operator]
+        raise ValueError(f"the manifest is marked unverifiable: {manifest[UNVERIFIABLE]}")  # type: ignore[index]
     names = list(manifest["files"])  # type: ignore[index]
     executable = manifest.get("executable", [])  # type: ignore[union-attr]
     if not isinstance(executable, list) or not all(isinstance(rel, str) and rel in names for rel in executable):
@@ -397,12 +400,18 @@ def frozen_output_bytes(folder: Path) -> int:
         return 0
 
 
-def snapshot_digest_of(manifest: bytes | None, stored: Callable[[str], bytes | None]) -> str | None:
+def snapshot_digest_of(
+    manifest: bytes | None,
+    stored: Callable[[str], bytes | None],
+    executable: Callable[[str], bool] | None = None,
+) -> str | None:
     """`snapshot_folder_digest` over files that aren't on disk (an exchange bundle's, say):
-    `manifest` is the snapshot's manifest.json and `stored(path)` a file by its path inside
-    the snapshot folder. None when the manifest is unreadable or a file it names is missing."""
+    `manifest` is the snapshot's manifest.json, `stored(path)` a file by its path inside the
+    snapshot folder and `executable(path)` whether the bundle carries it executable. None when
+    the manifest is unreadable or marked unverifiable, a file it names is missing, or (with
+    `executable`) a file's flag disagrees with the manifest's executable list, either way."""
     try:
-        names, executable = _manifest_names(json.loads((manifest or b"").decode("utf-8")))
+        names, marked = _manifest_names(json.loads((manifest or b"").decode("utf-8")))
     except (*_UNREADABLE, UnicodeDecodeError):
         return None
     entries: dict[str, str] = {}
@@ -410,8 +419,32 @@ def snapshot_digest_of(manifest: bytes | None, stored: Callable[[str], bytes | N
         data = stored(_stored(rel)) if isinstance(rel, str) else None
         if data is None:
             return None
+        if executable is not None and executable(_stored(rel)) != (rel in marked):
+            return None
         entries[rel] = hashlib.sha256(data).hexdigest()
-    return manifest_digest(entries, executable)
+    return manifest_digest(entries, marked)
+
+
+def manifest_executables(manifest: bytes | None) -> list[str]:
+    """The files a snapshot manifest records as executable, by their path inside the snapshot
+    folder (`node/run.sh`); none when it can't be read."""
+    try:
+        return [_stored(rel) for rel in json.loads((manifest or b"").decode("utf-8")).get("executable", []) if isinstance(rel, str)]
+    except (*_UNREADABLE, UnicodeDecodeError):
+        return []
+
+
+def mark_unverifiable(manifest: bytes, reason: str, *, without: Iterable[str] = ()) -> bytes:
+    """`manifest` marked unverifiable for `reason`, and with no entry, hash or executable flag
+    for the frozen files `without` (by their path from the node folder): what an export carries
+    when it withholds them (ADR-0015), so that nothing in the bundle betrays their contents."""
+    data = json.loads(manifest.decode("utf-8"))
+    dropped = set(without)
+    data["files"] = {rel: sha for rel, sha in data.get("files", {}).items() if rel not in dropped}
+    if "executable" in data:
+        data["executable"] = [rel for rel in data["executable"] if rel not in dropped]
+    data[UNVERIFIABLE] = reason
+    return (json.dumps(data, indent=1, sort_keys=True) + "\n").encode("utf-8")
 
 
 @dataclass
