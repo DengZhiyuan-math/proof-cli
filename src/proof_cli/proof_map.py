@@ -37,12 +37,14 @@ from .domain import (
     ChallengeStatus,
     ClaimRecord,
     DependencyPin,
+    EventRecord,
     EvidenceCheck,
     EvidenceOutcome,
-    EventRecord,
+    Medium,
     ProofMapNode,
     ProofMapNodeKind,
     TrustLevel,
+    is_computation,
     utc_now,
 )
 from .reviews import TRUST_RULES_FILE, DecisionKind, DecisionPayload, PinnedDependency, git_identity
@@ -84,6 +86,7 @@ from .storage import (
     delete_dependency_pin,
 )
 from . import key_ideas
+from .errors import notice
 from .trust_rules import (
     SiblingCitation,
     TrustConditionKind,
@@ -103,14 +106,20 @@ from .vault import (
     preamble_path,
     build_is_current,
     build_pdf_path,
-    manifest_digest,
+    NodeFolderLinks,
+    frozen_output_bytes,
+    large_output_threshold,
     node_folder,
+    read_working_snapshot,
     remove_snapshot,
+    run_script_path,
     snapshot_dir,
     snapshots_on_disk,
-    working_inputs,
+    vault_dir,
+    working_entry_path,
     working_proof_path,
     write_snapshot_folder,
+    write_working_computation,
     write_working_proof,
 )
 
@@ -251,6 +260,7 @@ def create_node(
     trust_level: TrustLevel | str | None = None,
     derived_from: str | None = None,
     reference_id: str | None = None,
+    medium: Medium | str | None = None,
 ) -> ProofMapNode:
     problem = node_id_problem(node_id)
     if problem is not None:
@@ -302,6 +312,8 @@ def create_node(
                 "an imported_result node requires both a source_locator and a source_version",
             )
 
+    resolved_medium = _resolve_medium(resolved_kind, medium)
+
     if reference_id is not None:
         # the citation an imported result links (issue #91, ADR-0012): only there, and only one that exists
         if resolved_kind != ProofMapNodeKind.imported_result:
@@ -326,6 +338,7 @@ def create_node(
         trust_level=resolved_trust_level,
         reference_id=reference_id,
         derived_from=derived_from,
+        medium=resolved_medium,
         created_by=created_by,
         updated_by=created_by,
     )
@@ -348,11 +361,79 @@ def create_node(
             ) from exc
         raise ProofMapError("NODE_ALREADY_EXISTS", f"proof map node {node_id} already exists") from exc
     if resolved_kind != ProofMapNodeKind.imported_result:
-        write_working_proof(store.root, node_id=node.id, kind=resolved_kind.value, statement=statement)
+        _write_working_files(store.root, node)
     elif reference_id is not None:
         # a citation may meet a Trust rule the moment it is linked (ADR-0014): on record from then
         note_trust_rule_matches(store, [node.id])
     return node
+
+
+def _resolve_medium(kind: ProofMapNodeKind, medium: Medium | str | None) -> Medium | None:
+    """The node's Medium (spec #145): `latex` unless asked otherwise; never on an imported result."""
+    if kind == ProofMapNodeKind.imported_result:
+        if medium is not None:
+            raise ProofMapError("MEDIUM_NOT_APPLICABLE", "an imported_result has no candidate proof, so no medium; it enters the map through Reference review")
+        return None
+    if medium is None:
+        return Medium.latex
+    try:
+        return Medium(medium)
+    except ValueError as exc:
+        valid = ", ".join(member.value for member in Medium)
+        raise ProofMapError("INVALID_MEDIUM", f"'{medium}' is not a medium; expected one of: {valid}") from exc
+
+
+def _write_working_files(root: Path, node: ProofMapNode) -> None:
+    """The node folder its Medium asks for: a LaTeX document, or a computation's run.sh (spec #145)."""
+    if is_computation(node):
+        write_working_computation(root, node_id=node.id, kind=node.kind.value, statement=node.statement)
+    else:
+        write_working_proof(root, node_id=node.id, kind=node.kind.value, statement=node.statement)
+
+
+def set_medium(store: ProjectStore, node_id: str, medium: Medium | str, *, edited_by: str = "human") -> ProofMapNode:
+    """Change what a node's candidate proof is made of (spec #145). Allowed at any time: the
+    medium is not part of the Accepted mathematical interface, so an Acceptance stands; files are
+    never removed, and the entry the new medium needs (run.sh or proof.tex) is scaffolded if
+    missing. Setting the medium a node already has changes and records nothing."""
+    node = require_node(store, node_id)
+    resolved = _resolve_medium(node.kind, medium)  # refuses an imported result or an unknown medium
+    if resolved == node.medium:
+        return node
+    changed = node.model_copy(update={"medium": resolved, "updated_by": edited_by, "updated_at": utc_now()})
+    with store.transaction() as conn:
+        # the scaffold first, undone if the transaction rolls back: an event is never left without its entry file
+        _scaffold_on_rollback(store, node_id)
+        _write_working_files(store.root, changed)
+        update_proof_map_node(store, changed, conn=conn)
+        append_event(
+            store, "proof_map_node_medium_set", f"{node_id}: medium {node.medium.value} → {resolved.value}",
+            entity_id=node_id, payload={"from": node.medium.value, "to": resolved.value, "by": edited_by}, conn=conn,
+        )
+    return changed
+
+
+def _scaffold_on_rollback(store: ProjectStore, node_id: str) -> None:
+    """Inside a write transaction about to scaffold a node's working files: remove each one it
+    creates (and each folder) if the transaction rolls back. What was there before stays."""
+    folder = node_folder(store.root, node_id)
+    candidates = [
+        vault_dir(store.root), folder, preamble_path(store.root), vault_dir(store.root) / ".gitignore",
+        working_proof_path(store.root, node_id), run_script_path(store.root, node_id), folder / key_ideas.KEY_IDEAS_FILE,
+    ]
+    absent = [path for path in candidates if not path.exists()]
+
+    def undo() -> None:
+        for path in reversed(absent):  # files first, then the folders that held them
+            if path.is_dir():
+                try:
+                    path.rmdir()
+                except OSError:
+                    pass
+            else:
+                path.unlink(missing_ok=True)
+
+    on_rollback(store, undo)
 
 
 def _promoted(store: ProjectStore, node_id: str) -> bool:
@@ -504,6 +585,7 @@ def _split(
             dependencies=list(spec.get("dependencies") or []),
             created_by=created_by,
             derived_from=parent_id,
+            medium=spec.get("medium"),
         )
         children.append(child)
 
@@ -917,15 +999,27 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
             "SCOPING_RATIONALE_REQUIRED",
             "requesting review requires stating why this node is now appropriately scoped to prove directly",
         )
-    working = working_proof_path(store.root, node_id)
-    if not working.is_file():
-        raise ProofMapError("WORKING_PROOF_MISSING", f"{working.relative_to(store.root).as_posix()} doesn't exist")
+    # the entry its Medium asks for (spec #145): a computation's run.sh, a LaTeX document's proof.tex
+    entry = working_entry_path(store.root, node_id, node.medium)
+    if not entry.is_file():
+        computation = is_computation(node)
+        raise ProofMapError(
+            "RUN_SCRIPT_MISSING" if computation else "WORKING_PROOF_MISSING",
+            f"{entry.relative_to(store.root).as_posix()} doesn't exist" + (": a computation node's review needs the program that is its candidate proof" if computation else ""),
+        )
     # read once: what is hashed is exactly what is frozen, even if a file changes meanwhile.
     # The key-ideas summary is one of these inputs (ADR-0013): frozen, listed and hashed with
     # the proof, so a change to it alone is a new version, by the same unchanged-check below
-    contents = {rel: path.read_bytes() for rel, path in working_inputs(store.root, node_id).items()}
+    # A computation's inputs are frozen whole — its allowlisted environment files, its scripts'
+    # executable bits; never a secret — and a file that can't be read, or a symbolic link, is
+    # refused before anything is written
+    try:
+        snapshot = read_working_snapshot(store.root, node_id, node.medium)
+    except (OSError, NodeFolderLinks) as exc:
+        raise node_folder_error(store.root, node_id, exc, "a Review snapshot") from exc
+    contents = snapshot.files
     _require_key_ideas(store, node_id, contents.get(key_ideas.KEY_IDEAS_FILE))
-    sha256 =manifest_digest({rel: hashlib.sha256(data).hexdigest() for rel, data in contents.items()})
+    sha256 = snapshot.digest()
 
     # The holder check and every write are one SQLite write transaction (#18): a reassignment
     # can't slip in between them, it waits for this to commit. The files written go if it rolls
@@ -961,7 +1055,7 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
         # now, under the write lock, so a rollback never removes a file this request didn't write
         ours = [p for p in (folder, pdf) if not p.exists()]
         on_rollback(store, lambda: [remove_snapshot(p) for p in ours])
-        write_snapshot_folder(folder, contents)
+        write_snapshot_folder(folder, snapshot)
         if build_is_current(store.root, node_id):
             # a PDF compiled from these very inputs (the studio's build): archived beside the snapshot
             shutil.copyfile(build_pdf_path(store.root, node_id), pdf)
@@ -1000,10 +1094,70 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
                 "resnapshot_after_loss": resnapshot_of,
                 # the summary's provenance: the author's, or the agent's draft confirmed or edited (ADR-0013)
                 "key_ideas_drafted_by": drafted_by,
+                # what the snapshot left out, by path only (ADR-0015): reported, never read
+                "skipped_hidden": list(snapshot.skipped_hidden),
             },
             conn=conn,
         )
     return record
+
+
+def node_folder_error(root: Path, node_id: str, exc: OSError | NodeFolderLinks, reader: str) -> ProofMapError:
+    """The registered refusal for a node folder `reader` (a snapshot, an export) can't read whole:
+    WORKING_FILE_UNREADABLE naming the path, or NODE_FOLDER_SYMLINK listing each link, dangling or not."""
+
+    def shown(where: Path) -> str:
+        return where.relative_to(root).as_posix() if where.is_relative_to(root) else str(where)
+
+    if isinstance(exc, NodeFolderLinks):
+        links = [{"path": shown(path), "dangling": dangling} for path, dangling in exc.links]
+        listed = ", ".join(link["path"] + (" (dangling)" if link["dangling"] else "") for link in links)
+        return ProofMapError(
+            "NODE_FOLDER_SYMLINK",
+            f"{listed}: {reader} follows no symbolic link, so nothing was written; replace each with the file "
+            "it points to, or move it out of the node folder (scratch/ and build/ are never read)",
+            details={"links": links},
+        )
+    path = shown(Path(exc.filename) if exc.filename else node_folder(root, node_id))
+    return ProofMapError(
+        "WORKING_FILE_UNREADABLE",
+        f"{path} can't be read ({exc.strerror or exc}): {reader} reads every file it would carry, so nothing was written; "
+        "make it readable, or move it out of the node folder (scratch/ and build/ are never read)",
+        details={"path": path},
+    )
+
+
+def review_notices(store: ProjectStore, record: CandidateProofRecord) -> list[dict]:
+    """What requesting review has to tell the researcher about the snapshot it froze, never a
+    refusal: each a registered notice code (`errors.NOTICE_CODES`) with its message and data.
+    SNAPSHOT_SKIPPED_HIDDEN when it left hidden files or folders out (by path, as the request
+    recorded them; never their contents). SNAPSHOT_LARGE_OUTPUT when a computation froze more of
+    `out/` than `[snapshot] large_output_mb` (default 50 MB), measured on the snapshot as stored
+    (spec #145)."""
+    notices: list[dict] = []
+    requested = latest_event(store, "proof_map_review_requested", record.node_id)
+    skipped = (requested.payload.get("skipped_hidden") or []) if requested and requested.payload.get("candidate_proof_id") == record.id else []
+    if skipped:
+        notices.append(notice(
+            "SNAPSHOT_SKIPPED_HIDDEN",
+            f"snapshot v{record.version} left out {len(skipped)} hidden path(s): {', '.join(skipped)}. Secrets (.env, .env.*, .envrc, "
+            ".netrc), hidden folders and dotfiles other than the allowlisted environment files are never frozen",
+            paths=list(skipped),
+        ))
+    node = get_proof_map_node(store, record.node_id)
+    if node is None or not is_computation(node) or not record.file_path.endswith("/" + SNAPSHOT_MANIFEST):
+        return notices
+    size = frozen_output_bytes((store.root / record.file_path).parent)
+    threshold = large_output_threshold(store.root)
+    if size > threshold:
+        notices.append(notice(
+            "SNAPSHOT_LARGE_OUTPUT",
+            f"snapshot v{record.version} froze {size / (1024 * 1024):.1f} MB of out/ (above {threshold / (1024 * 1024):g} MB): "
+            "every review snapshot keeps a copy; keep in out/ what the review needs and .gitignore the rest",
+            output_bytes=size,
+            threshold_bytes=threshold,
+        ))
+    return notices
 
 
 KEY_IDEAS_DRAFTED = "proof_map_key_ideas_drafted"

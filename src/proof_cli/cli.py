@@ -114,7 +114,7 @@ from .commands import (
     cmd_theorem_show,
     get_store,
 )
-from .domain import ProofMapNodeKind
+from .domain import ProofMapNodeKind, is_computation
 from .envelope import dump_envelope, error_envelope, success_envelope
 from .contract import ProofGroup
 from .theorems import LEGACY_TRUST_NOTICE
@@ -167,13 +167,15 @@ from .proof_map import (
     require_challenge,
     request_review,
     require_node,
+    review_notices,
+    set_medium,
     split_node,
     trust_rule_events,
     trust_rule_view,
     trust_rules_of,
 )
 from .trust_rules import get_trust_rule, list_trust_rules, trust_rule_history
-from .vault import working_proof_path
+from .vault import working_entry_path
 from .rendering import (
     render_candidate_proof,
     render_challenge,
@@ -217,6 +219,7 @@ trust_rule_app = typer.Typer(help="Trust rules: the researcher's standing Refere
 fog_app = typer.Typer(help="Proof fog: difficulties not yet precise enough to be a Claim, kept outside the map (ADR-0008). Ungated: anyone, agents included, may add, edit, drop or crystallize one")
 fog_experiment_app = typer.Typer(help="Experiments: numerical runs recorded against a fog item; they never change its status")
 node_evidence_app = typer.Typer(help="Evidence check workflows")
+node_medium_app = typer.Typer(help="What a node's candidate proof is made of: latex, or computation (spec #145)")
 challenge_app = typer.Typer(help="Challenge workflows")
 obligation_app = typer.Typer(help="(legacy) Proof-obligation queue; an obligation is a Claim node now")
 blocker_app = typer.Typer(help="(legacy) Blocker tracking")
@@ -427,6 +430,7 @@ def node_create(
     reference_id: str = typer.Option(
         "", "--reference-id", help="imported_result only: the `reference list` entry it cites; fixed once the node exists"
     ),
+    medium: str = typer.Option("", "--medium", help="What the candidate proof is made of: latex (default) or computation (run.sh, outputs in out/)"),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     store = get_store(_root(root))
@@ -443,6 +447,7 @@ def node_create(
             source_version=source_version or None,
             trust_level=trust_level or None,
             reference_id=reference_id or None,
+            medium=medium or None,
             created_by=created_by,
         )
     except ProofMapError as exc:
@@ -472,7 +477,7 @@ def node_show(
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.show")
         raise typer.Exit(code=1)
-    working = working_proof_path(store.root, node_id)
+    working = working_entry_path(store.root, node_id, node.medium)
     working_proof = working.relative_to(store.root).as_posix() if working.is_file() else None
     snapshots = [
         {"version": proof.version, "file_path": proof.file_path, "sha256": proof.sha256, "is_current": proof.is_current}
@@ -483,6 +488,8 @@ def node_show(
     if json_output:
         payload = node.model_dump(mode="json")
         payload["citation"] = citation
+        if is_computation(node):  # the entry is run.sh, under its own key: `working_proof` means proof.tex
+            payload["run_script"], working_proof = working_proof, None
         payload["workflow_state"] = workflow_state
         payload["acceptance_state"] = acceptance_state
         payload["integrity_state"] = integrity_state
@@ -684,6 +691,7 @@ def fog_crystallize(
     assumption: list[str] = typer.Option([], "--assumption"),
     display_label: str = typer.Option("", "--display-label"),
     created_by: str = typer.Option("human", "--created-by"),
+    medium: str = typer.Option("", "--medium", help="The new Claim's medium: latex (default) or computation"),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """State an open fog item as a Claim (written here, never taken from the item's text); the item leaves the fog list."""
@@ -692,6 +700,7 @@ def fog_crystallize(
         made = crystallize_fog(
             store, fog_id, node_id, statement, parent=parent, no_parent=no_parent, reassign=reassign,
             assumptions=assumption, display_label=display_label, created_by=created_by,
+            medium=medium or None,
         )
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="fog.crystallize")
@@ -785,11 +794,18 @@ def node_unassign(
 node_app.command("release", hidden=True)(node_unassign)
 
 
-def _emit_candidate_proof(record, json_output: bool, *, command: str) -> None:
+def _emit_candidate_proof(record, json_output: bool, *, command: str, notices: list[dict] | None = None) -> None:
+    """The Candidate proof as an envelope or a table; with `notices` (errors.NOTICE_CODES), what
+    the command has to tell beside it: `data.notices` under --json, a `Note` line each otherwise."""
     if json_output:
-        typer.echo(dump_envelope(success_envelope(command, record.model_dump(mode="json"))))
-    else:
-        typer.echo(render_candidate_proof(record))
+        data = record.model_dump(mode="json")
+        if notices is not None:
+            data["notices"] = notices
+        typer.echo(dump_envelope(success_envelope(command, data)))
+        return
+    typer.echo(render_candidate_proof(record))
+    for notice in notices or []:
+        typer.echo(f"Note ({notice['code']}): {notice['message']}")
 
 
 @node_app.command("request-review")
@@ -800,14 +816,15 @@ def node_request_review(
     root: str = ROOT_OPTION,
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
-    """Snapshot the node's working proof.tex for review (ADR-0010). Needs no claim."""
+    """Snapshot the node's working proof.tex (or a computation's run.sh and out/) for review (ADR-0010). Needs no claim."""
     store = get_store(_root(root))
     try:
         record = request_review(store, node_id, requested_by=requested_by, rationale=rationale)
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.request_review")
         raise typer.Exit(code=1)
-    _emit_candidate_proof(record, json_output, command="node.request_review")
+    # a large out/ is a notice, never a refusal (spec #145): the researcher's .gitignore decides what stays
+    _emit_candidate_proof(record, json_output, command="node.request_review", notices=review_notices(store, record))
 
 
 def _emit_review_record(record, json_output: bool, *, command: str) -> None:
@@ -889,6 +906,24 @@ def node_split(
         )
     else:
         typer.echo(render_proof_map_node_list(children))
+
+
+@node_medium_app.command("set")
+def node_medium_set(
+    node_id: str,
+    medium: str = typer.Argument(..., help="latex or computation"),
+    by: str = typer.Option("human", "--by", help="Who is switching (an agent or person name)"),
+    root: str = ROOT_OPTION,
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Switch a node's medium. Allowed at any time: files stay, the missing entry (run.sh or proof.tex) is scaffolded, an Acceptance stands."""
+    store = get_store(_root(root))
+    try:
+        node = set_medium(store, node_id, medium, edited_by=by)
+    except ProofMapError as exc:
+        _emit_error(exc, json_output, command="node.medium.set")
+        raise typer.Exit(code=1)
+    _emit_node(node, json_output, command="node.medium.set")
 
 
 @node_app.command("depend")
@@ -1043,6 +1078,7 @@ def evidence_review(check_id: str, decision: str = typer.Argument(""), root: str
 
 
 node_app.add_typer(node_evidence_app, name="evidence")
+node_app.add_typer(node_medium_app, name="medium")
 
 
 def _running_review_app(store) -> bool:
@@ -1949,16 +1985,25 @@ def exchange_export(
 ) -> None:
     """The project as one bundle: the proof map, its Proof vault files and its side state (#31).
     Its contracts' and references' trust fields are legacy (ADR-0012); an importer resets them."""
-    bundle_json = cmd_exchange_export(_root(root), note=note)  # led by the legacy notice
+    try:
+        bundle_json = cmd_exchange_export(_root(root), note=note)  # led by the legacy notice
+    except ProofMapError as exc:  # a node folder it can't read whole: an unreadable file, a symbolic link
+        _emit_error(exc, json_output, command="exchange.export")
+        raise typer.Exit(code=1)
     if output:
         Path(output).write_text(bundle_json + "\n", encoding="utf-8")
         bundle = parse_bundle(bundle_json)
         counts = inspect_exchange_bundle(bundle).section_counts
-        summary = {"legacy_notice": LEGACY_TRUST_NOTICE, "path": output, "bundle_id": bundle.id, "section_counts": counts}
+        summary = {
+            "legacy_notice": LEGACY_TRUST_NOTICE, "path": output, "bundle_id": bundle.id, "section_counts": counts,
+            "notices": bundle.notices,  # SNAPSHOT_EXPORTED_UNVERIFIABLE per snapshot it had to leave files out of
+        }
         if json_output:
             typer.echo(dump_envelope(success_envelope("exchange.export", summary)))
         else:
             typer.echo(f"Wrote bundle {bundle.id} to {output}: {counts['proof_map_nodes']} node(s), {counts['vault_files']} vault file(s)")
+            for item in bundle.notices:
+                typer.echo(f"Note ({item['code']}): {item['message']}")
         return
     _emit_legacy_json("exchange.export", json_output, lambda: bundle_json)
 

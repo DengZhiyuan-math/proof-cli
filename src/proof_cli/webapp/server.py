@@ -315,6 +315,7 @@ class ReviewApp:
                     "id": node.id,
                     "kind": node.kind.value,
                     "display_label": node.display_label,
+                    "medium": node.medium.value if node.medium is not None else None,  # what its candidate proof is made of (spec #145)
                     "statement": node.statement,
                     "dependencies": node.dependencies,
                     "workflow_state": workflow,

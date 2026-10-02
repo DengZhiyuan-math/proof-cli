@@ -4,7 +4,7 @@ from enum import Enum
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 def utc_now() -> datetime:
@@ -63,6 +63,20 @@ class ProofMapNodeKind(str, Enum):
     lemma = "lemma"
     claim = "claim"
     imported_result = "imported_result"
+
+
+class Medium(str, Enum):
+    """What a Theorem, Lemma or Claim's candidate proof is made of (spec #145, decided in #141).
+
+    `latex`: a standalone LaTeX document, `proof.tex`. `computation`: a program, `run.sh` as its
+    entry and its outputs in `out/`, whose run is meant to establish the statement — a case-by-case
+    check, an enumeration, a formal verification, a simulation. An attribute, never a kind: it
+    changes what the studio shows and what a Review snapshot freezes, never how the node is
+    claimed, reviewed or Accepted, and it is not part of the Accepted mathematical interface.
+    """
+
+    latex = "latex"
+    computation = "computation"
 
 
 class EventRecord(BaseModel):
@@ -161,10 +175,27 @@ class ProofMapNode(BaseModel):
     trust_level: TrustLevel | None = None
     reference_id: str | None = None
     derived_from: str | None = None
+    # what the candidate proof is made of (spec #145): every local node has one, an imported
+    # result none; a node recorded before the field existed reads `latex`
+    medium: Medium | None = None
     created_by: str = "human"
     updated_by: str = "human"
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
+
+    @model_validator(mode="after")
+    def _default_medium(self):
+        # lenient on read: a node from before the field reads `latex`. An imported result keeps
+        # what it was given, never silently nulled: every write path refuses a medium on one
+        # (MEDIUM_NOT_APPLICABLE), so none is ever stored
+        if self.kind != ProofMapNodeKind.imported_result and self.medium is None:
+            self.medium = Medium.latex
+        return self
+
+
+def is_computation(node: ProofMapNode) -> bool:
+    """Whether the node's candidate proof is a program (spec #145): its Medium is `computation`."""
+    return node.medium == Medium.computation
 
 
 class ClaimRecord(BaseModel):

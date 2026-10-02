@@ -74,6 +74,7 @@ from .domain import (
     TheoremContract,
     TheoremProvenanceKind,
     TheoremReviewState,
+    is_computation,
     utc_now,
 )
 from .governance import (
@@ -88,7 +89,7 @@ from .governance import (
     list_reusable_asset_records,
 )
 from .memory import HandoffSnapshot, LayeredMemory, latest_handoff_snapshot, load_memory, save_memory
-from .proof_map import ProofMapError, node_id_problem, note_trust_rule_matches
+from .proof_map import ProofMapError, node_folder_error, node_id_problem, note_trust_rule_matches
 from .proof_state import load_state, save_state
 from .publication import PublicationWorkspace, load_publication_workspace, save_publication_workspace
 from .references import ReferenceRecord, ReferenceReviewRecord
@@ -123,7 +124,19 @@ from .storage import (
     upsert_dependency_pin,
 )
 from .theorems import list_theorems
-from .vault import SNAPSHOT_MANIFEST, exchanged_files, preamble_path, snapshot_digest_of
+from .errors import notice
+from .vault import (
+    SNAPSHOT_MANIFEST,
+    NodeFolderLinks,
+    exchanged_files,
+    is_executable,
+    is_secret_path,
+    manifest_executables,
+    mark_unverifiable,
+    preamble_path,
+    set_executable,
+    snapshot_digest_of,
+)
 
 SHARED_PREAMBLE = "proofs/preamble.tex"
 RELEASED_BY = "exchange-import"
@@ -135,10 +148,12 @@ class VaultFile(BaseModel):
     path: str
     sha256: str
     content_base64: str
+    # a computation's run.sh and scripts keep their executable bit (spec #145); false in older bundles
+    executable: bool = False
 
     @classmethod
-    def of(cls, path: str, data: bytes) -> "VaultFile":
-        return cls(path=path, sha256=hashlib.sha256(data).hexdigest(), content_base64=base64.b64encode(data).decode("ascii"))
+    def of(cls, path: str, data: bytes, *, executable: bool = False) -> "VaultFile":
+        return cls(path=path, sha256=hashlib.sha256(data).hexdigest(), content_base64=base64.b64encode(data).decode("ascii"), executable=executable)
 
 
 class ExchangeBundle(BaseModel):
@@ -173,6 +188,12 @@ class ExchangeBundle(BaseModel):
     # for reference only: they never count here (ADR-0010). A bundle from
     # before ADR-0010 carried signatures instead; they're ignored.
     review_decisions: list[dict] = Field(default_factory=list)
+    # frozen files an export left out of a snapshot — secrets, or hidden or cache files an older
+    # rule froze (ADR-0015) — by their path from the project root: never their contents. The
+    # importer reads such a snapshot as unverifiable rather than refusing the bundle
+    withheld_files: list[str] = Field(default_factory=list)
+    # what the export has to tell (errors.NOTICE_CODES): SNAPSHOT_EXPORTED_UNVERIFIABLE per snapshot
+    notices: list[dict] = Field(default_factory=list)
 
 
 class ExchangeImportReport(BaseModel):
@@ -225,15 +246,84 @@ IMPORTED_SECTIONS = (
 # -- export ------------------------------------------------------------------------------
 
 
-def _vault_files(store: ProjectStore, nodes: list[ProofMapNode]) -> list[VaultFile]:
-    files: list[VaultFile] = []
+def _snapshot_folder_of(path: str) -> str | None:
+    """The snapshot folder (`proofs/<id>/snapshots/v<N>/`) a vault path lies in, or None."""
+    parts = PurePosixPath(path).parts
+    return "/".join(parts[:4]) + "/" if len(parts) >= 5 and parts[0] == "proofs" and parts[2] == "snapshots" else None
+
+
+@dataclass
+class _Vault:
+    files: list[VaultFile]
+    withheld: list[str]  # by path from the project root
+    notices: list[dict]
+    hidden_digests: set[str]  # what must appear nowhere in the bundle: withheld files' and their snapshots' SHA-256
+    unverifiable: set[str]  # the snapshot folders exported unverifiable
+
+
+def _vault_files(store: ProjectStore, nodes: list[ProofMapNode]) -> _Vault:
+    """The vault files a bundle carries, the frozen files it withholds, and a notice per snapshot
+    that withholding leaves unverifiable. A secret (.env, .env.*, .envrc, .netrc) is never read.
+    A snapshot's files carry the executable flags its own manifest records, whatever the node's
+    medium is now; a working file, its own bit on a computation node."""
+    vault = _Vault([], [], [], set(), set())
     preamble = preamble_path(store.root)
     if preamble.is_file():
-        files.append(VaultFile.of(SHARED_PREAMBLE, preamble.read_bytes()))
+        vault.files.append(VaultFile.of(SHARED_PREAMBLE, preamble.read_bytes()))
     for node in nodes:
-        for rel, path in exchanged_files(store.root, node.id).items():
-            files.append(VaultFile.of(rel, path.read_bytes()))
-    return files
+        try:
+            exchanged = exchanged_files(store.root, node.id, node.medium)
+        except (OSError, NodeFolderLinks) as exc:
+            raise node_folder_error(store.root, node.id, exc, "an exchange export") from exc
+        manifests = {
+            rel.removesuffix(SNAPSHOT_MANIFEST): path.read_bytes()
+            for rel, path in exchanged.files.items()
+            if rel.endswith("/" + SNAPSHOT_MANIFEST) and _snapshot_folder_of(rel) == rel.removesuffix(SNAPSHOT_MANIFEST)
+        }
+        executables = {folder + stored for folder, data in manifests.items() for stored in manifest_executables(data)}
+        for folder, missing in sorted(exchanged.withheld.items()):
+            vault.unverifiable.add(folder)
+            vault.withheld += [f"{folder}{'shared/' + rel[3:] if rel.startswith('../') else 'node/' + rel}" for rel in missing]
+            try:
+                entries = json.loads(manifests[folder].decode("utf-8")).get("files", {})
+                vault.hidden_digests |= {entries[rel] for rel in missing if isinstance(entries.get(rel), str)}
+            except (KeyError, ValueError, AttributeError, UnicodeDecodeError):
+                pass
+            version = folder.rstrip("/").rsplit("/", 1)[-1].removeprefix("v")
+            vault.notices.append(notice(
+                "SNAPSHOT_EXPORTED_UNVERIFIABLE",
+                f"snapshot {folder} of {node.id} is exported without {len(missing)} frozen file(s) ({', '.join(missing)}): "
+                "secrets and hidden or cache files are never exported, and its manifest carries no trace of them, "
+                "so it won't verify where the bundle is imported",
+                node_id=node.id,
+                version=int(version) if version.isdigit() else version,
+                paths=missing,
+            ))
+        for rel, path in exchanged.files.items():
+            if is_secret_path(rel):  # the hard deny, once more, whatever the walk allowed
+                continue
+            folder = _snapshot_folder_of(rel)
+            data = path.read_bytes()
+            if folder in vault.unverifiable and rel == folder + SNAPSHOT_MANIFEST:
+                data = mark_unverifiable(
+                    data, "exported without frozen files the export never carries (ADR-0015)", without=exchanged.withheld[folder]
+                )
+            executable = rel in executables if folder in manifests else is_computation(node) and is_executable(path)
+            vault.files.append(VaultFile.of(rel, data, executable=executable))
+    return vault
+
+
+def _scrubbed(value: Any, digests: set[str]) -> Any:
+    """`value` (JSON data) with each of `digests` blotted out wherever it appears, inside a string too."""
+    if isinstance(value, str):
+        for digest in digests:
+            value = value.replace(digest, "withheld")
+        return value
+    if isinstance(value, list):
+        return [_scrubbed(item, digests) for item in value]
+    if isinstance(value, dict):
+        return {key: _scrubbed(item, digests) for key, item in value.items()}
+    return value
 
 
 def export_exchange_bundle(store: ProjectStore, *, note: str = "") -> ExchangeBundle:
@@ -262,12 +352,27 @@ def export_exchange_bundle(store: ProjectStore, *, note: str = "") -> ExchangeBu
         dependency_pins=list_all_dependency_pins(store),
         challenges=list_challenges(store),
         evidence_checks=list_all_evidence_checks(store),
-        vault_files=_vault_files(store, nodes),
     )
+    vault = _vault_files(store, nodes)
+    bundle.vault_files, bundle.withheld_files, bundle.notices = vault.files, vault.withheld, vault.notices
     bundle.review_decisions = [
         {key: (value.model_dump(mode="json") if hasattr(value, "model_dump") else value) for key, value in row.items()}
         for row in list_decisions(store)
     ]
+    if vault.unverifiable:
+        # a snapshot exported without some of its files is known by no digest in the bundle: its own
+        # would let a guess at a withheld file be checked (ADR-0015). It is blotted out wherever it is
+        hidden = set(vault.hidden_digests) | {
+            proof.sha256 for proof in bundle.candidate_proofs
+            if proof.sha256 and proof.file_path.removesuffix(SNAPSHOT_MANIFEST) in vault.unverifiable
+        }
+        bundle.candidate_proofs = [
+            proof.model_copy(update={"sha256": None}) if proof.file_path.removesuffix(SNAPSHOT_MANIFEST) in vault.unverifiable else proof
+            for proof in bundle.candidate_proofs
+        ]
+        data = bundle.model_dump(mode="json")
+        files = data.pop("vault_files")  # carried bytes are already free of them; their own hashes stay true
+        bundle = ExchangeBundle.model_validate({**_scrubbed(data, hidden), "vault_files": files})
     return bundle
 
 
@@ -385,6 +490,7 @@ class _Plan:
     reference_reviews: list[ReferenceReviewRecord] = field(default_factory=list)
     governance: list[tuple[str, str, BaseModel]] = field(default_factory=list)  # (section, kind, record)
     files: list[tuple[str, bytes]] = field(default_factory=list)
+    executable: set[str] = field(default_factory=set)  # the planned files to write with their executable bit
 
     def problem(self, code: str, message: str, **details: Any) -> None:
         self.problems.append({"code": code, "message": message, **details})
@@ -485,17 +591,44 @@ def _plan_vault_files(store: ProjectStore, bundle: ExchangeBundle, plan: _Plan, 
             plan.problem("VAULT_FILE_CONFLICT", f"{path} can't be written: something else is in the way", path=path)
         else:
             plan.files.append((path, data))
+            if file.executable:
+                plan.executable.add(path)
     return carried
 
 
-def _check_snapshot(plan: _Plan, proof: CandidateProofRecord, carried: dict[str, bytes]) -> None:
-    """The snapshot the index row names travels in the bundle, with the SHA-256 the row records."""
+def _check_snapshot(
+    plan: _Plan, proof: CandidateProofRecord, carried: dict[str, bytes], withheld: set[str] = frozenset(), flags: dict[str, bool] | None = None
+) -> None:
+    """The snapshot the index row names travels in the bundle, with the SHA-256 the row records and
+    the executable flags its manifest records — unless the export declared files of it withheld
+    (ADR-0015), or its flags disagree with its manifest: it then arrives, and reads, unverifiable,
+    with a warning."""
+    flags = flags or {}
     if proof.file_path.endswith("/" + SNAPSHOT_MANIFEST):
         folder = proof.file_path.removesuffix(SNAPSHOT_MANIFEST)
-        digest = snapshot_digest_of(carried.get(proof.file_path), lambda rel: carried.get(folder + rel))
+        manifest = carried.get(proof.file_path)
+        digest = snapshot_digest_of(manifest, lambda rel: carried.get(folder + rel), lambda rel: flags.get(folder + rel, False))
+        plain = snapshot_digest_of(manifest, lambda rel: carried.get(folder + rel)) if digest is None else None
+        if plain is not None and (proof.sha256 is None or plain == proof.sha256):
+            plan.warnings.append(
+                f"candidate proof {proof.id} (v{proof.version} of {proof.node_id}) arrives unverifiable: "
+                "the bundle's executable flags for its files disagree with its manifest"
+            )
+            plan.files = [
+                (path, mark_unverifiable(data, "imported with executable flags that disagree with this manifest") if path == proof.file_path else data)
+                for path, data in plan.files
+            ]
+            return
     else:
         data = carried.get(proof.file_path)
         digest = hashlib.sha256(data).hexdigest() if data is not None else None
+    folder_path = proof.file_path.removesuffix(SNAPSHOT_MANIFEST)
+    if (digest is None or (proof.sha256 is not None and digest != proof.sha256)) and any(path.startswith(folder_path) for path in withheld):
+        plan.warnings.append(
+            f"candidate proof {proof.id} (v{proof.version} of {proof.node_id}) arrives unverifiable: "
+            "its export withheld frozen files (secrets, or hidden or cache files), so nothing can be decided on it here"
+        )
+        return
     if digest is None:
         plan.problem(
             "VAULT_FILE_MISSING",
@@ -540,6 +673,9 @@ def _plan_import(store: ProjectStore, bundle: ExchangeBundle) -> _Plan:
     for node in plan.nodes:
         if (problem := node_id_problem(node.id)) is not None:
             plan.problem("INVALID_NODE_ID", problem, node_id=node.id)
+        if node.kind == ProofMapNodeKind.imported_result and node.medium is not None:
+            # an imported result has no candidate proof (spec #145): refused, never silently dropped
+            plan.problem("MEDIUM_NOT_APPLICABLE", f"imported result {node.id} carries a medium ({node.medium.value}); an imported result has none", node_id=node.id)
         missing = [dependency for dependency in node.dependencies if dependency not in local_ids | new_ids]
         if missing:
             plan.problem("DEPENDENCY_NOT_FOUND", f"node {node.id} depends on {', '.join(missing)}, in neither the bundle nor this project", node_id=node.id)
@@ -602,8 +738,16 @@ def _plan_import(store: ProjectStore, bundle: ExchangeBundle) -> _Plan:
     # -- the Proof vault --
     carried = _plan_vault_files(store, bundle, plan, new_ids, local_ids)
     if proofs_ok:
+        withheld = {path for path in bundle.withheld_files if isinstance(path, str)}
+        flags = {file.path: file.executable for file in bundle.vault_files}
         for proof in plan.proofs:
-            _check_snapshot(plan, proof, carried)
+            _check_snapshot(plan, proof, carried, withheld, flags)
+    # a snapshot's files take the executable bits its manifest records; a working file, its flag
+    manifests = {path.removesuffix(SNAPSHOT_MANIFEST): data for path, data in carried.items() if _snapshot_folder_of(path) == path.removesuffix(SNAPSHOT_MANIFEST)}
+    planned = {path for path, _ in plan.files}
+    plan.executable = {path for path in plan.executable if _snapshot_folder_of(path) not in manifests} | {
+        folder + stored for folder, data in manifests.items() for stored in manifest_executables(data) if folder + stored in planned
+    }
 
     # -- the legacy registry: records only, never trust --
     plan.contracts = [_untrusted_contract(c) for c in _new_only(plan, "theorem_contracts", bundle.theorem_contracts, {c.id for c in list_theorems(store)})]
@@ -688,8 +832,9 @@ def _write_vault_file(path: Path, data: bytes) -> None:
     path.write_bytes(data)
 
 
-def _write_files(store: ProjectStore, files: list[tuple[str, bytes]]) -> None:
-    """Write the planned vault files; if the transaction rolls back, each one written (and each folder made) goes."""
+def _write_files(store: ProjectStore, files: list[tuple[str, bytes]], executable: set[str] = frozenset()) -> None:
+    """Write the planned vault files, those in `executable` with their executable bit; if the
+    transaction rolls back, each one written (and each folder made) goes."""
     for rel, data in files:
         target = store.root / rel
         made = [parent for parent in reversed(target.parents) if parent.is_relative_to(store.root) and not parent.exists()]
@@ -705,6 +850,8 @@ def _write_files(store: ProjectStore, files: list[tuple[str, bytes]]) -> None:
         on_rollback(store, undo)
         target.parent.mkdir(parents=True, exist_ok=True)
         _write_vault_file(target, data)
+        if rel in executable:
+            set_executable(target)
 
 
 def _write_import(store: ProjectStore, bundle: ExchangeBundle, plan: _Plan) -> ExchangeImportReport:
@@ -791,7 +938,7 @@ def _write_import(store: ProjectStore, bundle: ExchangeBundle, plan: _Plan) -> E
             payload={"bundle_id": bundle.id, "source_project_id": bundle.project_id, "released_claims": plan.released_claims},
         )
         # last: a file that fails to write rolls every write above back, and the files go with it
-        _write_files(store, plan.files)
+        _write_files(store, plan.files, plan.executable)
 
     written.update(
         {
@@ -845,7 +992,7 @@ def import_exchange_bundle(store: ProjectStore, bundle: ExchangeBundle | dict[st
 
     Raises `ProofMapError` — `MALFORMED_BUNDLE`, `IMPORT_ID_CONFLICT`,
     `DUPLICATE_THEOREM`, `DEPENDENCY_NOT_FOUND`, `INVALID_NODE_ID`,
-    `INVALID_VAULT_PATH`, `VAULT_FILE_MISSING`, `VAULT_HASH_MISMATCH` or
+    `INVALID_VAULT_PATH`, `VAULT_FILE_MISSING`, `VAULT_HASH_MISMATCH`, `MEDIUM_NOT_APPLICABLE` or
     `VAULT_FILE_CONFLICT`, the first problem's code, with every problem in
     `details["problems"]` — having written nothing.
     """

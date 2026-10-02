@@ -13,6 +13,7 @@ They should work together without depending on each other.
 ## Decided
 
 1. **A node's proof is a standalone LaTeX document.**
+   - *Amended by ADR-0015:* a node whose Medium is `computation` has a program instead — `run.sh` as its entry, its outputs in `out/` — frozen (its inputs and `out/`, not the shared preamble) and reviewed as a LaTeX proof is.
    - Each local node has one working file, `proofs/<node-id>/proof.tex`. It is a complete document: `\documentclass`, then `\input{../preamble}` for the project's shared `proofs/preamble.tex` (macros and theorem environments), then the proof.
    - It compiles on its own to its own PDF, so the researcher reviews one node as one PDF.
    - A combined document that `\input`s nodes in dependency order may come later. It is not part of this decision.

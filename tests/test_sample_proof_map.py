@@ -24,6 +24,7 @@ WITH_THE_CHALLENGE_OPEN = {
     "I": ("open", None, "reviewed", "current", False),  # an imported result's acceptance axis is its Reference review
     "I2": ("open", None, "trusted-by-rule", "current", False),  # or the Trust rule its citation meets (ADR-0014)
     "R": ("open", None, "rejected", "current", False),
+    "N": ("open", None, "accepted", "current", False),  # the computation claim, accepted on its program (spec #145)
 }
 AFTER_THE_DISMISSAL = {
     **WITH_THE_CHALLENGE_OPEN,
@@ -55,6 +56,7 @@ def test_the_sample_has_the_shape_of_spec_14(sample):
     nodes = _map(sample.store)
     assert {node_id: n["kind"] for node_id, n in nodes.items()} == {
         "T": "theorem", "L1": "lemma", "L2": "lemma", "C1": "claim", "C2": "claim", "I": "imported_result", "I2": "imported_result", "R": "claim",
+        "N": "claim",
     }
     assert nodes["T"]["dependencies"] == ["L1", "L2"]
     assert nodes["L1"]["dependencies"] == ["C1", "C2"]
@@ -85,7 +87,7 @@ def test_the_frontier_is_what_the_map_marks_ready(sample):
 
 def test_the_shared_claim_is_one_node_in_the_dag_with_two_parents(sample):
     nodes = _map(sample.store)
-    assert list(nodes).count("C2") == 1 and len(nodes) == 8
+    assert list(nodes).count("C2") == 1 and len(nodes) == 9
     assert sorted(node_id for node_id, n in nodes.items() if "C2" in n["dependencies"]) == ["L1", "L2"]
 
 
@@ -168,9 +170,23 @@ def test_the_builder_scales_for_a_performance_baseline(tmp_path: Path):
     scaled = build_sample_proof_map(tmp_path, copies=3)
 
     nodes = _map(scaled.store)
-    assert len(nodes) == 1 + 3 * 7
+    assert len(nodes) == 1 + 3 * 8
     assert nodes["T"]["dependencies"] == ["L1", "L2", "L1-2", "L2-2", "L1-3", "L2-3"]
     assert nodes["L2-3"]["dependencies"] == ["C2-3"]
     assert nodes["C1-3"]["dependencies"] == ["I-3"]
     assert {node_id for node_id, n in nodes.items() if n["frontier"]} == set(scaled.ids("L1"))
     assert len(scaled.challenges) == 3
+
+
+def test_the_computation_claim_is_accepted_on_its_program_and_a_passed_run(sample):
+    """N's medium is computation (spec #145): run.sh and out/ are its candidate proof, a run its Evidence check."""
+    from proof_cli.proof_map import list_candidate_proofs, list_evidence_checks
+
+    nodes = _map(sample.store)
+    assert nodes["N"]["medium"] == "computation" and nodes["N"]["acceptance_state"] == "accepted"
+    assert nodes["L1"]["medium"] == "latex" and nodes["I"]["medium"] is None
+    folder = sample.store.root / "proofs" / "N"
+    assert (folder / "run.sh").is_file() and (folder / "out" / "table.csv").is_file() and not (folder / "proof.tex").exists()
+    (proof,) = list_candidate_proofs(sample.store, "N")
+    (check,) = list_evidence_checks(sample.store, proof.id)
+    assert check.outcome.value == "passed"

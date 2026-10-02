@@ -762,3 +762,13 @@ def test_a_second_click_on_a_row_button_closes_its_form():
     assert row["form"]
     (row,) = [r for r in hidden["fogRows"] if r["id"] == "fog-1"]
     assert not row["form"]
+
+
+# -- the Medium of a node (spec #145): a computation node says so on its card --------------------
+
+def test_a_computation_nodes_card_names_its_medium_beside_its_kind():
+    computation = {**_node("c_check", "claim", "For every n ≤ 10^4 the inequality holds"), "medium": "computation"}
+    latex = {**_node("c_plain", "claim", "A written claim"), "medium": "latex"}
+    (shown,) = _home(map_={"nodes": [computation, latex]})
+    assert shown["dag"]["c_check"]["texts"][0].startswith("Claim · computation")  # the kind line, then the id
+    assert shown["dag"]["c_plain"]["texts"][0].startswith("Claim ") and "computation" not in shown["dag"]["c_plain"]["texts"][0]
