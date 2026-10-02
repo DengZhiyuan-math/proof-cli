@@ -74,6 +74,7 @@ from .domain import (
     TheoremContract,
     TheoremProvenanceKind,
     TheoremReviewState,
+    is_computation,
     utc_now,
 )
 from .governance import (
@@ -123,7 +124,7 @@ from .storage import (
     upsert_dependency_pin,
 )
 from .theorems import list_theorems
-from .vault import SNAPSHOT_MANIFEST, exchanged_files, preamble_path, snapshot_digest_of
+from .vault import SNAPSHOT_MANIFEST, exchanged_files, is_executable, preamble_path, snapshot_digest_of
 
 SHARED_PREAMBLE = "proofs/preamble.tex"
 RELEASED_BY = "exchange-import"
@@ -135,10 +136,12 @@ class VaultFile(BaseModel):
     path: str
     sha256: str
     content_base64: str
+    # a computation's run.sh and scripts keep their executable bit (spec #145); false in older bundles
+    executable: bool = False
 
     @classmethod
-    def of(cls, path: str, data: bytes) -> "VaultFile":
-        return cls(path=path, sha256=hashlib.sha256(data).hexdigest(), content_base64=base64.b64encode(data).decode("ascii"))
+    def of(cls, path: str, data: bytes, *, executable: bool = False) -> "VaultFile":
+        return cls(path=path, sha256=hashlib.sha256(data).hexdigest(), content_base64=base64.b64encode(data).decode("ascii"), executable=executable)
 
 
 class ExchangeBundle(BaseModel):
@@ -231,8 +234,8 @@ def _vault_files(store: ProjectStore, nodes: list[ProofMapNode]) -> list[VaultFi
     if preamble.is_file():
         files.append(VaultFile.of(SHARED_PREAMBLE, preamble.read_bytes()))
     for node in nodes:
-        for rel, path in exchanged_files(store.root, node.id).items():
-            files.append(VaultFile.of(rel, path.read_bytes()))
+        for rel, path in exchanged_files(store.root, node.id, node.medium).items():
+            files.append(VaultFile.of(rel, path.read_bytes(), executable=is_computation(node) and is_executable(path)))
     return files
 
 
@@ -385,6 +388,7 @@ class _Plan:
     reference_reviews: list[ReferenceReviewRecord] = field(default_factory=list)
     governance: list[tuple[str, str, BaseModel]] = field(default_factory=list)  # (section, kind, record)
     files: list[tuple[str, bytes]] = field(default_factory=list)
+    executable: set[str] = field(default_factory=set)  # the planned files to write with their executable bit
 
     def problem(self, code: str, message: str, **details: Any) -> None:
         self.problems.append({"code": code, "message": message, **details})
@@ -485,6 +489,8 @@ def _plan_vault_files(store: ProjectStore, bundle: ExchangeBundle, plan: _Plan, 
             plan.problem("VAULT_FILE_CONFLICT", f"{path} can't be written: something else is in the way", path=path)
         else:
             plan.files.append((path, data))
+            if file.executable:
+                plan.executable.add(path)
     return carried
 
 
@@ -540,6 +546,9 @@ def _plan_import(store: ProjectStore, bundle: ExchangeBundle) -> _Plan:
     for node in plan.nodes:
         if (problem := node_id_problem(node.id)) is not None:
             plan.problem("INVALID_NODE_ID", problem, node_id=node.id)
+        if node.kind == ProofMapNodeKind.imported_result and node.medium is not None:
+            # an imported result has no candidate proof (spec #145): refused, never silently dropped
+            plan.problem("MEDIUM_NOT_APPLICABLE", f"imported result {node.id} carries a medium ({node.medium.value}); an imported result has none", node_id=node.id)
         missing = [dependency for dependency in node.dependencies if dependency not in local_ids | new_ids]
         if missing:
             plan.problem("DEPENDENCY_NOT_FOUND", f"node {node.id} depends on {', '.join(missing)}, in neither the bundle nor this project", node_id=node.id)
@@ -688,8 +697,9 @@ def _write_vault_file(path: Path, data: bytes) -> None:
     path.write_bytes(data)
 
 
-def _write_files(store: ProjectStore, files: list[tuple[str, bytes]]) -> None:
-    """Write the planned vault files; if the transaction rolls back, each one written (and each folder made) goes."""
+def _write_files(store: ProjectStore, files: list[tuple[str, bytes]], executable: set[str] = frozenset()) -> None:
+    """Write the planned vault files, those in `executable` with their executable bit; if the
+    transaction rolls back, each one written (and each folder made) goes."""
     for rel, data in files:
         target = store.root / rel
         made = [parent for parent in reversed(target.parents) if parent.is_relative_to(store.root) and not parent.exists()]
@@ -705,6 +715,8 @@ def _write_files(store: ProjectStore, files: list[tuple[str, bytes]]) -> None:
         on_rollback(store, undo)
         target.parent.mkdir(parents=True, exist_ok=True)
         _write_vault_file(target, data)
+        if rel in executable:
+            target.chmod(target.stat().st_mode | 0o111)
 
 
 def _write_import(store: ProjectStore, bundle: ExchangeBundle, plan: _Plan) -> ExchangeImportReport:
@@ -791,7 +803,7 @@ def _write_import(store: ProjectStore, bundle: ExchangeBundle, plan: _Plan) -> E
             payload={"bundle_id": bundle.id, "source_project_id": bundle.project_id, "released_claims": plan.released_claims},
         )
         # last: a file that fails to write rolls every write above back, and the files go with it
-        _write_files(store, plan.files)
+        _write_files(store, plan.files, plan.executable)
 
     written.update(
         {
@@ -845,7 +857,7 @@ def import_exchange_bundle(store: ProjectStore, bundle: ExchangeBundle | dict[st
 
     Raises `ProofMapError` — `MALFORMED_BUNDLE`, `IMPORT_ID_CONFLICT`,
     `DUPLICATE_THEOREM`, `DEPENDENCY_NOT_FOUND`, `INVALID_NODE_ID`,
-    `INVALID_VAULT_PATH`, `VAULT_FILE_MISSING`, `VAULT_HASH_MISMATCH` or
+    `INVALID_VAULT_PATH`, `VAULT_FILE_MISSING`, `VAULT_HASH_MISMATCH`, `MEDIUM_NOT_APPLICABLE` or
     `VAULT_FILE_CONFLICT`, the first problem's code, with every problem in
     `details["problems"]` — having written nothing.
     """

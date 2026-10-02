@@ -47,6 +47,7 @@ ERROR_CODES: dict[str, str] = {
     "RUN_SCRIPT_MISSING": "a computation node has no run.sh: its review needs the program that is its candidate proof (spec #145)",
     "INVALID_MEDIUM": "the medium is not latex or computation (spec #145)",
     "MEDIUM_NOT_APPLICABLE": "an imported result has no candidate proof, so no medium (spec #145)",
+    "WORKING_FILE_UNREADABLE": "a file or folder the Review snapshot would freeze can't be read; `path` names it, and nothing was written",
     "WORKING_PROOF_UNCHANGED": "the working proof is the snapshot already under review",
     "KEY_IDEAS_REQUIRED": "requesting review needs the node's key-ideas.md, with 核心思路 and 主要步骤 filled in (ADR-0013); `missing` names what is absent",
     "CANDIDATE_PROOF_NOT_FOUND": "no Candidate proof has this id",
@@ -132,4 +133,11 @@ ERROR_CODES: dict[str, str] = {
     "INVALID_REQUEST": "the page's request is missing what the action needs (a node id, which snapshot, …)",
     "NOT_FOUND": "no such page route or node action, or (a legacy command under --json) no such contract, reference or target",
     "NOT_THIS_NODE": "the snapshot, Candidate proof or review named belongs to another node",
+}
+
+
+NOTICE_CODES: dict[str, str] = {
+    # A notice is what a command that succeeded has to tell its caller, never a refusal: under
+    # --json it is `data.notices`, a list of {code, message, …}; the code is stable like an error's.
+    "SNAPSHOT_LARGE_OUTPUT": "the Review snapshot froze more of a computation's out/ than `[snapshot] large_output_mb` in proof.toml (default 50); `output_bytes` and `threshold_bytes` say how much (spec #145)",
 }
