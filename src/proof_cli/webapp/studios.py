@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import threading
 from dataclasses import dataclass
+from functools import partial
 from http import HTTPStatus
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote
@@ -127,8 +128,13 @@ class StudioHub:
                 )
                 # the agent's compile tool builds through this node's studio (taken from upstream, 2938c05):
                 # a LaTeX node's Typesetter compiles what the researcher sees; a computation node has no build
-                self._studios[node.id].agent.server_url = lambda: self._studio_url(node_id) if self._medium(node_id) != "computation" else None
+                self._studios[node.id].agent.compile_url = partial(self._compile_url, node_id)
             return self._studios[node.id]
+
+    def _compile_url(self, node_id: str) -> str | None:
+        """The studio the agent's compile tool builds through, as of the turn: a LaTeX node's own; a computation
+        node has no build, so none."""
+        return None if self._medium(node_id) == "computation" else self._studio_url(node_id)
 
     def _studio_url(self, node_id: str) -> str:
         from .server import project_origin  # the page's pinned origin (a late import: server.py imports this module)
