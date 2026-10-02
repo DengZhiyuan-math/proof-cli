@@ -455,6 +455,16 @@ def test_an_evidence_check_without_a_snapshot_record_still_shows():
     assert "passed" in shown["text"] and "cp-v1" in shown["text"]
 
 
+def test_an_evidence_check_whose_snapshot_changed_since_it_is_flagged_and_an_unbound_one_says_so():
+    changed = {**_check("ev-2", "cp-v2", 2, SHA_V2, current=True), "binding": {"sha256": SHA_V1, "state": "changed", "label": "snapshot changed since this check"}}
+    unbound = {**_check("ev-3", "cp-v2", 2, SHA_V2, current=True), "binding": {"sha256": None, "state": "unbound", "label": "not bound (recorded before binding)"}}
+    matches = {**_check("ev-4", "cp-v2", 2, SHA_V2, current=True), "binding": {"sha256": SHA_V2, "state": "matches", "label": f"bound to {SHA_V2[:12]}…"}}
+    shown_changed, shown_unbound, shown_matches = _evidence([changed, unbound, matches])
+    assert shown_changed["warnings"] == ["snapshot changed since this check"] and SHA_V1[:12] in shown_changed["text"]
+    assert "not bound (recorded before binding)" in shown_unbound["text"] and shown_unbound["warnings"] == []
+    assert shown_matches["warnings"] == [] and "changed" not in shown_matches["text"]
+
+
 # -- Trusted by rule (ADR-0014): the review page's own section, the rules sheet, the chips ------------
 
 TRUSTED = [{"node_id": "ref_bw", "statement": "Bolzano-Weierstrass", "citation": CITATION, "trust_rule": ["textbooks"],
@@ -772,3 +782,15 @@ def test_a_computation_nodes_card_names_its_medium_beside_its_kind():
     (shown,) = _home(map_={"nodes": [computation, latex]})
     assert shown["dag"]["c_check"]["texts"][0].startswith("Claim · computation")  # the kind line, then the id
     assert shown["dag"]["c_plain"]["texts"][0].startswith("Claim ") and "computation" not in shown["dag"]["c_plain"]["texts"][0]
+
+
+def test_the_node_page_lists_a_computations_frozen_outputs_and_previews_its_images():
+    proof = {"id": "cp-v1", "version": 1, "sha256": "a" * 64, "text": "", "files": {"run.sh": "#!/usr/bin/env bash\n", "out/table.csv": "n,ratio\n"}, "key_ideas": None, "unreadable": False,
+             "outputs": [{"path": "out/plot.png", "type": "image/png", "bytes": 70}, {"path": "out/table.csv", "type": "text/csv", "bytes": 8}]}
+    view = {**NODE_VIEW, "node": {**NODE_VIEW["node"], "id": "c_check", "medium": "computation"}, "candidate_proof": proof, "crystallized_from": None, "fog_near": []}
+    _, opened = _fog_home(steps=[{"open": "c_check"}], nodes={"c_check": view})
+    plot, table = opened["nodeOutputs"]
+    assert plot["href"] == "/api/node/c_check/snapshot/file?path=out%2Fplot.png" and plot["image"] == [plot["href"]]
+    assert "image/png" in plot["text"] and table["image"] == [] and "text/csv" in table["text"]
+    _, plain = _fog_home(steps=[{"open": "c_check"}], nodes={"c_check": {**view, "candidate_proof": None}})
+    assert plain["nodeOutputs"] == []

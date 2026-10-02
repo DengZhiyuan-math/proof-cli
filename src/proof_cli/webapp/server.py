@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import mimetypes
 from contextlib import contextmanager
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -46,7 +47,7 @@ from ..storage import (
 )
 from ..authority import candidate_proof_sha256
 from .. import key_ideas
-from ..vault import SNAPSHOT_MANIFEST, archived_pdf_path, build_pdf_path, frozen_key_ideas, node_folder, snapshot_folder_files
+from ..vault import OUT_DIR, SNAPSHOT_MANIFEST, archived_pdf_path, build_pdf_path, frozen_key_ideas, node_folder, snapshot_folder_file, snapshot_folder_files
 from .studios import StudioHub
 
 
@@ -77,6 +78,18 @@ class RequestError(Exception):
         self.status, self.code, self.message, self.details = status, code, message, details or {}
 
 
+# the frozen outputs a browser may show inline: raster images only (an SVG or HTML can carry script)
+_INLINE_OUTPUT_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
+# what a frozen output is sent under: no script, no frames, nothing of the page's origin reachable
+_OUTPUT_POLICY = "sandbox; default-src 'none'"
+
+
+def _output_type(rel: str) -> str:
+    """A frozen output's media type by its name (a .log is text; anything unknown is a blob)."""
+    guessed, _ = mimetypes.guess_type(rel)
+    return guessed or ("text/plain" if rel.lower().endswith(".log") else "application/octet-stream")
+
+
 def _proof_view(store: ProjectStore, proof) -> dict | None:
     """A Candidate proof as the page shows it: every frozen file, exactly, and the SHA-256 a decision binds.
 
@@ -92,8 +105,18 @@ def _proof_view(store: ProjectStore, proof) -> dict | None:
             frozen = {"proof.tex": path.read_bytes()}
         except OSError:  # gone, or not readable by this process
             frozen = None
-    # a damaged or missing snapshot still shows: its page, its (now void) decisions, its warnings
-    files = {rel: data.decode("utf-8", errors="replace") for rel, data in (frozen or {}).items()}
+    # a damaged or missing snapshot still shows: its page, its (now void) decisions, its warnings.
+    # Text files show as text; what a computation wrote to out/ is listed with its type and size
+    # (spec #145), served by `snapshot_file`, and a binary file is never shown as text
+    files: dict[str, str] = {}
+    outputs: list[dict] = []
+    for rel, data in (frozen or {}).items():
+        try:
+            files[rel] = data.decode("utf-8")
+        except UnicodeDecodeError:
+            pass
+        if rel.startswith(f"{OUT_DIR}/"):
+            outputs.append({"path": rel, "bytes": len(data), "type": _output_type(rel)})
     summary = key_ideas.view((frozen or {}).get(key_ideas.KEY_IDEAS_FILE))
     if summary is not None:  # who wrote it, as the snapshot's record says (never read from the file)
         summary["drafted_by"] = proof.key_ideas_drafted_by
@@ -102,6 +125,7 @@ def _proof_view(store: ProjectStore, proof) -> dict | None:
         "version": proof.version,
         "text": files.get("proof.tex", ""),
         "files": files,
+        "outputs": outputs,
         "unreadable": frozen is None,
         "sha256": candidate_proof_sha256(store, proof.id),
         # what review starts from (ADR-0013): the key-ideas summary the snapshot froze, its four
@@ -127,7 +151,9 @@ def _evidence_checks(store: ProjectStore, node_id: str, current) -> list[dict]:
             "current": current is not None and proof.id == current.id,
             "location": f"{path.parent}/" if path.name == SNAPSHOT_MANIFEST else str(path),
         }
-        checks += [{**check.model_dump(mode="json"), "snapshot": snapshot} for check in proof_map.list_evidence_checks(store, proof.id)]
+        # each check with its own bound hash, read against the snapshot as it is now (PR #147)
+        checks += [{**check.model_dump(mode="json"), "snapshot": snapshot, "binding": proof_map.evidence_binding(check, now)}
+                   for check in proof_map.list_evidence_checks(store, proof.id)]
     return checks
 
 
@@ -340,6 +366,24 @@ class ReviewApp:
             "build": build_pdf_path(self.store.root, node_id).is_file(),
         }
 
+    def snapshot_file(self, node_id: str, rel: str) -> tuple[bytes, str]:
+        """One file the node's current snapshot froze (spec #145): a computation's output, as bytes with the
+        type it is served as. Served by the name the manifest lists it under (`snapshot_folder_file`
+        reads nothing else), so a path outside the snapshot never resolves; a folder snapshot only.
+        Never as active content on the page's origin: a raster image is served as itself (and sent
+        under a sandboxing policy), anything else — an agent-written HTML or SVG included — as a plain
+        download, so no frozen file can act on the page as the researcher (ADR-0010)."""
+        proof_map.require_node(self.store, node_id)
+        proof = get_current_candidate_proof(self.store, node_id)
+        path = self.store.root / proof.file_path if proof is not None else None
+        if path is None or path.name != SNAPSHOT_MANIFEST or not rel:
+            raise RequestError(HTTPStatus.NOT_FOUND, "NO_SUCH_FILE", f"{node_id} has no frozen file {rel!r}")
+        data = snapshot_folder_file(path.parent, rel)
+        if data is None:
+            raise RequestError(HTTPStatus.NOT_FOUND, "NO_SUCH_FILE", f"{node_id}'s snapshot froze no file {rel!r}")
+        kind = _output_type(rel)
+        return data, (kind if kind in _INLINE_OUTPUT_TYPES else "application/octet-stream")
+
     def pdf(self, node_id: str, which: str) -> bytes:
         proof_map.require_node(self.store, node_id)  # a known node id: a plain folder name, never a path
         if which == "snapshot":
@@ -424,8 +468,12 @@ class ReviewApp:
             proof = proof_map.require_candidate_proof(self.store, proof_id)
             if proof.node_id != node_id:
                 raise RequestError(HTTPStatus.BAD_REQUEST, "NOT_THIS_NODE", f"snapshot {proof_id} is a Candidate proof of {proof.node_id}, not of {node_id}")
+            sha = body.get("snapshot_sha256")  # the snapshot the check ran on, when the page knows it (PR #147)
+            if sha is not None and not isinstance(sha, str):
+                raise RequestError(HTTPStatus.BAD_REQUEST, "INVALID_REQUEST", "snapshot_sha256 is the snapshot's SHA-256, as a string")
             check = proof_map.record_evidence_check(
-                self.store, proof.id, str(body.get("outcome") or ""), notes=str(body.get("notes") or ""), run_by=str(body.get("run_by") or actor)
+                self.store, proof.id, str(body.get("outcome") or ""), notes=str(body.get("notes") or ""), run_by=str(body.get("run_by") or actor),
+                snapshot_sha256=sha or None,
             )
             return check.model_dump(mode="json")
         raise RequestError(HTTPStatus.NOT_FOUND, "NOT_FOUND", f"no node action {action!r}")
@@ -683,6 +731,17 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/api/fog":
             include_all = parse_qs(urlsplit(self.path).query).get("all", ["0"])[0] not in ("", "0", "false")
             return self._guarded(lambda: self.app.fog(include_all=include_all))
+        if path.startswith("/api/node/") and path.endswith("/snapshot/file"):
+            # a frozen output of the node's current snapshot, as itself (spec #145)
+            node_id = unquote(path.removeprefix("/api/node/").removesuffix("/snapshot/file"))
+            rel = parse_qs(urlsplit(self.path).query).get("path", [""])[0]
+            try:
+                data, content_type = self.app.snapshot_file(node_id, rel)
+            except RequestError as exc:
+                return self._error(exc.status, exc.code, exc.message)
+            except proof_map.ProofMapError as exc:
+                return self._error(HTTPStatus.NOT_FOUND, exc.code, exc.message)
+            return self._send(HTTPStatus.OK, data, content_type, policy=_OUTPUT_POLICY)
         if path.startswith("/api/node/") and path.endswith(("/pdf/snapshot", "/pdf/build")):
             node_id, _, which = unquote(path.removeprefix("/api/node/")).rpartition("/pdf/")
             try:

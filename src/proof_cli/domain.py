@@ -343,6 +343,9 @@ class EvidenceCheck(BaseModel):
     outcome: EvidenceOutcome
     notes: str = ""
     run_by: str = "system"
+    # the SHA-256 of the Candidate proof the check ran against, as a decision binds it (ADR-0010); None for a check
+    # recorded before the field, or against a snapshot that could not be read
+    candidate_proof_sha256: str | None = None
     created_at: datetime = Field(default_factory=utc_now)
 
 

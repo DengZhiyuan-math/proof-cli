@@ -18,18 +18,22 @@ import gzip
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import threading
 import time
 import webbrowser
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Mapping, TypedDict
+from urllib.parse import quote
 
 from . import build, httpbase
 from ..key_ideas import KEY_IDEAS_FILE
+from ..vault import RUN_SCRIPT
 from .agent import NO_WINDOW, AgentManager
-from .fsutil import EDITABLE_SUFFIXES, SKIP_DIRS, with_line_ends_of, write_bytes
+from .fsutil import COMPUTATION_SUFFIXES, EDITABLE_SUFFIXES, SKIP_DIRS, with_line_ends_of, write_bytes
 from .texutil import group, plain_text
 
 MAX_FILES = 3000
@@ -265,12 +269,99 @@ class Response:
         self.status, self.body, self.ctype = status, body, ctype
 
 
+RUN_TIMEOUT = 600.0  # seconds for one run of a computation node's run.sh, as for a build
+RUN_OUTPUT_LIMIT = 8 * 1024 * 1024  # bytes of a run's output kept, its last: a chatty program can't fill the server's memory
+
+
 def _json(obj, code=200) -> Response:
     return Response(code, json.dumps(obj).encode("utf-8"))
 
 
-def _err(code, msg) -> Response:
-    return _json({"error": msg}, code)
+def _err(status: int, code: str, msg: str) -> Response:
+    """Every studio error has one shape, {"error": message, "code": CODE}, with a registered code (errors.py)."""
+    return _json({"error": msg, "code": code}, status)
+
+
+def vscode_url(path: Path, line: int | None = None) -> str:
+    """`vscode://file/<path>[:<line>]`, the path percent-encoded so a `#`, `?`, `:` or space in it stays part of it."""
+    return f"vscode://file/{quote(path.as_posix(), safe='/')}" + (f":{line}" if line else "")
+
+
+class _Refused(Exception):
+    """A run or open request refused: answered as {"error": message, "code": code}."""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code, self.message = code, message
+
+
+def _line(value) -> int | None:
+    """The page's `line`: a positive whole number, or nothing; anything else is the page's mistake (INVALID_LINE)."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool) or not (isinstance(value, int) or (isinstance(value, str) and value.isdecimal() and value.isascii())) or int(value) < 1:
+        raise _Refused("INVALID_LINE", f"line must be a positive whole number, not {value!r}")
+    return int(value)
+
+
+@dataclass(frozen=True)
+class RunInputs:
+    """The state of a computation's inputs at one moment: their inputs digest (as a snapshot's frozen inputs
+    are hashed) and a stamp of each input by its path (size, mtime, ctime, inode) — or, when the folder
+    couldn't be read whole (an unreadable file, a symbolic link), why not."""
+
+    digest: str
+    stamps: Mapping[str, str]
+    unreadable: str | None = None
+
+
+@dataclass(frozen=True)
+class FinishedRun:
+    """A run of run.sh as it ended: its outcome and notes, its inputs before and after it (None when one
+    couldn't be read), and `stopped` ("stopped", "timed out") when it did not complete."""
+
+    outcome: str
+    notes: str
+    before: RunInputs | None
+    after: RunInputs | None
+    stopped: str | None
+
+
+class RunRecord(TypedDict):
+    """What became of a finished run: the Evidence check recorded (its JSON), or None and why not."""
+
+    evidence: dict | None
+    note: str
+
+
+@dataclass(frozen=True)
+class ComputationHooks:
+    """What a proof map node's studio asks the project about its computation (spec #145).
+
+    `medium()` is the node's Medium as of now: Run exists for a computation. `run_inputs()` is the state of the
+    program's inputs, read before and after a run, and `record_run(run)` records a finished run as an Evidence
+    check when the Evidence rule holds (ADR-0015). `open_command()` is the project's optional way to hand the
+    folder to an editor."""
+
+    medium: Callable[[], str | None]
+    run_inputs: Callable[[], RunInputs]
+    record_run: Callable[[FinishedRun], RunRecord]
+    open_command: Callable[[], str | None]
+
+
+def program_argv(script: Path) -> list[str]:
+    """How to start the node's program: the script as itself when it is executable; otherwise (an exchanged copy,
+    a fresh checkout) by the interpreter its own `#!` line names, so a zsh or Python entry runs as written —
+    and through `sh` only when it names none (audit R-S2)."""
+    if os.access(script, os.X_OK):
+        return [str(script)]
+    with script.open("rb") as handle:
+        first = handle.readline(512)
+    if first.startswith(b"#!"):
+        interpreter = shlex.split(first[2:].decode("utf-8", "replace").strip())
+        if interpreter:
+            return [*interpreter, str(script)]
+    return ["/bin/sh", str(script)]
 
 
 class Studio:
@@ -288,7 +379,10 @@ class Studio:
 
     def __init__(self, root: Path, *, fixed_build: tuple[str, str] | None = None,
                  hidden: tuple[str, ...] = (), agent_scratch: str | None = None,
-                 agent_context: Callable[[], object] | None = None) -> None:
+                 agent_context: Callable[[], object] | None = None,
+                 computation: ComputationHooks | None = None) -> None:
+        self.computation = computation  # a proof map node's Medium, its runs' Evidence and its editor (spec #145)
+        self.running_runs: list[build.Runner] = []  # runs may be concurrent, each its own Evidence check
         self.fixed_build = fixed_build
         self.hidden = hidden
         self.agent_scratch = agent_scratch
@@ -320,6 +414,7 @@ class Studio:
             running = self.running_build
         if running is not None:
             running.stop()      # registered before it runs anything, so nothing starts
+        self.stop_runs()        # a computation's runs too (ADR-0011: programs are limited per folder)
         self.agent.shutdown()
 
     # ------------------------------------------------------------ the agent's files
@@ -367,7 +462,7 @@ class Studio:
         if self.root not in p.parents:
             raise ValueError("outside project")
         r = p.relative_to(self.root).as_posix()
-        if p.suffix not in EDITABLE_SUFFIXES or self._excluded(r):
+        if not self.editable(p.name) or self._excluded(r):
             raise ValueError("not an editable file")
         return p
 
@@ -377,7 +472,7 @@ class Studio:
             for g in self.cfg.files:
                 for p in self.root.glob(g):
                     rel = p.relative_to(self.root).as_posix()
-                    if p.is_file() and p.suffix in EDITABLE_SUFFIXES and not self._excluded(rel):
+                    if p.is_file() and self.editable(p.name) and not self._excluded(rel):
                         seen.add(rel)
         else:
             for dirpath, dirnames, filenames in os.walk(self.root):
@@ -388,7 +483,7 @@ class Studio:
                                      and not (reld == "" and d in self.hidden))
                 for f in filenames:
                     rel = reld + f
-                    if Path(f).suffix in EDITABLE_SUFFIXES and not self._excluded(rel):
+                    if self.editable(f) and not self._excluded(rel):
                         seen.add(rel)
                 if len(seen) > MAX_FILES:
                     break
@@ -558,6 +653,94 @@ class Studio:
             b.stop()
         return b is not None
 
+    # ------------------------------------------------------------ a computation's run (spec #145)
+    def medium(self) -> str | None:
+        return self.computation.medium() if self.computation else None
+
+    def editable(self, name: str) -> bool:
+        """Whether the editor lists and writes a file, by its name: the LaTeX suffixes, plus a computation's program
+        and data (spec #145)."""
+        suffix = Path(name).suffix
+        return suffix in EDITABLE_SUFFIXES or (suffix.lower() in COMPUTATION_SUFFIXES and self.medium() == "computation")
+
+    def run_program(self) -> dict:
+        """Run the node's run.sh in its folder: the computation that is its candidate proof. A run that finishes is
+        recorded as an Evidence check on the current snapshot when the Evidence rule holds (ADR-0015: 0 passed,
+        otherwise failed, could not start error) — never a decision; the answer says when it is not, and why.
+        Runs may be concurrent. The program runs as the researcher, with their environment (ADR-0010)."""
+        t0 = time.time()
+        script = self.root / RUN_SCRIPT
+        runner = build.Runner(RUN_TIMEOUT, max_output=RUN_OUTPUT_LIMIT)
+        with self._admit:
+            if self.closed:
+                raise _Refused("STUDIO_CLOSED", "The studio is closed.")
+            self.running_runs.append(runner)
+        rc: int | None = None
+        before = self.computation.run_inputs() if self.computation else None
+        try:
+            if not script.is_file():
+                out = f"{RUN_SCRIPT} is missing in {self.root}: nothing ran"
+            else:
+                try:
+                    rc, out = runner.run(program_argv(script), self.root, env=build.build_env())
+                except build.Stopped:  # stopped from another request, or by the time limit (the Runner raises for both)
+                    out = f"the run took longer than {int(RUN_TIMEOUT)} seconds and was stopped" if runner.timed_out else "stopped"
+        except OSError as exc:
+            out = f"{RUN_SCRIPT} could not start: {exc}"
+        finally:
+            with self._admit:
+                if runner in self.running_runs:
+                    self.running_runs.remove(runner)
+        seconds = round(time.time() - t0, 1)
+        cancelled = runner.stopped.is_set() and not runner.timed_out  # as Build.run reads it
+        outcome = "passed" if rc == 0 else "failed" if rc is not None else "error"
+        what = "stopped" if cancelled else "timed out" if runner.timed_out else f"exit {rc}" if rc is not None else "could not start"
+        after = self.computation.run_inputs() if self.computation else None
+        recorded: RunRecord = (self.computation.record_run(FinishedRun(
+            outcome=outcome, notes=f"./{RUN_SCRIPT}: {what} after {seconds}s", before=before, after=after,
+            stopped=what if runner.stopped.is_set() else None)) if self.computation else {"evidence": None, "note": ""})
+        note = recorded.get("note") or ""
+        return {"exit": rc, "output": out + (f"\n\n[{note}]" if note else ""), "seconds": seconds, "cancelled": cancelled,
+                "timed_out": runner.timed_out, "outcome": outcome, "evidence": recorded.get("evidence"), "note": note}
+
+    def stop_runs(self) -> bool:
+        with self._admit:
+            runs = list(self.running_runs)
+        for runner in runs:
+            runner.stop()
+        return bool(runs)
+
+    def how_to_open(self) -> dict:
+        """How the page hands this folder to an editor: the project's command, or the vscode:// scheme."""
+        command = self.computation.open_command() if self.computation else None
+        if command:
+            return {"kind": "command", "command": command}
+        return {"kind": "scheme", "url": vscode_url(self.root)}
+
+    def open_folder(self, file: str | None = None, line=None) -> dict:
+        """Hand the folder — or one of its files, at a line — to the editor: run the project's open
+        command with {folder} and {file} filled in, or tell the page the scheme URL to use itself
+        (`vscode://file/<folder>`, `vscode://file/<file>:<line>`)."""
+        line = _line(line)
+        target = self.root
+        if file:
+            try:
+                target = self.resolve(file)  # a file of this folder, never outside it
+            except ValueError:
+                raise _Refused("NOT_A_NODE_FILE", f"not a file of this node: {file}") from None
+        how = self.how_to_open()
+        if how["kind"] != "command":
+            return {"ok": True, "kind": "scheme", "url": vscode_url(target, line if file else None)}
+        entry = target if file else self.root / (RUN_SCRIPT if self.medium() == "computation" else self.cfg.main)
+        argv = [part.replace("{folder}", str(self.root)).replace("{file}", str(entry)) for part in shlex.split(how["command"])]
+        try:
+            done = subprocess.run(argv, cwd=self.root, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=15)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise _Refused("OPEN_FAILED", f"{how['command']}: {exc}") from None
+        output = (done.stdout + done.stderr)[-2000:]
+        if done.returncode != 0:
+            raise _Refused("OPEN_FAILED", f"{how['command']}: exit {done.returncode}" + (f": {output.strip()}" if output.strip() else ""))
+        return {"ok": True, "kind": "command", "exit": 0, "output": output}
 
     # ------------------------------------------------------------ requests
     def get(self, path: str, q: dict) -> Response:
@@ -565,13 +748,13 @@ class Studio:
         try:
             return self._get(path, q)
         except UnicodeDecodeError:
-            return _err(415, "This file is not UTF-8 text; the studio edits UTF-8 files only.")
+            return _err(415, "NOT_UTF8", "This file is not UTF-8 text; the studio edits UTF-8 files only.")
         except (ValueError, KeyError) as e:
-            return _err(400, str(e))
+            return _err(400, "STUDIO_REQUEST_INVALID", str(e))
         except FileNotFoundError:
-            return _err(404, "file not found")
+            return _err(404, "NOT_FOUND", "file not found")
         except OSError as e:                 # e.g. the file is locked by another program
-            return _err(500, f"{type(e).__name__}: {e}")
+            return _err(500, "STUDIO_FILE_ERROR", f"{type(e).__name__}: {e}")
 
     def _get(self, path, q):
         if path == "/api/ping":
@@ -580,7 +763,7 @@ class Studio:
             return _json({"mtime": mtime(self.cfg.pdf) if self.cfg.pdf.exists() else None})
         if path == "/pdf":
             if not self.cfg.pdf.exists():
-                return _err(404, "no PDF yet")
+                return _err(404, "NO_PDF", "no PDF yet")
             return Response(200, self.cfg.pdf.read_bytes(), "application/pdf")
         if path == "/api/tree":
             st = self.git_status()
@@ -591,11 +774,13 @@ class Studio:
         if path == "/api/config":
             return _json({"main": self.cfg.main, "outdir": self.cfg.outdir, "modes": self.cfg.modes,
                                "builder": self.cfg.builder, "engine": self.cfg.engine, "error": self.cfg.error,
-                               "build": {m: self.cfg.describe(m) for m in self.cfg.modes}})
+                               "build": {m: self.cfg.describe(m) for m in self.cfg.modes},
+                               # the node's Medium, its folder and how to hand it to an editor (spec #145)
+                               "folder": str(self.root), "medium": self.medium(), "open": self.how_to_open()})
         if path == "/api/agent/events":
             job = self.agent.jobs.get(int(q["job"]))
             if not job:
-                return _err(404, "unknown job")
+                return _err(404, "NO_SUCH_JOB", "unknown job")
             evs, done = job.wait_events(int(q.get("after", 0)), 20.0)
             return _json({"events": evs, "done": done})
         if path == "/api/agent/commands":
@@ -623,25 +808,25 @@ class Studio:
         if path == "/api/synctex/forward":
             with self.sync_lock:
                 if not self.sync.load():
-                    return _err(404, "no synctex data; build first")
+                    return _err(404, "NO_SYNCTEX", "no synctex data; build first")
                 r = self.sync.forward(q["file"], int(q["line"]))
-            return _json(r or {"error": "no match"}, 200 if r else 404)
+            return _json(r) if r else _err(404, "NO_SYNCTEX_MATCH", "no match")
         if path == "/api/synctex/inverse":
             with self.sync_lock:
                 if not self.sync.load():
-                    return _err(404, "no synctex data; build first")
+                    return _err(404, "NO_SYNCTEX", "no synctex data; build first")
                 r = self.sync.inverse(int(q["page"]), float(q["x"]), float(q["y"]))
-            return _json(r or {"error": "no match"}, 200 if r else 404)
-        return _err(404, "not found")
+            return _json(r) if r else _err(404, "NO_SYNCTEX_MATCH", "no match")
+        return _err(404, "NOT_FOUND", "not found")
 
     def post(self, path: str, body: dict) -> Response:
         self.refresh_config()
         try:
             return self._post(path, body)
         except (ValueError, KeyError) as e:
-            return _err(400, str(e))
+            return _err(400, "STUDIO_REQUEST_INVALID", str(e))
         except OSError as e:                 # e.g. the file is locked by another program
-            return _err(500, f"{type(e).__name__}: {e}")
+            return _err(500, "STUDIO_FILE_ERROR", f"{type(e).__name__}: {e}")
 
     def draft_key_ideas(self, body: dict) -> Response:
         """The node's proof agent drafts its missing key-ideas.md (ADR-0013): one edit turn that may
@@ -649,10 +834,10 @@ class Studio:
         recorded in project state; the author edits it, and requesting review confirms it."""
         context = self.agent.context_fn() if self.agent.context_fn else None
         if context is None:
-            return _err(404, "only a proof map node's studio drafts key ideas")
+            return _err(404, "NOT_A_NODE_STUDIO", "only a proof map node's studio drafts key ideas")
         target = self.root / KEY_IDEAS_FILE
         if target.exists():
-            return _json({"error": f"{KEY_IDEAS_FILE} already exists: edit it, or remove it to have the agent draft it afresh"}, 409)
+            return _err(409, "KEY_IDEAS_EXISTS", f"{KEY_IDEAS_FILE} already exists: edit it, or remove it to have the agent draft it afresh")
         r = self.agent.start(context.key_ideas_prompt(), body.get("session_id") or None, "edit",
                              body.get("model") or None, body.get("effort") or None, [KEY_IDEAS_FILE],
                              body.get("provider") or None, finish=lambda: context.record_draft(target))
@@ -687,7 +872,22 @@ class Studio:
             return _json(r, 409 if r.get("busy") else 200)
         if path == "/api/build/stop":
             return _json({"ok": self.stop_build()})
-        return _err(404, "not found")
+        if path in ("/api/run", "/api/open"):
+            # refused in the run-refusal shape, {"error": message, "code": CODE}, as the agent's run is
+            try:
+                if path == "/api/open":
+                    return _json(self.open_folder(str(body.get("file") or "") or None, body.get("line")))
+                if self.medium() != "computation":
+                    raise _Refused("NOT_A_COMPUTATION", "Run is for a node whose Medium is computation; a LaTeX node compiles")
+                return _json(self.run_program())
+            except _Refused as refused:
+                return _err(self._REFUSAL_STATUS.get(refused.code, 400), refused.code, refused.message)
+        if path == "/api/run/stop":
+            return _json({"stopped": self.stop_runs()})
+        return _err(404, "NOT_FOUND", "not found")
+
+    # how a refused run or open reads over HTTP
+    _REFUSAL_STATUS = {"NOT_A_COMPUTATION": 409, "STUDIO_CLOSED": 503, "NOT_A_NODE_FILE": 400, "INVALID_LINE": 400, "OPEN_FAILED": 502}
 
 
 

@@ -130,10 +130,28 @@ ERROR_CODES: dict[str, str] = {
     "NO_DECISIONS": "the request decided nothing",
     "MALFORMED_DECISION": "a decision in the request isn't a well-formed object",
     "NO_PDF": "that PDF doesn't exist",
+    "NO_SUCH_FILE": "the node's current snapshot froze no file by that path",
     "NO_PROOF_FOLDER": "the node has no proof folder",
     "INVALID_REQUEST": "the page's request is missing what the action needs (a node id, which snapshot, …)",
     "NOT_FOUND": "no such page route or node action, or (a legacy command under --json) no such contract, reference or target",
     "NOT_THIS_NODE": "the snapshot, Candidate proof or review named belongs to another node",
+    # -- a node's studio (ADR-0011), and a computation's Run and Open in VS Code (ADR-0015, spec #145) --
+    "NO_STUDIO": "an imported result has no studio: it has no proof to write",
+    "STUDIO_CLOSED": "the studio is closed: the proof map's server is shutting down",
+    "CROSS_SITE": "the studio answers only its own page",
+    "NOT_A_COMPUTATION": "Run is for a node whose Medium is computation; a LaTeX node compiles",
+    "NOT_A_NODE_FILE": "the file to open is not an editable file of this node's folder",
+    "INVALID_LINE": "the line to open a file at is a positive whole number",
+    "OPEN_FAILED": "the project's [studio] open_command could not start, or exited non-zero",
+    "NOT_UTF8": "the file is not UTF-8 text; the studio edits UTF-8 files only",
+    "STUDIO_REQUEST_INVALID": "the studio's request is malformed or names something it may not touch; the message says what",
+    "STUDIO_FILE_ERROR": "the studio could not read or write a file (locked by another program, say); the message says which",
+    "NO_SUCH_JOB": "no agent job of this studio by that id",
+    "NO_SYNCTEX": "no SyncTeX data yet: build first",
+    "NO_SYNCTEX_MATCH": "SyncTeX knows no place for that position",
+    "NOT_A_NODE_STUDIO": "only a proof map node's studio drafts key ideas",
+    "KEY_IDEAS_EXISTS": "key-ideas.md already exists: edit it, or remove it to have the agent draft it afresh",
+    "EVIDENCE_SNAPSHOT_MISMATCH": "the snapshot hash an Evidence check names is not the snapshot's hash now; the message names the node's current snapshot",
 }
 
 

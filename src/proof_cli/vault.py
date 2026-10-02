@@ -261,6 +261,13 @@ def read_working_snapshot(root: Path, node_id: str, medium: Medium | None = None
     return SnapshotContents(files, executable, tuple(scan.hidden))
 
 
+def working_links(root: Path, node_id: str, medium: Medium | None = None) -> list[tuple[Path, bool]]:
+    """The symbolic links a snapshot of the node would meet where it reads a file or folder (each with whether it
+    dangles): what `read_working_snapshot` refuses with `NodeFolderLinks`. A Run's Evidence check (#147) refuses
+    only those among the inputs; a link under `out/` is an output, and outputs may differ."""
+    return list(_working_scan(root, node_id, medium).links)
+
+
 def working_inputs_digest(root: Path, node_id: str, medium: Medium | None = None) -> str:
     """The inputs digest of the node folder as it is now: equal to a snapshot's
     `frozen_inputs_digest` exactly when no input changed since it was frozen (`out/` may have).
@@ -389,6 +396,15 @@ def frozen_inputs_digest(folder: Path) -> str | None:
     except _UNREADABLE:
         return None
     return inputs_digest(entries, executable)
+
+
+def frozen_digests(folder: Path) -> tuple[str, str] | None:
+    """A snapshot folder's SHA-256 and its inputs digest, together: what a Run's Evidence check is bound to,
+    and what its inputs were compared with (#147). Exactly `snapshot_folder_digest` and
+    `frozen_inputs_digest`; None if either can't be had (the snapshot is gone, unreadable, or lost a
+    recorded executable bit). The record checks the bound hash against the snapshot once more."""
+    snapshot, inputs = snapshot_folder_digest(folder), frozen_inputs_digest(folder)
+    return (snapshot, inputs) if snapshot is not None and inputs is not None else None
 
 
 def frozen_output_bytes(folder: Path) -> int:

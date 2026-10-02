@@ -977,6 +977,7 @@ async function showNode(nodeId) {
     $("node-proof-meta").textContent = "No snapshot has been requested for review yet.";
     $("node-proof-exact").textContent = "";
   }
+  showOutputs(node.id, proof);
   $("node-evidence").replaceChildren(...view.evidence_checks.map(evidenceItem));
   const decisions = $("node-decisions").querySelector("tbody");
   // reviewing a node trusted by rule explicitly (ADR-0014): the ordinary Reference review, its rationale prefilled
@@ -1004,9 +1005,14 @@ function evidenceItem(c) {
   } else {
     li.append(el("span", `snapshot v${s.version}${hash}`, { class: "mono evidence-snap", title }), " · frozen at ", el("code", s.location));
   }
+  // the check's own bound hash (PR #147): flagged when the snapshot changed since, said plainly when unbound
+  const b = c.binding;
+  if (b && b.state === "unbound") li.append(" · ", el("span", b.label, { class: "evidence-binding" }));
+  else if (b && b.sha256 && b.state !== "matches") li.append(" · ", el("span", `bound to ${b.sha256.slice(0, 12)}…`, { class: "mono evidence-binding", title: b.sha256 }));
   const marks = [];
   if (!s.current) marks.push(`for an older version v${s.version}`);
   if (s.unreadable) marks.push("snapshot unreadable");
+  if (b && b.state === "changed") marks.push(b.label);
   for (const text of marks) {
     const chip = stateChip("unverifiable", text, text);  // the map's attention triangle and colour
     chip.classList.add("state-chip", "warning");
@@ -1031,6 +1037,25 @@ function showNodeFog(view) {
     for (const item of near) { const li = el("li"); li.append(el("a", item.id, { href: `#/fog/${encodeURIComponent(item.id)}`, class: "fog-id" }), " ", el("span", item.text, { class: "fog-text" }), " ", experimentChip(item)); ul.append(li); }
     block.append(ul);
   }
+}
+
+// what a computation wrote to out/, as the snapshot froze it (spec #145): each file a link to itself,
+// an image previewed; the frozen text files are shown above as text, a binary one never is
+function showOutputs(nodeId, proof) {
+  const box = $("node-outputs");
+  box.replaceChildren();
+  const outputs = (proof && proof.outputs) || [];
+  if (!outputs.length) return;
+  box.append(el("h3", "Frozen outputs"));
+  const ul = el("ul", null, { class: "node-outputs-list" });
+  for (const output of outputs) {
+    const href = `/api/node/${encodeURIComponent(nodeId)}/snapshot/file?path=${encodeURIComponent(output.path)}`;
+    const li = el("li");
+    li.append(el("a", output.path, { href, target: "_blank", rel: "noopener", class: "mono" }), el("span", ` · ${output.type} · ${output.bytes} bytes`, { class: "hint" }));
+    if (output.type.startsWith("image/")) li.append(el("img", null, { src: href, alt: output.path, class: "output-preview", loading: "lazy" }));
+    ul.append(li);
+  }
+  box.append(ul);
 }
 
 async function route() {

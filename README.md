@@ -25,6 +25,16 @@ proof node show <id>
 proof trust-rule list   # the Trust rules in force (read-only; declared on the page)
 proof fog list          # the Proof fog: difficulties not yet precise enough to be a Claim
 proof node create C3 claim "For every n ≤ 10^4 …" --medium computation   # a node established by a program: run.sh, outputs in out/
+# In a computation node's studio, Run executes run.sh (its exit code is an Evidence check on the current snapshot:
+# 0 passed, otherwise failed — recorded only when the run completes with the snapshot's frozen inputs, untouched;
+# see ADR-0015; a checker recording one by hand names the snapshot it ran on with
+# `proof node evidence record <proof> <outcome> --snapshot-sha256 <sha>` — refused unless it is that snapshot's
+# hash now; with no flag the check binds the snapshot as it is at the moment of recording, and a snapshot that
+# can't be read takes no check, SNAPSHOT_UNREADABLE). run.sh runs as you, with your full environment, and can write anywhere you can (ADR-0010's
+# cooperative model, not a sandbox); the page keeps the last 8 MB of its output.
+# Open in VS Code hands the folder to the editor — vscode://file/<folder>, or the command proof.toml names:
+#   [studio]
+#   open_command = "code {folder}"     # {folder} and {file} are filled in; run by the page's server
 ```
 
 Every command acts on `--root`, else `$PROOF_ROOT`, else the current folder. An agent working inside a node's folder, like the studio's agent panel, keeps `PROOF_ROOT` set to the project root.
