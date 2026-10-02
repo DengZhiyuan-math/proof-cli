@@ -90,7 +90,7 @@ def _turn(turn, role, step, **more):
 
 
 def test_the_log_links_to_what_each_entry_produced_and_folds_each_turns_conversation_under_its_step():
-    turns = [_turn("t1", "prover", 1, changed=[{"path": "scratch/proof-draft.md", "line": 12}]), _turn("t2", "typesetter", 4)]
+    turns = [_turn("t1", "prover", 1, changed=[{"path": "scratch/proof-draft.md", "line": 12, "url": "vscode://file//proj/proofs/N/scratch/proof-draft.md:12"}]), _turn("t2", "typesetter", 4)]
     (shown,) = _pane(run=RUNNING, log=LOG, turns=turns)
     assert "/#/fog/fog-3" in shown["links"] and "/#/node/N" in shown["links"]  # the fog item in the map's drawer, the Evidence check on the node's page
     assert [t["summary"] for t in shown["turns"]] == ["step 1 · Prover's turn — its conversation", "step 4 · Typesetter's turn — its conversation"]
@@ -166,7 +166,7 @@ def test_a_run_that_needs_the_researcher_says_what_it_needs_and_a_failed_release
 
 # -- seventh review ---------------------------------------------------------------------------------
 
-CHANGED = [_turn("t5", "numerics", 2, changed=[{"path": "check.py", "line": 40}])]
+CHANGED = [_turn("t5", "numerics", 2, changed=[{"path": "check.py", "line": 40, "url": "vscode://file//proj/proofs/N/check.py:40"}])]
 
 
 def test_a_changed_file_opens_in_vs_code_at_its_line():

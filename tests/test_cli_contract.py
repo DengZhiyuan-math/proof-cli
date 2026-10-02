@@ -212,7 +212,9 @@ def _raised_codes() -> dict[str, str]:
 
 
 def test_every_error_code_the_code_raises_is_registered():
-    unregistered = {code: where for code, where in _raised_codes().items() if code not in errors.ERROR_CODES}
+    # a `{"code": …}` answer may be a notice (#146) rather than a refusal: either registry lists it
+    registered = {**errors.ERROR_CODES, **errors.NOTICE_CODES}
+    unregistered = {code: where for code, where in _raised_codes().items() if code not in registered}
     assert not unregistered, unregistered
 
 
