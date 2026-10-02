@@ -117,6 +117,29 @@ def _hooks(**given):
     return RunHooks(**{key: value for key, value in {**base, **given}.items() if key in names})
 
 
+WAIT = 30.0  # seconds: how long a test waits for a subprocess (the stub CLI, a `proof` call) to do what it should
+
+
+def _until(ready, what, timeout=WAIT, every=0.05):
+    """Poll `ready()` until it is true; after `timeout` seconds fail, naming `what` (a string, or a callable that says
+    what is missing at that moment). Never a fixed sleep: a `proof` start-up takes seconds in a slow sandbox."""
+    deadline = time.monotonic() + timeout
+    while True:
+        value = ready()
+        if value:
+            return value
+        if time.monotonic() >= deadline:
+            raise AssertionError(f"waited {timeout:g}s for {what() if callable(what) else what}")
+        time.sleep(every)
+
+
+def _turn_running(hub, node="N"):
+    """The run's turn, once its CLI process is running."""
+    agent = hub.studio(node).agent
+    return _until(lambda: agent.active if agent.active is not None and not agent.active.done and agent.active.proc is not None else None,
+                  "the run's turn to start its CLI")
+
+
 def _wait(hub, node="N", until=("done", "stuck", "budget", "needs-human", "paused", "released"), timeout=60):
     deadline = time.monotonic() + timeout
     state = None
@@ -235,7 +258,7 @@ def test_pause_lets_the_turn_finish_then_holds_and_a_redirect_reaches_the_next_t
     store, hub, log, queue = studio
     _queue(queue, [["sleep", "0.6"]], [["sleep", "0"]], [["sleep", "0"]], [["sleep", "0"]])
     _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
-    time.sleep(0.2)
+    _turn_running(hub)
     assert _post(hub, "/studio/N/api/agent/pause")[1]["status"] in ("pausing", "paused")
     _wait(hub, until=("paused",))
     assert len(_turns(log)) == 1 and get_active_claim(store, "N") is not None
@@ -250,11 +273,11 @@ def test_stop_and_release_ends_the_run_and_unassigns_the_node(studio):
     store, hub, log, queue = studio
     _queue(queue, [["sleep", "5"]], [["sleep", "0"]])
     _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
-    time.sleep(0.3)
+    _turn_running(hub)
     status, released = _post(hub, "/studio/N/api/agent/release")
     assert status == 200 and released["status"] == "released"
     assert get_active_claim(store, "N") is None
-    time.sleep(0.5)
+    time.sleep(0.5)  # nothing more may happen: a check of an absence, not a wait for a subprocess
     assert len(_turns(log)) <= 1 and _get(hub, "/studio/N/api/agent/run")[1]["status"] == "released"
 
 
@@ -275,10 +298,19 @@ def test_the_map_and_the_node_payload_show_the_runs_role_and_step(studio):
     store, hub, log, queue = studio
     _queue(queue, [["proof", "node", "progress", "N", "--plan", "a", "--plan", "b", "--plan", "c"], ["proof", "node", "progress", "N", "--step", "2", "--status", "started"], ["sleep", "1.5"]], [["sleep", "0"]])
     _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
-    time.sleep(0.9)
     client = DirectClient(store)
     client.app.studios = hub  # the page's own hub is this one
-    node = next(n for n in client.get("/api/map")[1]["data"]["nodes"] if n["id"] == "N")
+
+    def shown():
+        node = next(n for n in client.get("/api/map")[1]["data"]["nodes"] if n["id"] == "N")
+        return node if (node.get("run") or {}).get("step") == 2 and node["run"].get("steps") == 3 else None
+
+    def missing():
+        kinds = [e.get("kind") for e in work_log(store, "N")]
+        return "the turn's two `proof node progress` calls to land; still missing: " + (
+            ", ".join(what for what, kind in (("the plan (--plan a b c)", "plan"), ("step 2 started", "step")) if kind not in kinds) or "neither (the map did not show them)")
+
+    node = _until(shown, missing, every=0.1)
     assert node["assignee"] == "claude-code" and node["run"] == {"status": "running", "role": "prover", "step": 2, "steps": 3, "decision": None}
     assert client.get("/api/node/N")[1]["data"]["run"]["role"] == "prover"
     _wait(hub)
@@ -354,7 +386,7 @@ def test_a_second_start_while_the_first_is_still_being_assigned_is_refused():
     first = {}
     worker = threading.Thread(target=lambda: first.update(run.start("claude")))
     worker.start()
-    time.sleep(0.2)
+    _until(lambda: run.view()["status"] == "starting", "the first Start to be assigning the node")
     second = run.start("claude")  # while the first is still assigning
     gate.set()
     worker.join(5)
@@ -388,7 +420,7 @@ def test_stop_and_release_while_the_node_is_still_being_assigned_holds():
     first = {}
     worker = threading.Thread(target=lambda: first.update(run.start("claude")))
     worker.start()
-    time.sleep(0.2)
+    _until(lambda: run.view()["status"] == "starting", "the first Start to be assigning the node")
     stopped = run.release()
     assert stopped["status"] == "released"
     gate.set()
@@ -408,20 +440,25 @@ def test_stop_while_the_turn_is_being_prepared_starts_no_turn(studio, monkeypatc
     _queue(queue, [["write", "scratch/after-release.txt", "written after Stop"]])
     agent = hub.studio("N").agent
     backend = agent.backend("claude")
-    entered, gate = threading.Event(), threading.Event()
+    entered, gate, returned = threading.Event(), threading.Event(), threading.Event()
     original = backend.preflight
 
     def slow_preflight(root):
         entered.set()
-        assert gate.wait(5)
-        return original(root)
+        assert gate.wait(WAIT)
+        try:
+            return original(root)  # `claude auth status`: a subprocess
+        finally:
+            returned.set()
 
     monkeypatch.setattr(backend, "preflight", slow_preflight)
     status, started = _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["typesetter"]})
     assert status == 200 and entered.wait(5) and agent.active is None
     assert _post(hub, "/studio/N/api/agent/release")[1]["status"] == "released"
     gate.set()
-    time.sleep(1.0)
+    assert returned.wait(WAIT), "the preflight never returned"
+    coordinator = hub.studio("N").run._run.thread  # this Start's own coordinator thread
+    _until(lambda: coordinator is None or not coordinator.is_alive(), "the stopped run's coordinator to end")
     assert _get(hub, "/studio/N/api/agent/run")[1]["status"] == "released"
     assert agent.active is None and _turns(log) == []  # no turn ever existed
     assert not (store.root / "proofs" / "N" / "scratch" / "after-release.txt").exists()
@@ -562,9 +599,7 @@ def test_a_start_waits_while_the_previous_run_is_still_giving_the_node_back():
                     release=release, work_log=lambda: [], record_close=lambda *a: None)
     run = AgentRun(Agent(), _hooks(**hooks_kw))
     run.start("claude")
-    deadline = time.monotonic() + 5
-    while run.view()["status"] != "stuck" and time.monotonic() < deadline:
-        time.sleep(0.01)
+    _until(lambda: run.view()["status"] == "stuck", "the run to end stuck")
     stopper = threading.Thread(target=run.release)
     stopper.start()
     assert releasing.wait(5)
@@ -589,16 +624,11 @@ def test_a_start_right_after_stop_and_release_is_not_ended_by_the_old_coordinato
     _queue(queue, [["sleep", "20"]], [["sleep", "1.5"]])
     _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["typesetter"]})
     agent = hub.studio("N").agent
-    deadline = time.monotonic() + 10
-    while time.monotonic() < deadline and not (agent.active and agent.active.proc):
-        time.sleep(0.01)
-    old = agent.active
+    old = _turn_running(hub)
     assert old is not None and _post(hub, "/studio/N/api/agent/release")[1]["status"] == "released"
     status, second = _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["numerics"]})
     assert status == 200 and second["status"] == "running"
-    deadline = time.monotonic() + 10
-    while time.monotonic() < deadline and not (agent.active and agent.active is not old and agent.active.proc):
-        time.sleep(0.01)
+    _until(lambda: agent.active is not None and agent.active is not old and agent.active.proc is not None, "the second Start's turn to start its CLI")
     assert old.done, "the old turn was stopped before the new one began"
     state = _get(hub, "/studio/N/api/agent/run")[1]
     assert (state["status"], state["turns"], state["roles"]) == ("running", 0, ["numerics"])  # the old coordinator's exit changed nothing
@@ -744,19 +774,21 @@ def test_a_run_a_proof_write_or_a_file_change_each_count_as_a_change(studio, mon
 
 def test_pause_stops_the_budget_clock_and_resume_continues_with_what_is_left(studio):
     store, hub, log, queue = studio
-    (store.root / "proof.toml").write_text("[studio]\nbudget = { turns = 3, minutes = 0.04 }\n")  # 2.4 seconds
+    (store.root / "proof.toml").write_text("[studio]\nbudget = { turns = 3, minutes = 10 }\n")
     _queue(queue, [["sleep", "0.4"]], [["write", "scratch/a.md", "a"]], [["write", "scratch/b.md", "b"]])
     _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
-    time.sleep(0.1)
+    _turn_running(hub)
     _post(hub, "/studio/N/api/agent/pause")
     paused = _wait(hub, until=("paused",))
     left = paused["minutes_left"]
-    assert 0 < left <= 0.04
-    time.sleep(3.0)  # longer than the whole budget: none of it is spent while paused
+    assert 0 < left <= 10
+    time.sleep(3.0)  # the clock is stopped: what is left stays what it was (a wait on nothing, not on a subprocess)
     assert _get(hub, "/studio/N/api/agent/run")[1]["minutes_left"] == pytest.approx(left, abs=1e-6)
     _post(hub, "/studio/N/api/agent/resume")
+    # resumed: the deadline moved on by the pause, so what is left is still about what it was — 3 s spent would be 0.05
+    assert _get(hub, "/studio/N/api/agent/run")[1]["minutes_left"] >= left - 0.02
     state = _wait(hub, until=("done", "stuck", "budget"))
-    assert len(_turns(log)) >= 2, state  # the next turn ran: the pause did not use up the budget
+    assert len(_turns(log)) == 3 and state["status"] == "budget" and "3 turn(s)" in state["reason"], state
 
 
 def test_redirect_with_no_run_is_refused_with_no_run(studio):
@@ -790,7 +822,7 @@ def test_the_run_leaves_a_closing_note_on_every_stop(studio):
     assert (last["status"], last["role"], last["by"]) == ("done", "prover", "claude-code") and "review-requested" in last["note"]
     _queue(queue, [["sleep", "5"]])
     _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["typesetter"]})
-    time.sleep(0.4)
+    _turn_running(hub)
     _post(hub, "/studio/N/api/agent/release")
     last = [e for e in work_log(store, "N") if e.get("kind") == "step"][-1]
     assert (last["status"], last["role"]) == ("done", "typesetter") and "released" in last["note"]
@@ -835,7 +867,7 @@ def test_an_ask_turn_while_the_run_is_paused_gets_no_role_scope_or_pending_redir
            [["sleep", "0"]],  # the Typesetter, after Resume
            [["proof", "node", "progress", "N", "--step", "1", "--status", "stuck", "--note", "enough"]])
     _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["prover", "typesetter"]})
-    time.sleep(0.1)
+    _turn_running(hub)
     _post(hub, "/studio/N/api/agent/pause")
     _wait(hub, until=("paused",))
     _post(hub, "/studio/N/api/agent/redirect", {"text": "use the sup norm", "role": "typesetter"})
@@ -844,7 +876,7 @@ def test_an_ask_turn_while_the_run_is_paused_gets_no_role_scope_or_pending_redir
     agent = hub.studio("N").agent
     job = agent.jobs[asked["job"]]
     with job.cond:
-        job.cond.wait_for(lambda: job.done, timeout=20)
+        assert job.cond.wait_for(lambda: job.done, timeout=WAIT), "the Ask turn never ended"
     ask = _turns(log)[-1]
     assert ask["role"] is None and "This turn you are" not in ask["brief"] and "use the sup norm" not in ask["prompt"]
     assert "Edit(./key-ideas.md)" not in ask["argv"]  # not the Typesetter's scope
@@ -864,9 +896,7 @@ def test_a_start_is_refused_when_the_previous_run_is_still_giving_the_node_back(
     gate = threading.Event()
     run = AgentRun(_fake_turns(lambda turn: None), _hooks(release=lambda name, reason: gate.wait(5)))
     run.start("claude", roles=["numerics"])
-    deadline = time.monotonic() + 5
-    while run.view()["status"] not in ("done", "stuck") and time.monotonic() < deadline:
-        time.sleep(0.01)
+    _until(lambda: run.view()["status"] in ("done", "stuck"), "the run to end")
     stopper = threading.Thread(target=run.release)
     stopper.start()
     time.sleep(0.1)
@@ -880,7 +910,7 @@ def test_a_failed_release_is_not_reported_as_released(studio, monkeypatch):
     store, hub, log, queue = studio
     _queue(queue, [["sleep", "5"]])
     _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["prover"]})
-    time.sleep(0.3)
+    _turn_running(hub)
     run = hub.studio("N").run
 
     def fails(name, reason):
@@ -900,10 +930,11 @@ def test_the_release_reason_says_why_the_node_was_given_back(studio):
     store, hub, log, queue = studio
     _queue(queue, [["sleep", "5"]], [["sleep", "5"]])
     _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["prover"]})
-    time.sleep(0.3)
+    first = _turn_running(hub)
     _post(hub, "/studio/N/api/agent/release")
     _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["prover"]})
-    time.sleep(0.3)
+    agent = hub.studio("N").agent
+    _until(lambda: agent.active is not None and agent.active is not first and agent.active.proc is not None, "the second Start's turn to start its CLI")
     hub.studio("N").close()
     reasons = [e.payload["reason"] for e in list_events(store) if e.kind == "proof_map_claim_released"]
     assert reasons == ["stopped and released by the researcher", "studio closed"]
@@ -945,9 +976,7 @@ def test_a_late_assignment_after_the_later_run_requested_review_leaves_no_claim(
     assert entered.wait(5)
     run.release()
     run.start("claude", roles=["prover"])
-    deadline = time.monotonic() + 5
-    while run.view()["status"] != "done" and time.monotonic() < deadline:
-        time.sleep(0.01)
+    _until(lambda: run.view()["status"] == "done", "the later run to end done")
     assert (run.view()["status"], run.view()["reason"]) == ("done", "review-requested") and get_active_claim(store, "N") is None
     gate.set()
     first.join(5)
@@ -966,9 +995,7 @@ def test_what_the_researcher_does_during_a_turn_keeps_its_own_actor_and_no_role(
     _queue(queue, [["proof", "fog", "add", "the agent's direction", "--near", "N", "--created-by", "claude-code"], ["sleep", "1.2"],
                    ["proof", "node", "progress", "N", "--step", "1", "--status", "stuck", "--note", "enough"]])
     _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["prover"]})
-    deadline = time.monotonic() + 10
-    while time.monotonic() < deadline and not any(e["kind"] == "fog" for e in work_log(store, "N")):
-        time.sleep(0.05)
+    _until(lambda: any(e["kind"] == "fog" for e in work_log(store, "N")), "the Prover's `proof fog add` to land")
     add_fog(store, "the researcher's own hunch", near=["N"], created_by="ada")  # mid-turn
     _wait(hub)
     fog = {e["text"]: e for e in work_log(store, "N") if e["kind"] == "fog"}
