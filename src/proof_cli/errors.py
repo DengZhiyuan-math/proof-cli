@@ -133,4 +133,12 @@ ERROR_CODES: dict[str, str] = {
     "INVALID_REQUEST": "the page's request is missing what the action needs (a node id, which snapshot, …)",
     "NOT_FOUND": "no such page route or node action, or (a legacy command under --json) no such contract, reference or target",
     "NOT_THIS_NODE": "the snapshot, Candidate proof or review named belongs to another node",
+    # -- a node's studio (ADR-0011), and a computation's Run and Open in VS Code (ADR-0015, spec #145) --
+    "NO_STUDIO": "an imported result has no studio: it has no proof to write",
+    "STUDIO_CLOSED": "the studio is closed: the proof map's server is shutting down",
+    "CROSS_SITE": "the studio answers only its own page",
+    "NOT_A_COMPUTATION": "Run is for a node whose Medium is computation; a LaTeX node compiles",
+    "NOT_A_NODE_FILE": "the file to open is not an editable file of this node's folder",
+    "INVALID_LINE": "the line to open a file at is a positive whole number",
+    "OPEN_FAILED": "the project's [studio] open_command could not start, or exited non-zero",
 }

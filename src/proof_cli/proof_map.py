@@ -1123,15 +1123,19 @@ def record_evidence_check(
     *,
     notes: str = "",
     run_by: str = "system",
+    snapshot_sha256: str | None = None,
 ) -> EvidenceCheck:
     """Record an automated or semi-automated check against a specific Candidate proof.
 
     Purely advisory and ungated — an automated checker records its own
     outcome directly, no Human Review needed to log a result. Nothing here
     can close, block, or otherwise touch acceptance_state; the sole write
-    is this check's own row (ADR-0004 point 5).
+    is this check's own row (ADR-0004 point 5). The check is bound to the
+    snapshot's SHA-256, as a decision is: the one the caller checked against,
+    else the snapshot's as it is on disk now.
     """
     require_candidate_proof(store, candidate_proof_id)
+    sha256 = snapshot_sha256 or candidate_proof_sha256(store, candidate_proof_id)
 
     try:
         resolved_outcome = EvidenceOutcome(outcome)
@@ -1142,7 +1146,8 @@ def record_evidence_check(
         ) from exc
 
     check = EvidenceCheck(
-        id=str(uuid.uuid4()), candidate_proof_id=candidate_proof_id, outcome=resolved_outcome, notes=notes, run_by=run_by
+        id=str(uuid.uuid4()), candidate_proof_id=candidate_proof_id, outcome=resolved_outcome, notes=notes, run_by=run_by,
+        candidate_proof_sha256=sha256,
     )
     insert_evidence_check(store, check)
     append_event(
@@ -1150,7 +1155,7 @@ def record_evidence_check(
         "proof_map_evidence_check_recorded",
         f"evidence check {resolved_outcome.value} for candidate proof {candidate_proof_id}",
         entity_id=candidate_proof_id,
-        payload={"evidence_check_id": check.id, "outcome": resolved_outcome.value, "run_by": run_by},
+        payload={"evidence_check_id": check.id, "outcome": resolved_outcome.value, "run_by": run_by, "candidate_proof_sha256": sha256},
     )
     return check
 

@@ -365,10 +365,11 @@ function applyMedium(r) {
 // the bar's primary action, and ⌘↵: Run on a computation node, Compile on a LaTeX one
 function primaryAction() { return MEDIUM.value === "computation" ? runProgram() : compile(); }
 
+// With no [studio] open_command the page opens the vscode:// URL itself (spec #145); only a command goes to the server.
 async function openInEditor() {
+  if (MEDIUM.open && MEDIUM.open.kind === "scheme") { location.href = MEDIUM.open.url; return; }
   const r = await api("/api/open", {});
-  if (r.kind === "scheme" && r.url) { location.href = r.url; return; }
-  if (!r.ok) toast(r.error || `open command failed (exit ${r.exit})`);
+  if (r._status !== 200) toast(r.error || `HTTP ${r._status}`);
 }
 async function runProgram() {
   if (S.building) return;
@@ -378,7 +379,7 @@ async function runProgram() {
   setCompileButton(true);
   try {
     const r = await api("/api/run", {});
-    if (r._status !== 200) { st.className = "status err"; st.textContent = r.message || r.error || `HTTP ${r._status}`; return; }
+    if (r._status !== 200) { st.className = "status err"; st.textContent = r.error || `HTTP ${r._status}`; return; }
     $("#output").textContent = r.output || "";
     const text = r.cancelled ? "run stopped" : r.timed_out ? "stopped: the run took too long" : r.exit === 0 ? "OK" : r.exit === null ? "could not start" : `FAILED (exit ${r.exit})`;
     st.className = "status " + (r.exit === 0 ? "ok" : r.cancelled ? "warn" : "err");

@@ -25,9 +25,9 @@ from ..domain import ProofMapNodeKind
 from ..reviews import git_identity
 from ..storage import ProjectStore, get_current_candidate_proof
 from ..studio.proof_agent import ProofAgentContext, library_folders, open_command
-from ..studio.server import Studio
+from ..studio.server import ComputationHooks, Studio
 from ..authority import candidate_proof_sha256
-from ..vault import OUT_DIR, manifest_digest, node_folder, working_inputs
+from ..vault import SNAPSHOT_MANIFEST, manifest_digest, node_folder, run_inputs, snapshot_inputs_digest
 
 STUDIO_STATIC = Path(__file__).resolve().parent.parent / "studio" / "static"
 # the node's build: what vault.build_is_current checks and review archives (ADR-0010)
@@ -107,10 +107,12 @@ class StudioHub:
                     ),
                     # the node's Medium as of each request, a run recorded as an Evidence check as the page's
                     # identity, and the project's optional open command (spec #145)
-                    node_medium=lambda: self._medium(node_id),
-                    on_run=lambda outcome, notes, before, after: self._record_run(node_id, outcome, notes, before, after),
-                    working_digest=lambda: self._working_digest(node_id),
-                    open_command=lambda: open_command(root),
+                    computation=ComputationHooks(
+                        medium=lambda: self._medium(node_id),
+                        run_inputs=lambda: self._run_inputs(node_id),
+                        record_run=lambda **run: self._record_run(node_id, **run),
+                        open_command=lambda: open_command(root),
+                    ),
                 )
             return self._studios[node.id]
 
@@ -118,29 +120,37 @@ class StudioHub:
         node = proof_map.get_node(self.store, node_id)
         return node.medium.value if node is not None and node.medium is not None else None
 
-    def _working_digest(self, node_id: str) -> tuple[str, str]:
-        """What a run ran, twice over: the content digest of the node folder's inputs, as a snapshot would freeze them,
-        and a stamp of every input but the outputs — its size and the time it was last written. A program's inputs
-        must not be touched while it runs: an edit undone before the run ends leaves the content as it was, not the
-        stamp (audit R-S1). Its outputs it writes itself, so they are compared by content alone."""
-        inputs = working_inputs(self.store.root, node_id)
+    def _run_inputs(self, node_id: str) -> tuple[str, str]:
+        """The state of the program's inputs — its scripts, environment files and data, never `out/` or byte code
+        (`vault.is_run_input`) — twice over: their content digest, as a snapshot's frozen inputs are digested, and a
+        stamp of each (size, mtime, ctime, inode). An input edited during a run and put back before it ends has its
+        content as before but not its stamp (audit R-S1); its ctime no program can set back."""
+        inputs = run_inputs(self.store.root, node_id)
         content = manifest_digest({rel: hashlib.sha256(path.read_bytes()).hexdigest() for rel, path in inputs.items()})
-        stamp = manifest_digest({rel: f"{st.st_size}:{st.st_mtime_ns}:{st.st_ino}" for rel, path in inputs.items()
-                                 if rel.split("/", 1)[0] != OUT_DIR for st in [path.stat()]})
+        stamp = manifest_digest({rel: f"{st.st_size}:{st.st_mtime_ns}:{st.st_ctime_ns}:{st.st_ino}"
+                                 for rel, path in inputs.items() for st in [path.stat()]})
         return content, stamp
 
-    def _record_run(self, node_id: str, outcome: str, notes: str, before: tuple[str, str] | None, after: tuple[str, str] | None) -> dict:
-        """A run is an Evidence check on a specific Candidate proof (ADR-0004): recorded only when the folder it ran in
-        is the current snapshot — untouched from before the run to after it (content and stamp alike), and the same as
-        what was frozen. Otherwise nothing is recorded, and the answer says why."""
+    def _record_run(self, node_id: str, *, outcome: str, notes: str, before: tuple[str, str] | None,
+                    after: tuple[str, str] | None, stopped: str | None) -> dict:
+        """The Evidence rule (ADR-0015): a run is an Evidence check on the node's current snapshot only when it ran to
+        its end (not stopped, not timed out), its inputs were untouched from before it to after it, and they are the
+        inputs the snapshot froze. Its outputs may differ: the check is of the execution outcome for the frozen
+        inputs, not a certificate of the frozen outputs. Recorded bound to the snapshot's SHA-256; otherwise nothing
+        is recorded, and the note says why."""
         proof = get_current_candidate_proof(self.store, node_id)
+        if stopped is not None:
+            return {"evidence": None, "note": f"{stopped} — not recorded as an Evidence check: only a run that completes is one"}
         if proof is None:
-            return {"evidence": None, "note": "no snapshot yet: request review, and runs of what it froze are recorded as Evidence checks on it"}
+            return {"evidence": None, "note": "no snapshot yet — not recorded: request review, and runs of what it froze are recorded as Evidence checks on it"}
         if before is None or before != after:
-            return {"evidence": None, "note": f"the folder changed during the run, so it is not snapshot v{proof.version} that ran: request review to freeze what is there now"}
-        if before[0] != candidate_proof_sha256(self.store, proof.id):
-            return {"evidence": None, "note": f"the program differs from snapshot v{proof.version}: request review to freeze it, and runs of it are recorded"}
-        check = proof_map.record_evidence_check(self.store, proof.id, outcome, notes=notes, run_by=git_identity(self.store.root))
+            return {"evidence": None, "note": f"inputs changed during the run — not recorded against snapshot v{proof.version}"}
+        snapshot = self.store.root / proof.file_path
+        frozen = snapshot_inputs_digest(snapshot.parent) if snapshot.name == SNAPSHOT_MANIFEST else None
+        if frozen is None or before[0] != frozen:
+            return {"evidence": None, "note": f"inputs differ from snapshot v{proof.version} — not recorded: request review to freeze them"}
+        check = proof_map.record_evidence_check(self.store, proof.id, outcome, notes=notes, run_by=git_identity(self.store.root),
+                                                snapshot_sha256=candidate_proof_sha256(self.store, proof.id))
         return {"evidence": check.model_dump(mode="json"), "note": ""}
 
     def _dependencies(self, node_id: str) -> list[str]:
