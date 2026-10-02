@@ -87,17 +87,19 @@ class AgentManager:
         except ValueError:
             return False
 
+    def edit_turn_running(self) -> bool:
+        """An edit turn is running now: what is saved meanwhile becomes part of its changes."""
+        job = self.active
+        return job is not None and not job.done and job.mode == "edit"
+
     # ------------------------------------------------------------ run
     def start(self, prompt: str, session_id: str | None, mode: str,
               model: str | None = None, effort: str | None = None,
               scope: list[str] | None = None, provider: str | None = None,
-              finish: Callable[[], None] | None = None,
               unless: Callable[[], bool] | None = None,
               turn: dict | None = None) -> dict:
         """Run one turn. `scope` (project-relative files) limits which files the agent may
-        change in edit mode; None lets it change any file and create new ones. `finish` runs
-        once the backend is done, before the turn's changes are read, so its own changes are
-        part of the turn (and of its Undo). `unless` is asked once more, after the checks and
+        change in edit mode; None lets it change any file and create new ones. `unless` is asked once more, after the checks and
         the preflight, right before the turn exists: true, and no turn starts (a run stopped
         while its turn was being prepared). `turn` is a run's turn (agent_run.py): its role,
         name and redirect, handed to the node's context as they are — None for the
@@ -147,7 +149,6 @@ class AgentManager:
         job.context = (self.context_fn(turn) if turn is not None else self.context_fn()) if self.context_fn else None
         job.turn = turn
         job.writable = lambda rel: self._writable(job, rel)
-        job.finish = finish
         job.before = self._snapshot()
         threading.Thread(target=self._run, args=(job, backend), daemon=True).start()
         return {"job": job.id, "provider": backend.id}
@@ -161,11 +162,6 @@ class AgentManager:
             res = {"is_error": True}
         finally:
             time.sleep(0.2)
-            if job.finish is not None:
-                try:
-                    job.finish()
-                except Exception as e:  # noqa: BLE001 — report it; the turn still ends
-                    job.emit({"t": "error", "message": f"{type(e).__name__}: {e}"})
             job.after = self._snapshot()
             out_of_scope = [rel for rel in sorted(set(job.before) | set(job.after))
                             if job.scope and rel not in job.scope

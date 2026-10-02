@@ -30,6 +30,7 @@ from typing import Callable
 from . import build, httpbase
 from .agent_run import ACTIONS, AgentRun, RunHooks
 from ..errors import ERROR_CODES
+from ..key_ideas import KEY_IDEAS_FILE
 from ..vault import RUN_SCRIPT
 from .agent import NO_WINDOW, AgentManager
 from .fsutil import EDITABLE_SUFFIXES, SKIP_DIRS, with_line_ends_of, write_bytes
@@ -487,6 +488,10 @@ class Studio:
         """Write an editor buffer to disk, unless the file changed on disk since the editor
         loaded it (a conflict). The file keeps its line ends (the editor sends \\n)."""
         p = self.resolve(rel)
+        if self.agent.context_fn is not None and p == (self.root / KEY_IDEAS_FILE).resolve() and self.agent.edit_turn_running():
+            # it would land in the agent's turn and be recorded as the agent's draft (ADR-0013): the researcher's own
+            # summary is saved once the turn is over
+            return {"error": "KEY_IDEAS_AGENT_TURN", "message": f"an agent turn is editing this node; save {KEY_IDEAS_FILE} when it ends, so it stays yours"}, 409
         with self.save_lock:     # check-then-write must not interleave with another save
             if p.exists() and base_mtime is not None and abs(mtime(p) - base_mtime) > 1e-6 \
                     and not force:

@@ -137,7 +137,7 @@ async function saveTabNow(t, force) {
     toast(`${t.path} changed on disk — not saved. Resolve in the banner.`);
     return false;
   }
-  if (r._status !== 200) { toast(`Save failed: ${r.error || r._status}`); return false; }
+  if (r._status !== 200) { toast(`Save failed: ${r.message || r.error || r._status}`); return false; }
   t.mtime = r.mtime; t.gen = gen; t.conflict = null;
   renderTabs(); showBanner(t); scheduleSymbols();
   return true;
