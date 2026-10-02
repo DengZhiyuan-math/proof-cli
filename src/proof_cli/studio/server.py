@@ -30,7 +30,6 @@ from typing import Callable
 from . import build, httpbase
 from .agent_run import ACTIONS, AgentRun, RunHooks
 from ..errors import ERROR_CODES
-from ..key_ideas import KEY_IDEAS_FILE
 from ..vault import RUN_SCRIPT
 from .agent import NO_WINDOW, AgentManager
 from .fsutil import EDITABLE_SUFFIXES, SKIP_DIRS, with_line_ends_of, write_bytes
@@ -826,21 +825,6 @@ class Studio:
         except OSError as e:                 # e.g. the file is locked by another program
             return _err(500, f"{type(e).__name__}: {e}")
 
-    def draft_key_ideas(self, body: dict) -> Response:
-        """The node's proof agent drafts its missing key-ideas.md (ADR-0013): one edit turn that may
-        write only that file, briefed to summarise proof.tex and the dependencies. The draft is then
-        recorded in project state; the author edits it, and requesting review confirms it."""
-        context = self.agent.context_fn() if self.agent.context_fn else None
-        if context is None:
-            return _err(404, "only a proof map node's studio drafts key ideas")
-        target = self.root / KEY_IDEAS_FILE
-        if target.exists():
-            return _json({"error": f"{KEY_IDEAS_FILE} already exists: edit it, or remove it to have the agent draft it afresh"}, 409)
-        r = self.agent.start(context.key_ideas_prompt(), body.get("session_id") or None, "edit",
-                             body.get("model") or None, body.get("effort") or None, [KEY_IDEAS_FILE],
-                             body.get("provider") or None, finish=lambda: context.record_draft(target))
-        return _json(r, 409 if "error" in r else 200)
-
     def _post(self, path, body):
         if path == "/api/file":
             r, code = self.save_file(body["path"], str(body["content"]), body.get("base_mtime"),
@@ -858,8 +842,6 @@ class Studio:
                             "ask", body.get("model") or None,
                             body.get("effort") or None, scope, body.get("provider") or None)
             return _json(r, 409 if "error" in r else 200)
-        if path == "/api/key-ideas/draft":
-            return self.draft_key_ideas(body)
         if path == "/api/agent/usage":
             return _json(self.agent.probe_rate(body.get("provider") or None))
         if path == "/api/agent/stop":

@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Callable
 
 from ..domain import AgentRole
+from ..key_ideas import KEY_IDEAS_FILE
 
 PROJECT_CONFIG = "proof.toml"
 # the commands the agent may run besides `proof`: computation in support of its reasoning
@@ -128,28 +129,18 @@ SOLO_BRIEF = """\
 """
 
 
-KEY_IDEAS_BRIEF = """\
-Draft this node's key-ideas summary: create key-ideas.md in this folder ({node}). It is what the
-researcher reads first when reviewing the proof, so it must say what the proof in proof.tex
-actually does, not what it should do. Read proof.tex (and any file it \\input's) and the
-dependencies it rests on: {dependencies}. Don't change the proof, and write no other file.
-
-Write Markdown, with mathematics as $…$, under exactly these four headings:
-
-## 核心思路
-One or two sentences: why the result holds. (Required.)
-
-## 主要步骤
-3–7 numbered steps, each naming the dependency node it uses, by id. (Required.)
-
-## 难点
-Where the proof is most likely to be wrong: what the reviewer should check hardest. Write 「无」 if nothing stands out.
-
-## 未覆盖
-Boundary cases, extra assumptions, or parts not yet handled. Write 「无」 if there are none.
-
-If proof.tex has no proof yet, say so under 核心思路 instead of inventing one. The author edits
-your draft; requesting review is how they confirm it, and the studio records that you drafted it.
+# How the Typesetter writes the key-ideas summary (ADR-0013): what the researcher reads first when reviewing.
+# Whatever turn writes key-ideas.md, the studio records it as that agent's draft (ProofAgentContext.turn_ended).
+KEY_IDEAS_GUIDE = """\
+The key-ideas summary, key-ideas.md, is what the researcher reads first when reviewing the proof, so it
+must say what the proof in proof.tex actually does, not what it should do: read proof.tex (and any file it
+\\input's) and the dependencies it rests on ({dependencies}). Write Markdown, with mathematics as $…$,
+under exactly these four headings: `## 核心思路` (one or two sentences: why the result holds; required),
+`## 主要步骤` (3–7 numbered steps, each naming the dependency node it uses, by id; required), `## 难点`
+(where the proof is most likely to be wrong; 「无」 if nothing stands out) and `## 未覆盖` (boundary cases,
+extra assumptions, parts not yet handled; 「无」 if none). If proof.tex has no proof yet, say so under
+核心思路 instead of inventing one. The author edits your draft; requesting review is how they confirm
+it, and the studio records that you drafted it.
 """
 
 
@@ -166,7 +157,7 @@ class Role:
     """What one role of a run is for, may write, may ask `proof` for, and may run."""
 
     name: str
-    brief: str                      # appended to the common brief, with {node} and {name} filled in
+    brief: str                      # appended to the common brief, with {node}, {name} and {key_ideas} filled in
     writes: tuple[str, ...]          # Claude Code's Edit/Write/MultiEdit rules, relative to the node folder
     proof: tuple[str, ...]           # the `proof` commands it may run
     programs: tuple[str, ...]        # the programs it may run besides `proof`
@@ -195,6 +186,9 @@ proof is ready to request review. Report your plan first (`proof node progress {
 then each step as you start and finish it (`--step N --status started|done`). When a step needs
 another role, hand it over and end your turn: `proof node progress {node} --handoff typesetter --note
 "<what to write>"` or `--handoff numerics --note "<what to compute>"`; the run brings you back after.
+When a dependency this proof rests on may no longer hold, open a Challenge on it (ADR-0005):
+`proof challenge open <dependency-id> --rationale "<why>" --opened-by {name}`. Dismissing or resolving a
+Challenge is the researcher's alone: you never do either.
 """ + _STOPPING,
     "typesetter": """\
 This turn you are the **Typesetter** of node {node}. You write the Prover's draft (scratch/proof-draft.md)
@@ -203,7 +197,7 @@ preamble's conventions, and write the text of key-ideas.md from the draft. You d
 never supply a missing step or a missing case yourself; when the draft lacks one, report it and end your turn
 (`proof node progress {node} --step N --status done --note "missing: …"`), and the Prover takes it from there.
 You never split the node and never request review. Compile without --shell-escape.
-""" + _STOPPING,
+{key_ideas}""" + _STOPPING,
     "numerics": """\
 This turn you are the **Numerics** role of node {node}. You write and run the computations: run.sh is the
 entry, scripts beside it, everything they produce in out/. On a computation node that program and its
@@ -273,15 +267,21 @@ class ProofAgentContext:
     # a run's turn (spec #145): which role this turn is; None for the researcher's own turn (an Ask)
     role: str | None = None
 
-    def key_ideas_prompt(self) -> str:
-        """The turn that drafts a missing key-ideas.md from proof.tex and the dependencies (ADR-0013)."""
-        deps = ", ".join(f"{dep} (../{dep}/)" for dep in self.dependencies) or "none (it has no dependencies)"
-        return KEY_IDEAS_BRIEF.format(node=self.node_id, dependencies=deps)
+    def key_ideas_guide(self) -> str:
+        """How key-ideas.md is written (ADR-0013), naming this node's dependencies as of this turn."""
+        deps = ", ".join(f"{dep} (../{dep}/)" for dep in self.dependencies) or "none: it has no dependencies"
+        return KEY_IDEAS_GUIDE.format(dependencies=deps)
+
+    def turn_ended(self, root: Path, changed: list[str]) -> None:
+        """After an agent turn (agent.py): when it wrote key-ideas.md, record it as this agent's draft — a run's
+        role or a one-off task alike (ADR-0013). Without that record, an agent's summary would read as the author's."""
+        if KEY_IDEAS_FILE in changed:
+            self.record_draft(Path(root) / KEY_IDEAS_FILE)
 
     def record_draft(self, path: Path) -> None:
-        """After the drafting turn: record in project state that this agent wrote the summary, and
-        the SHA-256 of what it wrote, so a review request can tell the agent's draft, as confirmed
-        or as edited by the author, from the author's own (ADR-0013). The file itself is untouched."""
+        """Record in project state that this agent wrote the summary, and the SHA-256 of what it left, so a
+        review request can tell the agent's draft, as confirmed or as edited by the author, from the author's
+        own (ADR-0013). The file itself is untouched."""
         try:
             data = path.read_bytes()
         except OSError:
@@ -305,7 +305,7 @@ class ProofAgentContext:
         library = "".join(f", {folder}" for folder in self.library)
         work = ROLES[self.role].brief if self.role in ROLES else SOLO_BRIEF
         return BRIEF.format(node=self.node_id, name=self.name, library=f", and the library ({library[2:]})" if library else "",
-                            work=work.format(node=self.node_id, name=self.name))
+                            work=work.format(node=self.node_id, name=self.name, key_ideas=self.key_ideas_guide()))
 
     def claude_args(self, edit: bool, scope_rules: list[str] | None = None) -> list[str]:
         """Claude Code's permissions: read the project and library, the web, `proof` and computation;

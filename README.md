@@ -47,7 +47,7 @@ Every command acts on `--root`, else `$PROOF_ROOT`, else the current folder. An 
 
 Each local proof map node has a standalone LaTeX document, `proofs/<id>/proof.tex`, created with the node. It `\input`s the project's shared `proofs/preamble.tex` and compiles on its own. The researcher edits it in the node's studio on the proof map page (below); agents edit it directly. The folder `proofs/<id>/` is still an ordinary LaTeX project that any editor can open.
 
-Beside it sits the proof's key-ideas summary, `proofs/<id>/key-ideas.md` (ADR-0013). It is Markdown, with maths as `$…$`, under four headings: **核心思路** (why it holds) and **主要步骤** (3–7 steps, each naming the dependency it uses) are required; **难点** (where it is most likely wrong) and **未覆盖** (what it leaves out) may be 「无」. Review starts from it. When it is missing, the node panel's *Draft key ideas with the proof agent* has the agent draft it from `proof.tex` and the dependencies; you edit the draft, and requesting review confirms it.
+Beside it sits the proof's key-ideas summary, `proofs/<id>/key-ideas.md` (ADR-0013). It is Markdown, with maths as `$…$`, under four headings: **核心思路** (why it holds) and **主要步骤** (3–7 steps, each naming the dependency it uses) are required; **难点** (where it is most likely wrong) and **未覆盖** (what it leaves out) may be 「无」. Review starts from it. When it is missing, the Typesetter drafts it from `proof.tex` and the dependencies (the studio's "+" → *Ask the agent to…* → *Typesetter · draft key ideas*, or a run's own turn); any agent turn that writes it is recorded as the agent's draft; you edit it, and requesting review confirms it.
 
 When the proof and its summary are ready, request review from the studio's node panel, or:
 
