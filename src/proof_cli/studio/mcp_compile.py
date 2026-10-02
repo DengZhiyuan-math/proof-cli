@@ -64,6 +64,21 @@ def build(url: str, clean: bool) -> dict:
             raise
 
 
+def refusal(e: urllib.error.HTTPError) -> str:
+    """A refused request as "CODE: message": a node studio answers `{"error": message, "code": CODE}`, the server in
+    front of it (its Host and Origin checks) `{"ok": false, "error": {"code", "message"}}`."""
+    try:
+        body = json.loads(e.read().decode("utf-8", "replace"))
+    except (OSError, ValueError):
+        body = None
+    if isinstance(body, dict):
+        inner = body.get("error")
+        code, message = (inner.get("code"), inner.get("message")) if isinstance(inner, dict) else (body.get("code"), inner)
+        if code or message:
+            return f"{code or e.code}: {message or ''}".rstrip(": ")
+    return f"HTTP {e.code}"
+
+
 def report(r: dict) -> tuple[str, bool]:
     """The build result as text for the model, and whether it failed."""
     if r.get("busy"):
@@ -111,6 +126,8 @@ def answer(msg: dict, url: str) -> dict | None:
                     "error": {"code": -32602, "message": f"unknown tool {params.get('name')}"}}
         try:
             text, failed = report(build(url, bool((params.get("arguments") or {}).get("clean"))))
+        except urllib.error.HTTPError as e:
+            text, failed = f"The editor refused the build: {refusal(e)}", True
         except (OSError, ValueError) as e:
             text, failed = f"Could not reach the editor to compile: {e}", True
         result = {"content": [{"type": "text", "text": text}], "isError": failed}

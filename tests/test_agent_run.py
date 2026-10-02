@@ -1458,6 +1458,13 @@ def test_the_compile_tool_passes_the_servers_own_origin_check_and_a_wrong_origin
             mcp_compile.build(url, False)
         assert refused.value.code == 403 and json.loads(refused.value.read())["error"]["code"] == "WRONG_ORIGIN"
         assert len(built) == 2
+        # what the agent is told: the refusal's code and message, from the server's answer
+        call = {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "compile"}}
+        told = mcp_compile.answer(call, url)["result"]
+        assert told["isError"] and "WRONG_ORIGIN" in told["content"][0]["text"] and len(built) == 2
+        monkeypatch.setattr(urllib.request, "Request", real)
+        told = mcp_compile.answer(call, f"{project_origin(store)}/studio/NOPE/")["result"]  # a studio's own refusal: flat
+        assert told["isError"] and "NODE_NOT_FOUND" in told["content"][0]["text"], told
     finally:
         app.close()
 
