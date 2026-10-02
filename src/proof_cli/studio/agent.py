@@ -94,18 +94,20 @@ class AgentManager:
         except ValueError:
             return False
 
+    def edit_turn_running(self) -> bool:
+        """An edit turn is running now: what is saved meanwhile becomes part of its changes."""
+        job = self.active
+        return job is not None and not job.done and job.mode == "edit"
+
     # ------------------------------------------------------------ run
     def start(self, prompt: str, session_id: str | None, mode: str,
               model: str | None = None, effort: str | None = None,
               scope: list[str] | None = None, provider: str | None = None,
-              finish: Callable[[], None] | None = None,
               unless: Callable[[], bool] | None = None,
               turn: dict | None = None,
               begin: Callable[[Job], None] | None = None) -> dict:
         """Run one turn. `scope` (project-relative files) limits which files the agent may
-        change in edit mode; None lets it change any file and create new ones. `finish` runs
-        once the backend is done, before the turn's changes are read, so its own changes are
-        part of the turn (and of its Undo). `unless` is asked once more, after the checks and
+        change in edit mode; None lets it change any file and create new ones. `unless` is asked once more, after the checks and
         the preflight, right before the turn exists: true, and no turn starts (a run stopped
         while its turn was being prepared). `turn` is a run's turn (agent_run.py): its role,
         name and redirect, handed to the node's context as they are — None for the
@@ -136,6 +138,8 @@ class AgentManager:
                 return {"error": "The agent is still working on the previous message.", "code": "AGENT_BUSY"}
             job = Job(next(self.ids))
             job.provider = backend.id   # before it is visible as active: stop() finds its backend
+            # and its mode: an edit turn is one from the moment anyone can see it (edit_turn_running)
+            job.mode = mode if mode in ("edit", "ask") else "ask"
             self.jobs[job.id] = job
             self.active = job
         job.scope = scope if mode == "edit" and scope else None
@@ -154,12 +158,11 @@ class AgentManager:
         if note:
             prompt = f"{prompt}\n\n[Scope for this turn] {note}"
         job.provider, job.prompt, job.session_id = backend.id, prompt, session_id
-        job.mode, job.model, job.effort = mode if mode in ("edit", "ask") else "ask", model, effort
+        job.model, job.effort = model, effort
         job.root, job.files = self.root_fn(), self.files_fn
         job.context = (self.context_fn(turn) if turn is not None else self.context_fn()) if self.context_fn else None
         job.turn = turn
         job.writable = lambda rel: self._writable(job, rel)
-        job.finish = finish
         job.before = self._snapshot()
         if begin is not None:
             try:
@@ -178,11 +181,6 @@ class AgentManager:
             res = {"is_error": True}
         finally:
             time.sleep(0.2)
-            if job.finish is not None:
-                try:
-                    job.finish()
-                except Exception as e:  # noqa: BLE001 — report it; the turn still ends
-                    job.emit({"t": "error", "message": f"{type(e).__name__}: {e}"})
             job.after = self._snapshot()
             out_of_scope = [rel for rel in sorted(set(job.before) | set(job.after))
                             if job.scope and rel not in job.scope
@@ -199,6 +197,14 @@ class AgentManager:
                 if a != b:
                     changed.append({"path": rel, "diff": self._diff(rel, a, b),
                                     "created": a is None, "deleted": b is None})
+            # What the turn left may need recording in project state: a key-ideas summary an agent turn wrote is the
+            # agent's draft (ADR-0013), whichever turn wrote it — a run's role, a one-off task from the "+" menu.
+            ended = getattr(job.context, "turn_ended", None)
+            if ended is not None and job.mode == "edit":
+                try:
+                    ended(job.root, [c["path"] for c in changed if not c["deleted"]])
+                except Exception as e:  # noqa: BLE001 — report it; the turn still ends
+                    job.emit({"t": "error", "message": f"{type(e).__name__}: {e}"})
             # Undo needs only the files this turn changed: keep just those in memory.
             keep = [c["path"] for c in changed]
             job.before = {r: job.before.get(r) for r in keep}

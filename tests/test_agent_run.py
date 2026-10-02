@@ -619,6 +619,62 @@ def test_a_start_waits_while_the_previous_run_is_still_giving_the_node_back():
     assert get_active_claim(store, "N") is None
 
 
+def test_a_late_assignment_after_the_next_run_requested_review_leaves_no_claim():
+    """Fifth review: the first Start's assignment is pending; Stop; a second Start claims and Review what it has hands
+    the node over (claim released); then the first assignment comes back and claims again — given back."""
+    import threading
+    from dataclasses import fields
+
+    from proof_cli.proof_map import claim_node, release_node
+    from proof_cli.studio.agent_run import AgentRun, RunHooks
+
+    store = ensure_project(Path(os.environ.get("TMPDIR", "/tmp")) / f"proof-late-review-{os.getpid()}-{time.time_ns()}")
+    create_node(store, node_id="N", kind="claim", statement="a claim")
+    entered, gate = threading.Event(), threading.Event()
+    calls: list[str] = []
+
+    def assign(name):
+        calls.append(name)
+        if len(calls) == 1:
+            entered.set()
+            assert gate.wait(5)
+        claim_node(store, "N", claimant_id=name)
+
+    def release(name, reason="released"):
+        claim = get_active_claim(store, "N")
+        if claim is not None and claim.claimant_id == name:
+            release_node(store, "N", claimant_id=name, reason=reason)
+
+    def review_now():  # as the project's request-review does: the snapshot is frozen and the node handed over
+        release("claude-code")
+        return {"version": 1}
+
+    class Agent:
+        jobs = {}
+
+        def start(self, *args, **kwargs):
+            return {"error": "The agent is still working on the previous message.", "code": "AGENT_BUSY"}  # never a turn: the run waits
+
+        def stop(self, jid):
+            pass
+
+    run = AgentRun(Agent(), _hooks(assign=assign, release=release, review_now=review_now))
+    first = threading.Thread(target=lambda: run.start("claude"))
+    first.start()
+    assert entered.wait(5)
+    run.release()
+    run.start("claude")
+    assert get_active_claim(store, "N").claimant_id == "claude-code"
+    run.review_now()
+    state = run.view()
+    assert (state["status"], state["reason"]) == ("done", "review-requested") and get_active_claim(store, "N") is None
+    gate.set()
+    first.join(5)
+    assert get_active_claim(store, "N") is None  # the late assignment's claim was given back: the node was handed over
+    assert (run.view()["status"], run.view()["reason"]) == ("done", "review-requested")
+    run.release()
+
+
 def test_a_start_right_after_stop_and_release_is_not_ended_by_the_old_coordinator(studio):
     """Reaudit R-P1: the first run's turn is still being stopped when the second Start begins; when it finally ends,
     only the first Start ends — the second keeps running its own turn and counts it."""
@@ -1049,3 +1105,340 @@ def test_running_the_nodes_program_counts_as_a_change(studio, monkeypatch):
     _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["prover", "numerics"]})
     state = _wait(hub)
     assert state["status"] == "stuck" and len(_turns(log)) == 4, state
+
+
+# -- what the studio's centre reads and does (spec #145, part 4) ---------------------------------------
+
+
+def test_the_studio_serves_the_work_log(studio):
+    store, hub, log, queue = studio
+    _queue(queue, [["proof", "node", "progress", "N", "--plan", "read", "--plan", "prove"], ["proof", "node", "progress", "N", "--step", "1", "--status", "started"]], [["sleep", "0"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
+    _wait(hub)
+    status, served = _get(hub, "/studio/N/api/agent/log")
+    assert status == 200 and [e["kind"] for e in served["entries"]][:3] == ["claimed", "plan", "step"]
+
+
+def test_review_what_it_has_is_recorded_under_the_researcher_and_ends_the_run(studio):
+    """Seventh review: the researcher asked for the review, so it is recorded as the researcher — the page's git
+    identity, as every page-initiated human action is — not as the agent that holds the node. The run's claim ends
+    with it (the researcher unassigns the node in the same request), so the run ends as any review request ends it."""
+    from proof_cli.proof_map import list_candidate_proofs
+    from proof_cli.reviews import git_identity
+
+    store, hub, log, queue = studio
+    write_key_ideas(store, "N")
+    _queue(queue, [["write", "proof.tex", "\\documentclass{amsart}\\begin{document}half\\end{document}\n"], ["sleep", "10"]], [["sleep", "0"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
+    proof_tex = store.root / "proofs" / "N" / "proof.tex"
+    _until(lambda: "half" in proof_tex.read_text(), "the Prover's turn to write proof.tex (and go on working)")
+    assert get_active_claim(store, "N").claimant_id == "claude-code"
+    status, frozen = _post(hub, "/studio/N/api/agent/review-now")
+    assert status == 200 and frozen["version"] == 1
+    assert get_workflow_state(store, "N") == "review-needed"
+    (proof,) = list_candidate_proofs(store, "N")
+    assert proof.submitted_by == git_identity(store.root) != "claude-code"
+    (requested,) = [e for e in work_log(store, "N") if e["kind"] == "review-requested"]
+    assert requested["by"] == git_identity(store.root)
+    state = _wait(hub)
+    assert state["status"] == "done" and state["reason"] == "review-requested" and get_active_claim(store, "N") is None
+
+
+def test_review_what_it_has_on_a_node_another_person_holds_is_recorded_under_the_researcher(studio):
+    from proof_cli.proof_map import claim_node, list_candidate_proofs
+    from proof_cli.reviews import git_identity
+
+    store, hub, log, queue = studio
+    write_key_ideas(store, "N")
+    claim_node(store, "N", claimant_id="alice")
+    status, frozen = _post(hub, "/studio/N/api/agent/review-now")
+    assert status == 200 and frozen["version"] == 1
+    (proof,) = list_candidate_proofs(store, "N")
+    assert proof.submitted_by == git_identity(store.root) != "alice"
+    assert get_active_claim(store, "N") is None  # handed over: the researcher unassigned it in the same request
+
+
+def test_a_refused_review_what_it_has_leaves_the_holders_claim(studio):
+    from proof_cli.proof_map import claim_node
+
+    store, hub, log, queue = studio
+    claim_node(store, "N", claimant_id="alice")
+    status, refused = _post(hub, "/studio/N/api/agent/review-now")  # no key ideas: refused before anything changes
+    assert status == 409 and refused["code"] == "KEY_IDEAS_REQUIRED"
+    assert get_active_claim(store, "N").claimant_id == "alice"
+
+
+def test_review_what_it_has_is_refused_when_nothing_can_be_frozen(studio):
+    store, hub, log, queue = studio
+    status, refused = _post(hub, "/studio/N/api/agent/review-now")  # no key ideas yet: the service refuses, and says so
+    assert status == 409 and refused["code"] == "KEY_IDEAS_REQUIRED"
+
+
+def test_every_starts_turns_stay_in_the_log_under_their_steps_after_a_new_start_and_a_restart(studio):
+    """Seventh review (spec #145, story 40): each turn is in the work log with the step it belongs to, and its raw
+    conversation is read from what the project kept — the turns of an earlier Start survive a new Start and a restart."""
+    store, hub, log, queue = studio
+    _queue(queue,
+           [["proof", "node", "progress", "N", "--plan", "read", "--plan", "prove"], ["proof", "node", "progress", "N", "--step", "1", "--status", "done"]],
+           [["proof", "node", "progress", "N", "--step", "2", "--status", "started"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["prover"]})
+    _wait(hub)
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["prover"]})  # a second Start
+    _wait(hub)
+    hub.close()
+    again = StudioHub(store)  # and a restart
+    try:
+        answer = again.request("GET", "/studio/N/api/agent/log", "", None, cross_site=False)
+        turns = [e for e in json.loads(answer.body)["entries"] if e["kind"] == "turn"]
+        assert [(t["role"], t["step"]) for t in turns] == [("prover", 1), ("prover", 2)]
+        for turn in turns:
+            kept = json.loads(again.request("GET", "/studio/N/api/agent/turn", f"turn={turn['turn']}", None, cross_site=False).body)
+            assert "Take your turn as the Prover" in kept["prompt"] and any(e.get("t") == "done" for e in kept["events"])
+    finally:
+        again.close()
+
+
+def test_the_chat_route_is_ask_only_whatever_the_body_says(studio):
+    store, hub, log, queue = studio
+    _queue(queue, [["write", "proof.tex", "edited by a chat turn\n"]])
+    status, started = _post(hub, "/studio/N/api/agent", {"prompt": "rewrite the proof", "mode": "edit", "provider": "claude"})
+    assert status == 200 and "job" in started
+    job = hub.studio("N").agent.jobs[started["job"]]
+    _until(lambda: job.done, "the Ask turn to end")
+    assert job.mode == "ask"  # the backend gets no Edit permission in this mode; what the stub wrote directly says nothing about that
+
+
+def _cli_commands() -> set[str]:
+    """Every `proof` command the CLI really has, as `group … command`, walked from its command tree."""
+    import typer
+
+    from proof_cli.cli import app
+
+    def leaves(command, path=()):
+        if hasattr(command, "commands"):
+            for name, sub in command.commands.items():
+                yield from leaves(sub, (*path, name))
+        else:
+            yield " ".join(path)
+
+    return set(leaves(typer.main.get_command(app)))
+
+
+def _proof_rule_command(rule: str) -> str:
+    """`Bash(proof node split *)` → `node split`."""
+    assert rule.startswith("Bash(proof ") and rule.endswith(" *)"), rule
+    return rule[len("Bash(proof "):-len(" *)")]
+
+
+def test_the_prover_may_open_a_challenge(studio):
+    """Seventh review: the rule names the CLI's real command (ADR-0006: `proof challenge open`), not one that
+    does not exist — a permission for a command the CLI lacks lets the agent do nothing."""
+    store, hub, log, queue = studio
+    _queue(queue, [["sleep", "0"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["prover"]})
+    _wait(hub)
+    argv = _turns(log)[0]["argv"]
+    challenge = [rule for rule in argv if rule.startswith("Bash(proof") and "challenge" in rule]
+    assert challenge == ["Bash(proof challenge open *)"]
+    assert _proof_rule_command(challenge[0]) in _cli_commands()
+
+
+def test_only_opening_a_challenge_is_agent_reachable_and_the_prover_is_told_so():
+    """The researcher confirmed (PR #149): the Prover may open a Challenge (ADR-0005, ADR-0011); dismissing or
+    resolving one stays human-only, so no role may reach any other challenge command, nor `proof` at large."""
+    from proof_cli.studio.proof_agent import ROLES, ProofAgentContext
+
+    challenge_commands = {c for c in _cli_commands() if c.startswith("challenge ")}
+    assert "challenge dismiss" in challenge_commands  # the human-only path the roles must not reach
+    for role in ROLES.values():
+        rules = [*role.proof, *role.commands]
+        assert "Bash(proof *)" not in rules and "Bash(proof challenge *)" not in rules, role.name
+        reached = {_proof_rule_command(r) for r in role.proof if r.startswith("Bash(proof challenge")}
+        assert reached == ({"challenge open"} if role.name == "prover" else set()), role.name
+    brief = ProofAgentContext("N", Path("/p"), role="prover", name="claude-code").brief()
+    assert "proof challenge open" in brief and "Dismissing or resolving a\nChallenge is the researcher's alone" in brief
+
+
+def test_every_roles_proof_rules_name_real_commands():
+    from proof_cli.studio.proof_agent import ROLES
+
+    known = _cli_commands()
+    for role in ROLES.values():
+        for rule in role.proof:
+            assert _proof_rule_command(rule) in known, (role.name, rule)
+
+
+def test_review_what_it_has_while_paused_ends_the_run_and_resume_does_nothing(studio):
+    store, hub, log, queue = studio
+    write_key_ideas(store, "N")
+    _queue(queue, [["write", "proof.tex", "\\documentclass{amsart}\\begin{document}half\\end{document}\n"]], [["write", "scratch/after-review.md", "x"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
+    _post(hub, "/studio/N/api/agent/pause")
+    _wait(hub, until=("paused",))
+    status, frozen = _post(hub, "/studio/N/api/agent/review-now")
+    assert status == 200 and frozen["version"] == 1
+    state = _get(hub, "/studio/N/api/agent/run")[1]
+    assert state["status"] == "done" and state["reason"] == "review-requested" and state["active"] is False
+    assert _post(hub, "/studio/N/api/agent/resume")[1]["status"] == "done"  # nothing to resume
+    run = hub.studio("N").run
+    _until(lambda: not (run._run.thread and run._run.thread.is_alive()), "the run's coordinator to stop")  # no turn can follow now
+    assert not (store.root / "proofs" / "N" / "scratch" / "after-review.md").exists() and len(_turns(log)) == 1
+
+
+def test_the_log_gives_each_changed_file_its_line_and_how_the_page_opens_it(studio):
+    """Seventh review (spec #145, stories 18–19): a file a turn changed is listed with the first line it changed, and
+    the log says how the page opens it — the vscode:// scheme, or the project's `[studio] open_command` when set."""
+    store, hub, log, queue = studio
+    folder = store.root / "proofs" / "N"
+    (folder / "scratch").mkdir(exist_ok=True)
+    (folder / "scratch" / "draft.md").write_text("one\ntwo\nthree\nfour\nfive\nsix\n")
+    _queue(queue, [["write", "scratch/draft.md", "one\ntwo\nthree\nFOUR\nfive\nsix\n"], ["write", "scratch/my #1.md", "fresh\n"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["prover"]})
+    _wait(hub)
+    served = _get(hub, "/studio/N/api/agent/log")[1]
+    (turn,) = [e for e in served["entries"] if e["kind"] == "turn"]
+    assert {c["path"]: c["line"] for c in turn["changed"]} == {"scratch/draft.md": 4, "scratch/my #1.md": 1}
+    # one way to build the link: the server's vscode_url (#147), percent-encoded — a `#` or a space stays in the path
+    from proof_cli.studio.server import vscode_url
+
+    links = {c["path"]: c["url"] for c in turn["changed"]}
+    assert links == {"scratch/draft.md": vscode_url(folder / "scratch" / "draft.md", 4), "scratch/my #1.md": vscode_url(folder / "scratch" / "my #1.md", 1)}
+    assert "%20%231.md:1" in links["scratch/my #1.md"]
+    assert served["open"] == {"kind": "scheme", "url": vscode_url(folder)}
+    (store.root / "proof.toml").write_text('[studio]\nopen_command = "subl {file}"\n')
+    commanded = _get(hub, "/studio/N/api/agent/log")[1]
+    assert commanded["open"] == {"kind": "command", "command": "subl {file}"}
+    assert all("url" not in c for e in commanded["entries"] if e["kind"] == "turn" for c in e["changed"])  # the server opens it
+
+
+def test_an_agent_job_is_an_edit_turn_from_the_moment_it_is_visible(studio):
+    """Final review: the job became the manager's active one a moment before its mode was set, so a key-ideas.md save
+    in that instant was not refused. Its mode is set before anyone can see it."""
+    store, hub, log, queue = studio
+    agent = hub.studio("N").agent
+    seen = []
+
+    class Watched(type(agent)):
+        @property
+        def active(self):
+            return self.__dict__.get("_active")
+
+        @active.setter
+        def active(self, job):
+            seen.append(job.mode if job is not None else None)
+            self.__dict__["_active"] = job
+
+    agent.__dict__["_active"] = agent.__dict__.pop("active", None)
+    agent.__class__ = Watched
+    _queue(queue, [["sleep", "0"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["typesetter"]})
+    _wait(hub)
+    assert "edit" in seen and "ask" not in seen  # never visible as active in the default (ask) mode
+
+
+# -- ADR-0013: a key-ideas summary an agent turn wrote is recorded as the agent's draft ------------------
+
+
+def _typeset_key_ideas(hub, queue, text):
+    """The "+" menu's Typesetter · draft key ideas: one Typesetter turn of the run, which writes key-ideas.md."""
+    _queue(queue, [["write", "key-ideas.md", text]])
+    status, _ = _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["typesetter"],
+                                                         "redirect": "Write key-ideas.md from the draft and proof.tex: 核心思路, 主要步骤, 难点, 未覆盖."})
+    assert status == 200
+    _wait(hub)
+    _post(hub, "/studio/N/api/agent/release")  # the one turn is over: the node is the author's to submit
+
+
+def _draft_events(store):
+    from proof_cli.storage import list_events
+
+    return [e for e in list_events(store) if e.kind == "proof_map_key_ideas_drafted"]
+
+
+def test_a_summary_the_typesetter_drafted_and_the_author_left_as_it_is_reads_as_the_agents_confirmed(studio):
+    from _proofs import KEY_IDEAS
+
+    from proof_cli import key_ideas
+    from proof_cli.proof_map import request_review
+
+    store, hub, log, queue = studio
+    _typeset_key_ideas(hub, queue, KEY_IDEAS)
+    (drafted,) = _draft_events(store)  # the agent's name and the digest of what it left
+    assert drafted.payload == {"drafted_by": "claude-code", "sha256": key_ideas.digest(KEY_IDEAS.encode())}
+    record = request_review(store, "N", requested_by="author", rationale="scoped")
+    assert record.key_ideas_drafted_by == key_ideas.AGENT_CONFIRMED == "agent (confirmed by author at request-review)"
+
+
+def test_a_summary_the_typesetter_drafted_and_the_author_edited_reads_as_edited(studio):
+    from _proofs import KEY_IDEAS
+
+    from proof_cli import key_ideas
+    from proof_cli.proof_map import request_review
+
+    store, hub, log, queue = studio
+    _typeset_key_ideas(hub, queue, KEY_IDEAS)
+    write_key_ideas(store, "N", KEY_IDEAS.replace("compactness", "compactness and continuity"))  # the author's edit
+    record = request_review(store, "N", requested_by="author", rationale="scoped")
+    assert record.key_ideas_drafted_by == key_ideas.AGENT_EDITED == "agent draft, edited by author"
+
+
+def test_a_summary_no_agent_turn_touched_reads_as_the_authors(studio):
+    from proof_cli import key_ideas
+    from proof_cli.proof_map import request_review
+
+    store, hub, log, queue = studio
+    write_key_ideas(store, "N")  # the author's own
+    _queue(queue, [["write", "scratch/draft.md", "a draft\n"]])  # an agent turn that leaves key-ideas.md alone
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["prover"]})
+    _wait(hub)
+    _post(hub, "/studio/N/api/agent/release")
+    assert _draft_events(store) == []
+    record = request_review(store, "N", requested_by="author", rationale="scoped")
+    assert record.key_ideas_drafted_by == key_ideas.AUTHOR == "author"
+
+
+def test_a_files_save_of_the_summary_waits_while_an_agent_edit_turn_runs(studio):
+    """Final review: a save of key-ideas.md from the Files view during an agent's edit turn would land in that turn's
+    changes and be recorded as the agent's draft (ADR-0013). It is refused with a registered code until the turn ends;
+    other files save as before."""
+    from proof_cli.errors import ERROR_CODES
+
+    store, hub, log, queue = studio
+    _queue(queue, [["sleep", "5"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["typesetter"]})
+    agent = hub.studio("N").agent
+    _until(lambda: agent.active is not None and not agent.active.done, "the Typesetter's turn to be running")
+    status, refused = _post(hub, "/studio/N/api/file", {"path": "key-ideas.md", "content": "mine\n"})
+    assert status == 409 and refused["code"] == "KEY_IDEAS_AGENT_TURN" and "KEY_IDEAS_AGENT_TURN" in ERROR_CODES
+    assert not (store.root / "proofs" / "N" / "key-ideas.md").exists()
+    assert _post(hub, "/studio/N/api/file", {"path": "proof.tex", "content": "\\documentclass{amsart}\n"})[0] == 200
+    _wait(hub)
+    assert _post(hub, "/studio/N/api/file", {"path": "key-ideas.md", "content": "mine\n"})[0] == 200  # the turn is over
+    assert _draft_events(store) == []  # and the researcher's own save is never the agent's draft
+
+
+def test_the_turns_finish_hook_is_gone_with_its_last_caller():
+    """Final review: `AgentManager.start(finish=…)` and `Job.finish` served only the old drafting route."""
+    import inspect
+
+    from proof_cli.studio.agent import AgentManager
+    from proof_cli.studio.backends import Job
+
+    assert "finish" not in inspect.signature(AgentManager.start).parameters
+    assert not hasattr(Job(1), "finish")
+
+
+def test_a_turn_transcript_is_read_only_for_a_safe_node_id(studio):
+    """Final review: the node id is checked as node folders are (`_SAFE_NODE_ID`), so `..` never reaches the path."""
+    from proof_cli.proof_map import agent_turn_transcript
+
+    store, hub, log, queue = studio
+    turns = store.root / ".proof" / "agent-turns"
+    (turns / "x").mkdir(parents=True)
+    (turns / "x" / "t1.json").write_text('{"events": []}')
+    assert agent_turn_transcript(store, "x", "t1") == {"events": []}
+    (store.root / ".proof" / "t1.json").write_text('{"events": ["outside"]}')  # what `..` would reach
+    (turns / ".hidden").mkdir()
+    (turns / ".hidden" / "t1.json").write_text('{"events": ["hidden"]}')
+    for bad in ("..", ".hidden", "a/b", ""):
+        assert agent_turn_transcript(store, bad, "t1") is None, bad

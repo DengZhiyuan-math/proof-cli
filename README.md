@@ -25,6 +25,9 @@ proof node show <id>
 proof trust-rule list   # the Trust rules in force (read-only; declared on the page)
 proof fog list          # the Proof fog: difficulties not yet precise enough to be a Claim
 proof node create C3 claim "For every n ≤ 10^4 …" --medium computation   # a node established by a program: run.sh, outputs in out/
+# A node's studio opens on the agent's Work log: its plan, role and step, the oversight actions (Start, Pause,
+# Redirect, Resume, Stop and release, Review what it has) and what it did; the editor and PDF — or a computation's
+# program and out/ — sit behind the Files tab; the Ask box only puts read-only questions to the agent.
 # The Proof agent works a node on its own once started (from the map, the node page or the studio): a run of three
 # roles — Prover, Typesetter, Numerics — that reports its plan and steps (`proof node progress`), stops for a review
 # request, a decision, its budget or when stuck, and that you pause, redirect, resume or release. In proof.toml:
@@ -50,7 +53,7 @@ Every command acts on `--root`, else `$PROOF_ROOT`, else the current folder. An 
 
 Each local proof map node has a standalone LaTeX document, `proofs/<id>/proof.tex`, created with the node. It `\input`s the project's shared `proofs/preamble.tex` and compiles on its own. The researcher edits it in the node's studio on the proof map page (below); agents edit it directly. The folder `proofs/<id>/` is still an ordinary LaTeX project that any editor can open.
 
-Beside it sits the proof's key-ideas summary, `proofs/<id>/key-ideas.md` (ADR-0013). It is Markdown, with maths as `$…$`, under four headings: **核心思路** (why it holds) and **主要步骤** (3–7 steps, each naming the dependency it uses) are required; **难点** (where it is most likely wrong) and **未覆盖** (what it leaves out) may be 「无」. Review starts from it. When it is missing, the node panel's *Draft key ideas with the proof agent* has the agent draft it from `proof.tex` and the dependencies; you edit the draft, and requesting review confirms it.
+Beside it sits the proof's key-ideas summary, `proofs/<id>/key-ideas.md` (ADR-0013). It is Markdown, with maths as `$…$`, under four headings: **核心思路** (why it holds) and **主要步骤** (3–7 steps, each naming the dependency it uses) are required; **难点** (where it is most likely wrong) and **未覆盖** (what it leaves out) may be 「无」. Review starts from it. When it is missing, the Typesetter drafts it from `proof.tex` and the dependencies (the studio's "+" → *Ask the agent to…* → *Typesetter · draft key ideas*, or a run's own turn); any agent turn that writes it is recorded as the agent's draft; you edit it, and requesting review confirms it.
 
 When the proof and its summary are ready, request review from the studio's node panel, or:
 

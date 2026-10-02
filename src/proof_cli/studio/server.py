@@ -31,6 +31,7 @@ from urllib.parse import quote
 
 from . import build, httpbase
 from .agent_run import ACTIONS, AgentRun, RunHooks
+from ..errors import ERROR_CODES
 from ..key_ideas import KEY_IDEAS_FILE
 from ..vault import RUN_SCRIPT
 from .agent import NO_WINDOW, AgentManager
@@ -365,6 +366,15 @@ def program_argv(script: Path) -> list[str]:
     return ["/bin/sh", str(script)]
 
 
+def refusal(exc: Exception) -> dict | None:
+    """A service's refusal as the answer to a request, in the studio's shape {"error": message, "code": CODE} (a
+    registered code, else RUN_REFUSED), or None for anything that is not one."""
+    code = getattr(exc, "code", None)
+    if not code:
+        return None
+    return {"error": getattr(exc, "message", None) or str(exc), "code": code if code in ERROR_CODES else "RUN_REFUSED"}
+
+
 class Studio:
     """One folder's studio: its settings, files, build, SyncTeX and agent, with its own locks.
 
@@ -536,6 +546,10 @@ class Studio:
         """Write an editor buffer to disk, unless the file changed on disk since the editor
         loaded it (a conflict). The file keeps its line ends (the editor sends \\n)."""
         p = self.resolve(rel)
+        if self.agent.context_fn is not None and p == (self.root / KEY_IDEAS_FILE).resolve() and self.agent.edit_turn_running():
+            # it would land in the agent's turn and be recorded as the agent's draft (ADR-0013): the researcher's own
+            # summary is saved once the turn is over
+            return {"error": f"an agent turn is editing this node; save {KEY_IDEAS_FILE} when it ends, so it stays yours", "code": "KEY_IDEAS_AGENT_TURN"}, 409
         with self.save_lock:     # check-then-write must not interleave with another save
             if p.exists() and base_mtime is not None and abs(mtime(p) - base_mtime) > 1e-6 \
                     and not force:
@@ -720,8 +734,11 @@ class Studio:
         if action == "start":
             provider = str(body.get("provider") or (self.agent.backend(None).id if self.agent.backend(None) else ""))
             roles = body.get("roles") if isinstance(body.get("roles"), list) else None
-            r = self.run.start(provider, roles=roles, redirect=str(body.get("redirect") or "") or None,
-                               model=body.get("model") or None, effort=body.get("effort") or None)
+            try:
+                r = self.run.start(provider, roles=roles, redirect=str(body.get("redirect") or "") or None,
+                                   model=body.get("model") or None, effort=body.get("effort") or None)
+            except Exception as exc:  # noqa: BLE001 — the node could not be assigned: the refusal is the answer
+                return 400, refusal(exc) or {"error": f"{type(exc).__name__}: {exc}", "code": "RUN_REFUSED"}
         elif action == "pause":
             r = self.run.pause()
         elif action == "resume":
@@ -733,6 +750,14 @@ class Studio:
             r = self.run.redirect(text, body.get("role") or None)
         elif action == "release":
             r = self.run.release()
+        elif action == "review-now":  # Review what it has: a snapshot of the folder as it stands
+            try:
+                r = self.run.review_now()
+            except Exception as exc:  # noqa: BLE001 — a refusal (no key ideas yet, nothing new, …) is the answer; anything else is a bug
+                answer = refusal(exc)
+                if answer is None:
+                    raise
+                return 409, answer
         else:
             return 404, {"error": f"no run action {action!r}", "code": "NOT_FOUND"}
         # the studio's answers, as the agent manager's: {"error": message, "code": CODE}
@@ -814,9 +839,17 @@ class Studio:
                                "folder": str(self.root), "medium": self.medium(), "open": self.how_to_open()})
         if path == "/api/agent/run":
             return _json(self.run.view() if self.run is not None else {"status": "idle", "reason": "no run on this folder"})
+        if path == "/api/agent/log":  # the node's work log (spec #145): what the agent planned, did and handed over, the run's turns, and how files open
+            how = self.how_to_open()
+            entries = self.run.work_log() if self.run is not None else []
+            if how["kind"] == "scheme":  # each changed file's link, built once, by vscode_url (#147): the page uses it as it is
+                for entry in entries:
+                    for change in entry.get("changed") or [] if entry.get("kind") == "turn" else []:
+                        change["url"] = vscode_url(self.root / change["path"], change.get("line"))
+            return _json({"entries": entries, "folder": str(self.root), "open": how})
         if path == "/api/agent/turn":  # a run's turn, as recorded with the project: its conversation outlives the studio's memory
             kept = self.run.transcript(q.get("turn") or "") if self.run is not None else None
-            return _json(kept) if kept is not None else _json({"error": "no recorded turn by that id", "code": "NO_SUCH_TURN"}, 404)
+            return _json(kept) if kept is not None else _err(404, "NO_SUCH_TURN", "no recorded turn by that id")
         if path == "/api/agent/events":
             job = self.agent.jobs.get(int(q["job"]))
             if not job:
@@ -868,21 +901,6 @@ class Studio:
         except OSError as e:                 # e.g. the file is locked by another program
             return _err(500, "STUDIO_FILE_ERROR", f"{type(e).__name__}: {e}")
 
-    def draft_key_ideas(self, body: dict) -> Response:
-        """The node's proof agent drafts its missing key-ideas.md (ADR-0013): one edit turn that may
-        write only that file, briefed to summarise proof.tex and the dependencies. The draft is then
-        recorded in project state; the author edits it, and requesting review confirms it."""
-        context = self.agent.context_fn() if self.agent.context_fn else None
-        if context is None:
-            return _err(404, "NOT_A_NODE_STUDIO", "only a proof map node's studio drafts key ideas")
-        target = self.root / KEY_IDEAS_FILE
-        if target.exists():
-            return _err(409, "KEY_IDEAS_EXISTS", f"{KEY_IDEAS_FILE} already exists: edit it, or remove it to have the agent draft it afresh")
-        r = self.agent.start(context.key_ideas_prompt(), body.get("session_id") or None, "edit",
-                             body.get("model") or None, body.get("effort") or None, [KEY_IDEAS_FILE],
-                             body.get("provider") or None, finish=lambda: context.record_draft(target))
-        return _json(r, 409 if "error" in r else 200)
-
     def _post(self, path, body):
         if path == "/api/file":
             r, code = self.save_file(body["path"], str(body["content"]), body.get("base_mtime"),
@@ -895,12 +913,11 @@ class Studio:
                     raise ValueError("scope must be a list of files")
                 for f in scope:
                     self.resolve(f)          # an editable project file, or ValueError
+            # the chat is Ask only (spec #145, decided in #144): the agent is driven from its run, never from here
             r = self.agent.start(body["prompt"], body.get("session_id") or None,
-                            body.get("mode", "ask"), body.get("model") or None,
+                            "ask", body.get("model") or None,
                             body.get("effort") or None, scope, body.get("provider") or None)
             return _json(r, 409 if "error" in r else 200)
-        if path == "/api/key-ideas/draft":
-            return self.draft_key_ideas(body)
         if path == "/api/agent/usage":
             return _json(self.agent.probe_rate(body.get("provider") or None))
         if path == "/api/agent/stop":

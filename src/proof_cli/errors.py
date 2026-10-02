@@ -156,8 +156,6 @@ ERROR_CODES: dict[str, str] = {
     "NO_SUCH_JOB": "no agent job of this studio by that id",
     "NO_SYNCTEX": "no SyncTeX data yet: build first",
     "NO_SYNCTEX_MATCH": "SyncTeX knows no place for that position",
-    "NOT_A_NODE_STUDIO": "only a proof map node's studio drafts key ideas",
-    "KEY_IDEAS_EXISTS": "key-ideas.md already exists: edit it, or remove it to have the agent draft it afresh",
     "EVIDENCE_SNAPSHOT_MISMATCH": "the snapshot hash an Evidence check names is not the snapshot's hash now; the message names the node's current snapshot",
     # -- the Proof agent's work log (ADR-0016, spec #145) --
     "ROLE_REQUIRED": "a progress report names the role that makes it: PROOF_AGENT_ROLE in the agent's runtime, or --role",
@@ -175,6 +173,7 @@ ERROR_CODES: dict[str, str] = {
     "RUN_REFUSED": "the run's Start was refused for a reason with no code of its own; the message says why",
     "RELEASE_FAILED": "the run ended but the node could not be given back; it is still assigned, and the message says why",
     "AGENT_BUSY": "the studio's agent is still working on the previous turn",
+    "KEY_IDEAS_AGENT_TURN": "an agent's edit turn is running on this node; key-ideas.md is saved from the page once it ends, so the save stays the researcher's (ADR-0013)",
     "NO_SUCH_TURN": "no turn of a run on this node was recorded under that id",
     "AGENT_UNKNOWN_PROVIDER": "the studio has no agent backend by that name (claude, codex)",
     "AGENT_UNAVAILABLE": "the agent's CLI can't run a turn here: not installed, not logged in, or it refused; the message says why",
