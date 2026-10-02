@@ -618,3 +618,47 @@ def test_frozen_digests_agree_with_the_vaults_own(hub):
     _script(store, "N", "exit 0\n")
     snapshot = (store.root / _reviewed(store).file_path).parent
     assert frozen_digests(snapshot) == (snapshot_folder_digest(snapshot), frozen_inputs_digest(snapshot))
+
+
+# -- after #146's withheld exports: an unverifiable snapshot takes no Run's Evidence -------------------------
+
+
+def test_a_snapshot_whose_manifest_is_marked_unverifiable_reads_cant_be_read(hub):
+    from proof_cli.vault import SNAPSHOT_MANIFEST, frozen_digests, frozen_inputs_digest, mark_unverifiable, snapshot_folder_digest
+
+    store, hub = hub
+    _script(store, "N", "exit 0\n")
+    proof = _reviewed(store)
+    folder = (store.root / proof.file_path).parent
+    manifest = folder / SNAPSHOT_MANIFEST
+    manifest.write_bytes(mark_unverifiable(manifest.read_bytes(), "a file was withheld"))
+    assert frozen_digests(folder) is None and frozen_inputs_digest(folder) is None and snapshot_folder_digest(folder) is None
+    result = _post(hub, "/studio/N/api/run")[1]
+    assert result["exit"] == 0 and result["evidence"] is None
+    assert "snapshot v1 can't be read" in result["note"] and "not recorded" in result["note"]
+    assert list_evidence_checks(store, proof.id) == []
+
+
+def test_a_run_against_a_snapshot_imported_with_withheld_files_records_nothing(hub, tmp_path, monkeypatch):
+    from proof_cli import vault
+    from proof_cli.exchange import bundle_to_json, export_exchange_bundle, import_exchange_bundle, parse_bundle
+
+    store, hub = hub
+    folder = store.root / "proofs" / "N"
+    _script(store, "N", "exit 0\n")
+    (folder / ".env").write_text("API_KEY=not-for-export\n")
+    with monkeypatch.context() as old:  # a snapshot frozen by the rule before the allowlist, which froze every root dotfile
+        old.setattr(vault, "is_secret_path", lambda rel: False)
+        old.setattr(vault, "HIDDEN_INPUTS", frozenset({".env"}))
+        proof = _reviewed(store)
+    (folder / ".env").unlink()
+    target = ensure_project(tmp_path / "target")
+    import_exchange_bundle(target, parse_bundle(bundle_to_json(export_exchange_bundle(store))))
+    other = StudioHub(target)
+    try:
+        status, result = _post(other, "/studio/N/api/run")
+    finally:
+        other.close()
+    assert status == 200 and result["exit"] == 0 and result["evidence"] is None
+    assert "snapshot v1 can't be read" in result["note"]
+    assert list_evidence_checks(target, proof.id) == []
