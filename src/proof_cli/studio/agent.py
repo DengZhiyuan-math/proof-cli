@@ -149,7 +149,7 @@ class AgentManager:
         job.root, job.files = self.root_fn(), self.files_fn
         job.context = (self.context_fn(turn) if turn is not None else self.context_fn()) if self.context_fn else None
         job.turn = turn
-        job.server_url = self.compile_url() if self.compile_url else None
+        job.compile_url = self.compile_url() if self.compile_url else None
         job.writable = lambda rel: self._writable(job, rel)
         job.finish = finish
         job.before = self._snapshot()

@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .backends import MCP_SERVER, CliBackend, Job, compile_tool_server, find_bin, has_compile_tool, system_append
+from .backends import MCP_SERVER, CliBackend, Job, compile_tool_server, find_bin, has_compile_tool, system_append, tool_name
 
 SANDBOX = {"edit": "workspace-write", "ask": "read-only"}
 
@@ -71,7 +71,7 @@ class Codex(CliBackend):
             cmd += ["-c", f"model_reasoning_effort={job.effort}"]
         if has_compile_tool(job):
             # the compile tool, as a config override: `-c` values are TOML, and a JSON string or array of strings is one
-            server = compile_tool_server(job.server_url)
+            server = compile_tool_server(job.compile_url)
             cmd += ["-c", f"mcp_servers.{MCP_SERVER}.command={json.dumps(server['command'])}",
                     "-c", f"mcp_servers.{MCP_SERVER}.args={json.dumps(server['args'])}"]
         prompt = job.prompt
@@ -128,7 +128,7 @@ class Codex(CliBackend):
                 job.emit({"t": "tool_result", "id": iid, "error": item.get("status") == "failed",
                           "preview": ""})
         elif kind == "mcp_tool_call":
-            tool(f"{item.get('server', '')}.{item.get('tool', '')}", "")
+            tool(tool_name(f"{item.get('server', '')}.{item.get('tool', '')}"), "")
             if completed:
                 job.emit({"t": "tool_result", "id": iid, "error": item.get("status") == "failed",
                           "preview": ""})

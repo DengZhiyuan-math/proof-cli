@@ -102,12 +102,20 @@ def system_append(context=None) -> str:
 # The agent's compile tool (mcp_compile.py, taken from upstream 2938c05): an MCP server either CLI starts
 # for the turn, named "studio", with one tool, "compile", that builds through the node's own studio.
 MCP_SERVER = "studio"
+# The compile tool as each CLI names it in its events: Claude Code's `mcp__<server>__<tool>`, Codex's `<server>.<tool>`.
+COMPILE_TOOL_NAMES = frozenset((f"mcp__{MCP_SERVER}__compile", f"{MCP_SERVER}.compile"))
+
+
+def tool_name(name: str | None) -> str | None:
+    """A tool's name as the turn's events carry it, for either CLI: the compile tool is "Compile" (what the stuck
+    rule, the transcript and the live view look for), every other tool its own name."""
+    return "Compile" if name in COMPILE_TOOL_NAMES else name
 
 
 def has_compile_tool(job: "Job") -> bool:
     """Whether this turn gets the compile tool: the node's studio has a build (a URL), the turn edits (plan
     mode admits no tool that builds), and its role typesets (the Prover and Numerics don't)."""
-    return bool(job.server_url) and job.mode == "edit" and (job.context is None or job.context.compiles)
+    return bool(job.compile_url) and job.mode == "edit" and (job.context is None or job.context.compiles)
 
 
 def compile_tool_server(url: str) -> dict:
@@ -140,7 +148,7 @@ class Job:
         self.model: str | None = None
         self.effort: str | None = None
         self.scope: list[str] | None = None     # files this turn may change (None: any)
-        self.server_url: str | None = None      # the editor server (the compile tool)
+        self.compile_url: str | None = None     # the node studio this turn's compile tool builds through (None: no tool)
         self.root = Path(".")
         self.files: Callable[[], list[str]] = lambda: []    # editable files
         self.writable: Callable[[str], bool] = lambda rel: False

@@ -388,7 +388,7 @@ class CompileTool(unittest.TestCase):
 
     def test_a_turn_with_a_studio_url_gets_the_tool_and_only_that_mcp_server(self):
         from proof_cli.studio import backend_claude
-        cmd, _ = self.claude.command(job_for(mode="edit", root=tmpdir(), server_url="http://127.0.0.1:9/studio/L1/"))
+        cmd, _ = self.claude.command(job_for(mode="edit", root=tmpdir(), compile_url="http://127.0.0.1:9/studio/L1/"))
         cfg = json.loads(cmd[cmd.index("--mcp-config") + 1])
         (name,) = cfg["mcpServers"]
         args = cfg["mcpServers"][name]["args"]
@@ -406,7 +406,7 @@ class CompileTool(unittest.TestCase):
         from proof_cli.studio.proof_agent import ProofAgentContext
         for role, expected in (("prover", False), ("numerics", False), ("typesetter", True), (None, True)):
             ctx = ProofAgentContext("N", tmpdir(), role=role)
-            cmd, _ = self.claude.command(job_for(mode="edit", root=tmpdir(), server_url="http://127.0.0.1:9/studio/N/", context=ctx))
+            cmd, _ = self.claude.command(job_for(mode="edit", root=tmpdir(), compile_url="http://127.0.0.1:9/studio/N/", context=ctx))
             self.assertEqual("--mcp-config" in cmd, expected, role)
 
     def test_codex_gets_the_same_tool_through_its_configuration(self):
@@ -414,15 +414,15 @@ class CompileTool(unittest.TestCase):
         from proof_cli.studio.proof_agent import ProofAgentContext
         codex = Codex("codex", {"bin": "codex"})
         ctx = ProofAgentContext("N", tmpdir(), role="typesetter")
-        cmd, _ = codex.command(job_for(mode="edit", root=tmpdir(), server_url="http://127.0.0.1:9/studio/N/", context=ctx))
+        cmd, _ = codex.command(job_for(mode="edit", root=tmpdir(), compile_url="http://127.0.0.1:9/studio/N/", context=ctx))
         overrides = [cmd[i + 1] for i, x in enumerate(cmd) if x == "-c"]
         command = next(o for o in overrides if o.startswith("mcp_servers.studio.command="))
         args = next(o for o in overrides if o.startswith("mcp_servers.studio.args="))
         self.assertEqual(json.loads(command.split("=", 1)[1]), sys.executable)
         self.assertEqual(json.loads(args.split("=", 1)[1])[1:], ["--url", "http://127.0.0.1:9/studio/N/"])
         self.assertTrue(json.loads(args.split("=", 1)[1])[0].endswith("proof_cli/studio/mcp_compile.py"))
-        for job in (job_for(mode="ask", root=tmpdir(), server_url="http://127.0.0.1:9/studio/N/", context=ctx),
-                    job_for(mode="edit", root=tmpdir(), server_url="http://127.0.0.1:9/studio/N/", context=ProofAgentContext("N", tmpdir(), role="prover")),
+        for job in (job_for(mode="ask", root=tmpdir(), compile_url="http://127.0.0.1:9/studio/N/", context=ctx),
+                    job_for(mode="edit", root=tmpdir(), compile_url="http://127.0.0.1:9/studio/N/", context=ProofAgentContext("N", tmpdir(), role="prover")),
                     job_for(mode="edit", root=tmpdir(), context=ctx)):
             self.assertFalse(any(x.startswith("mcp_servers.") for x in codex.command(job)[0]), job.mode)
         from proof_cli.studio import mcp_compile
@@ -430,7 +430,7 @@ class CompileTool(unittest.TestCase):
 
     def test_an_ask_turn_has_no_tool(self):
         """Plan mode admits no tool that builds: offering it would only make a refused step."""
-        cmd, _ = self.claude.command(job_for(mode="ask", root=tmpdir(), server_url="http://127.0.0.1:9/studio/L1/"))
+        cmd, _ = self.claude.command(job_for(mode="ask", root=tmpdir(), compile_url="http://127.0.0.1:9/studio/L1/"))
         self.assertNotIn("--mcp-config", cmd)
 
     def test_the_tool_posts_the_build_as_the_pages_own_origin(self):
@@ -472,8 +472,20 @@ class CompileTool(unittest.TestCase):
         from proof_cli.studio.proof_agent import ProofAgentContext
         self.assertFalse(hasattr(backends, "compiles"))
         ctx = ProofAgentContext("N", tmpdir(), role="typesetter")
-        self.assertTrue(backends.has_compile_tool(job_for(mode="edit", server_url="http://127.0.0.1:9/studio/N/", context=ctx)))
+        self.assertTrue(backends.has_compile_tool(job_for(mode="edit", compile_url="http://127.0.0.1:9/studio/N/", context=ctx)))
         self.assertFalse(hasattr(manager(Path("."), plain=Codex("plain", {"bin": "codex"})), "server_url"))  # the manager's is compile_url
+        self.assertFalse(hasattr(backends.Job(1), "server_url"))  # and so is the turn's
+        self.assertIsNone(backends.Job(1).compile_url)
+
+    def test_codex_names_the_tool_compile_too(self):
+        """Last review round: one mapping (backends.tool_name) for both CLIs' names of the compile tool."""
+        self.assertEqual(backends.tool_name("mcp__studio__compile"), "Compile")
+        self.assertEqual(backends.tool_name("studio.compile"), "Compile")
+        self.assertEqual(backends.tool_name("other.compile"), "other.compile")
+        j, st = job_for(root=tmpdir()), {}
+        Codex("codex", {"bin": "codex"}).handle({"type": "item.started", "item": {
+            "id": "m1", "type": "mcp_tool_call", "server": "studio", "tool": "compile"}}, j, st)
+        self.assertEqual([e["name"] for e in j.events if e["t"] == "tool"], ["Compile"])
 
     def test_protocol(self):
         from proof_cli.studio import mcp_compile

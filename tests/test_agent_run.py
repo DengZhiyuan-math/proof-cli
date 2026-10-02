@@ -804,6 +804,66 @@ def test_a_compile_through_the_tool_counts_as_a_run(studio, monkeypatch):
     assert state["status"] == "stuck" and len(_turns(log)) == 4, state
 
 
+def test_a_tex_lookup_alone_is_no_change(studio, monkeypatch):
+    """Last review round: `kpsewhich` is a lookup the Typesetter may run, not a compile, so a turn of lookups alone
+    does not hold off the stuck rule."""
+    from proof_cli.studio import agent_run
+    from proof_cli.studio.proof_agent import is_a_run
+
+    assert not is_a_run("kpsewhich amsmath.sty") and is_a_run("latexmk -pdf proof.tex")
+    store, hub, log, queue = studio
+    monkeypatch.setattr(agent_run, "STUCK_TURNS", 2)
+    _queue(queue, [["tool", "kpsewhich amsmath.sty"]], [["tool", "kpsewhich amsthm.sty"]], [["sleep", "0"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude"})
+    state = _wait(hub)
+    assert state["status"] == "stuck" and "no change in 2 turn(s)" in state["reason"] and len(_turns(log)) == 2, state
+
+
+# a Codex CLI on PATH: each invocation pops one script from FAKE_QUEUE (["compile"]: a call of the studio's compile
+# tool, as `codex exec --json` reports an MCP tool call; anything else is a command it runs) and logs to FAKE_LOG
+FAKE_CODEX = r'''#!{python}
+import json, os, subprocess, sys
+sys.stdin.read()
+queue_path = os.environ["FAKE_QUEUE"]
+queue = json.load(open(queue_path)) if os.path.exists(queue_path) else []
+script = queue.pop(0) if queue else []
+json.dump(queue, open(queue_path, "w"))
+for command in script:
+    if command[0] != "compile":
+        subprocess.run(command, capture_output=True, text=True)
+open(os.environ["FAKE_LOG"], "a").write(json.dumps({{"argv": sys.argv[1:], "role": os.environ.get("PROOF_AGENT_ROLE")}}) + "\n")
+print(json.dumps({{"type": "thread.started", "thread_id": "codex-thread"}}))
+for i, command in enumerate(script):
+    if command[0] == "compile":
+        item = {{"id": f"m{{i}}", "type": "mcp_tool_call", "server": "studio", "tool": "compile", "status": "completed"}}
+        print(json.dumps({{"type": "item.started", "item": item}}))
+        print(json.dumps({{"type": "item.completed", "item": item}}))
+print(json.dumps({{"type": "turn.completed", "usage": {{"input_tokens": 1, "output_tokens": 1}}}}))
+'''
+
+
+def test_a_codex_typesetter_turn_that_only_compiles_is_a_run_and_its_transcript_says_compile(studio, monkeypatch, tmp_path):
+    """Last review round: Codex reports the compile tool as `studio.compile`; it is named `Compile` in one place
+    (backends.tool_name) for both CLIs, so the stuck rule counts it as a run and the turn's transcript says Compile."""
+    from proof_cli.studio import agent_run
+
+    store, hub, log, queue = studio
+    monkeypatch.setenv("CODEX_BIN", str(_executable(tmp_path / "bin" / "codex", FAKE_CODEX.format(python=sys.executable))))
+    monkeypatch.setattr(agent_run, "STUCK_TURNS", 2)
+    _queue(queue, [["proof", "node", "progress", "N", "--handoff", "typesetter", "--note", "typeset it"]],  # narration: idle 1
+           [["compile"]],  # the Typesetter only compiles: a run, idle back to 0
+           [], [])          # the Prover twice with nothing: stuck
+    _post(hub, "/studio/N/api/agent/start", {"provider": "codex"})
+    state = _wait(hub)
+    roles = [t["role"] for t in _turns(log)]
+    assert state["status"] == "stuck" and roles == ["prover", "typesetter", "prover", "prover"], (state["reason"], roles)
+    entries = _get(hub, "/studio/N/api/agent/log")[1]["entries"]
+    first = next(e for e in entries if e["kind"] == "turn" and e["role"] == "typesetter")
+    answer = hub.request("GET", "/studio/N/api/agent/turn", f"turn={first['turn']}", None, cross_site=False)
+    events = json.loads(answer.body)["events"]
+    assert [e["name"] for e in events if e["t"] == "tool"] == ["Compile"]
+
+
 def test_pause_stops_the_budget_clock_and_resume_continues_with_what_is_left(studio):
     store, hub, log, queue = studio
     (store.root / "proof.toml").write_text("[studio]\nbudget = { turns = 3, minutes = 0.04 }\n")  # 2.4 seconds
