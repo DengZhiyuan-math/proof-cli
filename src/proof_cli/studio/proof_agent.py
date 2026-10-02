@@ -150,8 +150,9 @@ it, and the studio records that you drafted it.
 _PROOF_READS = ("Bash(proof search *)", "Bash(proof retrieve *)", "Bash(proof node show *)", "Bash(proof node list *)", "Bash(proof reference list *)",
                 "Bash(proof memory list *)", "Bash(proof fog list *)", "Bash(proof fog show *)", "Bash(proof node progress *)")
 _TEX_LOOKUPS = ("kpsewhich",)   # the Typesetter compiles through the studio's build (its compile tool), not a shell
-# TeX's programs, for the stuck rule: a compile in a shell is a run (the Typesetter's goes through the compile tool)
-_TEX_PROGRAMS = ("latexmk", "pdflatex", "xelatex", "lualatex", "tectonic", "bibtex", "biber", "kpsewhich")
+# TeX's programs that build, for the stuck rule: a compile in a shell is a run (the Typesetter's goes through the
+# compile tool). Not kpsewhich: a lookup is not a run, or a turn of lookups would hold off the stuck rule.
+_TEX_PROGRAMS = ("latexmk", "pdflatex", "xelatex", "lualatex", "tectonic", "bibtex", "biber")
 
 
 @dataclass(frozen=True)

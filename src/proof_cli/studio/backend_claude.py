@@ -24,7 +24,7 @@ import time
 from pathlib import Path
 
 from .fsutil import read_json
-from .backends import MCP_SERVER, NO_WINDOW, TREE, CliBackend, Job, compile_tool_server, find_bin, has_compile_tool, kill_tree, system_append
+from .backends import MCP_SERVER, NO_WINDOW, TREE, CliBackend, Job, compile_tool_server, find_bin, has_compile_tool, tool_name, kill_tree, system_append
 
 MODES = {"edit": "acceptEdits", "ask": "plan"}
 
@@ -126,11 +126,6 @@ def account_problem(info: dict, allowed: str) -> str | None:
 
 
 COMPILE_TOOL = f"mcp__{MCP_SERVER}__compile"       # the compile tool (backends.compile_tool_server), as Claude Code names it
-
-
-def tool_name(name: str | None) -> str | None:
-    """A tool's name as the page shows it: the compile tool is "Compile", every other tool its own name."""
-    return "Compile" if name == COMPILE_TOOL else name
 
 
 def _loads_compile_tool(block: dict) -> bool:
@@ -313,7 +308,7 @@ class ClaudeCode(CliBackend):
         # shell needed to compile, and no other MCP server is loaded.
         tools = [COMPILE_TOOL] if has_compile_tool(job) else []
         if tools:
-            cmd += ["--mcp-config", json.dumps({"mcpServers": {MCP_SERVER: compile_tool_server(job.server_url)}}), "--strict-mcp-config"]
+            cmd += ["--mcp-config", json.dumps({"mcpServers": {MCP_SERVER: compile_tool_server(job.compile_url)}}), "--strict-mcp-config"]
         if job.context:
             cmd += job.context.claude_args(job.mode == "edit", self.scope_rules(job.scope) if job.scope else None, tools=tools)
         elif job.scope or tools:
