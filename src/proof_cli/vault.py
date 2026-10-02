@@ -150,6 +150,36 @@ def snapshot_folder_digest(folder: Path) -> str | None:
     return manifest_digest(entries)
 
 
+# -- a computation's inputs: what a run of its program is evidence about (spec #145, PR #147 review) ---------
+
+# what a run writes rather than reads: its outputs, byte code, and VCS and tool caches
+_NOT_RUN_INPUT_PARTS = {"__pycache__", ".git", ".hg", ".svn", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".ipynb_checkpoints"}
+
+
+def is_run_input(rel: str) -> bool:
+    """Whether a path from the node folder is an input of the node's program — its scripts, environment files and
+    data — rather than something a run writes: `out/`, `__pycache__`/`*.pyc`, VCS and tool caches."""
+    parts = rel.split("/")
+    return parts[0] != OUT_DIR and not _NOT_RUN_INPUT_PARTS.intersection(parts) and not rel.endswith(".pyc")
+
+
+def run_inputs(root: Path, node_id: str) -> dict[str, Path]:
+    """The node's working inputs (`working_inputs`) that its program reads, by their path from the node folder."""
+    return {rel: path for rel, path in working_inputs(root, node_id).items() if is_run_input(rel)}
+
+
+def snapshot_inputs_digest(folder: Path) -> str | None:
+    """The `manifest_digest` of the program inputs a snapshot folder froze, recomputed from the files stored now
+    (as `snapshot_folder_digest`, without the outputs). None if the snapshot is gone, unreadable or a single file."""
+    try:
+        manifest = json.loads((folder / SNAPSHOT_MANIFEST).read_text(encoding="utf-8"))
+        entries = {rel: hashlib.sha256((folder / _stored(rel)).read_bytes()).hexdigest()
+                   for rel in manifest["files"] if is_run_input(rel)}
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return manifest_digest(entries)
+
+
 def snapshot_digest_of(manifest: bytes | None, stored: Callable[[str], bytes | None]) -> str | None:
     """`snapshot_folder_digest` over files that aren't on disk (an exchange bundle's, say):
     `manifest` is the snapshot's manifest.json and `stored(path)` a file by its path inside
