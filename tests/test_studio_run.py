@@ -111,7 +111,7 @@ def test_a_run_before_any_snapshot_records_nothing_and_says_so(hub):
 def test_run_is_refused_on_a_latex_node(hub):
     store, hub = hub
     status, result = _post(hub, "/studio/L/api/run")
-    assert status == 409 and result["error"] == "NOT_A_COMPUTATION"
+    assert status == 409 and result["code"] == "NOT_A_COMPUTATION" and "computation" in result["error"]  # the run-refusal shape
 
 
 def test_a_run_is_stopped_from_another_request(hub):
@@ -120,7 +120,7 @@ def test_a_run_is_stopped_from_another_request(hub):
 
     store, hub = hub
     _script(store, "N", "sleep 30\n")
-    _reviewed(store)
+    proof = _reviewed(store)
     outcome = {}
     worker = threading.Thread(target=lambda: outcome.update(result=_post(hub, "/studio/N/api/run")[1]))
     worker.start()
@@ -129,7 +129,10 @@ def test_a_run_is_stopped_from_another_request(hub):
             break
         time.sleep(0.05)
     worker.join(timeout=10)
-    assert outcome["result"]["cancelled"] is True and outcome["result"]["evidence"]["outcome"] == "error"
+    result = outcome["result"]
+    assert result["cancelled"] is True and result["evidence"] is None  # a stopped run establishes nothing (Evidence rule 3)
+    assert "stopped" in result["note"] and "not recorded" in result["note"] and "not recorded" in result["output"]
+    assert list_evidence_checks(store, proof.id) == []
 
 
 # -- Open in VS Code --------------------------------------------------------------------------------
@@ -161,7 +164,7 @@ def test_opening_without_a_command_tells_the_page_to_use_the_scheme(hub):
     assert status == 200 and result == {"ok": True, "kind": "scheme", "url": f"vscode://file/{(store.root / 'proofs' / 'N').resolve()}"}
 
 
-def test_a_run_that_outlives_the_time_limit_is_recorded_as_an_error_not_as_stopped(hub, monkeypatch):
+def test_a_run_that_outlives_the_time_limit_is_timed_out_not_stopped_and_records_nothing(hub, monkeypatch):
     from proof_cli.studio import server as studio_server
 
     store, hub = hub
@@ -171,8 +174,8 @@ def test_a_run_that_outlives_the_time_limit_is_recorded_as_an_error_not_as_stopp
     status, result = _post(hub, "/studio/N/api/run")
     assert status == 200 and result["timed_out"] is True and result["cancelled"] is False and result["exit"] is None
     assert "longer than 1 seconds" in result["output"]
-    (check,) = list_evidence_checks(store, proof.id)
-    assert check.outcome.value == "error" and "timed out" in check.notes
+    assert result["evidence"] is None and "timed out" in result["note"] and "not recorded" in result["note"]
+    assert list_evidence_checks(store, proof.id) == []  # a timed-out run records nothing (Evidence rule 3)
 
 
 def test_a_computation_nodes_studio_lists_and_edits_its_program_and_data_while_a_latex_nodes_does_not(hub):
@@ -194,7 +197,7 @@ def test_a_file_opens_at_its_line_by_scheme_or_through_the_command(hub):
     (store.root / "proofs" / "N" / "check.py").write_text("print(1)\n")
     status, result = _post(hub, "/studio/N/api/open", {"file": "check.py", "line": 40})
     assert result == {"ok": True, "kind": "scheme", "url": f"vscode://file/{(store.root / 'proofs' / 'N' / 'check.py').resolve()}:40"}
-    assert _post(hub, "/studio/N/api/open", {"file": "../L/proof.tex"})[1]["ok"] is False
+    assert _post(hub, "/studio/N/api/open", {"file": "../L/proof.tex"})[1]["code"] == "NOT_A_NODE_FILE"
     marker = store.root / "opened.txt"
     (store.root / "proof.toml").write_text(f'[studio]\nopen_command = "sh -c \'echo {{file}} > {marker}\'"\n')
     assert _post(hub, "/studio/N/api/open", {"file": "check.py", "line": 40})[1]["ok"] is True
@@ -211,22 +214,104 @@ def test_a_run_of_a_program_that_differs_from_the_snapshot_is_recorded_against_n
     _script(store, "N", "exit 0\n")  # the working copy now passes — v1 did not
     status, result = _post(hub, "/studio/N/api/run")
     assert status == 200 and result["exit"] == 0
-    assert result["evidence"] is None and "differs from snapshot v1" in result["note"]
+    assert result["evidence"] is None and "inputs differ from snapshot v1" in result["note"] and "not recorded" in result["note"]
+    assert "inputs differ from snapshot v1" in result["output"]  # said where the researcher reads the run, too
     assert list_evidence_checks(store, proof.id) == []
 
 
-def test_a_run_counts_only_when_the_folder_matches_the_snapshot_before_and_after(hub):
+def test_the_first_run_after_a_snapshot_with_an_empty_out_records_evidence(hub):
+    """Evidence rule 1: only the inputs are compared. The snapshot froze no output; the run writes one; it still counts."""
     store, hub = hub
-    _script(store, "N", "mkdir -p out\necho 'n,ratio' > out/table.csv\nexit 0\n")  # writes an output the snapshot did not hold
+    (store.root / "proofs" / "N" / "out").mkdir(exist_ok=True)
+    _script(store, "N", "mkdir -p out\necho 'n,ratio' > out/table.csv\nexit 0\n")
     proof = _reviewed(store)
     status, result = _post(hub, "/studio/N/api/run")
-    assert result["evidence"] is None and "changed during the run" in result["note"]  # out/table.csv appeared: the folder is no longer v1
-    assert list_evidence_checks(store, proof.id) == []
-    proof2 = request_review(store, "N", requested_by="agent_a", rationale="with its output")
-    status, again = _post(hub, "/studio/N/api/run")  # the same output is written again: the folder still matches v2
-    assert again["evidence"]["outcome"] == "passed"
-    (check,) = list_evidence_checks(store, proof2.id)
+    assert status == 200 and result["evidence"]["outcome"] == "passed" and result["note"] == ""
+    (check,) = list_evidence_checks(store, proof.id)
     assert check.outcome.value == "passed"
+
+
+def test_a_non_deterministic_output_still_records(hub):
+    store, hub = hub
+    _script(store, "N", "mkdir -p out\ndate +%s%N > out/stamp.txt\necho $$ >> out/stamp.txt\nexit 0\n")
+    _post(hub, "/studio/N/api/run")  # an output to freeze
+    proof = _reviewed(store)
+    frozen = (store.root / "proofs" / "N" / "out" / "stamp.txt").read_text()
+    for _ in range(2):
+        assert _post(hub, "/studio/N/api/run")[1]["evidence"]["outcome"] == "passed"
+    assert (store.root / "proofs" / "N" / "out" / "stamp.txt").read_text() != frozen  # the output moved; the check stands
+    assert [c.outcome.value for c in list_evidence_checks(store, proof.id)] == ["passed", "passed"]
+
+
+def test_a_python_run_that_writes_pycache_still_records(hub):
+    store, hub = hub
+    folder = store.root / "proofs" / "N"
+    (folder / "helper.py").write_text("VALUE = 1\n")
+    _script(store, "N", f"unset PYTHONDONTWRITEBYTECODE\n'{sys.executable}' -c 'import helper, sys; sys.exit(0 if helper.VALUE == 1 else 1)'\n")
+    proof = _reviewed(store)
+    status, result = _post(hub, "/studio/N/api/run")
+    assert result["exit"] == 0 and (folder / "__pycache__").is_dir()  # the run wrote byte code beside its input
+    assert result["evidence"]["outcome"] == "passed"
+    assert _post(hub, "/studio/N/api/run")[1]["evidence"]["outcome"] == "passed"  # and again, with the cache now there
+    assert len(list_evidence_checks(store, proof.id)) == 2
+
+
+def test_an_input_edited_before_the_run_records_nothing_but_the_run_still_executes(hub):
+    store, hub = hub
+    folder = store.root / "proofs" / "N"
+    (folder / "data.csv").write_text("n\n1\n")
+    _script(store, "N", "mkdir -p out\ncp data.csv out/copy.csv\nexit 0\n")
+    proof = _reviewed(store)
+    (folder / "data.csv").write_text("n\n2\n")  # the data changed since v1 froze it
+    status, result = _post(hub, "/studio/N/api/run")
+    assert status == 200 and result["exit"] == 0 and (folder / "out" / "copy.csv").read_text() == "n\n2\n"  # it ran
+    assert result["evidence"] is None and "inputs differ from snapshot v1" in result["note"]
+    assert list_evidence_checks(store, proof.id) == []
+
+
+def test_only_a_hidden_root_file_differing_from_the_snapshot_records_nothing(hub):
+    """A hidden environment file at the node root (`.python-version`) is an input the snapshot froze (#146)."""
+    store, hub = hub
+    folder = store.root / "proofs" / "N"
+    (folder / ".python-version").write_text("3.11\n")
+    _script(store, "N", "exit 0\n")
+    proof = _reviewed(store)
+    (folder / ".python-version").write_text("3.12\n")
+    status, result = _post(hub, "/studio/N/api/run")
+    assert status == 200 and result["exit"] == 0
+    assert result["evidence"] is None and "inputs differ from snapshot v1" in result["note"]
+    assert list_evidence_checks(store, proof.id) == []
+    (folder / ".python-version").write_text("3.11\n")  # put back as frozen: the next run counts
+    assert _post(hub, "/studio/N/api/run")[1]["evidence"]["outcome"] == "passed"
+
+
+def test_an_unreadable_input_records_nothing_and_does_not_crash(hub):
+    store, hub = hub
+    folder = store.root / "proofs" / "N"
+    _script(store, "N", "exit 0\n")
+    (folder / "data.csv").write_text("n\n1\n")
+    proof = _reviewed(store)
+    (folder / "data.csv").chmod(0)
+    try:
+        status, result = _post(hub, "/studio/N/api/run")
+    finally:
+        (folder / "data.csv").chmod(0o644)
+    assert status == 200 and result["exit"] == 0
+    assert result["evidence"] is None and "could not be read" in result["note"] and "not recorded" in result["note"]
+    assert list_evidence_checks(store, proof.id) == []
+
+
+def test_the_evidence_record_binds_the_snapshot_hash(hub):
+    from proof_cli.authority import candidate_proof_sha256
+
+    store, hub = hub
+    _script(store, "N", "exit 0\n")
+    proof = _reviewed(store)
+    result = _post(hub, "/studio/N/api/run")[1]
+    digest = candidate_proof_sha256(store, proof.id)
+    assert digest and result["evidence"]["candidate_proof_sha256"] == digest
+    (check,) = list_evidence_checks(store, proof.id)
+    assert check.candidate_proof_sha256 == digest
 
 
 # -- an exchanged computation node still runs (audit S2) -----------------------------------------------
@@ -281,7 +366,7 @@ def test_an_input_edited_during_the_run_and_put_back_is_still_not_the_snapshot_t
     worker.join(15)
 
     assert answer["exit"] == 0  # what ran was the edited helper
-    assert answer["evidence"] is None and "changed during the run" in answer["note"]
+    assert answer["evidence"] is None and "changed during the run" in answer["note"] and "not recorded" in answer["note"]
     assert list_evidence_checks(store, proof.id) == []
 
 
@@ -306,3 +391,61 @@ def test_a_non_executable_entry_runs_by_the_interpreter_its_shebang_names(hub):
     assert status == 200 and result["exit"] == 0 and "computed by python" in result["output"]
     run.write_text("echo computed by sh\n")  # no shebang: sh, as before
     assert "computed by sh" in _post(hub, "/studio/N/api/run")[1]["output"]
+
+
+# -- the review of PR #147: refusals in the run-refusal shape, an encoded link, a capped output ----------------
+
+
+def test_a_vscode_link_percent_encodes_the_path(hub):
+    store, hub = hub
+    folder = store.root / "proofs" / "N"
+    (folder / "a #1 ?.py").write_text("print(1)\n")
+    status, result = _post(hub, "/studio/N/api/open", {"file": "a #1 ?.py", "line": 3})
+    assert status == 200 and result["url"].endswith("/a%20%231%20%3F.py:3")
+    assert "#" not in result["url"] and "?" not in result["url"] and " " not in result["url"]
+    from urllib.parse import unquote
+    assert unquote(result["url"].removeprefix("vscode://file/").rsplit(":", 1)[0]) == str((folder / "a #1 ?.py").resolve())
+
+
+@pytest.mark.parametrize("line", ["forty", "4.5", -1, 0, True, [3]])
+def test_a_bad_line_is_a_400_with_a_registered_code(hub, line):
+    from proof_cli.errors import ERROR_CODES
+
+    store, hub = hub
+    (store.root / "proofs" / "N" / "check.py").write_text("print(1)\n")
+    status, result = _post(hub, "/studio/N/api/open", {"file": "check.py", "line": line})
+    assert status == 400 and result["code"] == "INVALID_LINE" and result["code"] in ERROR_CODES and result["error"]
+
+
+def test_open_refusals_use_the_run_refusal_shape(hub):
+    from proof_cli.errors import ERROR_CODES
+
+    store, hub = hub
+    status, result = _post(hub, "/studio/N/api/open", {"file": "../L/proof.tex"})
+    assert status == 400 and result["code"] == "NOT_A_NODE_FILE" and "../L/proof.tex" in result["error"]
+    (store.root / "proof.toml").write_text('[studio]\nopen_command = "sh -c \'exit 4\'"\n')
+    status, result = _post(hub, "/studio/N/api/open")
+    assert status == 502 and result["code"] == "OPEN_FAILED" and "exit 4" in result["error"]
+    for code in ("NOT_A_COMPUTATION", "NOT_A_NODE_FILE", "OPEN_FAILED", "INVALID_LINE", "STUDIO_CLOSED", "NO_STUDIO", "CROSS_SITE"):
+        assert code in ERROR_CODES, code
+
+
+def test_a_closed_studio_refuses_a_run_in_the_run_refusal_shape(hub):
+    store, hub = hub
+    studio = hub.studio("N")
+    studio.close()
+    answer = studio.post("/api/run", {})
+    assert answer.status == 503 and json.loads(answer.body) == {"error": "The studio is closed.", "code": "STUDIO_CLOSED"}
+
+
+def test_a_chatty_run_keeps_only_the_tail_of_its_output(hub, monkeypatch):
+    from proof_cli.studio import server as studio_server
+
+    store, hub = hub
+    monkeypatch.setattr(studio_server, "RUN_OUTPUT_LIMIT", 10_000)
+    _script(store, "N", f"'{sys.executable}' -c \"import sys; [sys.stdout.write('line %d\\n' % i) for i in range(20000)]\"\necho LAST\n")
+    status, result = _post(hub, "/studio/N/api/run")
+    assert status == 200 and result["exit"] == 0
+    printed = result["output"].split("\n\n[no snapshot yet")[0]  # what the program printed, before the Evidence note
+    assert printed.rstrip().endswith("LAST") and "line 0\n" not in printed
+    assert "earlier output dropped" in result["output"] and len(result["output"]) < 11_000
