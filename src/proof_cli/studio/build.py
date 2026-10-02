@@ -267,12 +267,35 @@ def git_perl_dir() -> str | None:
 
 # ---------------------------------------------------------------- running programs
 
+class _Tail:
+    """What a program printed, as its last `limit` bytes: a chatty program can't fill the server's memory."""
+
+    def __init__(self, limit: int):
+        self.limit, self.dropped, self.data = limit, 0, bytearray()
+
+    def drain(self, stream) -> None:
+        for chunk in iter(lambda: stream.read(65536), b""):
+            self.data += chunk
+            if len(self.data) > self.limit:
+                cut = len(self.data) - self.limit
+                del self.data[:cut]
+                self.dropped += cut
+
+    def text(self) -> str:
+        out = self.data.decode("utf-8", "replace")
+        if not self.dropped:
+            return out
+        return f"[… {self.dropped} bytes of earlier output dropped: only the last {self.limit} bytes are kept]\n" + out
+
+
 class Runner:
     """Runs the programs of one build. `stop()` (from another thread) ends the running
-    program and every later one; so does the build's time limit."""
+    program and every later one; so does the build's time limit. With `max_output`, only
+    the last that many bytes of a program's output are kept, under a note of what was dropped."""
 
-    def __init__(self, timeout: float = TIMEOUT):
+    def __init__(self, timeout: float = TIMEOUT, max_output: int | None = None):
         self.timeout = timeout
+        self.max_output = max_output
         self.deadline = time.monotonic() + timeout
         self.stopped = threading.Event()
         self.timed_out = False
@@ -287,19 +310,32 @@ class Runner:
             proc = self.proc = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
                                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                                 **TREE)
+        tail = _Tail(self.max_output) if self.max_output else None
+        reader = threading.Thread(target=tail.drain, args=(proc.stdout,), daemon=True) if tail else None
+        if reader:
+            reader.start()
         try:
-            out, _ = proc.communicate(timeout=max(1.0, self.deadline - time.monotonic()))
+            if reader:
+                proc.wait(timeout=max(1.0, self.deadline - time.monotonic()))
+            else:
+                out, _ = proc.communicate(timeout=max(1.0, self.deadline - time.monotonic()))
         except subprocess.TimeoutExpired:
             self.timed_out = True
             self.stopped.set()
             kill_tree(proc)
-            out, _ = proc.communicate()
+            if reader:
+                proc.wait()
+            else:
+                out, _ = proc.communicate()
         finally:
+            if reader:
+                reader.join()
+                proc.stdout.close()
             with self.lock:
                 self.proc = None
         if self.stopped.is_set():
             raise Stopped()
-        return proc.returncode, out.decode("utf-8", "replace")
+        return proc.returncode, tail.text() if tail else out.decode("utf-8", "replace")
 
     def stop(self) -> None:
         with self.lock:

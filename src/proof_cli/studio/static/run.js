@@ -123,19 +123,20 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
 
   // A file the agent changed, opened where files are edited, at the line the turn changed (spec #145, stories 18–19):
   // through the vscode:// scheme, or — when the project names an `[studio] open_command` — by the studio's server running it.
+  // The link is built once, by the server (vscode_url, #147); the page posts to api/open only when a command is set.
   function fileLink(change) {
     const rel = change.path, line = change.line || 1;
-    const how = state.open || { kind: "scheme", url: `vscode://file/${state.folder}` };
+    const how = state.open || { kind: "scheme" };
     if (how.kind === "command") {
       const link = h("a", rel, { href: "#", class: "log-file", title: `Open ${rel} at line ${line} with: ${how.command}` });
       link.onclick = async (event) => {
         if (event && event.preventDefault) event.preventDefault();
         const r = await api("/api/open", { file: rel, line });
-        if (!r.ok) tell(r.error || `the open command failed (exit ${r.exit})`, true);
+        if (r._status !== 200) tell(`${r.code || "OPEN_FAILED"}: ${r.error || ""}`.trim(), true);
       };
       return link;
     }
-    return h("a", rel, { href: `${how.url}/${rel}:${line}`, class: "log-file", title: `Open ${rel} at line ${line} in VS Code` });
+    return change.url ? h("a", rel, { href: change.url, class: "log-file", title: `Open ${rel} at line ${line} in VS Code` }) : h("span", rel, { class: "log-file" });
   }
 
   // one work-log entry as a line: time, role, what happened, and a link to what it produced
