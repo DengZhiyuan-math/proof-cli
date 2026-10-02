@@ -251,6 +251,8 @@ _CHALLENGE_ADDED_COLUMNS = {"resolution_review_id": "TEXT"}
 _CLAIM_DROPPED_COLUMNS = ("token_hash",)  # the #37 claim token, gone with ADR-0010
 # a Review snapshot's hash (ADR-0010), and the node's dependencies as the snapshot was requested (#96, JSON)
 _CANDIDATE_PROOF_ADDED_COLUMNS = {"sha256": "TEXT", "dependencies": "TEXT", "key_ideas_drafted_by": "TEXT"}
+# the snapshot hash an Evidence check ran against (PR #147 review)
+_EVIDENCE_CHECK_ADDED_COLUMNS = {"candidate_proof_sha256": "TEXT"}
 
 REVIEW_HISTORY_TRIGGERS = """
 CREATE INDEX IF NOT EXISTS idx_review_history_object ON review_history(object_type, object_id, seq);
@@ -500,6 +502,7 @@ _SCHEMA_DDL_DIGEST = int.from_bytes(
                 _CHALLENGE_ADDED_COLUMNS,
                 _CLAIM_DROPPED_COLUMNS,
                 _CANDIDATE_PROOF_ADDED_COLUMNS,
+                _EVIDENCE_CHECK_ADDED_COLUMNS,
             ]
         ).encode("utf-8")
     ).digest()[:4],
@@ -527,6 +530,7 @@ def _apply_schema(conn: sqlite3.Connection) -> None:
     _add_missing_columns(conn, "challenges", _CHALLENGE_ADDED_COLUMNS)
     _drop_columns(conn, "claims", _CLAIM_DROPPED_COLUMNS)
     _add_missing_columns(conn, "candidate_proofs", _CANDIDATE_PROOF_ADDED_COLUMNS)
+    _add_missing_columns(conn, "evidence_checks", _EVIDENCE_CHECK_ADDED_COLUMNS)
     conn.executescript(REVIEW_HISTORY_TRIGGERS)
     conn.executescript(REVIEWER_KEYS_SCHEMA)
     conn.executescript(PROOF_LEDGER_SCHEMA)
@@ -1741,6 +1745,7 @@ def _row_to_evidence_check(row: sqlite3.Row) -> EvidenceCheck:
         outcome=row["outcome"],
         notes=row["notes"],
         run_by=row["run_by"],
+        candidate_proof_sha256=row["candidate_proof_sha256"],
         created_at=row["created_at"],
     )
 
@@ -1748,8 +1753,10 @@ def _row_to_evidence_check(row: sqlite3.Row) -> EvidenceCheck:
 def insert_evidence_check(store: ProjectStore, check: EvidenceCheck) -> EvidenceCheck:
     with _writing(store, None) as conn:
         conn.execute(
-            "INSERT INTO evidence_checks(id, candidate_proof_id, outcome, notes, run_by, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (check.id, check.candidate_proof_id, check.outcome.value, check.notes, check.run_by, check.created_at.isoformat()),
+            "INSERT INTO evidence_checks(id, candidate_proof_id, outcome, notes, run_by, candidate_proof_sha256, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (check.id, check.candidate_proof_id, check.outcome.value, check.notes, check.run_by, check.candidate_proof_sha256,
+             check.created_at.isoformat()),
         )
     return check
 

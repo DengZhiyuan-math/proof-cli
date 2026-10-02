@@ -52,6 +52,18 @@ def library_folders(project_root: Path) -> list[Path]:
     return folders
 
 
+def open_command(project_root: Path) -> str | None:
+    """The optional `[studio] open_command` of proof.toml (spec #145, decided in #143): how to hand a
+    node folder to an editor other than VS Code, with `{folder}` and `{file}` filled in. None means
+    the page uses `vscode://file/<folder>`."""
+    config = project_root / PROJECT_CONFIG
+    try:
+        command = tomllib.loads(config.read_text(encoding="utf-8")).get("studio", {}).get("open_command")
+    except (OSError, tomllib.TOMLDecodeError, AttributeError):
+        return None
+    return command.strip() if isinstance(command, str) and command.strip() else None
+
+
 BRIEF = """\
 You are the proof agent on node {node} of a proof map: an automated proof system. You research,
 reason and prove; the LaTeX in this folder is where the proof is written down. The researcher

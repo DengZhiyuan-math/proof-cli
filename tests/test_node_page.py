@@ -207,6 +207,54 @@ def test_an_evidence_check_on_an_unreadable_snapshot_still_shows(page):
     assert shown["snapshot"]["sha256"] == v1["sha256"]  # what it was frozen as, still named
 
 
+def test_the_node_page_shows_each_evidence_checks_own_binding(page):
+    import sqlite3
+
+    store, client = page
+    _, v2 = _two_snapshots(store, client)
+    sha = candidate_proof_sha256(store, v2["id"])
+    bound = _ok(client.post("/api/node/c1/evidence", {"candidate_proof_id": v2["id"], "outcome": "passed", "run_by": "lean", "snapshot_sha256": sha}))
+    old = _ok(client.post("/api/node/c1/evidence", {"candidate_proof_id": v2["id"], "outcome": "passed", "run_by": "lean"}))
+    assert bound["candidate_proof_sha256"] == old["candidate_proof_sha256"] == sha
+    with sqlite3.connect(store.root / ".proof" / "project.sqlite3") as conn:
+        conn.execute("UPDATE evidence_checks SET candidate_proof_sha256 = NULL WHERE id = ?", (old["id"],))
+    checks = {c["id"]: c for c in _ok(client.get("/api/node/c1"))["evidence_checks"]}
+    assert checks[bound["id"]]["binding"]["state"] == "matches" and checks[bound["id"]]["binding"]["sha256"] == sha
+    assert checks[old["id"]]["binding"]["state"] == "unbound"
+    frozen = next((store.root / "proofs" / "c1" / "snapshots" / "v2").rglob("proof.tex"))
+    frozen.write_text("changed after the check\n")
+    checks = {c["id"]: c for c in _ok(client.get("/api/node/c1"))["evidence_checks"]}
+    assert checks[bound["id"]]["binding"]["state"] == "changed" and checks[old["id"]]["binding"]["state"] == "unbound"
+
+
+def test_recording_evidence_on_the_page_refuses_a_hash_that_is_not_the_snapshots(page):
+    store, client = page
+    _, v2 = _two_snapshots(store, client)
+    status, body = client.post("/api/node/c1/evidence", {"candidate_proof_id": v2["id"], "outcome": "passed", "snapshot_sha256": "0" * 64})
+    assert status >= 400 and body["error"]["code"] == "EVIDENCE_SNAPSHOT_MISMATCH" and "v2" in body["error"]["message"]
+    assert list_evidence_checks(store, v2["id"]) == []
+
+
+def test_recording_evidence_on_the_page_on_an_unreadable_snapshot_is_refused(page):
+    store, client = page
+    v1, _ = _two_snapshots(store, client)
+    shutil.rmtree(store.root / "proofs" / "c1" / "snapshots" / "v1")
+    for extra in ({}, {"snapshot_sha256": v1["sha256"]}):
+        status, body = client.post("/api/node/c1/evidence", {"candidate_proof_id": v1["id"], "outcome": "passed", **extra})
+        assert status >= 400 and body["error"]["code"] == "SNAPSHOT_UNREADABLE" and "v1" in body["error"]["message"]
+    assert list_evidence_checks(store, v1["id"]) == []
+
+
+def test_the_node_page_reads_a_check_on_a_snapshot_lost_since_as_unverifiable(page):
+    store, client = page
+    v1, _ = _two_snapshots(store, client)
+    check = _ok(client.post("/api/node/c1/evidence", {"candidate_proof_id": v1["id"], "outcome": "passed", "run_by": "lean"}))
+    shutil.rmtree(store.root / "proofs" / "c1" / "snapshots" / "v1")
+    (shown,) = [c for c in _ok(client.get("/api/node/c1"))["evidence_checks"] if c["id"] == check["id"]]
+    assert shown["binding"]["state"] == "unverifiable" and shown["binding"]["sha256"] == v1["sha256"]
+    assert shown["snapshot"]["unreadable"] is True
+
+
 # -- no more launching prism-local --------------------------------------------------
 
 
@@ -470,3 +518,56 @@ def test_the_dependency_list_names_the_trust_rule_an_imported_result_is_relied_o
 def test_the_panels_acceptance_chip_names_the_rules_a_trusted_by_rule_node_meets():
     view = {**VIEW, "node": {"id": "ref", "kind": "imported_result", "statement": "K", "assumptions": []}, "acceptance_state": "trusted-by-rule", "trust_rule": ["textbooks"], "dependencies": []}
     assert "trusted by rule textbooks" in _panel(view=view)["panel"]
+
+
+# -- a computation node's frozen outputs (spec #145): listed, previewable, served ------------------
+
+PNG = bytes.fromhex("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da6364f8cfc000000301010018dd8db00000000049454e44ae426082")
+
+
+def _computation_with_snapshot(store, node_id="N"):
+    from proof_cli.proof_map import create_node, request_review
+
+    create_node(store, node_id=node_id, kind="claim", statement="for every n ≤ 10^4 it holds", medium="computation")
+    folder = store.root / "proofs" / node_id
+    (folder / "out").mkdir()
+    (folder / "out" / "plot.png").write_bytes(PNG)
+    (folder / "out" / "table.csv").write_text("n,ratio\n10000,0.9999\n")
+    write_key_ideas(store, node_id)
+    return request_review(store, node_id, requested_by="agent_a", rationale="scoped")
+
+
+def test_the_node_page_lists_a_snapshots_outputs_and_keeps_binary_ones_out_of_the_text(page):
+    store, client = page
+    _computation_with_snapshot(store)
+    proof = _ok(client.get("/api/node/N"))["candidate_proof"]
+    outputs = {o["path"]: o for o in proof["outputs"]}
+    assert set(outputs) == {"out/plot.png", "out/table.csv"}
+    assert outputs["out/plot.png"]["type"] == "image/png" and outputs["out/plot.png"]["bytes"] == len(PNG)
+    assert outputs["out/table.csv"]["type"] == "text/csv"
+    assert "out/plot.png" not in proof["files"] and proof["files"]["out/table.csv"].startswith("n,ratio")  # text shows, bytes don't
+    assert proof["files"]["run.sh"].startswith("#!")
+
+
+def test_a_frozen_output_is_served_as_itself_and_only_from_inside_the_snapshot(page):
+    store, client = page
+    _computation_with_snapshot(store)
+    served = _ok(client.get("/api/node/N/snapshot/file?path=out/plot.png"))
+    assert served["bytes"] == PNG and served["type"] == "image/png"
+    assert client.get("/api/node/N/snapshot/file?path=../../proof.tex")[0] == 404
+    assert client.get("/api/node/N/snapshot/file?path=out/missing.png")[0] == 404
+
+
+def test_a_frozen_output_that_could_carry_script_is_served_as_a_download_never_as_a_page(page):
+    store, client = page
+    _computation_with_snapshot(store)
+    folder = store.root / "proofs" / "N"
+    (folder / "out" / "report.html").write_text("<script>fetch('/api/decide')</script>")
+    (folder / "out" / "plot.svg").write_text("<svg onload='fetch(\"/api/decide\")'/>")
+    from proof_cli.proof_map import request_review
+    request_review(store, "N", requested_by="agent_a", rationale="with a report")
+    outputs = {o["path"]: o["type"] for o in _ok(client.get("/api/node/N"))["candidate_proof"]["outputs"]}
+    assert outputs["out/report.html"] == "text/html" and outputs["out/plot.svg"] == "image/svg+xml"  # listed by what they are
+    assert _ok(client.get("/api/node/N/snapshot/file?path=out/report.html"))["type"] == "application/octet-stream"  # served as a download
+    assert _ok(client.get("/api/node/N/snapshot/file?path=out/plot.svg"))["type"] == "application/octet-stream"
+    assert _ok(client.get("/api/node/N/snapshot/file?path=out/plot.png"))["type"] == "image/png"  # a raster image shows inline

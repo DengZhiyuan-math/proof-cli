@@ -22,6 +22,7 @@ error report.
 """
 from __future__ import annotations
 
+import collections
 import hashlib
 import json
 import os
@@ -267,12 +268,43 @@ def git_perl_dir() -> str | None:
 
 # ---------------------------------------------------------------- running programs
 
+class _Tail:
+    """What a program printed, as its last `limit` bytes: a chatty program can't fill the server's memory."""
+
+    def __init__(self, limit: int):
+        self.limit, self.dropped, self.size = limit, 0, 0
+        self.chunks: collections.deque[bytes] = collections.deque()
+
+    def drain(self, stream) -> None:
+        """Read `stream` to its end, keeping chunks while they fit and dropping whole ones from the front:
+        each byte is kept and dropped at most once, so a chatty program costs time linear in its output."""
+        for chunk in iter(lambda: stream.read(65536), b""):
+            self.chunks.append(chunk)
+            self.size += len(chunk)
+            while self.size - len(self.chunks[0]) >= self.limit:
+                self.size -= len(first := self.chunks.popleft())
+                self.dropped += len(first)
+
+    def text(self) -> str:
+        data = b"".join(self.chunks)
+        if len(data) > self.limit:  # the oldest kept chunk only partly fits
+            self.dropped += len(data) - self.limit
+            data = data[-self.limit:]
+            self.chunks, self.size = collections.deque([data]), len(data)
+        out = data.decode("utf-8", "replace")
+        if not self.dropped:
+            return out
+        return f"[… {self.dropped} bytes of earlier output dropped: only the last {self.limit} bytes are kept]\n" + out
+
+
 class Runner:
     """Runs the programs of one build. `stop()` (from another thread) ends the running
-    program and every later one; so does the build's time limit."""
+    program and every later one; so does the build's time limit. With `max_output`, only
+    the last that many bytes of a program's output are kept, under a note of what was dropped."""
 
-    def __init__(self, timeout: float = TIMEOUT):
+    def __init__(self, timeout: float = TIMEOUT, max_output: int | None = None):
         self.timeout = timeout
+        self.max_output = max_output
         self.deadline = time.monotonic() + timeout
         self.stopped = threading.Event()
         self.timed_out = False
@@ -287,19 +319,32 @@ class Runner:
             proc = self.proc = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
                                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                                 **TREE)
+        tail = _Tail(self.max_output) if self.max_output else None
+        reader = threading.Thread(target=tail.drain, args=(proc.stdout,), daemon=True) if tail else None
+        if reader:
+            reader.start()
         try:
-            out, _ = proc.communicate(timeout=max(1.0, self.deadline - time.monotonic()))
+            if reader:
+                proc.wait(timeout=max(1.0, self.deadline - time.monotonic()))
+            else:
+                out, _ = proc.communicate(timeout=max(1.0, self.deadline - time.monotonic()))
         except subprocess.TimeoutExpired:
             self.timed_out = True
             self.stopped.set()
             kill_tree(proc)
-            out, _ = proc.communicate()
+            if reader:
+                proc.wait()
+            else:
+                out, _ = proc.communicate()
         finally:
+            if reader:
+                reader.join()
+                proc.stdout.close()
             with self.lock:
                 self.proc = None
         if self.stopped.is_set():
             raise Stopped()
-        return proc.returncode, out.decode("utf-8", "replace")
+        return proc.returncode, tail.text() if tail else out.decode("utf-8", "replace")
 
     def stop(self) -> None:
         with self.lock:

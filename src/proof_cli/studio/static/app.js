@@ -21,7 +21,7 @@ const cm = CodeMirror($("#editor"), {
   styleActiveLine: true, indentUnit: 2, tabSize: 2, indentWithTabs: false,
   extraKeys: {
     "Cmd-S": () => saveActive(), "Ctrl-S": () => saveActive(),
-    "Cmd-Enter": () => compile(), "Ctrl-Enter": () => compile(),
+    "Cmd-Enter": () => primaryAction(), "Ctrl-Enter": () => primaryAction(),
     "Cmd-J": () => forwardSync(), "Ctrl-J": () => forwardSync(),
     "Ctrl-Space": (ed) => showCompletions(ed, true),
     "Cmd-/": "toggleTexComment", "Ctrl-/": "toggleTexComment",
@@ -152,7 +152,7 @@ async function saveActive() {
   const t = activeTab(); if (!t) return;
   clearTimeout(t.saveTimer);
   const ok = await saveTab(t);
-  if (ok && $("#auto-compile").checked) compile();
+  if (ok && $("#auto-compile").checked && MEDIUM.value !== "computation") compile();
 }
 
 /* Autosave, as in Overleaf: an edit is saved a moment after you stop typing, and every
@@ -166,7 +166,7 @@ function scheduleSave(t) {
 }
 async function autosave(t) {
   if (!S.tabs.includes(t) || t.conflict || !isDirty(t)) return;
-  if ((await saveTab(t)) && $("#auto-compile").checked) scheduleCompile();
+  if ((await saveTab(t)) && $("#auto-compile").checked && MEDIUM.value !== "computation") scheduleCompile();
 }
 function flushSaves() {
   for (const t of S.tabs) { clearTimeout(t.saveTimer); autosave(t); }
@@ -347,9 +347,56 @@ function showCompletions(ed, explicit) {
   ed.showHint({ hint: (e) => computeHints(e, explicit), completeSingle: false });
 }
 
+// The node's Medium (spec #145): a computation node's bar offers Run (its run.sh, recorded as an
+// Evidence check) where a LaTeX node's offers Compile, and Open in VS Code hands its folder to the editor.
+const MEDIUM = { value: "latex", open: null };
+function applyMedium(r) {
+  MEDIUM.value = r.medium || "latex";
+  MEDIUM.open = r.open || null;
+  const computation = MEDIUM.value === "computation";
+  const open = $("#btn-open-editor");
+  open.hidden = !computation;
+  open.title = MEDIUM.open && MEDIUM.open.kind === "command" ? `Open this node's folder with: ${MEDIUM.open.command}` : "Open this node's folder in VS Code (vscode://file/…)";
+  $("#btn-compile-menu").hidden = computation;
+  for (const id of ["#zoom-out", "#zoom-in", "#zoom-fit", "#zoom-label", "#page-label", "#pdf-popout", "#btn-forward"]) { const e = $(id); if (e) e.hidden = computation; }
+  $("#pdf-empty").textContent = computation ? "A computation node: Run executes run.sh here. Its exit code is an Evidence check; what it writes to out/ is frozen with the next snapshot and listed on the node's page." : "No PDF yet — press Compile.";
+  setCompileButton(false);
+}
+// the bar's primary action, and ⌘↵: Run on a computation node, Compile on a LaTeX one
+function primaryAction() { return MEDIUM.value === "computation" ? runProgram() : compile(); }
+
+// With no [studio] open_command the page opens the vscode:// URL itself (spec #145); only a command goes to the server.
+async function openInEditor() {
+  if (MEDIUM.open && MEDIUM.open.kind === "scheme") { location.href = MEDIUM.open.url; return; }
+  const r = await api("/api/open", {});
+  if (r._status !== 200) toast(r.error || `HTTP ${r._status}`);
+}
+async function runProgram() {
+  if (S.building) return;
+  S.building = true;
+  const st = $("#build-status");
+  st.className = "status busy"; st.textContent = "running run.sh…";
+  setCompileButton(true);
+  try {
+    const r = await api("/api/run", {});
+    if (r._status !== 200) { st.className = "status err"; st.textContent = r.error || `HTTP ${r._status}`; return; }
+    $("#output").textContent = r.output || "";
+    const text = r.cancelled ? "run stopped" : r.timed_out ? "stopped: the run took too long" : r.exit === 0 ? "OK" : r.exit === null ? "could not start" : `FAILED (exit ${r.exit})`;
+    st.className = "status " + (r.exit === 0 ? "ok" : r.cancelled ? "warn" : "err");
+    st.textContent = `${text} · ${r.seconds}s` + (r.evidence ? ` · Evidence check ${r.evidence.outcome}` : r.note ? ` · ${r.note}` : "");
+    openPanel("output");
+    poll();  // out/ may hold new files
+  } catch (e) {
+    st.className = "status err"; st.textContent = "run request failed: " + e;
+  } finally {
+    S.building = false; setCompileButton(false);
+  }
+}
+
 async function loadConfig() {
   const r = await api("/api/config");
   if (r._status !== 200) return;
+  applyMedium(r);
   BUILD.modes = r.modes || [];
   BUILD.cmds = r.build || {};
   BUILD.main = String(r.main || "main.tex").replace(/\\/g, "/").replace(/^(\.\/)+/, "");
@@ -364,10 +411,13 @@ async function loadConfig() {
 // While a build runs, the Compile button stops it.
 function setCompileButton(running) {
   const b = $("#btn-compile");
+  const computation = MEDIUM.value === "computation";
   b.classList.toggle("stop", running);
   b.querySelector("svg").outerHTML = icon(running ? "stop" : "play");
-  $("#compile-label").textContent = running ? "Stop" : "Compile";
-  b.title = running ? "Stop the build" : keys(`Save all and compile (${(MODE_INFO[BUILD.mode] || [BUILD.mode])[0]}) (⌘↵)`);
+  $("#compile-label").textContent = running ? "Stop" : computation ? "Run" : "Compile";
+  b.title = running ? (computation ? "Stop the run" : "Stop the build")
+    : computation ? "Run ./run.sh in the node folder; its exit code is recorded as an Evidence check (⌘↵)"
+    : keys(`Save all and compile (${(MODE_INFO[BUILD.mode] || [BUILD.mode])[0]}) (⌘↵)`);
 }
 const plural = (n, w, ws = w + "s") => `${n} ${n === 1 ? w : ws}`;
 
@@ -412,7 +462,11 @@ async function compile(clean = false) {
     S.building = false; setCompileButton(false);
   }
 }
-$("#btn-compile").onclick = () => S.building ? api("/api/build/stop", {}) : compile();
+$("#btn-compile").onclick = () => {
+  if (!S.building) return primaryAction();
+  return api(MEDIUM.value === "computation" ? "/api/run/stop" : "/api/build/stop", {});
+};
+$("#btn-open-editor").onclick = () => openInEditor();
 $("#btn-clean-build").onclick = () => { compileMenu(false); compile(true); };
 
 /* Compile menu: build mode and auto-compile, on the ▾ half of the Compile button. */

@@ -13,6 +13,7 @@ fixed: `proof.tex` → `build/proof.pdf`, the PDF review archives when it is cur
 
 from __future__ import annotations
 
+import hashlib
 import threading
 from dataclasses import dataclass
 from http import HTTPStatus
@@ -20,11 +21,13 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote
 
 from .. import proof_map
-from ..domain import ProofMapNodeKind
-from ..storage import ProjectStore
-from ..studio.proof_agent import ProofAgentContext, library_folders
-from ..studio.server import Studio
-from ..vault import node_folder
+from ..domain import Medium, ProofMapNodeKind
+from ..reviews import git_identity
+from ..storage import ProjectStore, get_current_candidate_proof
+from ..studio.proof_agent import ProofAgentContext, library_folders, open_command
+from ..studio.server import ComputationHooks, FinishedRun, RunInputs, RunRecord, Studio
+from ..vault import (SNAPSHOT_MANIFEST, frozen_digests, frozen_role, inputs_digest, is_executable, node_folder,
+                     working_inputs, working_links)
 
 STUDIO_STATIC = Path(__file__).resolve().parent.parent / "studio" / "static"
 # the node's build: what vault.build_is_current checks and review archives (ADR-0010)
@@ -61,9 +64,10 @@ class StudioAnswer:
 
 
 def _error(status: HTTPStatus, code: str, message: str) -> StudioAnswer:
+    """The hub's refusals in the studio's one error shape, {"error": message, "code": CODE}."""
     import json
 
-    body = json.dumps({"ok": False, "error": {"code": code, "message": message}}).encode("utf-8")
+    body = json.dumps({"error": message, "code": code}).encode("utf-8")
     return StudioAnswer(int(status), body, "application/json")
 
 
@@ -102,8 +106,89 @@ class StudioHub:
                         node_id, root, library_folders(root), dependencies=self._dependencies(node_id),
                         on_drafted=lambda agent, data: proof_map.record_key_ideas_draft(self.store, node_id, agent=agent, content=data),
                     ),
+                    # the node's Medium as of each request, a run recorded as an Evidence check as the page's
+                    # identity, and the project's optional open command (spec #145)
+                    computation=ComputationHooks(
+                        medium=lambda: self._medium(node_id),
+                        run_inputs=lambda: self._run_inputs(node_id),
+                        record_run=lambda run: self._record_run(node_id, run),
+                        open_command=lambda: open_command(root),
+                    ),
                 )
             return self._studios[node.id]
+
+    def _medium(self, node_id: str) -> str | None:
+        node = proof_map.get_node(self.store, node_id)
+        return node.medium.value if node is not None and node.medium is not None else None
+
+    def _run_inputs(self, node_id: str) -> RunInputs:
+        """The state of the program's inputs (`vault.frozen_role` is `input`: its scripts, data and hidden environment
+        files, never `out/`): their inputs digest, as `frozen_inputs_digest` hashes a snapshot's, and a stamp of each
+        (size, mtime, ctime, inode). An input edited during a run and put back before it ends has its content as
+        before but not its stamp (audit R-S1); its ctime no program can set back. The digest is
+        `vault.inputs_digest` over exactly the files `working_inputs_digest` reads, without refusing a link under
+        `out/`: only a symbolic link among the inputs, or an unreadable input, is no state to compare, and says why."""
+        folder = node_folder(self.store.root, node_id)
+        try:
+            links = sorted(path.relative_to(folder).as_posix() for path, _ in working_links(self.store.root, node_id, Medium.computation)
+                           if frozen_role(path.relative_to(folder).as_posix()) == "input")
+            if links:  # a link among the outputs is an output, and outputs may differ (Q41)
+                return RunInputs("", {}, f"{', '.join(links)}: a symbolic link among the program's inputs, which a Run's inputs are "
+                                         "never compared through")
+            paths = {rel: path for rel, path in working_inputs(self.store.root, node_id, Medium.computation).items()
+                     if frozen_role(rel) == "input"}
+            stamps = {rel: f"{st.st_size}:{st.st_mtime_ns}:{st.st_ctime_ns}:{st.st_ino}" for rel, path in paths.items() for st in [path.stat()]}
+            digest = inputs_digest({rel: hashlib.sha256(path.read_bytes()).hexdigest() for rel, path in paths.items()},
+                                   [rel for rel, path in paths.items() if is_executable(path)])
+        except OSError as exc:
+            where = Path(exc.filename).relative_to(folder).as_posix() if exc.filename and Path(exc.filename).is_relative_to(folder) else str(folder)
+            return RunInputs("", {}, f"{where} can't be read ({exc.strerror or exc}), so the program's inputs can't be compared")
+        return RunInputs(digest, stamps)
+
+    @staticmethod
+    def _changed_during(before: RunInputs, after: RunInputs) -> str | None:
+        """Why the inputs are not the ones the run started with, naming the first input that changed; None if none did."""
+        if before == after:
+            return None
+        written = sorted(set(after.stamps) - set(before.stamps))
+        if written:
+            return f"the run wrote outside out/ ({written[0]}), which changed its inputs"
+        touched = sorted(rel for rel in before.stamps if before.stamps[rel] != after.stamps.get(rel))
+        return f"inputs changed during the run ({touched[0]})" if touched else "inputs changed during the run"
+
+    def _record_run(self, node_id: str, run: FinishedRun) -> RunRecord:
+        """The Evidence rule (ADR-0015): a run is an Evidence check on the node's current snapshot only when it ran to
+        its end (not stopped, not timed out), its inputs were untouched from before it to after it, and they are the
+        inputs the snapshot froze. Its outputs may differ: the check is of the execution outcome for the frozen
+        inputs, not a certificate of the frozen outputs. Recorded bound to the snapshot hash read together with the
+        frozen inputs it was compared with; otherwise nothing is recorded, and the note says why."""
+        proof = get_current_candidate_proof(self.store, node_id)
+        if run.stopped is not None:
+            return {"evidence": None, "note": f"{run.stopped} — not recorded as an Evidence check: only a run that completes is one"}
+        if proof is None:
+            return {"evidence": None, "note": "no snapshot yet — not recorded: request review, and runs of what it froze are recorded as Evidence checks on it"}
+        version = f"snapshot v{proof.version}"
+        if run.before is None or run.after is None:
+            return {"evidence": None, "note": f"an input could not be read — not recorded against {version}"}
+        unreadable = run.before.unreadable or run.after.unreadable
+        if unreadable:
+            return {"evidence": None, "note": f"the run was not recorded as an Evidence check on {version}: {unreadable}"}
+        changed = self._changed_during(run.before, run.after)
+        if changed:
+            return {"evidence": None, "note": f"{changed} — not recorded against {version}"}
+        snapshot = self.store.root / proof.file_path
+        frozen = frozen_digests(snapshot.parent) if snapshot.name == SNAPSHOT_MANIFEST else None
+        if frozen is None:
+            return {"evidence": None, "note": f"{version} can't be read — not recorded"}
+        snapshot_sha256, frozen_inputs = frozen
+        if run.before.digest != frozen_inputs:
+            return {"evidence": None, "note": f"inputs differ from {version} — not recorded: request review to freeze them"}
+        try:
+            check = proof_map.record_evidence_check(self.store, proof.id, run.outcome, notes=run.notes,
+                                                    run_by=git_identity(self.store.root), snapshot_sha256=snapshot_sha256)
+        except proof_map.ProofMapError as exc:  # the snapshot changed between the comparison and the record
+            return {"evidence": None, "note": f"{version} changed while the run was recorded — not recorded: {exc.message}"}
+        return {"evidence": check.model_dump(mode="json"), "note": ""}
 
     def _dependencies(self, node_id: str) -> list[str]:
         node = proof_map.get_node(self.store, node_id)
