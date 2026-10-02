@@ -1000,3 +1000,18 @@ def test_a_decision_wins_over_a_review_request_in_the_same_turn_and_is_logged_on
     assert get_workflow_state(store, "N") == "review-needed"  # the review request stands as it is
     asked = [e for e in work_log(store, "N") if e.get("kind") == "step" and e.get("status") == "needs-human"]
     assert len(asked) == 1  # the run's closing note does not say it a second time
+
+
+def test_running_the_nodes_program_counts_as_a_change(studio, monkeypatch):
+    """A computation turn's run of `./run.sh` is a run for the stuck rule, as an interpreter's or a compile's is."""
+    from proof_cli.studio import agent_run
+    from proof_cli.studio.proof_agent import is_a_run
+
+    assert is_a_run("./run.sh") and is_a_run("cd out && ./run.sh --n 100") and is_a_run("latexmk -pdf proof.tex")
+    assert not is_a_run("ls out") and not is_a_run("cat run.sh")
+    store, hub, log, queue = studio
+    monkeypatch.setattr(agent_run, "STUCK_TURNS", 2)
+    _queue(queue, [["sleep", "0"]], [["tool", "./run.sh"]], [["sleep", "0"]], [["sleep", "0"]], [["sleep", "0"]])
+    _post(hub, "/studio/N/api/agent/start", {"provider": "claude", "roles": ["prover", "numerics"]})
+    state = _wait(hub)
+    assert state["status"] == "stuck" and len(_turns(log)) == 4, state
