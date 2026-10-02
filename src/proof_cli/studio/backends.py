@@ -103,6 +103,7 @@ class Job:
         self.files: Callable[[], list[str]] = lambda: []    # editable files
         self.writable: Callable[[str], bool] = lambda rel: False
         self.context = None     # a node's ProofAgentContext (proof_agent.py), or None outside a proof map
+        self.turn: dict | None = None   # a run's turn (agent_run.py): role, name, redirect; None for the researcher's own
         self.before: dict[str, bytes | None] = {}     # file contents around the turn
         self.after: dict[str, bytes | None] = {}
         # run once the backend is done, before the turn's changes are read (a draft's marker, ADR-0013)

@@ -368,10 +368,16 @@ def create_node(
 # `proof` like everything else: an event on the node, never a decision, never a file in the node folder
 # (a snapshot would freeze it). The work log the studio shows is these reports merged, in time order,
 # with what the agent did through other `proof` commands: a split, a review request, an Evidence check,
-# a fog item, a dependency edit.
+# a fog item, a dependency edit — each carrying the role of the run's turn it happened in — and with
+# the turns themselves: each its job, its backend session, the step it belongs to, and its conversation.
 
-PROGRESS_STATUSES = ("started", "done", "stuck")
+# a step's status; `needs-human` names, in its note, a decision only the researcher can make (the run stops for it)
+PROGRESS_STATUSES = ("started", "done", "stuck", "needs-human")
 PROGRESS_EVENT = "agent_progress"
+TURN_EVENT = "agent_turn"
+# a turn's raw conversation, kept with the project's state (never the node folder, which a snapshot freezes)
+TURNS_DIR = Path(".proof") / "agent-turns"
+_TURN_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 
 
 def record_progress(
@@ -408,6 +414,8 @@ def record_progress(
             raise ProofMapError("INVALID_PROGRESS_STATUS", f"'{status}' is not a step status; expected one of: {', '.join(PROGRESS_STATUSES)}")
         if int(step) < 1:
             raise ProofMapError("INVALID_PROGRESS_STEP", "steps count from 1")
+        if status == "needs-human" and not note.strip():
+            raise ProofMapError("DECISION_REQUIRED", "name the decision the researcher must make: --note \"<the decision>\"")
         payload = {"kind": "step", "role": role, "by": by, "step": int(step), "status": status, "note": note.strip()}
         message = f"{role} on {node_id}: step {step} {status}" + (f" — {note.strip()}" if note.strip() else "")
     else:
@@ -417,15 +425,71 @@ def record_progress(
     return {**payload, "node_id": node_id, "at": utc_now().isoformat()}
 
 
+def record_agent_turn(
+    store: ProjectStore,
+    node_id: str,
+    *,
+    phase: str,
+    turn: str,
+    role: str,
+    by: str,
+    provider: str = "",
+    job: int | None = None,
+    session_id: str | None = None,
+    step: int | None = None,
+    events: list[dict] | None = None,
+) -> None:
+    """A run's turn on the node: `started` before it runs, `ended` when it is over, with its job, its backend session
+    (where the backend keeps the conversation too), the step it belongs to, and the conversation itself, kept under
+    .proof/agent-turns/ so it outlives the studio's memory: a new Start, a restart. Never a decision."""
+    require_node(store, node_id)
+    if not _TURN_ID.fullmatch(turn):
+        raise ProofMapError("INVALID_REQUEST", f"not a turn id: {turn!r}")
+    payload: dict = {"phase": phase, "turn": turn, "role": role, "by": by, "provider": provider}
+    if phase == "ended":
+        payload.update(job=job, session_id=session_id, step=step)
+        if events is not None:
+            path = TURNS_DIR / node_id / f"{turn}.json"
+            target = store.root / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(json.dumps({**payload, "events": events}, ensure_ascii=False), encoding="utf-8")
+            payload["transcript"] = path.as_posix()
+    with store.transaction() as conn:
+        append_event(store, TURN_EVENT, f"{role} on {node_id}: turn {turn} {phase}", entity_id=node_id, payload=payload, conn=conn)
+
+
+def agent_turn_transcript(store: ProjectStore, node_id: str, turn: str) -> dict | None:
+    """A turn's record with its conversation (`events`), as record_agent_turn kept it; None when there is none."""
+    if not _TURN_ID.fullmatch(turn or "") or not re.fullmatch(r"[A-Za-z0-9._-]+", node_id or ""):
+        return None
+    try:
+        return json.loads((store.root / TURNS_DIR / node_id / f"{turn}.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
 def work_log(store: ProjectStore, node_id: str) -> list[dict]:
-    """The node's work log: the agent's reports merged, in time order, with what it did through `proof`."""
+    """The node's work log: the agent's reports merged, in time order, with what it did through `proof` and its turns.
+    What happened during a run's turn carries that turn's role; what happened outside one (the researcher's own split,
+    a fog item from the map) has none."""
     require_node(store, node_id)
     proof_ids = {proof.id for proof in list_candidate_proofs(store, node_id)}
-    near_fog = {item.id for item in list_fog_items(store) if node_id in item.near}  # the fog about this node: its Experiments belong here
+    fog = {item.id: item for item in list_fog_items(store)}
+    near_fog = {fog_id for fog_id, item in fog.items() if node_id in item.near}  # the fog about this node: its Experiments belong here
     entries: list[dict] = []
+    turn_role: str | None = None  # the role of the turn running at this point of the log
     for event in list_events(store):
         at = event.created_at.isoformat()
         payload = event.payload or {}
+        if event.kind == TURN_EVENT and event.entity_id == node_id:
+            if payload.get("phase") == "started":
+                turn_role = payload.get("role")
+                continue
+            turn_role = None
+            if payload.get("job") is not None:  # a turn that never began (stopped before it existed) has nothing to show
+                entries.append({"at": at, "kind": "turn", **{key: value for key, value in payload.items() if key != "phase"}})
+            continue
+        before = len(entries)
         if event.kind == PROGRESS_EVENT and event.entity_id == node_id:
             entries.append({"at": at, **payload})
         elif event.kind == "proof_map_node_split" and event.entity_id == node_id:
@@ -435,13 +499,16 @@ def work_log(store: ProjectStore, node_id: str) -> list[dict]:
         elif event.kind == "proof_map_evidence_check_recorded" and event.entity_id in proof_ids:
             entries.append({"at": at, "kind": "evidence", "by": payload.get("run_by"), "outcome": payload.get("outcome"), "evidence_check_id": payload.get("evidence_check_id")})
         elif event.kind == "proof_fog_added" and node_id in (payload.get("near") or []):
-            entries.append({"at": at, "kind": "fog", "by": payload.get("created_by"), "fog_id": event.entity_id, "text": event.message.partition(": ")[2]})
+            text = payload.get("text") or (fog[event.entity_id].text if event.entity_id in fog else None)  # older events: the item's text
+            entries.append({"at": at, "kind": "fog", "by": payload.get("created_by"), "fog_id": event.entity_id, "text": text})
         elif event.kind == "proof_fog_experiment_recorded" and event.entity_id in near_fog:
             entries.append({"at": at, "kind": "experiment", "by": payload.get("run_by"), "fog_id": event.entity_id, "outcome": payload.get("outcome"), "seq": payload.get("seq")})
         elif event.kind in ("proof_map_dependency_added", "proof_map_dependency_removed", "proof_map_dependency_moved") and event.entity_id == node_id:
             entries.append({"at": at, "kind": "dependencies", "by": payload.get("edited_by") or payload.get("by"), "change": event.kind.rsplit("_", 1)[1], "dependency": payload.get("dependency_id") or payload.get("dependency")})
         elif event.kind in ("proof_map_node_claimed", "proof_map_claim_reassigned") and event.entity_id == node_id:
             entries.append({"at": at, "kind": "claimed", "by": payload.get("claimant_id") or payload.get("assignee")})
+        for entry in entries[before:]:
+            entry.setdefault("role", turn_role)  # an automatic entry: the role of the turn it happened in, if any
     return entries
 
 

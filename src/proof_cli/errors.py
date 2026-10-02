@@ -140,5 +140,16 @@ ERROR_CODES: dict[str, str] = {
     "INVALID_PROGRESS_STEP": "steps count from 1",
     "PROGRESS_STATUS_REQUIRED": "a step report needs its status",
     "PROGRESS_EMPTY": "a progress report is a plan, a step or a handoff; this one is none of them",
-
+    "DECISION_REQUIRED": "a step that needs a human decision names the decision in --note",
+    # -- the Proof agent's run, through the studio and the map (ADR-0016, spec #145) --
+    "RUN_ACTIVE": "an agent is already working on this node: pause, redirect or release it first",
+    "RUN_SETTLING": "the previous run is still giving the node back; Start again in a moment",
+    "NO_RUN": "no agent run to act on: the folder is not a proof map node, or no run is active on it",
+    "REDIRECT_EMPTY": "a Redirect needs its one line of text",
+    "RUN_REFUSED": "the run's Start was refused for a reason with no code of its own; the message says why",
+    "RELEASE_FAILED": "the run ended but the node could not be given back; it is still assigned, and the message says why",
+    "AGENT_BUSY": "the studio's agent is still working on the previous turn",
+    "NO_SUCH_TURN": "no turn of a run on this node was recorded under that id",
+    "TURN_CALLED_OFF": "the run was stopped while its turn was being prepared, so no turn started",
+    "NOT_A_COMPUTATION": "Run is for a node whose Medium is computation; a LaTeX node compiles",
 }

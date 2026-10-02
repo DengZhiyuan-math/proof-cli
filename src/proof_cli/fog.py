@@ -136,7 +136,7 @@ def add_fog(store: ProjectStore, text: str, *, near=(), notes: str = "", created
     with store.transaction() as conn:
         item = FogItem(id=FogItem.id_for(next_fog_number(store, conn=conn)), text=text.strip(), notes=notes or "", near=near_ids, created_by=created_by or "human")
         insert_fog_item(store, item, conn=conn)
-        append_event(store, "proof_fog_added", f"added {item.id}: {item.text}", entity_id=item.id, payload={"near": near_ids, "created_by": item.created_by}, conn=conn)
+        append_event(store, "proof_fog_added", f"added {item.id}: {item.text}", entity_id=item.id, payload={"near": near_ids, "created_by": item.created_by, "text": item.text}, conn=conn)
     return item
 
 
