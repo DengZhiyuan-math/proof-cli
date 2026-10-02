@@ -578,6 +578,8 @@ function statusIcon(kind, x, y, size = 16) {
 
 const KIND_LABEL = { theorem: "Theorem", lemma: "Lemma", claim: "Claim", imported_result: "Imported result" };
 const capitalised = (text) => text.charAt(0).toUpperCase() + text.slice(1);
+// whether a node's candidate proof is a program (spec #145): its medium is computation
+const isComputation = (node) => node.medium === "computation";
 
 // Layers by longest path from the top (a node sits below everything that depends on it),
 // then a few barycenter sweeps to cut crossings. Enough for tens to hundreds of nodes.
@@ -752,7 +754,7 @@ function drawDag(nodes) {
     place();
     g.append(svg("rect", { class: "box", x: left, y: top, width: BOX.w, height: BOX.h, rx: BOX.radius }));
     const kind = svg("text", { class: "kind", x: left + 14, y: top + 21 });
-    kind.textContent = `${KIND_LABEL[n.kind] || capitalised(n.kind.replace("_", " "))}${n.medium === "computation" ? " · computation" : ""}  `;
+    kind.textContent = `${KIND_LABEL[n.kind] || capitalised(n.kind.replace("_", " "))}${isComputation(n) ? " · computation" : ""}  `;
     const id = svg("tspan", { class: "id" });
     id.textContent = short(n.id, 18);
     kind.append(id);

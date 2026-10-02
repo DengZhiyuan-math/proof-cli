@@ -47,6 +47,7 @@ ERROR_CODES: dict[str, str] = {
     "RUN_SCRIPT_MISSING": "a computation node has no run.sh: its review needs the program that is its candidate proof (spec #145)",
     "INVALID_MEDIUM": "the medium is not latex or computation (spec #145)",
     "MEDIUM_NOT_APPLICABLE": "an imported result has no candidate proof, so no medium (spec #145)",
+    "WORKING_FILE_UNREADABLE": "a file or folder the Review snapshot would freeze can't be read; `path` names it, and nothing was written",
     "WORKING_PROOF_UNCHANGED": "the working proof is the snapshot already under review",
     "KEY_IDEAS_REQUIRED": "requesting review needs the node's key-ideas.md, with 核心思路 and 主要步骤 filled in (ADR-0013); `missing` names what is absent",
     "CANDIDATE_PROOF_NOT_FOUND": "no Candidate proof has this id",
@@ -133,10 +134,18 @@ ERROR_CODES: dict[str, str] = {
     "INVALID_REQUEST": "the page's request is missing what the action needs (a node id, which snapshot, …)",
     "NOT_FOUND": "no such page route or node action, or (a legacy command under --json) no such contract, reference or target",
     "NOT_THIS_NODE": "the snapshot, Candidate proof or review named belongs to another node",
+    # -- a node's studio (ADR-0011), and a computation's Run and Open in VS Code (ADR-0015, spec #145) --
+    "NO_STUDIO": "an imported result has no studio: it has no proof to write",
+    "STUDIO_CLOSED": "the studio is closed: the proof map's server is shutting down",
+    "CROSS_SITE": "the studio answers only its own page",
+    "NOT_A_COMPUTATION": "Run is for a node whose Medium is computation; a LaTeX node compiles",
+    "NOT_A_NODE_FILE": "the file to open is not an editable file of this node's folder",
+    "INVALID_LINE": "the line to open a file at is a positive whole number",
+    "OPEN_FAILED": "the project's [studio] open_command could not start, or exited non-zero",
     # -- the Proof agent's work log (ADR-0016, spec #145) --
     "ROLE_REQUIRED": "a progress report names the role that makes it: PROOF_AGENT_ROLE in the agent's runtime, or --role",
     "INVALID_ROLE": "the Proof agent role is not prover, typesetter or numerics",
-    "INVALID_PROGRESS_STATUS": "a step's status is started, done or stuck",
+    "INVALID_PROGRESS_STATUS": "a step's status is started, done, stuck or needs-human",
     "INVALID_PROGRESS_STEP": "steps count from 1",
     "PROGRESS_STATUS_REQUIRED": "a step report needs its status",
     "PROGRESS_EMPTY": "a progress report is a plan, a step or a handoff; this one is none of them",
@@ -151,5 +160,11 @@ ERROR_CODES: dict[str, str] = {
     "AGENT_BUSY": "the studio's agent is still working on the previous turn",
     "NO_SUCH_TURN": "no turn of a run on this node was recorded under that id",
     "TURN_CALLED_OFF": "the run was stopped while its turn was being prepared, so no turn started",
-    "NOT_A_COMPUTATION": "Run is for a node whose Medium is computation; a LaTeX node compiles",
+}
+
+
+NOTICE_CODES: dict[str, str] = {
+    # A notice is what a command that succeeded has to tell its caller, never a refusal: under
+    # --json it is `data.notices`, a list of {code, message, …}; the code is stable like an error's.
+    "SNAPSHOT_LARGE_OUTPUT": "the Review snapshot froze more of a computation's out/ than `[snapshot] large_output_mb` in proof.toml (default 50); `output_bytes` and `threshold_bytes` say how much (spec #145)",
 }
