@@ -44,7 +44,7 @@ class El {
         posted.push({ url, body: JSON.parse(options.body) });
         const answer = scenario.answer || { status: "running", name: "claude-code", version: 2 };
         if (scenario.after) run = scenario.after;  // what the next read of the run says
-        return { status: scenario.refuse ? 409 : 200, json: async () => (scenario.refuse ? { error: "RUN_ACTIVE", message: "already working" } : answer) };
+        return { status: scenario.refuse ? 409 : 200, json: async () => (scenario.refuse ? { error: "already working", code: "RUN_ACTIVE" } : answer) };
       }
       if (url === "api/agent/run") return { status: 200, json: async () => run };
       if (url === "api/agent/log") return { status: 200, json: async () => ({ entries: log, folder: "/proj/proofs/N", open: scenario.open || { kind: "scheme", url: "vscode://file//proj/proofs/N" } }) };

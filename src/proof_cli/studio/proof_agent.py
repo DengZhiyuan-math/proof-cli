@@ -235,18 +235,32 @@ ROLES: dict[str, Role] = {
     ),
 }
 
-# What a role's programs could still run beyond a file of the node's own: an interpreter's inline code or module
-# (`python3 -c "…"`, `python3 -m proof_cli …`), TeX's shell escape, latexmk's Perl. Denied, so a role's scope is not
-# one command away from anything (ADR-0011; a contract for a cooperative agent, as ADR-0010 says, not a sandbox).
-_INLINE = {"python": ("-c", "-m"), "python3": ("-c", "-m"), "sage": ("-c", "-m", "-sh", "-python", "-ipython"), "latexmk": ("-e", "-shell-escape", "--shell-escape"),
+# The named ways a role's allowed programs give a general shell back, denied (ADR-0011): an interpreter's inline code,
+# module or stdin (`python3 -c "…"`, `python3 -m proof_cli …`, `python3 -`, `python3 /dev/stdin`), sage's shells,
+# `lake env <cmd>` / `lake exe|run|script`, TeX's shell escape, and latexmk's Perl (`-e`, `-r <rc>`) and engine
+# commands (`-pdflatex=<cmd>`). This closes these named escapes only, not every prefix trick: ADR-0010 makes the roles'
+# scope a contract for a cooperative agent, not a sandbox, and a role can still run a script it wrote itself.
+# A flag ending in "=" takes its value glued on; latexmk's flags are denied wherever they stand in the command line.
+_TEX_ENGINES = ("-pdflatex", "-lualatex", "-xelatex", "-latex")
+_INLINE = {"python": ("-c", "-m", "-", "/dev/stdin"), "python3": ("-c", "-m", "-", "/dev/stdin"),
+           "sage": ("-c", "-m", "-sh", "-python", "-ipython", "-", "/dev/stdin"), "lake": ("env", "exe", "run", "script"),
+           "latexmk": ("-e", "-r", *(f"{engine}=" for engine in _TEX_ENGINES), *_TEX_ENGINES, "-shell-escape", "--shell-escape"),
            **{tex: ("-shell-escape", "--shell-escape") for tex in ("pdflatex", "xelatex", "lualatex")}}
+_ANYWHERE = ("latexmk",)
 # the commands that make a turn a run, for the stuck rule: a computation, a compile, the node's own program
 _RUNS = frozenset((*COMPUTATION, *_TEX_PROGRAMS))
 
 
 def inline_code_rules(programs: tuple[str, ...]) -> list[str]:
-    """The Bash rules that deny `programs` their inline-code forms (see _INLINE)."""
-    return [f"Bash({program} {flag} *)" for program in programs for flag in _INLINE.get(program, ())]
+    """The Bash rules that deny `programs` their ways back to a general shell (see _INLINE)."""
+    rules: list[str] = []
+    for program in programs:
+        for flag in _INLINE.get(program, ()):
+            forms = [f"{flag}*"] if flag.endswith("=") else [flag, f"{flag} *"]
+            if program in _ANYWHERE:
+                forms += [f"* {form}" for form in forms]
+            rules += [f"Bash({program} {form})" for form in forms]
+    return rules
 
 
 def is_a_run(command: str) -> bool:
