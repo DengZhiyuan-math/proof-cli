@@ -1,6 +1,6 @@
 # One web entry, with the LaTeX studio built in
 
-**Status**: accepted (implemented in #67–#72). Amended by ADR-0015: a node whose Medium is `computation` has a program as its candidate proof — its scripts, data and environment files, frozen by the snapshot as inputs, and `out/` as outputs — unlike a LaTeX node's `scratch/`, which stays unfrozen. The studio's Run and the display of frozen outputs follow in #147. Amended by ADR-0016: the studio is the Proof agent's workbench — a run of three roles the researcher watches and steps in on — and the editor is its Files view.
+**Status**: accepted (implemented in #67–#72). Amended by ADR-0015: a node whose Medium is `computation` has a program as its candidate proof — its scripts, data and allowlisted environment files (never a secret), frozen by the snapshot as inputs, and `out/` as outputs — unlike a LaTeX node's `scratch/`, which stays unfrozen. The studio's Run and the display of frozen outputs follow in #147. Amended by ADR-0016: the studio is the Proof agent's workbench — a run of three roles the researcher watches and steps in on — and the editor is its Files view.
 - **Supersedes** ADR-0010 point 5 ("prism-local is coupled only through files") and its note that proof-cli needs no TeX.
 - **Supersedes** ADR-0007's "Start agent is not the web app spawning or supervising an agent process": the node page now runs an agent.
 - **Amends** ADR-0006 (the command surface), ADR-0008 (the node page) and ADR-0010's snapshot (point 5 below).
