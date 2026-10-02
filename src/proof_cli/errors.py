@@ -47,7 +47,8 @@ ERROR_CODES: dict[str, str] = {
     "RUN_SCRIPT_MISSING": "a computation node has no run.sh: its review needs the program that is its candidate proof (spec #145)",
     "INVALID_MEDIUM": "the medium is not latex or computation (spec #145)",
     "MEDIUM_NOT_APPLICABLE": "an imported result has no candidate proof, so no medium (spec #145)",
-    "WORKING_FILE_UNREADABLE": "a file or folder the Review snapshot would freeze can't be read; `path` names it, and nothing was written",
+    "WORKING_FILE_UNREADABLE": "a file or folder a Review snapshot would freeze, or an exchange export carry, can't be read; `path` names it, and nothing was written",
+    "NODE_FOLDER_SYMLINK": "a node folder holds a symbolic link where a Review snapshot or an exchange export would read; neither follows links. `links` lists each, its `path` and whether it is `dangling`",
     "WORKING_PROOF_UNCHANGED": "the working proof is the snapshot already under review",
     "KEY_IDEAS_REQUIRED": "requesting review needs the node's key-ideas.md, with 核心思路 and 主要步骤 filled in (ADR-0013); `missing` names what is absent",
     "CANDIDATE_PROOF_NOT_FOUND": "no Candidate proof has this id",
@@ -134,6 +135,13 @@ ERROR_CODES: dict[str, str] = {
     "INVALID_REQUEST": "the page's request is missing what the action needs (a node id, which snapshot, …)",
     "NOT_FOUND": "no such page route or node action, or (a legacy command under --json) no such contract, reference or target",
     "NOT_THIS_NODE": "the snapshot, Candidate proof or review named belongs to another node",
+    # the page's write checks, before any action runs (ADR-0007)
+    "WRONG_HOST": "the request names another host than the app's pinned origin",
+    "WRONG_ORIGIN": "a write came from another origin than the app's own page",
+    "JSON_REQUIRED": "a write's body is application/json",
+    "BAD_LENGTH": "the request's Content-Length is missing a number or negative",
+    "BODY_TOO_LARGE": "the request body is larger than the app accepts",
+    "MALFORMED_JSON": "the request body isn't a JSON object",
     # -- a node's studio (ADR-0011), and a computation's Run and Open in VS Code (ADR-0015, spec #145) --
     "NO_STUDIO": "an imported result has no studio: it has no proof to write",
     "STUDIO_CLOSED": "the studio is closed: the proof map's server is shutting down",
@@ -142,6 +150,15 @@ ERROR_CODES: dict[str, str] = {
     "NOT_A_NODE_FILE": "the file to open is not an editable file of this node's folder",
     "INVALID_LINE": "the line to open a file at is a positive whole number",
     "OPEN_FAILED": "the project's [studio] open_command could not start, or exited non-zero",
+    "NOT_UTF8": "the file is not UTF-8 text; the studio edits UTF-8 files only",
+    "STUDIO_REQUEST_INVALID": "the studio's request is malformed or names something it may not touch; the message says what",
+    "STUDIO_FILE_ERROR": "the studio could not read or write a file (locked by another program, say); the message says which",
+    "NO_SUCH_JOB": "no agent job of this studio by that id",
+    "NO_SYNCTEX": "no SyncTeX data yet: build first",
+    "NO_SYNCTEX_MATCH": "SyncTeX knows no place for that position",
+    "NOT_A_NODE_STUDIO": "only a proof map node's studio drafts key ideas",
+    "KEY_IDEAS_EXISTS": "key-ideas.md already exists: edit it, or remove it to have the agent draft it afresh",
+    "EVIDENCE_SNAPSHOT_MISMATCH": "the snapshot hash an Evidence check names is not the snapshot's hash now; the message names the node's current snapshot",
     # -- the Proof agent's work log (ADR-0016, spec #145) --
     "ROLE_REQUIRED": "a progress report names the role that makes it: PROOF_AGENT_ROLE in the agent's runtime, or --role",
     "INVALID_ROLE": "the Proof agent role is not prover, typesetter or numerics",
@@ -159,6 +176,10 @@ ERROR_CODES: dict[str, str] = {
     "RELEASE_FAILED": "the run ended but the node could not be given back; it is still assigned, and the message says why",
     "AGENT_BUSY": "the studio's agent is still working on the previous turn",
     "NO_SUCH_TURN": "no turn of a run on this node was recorded under that id",
+    "AGENT_UNKNOWN_PROVIDER": "the studio has no agent backend by that name (claude, codex)",
+    "AGENT_UNAVAILABLE": "the agent's CLI can't run a turn here: not installed, not logged in, or it refused; the message says why",
+    "AGENT_INVALID_OPTION": "the model or effort asked for is not one the agent's CLI accepts",
+    "AGENT_NO_USAGE_LIMITS": "this agent backend reports no usage limits to probe",
     "TURN_CALLED_OFF": "the run was stopped while its turn was being prepared, so no turn started",
 }
 
@@ -167,4 +188,12 @@ NOTICE_CODES: dict[str, str] = {
     # A notice is what a command that succeeded has to tell its caller, never a refusal: under
     # --json it is `data.notices`, a list of {code, message, …}; the code is stable like an error's.
     "SNAPSHOT_LARGE_OUTPUT": "the Review snapshot froze more of a computation's out/ than `[snapshot] large_output_mb` in proof.toml (default 50); `output_bytes` and `threshold_bytes` say how much (spec #145)",
+    "SNAPSHOT_SKIPPED_HIDDEN": "the Review snapshot left hidden files or folders out (secrets, dotfiles not on the allowlist, hidden folders); `paths` lists them by path, never their contents (ADR-0015)",
+    "SNAPSHOT_EXPORTED_UNVERIFIABLE": "an exchange export left frozen files out of a snapshot (secrets, or hidden or cache files an older rule froze), so it no longer verifies where it is imported; `node_id`, `version` and `paths` say which (ADR-0015)",
 }
+
+
+def notice(code: str, message: str, **data) -> dict:
+    """One notice, as `data.notices` carries it; `code` must be in NOTICE_CODES (KeyError otherwise)."""
+    NOTICE_CODES[code]
+    return {"code": code, "message": message, **data}

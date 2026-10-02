@@ -152,7 +152,9 @@ def _evidence_checks(store: ProjectStore, node_id: str, current) -> list[dict]:
             "current": current is not None and proof.id == current.id,
             "location": f"{path.parent}/" if path.name == SNAPSHOT_MANIFEST else str(path),
         }
-        checks += [{**check.model_dump(mode="json"), "snapshot": snapshot} for check in proof_map.list_evidence_checks(store, proof.id)]
+        # each check with its own bound hash, read against the snapshot as it is now (PR #147)
+        checks += [{**check.model_dump(mode="json"), "snapshot": snapshot, "binding": proof_map.evidence_binding(check, now)}
+                   for check in proof_map.list_evidence_checks(store, proof.id)]
     return checks
 
 
@@ -477,8 +479,12 @@ class ReviewApp:
             proof = proof_map.require_candidate_proof(self.store, proof_id)
             if proof.node_id != node_id:
                 raise RequestError(HTTPStatus.BAD_REQUEST, "NOT_THIS_NODE", f"snapshot {proof_id} is a Candidate proof of {proof.node_id}, not of {node_id}")
+            sha = body.get("snapshot_sha256")  # the snapshot the check ran on, when the page knows it (PR #147)
+            if sha is not None and not isinstance(sha, str):
+                raise RequestError(HTTPStatus.BAD_REQUEST, "INVALID_REQUEST", "snapshot_sha256 is the snapshot's SHA-256, as a string")
             check = proof_map.record_evidence_check(
-                self.store, proof.id, str(body.get("outcome") or ""), notes=str(body.get("notes") or ""), run_by=str(body.get("run_by") or actor)
+                self.store, proof.id, str(body.get("outcome") or ""), notes=str(body.get("notes") or ""), run_by=str(body.get("run_by") or actor),
+                snapshot_sha256=sha or None,
             )
             return check.model_dump(mode="json")
         raise RequestError(HTTPStatus.NOT_FOUND, "NOT_FOUND", f"no node action {action!r}")

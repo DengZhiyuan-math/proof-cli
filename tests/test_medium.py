@@ -201,14 +201,19 @@ def test_a_bundle_from_before_the_medium_reads_its_nodes_as_latex(tmp_path: Path
 def test_a_bundle_whose_imported_result_carries_a_medium_is_refused_and_writes_nothing(tmp_path: Path, medium: str):
     source = ensure_project(tmp_path / "source")
     _imported(source)
+    _claim(source, "c-ok", medium="computation")  # a node whose files the bundle carries
     raw = json.loads(bundle_to_json(export_exchange_bundle(source)))
-    (node,) = raw["proof_map_nodes"]
+    (node,) = [n for n in raw["proof_map_nodes"] if n["id"] == "i1"]
     node["medium"] = medium  # never silently dropped
+    assert raw["vault_files"]
     target = ensure_project(tmp_path / "target")
+    before = sorted(p.relative_to(target.root) for p in target.root.rglob("*") if p.is_file() and ".proof" not in p.parts)
     with pytest.raises(ProofMapError) as caught:
         import_exchange_bundle(target, raw)
     assert caught.value.code == "MEDIUM_NOT_APPLICABLE"
-    assert get_node(target, "i1") is None
+    assert get_node(target, "i1") is None and get_node(target, "c-ok") is None
+    after = sorted(p.relative_to(target.root) for p in target.root.rglob("*") if p.is_file() and ".proof" not in p.parts)
+    assert after == before and not (target.root / "proofs" / "c-ok").exists()  # no file written
 
 
 @pytest.mark.parametrize("medium", ["latex", "computation"])
