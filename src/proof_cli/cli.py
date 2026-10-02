@@ -114,7 +114,7 @@ from .commands import (
     cmd_theorem_show,
     get_store,
 )
-from .domain import ProofMapNodeKind
+from .domain import ProofMapNodeKind, is_computation
 from .envelope import dump_envelope, error_envelope, success_envelope
 from .contract import ProofGroup
 from .theorems import LEGACY_TRUST_NOTICE
@@ -143,10 +143,13 @@ from .exchange import (
     summarize_inspect_report,
 )
 from .proof_map import (
+    ProofMapError,
     add_dependency,
     claim_node,
     create_node,
     dependency_details,
+    move_dependency,
+    remove_dependency,
     get_acceptance_state,
     get_blocked_reason,
     get_frontier,
@@ -157,16 +160,14 @@ from .proof_map import (
     list_challenges,
     list_integrity_warnings,
     list_nodes,
-    move_dependency,
     node_citation,
     open_challenge,
-    ProofMapError,
     record_evidence_check,
     release_node,
-    remove_dependency,
-    request_review,
     require_challenge,
+    request_review,
     require_node,
+    review_notices,
     set_medium,
     split_node,
     trust_rule_events,
@@ -174,7 +175,7 @@ from .proof_map import (
     trust_rules_of,
 )
 from .trust_rules import get_trust_rule, list_trust_rules, trust_rule_history
-from .vault import large_output_note, working_entry_path
+from .vault import working_entry_path
 from .rendering import (
     render_candidate_proof,
     render_challenge,
@@ -476,8 +477,7 @@ def node_show(
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.show")
         raise typer.Exit(code=1)
-    computation = node.medium is not None and node.medium.value == "computation"
-    working = working_entry_path(store.root, node_id, node.medium.value if node.medium else None)
+    working = working_entry_path(store.root, node_id, node.medium)
     working_proof = working.relative_to(store.root).as_posix() if working.is_file() else None
     snapshots = [
         {"version": proof.version, "file_path": proof.file_path, "sha256": proof.sha256, "is_current": proof.is_current}
@@ -488,7 +488,7 @@ def node_show(
     if json_output:
         payload = node.model_dump(mode="json")
         payload["citation"] = citation
-        if computation:  # the entry is run.sh, under its own key: `working_proof` means proof.tex
+        if is_computation(node):  # the entry is run.sh, under its own key: `working_proof` means proof.tex
             payload["run_script"], working_proof = working_proof, None
         payload["workflow_state"] = workflow_state
         payload["acceptance_state"] = acceptance_state
@@ -794,11 +794,18 @@ def node_unassign(
 node_app.command("release", hidden=True)(node_unassign)
 
 
-def _emit_candidate_proof(record, json_output: bool, *, command: str) -> None:
+def _emit_candidate_proof(record, json_output: bool, *, command: str, notices: list[dict] | None = None) -> None:
+    """The Candidate proof as an envelope or a table; with `notices` (errors.NOTICE_CODES), what
+    the command has to tell beside it: `data.notices` under --json, a `Note` line each otherwise."""
     if json_output:
-        typer.echo(dump_envelope(success_envelope(command, record.model_dump(mode="json"))))
-    else:
-        typer.echo(render_candidate_proof(record))
+        data = record.model_dump(mode="json")
+        if notices is not None:
+            data["notices"] = notices
+        typer.echo(dump_envelope(success_envelope(command, data)))
+        return
+    typer.echo(render_candidate_proof(record))
+    for notice in notices or []:
+        typer.echo(f"Note ({notice['code']}): {notice['message']}")
 
 
 @node_app.command("request-review")
@@ -816,14 +823,8 @@ def node_request_review(
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.request_review")
         raise typer.Exit(code=1)
-    # a large out/ is a reminder, never a refusal (spec #145): the researcher's .gitignore decides what stays
-    note = large_output_note(store.root, node_id) or ""
-    if json_output:
-        typer.echo(dump_envelope(success_envelope("node.request_review", {**record.model_dump(mode="json"), "note": note})))
-        return
-    _emit_candidate_proof(record, json_output, command="node.request_review")
-    if note:
-        typer.echo(f"Note: {note}")
+    # a large out/ is a notice, never a refusal (spec #145): the researcher's .gitignore decides what stays
+    _emit_candidate_proof(record, json_output, command="node.request_review", notices=review_notices(store, record))
 
 
 def _emit_review_record(record, json_output: bool, *, command: str) -> None:

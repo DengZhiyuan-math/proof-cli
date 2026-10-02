@@ -7,6 +7,7 @@ reviewed or Accepted. These tests drive the service layer and assert only what i
 the node as read back, the files in its folder, the error codes, the events.
 """
 
+import json
 import os
 from pathlib import Path
 
@@ -14,8 +15,10 @@ import pytest
 
 from _proofs import submit_proof, write_key_ideas
 from _researcher import researcher
+from proof_cli import proof_map
 from proof_cli.exchange import bundle_to_json, export_exchange_bundle, import_exchange_bundle, parse_bundle
 from proof_cli.fog import add_fog, crystallize_fog
+from proof_cli.key_ideas import TEMPLATE_COMPUTATION
 from proof_cli.proof_map import ProofMapError, create_node, get_acceptance_state, get_node, request_review, set_medium
 from proof_cli.storage import ensure_project, list_events
 from proof_cli.vault import snapshot_folder_files
@@ -181,3 +184,98 @@ def test_the_medium_travels_with_an_exchange_bundle(tmp_path: Path):
     import_exchange_bundle(target, bundle)
     assert get_node(target, "c-check").medium.value == "computation"
     assert get_node(target, "c-plain").medium.value == "latex"
+
+
+def test_a_bundle_from_before_the_medium_reads_its_nodes_as_latex(tmp_path: Path):
+    source = ensure_project(tmp_path / "source")
+    _claim(source, "c-old")
+    raw = json.loads(bundle_to_json(export_exchange_bundle(source)))
+    for node in raw["proof_map_nodes"]:
+        node.pop("medium")
+    target = ensure_project(tmp_path / "target")
+    import_exchange_bundle(target, raw)
+    assert get_node(target, "c-old").medium.value == "latex"
+
+
+@pytest.mark.parametrize("medium", ["latex", "computation"])
+def test_a_bundle_whose_imported_result_carries_a_medium_is_refused_and_writes_nothing(tmp_path: Path, medium: str):
+    source = ensure_project(tmp_path / "source")
+    _imported(source)
+    raw = json.loads(bundle_to_json(export_exchange_bundle(source)))
+    (node,) = raw["proof_map_nodes"]
+    node["medium"] = medium  # never silently dropped
+    target = ensure_project(tmp_path / "target")
+    with pytest.raises(ProofMapError) as caught:
+        import_exchange_bundle(target, raw)
+    assert caught.value.code == "MEDIUM_NOT_APPLICABLE"
+    assert get_node(target, "i1") is None
+
+
+@pytest.mark.parametrize("medium", ["latex", "computation"])
+def test_setting_any_medium_on_an_imported_result_is_refused(tmp_path: Path, medium: str):
+    store = ensure_project(tmp_path)
+    _imported(store)
+    with pytest.raises(ProofMapError) as caught:
+        set_medium(store, "i1", medium, edited_by="human")
+    assert caught.value.code == "MEDIUM_NOT_APPLICABLE"
+    assert get_node(store, "i1").medium is None
+
+
+# -- the scaffold and the event go together ------------------------------------------------------------
+
+
+def _medium_events(store, node_id="c1"):
+    return [e for e in list_events(store) if e.kind == "proof_map_node_medium_set" and e.entity_id == node_id]
+
+
+def test_a_scaffold_that_cannot_be_written_switches_and_records_nothing(tmp_path: Path, monkeypatch):
+    store = ensure_project(tmp_path)
+    _claim(store)
+
+    def disk_full(*_args, **_kwargs):
+        raise OSError("no space left on device")
+
+    monkeypatch.setattr(proof_map, "write_working_computation", disk_full)
+    with pytest.raises(OSError):
+        set_medium(store, "c1", "computation", edited_by="human")
+    assert get_node(store, "c1").medium.value == "latex" and _medium_events(store) == []
+
+
+def test_a_switch_that_rolls_back_leaves_no_scaffold_behind(tmp_path: Path, monkeypatch):
+    store = ensure_project(tmp_path)
+    _claim(store)
+    folder = tmp_path / "proofs" / "c1"
+    real_append = proof_map.append_event
+
+    def scaffold_then_fail(*args, **kwargs):
+        assert (folder / "run.sh").is_file()  # the scaffold is written before the event
+        raise RuntimeError("the commit failed")
+
+    monkeypatch.setattr(proof_map, "append_event", scaffold_then_fail)
+    with pytest.raises(RuntimeError):
+        set_medium(store, "c1", "computation", edited_by="human")
+    monkeypatch.setattr(proof_map, "append_event", real_append)
+    assert not (folder / "run.sh").exists() and not (folder / "key-ideas.md").exists()
+    assert (folder / "proof.tex").is_file()  # what was there stays
+    assert get_node(store, "c1").medium.value == "latex" and _medium_events(store) == []
+
+
+# -- the key-ideas requirement (#103) holds for a computation -------------------------------------------
+
+
+def test_a_computation_node_cannot_request_review_without_its_key_ideas(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    folder = _computation_ready(store)
+    (folder / "key-ideas.md").unlink()
+    with pytest.raises(ProofMapError) as caught:
+        request_review(store, "c1", requested_by="agent_a", rationale="ready")
+    assert caught.value.code == "KEY_IDEAS_REQUIRED"
+
+
+def test_a_computation_nodes_unfilled_key_ideas_skeleton_is_refused(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    folder = _computation_ready(store)
+    (folder / "key-ideas.md").write_text(TEMPLATE_COMPUTATION)
+    with pytest.raises(ProofMapError) as caught:
+        request_review(store, "c1", requested_by="agent_a", rationale="ready")
+    assert caught.value.code == "KEY_IDEAS_REQUIRED" and caught.value.details["missing"]

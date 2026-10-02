@@ -44,6 +44,7 @@ from .domain import (
     ProofMapNode,
     ProofMapNodeKind,
     TrustLevel,
+    is_computation,
     utc_now,
 )
 from .reviews import TRUST_RULES_FILE, DecisionKind, DecisionPayload, PinnedDependency, git_identity
@@ -104,13 +105,17 @@ from .vault import (
     preamble_path,
     build_is_current,
     build_pdf_path,
-    manifest_digest,
+    frozen_output_bytes,
+    large_output_threshold,
     node_folder,
+    read_working_snapshot,
     remove_snapshot,
+    run_script_path,
     snapshot_dir,
     snapshots_on_disk,
-    working_inputs,
+    vault_dir,
     working_entry_path,
+    working_proof_path,
     write_snapshot_folder,
     write_working_computation,
     write_working_proof,
@@ -378,7 +383,7 @@ def _resolve_medium(kind: ProofMapNodeKind, medium: Medium | str | None) -> Medi
 
 def _write_working_files(root: Path, node: ProofMapNode) -> None:
     """The node folder its Medium asks for: a LaTeX document, or a computation's run.sh (spec #145)."""
-    if node.medium == Medium.computation:
+    if is_computation(node):
         write_working_computation(root, node_id=node.id, kind=node.kind.value, statement=node.statement)
     else:
         write_working_proof(root, node_id=node.id, kind=node.kind.value, statement=node.statement)
@@ -395,13 +400,38 @@ def set_medium(store: ProjectStore, node_id: str, medium: Medium | str, *, edite
         return node
     changed = node.model_copy(update={"medium": resolved, "updated_by": edited_by, "updated_at": utc_now()})
     with store.transaction() as conn:
+        # the scaffold first, undone if the transaction rolls back: an event is never left without its entry file
+        _scaffold_on_rollback(store, node_id)
+        _write_working_files(store.root, changed)
         update_proof_map_node(store, changed, conn=conn)
         append_event(
             store, "proof_map_node_medium_set", f"{node_id}: medium {node.medium.value} → {resolved.value}",
             entity_id=node_id, payload={"from": node.medium.value, "to": resolved.value, "by": edited_by}, conn=conn,
         )
-    _write_working_files(store.root, changed)
     return changed
+
+
+def _scaffold_on_rollback(store: ProjectStore, node_id: str) -> None:
+    """Inside a write transaction about to scaffold a node's working files: remove each one it
+    creates (and each folder) if the transaction rolls back. What was there before stays."""
+    folder = node_folder(store.root, node_id)
+    candidates = [
+        vault_dir(store.root), folder, preamble_path(store.root), vault_dir(store.root) / ".gitignore",
+        working_proof_path(store.root, node_id), run_script_path(store.root, node_id), folder / key_ideas.KEY_IDEAS_FILE,
+    ]
+    absent = [path for path in candidates if not path.exists()]
+
+    def undo() -> None:
+        for path in reversed(absent):  # files first, then the folders that held them
+            if path.is_dir():
+                try:
+                    path.rmdir()
+                except OSError:
+                    pass
+            else:
+                path.unlink(missing_ok=True)
+
+    on_rollback(store, undo)
 
 
 def _promoted(store: ProjectStore, node_id: str) -> bool:
@@ -968,9 +998,9 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
             "requesting review requires stating why this node is now appropriately scoped to prove directly",
         )
     # the entry its Medium asks for (spec #145): a computation's run.sh, a LaTeX document's proof.tex
-    entry = working_entry_path(store.root, node_id, node.medium.value if node.medium else None)
+    entry = working_entry_path(store.root, node_id, node.medium)
     if not entry.is_file():
-        computation = node.medium == Medium.computation
+        computation = is_computation(node)
         raise ProofMapError(
             "RUN_SCRIPT_MISSING" if computation else "WORKING_PROOF_MISSING",
             f"{entry.relative_to(store.root).as_posix()} doesn't exist" + (": a computation node's review needs the program that is its candidate proof" if computation else ""),
@@ -978,9 +1008,22 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
     # read once: what is hashed is exactly what is frozen, even if a file changes meanwhile.
     # The key-ideas summary is one of these inputs (ADR-0013): frozen, listed and hashed with
     # the proof, so a change to it alone is a new version, by the same unchanged-check below
-    contents = {rel: path.read_bytes() for rel, path in working_inputs(store.root, node_id).items()}
+    # A computation's inputs are frozen whole — its hidden environment files, its scripts'
+    # executable bits — and a file that can't be read is refused before anything is written
+    try:
+        snapshot = read_working_snapshot(store.root, node_id, node.medium)
+    except OSError as exc:
+        where = Path(exc.filename) if exc.filename else node_folder(store.root, node_id)
+        path = where.relative_to(store.root).as_posix() if where.is_relative_to(store.root) else str(where)
+        raise ProofMapError(
+            "WORKING_FILE_UNREADABLE",
+            f"{path} can't be read ({exc.strerror or exc}): a Review snapshot freezes every input, so nothing was written; "
+            "make it readable, or move it out of the node folder (scratch/ and build/ are never frozen)",
+            details={"path": path},
+        ) from exc
+    contents = snapshot.files
     _require_key_ideas(store, node_id, contents.get(key_ideas.KEY_IDEAS_FILE))
-    sha256 =manifest_digest({rel: hashlib.sha256(data).hexdigest() for rel, data in contents.items()})
+    sha256 = snapshot.digest()
 
     # The holder check and every write are one SQLite write transaction (#18): a reassignment
     # can't slip in between them, it waits for this to commit. The files written go if it rolls
@@ -1016,7 +1059,7 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
         # now, under the write lock, so a rollback never removes a file this request didn't write
         ours = [p for p in (folder, pdf) if not p.exists()]
         on_rollback(store, lambda: [remove_snapshot(p) for p in ours])
-        write_snapshot_folder(folder, contents)
+        write_snapshot_folder(folder, snapshot)
         if build_is_current(store.root, node_id):
             # a PDF compiled from these very inputs (the studio's build): archived beside the snapshot
             shutil.copyfile(build_pdf_path(store.root, node_id), pdf)
@@ -1059,6 +1102,27 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
             conn=conn,
         )
     return record
+
+
+def review_notices(store: ProjectStore, record: CandidateProofRecord) -> list[dict]:
+    """What requesting review has to tell the researcher about the snapshot it froze, never a
+    refusal: each a registered notice code (`errors.NOTICE_CODES`) with its message and data.
+    SNAPSHOT_LARGE_OUTPUT when a computation froze more of `out/` than `[snapshot]
+    large_output_mb` (default 50 MB) — measured on the snapshot as stored (spec #145)."""
+    node = get_proof_map_node(store, record.node_id)
+    if node is None or not is_computation(node) or not record.file_path.endswith("/" + SNAPSHOT_MANIFEST):
+        return []
+    size = frozen_output_bytes((store.root / record.file_path).parent)
+    threshold = large_output_threshold(store.root)
+    if size <= threshold:
+        return []
+    return [{
+        "code": "SNAPSHOT_LARGE_OUTPUT",
+        "message": f"snapshot v{record.version} froze {size / (1024 * 1024):.1f} MB of out/ (above {threshold / (1024 * 1024):g} MB): "
+        "every review snapshot keeps a copy; keep in out/ what the review needs and .gitignore the rest",
+        "output_bytes": size,
+        "threshold_bytes": threshold,
+    }]
 
 
 KEY_IDEAS_DRAFTED = "proof_map_key_ideas_drafted"
