@@ -69,6 +69,121 @@ def test_the_created_by_is_the_pages_git_identity(page):
     assert get_node(store, "a").created_by == client.app.state()["reviewer"]
 
 
+# -- the canvas's node form (issue #154): medium, a parent that rests on the node, references --
+
+
+def test_the_page_creates_a_computation_node(page):
+    store, client = page
+    made = _ok(client.post("/api/nodes", {"node_id": "calc", "kind": "claim", "statement": "C", "medium": "computation"}))
+    assert made["medium"] == "computation" and get_node(store, "calc").medium.value == "computation"
+    assert (store.root / "proofs" / "calc" / "run.sh").is_file()
+    assert _refused(client.post("/api/nodes", {"node_id": "r", "kind": "imported_result", "statement": "K",
+                                                "source_locator": "l", "source_version": "v", "medium": "latex"})) == "MEDIUM_NOT_APPLICABLE"
+
+
+def test_a_parent_that_rests_on_the_new_node_gains_it_in_the_same_request(page):
+    store, client = page
+    _ok(client.post("/api/nodes", {"node_id": "p", "kind": "theorem", "statement": "P"}))
+    made = _ok(client.post("/api/nodes", {"node_id": "lem", "kind": "lemma", "statement": "L", "parent": {"id": "p"}}))
+    assert made["id"] == "lem" and made["page"] == "/studio/lem/"
+    assert get_node(store, "p").dependencies == ["lem"] and get_node(store, "lem").derived_from is None
+    # an imported result can hang under a parent too: the parent rests on the citation
+    _ok(client.post("/api/nodes", {"node_id": "ref", "kind": "imported_result", "statement": "K",
+                                   "source_locator": "l", "source_version": "v", "parent": {"id": "p", "reassign": False}}))
+    assert get_node(store, "p").dependencies == ["lem", "ref"]
+
+
+@pytest.mark.parametrize("parent, code", [
+    ({"id": "held"}, "NOT_CLAIMANT"),
+    ({"id": "nope"}, "NODE_NOT_FOUND"),
+    ({"id": "ref"}, "IMPORTED_RESULT_HAS_NO_DEPENDENCIES"),
+])
+def test_a_refused_parent_leaves_no_node_and_no_folder(page, parent, code):
+    store, client = page
+    _ok(client.post("/api/nodes", {"node_id": "held", "kind": "claim", "statement": "H"}))
+    _ok(client.post("/api/nodes", {"node_id": "ref", "kind": "imported_result", "statement": "K", "source_locator": "l", "source_version": "v"}))
+    claim_node(store, "held", claimant_id="agent_b")
+    assert _refused(client.post("/api/nodes", {"node_id": "orphan", "kind": "claim", "statement": "O", "parent": parent})) == code
+    assert get_node(store, "orphan") is None and not (store.root / "proofs" / "orphan").exists()
+
+
+def test_a_parent_that_would_close_a_cycle_leaves_no_node_and_no_folder(page):
+    store, client = page
+    _ok(client.post("/api/nodes", {"node_id": "p", "kind": "claim", "statement": "P"}))
+    _ok(client.post("/api/nodes", {"node_id": "above", "kind": "claim", "statement": "A", "dependencies": ["p"]}))
+    status, body = client.post("/api/nodes", {"node_id": "loop", "kind": "claim", "statement": "L", "dependencies": ["above"], "parent": {"id": "p"}})
+    assert body["error"]["code"] == "DEPENDENCY_CYCLE" and body["error"]["message"] == "p can't rest on loop: p → loop → above → p would be a cycle"
+    assert get_node(store, "loop") is None and not (store.root / "proofs" / "loop").exists()
+    assert get_node(store, "p").dependencies == []
+
+
+def test_reassign_takes_the_parents_claim_over(page):
+    store, client = page
+    _ok(client.post("/api/nodes", {"node_id": "held", "kind": "claim", "statement": "H"}))
+    claim_node(store, "held", claimant_id="agent_b")
+    _ok(client.post("/api/nodes", {"node_id": "under", "kind": "claim", "statement": "U", "parent": {"id": "held", "reassign": True}}))
+    assert get_node(store, "held").dependencies == ["under"]
+    assert get_active_claim(store, "held").claimant_id == client.app.state()["reviewer"]
+
+
+@pytest.mark.parametrize("parent", ["p", {"reassign": True}, {"id": ""}, {"id": "p", "reassign": "yes"}])
+def test_a_malformed_parent_is_refused_before_anything_is_created(page, parent):
+    store, client = page
+    _ok(client.post("/api/nodes", {"node_id": "p", "kind": "claim", "statement": "P"}))
+    assert _refused(client.post("/api/nodes", {"node_id": "x", "kind": "claim", "statement": "X", "parent": parent})) == "INVALID_REQUEST"
+    assert get_node(store, "x") is None
+
+
+def test_a_split_child_carries_its_assumptions_display_label_dependencies_and_medium(page):
+    store, client = page
+    _ok(client.post("/api/nodes", {"node_id": "p", "kind": "claim", "statement": "P"}))
+    _ok(client.post("/api/nodes", {"node_id": "base", "kind": "claim", "statement": "B"}))
+    child = {"id": "k", "statement": "K", "assumptions": ["$x>0$"], "display_label": "Key", "dependencies": ["base"], "medium": "computation"}
+    _ok(client.post("/api/node/p/split", {"children": [child]}))
+    k = get_node(store, "k")
+    assert (k.assumptions, k.display_label, k.dependencies, k.medium.value, k.derived_from) == (["$x>0$"], "Key", ["base"], "computation", "p")
+
+
+def _import(client, **fields):
+    return client.post("/api/references", {"reference_id": "rudin", "title": "Principles", "year": 1976, "authors": ["Walter Rudin"],
+                                            "source_type": "textbook", "identifier": "isbn:0070542350", "url": "", **fields})
+
+
+def test_the_page_imports_a_reference_and_lists_only_its_citation(page):
+    store, client = page
+    made = _ok(_import(client))
+    assert made["id"] == "rudin" and made["authors"] == ["Walter Rudin"] and made["year"] == 1976
+    _ok(client.post("/api/nodes", {"node_id": "ref_bw", "kind": "imported_result", "statement": "BW",
+                                   "source_locator": "Thm 3.6", "source_version": "3rd ed.", "reference_id": "rudin"}))
+    (listed,) = _ok(client.get("/api/references"))["references"]
+    assert set(listed) == {"id", "title", "authors", "year", "source_type", "identifier", "url", "bibliographic_source", "cited_by"}
+    assert listed["source_type"] == "textbook"
+    # never the legacy trust fields (ADR-0012); who cites it, at which version, in which state
+    assert listed["cited_by"] == [{"id": "ref_bw", "source_version": "3rd ed.", "acceptance_state": "unreviewed"}]
+    assert {"review_status", "trust_level", "is_callable"}.isdisjoint(made)
+
+
+@pytest.mark.parametrize("fields, message", [
+    ({}, "reference rudin already exists; import the new record under a new id"),
+    ({"reference_id": "other", "year": "1976a"}, "a reference's year is a whole number"),
+    ({"reference_id": "other", "year": True}, "a reference's year is a whole number"),
+    ({"reference_id": " ", "title": "T"}, "a reference needs reference_id, title and year"),
+    ({"reference_id": "other", "title": ""}, "a reference needs reference_id, title and year"),
+    ({"reference_id": "other", "source_type": "blog"}, "'blog' is not a reference source type; expected one of: standard_reference, research_paper, textbook, survey, monograph, website, other"),
+])
+def test_importing_a_reference_is_refused_with_invalid_input(page, fields, message):
+    store, client = page
+    _ok(_import(client))
+    status, body = _import(client, **fields)
+    assert (status, body["error"]["code"], body["error"]["message"]) == (400, "INVALID_INPUT", message)
+    assert [r["id"] for r in _ok(client.get("/api/references"))["references"]] == ["rudin"]
+
+
+def test_a_year_written_as_digits_is_a_year(page):
+    store, client = page
+    assert _ok(_import(client, year="1976"))["year"] == 1976
+
+
 # -- a local node's page is its studio; an imported result's is not -------------------
 
 

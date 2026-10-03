@@ -11,7 +11,7 @@ ERROR_CODES: dict[str, str] = {
     # -- the CLI itself ----------------------------------------------------------------
     "USAGE_ERROR": "the command line didn't parse: a missing argument, an unknown option or command (exit 2)",
     "INTERNAL_ERROR": "an unexpected failure inside proof-cli; the message names it",
-    "INVALID_INPUT": "a legacy command (`theorem add`, `reference import`) refused its input under --json; the message says why",
+    "INVALID_INPUT": "a legacy command (`theorem add`, `reference import`) refused its input under --json, or the page's new reference (POST /api/references) was refused; the message says why",
     "PROJECT_NOT_FOUND": "a read was pointed at a folder with no proof project; nothing was created",
     "HUMAN_REVIEW_REQUIRED": "a Human Review decision, made only by the researcher on the proof map page; the error carries its URL",
     "REVIEW_PORT_IN_USE": "`map serve` couldn't bind the project's review port because it is taken, likely by the page already running (`proof map open`); `errno` names the cause",

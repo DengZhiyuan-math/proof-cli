@@ -676,6 +676,36 @@ def split_node(
         return _split(store, conn, parent_id, child_specs, created_by=created_by, reassign=reassign)
 
 
+def create_node_under_parent(
+    store: ProjectStore, parent_id: str, *, created_by: str = "human", reassign: bool = False, **fields: Any
+) -> ProofMapNode:
+    """Create a node and make `parent_id` rest on it, in one write transaction (issue #154).
+
+    Any kind, an imported result included: the parent gains the new node as a
+    dependency, exactly as `create_node` then `add_dependency(parent_id, …)`
+    would, with every refusal of either (NOT_CLAIMANT unless `reassign`,
+    NODE_ACCEPTED, DEPENDENCY_CYCLE, …). Unlike a Split, the node is not
+    derived from the parent. A refused parent leaves no node and no folder.
+    `fields` are `create_node`'s.
+    """
+    with store.transaction() as conn:
+        remove_new_node_folders_on_rollback(store, [fields["node_id"]])
+        node = create_node(store, created_by=created_by, **fields)
+        # add_dependency's checks, in its order; the new node is not yet visible outside this
+        # transaction, so the cycle is looked for from its own dependencies down to the parent
+        parent = require_node(store, parent_id)
+        _structure_editable(store, parent)
+        for dependency_id in node.dependencies:
+            path = _dependency_path(store, dependency_id, parent_id)
+            if path is not None:
+                raise _cycle(parent_id, [parent_id, node.id, *path])
+        claim = _held_by_another(store, conn, parent_id, created_by, reassign=reassign)
+        if claim is not None:
+            _take_over(store, conn, claim, created_by)
+        _gain_dependency(store, conn, parent, node.id, created_by)
+    return node
+
+
 def remove_new_node_folders_on_rollback(store: ProjectStore, node_ids: list[str]) -> None:
     """Inside a write transaction that will create `node_ids`: take their folders with them if it rolls back.
 
@@ -939,17 +969,22 @@ def add_dependency(
         claim = _held_by_another(store, conn, node_id, edited_by, reassign=reassign)
         if claim is not None:
             _take_over(store, conn, claim, edited_by)
-        updated = _with_dependencies(node, [*node.dependencies, dependency_id], edited_by)
-        update_proof_map_node(store, updated, conn=conn)
-        append_event(
-            store,
-            "proof_map_dependency_added",
-            f"{node_id} now rests on {dependency_id}",
-            entity_id=node_id,
-            payload={"dependency_id": dependency_id, "edited_by": edited_by, "dependencies": {"before": node.dependencies, "after": updated.dependencies}},
-            conn=conn,
-        )
+        _gain_dependency(store, conn, node, dependency_id, edited_by)
     return DependencyEdit("add", dependency_id, get_node(store, node_id))
+
+
+def _gain_dependency(store: ProjectStore, conn: sqlite3.Connection, node: ProofMapNode, dependency_id: str, edited_by: str) -> None:
+    """Write `node` resting on `dependency_id` too, once every check has passed: the edge and its event."""
+    updated = _with_dependencies(node, [*node.dependencies, dependency_id], edited_by)
+    update_proof_map_node(store, updated, conn=conn)
+    append_event(
+        store,
+        "proof_map_dependency_added",
+        f"{node.id} now rests on {dependency_id}",
+        entity_id=node.id,
+        payload={"dependency_id": dependency_id, "edited_by": edited_by, "dependencies": {"before": node.dependencies, "after": updated.dependencies}},
+        conn=conn,
+    )
 
 
 def remove_dependency(
