@@ -103,12 +103,14 @@ class FakeElement {
     "rule-decision", "rule-name", "rule-rationale", "rule-conditions", "cond-reviewed", "cond-doi", "cond-arxiv", "cond-types",
     "rule-reminder", "rule-impact", "rule-new", "rule-cancel", "rule-record",
     // the fog drawer (issue #137) and the node page's fog block
-    "fog-badge", "stat-fog", "fog-drawer", "fog-drawer-n", "fog-list", "fog-close", "fog-add-text", "fog-add-near", "fog-add", "fog-show-all", "fog-composer", "node-fog", "node-outputs", "node-run"];
+    "fog-badge", "stat-fog", "fog-drawer", "fog-drawer-n", "fog-list", "fog-close", "fog-add-text", "fog-add-near", "fog-add", "fog-show-all", "fog-composer", "node-fog", "node-outputs", "node-run",
+    // the legend (issue #157)
+    "map-legend"];
   const tags = { "tree-root": "select", "dag-svg": "svg", "decide-batch": "button", pending: "table", warnings: "ul", "map-find": "input", "attention-nodes": "ul",
     "node-deps": "table", "node-decisions": "table", "node-challenges": "ul", "node-evidence": "ul", "node-history": "ul",
     trusted: "table", "rules-list": "ul", "rules-retired-list": "ul", "rule-name": "input", "rule-rationale": "input", "rule-decision": "input",
     "cond-reviewed": "input", "cond-doi": "input", "cond-arxiv": "input", "manage-rules": "button", "rule-record": "button", "rule-cancel": "button", "rule-new": "button",
-    "fog-badge": "a", "stat-fog": "b", "fog-drawer": "aside", "fog-list": "ul", "fog-close": "button", "fog-add-text": "input", "fog-add-near": "select", "fog-add": "button", "fog-show-all": "input", "fog-composer": "form" };
+    "map-legend": "ul", "fog-badge": "a", "stat-fog": "b", "fog-drawer": "aside", "fog-list": "ul", "fog-close": "button", "fog-add-text": "input", "fog-add-near": "select", "fog-add": "button", "fog-show-all": "input", "fog-composer": "form" };
   const elements = Object.fromEntries(ids.map((id) => [id, new FakeElement(tags[id] || "div")]));
   Object.assign(elements["map-dag"], { clientWidth: 800, clientHeight: 600 });  // the canvas has a size, so it can be fitted and panned
   focus.body = focus.on = new FakeElement("body");
@@ -162,6 +164,7 @@ class FakeElement {
   context.katex = require("./katex_stub.js")(katexCalls);
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, "../../src/proof_cli/studio/static/mathtext.js"), "utf8"), context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "../../src/proof_cli/studio/static/status.js"), "utf8"), context);  // the status icons (issue #157)
   vm.runInContext(fs.readFileSync(path.join(__dirname, "../../src/proof_cli/webapp/static/app.js"), "utf8"), context);
   listeners.DOMContentLoaded.forEach((fn) => fn());
   await new Promise((resolve) => setImmediate(resolve));
@@ -169,11 +172,17 @@ class FakeElement {
   const pendingRow = (id) => elements.pending.querySelectorAll("tbody tr").find((tr) => tr.dataset.target === id);
   const nodeIdOf = (g) => g.attributes["aria-label"].split(" ")[1].replace(/:$/, "");
   // a tree line, read the way PR #104's harness reads it: its attributes, its own chips, its children
+  // a status icon (issue #157): its kind and its shapes, each a tag with its attributes
+  const iconOf = (icon) => icon && { kind: icon.className.split(" ").find((c) => c !== "status-icon"), shapes: icon.children.map((c) => [c.tagName.toLowerCase(), c.attributes]) };
+  const kindOf = (node) => (node.className.split(" ").find((c) => c.startsWith("state-")) || "").slice("state-".length);
+  // a node's status chip: its word, its colour (state-<kind>) and its icon
+  const statusChip = (span) => ({ text: span.textContent, kind: kindOf(span), icon: iconOf(span.querySelector("g.status-icon")) });
   const treeLine = (li) => ({
     id: li.getAttribute("data-node-id"),
     dim: li.classList.contains("dim"),
     sharedBy: li.getAttribute("data-shared-by"),
     chips: li.children.filter((c) => c.tagName === "SPAN" && c.classList.contains("state-chip")).map((c) => c.textContent),
+    status: li.children.filter((c) => c.tagName === "SPAN" && c.classList.contains("node-status")).map(statusChip),
     children: li.children.filter((c) => c.tagName === "UL").flatMap((ul) => ul.children.filter((c) => c.tagName === "LI").map((c) => c.getAttribute("data-node-id"))),
   });
   const read = () => ({
@@ -188,6 +197,8 @@ class FakeElement {
       label: g.attributes["aria-label"],
       title: (g.querySelector("title") || { textContent: null }).textContent,  // what hovering it shows
       start: !!g.querySelector("g.start"),  // the card offers Start agent (spec #145)
+      // its status (issue #157): the word, the colour, then each badge's icon (its own, then a frontier's Ready)
+      status: { text: (g.querySelector("text.tag") || { textContent: null }).textContent, kind: kindOf(g), icons: g.querySelectorAll("g.status-icon").map(iconOf) },
     }])),
     // each tree line in drawing order
     tree: elements["map-tree"].querySelectorAll("li").map(treeLine),
@@ -251,6 +262,9 @@ class FakeElement {
     ruleRecordDisabled: elements["rule-record"].disabled,
     // the node page's axis chips: each one's state class
     nodeAxisClasses: elements["node-axes"].querySelectorAll("span.chip").map((c) => c.className),
+    // the node page's status chips (issue #157), and the legend: each kind, its word and its icon
+    nodeStatus: elements["node-axes"].querySelectorAll("span.node-status").map(statusChip),
+    legend: elements["map-legend"].querySelectorAll("li").map((li) => ({ kind: li.getAttribute("data-kind"), text: li.textContent, icon: iconOf(li.querySelector("svg")) })),
     // the node page's acceptance chip and its history lines
     nodeAxes: elements["node-axes"].querySelectorAll("span.chip").map((c) => c.textContent),
     nodeHistory: elements["node-history"].querySelectorAll("li").map((li) => li.textContent),
