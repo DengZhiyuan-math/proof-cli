@@ -507,11 +507,10 @@ function warningOf(n) {
 
 function short(text, length) { return text.length > length ? text.slice(0, length - 1) + "…" : text; }
 
-// A node card's one state: an icon anyone reads at a glance, and a word. What needs the
-// researcher comes first (a Challenge, a moved dependency, a decision that no longer applies:
-// one "attention" icon, the word saying which), then the frontier, a claim, a review request,
-// a rejected route, blocked, accepted. A frontier node with a warning keeps its frontier mark too,
-// a small blue badge beside the warning's (ADR-0008): see drawDag.
+// A node's one state, an icon anyone reads at a glance and a word, is the server's `status`
+// (webapp/node_status.py, issue #157): the card, the legend, the tree and the node page all show
+// it, none derives its own. A frontier node with a warning keeps its frontier mark too, a small
+// blue badge beside the warning's (ADR-0008): statusMarks in status.js.
 // where the agent's run on a node is (spec #145): "Typesetter · step 4/5", "Prover · paused", "Numerics · needs you"
 function runWhere(run) {
   const role = run.role ? run.role.charAt(0).toUpperCase() + run.role.slice(1) : "Agent";
@@ -520,60 +519,50 @@ function runWhere(run) {
   return run.status === "paused" ? `${role} · paused` : role;
 }
 
-function tagOf(n) {
-  if (n.integrity_state === "challenged") return ["challenged", "attention"];
-  if (n.integrity_state === "potentially-stale") return ["dependency changed", "attention"];
-  if (n.acceptance_state === "unverifiable") return ["decision outdated", "attention"];
-  if (["rejected", "no-longer-callable"].includes(n.acceptance_state)) return [n.acceptance_state === "rejected" ? "rejected" : "no longer callable", "rejected"];
-  if (n.frontier) return ["ready", "ready"];
-  if (n.run && n.run.status !== "idle") return [runWhere(n.run), n.run.status === "needs-human" ? "attention" : "claimed"];  // the agent's run (spec #145)
-  if (n.assignee) return [n.assignee, "claimed"];
-  if (n.workflow_state === "review-needed") return ["awaiting review", "review"];
-  if (n.workflow_state === "revision-requested") return ["revision requested", "review"];
-  if (n.workflow_state === "blocked") return ["blocked", "blocked"];
-  if (["accepted", "reviewed"].includes(n.acceptance_state)) return [n.acceptance_state, "accepted"];
-  if (n.acceptance_state === "trusted-by-rule") return ["trusted by rule", "accepted"];  // the rule names: on the chips, the tree, the node page
-  return ["open", "open"];
-}
-
 // an imported result's acceptance axis, in words: "trusted by rule <names>" names the Trust rules it meets (ADR-0014)
 function acceptanceText(n) {
   return n.acceptance_state === "trusted-by-rule" ? `trusted by rule ${(n.trust_rule || []).join(", ")}` : n.acceptance_state;
 }
 
-// the icons, SF Symbols' ".circle.fill" style: a filled disc, a white glyph, 16 × 16
-const STATUS_GLYPHS = {
-  ready: [["path", { d: "M6.4 4.9v6.2L11.3 8z", class: "glyph-fill" }]],
-  claimed: [["path", { d: "M9.4 6.6 4.7 11.3", class: "glyph" }], ["rect", { x: 6.8, y: 5.3, width: 5.6, height: 2.5, rx: 0.6, transform: "rotate(45 9.6 6.55)", class: "glyph-fill" }]],  // a hammer: work in progress
-  blocked: [["rect", { x: 5.2, y: 7.3, width: 5.6, height: 4.2, rx: 1, class: "glyph-fill" }], ["path", { d: "M6.4 7.3V6.1a1.6 1.6 0 0 1 3.2 0v1.2", class: "glyph" }]],
-  review: [["path", { d: "M8 4.6V8l2.3 1.5", class: "glyph" }]],
-  accepted: [["path", { d: "M4.9 8.3 7 10.4l4.2-4.6", class: "glyph" }]],
-  rejected: [["path", { d: "M5.6 5.6l4.8 4.8M10.4 5.6l-4.8 4.8", class: "glyph" }]],
-  attention: [["path", { d: "M8 5.6v3.9", class: "glyph" }], ["circle", { cx: 8, cy: 12, r: 1, class: "glyph-fill" }]],
-  open: [],
-};
-// A state value on the node page, the tree or anywhere else, as the map's icon for it plus its
-// word: every axis value lands on one of the seven states (neutral ones get a plain grey disc).
-const VALUE_STATE = {
-  frontier: "ready", claimed: "claimed", "review-needed": "review", "revision-requested": "review", blocked: "blocked",
-  accepted: "accepted", reviewed: "accepted", "trusted-by-rule": "accepted", rejected: "rejected", "no-longer-callable": "rejected",
-  unverifiable: "attention", "potentially-stale": "attention", challenged: "attention",
-};
+// A state value on the node page, the tree or anywhere else, as the map's icon for it plus its word:
+// every axis value lands on one of the kinds (STATUS_OF_VALUE in status.js; neutral ones get a plain grey disc).
 function stateChip(value, text, title) {
-  const kind = VALUE_STATE[value] || "open";
-  const chip = el("span", null, { class: `chip state-${kind}`, title: title || text || value });
+  return kindChip(STATUS_OF_VALUE[value] || "open", text || value, title || text || value);
+}
+
+function kindChip(kind, text, title) {
+  const chip = el("span", null, { class: `chip state-${kind}`, title: title || text });
   const icon = svg("svg", { viewBox: "-1 -1 18 18", class: "chip-icon", "aria-hidden": "true" });
   icon.append(statusIcon(kind, 8, 8, 16));
-  chip.append(icon, text || value);
+  chip.append(icon, text);
   return chip;
 }
 
+// a node's status (the server's, issue #157) as chips: its own, and a frontier node's Ready beside a warning (ADR-0008)
+function statusChips(status, frontier) {
+  return statusMarks(status, frontier).map((mark) => {
+    const chip = kindChip(mark.kind, mark.text, mark.kind === "ready" ? "on the frontier: ready to start" : mark.text);
+    chip.classList.add("node-status");
+    return chip;
+  });
+}
+
+// the icons are status.js's, defined once for every view
 function statusIcon(kind, x, y, size = 16) {
   const icon = svg("g", { class: `status-icon ${kind}`, transform: `translate(${x - size / 2},${y - size / 2}) scale(${size / 16})` });
-  // a warning is a triangle, like the system's; every other state a disc
-  icon.append(kind === "attention" ? svg("path", { d: "M8 1.1c.5 0 .95.27 1.2.72l6.1 10.9c.52.93-.15 2.08-1.2 2.08H1.9c-1.05 0-1.72-1.15-1.2-2.08L6.8 1.82C7.05 1.37 7.5 1.1 8 1.1z", class: "disc" }) : svg("circle", { cx: 8, cy: 8, r: 8, class: "disc" }));
-  for (const [tag, attrs] of STATUS_GLYPHS[kind] || []) icon.append(svg(tag, attrs));
+  for (const [tag, attrs] of statusShapes(kind)) icon.append(svg(tag, attrs));
   return icon;
+}
+
+// the legend: every kind's icon and what it means, Open among them
+function drawLegend() {
+  $("map-legend").replaceChildren(...Object.entries(STATUS_KINDS).map(([kind, { label }]) => {
+    const icon = svg("svg", { class: `status-icon ${kind}`, viewBox: "-1 -1 18 18", "aria-hidden": "true" });
+    for (const [tag, attrs] of statusShapes(kind)) icon.append(svg(tag, attrs));
+    const li = el("li", null, { "data-kind": kind });
+    li.append(icon, label);
+    return li;
+  }));
 }
 
 const KIND_LABEL = { theorem: "Theorem", lemma: "Lemma", claim: "Claim", imported_result: "Imported result" };
@@ -748,7 +737,7 @@ function drawDag(nodes) {
   }
   for (const n of nodes) {
     const left = -BOX.w / 2, top = -BOX.h / 2;
-    const classes = ["node", `state-${tagOf(n)[1]}`, n.frontier ? "frontier" : "", rejected(n) ? "rejected" : ""].filter(Boolean).join(" ");
+    const classes = ["node", `state-${n.status.kind}`, n.frontier ? "frontier" : "", rejected(n) ? "rejected" : ""].filter(Boolean).join(" ");
     const place = () => { const p = at.get(n.id); g.setAttribute("transform", `translate(${p.x},${p.y})`); };
     const g = svg("g", { class: classes, "data-node-id": n.id, tabindex: 0, role: "link", "aria-label": `${n.kind} ${n.id}: ${acceptanceText(n)}, ${n.workflow_state}, ${n.integrity_state}${n.assignee ? `, claimed by ${n.assignee}` : ""}${n.frontier ? ", on the frontier" : ""}` });
     place();
@@ -763,16 +752,16 @@ function drawDag(nodes) {
     const meta = svg("text", { class: "meta", x: left + 14, y: top + 58 });
     meta.textContent = n.display_label ? short(n.statement, 30) : "";
     g.append(kind, label, meta);
-    // the node's one state, as a word along the bottom
-    const [tagText, statusKind] = tagOf(n);
-    const status = svg("g", { class: `status ${statusKind}` });
+    // the node's one state (the server's, issue #157), as a word along the bottom
+    const [own, ...beside] = statusMarks(n.status, n.frontier);
+    const status = svg("g", { class: `status ${own.kind}` });
     const tag = svg("text", { class: "tag", x: left + 14, y: top + BOX.h - 13 });
-    tag.textContent = capitalised(short(tagText, 24));
+    tag.textContent = short(own.text, 24);
     status.append(tag);
     // the state's icon, large, as a badge on the card's top-right corner
-    g.append(status, statusIcon(statusKind, left + BOX.w - 6, top + 6, 30));
+    g.append(status, statusIcon(own.kind, left + BOX.w - 6, top + 6, 30));
     // the frontier is its own, strongest signal (ADR-0008): a warning is shown beside it, never in its place
-    if (n.frontier && warningOf(n)) g.append(statusIcon("ready", left + BOX.w - 36, top + 6, 22));
+    for (const mark of beside) g.append(statusIcon(mark.kind, left + BOX.w - 36, top + 6, 22));
     // Start agent from the card (spec #145): a local node nobody holds; the click never opens the node
     if (n.kind !== "imported_result" && !n.assignee && !n.run && !rejected(n)) {
       const start = svg("g", { class: "start", role: "button", tabindex: 0, "aria-label": `Start the agent on ${n.id}` });
@@ -847,7 +836,7 @@ function drawTree(nodes) {
     const small = (chip) => { chip.classList.add("state-chip"); return chip; };
     li.append(small(stateChip(n.acceptance_state, acceptanceText(n))), small(stateChip(n.workflow_state)), small(stateChip(n.integrity_state)));
     if (n.assignee) li.append(small(stateChip("claimed", n.assignee, `claimed by ${n.assignee}`)));
-    if (n.frontier) li.append(small(stateChip("frontier", "frontier", "on the frontier: ready to start")));
+    li.append(...statusChips(n.status, n.frontier).map(small));  // the card's status, and its Ready beside a warning (issue #157)
     if ((parents.get(id) || 0) > 1) li.append(el("span", "shared", { class: "state-chip shared-chip", title: `used by ${parents.get(id)} nodes; see the DAG` }));
     if (ancestors.has(id)) { li.append(" (cycle: not expanded again)"); return li; }
     if (n.dependencies.length) {
@@ -964,7 +953,10 @@ async function showNode(nodeId) {
   $("node-title").replaceChildren(node.id, el("small", node.kind.replace("_", " ")));
   const axis = (name, value, text = value) => { const cell = el("div"); cell.append(el("span", name, { class: "lbl" }), stateChip(value, text, `${name}: ${text}`)); return cell; };
   const acceptance = acceptanceText({ acceptance_state: view.acceptance_state, trust_rule: view.trust_rule });
-  $("node-axes").replaceChildren(axis("workflow", view.workflow_state), axis("acceptance", view.acceptance_state, acceptance), axis("integrity", view.integrity_state));
+  // its one status, as its card shows it (issue #157), then its three axes
+  const status = el("div");
+  status.append(el("span", "status", { class: "lbl" }), ...statusChips(view.status, view.frontier));
+  $("node-axes").replaceChildren(status, axis("workflow", view.workflow_state), axis("acceptance", view.acceptance_state, acceptance), axis("integrity", view.integrity_state));
   showRunControls(node, view);
   const nodeWarnings = el("ul");
   showWarnings(view.warnings, nodeWarnings);
@@ -1162,7 +1154,7 @@ function showAttention() {
     const row = el("li");
     const link = el("a", null, { href: pageOf(n), class: "attention-node" });
     link.append(el("b", n.display_label || short(n.statement, 60)), el("span", `${KIND_LABEL[n.kind] || n.kind} · ${n.id}`, { class: "attention-id" }));
-    row.append(stateChip(reason, tagOf(n)[0]), link, el("p", ATTENTION_WHY[reason], { class: "hint" }));
+    row.append(stateChip(reason, n.status.text), link, el("p", ATTENTION_WHY[reason], { class: "hint" }));
     return row;
   }));
   if (!nodes.length) list.append(el("li", "Nothing on the map needs attention.", { class: "attention-none" }));
@@ -1173,6 +1165,7 @@ function showAttention() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  drawLegend();
   $("decide-batch").addEventListener("click", async () => {
     const decisions = [...$("pending").querySelectorAll("tbody tr")]
       .filter((tr) => tr.querySelector("input[type=checkbox]")?.checked)

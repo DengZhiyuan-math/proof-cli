@@ -140,44 +140,31 @@
     return box;
   }
 
-  // the node's three state axes, one chip each (never folded into one status), plus its claim
-  // Each state as the proof map's icon for it and its word, in its colour (the map's seven states:
-  // ready, in progress, blocked, awaiting review, accepted, rejected, needs attention).
-  const VALUE_STATE = {
-    claimed: "claimed", "review-needed": "review", "revision-requested": "review", blocked: "blocked",
-    accepted: "accepted", reviewed: "accepted", "trusted-by-rule": "accepted", rejected: "rejected", "no-longer-callable": "rejected",
-    unverifiable: "attention", "potentially-stale": "attention", challenged: "attention",
-  };
-  const GLYPHS = {
-    claimed: [["path", { d: "M9.4 6.6 4.7 11.3", class: "glyph" }], ["rect", { x: 6.8, y: 5.3, width: 5.6, height: 2.5, rx: 0.6, transform: "rotate(45 9.6 6.55)", class: "glyph-fill" }]],  // a hammer: work in progress
-    blocked: [["rect", { x: 5.2, y: 7.3, width: 5.6, height: 4.2, rx: 1, class: "glyph-fill" }], ["path", { d: "M6.4 7.3V6.1a1.6 1.6 0 0 1 3.2 0v1.2", class: "glyph" }]],
-    review: [["path", { d: "M8 4.6V8l2.3 1.5", class: "glyph" }]],
-    accepted: [["path", { d: "M4.9 8.3 7 10.4l4.2-4.6", class: "glyph" }]],
-    rejected: [["path", { d: "M5.6 5.6l4.8 4.8M10.4 5.6l-4.8 4.8", class: "glyph" }]],
-    attention: [["path", { d: "M8 5.6v3.9", class: "glyph" }], ["circle", { cx: 8, cy: 12, r: 1, class: "glyph-fill" }]],
-    open: [],
-  };
+  // Each state as the proof map's icon for it and its word, in its colour: the icons and the kinds
+  // are status.js's, shared with the map page (issue #157).
   const SVG_NS = "http://www.w3.org/2000/svg";
   function icon(kind) {
     if (!document.createElementNS) return null;  // no SVG here: the word alone says it
     const make = (tag, attrs) => { const e = document.createElementNS(SVG_NS, tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); return e; };
     const box = make("svg", { viewBox: "-1 -1 18 18", class: `status-icon ${kind}`, "aria-hidden": "true" });
-    box.append(kind === "attention" ? make("path", { d: "M8 1.1c.5 0 .95.27 1.2.72l6.1 10.9c.52.93-.15 2.08-1.2 2.08H1.9c-1.05 0-1.72-1.15-1.2-2.08L6.8 1.82C7.05 1.37 7.5 1.1 8 1.1z", class: "disc" }) : make("circle", { cx: 8, cy: 8, r: 8, class: "disc" }));
-    for (const [tag, attrs] of GLYPHS[kind] || []) box.append(make(tag, attrs));
+    for (const [tag, attrs] of statusShapes(kind)) box.append(make(tag, attrs));
     return box;
   }
 
-  // the node's three state axes and who holds it, one chip each (never folded into one status)
+  // the node's one status, as its map card shows it (the server's, issue #157), then its three
+  // state axes and who holds it, one chip each (never folded into one status)
   function axes(view, claimed) {
     const box = h("div", null, { class: "node-axes" });
-    const chip = (value, text) => {
-      const kind = VALUE_STATE[value] || "open";
-      const span = h("span", null, { class: `state-${kind}`, title: text });
+    const kindChip = (kind, text, extra) => {
+      const span = h("span", null, { class: `state-${kind}${extra ? ` ${extra}` : ""}`, title: text });
       const mark = icon(kind);
       if (mark) span.append(mark);
       span.append(text);
       box.append(span);
     };
+    const chip = (value, text) => kindChip(STATUS_OF_VALUE[value] || "open", text);
+    // a frontier node with a warning shows its Ready beside the warning, never replaced by it (ADR-0008)
+    for (const mark of statusMarks(view.status, view.frontier)) kindChip(mark.kind, mark.text, "node-status");
     // who holds the node is a state only (the proof agent claims through `proof`): a claimed
     // node's workflow chip names its holder, and any other node says whether someone holds it
     if (view.workflow_state !== "claimed") chip(view.workflow_state, view.workflow_state);

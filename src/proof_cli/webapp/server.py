@@ -49,6 +49,7 @@ from ..authority import candidate_proof_sha256
 from .. import key_ideas
 from ..vault import OUT_DIR, SNAPSHOT_MANIFEST, archived_pdf_path, build_pdf_path, frozen_key_ideas, node_folder, snapshot_folder_file, snapshot_folder_files
 from ..studio.agent_run import ACTIONS as RUN_ACTIONS
+from .node_status import node_status
 from .studios import StudioHub
 
 
@@ -68,8 +69,9 @@ def project_origin(store: ProjectStore) -> str:
 
 _STATIC = resources.files("proof_cli.webapp") / "static"
 _CONTENT_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".woff2": "font/woff2"}
-# what the map page shares with the studio's static folder: the maths renderer and vendored KaTeX (ADR-0013)
-_SHARED_PREFIXES = ("mathtext.js", "vendor/katex.min.", "vendor/fonts/KaTeX_")
+# what the map page shares with the studio's static folder: the maths renderer and vendored KaTeX (ADR-0013),
+# and the status icons (issue #157)
+_SHARED_PREFIXES = ("mathtext.js", "status.js", "vendor/katex.min.", "vendor/fonts/KaTeX_")
 _MAX_BODY_BYTES = 2_000_000
 
 
@@ -358,6 +360,7 @@ class ReviewApp:
                     "core_idea": None if imported else _core_idea(self.store, node.id),
                 }
             )
+            nodes[-1]["status"] = node_status(nodes[-1])  # the one status every view shows (issue #157)
         return {"nodes": nodes}
 
     def _pdfs(self, node_id: str, proof) -> dict:
@@ -539,10 +542,7 @@ class ReviewApp:
         challenges = proof_map.list_challenges(store, target_node_id=node_id)
         warnings = proof_map.list_integrity_warnings(store)
         claim = get_active_claim(store, node_id)
-        return {
-            # its assignee: a planning signal, cleared with `proof node unassign` (ADR-0010)
-            "claim": {"id": claim.id, "claimant_id": claim.claimant_id, "claimed_at": claim.claimed_at.isoformat()} if claim else None,
-            "node": node.model_dump(mode="json"),
+        axes = {
             "workflow_state": proof_map.get_workflow_state(store, node_id),
             "acceptance_state": (
                 proof_map.get_reference_review_state(store, node_id)
@@ -550,6 +550,17 @@ class ReviewApp:
                 else proof_map.get_acceptance_state(store, node_id)
             ),
             "integrity_state": proof_map.get_integrity_state(store, node_id),
+        }
+        frontier = any(other.id == node_id for other in proof_map.get_frontier(store))
+        run = self.studios.run_state(node_id)
+        return {
+            # its assignee: a planning signal, cleared with `proof node unassign` (ADR-0010)
+            "claim": {"id": claim.id, "claimant_id": claim.claimant_id, "claimed_at": claim.claimed_at.isoformat()} if claim else None,
+            "node": node.model_dump(mode="json"),
+            **axes,
+            # on the frontier, and the one status the map card shows for it (issue #157)
+            "frontier": frontier,
+            "status": node_status({**axes, "frontier": frontier, "assignee": claim.claimant_id if claim else None, "run": run}),
             "trust_rule": proof_map.trust_rules_of(store, node_id) if node.kind == ProofMapNodeKind.imported_result else [],
             # when it first met each rule (ADR-0014): an event, never a decision, listed with the history
             "rule_events": [{"rule": event.payload.get("rule"), "at": event.created_at.isoformat()} for event in proof_map.trust_rule_events(store, node_id)],
@@ -566,7 +577,7 @@ class ReviewApp:
             "citation": proof_map.node_citation(store, node),
             # the open fog near this node, and the fog item it was crystallized from (ADR-0008, spec #136)
             "fog_near": [proof_fog.fog_view(store, item) for item in proof_fog.fog_near(store, node_id)],
-            "run": self.studios.run_state(node_id),
+            "run": run,
             "crystallized_from": origin.id if (origin := proof_fog.crystallized_from(store, node_id)) is not None else None,
             "dependents": sorted(other.id for other in proof_map.list_nodes(store) if node_id in other.dependencies),
             "pdfs": self._pdfs(node_id, proof),

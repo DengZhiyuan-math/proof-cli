@@ -21,7 +21,8 @@ class El {
   const everything = () => [...panel.all(), ...card.all()];  // the node panel and the review card in the agent panel
   const context = {
     NODE: scenario.view.node.id,
-    document: { getElementById: (id) => (id === "node-panel" ? panel : id === "review-card" ? card : name), createElement: (tag) => new El(tag), addEventListener() {} },
+    document: { getElementById: (id) => (id === "node-panel" ? panel : id === "review-card" ? card : name), createElement: (tag) => new El(tag), addEventListener() {},
+      ...(scenario.svg ? { createElementNS: (_, tag) => new El(tag) } : {}) },  // the status icons, when the scenario reads them (issue #157)
     location: {},
     confirm: () => { events.push("confirm"); return scenario.confirm !== false; },
     openReadOnly: (name, text) => { events.push({ openReadOnly: name, text }); },
@@ -36,6 +37,7 @@ class El {
   if (scenario.katex !== false) context.katex = require("./katex_stub.js")(katexCalls);
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, "../../src/proof_cli/studio/static/mathtext.js"), "utf8"), context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "../../src/proof_cli/studio/static/status.js"), "utf8"), context);  // the status icons (issue #157)
   vm.runInContext(fs.readFileSync(path.join(__dirname, "../../src/proof_cli/studio/static/node.js"), "utf8"), context);
   await new Promise(setImmediate);
   const out = { events, deps: null, links: [], note: "", panel: panel.text() };
@@ -61,6 +63,13 @@ class El {
   out.buttons = panel.all().filter((x) => x.tag === "button").map((x) => x.textContent);
   out.text = panel.text();
   out.katex = katexCalls;
+  // the node's status chips (issue #157): each one's word, colour (state-<kind>) and icon (its kind and shapes)
+  const kindOf = (x) => (String(x.attrs.class || "").split(" ").find((c) => c.startsWith("state-")) || "").slice("state-".length);
+  const iconOf = (x) => x && { kind: String(x.attrs.class).split(" ").find((c) => c !== "status-icon"),
+    shapes: x.children.map((c) => [c.tag, Object.fromEntries(Object.entries(c.attrs).map(([k, v]) => [k, String(v)]))]) };
+  out.status = panel.all().filter((x) => x.tag === "span" && String(x.attrs.class || "").split(" ").includes("node-status")).map((x) => ({
+    text: x.children.filter((c) => typeof c === "string").join(""), kind: kindOf(x), icon: iconOf(x.children.find((c) => typeof c === "object" && c.tag === "svg") || null),
+  }));
   // every maths span in the review sheet: its class and its text
   out.math = review.all().filter((x) => x.tag === "span" && String(x.attrs.class || "").startsWith("math")).map((x) => ({ class: x.attrs.class, text: x.textContent, title: x.attrs.title || null }));
   console.log(JSON.stringify(out));
