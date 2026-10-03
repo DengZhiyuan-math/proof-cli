@@ -731,14 +731,11 @@ def test_the_toggle_lists_dropped_and_crystallized_items_apart_and_reopens_a_dro
     assert sent == {"url": "/api/fog/fog-3/reopen", "body": {}}
 
 
-def test_crystallize_shows_the_cli_command_with_the_near_node_as_the_parent():
+def test_crystallize_opens_the_node_form_not_an_inline_hint():
+    """The form itself is nodeform.js's, tested in test_fog_crystallize_form.py (issue #155): the row grows no CLI hint and posts nothing."""
     _, _, shown = _fog_home(steps=[{"fog": True}, {"fogButton": {"id": "fog-1", "text": "Crystallize…"}}])
     (row,) = [r for r in shown["fogRows"] if r["id"] == "fog-1"]
-    assert row["cli"] == 'proof fog crystallize fog-1 <node-id> "<statement>" --parent lem_bound'
-    assert shown["posted"] == []
-    _, _, loose = _fog_home(steps=[{"fog": True}, {"fogButton": {"id": "fog-2", "text": "Crystallize…"}}])
-    (row,) = [r for r in loose["fogRows"] if r["id"] == "fog-2"]
-    assert row["cli"] == 'proof fog crystallize fog-2 <node-id> "<statement>"'
+    assert row["cli"] is None and not row["form"] and shown["posted"] == []
 
 
 def test_the_drawer_closes_from_its_button_and_the_badge_reads_the_same():

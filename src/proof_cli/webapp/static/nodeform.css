@@ -78,7 +78,10 @@
 .nf-row3 label:last-child { grid-column: 1 / -1; }
 .nf-suggest { font-size: 11.5px; color: var(--label-3); margin: 0; }
 
-.nf-refusal { font-family: var(--mono); font-size: 11.5px; color: var(--red); background: var(--fill); border-radius: 8px; padding: 6px 10px; margin: 0; overflow-wrap: anywhere; }
+/* a crystallize's fog item, above the form for reference (#155): app.css's .fog-text, on the immutable note's fill */
+.nf-fog { display: grid; gap: 4px; background: var(--fill); border-radius: 8px; padding: 7px 10px; min-width: 0; }
+.nf-fog .fog-text { overflow-wrap: anywhere; }
+.nf-refusal {font-family: var(--mono); font-size: 11.5px; color: var(--red); background: var(--fill); border-radius: 8px; padding: 6px 10px; margin: 0; overflow-wrap: anywhere; }
 .nf-refusal:empty { display: none; }
 .nf-cli-box { border-top: .5px solid var(--sep); padding-top: 10px; display: grid; gap: 4px; min-width: 0; }
 .nf-cli-head { display: flex; justify-content: space-between; align-items: center; }

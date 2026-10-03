@@ -9,7 +9,9 @@
 // {parent: id}; {mode: "split"|"rests"}; {reassign: bool}; {refFind: text}; {refPick: id}; {newRef: {...}} (opens and
 // fills the new-reference fields); {suggest: "locator"|"version"}; {submit: true}; {cancel: true}; {close: true};
 // {escape: true} (Escape inside the form); {key: k} (a key at the document, from the page body);
-// {outside: true} (a pointer pressed on the canvas, outside the popover); {copy: true}.
+// {outside: true} (a pointer pressed on the canvas, outside the popover); {copy: true};
+// {crystallize: fog_id} (the toolbar's Fog badge, then that row's Crystallize… in the drawer, issue #155),
+// served from scenario.fog; {noParent: true} (the parent select's "None: free-standing").
 const fs = require("fs"), path = require("path"), vm = require("vm");
 
 const focus = { on: null, body: null };
@@ -142,7 +144,13 @@ class FakeElement {
       let data;
       if (url === "/api/state") data = scenario.state;
       else if (url === "/api/map") data = map;
-      else if (url.startsWith("/api/fog")) data = { items: [] };
+      else if (url.endsWith("/crystallize") && method === "POST") {
+        // the crystallize as the server answers it (webapp/server.py fog_action): the node, its fog item, the page to open
+        data = { id: body.node_id, kind: "claim", fog: { id: url.split("/")[3], status: "crystallized", node_id: body.node_id }, reminder: scenario.reminder || "", page: `/studio/${body.node_id}/` };
+        map = { nodes: [...map.nodes, { id: body.node_id, kind: "claim", statement: body.statement, display_label: body.display_label, dependencies: [],
+          acceptance_state: "unreviewed", workflow_state: "open", integrity_state: "current", assignee: null, frontier: false, status: { text: "Open", kind: "open" } }] };
+      }
+      else if (url.startsWith("/api/fog")) data = scenario.fog || { items: [] };
       else if (url === "/api/references" && method === "GET") data = scenario.references || { references: [], source_types: [] };
       else if (url === "/api/references") data = { id: body.reference_id, title: body.title, authors: body.authors, year: Number(body.year), source_type: body.source_type, identifier: body.identifier, url: body.url, bibliographic_source: "" };
       else if (url === "/api/nodes") {
@@ -192,12 +200,16 @@ class FakeElement {
       findFocused: focus.on === elements["map-find"],
       // what Create would post now, its own checks aside: for comparing them with the server's
       cliCommands: vm.runInContext("nf.F ? nfCliLines() : null", context),
-      wouldPost: vm.runInContext("nf.F ? (nfSplit() ? { url: `/api/node/${nf.F.parent}/split`, body: nfSplitBody() } : { url: '/api/nodes', body: nfNodeBody() }) : null", context),
+      // each card's centre on the scene, and the scene's pan and zoom: where a crystallize's popover should stand
+      centres: vm.runInContext("view.at ? Object.fromEntries(view.at) : null", context),
+      zoom: vm.runInContext("({ k: view.k, tx: view.tx, ty: view.ty })", context),
+      anchor: vm.runInContext("nf.F && nf.anchor ? { ...nf.anchor } : null", context),
+      wouldPost: vm.runInContext("nf.F ? (nf.F.fog ? { url: `/api/fog/${nf.F.fog.id}/crystallize`, body: nfCrystallizeBody() } : nfSplit() ? { url: `/api/node/${nf.F.parent}/split`, body: nfSplitBody() } : { url: '/api/nodes', body: nfNodeBody() }) : null", context),
     };
     if (!p) return reading;
     const q = (sel) => p.querySelector(sel);
     return Object.assign(reading, {
-      title: q("h2").textContent, classes: p.className.split(" "), style: { ...p.style },
+      title: q("h2").textContent, fogShown: !q(".nf-fog").hidden, fogText: q(".nf-fog").textContent, classes: p.className.split(" "), style: { ...p.style },
       kinds: q("[data-seg=kind]").querySelectorAll("button").map((b) => ({ kind: b.getAttribute("data-kind"), pressed: b.getAttribute("aria-pressed") === "true", disabled: b.disabled })),
       mediumShown: !q("[data-seg=medium]").parent.hidden, medium: q("[data-seg=medium]").querySelectorAll("button").filter((b) => b.getAttribute("aria-pressed") === "true").map((b) => b.getAttribute("data-medium"))[0],
       depsShown: !q("[data-f=deps]").hidden, sourceShown: !q("fieldset").hidden,
@@ -257,6 +269,14 @@ class FakeElement {
     if (step.depFind !== undefined) { const input = inPop("nf-deps-find"); input.value = step.depFind; await input.dispatch("input"); await settle(); }
     if (step.pick) { await click(pop().querySelector("[data-f=deps]").querySelectorAll("li").find((li) => li.getAttribute("data-dep") === step.pick)); }
     if (step.unpick) { await click(pop().querySelector("[data-f=deps]").querySelectorAll(".nf-dep-chip").find((c) => c.getAttribute("data-chip") === step.unpick).querySelector("button")); }
+    if (step.crystallize) {
+      await elements["fog-badge"].dispatch("click"); await settle();
+      const row = elements["fog-list"].querySelectorAll("li").find((li) => li.getAttribute("data-fog") === step.crystallize);
+      const button = row.querySelectorAll("button").find((b) => b.textContent === "Crystallize…");
+      for (const fn of listeners.pointerdown || []) await fn({ target: button, button: 0, pointerType: "mouse" });
+      await button.dispatch("click"); await flush();
+    }
+    if (step.noParent) { const select = inPop("nf-parent"); select.value = ":none"; await select.dispatch("change"); await settle(); }
     if (step.parent !== undefined) { const select = inPop("nf-parent"); select.value = step.parent; await select.dispatch("change"); await settle(); }
     if (step.mode) { const radio = pop().querySelectorAll("input[type=radio]").find((r) => r.value === step.mode); radio.checked = true; await radio.dispatch("change"); await settle(); }
     if (step.reassign !== undefined) { const box = inPop("nf-reassign"); box.checked = step.reassign; await box.dispatch("change"); await settle(); }
