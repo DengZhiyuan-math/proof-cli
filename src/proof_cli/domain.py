@@ -4,7 +4,7 @@ from enum import Enum
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_serializer, model_validator
 
 
 def utc_now() -> datetime:
@@ -330,6 +330,11 @@ class Challenge(BaseModel):
     resolution_review_id: str | None = None
     # that decision's signed rationale
     resolution_rationale: str | None = None
+
+    @field_serializer("resolved_at", when_used="json")
+    def _resolved_at_as_recorded(self, value: datetime | None) -> str | None:
+        # the decision's own `isoformat()` (`+00:00`), as `resolved_at` has always read (#159)
+        return None if value is None else value.isoformat()
 
 
 class EvidenceOutcome(str, Enum):
