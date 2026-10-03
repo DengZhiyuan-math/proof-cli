@@ -411,8 +411,6 @@ td a { font-family: var(--mono); font-size: 12px; }
 .fog-form select { height: 28px; }
 .fog-form input[name=run_by], .fog-form input[name=path] { flex: 1; min-width: 110px; font-family: var(--mono); font-size: 12px; }
 .fog-form button { height: 26px; font-size: 12px; }
-.fog-cli-hint { margin: 0; padding-top: 4px; border-top: .5px solid var(--sep); }
-.fog-cli { display: block; margin-top: 4px; user-select: all; word-break: break-all; }
 /* an Experiment's outcome: a grey chip whose word says it, told apart by its mark, never by a node state's colour
    (green is accepted, red is rejected): supports a filled dot, refutes a ring, inconclusive a faint dot, error a "!" */
 .exp { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 8px 0 6px; border-radius: 10px; font-size: 11px; font-weight: 600; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; color: var(--label-2); background: var(--fill); }

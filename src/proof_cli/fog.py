@@ -294,6 +294,9 @@ def crystallize_fog(
         item = require_fog(store, fog_id, conn=conn)
         _require_open(item, "crystallizing it")
         parent_id = _resolve_parent(item, parent=parent, no_parent=no_parent)
+        if not statement.strip():
+            # written now, never the item's text: a Claim with no statement states nothing (#155)
+            raise ProofMapError("FOG_STATEMENT_REQUIRED", f"crystallizing {item.id} needs the Claim's statement, written now; the item's text is never copied")
         # the item first: if the node can't be made, the whole transaction rolls back, item included
         update_fog_item(store, item.model_copy(update={"status": FogStatus.crystallized, "node_id": node_id, "updated_at": utc_now()}), conn=conn)
         spec = {"id": node_id, "statement": statement, "assumptions": list(assumptions or []), "display_label": display_label, "medium": medium}
