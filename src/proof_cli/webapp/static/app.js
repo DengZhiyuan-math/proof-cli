@@ -65,8 +65,8 @@ let state = null;
 // -- the fog drawer (issue #137, ADR-0008): the Proof fog beside the map, never on it -----------------
 // A fog item is a difficulty not yet precise enough to be a Claim; it is never a node, and `near` is
 // an informal pointer, never a dependency. The drawer lists open items (dropped and crystallized ones
-// on request), adds, drops, reopens and records Experiments through /api/fog; crystallize is a CLI
-// command until it opens the map's node form (#155). Hovering a row lights its near nodes up on the
+// on request), adds, drops, reopens and records Experiments through /api/fog; Crystallize… opens the
+// map's node form (nodeform.js, #155), which posts to /api/fog/<id>/crystallize. Hovering a row lights its near nodes up on the
 // canvas the way the search box does, with nothing drawn on the map.
 let fogData = { items: [] };
 // form: {id, kind} of the one inline form showing; near: the hovered row's nodes, lit up on the map; found: the row a #/fog/<id> link asked for
@@ -148,18 +148,11 @@ function fogActions(item) {
   const button = (text, onClick, primary) => { const b = el("button", text, { type: "button", class: primary ? "primary" : "" }); b.addEventListener("click", (event) => { event.stopPropagation(); onClick(); }); return b; };
   // each "…" button opens its inline form (or hint) under the row; a second click closes it
   const toggle = (kind) => () => { fog.form = fog.form && fog.form.id === item.id && fog.form.kind === kind ? null : { id: item.id, kind }; showFog(); };
-  if (item.status === "open") box.append(button("Crystallize…", toggle("crystallize"), true), button("Record experiment…", toggle("experiment")), button("Drop…", toggle("drop")));
+  // Crystallize… opens the map's node form (nodeform.js, #155), not an inline form
+  const crystallize = () => { if (typeof nfCrystallize === "function") { fog.form = null; showFog(); nfCrystallize(item); } };
+  if (item.status === "open") box.append(button("Crystallize…", crystallize, true), button("Record experiment…", toggle("experiment")), button("Drop…", toggle("drop")));
   else if (item.status === "dropped") box.append(button("Reopen", () => fogPost(`/api/fog/${encodeURIComponent(item.id)}/reopen`, {}, `${item.id}: reopened.`)));
   return box;
-}
-
-// a crystallize is a CLI command until it opens the map's node form (#155): the command, ready to copy
-function crystallizeHint(item) {
-  const parent = item.near.length === 1 ? ` --parent ${item.near[0]}` : item.near.length > 1 ? ` --parent <one of ${item.near.join(", ")}>` : "";
-  const hint = el("p", null, { class: "hint fog-cli-hint" });
-  hint.append("State it as a Claim from the CLI (the statement is written fresh; the fog's text is never copied): ",
-    el("code", `proof fog crystallize ${item.id} <node-id> "<statement>"${parent}`, { class: "fog-cli" }));
-  return hint;
 }
 
 function fogRow(item) {
@@ -173,7 +166,7 @@ function fogRow(item) {
   const status = fogStatusLine(item);
   if (status) meta.append(status);
   li.append(meta, fogActions(item));
-  if (fog.form && fog.form.id === item.id) li.append(fog.form.kind === "crystallize" ? crystallizeHint(item) : fogForm(item, fog.form.kind));
+  if (fog.form && fog.form.id === item.id) li.append(fogForm(item, fog.form.kind));
   // hovering a row lights its near nodes up on the map, the rest fall back: the search box's own marking
   // (dim / found), on the canvas and the tree alike; nothing is drawn on the map for a fog item
   li.addEventListener("mouseenter", () => focusFogNodes(item.near));

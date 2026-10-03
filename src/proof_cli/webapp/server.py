@@ -704,7 +704,7 @@ class ReviewApp:
         return proof_fog.fog_view(self.store, item)
 
     def fog_action(self, fog_id: str, action: str, body: dict) -> dict:
-        """The page's writes on one item, with the CLI's checks and codes: edit, drop, reopen, experiment."""
+        """The page's writes on one item, with the CLI's checks and codes: edit, drop, reopen, experiment, crystallize."""
         actor = self._actor()
         if action == "edit":
             near = body.get("near")
@@ -727,7 +727,26 @@ class ReviewApp:
                 run_by=str(body.get("run_by") or ""), path=body.get("path") or None,
             )
             return experiment.model_dump(mode="json")
+        if action == "crystallize":
+            return self._crystallize(fog_id, body, actor)
         raise RequestError(HTTPStatus.NOT_FOUND, "NOT_FOUND", f"no fog action {action!r}")
+
+    def _crystallize(self, fog_id: str, body: dict, actor: str) -> dict:
+        """The map's node form, opened from the drawer (issue #155): `proof fog crystallize`'s service, its checks and codes.
+
+        No parent and no `no_parent` is the CLI's default (the item's one near node, refused
+        when it has several). The answer is the CLI's --json payload, with the page to open.
+        """
+        node_id, statement, parent = body.get("node_id"), body.get("statement"), body.get("parent")
+        if not isinstance(node_id, str) or not isinstance(statement, str) or not (parent is None or isinstance(parent, str)):
+            raise RequestError(HTTPStatus.BAD_REQUEST, "INVALID_REQUEST", "a crystallize is node_id and statement, as text, and optionally a parent's id or no_parent")
+        made = proof_fog.crystallize_fog(
+            self.store, fog_id, node_id, statement, parent=parent or None, no_parent=bool(body.get("no_parent")), reassign=bool(body.get("reassign")),
+            assumptions=[str(a) for a in body.get("assumptions") or [] if str(a).strip()], display_label=str(body.get("display_label") or ""),
+            created_by=actor, medium=body.get("medium") or None,
+        )
+        fog = {"id": made.fog.id, "status": made.fog.status.value, "node_id": made.fog.node_id}
+        return {**made.node.model_dump(mode="json"), "fog": fog, "reminder": made.reminder, "page": self.page_of(made.node)}
 
     # -- decisions ----------------------------------------------------------------
 

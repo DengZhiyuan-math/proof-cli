@@ -6,6 +6,8 @@
 // Uses app.js's helpers ($, el, svg, api, say, showError, withMath, citationBlock, statusChips,
 // pageOf, positions, view, BOX, KIND_LABEL, mapData, state, mapView, refresh). A node's status is always the
 // server's `status` from /api/map, never worked out here. Text is inserted as text.
+// The fog drawer's Crystallize… opens the same form (issue #155, ADR-0008): a Claim, posted to the
+// crystallize service, with `proof fog crystallize …` as its command and the item's text shown above it.
 "use strict";
 
 const NF_SAFE_NODE_ID = /^[A-Za-z0-9_-][A-Za-z0-9._-]*$/;
@@ -14,6 +16,7 @@ const NF_KINDS = ["theorem", "lemma", "claim", "imported_result"];
 const NF_TRUST_LEVELS = ["foundational", "project_verified", "external_reference", "temporary_admit"];  // TrustLevel
 const NF_SOURCE_TYPES = ["standard_reference", "research_paper", "textbook", "survey", "monograph", "website", "other"];  // ReferenceSourceType
 const NF_LONG_PRESS_MS = 550;
+const NF_NO_PARENT = ":none";  // a crystallize's "None: free-standing" (--no-parent); ':' is never in a node id
 const NF_IMMUTABLE = "The citation is fixed once the node exists (reference_id, ADR-0012). Its Reference review binds the id, not the entry's text. To cite a different source, create a new imported result and move its dependents onto it.";
 
 const nf = {
@@ -33,6 +36,8 @@ function nfBlank() {
     id: "", label: "", kind: "claim", statement: "", assumptions: [], medium: "latex", deps: [], depFind: "",
     parent: "", parentMode: "rests", reassign: false, locator: "", version: "", trust: "", refId: "", refFind: "", newRef: null,
     touched: new Set(), submitted: false, busy: false, refusal: "",
+    fog: null,        // a crystallize: {id, text, near} of the fog item, from the drawer (#155)
+    noParent: false,  // a crystallize's explicit none (--no-parent); no parent and not this is the CLI's default
   };
 }
 
@@ -44,7 +49,8 @@ const nfSplit = () => !!nf.F.parent && nf.F.parentMode === "split";
 const nfAssumptions = () => nf.F.assumptions.filter((a) => a.trim());
 const nfNarrow = () => typeof matchMedia === "function" && matchMedia("(max-width: 760px)").matches;
 const nfAuthors = (text) => String(text || "").split(/[;\n]/).map((a) => a.trim()).filter(Boolean);
-const nfData = (F) => JSON.stringify([F.id, F.label, F.kind, F.statement, F.assumptions, F.medium, F.deps, F.parent, F.parentMode, F.reassign, F.locator, F.version, F.trust, F.refId, F.newRef]);
+const nfFog = () => nf.F.fog;
+const nfData = (F) => JSON.stringify([F.id, F.label, F.kind, F.statement, F.assumptions, F.medium, F.deps, F.parent, F.parentMode, F.reassign, F.locator, F.version, F.trust, F.refId, F.newRef, F.noParent]);
 const nfDirty = () => !!nf.F && nfData(nf.F) !== nf.initial;
 
 // A Python str's repr, as the server's messages quote a node id ({node_id!r})
@@ -89,8 +95,18 @@ function nfValidate() {
   };
   const parent = F.parent ? nfNode(F.parent) : null;
   const heldByAnother = parent && parent.assignee && parent.assignee !== nfMe() && !F.reassign;
+  const fog = nfFog();
+  if (fog) {
+    // fog.crystallize_fog's own checks first (the item's parent, then the statement); with a parent the
+    // rest is a single-child Split's, below, and with none a Claim's create (#155)
+    if (!F.parent && !F.noParent && fog.near.length > 1) {
+      add("parent", "FOG_PARENT_AMBIGUOUS", `${fog.id} is near ${fog.near.length} nodes (${fog.near.join(", ")}); say which is the parent with --parent, or --no-parent for none`);
+    } else if (!F.statement.trim()) add("statement", "FOG_STATEMENT_REQUIRED", `crystallizing ${fog.id} needs the Claim's statement, written now; the item's text is never copied`);
+    if (errs.length) return errs;
+    if (!nfSplit()) { idProblems(); return errs; }
+  }
   if (nfSplit()) {
-    if (!id || !F.statement) { add(id ? "statement" : "id", "INVALID_CHILD_SPEC", "each child needs an id and a statement"); return errs; }
+    if (!fog && (!id || !F.statement)) { add(id ? "statement" : "id", "INVALID_CHILD_SPEC", "each child needs an id and a statement"); return errs; }
     if (!parent) add("parent", "NODE_NOT_FOUND", `proof map node ${F.parent} not found`);
     else if (parent.kind === "imported_result") add("parent", "IMMUTABLE_NODE", `imported_result node ${parent.id} cannot be split`);
     else if (parent.acceptance_state === "rejected") add("parent", "NODE_REJECTED", `node ${parent.id} was Rejected and should not be pursued further; split is unavailable`);
@@ -136,6 +152,18 @@ function nfCliLines() {
   const id = F.id.trim() || "<node-id>";
   const statement = F.statement || "<statement>";
   const command = (parts) => out.push(parts.join(" \\\n    "));
+  const fog = nfFog();
+  if (fog) {  // one command, one transaction: the Claim, its Split of the parent, the item's record
+    const parts = [`proof fog crystallize ${nfQuote(fog.id)} ${nfQuote(id)} ${nfQuote(statement)}`];
+    if (F.parent) parts.push(`--parent ${nfQuote(F.parent)}`);
+    else if (F.noParent && fog.near.length) parts.push("--no-parent");
+    for (const a of nfAssumptions()) parts.push(`--assumption ${nfQuote(a)}`);
+    if (F.label.trim()) parts.push(`--display-label ${nfQuote(F.label.trim())}`);
+    if (F.parent && F.reassign) parts.push("--reassign");
+    if (F.medium === "computation") parts.push("--medium computation");
+    command(parts);
+    return out;
+  }
   if (!nfLocal() && F.newRef) {
     const r = F.newRef;
     const parts = [`proof reference import ${nfQuote(r.id.trim() || "<reference-id>")} ${nfQuote(r.title.trim() || "<title>")} ${nfQuote(r.year.trim() || "<year>")}`];
@@ -186,6 +214,15 @@ function nfSplitBody() {
   return { children: [{ id: F.id.trim(), statement: F.statement, display_label: F.label.trim(), assumptions: nfAssumptions(), dependencies: [...F.deps], medium: F.medium }], reassign: F.reassign };
 }
 
+// a crystallize (#155): no parent and no no_parent is the CLI's default, the item's one near node
+function nfCrystallizeBody() {
+  const F = nf.F;
+  return {
+    node_id: F.id.trim(), statement: F.statement, display_label: F.label.trim(), assumptions: nfAssumptions(), medium: F.medium,
+    parent: F.parent || null, no_parent: !F.parent && F.noParent, reassign: !!F.parent && F.reassign,
+  };
+}
+
 async function nfSubmit() {
   const F = nf.F;
   if (!F || F.busy) return;
@@ -207,12 +244,19 @@ async function nfSubmit() {
       F.refId = made.id;
       F.newRef = null;
     }
-    const page = nfSplit()
-      ? (await api(`/api/node/${encodeURIComponent(F.parent)}/split`, nfSplitBody())).next
-      : (await api("/api/nodes", nfNodeBody())).page;
+    let page, done = `Created ${id}.`;
+    if (F.fog) {  // the crystallize service, never a plain create: the item reads crystallized and names the Claim
+      const made = await api(`/api/fog/${encodeURIComponent(F.fog.id)}/crystallize`, nfCrystallizeBody());
+      page = made.page;
+      done = `Crystallized ${F.fog.id} as ${id}.${made.reminder ? ` ${made.reminder}` : ""}`;
+    } else {
+      page = nfSplit()
+        ? (await api(`/api/node/${encodeURIComponent(F.parent)}/split`, nfSplitBody())).next
+        : (await api("/api/nodes", nfNodeBody())).page;
+    }
     if (nf.ghost) { const saved = positions.load(); saved[id] = { x: nf.ghost.x, y: nf.ghost.y }; positions.save(saved); }  // where the ghost stood
     nfClose();
-    say(`Created ${id}.`, "ok");
+    say(done, "ok");
     try { await refresh(); } catch (error) { showError(error); }
     location.href = page || `#/node/${encodeURIComponent(id)}`;
   } catch (error) {
@@ -253,6 +297,12 @@ function nfBuild() {
   const form = el("form", null, { class: "nf", novalidate: "", autocomplete: "off" });
   ui.err = {};
   const err = (f) => { ui.err[f] = el("p", null, { class: "nf-err" }); return ui.err[f]; };
+
+  // a crystallize's fog item, for reference: its text is an idea, never copied into the statement (#155)
+  ui.fog = el("div", null, { class: "nf-fog" });
+  ui.fogHead = el("span", null, { class: "nf-lbl" });
+  ui.fogText = el("p", null, { class: "fog-text" });
+  ui.fog.append(ui.fogHead, ui.fogText, el("p", "For reference: write the Claim's statement below; the item's text is never copied.", { class: "hint" }));
 
   const idBox = nfField("id", "Node id", "its folder: proofs/<id>/");
   ui.id = nfInput("nf-id", { class: "mono", placeholder: "lem-chain" });
@@ -357,7 +407,7 @@ function nfBuild() {
   ui.submit = el("button", "Create", { type: "submit", class: "primary" });
   foot.append(ui.cancel, ui.submit);
 
-  form.append(idBox, labelBox, kindBox, stBox, asBox, ui.mediumBox, ui.depsBox, parentBox, ui.source, ui.refusal, cli, foot);
+  form.append(ui.fog, idBox, labelBox, kindBox, stBox, asBox, ui.mediumBox, ui.depsBox, parentBox, ui.source, ui.refusal, cli, foot);
   pop.append(head, form);
   ui.pop = pop;
   ui.form = form;
@@ -384,7 +434,13 @@ function nfWire(ui) {
   });
   ui.addAssumption.addEventListener("click", () => { F().assumptions.push(""); nfAssumptionRows(true); nfUpdate(); });
   ui.depFind.addEventListener("input", () => { F().depFind = ui.depFind.value; nfDeps(); });
-  ui.parent.addEventListener("change", () => { F().parent = ui.parent.value; F().reassign = false; F().touched.add("parent"); nfUpdate(); });
+  ui.parent.addEventListener("change", () => {
+    F().noParent = ui.parent.value === NF_NO_PARENT;
+    F().parent = F().noParent ? "" : ui.parent.value;
+    F().reassign = false;
+    F().touched.add("parent");
+    nfUpdate();
+  });
   for (const { input } of [ui.modeSplit, ui.modeRests]) {
     input.addEventListener("change", () => { F().parentMode = input.value; if (nfSplit()) F().kind = "claim"; nfUpdate(); });
   }
@@ -546,9 +602,18 @@ function nfRefs() {
 
 function nfParent() {
   const F = nf.F, ui = nf.ui;
-  ui.parent.replaceChildren(el("option", "None: free-standing", { value: "" }), ...nfNodes().map((n) => el("option", `${n.id} · ${KIND_LABEL[n.kind] || n.kind}${n.status ? `, ${n.status.text}` : ""}`, { value: n.id })));
-  ui.parent.value = F.parent;
-  ui.parentMode.hidden = !F.parent;
+  const fog = nfFog();
+  const nodes = nfNodes().map((n) => el("option", `${n.id} · ${KIND_LABEL[n.kind] || n.kind}${n.status ? `, ${n.status.text}` : ""}`, { value: n.id }));
+  if (fog) {
+    // near several nodes: unset until the researcher says which, or none (the CLI refuses to guess either)
+    const unset = fog.near.length > 1 ? [el("option", `Choose: it is near ${fog.near.join(", ")}`, { value: "" })] : [];
+    ui.parent.replaceChildren(...unset, el("option", "None: free-standing", { value: NF_NO_PARENT }), ...nodes);
+    ui.parent.value = F.noParent ? NF_NO_PARENT : F.parent;
+  } else {
+    ui.parent.replaceChildren(el("option", "None: free-standing", { value: "" }), ...nodes);
+    ui.parent.value = F.parent;
+  }
+  ui.parentMode.hidden = !F.parent || !!fog;  // a crystallize under a parent is always its single-child Split
   ui.modeSplit.input.checked = F.parentMode === "split";
   ui.modeRests.input.checked = F.parentMode === "rests";
   ui.modeSplit.input.disabled = !nfLocal();  // an imported result is never a split child
@@ -569,19 +634,22 @@ const NF_KIND_HINTS = {
 function nfUpdate() {
   const F = nf.F, ui = nf.ui;
   if (!F || !ui) return;
+  const fog = nfFog();
   for (const b of ui.kind.querySelectorAll("button")) {
     const kind = b.getAttribute("data-kind");
     b.setAttribute("aria-pressed", String(kind === F.kind));
-    b.disabled = nfSplit() && kind !== "claim";  // a split child is a Claim
+    b.disabled = (nfSplit() || !!fog) && kind !== "claim";  // a split child is a Claim, and so is a crystallize
   }
   for (const b of ui.medium.querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.getAttribute("data-medium") === F.medium));
-  ui.kindHint.textContent = nfSplit() ? "A Split child is always a Claim." : NF_KIND_HINTS[F.kind];
+  ui.kindHint.textContent = fog ? "A crystallize states a Claim." : nfSplit() ? "A Split child is always a Claim." : NF_KIND_HINTS[F.kind];
   ui.mediumBox.hidden = !nfLocal();
-  ui.depsBox.hidden = !nfLocal() && !F.deps.length;  // left over from a local kind: shown so they can be removed
+  ui.depsBox.hidden = !!fog || (!nfLocal() && !F.deps.length);  // left over from a local kind: shown so they can be removed; a crystallize takes none
   ui.depFind.hidden = ui.depList.hidden = !nfLocal();
   ui.source.hidden = nfLocal();
   ui.pop.classList.toggle("wide", !nfLocal());
-  ui.title.textContent = nfSplit() ? `Split ${F.parent}` : F.kind === "imported_result" ? "New imported result" : "New node";
+  ui.fog.hidden = !fog;
+  if (fog) { ui.fogHead.textContent = `From ${fog.id}`; ui.fogText.textContent = fog.text; }
+  ui.title.textContent = fog ? `Crystallize ${fog.id}` : nfSplit() ? `Split ${F.parent}` : F.kind === "imported_result" ? "New imported result" : "New node";
   nfPreview(ui.statementPreview, F.statement);
   nfDeps();
   nfParent();
@@ -597,7 +665,7 @@ function nfUpdate() {
   const lines = nfCliLines();
   ui.cli.textContent = lines.join("\n");
   ui.cliNote.textContent = lines.length > 1 ? `${lines.length} commands, run in order: not atomic from the CLI (a later one can fail after an earlier one wrote)` : "";
-  ui.submit.textContent = F.busy ? "Creating…" : nfSplit() ? "Split" : F.kind === "imported_result" ? "Create imported result" : `Create ${F.kind}`;
+  ui.submit.textContent = fog ? (F.busy ? "Crystallizing…" : "Crystallize") : F.busy ? "Creating…" : nfSplit() ? "Split" : F.kind === "imported_result" ? "Create imported result" : `Create ${F.kind}`;
   ui.submit.disabled = F.busy;
   nfPlace();
   drawNodeFormGhost();
@@ -662,6 +730,27 @@ function nfMenu(point, node) {
 
 function nfCloseMenu() {
   if (nf.menu) { nf.menu.remove(); nf.menu = null; }
+}
+
+// The fog drawer's Crystallize… (#155): the form beside the item's near node on the canvas (its first one
+// drawn there), the ghost below it where a Split child lands; with no near node, at the canvas centre.
+// The parent is prefilled only when the item is near exactly one node; near none, it is none.
+function nfCrystallize(item) {
+  if (nf.ui && !nf.ui.pop.hidden && nfDirty()) { say("Finish or cancel the new node first: its form has unsaved input.", "error"); return; }
+  nfCloseMenu();
+  const near = item.near || [];
+  const centre = mapView === "dag" && view.at ? near.map((id) => view.at.get(id)).find(Boolean) : null;
+  const stage = nfStage();
+  let ghost;
+  if (centre) {
+    nf.anchor = { x: centre.x * view.k + view.tx, y: centre.y * view.k + view.ty };
+    ghost = { x: centre.x, y: centre.y + BOX.h + BOX.gapY / 2 };
+  } else {
+    nf.anchor = { x: (stage.clientWidth || 0) / 2, y: (stage.clientHeight || 0) / 2 };
+    ghost = nfToScene(nf.anchor);
+  }
+  const prefill = { fog: { id: item.id, text: item.text, near: [...near] }, kind: "claim", parentMode: "split", parent: near.length === 1 ? near[0] : "", noParent: !near.length };
+  return nfOpen(prefill, ghost);
 }
 
 async function nfOpen(prefill, at) {
