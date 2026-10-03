@@ -28,7 +28,8 @@ ME = "Researcher <r@example.org>"
 def _node(node_id, kind="claim", statement="", dependencies=(), **axes):
     return {
         "id": node_id, "kind": kind, "statement": statement or node_id, "display_label": None, "dependencies": list(dependencies),
-        "acceptance_state": "unreviewed", "workflow_state": "open", "integrity_state": "current", "assignee": None, "frontier": False, **axes,
+        "acceptance_state": "unreviewed", "workflow_state": "open", "integrity_state": "current", "assignee": None, "frontier": False,
+        "status": {"text": "Ready", "kind": "ready"} if axes.get("frontier") else {"text": "Open", "kind": "open"}, **axes,
     }
 
 
@@ -215,9 +216,28 @@ def test_an_imported_result_hides_dependencies_and_medium_and_asks_for_its_sourc
 def test_the_dependency_picker_searches_id_label_and_statement_and_marks_the_match():
     rows = _form([*NEW_HERE, {"depFind": "partial"}])[-1]["depRows"]
     assert [(r["id"], r["marks"]) for r in rows] == [("base", ["partial"])]
-    assert rows[0]["chip"] == "chip state-ready"  # each row's state, as the card shows it
+    assert rows[0]["chips"] == [{"text": "Ready", "class": "chip state-ready node-status", "icon": "status-icon ready"}]  # its status, as the card shows it
     picked = _form([*NEW_HERE, {"pick": "base"}, {"pick": "thm"}, {"unpick": "base"}])[-1]
     assert picked["depChips"] == ["thm"]
+
+
+def test_the_picker_and_the_parent_show_the_servers_status_never_one_worked_out_on_the_page():
+    """The status is the server's (webapp/node_status.py, issue #157): the form shows the word and kind it was sent,
+    with status.js's icons, and a frontier node's Ready beside a warning."""
+    odd = {"nodes": [_node("base", acceptance_state="accepted", frontier=True, status={"text": "Numerics · needs you", "kind": "attention"}), MAP["nodes"][2]]}
+    form = _form([*NEW_HERE, {"depFind": "base"}], map_=odd)[-1]
+    assert [(c["text"], c["class"], c["icon"]) for c in form["depRows"][0]["chips"]] == [
+        ("Numerics · needs you", "chip state-attention node-status", "status-icon attention"), ("Ready", "chip state-ready node-status", "status-icon ready")]
+    assert form["parentLabels"][1] == "base · Claim, Numerics · needs you"
+    source = (STATIC / "nodeform.js").read_text()
+    for local in ("tagOf", "statusIcon", "STATUS_OF_VALUE", "STATUS_KINDS", "glyph"):
+        assert local not in source, local
+
+
+def test_a_node_the_form_made_reads_the_status_the_server_sent_for_it():
+    steps = [*NEW_HERE, {"fill": {"nf-id": "lem1", "nf-statement": "S"}}, {"submit": True}, *NEW_HERE, {"depFind": "lem1"}]
+    row = _form(steps, createdStatus={"text": "Blocked", "kind": "blocked"})[-1]["depRows"][0]
+    assert row["id"] == "lem1" and [c["text"] for c in row["chips"]] == ["Blocked"]
 
 
 def test_the_reference_picker_searches_title_author_and_identifier_and_shows_who_cites_it():

@@ -3,8 +3,9 @@
 // dashed ghost card where the new node will land. Its fields are `proof node create`'s, and the equivalent
 // command is shown under it. The server is the source of truth: the form's own checks only say early what
 // the server would refuse, in its words and codes. Double-click still zooms; nothing here takes it.
-// Uses app.js's helpers ($, el, svg, api, say, showError, withMath, citationBlock, tagOf, statusIcon,
-// pageOf, positions, view, BOX, KIND_LABEL, mapData, state, mapView, refresh). Text is inserted as text.
+// Uses app.js's helpers ($, el, svg, api, say, showError, withMath, citationBlock, statusChips,
+// pageOf, positions, view, BOX, KIND_LABEL, mapData, state, mapView, refresh). A node's status is always the
+// server's `status` from /api/map, never worked out here. Text is inserted as text.
 "use strict";
 
 const NF_SAFE_NODE_ID = /^[A-Za-z0-9_-][A-Za-z0-9._-]*$/;
@@ -459,14 +460,9 @@ function nfMarked(text, query) {
   return span;
 }
 
-function nfNodeChip(n) {
-  const [text, kind] = tagOf(n);
-  const chip = el("span", null, { class: `chip state-${kind}` });
-  const icon = svg("svg", { viewBox: "-1 -1 18 18", class: "chip-icon", "aria-hidden": "true" });
-  icon.append(statusIcon(kind, 8, 8, 16));
-  chip.append(icon, capitalised(text));
-  return chip;
-}
+// a node's status as the server sends it with the map (webapp/node_status.py, issue #157), drawn with
+// status.js's icons through app.js's statusChips: the same chips as the tree and the node page
+const nfStatusChips = (n) => (n.status ? statusChips(n.status, n.frontier) : []);
 
 function nfDeps() {
   const F = nf.F, ui = nf.ui;
@@ -474,7 +470,7 @@ function nfDeps() {
   const pool = nfNodes().filter((n) => !q || [n.id, n.display_label || "", n.statement || ""].some((t) => t.toLowerCase().includes(q)));
   ui.depList.replaceChildren(...pool.map((n) => {
     const li = el("li", null, { class: F.deps.includes(n.id) ? "on" : "", "data-dep": n.id });
-    li.append(nfMarked(n.id, F.depFind), nfMarked(n.display_label || n.statement, F.depFind), nfNodeChip(n));
+    li.append(nfMarked(n.id, F.depFind), nfMarked(n.display_label || n.statement, F.depFind), ...nfStatusChips(n));
     li.children[0].setAttribute("class", "nf-pid");
     li.children[1].setAttribute("class", "nf-pst");
     li.addEventListener("click", () => nfToggleDep(n.id));
@@ -550,7 +546,7 @@ function nfRefs() {
 
 function nfParent() {
   const F = nf.F, ui = nf.ui;
-  ui.parent.replaceChildren(el("option", "None: free-standing", { value: "" }), ...nfNodes().map((n) => el("option", `${n.id} · ${KIND_LABEL[n.kind] || n.kind}, ${tagOf(n)[0]}`, { value: n.id })));
+  ui.parent.replaceChildren(el("option", "None: free-standing", { value: "" }), ...nfNodes().map((n) => el("option", `${n.id} · ${KIND_LABEL[n.kind] || n.kind}${n.status ? `, ${n.status.text}` : ""}`, { value: n.id })));
   ui.parent.value = F.parent;
   ui.parentMode.hidden = !F.parent;
   ui.modeSplit.input.checked = F.parentMode === "split";
