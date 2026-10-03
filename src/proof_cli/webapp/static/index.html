@@ -6,9 +6,11 @@
   <title>Proof map</title>
   <link rel="stylesheet" href="/static/shared/vendor/katex.min.css">
   <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/nodeform.css">
   <script src="/static/shared/vendor/katex.min.js" defer></script>
   <script src="/static/shared/mathtext.js" defer></script>
   <script src="/static/app.js" defer></script>
+  <script src="/static/nodeform.js" defer></script>
 </head>
 <body>
   <header class="toolbar">
@@ -59,7 +61,7 @@
     <main>
       <div id="message" role="status"></div>
       <section id="home">
-        <div class="stage">
+        <div class="stage" id="map-stage">
           <div id="map-dag" class="map-canvas"><svg id="dag-svg" role="img" aria-label="Dependency graph of the proof map"></svg></div>
           <div id="map-tree" hidden></div>
           <ul class="legend" aria-label="What the icons mean">

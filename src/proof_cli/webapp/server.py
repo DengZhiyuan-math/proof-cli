@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import json
 import mimetypes
+import re
 from contextlib import contextmanager
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -32,7 +33,7 @@ from urllib.parse import unquote, urlsplit, parse_qs
 from .. import proof_map
 from ..collaboration import list_review_records
 from ..domain import ProofMapNodeKind
-from ..references import ReferenceSourceType
+from ..references import ReferenceRecord, ReferenceSourceType
 from ..reviews import git_identity
 from ..trust_rules import WEAK_SOURCE_TYPES, list_trust_rules, trust_rule_history
 from .. import fog as proof_fog
@@ -40,6 +41,8 @@ from ..storage import (
     ProjectStore,
     get_active_claim,
     get_current_candidate_proof,
+    import_reference as store_new_reference,
+    list_references,
     read_project_instance_id,
     read_scope,
     read_scoped,
@@ -425,9 +428,15 @@ class ReviewApp:
         node_id, kind, statement = body.get("node_id"), body.get("kind"), body.get("statement")
         if not all(isinstance(value, str) and value.strip() for value in (node_id, kind, statement)):
             raise RequestError(HTTPStatus.BAD_REQUEST, "INVALID_REQUEST", "a node needs node_id, kind and statement")
+        parent = body.get("parent")
+        if parent is not None and not (
+            isinstance(parent, dict) and isinstance(parent.get("id"), str) and parent["id"].strip() and isinstance(parent.get("reassign", False), bool)
+        ):
+            raise RequestError(
+                HTTPStatus.BAD_REQUEST, "INVALID_REQUEST", "a parent is {id, reassign}: the node that rests on the new one, and whether to take its claim over"
+            )
         texts = lambda key: [str(item) for item in body.get(key) or [] if str(item).strip()]  # noqa: E731
-        node = proof_map.create_node(
-            self.store,
+        fields = dict(
             node_id=node_id.strip(),
             kind=kind,
             statement=statement,
@@ -439,8 +448,62 @@ class ReviewApp:
             source_version=body.get("source_version") or None,
             trust_level=body.get("trust_level") or None,
             reference_id=body.get("reference_id") or None,
+            medium=body.get("medium") or None,  # a computation node from the page too (issue #154)
         )
+        if parent is None:
+            node = proof_map.create_node(self.store, **fields)
+        else:  # the parent rests on it: one transaction, and a refused parent leaves nothing (issue #154)
+            node = proof_map.create_node_under_parent(self.store, parent["id"].strip(), reassign=parent.get("reassign", False), **fields)
         return {**node.model_dump(mode="json"), "page": self.page_of(node)}
+
+    # -- references: the citations an imported result may link (ADR-0012, issue #154) ---------------
+    # Only the citation: never a ReferenceRecord's legacy review status, trust level or callable flag.
+
+    _CITATION_FIELDS = ("id", "title", "authors", "year", "source_type", "identifier", "url", "bibliographic_source")
+
+    def references(self) -> dict:
+        """Every reference's citation, each with the imported results that cite it: what the form's picker searches."""
+        with self._one_state():
+            citing: dict[str, list[dict]] = {}
+            for node in proof_map.list_nodes(self.store):
+                if node.kind == ProofMapNodeKind.imported_result and node.reference_id is not None:
+                    citing.setdefault(node.reference_id, []).append(
+                        {"id": node.id, "source_version": node.source_version, "acceptance_state": proof_map.get_reference_review_state(self.store, node.id)}
+                    )
+            return {
+                "references": [
+                    {**reference.model_dump(mode="json", include=set(self._CITATION_FIELDS)), "cited_by": citing.get(reference.id, [])}
+                    for reference in list_references(self.store)
+                ],
+                "source_types": [member.value for member in ReferenceSourceType],
+            }
+
+    def import_reference(self, body: dict) -> dict:
+        """A new citation, as `proof reference import` makes it. Not a Human Review decision: it trusts nothing."""
+        reference_id, title, year = str(body.get("reference_id") or "").strip(), str(body.get("title") or "").strip(), body.get("year")
+        if not reference_id or not title or year in (None, ""):
+            raise RequestError(HTTPStatus.BAD_REQUEST, "INVALID_INPUT", "a reference needs reference_id, title and year")
+        if isinstance(year, bool) or not (isinstance(year, int) or (isinstance(year, str) and re.fullmatch(r"-?[0-9]+", year.strip()) is not None)):
+            raise RequestError(HTTPStatus.BAD_REQUEST, "INVALID_INPUT", "a reference's year is a whole number")
+        source_type = str(body.get("source_type") or ReferenceSourceType.other.value)
+        if source_type not in {member.value for member in ReferenceSourceType}:
+            valid = ", ".join(member.value for member in ReferenceSourceType)
+            raise RequestError(HTTPStatus.BAD_REQUEST, "INVALID_INPUT", f"'{source_type}' is not a reference source type; expected one of: {valid}")
+        record = ReferenceRecord(
+            id=reference_id,
+            title=title,
+            year=int(year),
+            authors=[str(author).strip() for author in body.get("authors") or [] if str(author).strip()],
+            source_type=ReferenceSourceType(source_type),
+            identifier=str(body.get("identifier") or "").strip(),
+            url=str(body.get("url") or "").strip(),
+            bibliographic_source=str(body.get("bibliographic_source") or "").strip(),
+        )
+        try:
+            stored = store_new_reference(self.store, record)
+        except ValueError as exc:  # it exists already: importing again never overwrites a citation
+            raise RequestError(HTTPStatus.BAD_REQUEST, "INVALID_INPUT", str(exc)) from exc
+        return stored.model_dump(mode="json", include=set(self._CITATION_FIELDS))
 
     def node_action(self, node_id: str, action: str, body: dict) -> dict:
         actor = self._actor()
@@ -740,6 +803,8 @@ class _Handler(BaseHTTPRequestHandler):
             return self._guarded(self.app.map)
         if path == "/api/trust-rules":
             return self._guarded(self.app.trust_rules)
+        if path == "/api/references":
+            return self._guarded(self.app.references)
         if path == "/api/fog":
             include_all = parse_qs(urlsplit(self.path).query).get("all", ["0"])[0] not in ("", "0", "false")
             return self._guarded(lambda: self.app.fog(include_all=include_all))
@@ -795,6 +860,8 @@ class _Handler(BaseHTTPRequestHandler):
         routes: dict[str, Callable[[], Any]] = {
             "/api/decide": lambda: self.app.decide(body),
             "/api/nodes": lambda: self.app.create_node(body),
+            # a citation for the node form's picker: not a decision, so no more than the same-origin check (ADR-0007)
+            "/api/references": lambda: self.app.import_reference(body),
             # a read: what a rule change would do, asked with the change itself (ADR-0014)
             "/api/trust-rules/preview": lambda: self.app.trust_rule_preview(body),
             "/api/fog": lambda: self.app.fog_add(body),
