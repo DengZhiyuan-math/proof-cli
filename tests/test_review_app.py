@@ -234,6 +234,9 @@ def test_the_node_panel_and_node_creation_are_refused_from_another_origin(http_a
     assert client.post("/api/node/lem/claim", {}, origin="http://evil.example")[0] == 403
     assert client.post("/api/node/lem/claim", {}, origin=None)[0] == 403
     assert client.post("/api/nodes", {"node_id": "x", "kind": "claim", "statement": "X"}, origin="http://evil.example")[0] == 403
+    # a new citation from the node form (#154): no passkey, but the same-origin check as every write (ADR-0007)
+    assert client.post("/api/references", {"reference_id": "r", "title": "T", "year": 2000}, origin="http://evil.example")[0] == 403
+    assert client.get("/api/references")[0] == 200
     assert get_active_claim(store, "lem") is None
     assert client.post("/api/node/lem/claim", {})[0] == 200  # from the page itself
 

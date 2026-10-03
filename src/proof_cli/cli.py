@@ -148,6 +148,7 @@ from .proof_map import (
     add_dependency,
     claim_node,
     create_node,
+    create_node_under_parent,
     dependency_details,
     move_dependency,
     remove_dependency,
@@ -438,12 +439,19 @@ def node_create(
         "", "--reference-id", help="imported_result only: the `reference list` entry it cites; fixed once the node exists"
     ),
     medium: str = typer.Option("", "--medium", help="What the candidate proof is made of: latex (default) or computation (run.sh, outputs in out/)"),
+    parent: str = typer.Option(
+        "", "--parent", help="A node that rests on the new one: it gains it as a dependency, in the same transaction (any kind; not a Split)"
+    ),
+    reassign: bool = typer.Option(False, "--reassign", help="With --parent: take the parent's claim over from whoever holds it"),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
+    """Create a proof map node. With --parent, the parent rests on it too: one transaction, and a refused
+    parent leaves no node and no folder (issue #154)."""
+    if reassign and not parent:
+        raise click.UsageError("--reassign goes with --parent: it takes the parent's claim over")
     store = get_store(_root(root))
     try:
-        node = create_node(
-            store,
+        fields = dict(
             node_id=node_id,
             kind=kind,
             statement=statement,
@@ -457,6 +465,7 @@ def node_create(
             medium=medium or None,
             created_by=created_by,
         )
+        node = create_node_under_parent(store, parent, reassign=reassign, **fields) if parent else create_node(store, **fields)
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.create")
         raise typer.Exit(code=1)
@@ -891,13 +900,18 @@ def node_split(
     child: list[str] = typer.Option(
         ..., "--child", help="Repeatable, one per child: <child-id>=<statement>"
     ),
+    assumption: list[str] = typer.Option(None, "--assumption", help="Repeatable: an assumption of the one --child (as the page's split gives it)"),
+    display_label: str = typer.Option("", "--display-label", help="The one --child's display label"),
     root: str = ROOT_OPTION,
     created_by: str = "human",
     reassign: bool = typer.Option(False, "--reassign", help="Take the claim over from whoever holds it (recorded as `claim --reassign` records it); the node need not be on the frontier"),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Decompose parent_id into new claim-kind children. Ungated — no researcher approval needed.
-    All or nothing; a node someone else holds is theirs to split unless --reassign."""
+    All or nothing; a node someone else holds is theirs to split unless --reassign.
+    With a single --child, --assumption and --display-label give it those, as the page's split does (issue #154)."""
+    if (assumption or display_label) and len(child) != 1:
+        raise click.UsageError("--assumption and --display-label go with a single --child")
     store = get_store(_root(root))
     try:
         specs = []
@@ -907,7 +921,7 @@ def node_split(
                     "INVALID_CHILD_SPEC", f"'{entry}' is not in the form <child-id>=<statement>"
                 )
             child_id, statement = entry.split("=", 1)
-            specs.append({"id": child_id, "statement": statement})
+            specs.append({"id": child_id, "statement": statement, "assumptions": list(assumption or []), "display_label": display_label})
         children = split_node(store, parent_id, specs, created_by=created_by, reassign=reassign)
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.split")

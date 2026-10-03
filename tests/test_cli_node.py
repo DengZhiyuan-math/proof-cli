@@ -615,6 +615,79 @@ def test_node_split_invalid_child_spec_fails(tmp_path: Path):
     assert payload["error"]["code"] == "INVALID_CHILD_SPEC"
 
 
+def _show(tmp_path: Path, node_id: str) -> dict:
+    return json.loads(runner.invoke(app, ["node", "show", node_id, "--root", str(tmp_path), "--json"]).stdout)["data"]
+
+
+def test_node_split_gives_its_child_assumptions_and_a_display_label(tmp_path: Path):
+    """The page's split carries them (issue #154); the CLI's does too, for its one child."""
+    runner.invoke(app, ["node", "create", "p", "claim", "P", "--root", str(tmp_path)])
+    result = runner.invoke(app, [
+        "node", "split", "p", "--root", str(tmp_path), "--child", "k=K holds",
+        "--assumption", "$x > 0$", "--assumption", "$y$ bounded", "--display-label", "Key step", "--json",
+    ])
+    assert result.exit_code == 0, result.stdout
+    (child,) = json.loads(result.stdout)["data"]
+    assert (child["assumptions"], child["display_label"], child["derived_from"]) == (["$x > 0$", "$y$ bounded"], "Key step", "p")
+    assert _show(tmp_path, "k")["assumptions"] == ["$x > 0$", "$y$ bounded"]
+
+
+def test_node_split_names_one_child_for_its_assumptions_and_display_label(tmp_path: Path):
+    runner.invoke(app, ["node", "create", "p", "claim", "P", "--root", str(tmp_path)])
+    result = runner.invoke(app, ["node", "split", "p", "--root", str(tmp_path), "--child", "a=A", "--child", "b=B", "--assumption", "x", "--json"])
+    assert result.exit_code == 2
+    assert json.loads(result.stdout)["error"]["code"] == "USAGE_ERROR"
+    assert _show(tmp_path, "p")["dependencies"] == []
+
+
+def test_node_create_with_a_parent_makes_the_parent_rest_on_it(tmp_path: Path):
+    runner.invoke(app, ["node", "create", "thm", "theorem", "T", "--root", str(tmp_path)])
+    result = runner.invoke(app, ["node", "create", "lem", "lemma", "L", "--parent", "thm", "--root", str(tmp_path), "--json"])
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["command"] == "node.create" and payload["data"]["id"] == "lem"  # the envelope as before: the new node
+    assert _show(tmp_path, "thm")["dependencies"] == ["lem"]
+    assert _show(tmp_path, "lem")["derived_from"] is None
+
+
+@pytest.mark.parametrize("json_output", [True, False])
+def test_node_create_with_a_parent_someone_else_holds_leaves_nothing_behind(tmp_path: Path, json_output: bool):
+    runner.invoke(app, ["node", "create", "p", "claim", "P", "--root", str(tmp_path)])
+    _claim_via_cli(tmp_path, "p", "agent_b")
+    create = ["node", "create", "under", "claim", "U", "--parent", "p", "--root", str(tmp_path), "--created-by", "agent_a"]
+    flags = ["--json"] if json_output else []
+
+    refused = runner.invoke(app, create + flags)
+    assert refused.exit_code == 1
+    if json_output:
+        assert json.loads(refused.stdout)["error"]["code"] == "NOT_CLAIMANT"
+    else:
+        assert "claimed by agent_b" in refused.output and "[NOT_CLAIMANT]" in refused.output
+    assert not (tmp_path / "proofs" / "under").exists()
+    missing = runner.invoke(app, ["node", "show", "under", "--root", str(tmp_path), "--json"])
+    assert json.loads(missing.stdout)["error"]["code"] == "NODE_NOT_FOUND"
+
+    taken_over = runner.invoke(app, create + ["--reassign"] + flags)
+    assert taken_over.exit_code == 0, taken_over.output
+    assert _show(tmp_path, "p")["dependencies"] == ["under"]
+    assert (tmp_path / "proofs" / "under" / "proof.tex").is_file()
+
+
+def test_node_create_with_a_parent_that_would_close_a_cycle_leaves_nothing_behind(tmp_path: Path):
+    runner.invoke(app, ["node", "create", "p", "claim", "P", "--root", str(tmp_path)])
+    runner.invoke(app, ["node", "create", "above", "claim", "A", "--dependency", "p", "--root", str(tmp_path)])
+    result = runner.invoke(app, ["node", "create", "loop", "claim", "L", "--dependency", "above", "--parent", "p", "--root", str(tmp_path), "--json"])
+    assert result.exit_code == 1
+    assert json.loads(result.stdout)["error"]["code"] == "DEPENDENCY_CYCLE"
+    assert not (tmp_path / "proofs" / "loop").exists() and _show(tmp_path, "p")["dependencies"] == []
+
+
+def test_node_create_reassign_goes_with_a_parent(tmp_path: Path):
+    result = runner.invoke(app, ["node", "create", "x", "claim", "X", "--reassign", "--root", str(tmp_path), "--json"])
+    assert result.exit_code == 2 and json.loads(result.stdout)["error"]["code"] == "USAGE_ERROR"
+    assert not (tmp_path / "proofs" / "x").exists()
+
+
 def _create_claimed_and_submitted(tmp_path: Path, node_id: str = "clm_1", claimant: str = "agent_a") -> str:
     runner.invoke(app, ["node", "create", node_id, "claim", "stmt", "--root", str(tmp_path)])
     _claim_via_cli(tmp_path, node_id, claimant)
