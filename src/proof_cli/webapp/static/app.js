@@ -225,13 +225,45 @@ function showWarnings(list, into) {
   if (!list.length) into.append(el("li", "None."));
 }
 
+// why a review card offers no decision, and the next step (#156)
+function reviewBlocked(blocked) {
+  const box = el("div", null, { class: "review-blocked" });
+  if (!blocked) { box.append(el("p", "No decision can be made on it right now.", { class: "hint" })); return box; }
+  box.append(el("p", blocked.message, { class: "hint warning" }));
+  if (blocked.next) box.append(el("code", blocked.next, { class: "review-next" }));
+  return box;
+}
+
+// the Evidence checks on a card's snapshot (#158), compactly: outcome, who ran it, when, and the hash it is
+// bound to; one that doesn't match the snapshot as it is now is marked, the way the node page marks it
+const CARD_EVIDENCE_MARKS = { unverifiable: "unverifiable", changed: "snapshot changed since this check", unbound: "not bound (recorded before binding)" };
+function cardEvidence(checks) {
+  const list = el("ul", null, { class: "card-evidence" });
+  for (const c of checks) {
+    const when = String(c.created_at || "").replace("T", " ").slice(0, 16);
+    const hash = c.sha256 ? ` · ${c.sha256.slice(0, 12)}…` : "";
+    const li = el("li", `${c.outcome} · run by ${c.run_by} · ${when}${hash}`, { class: "hint", title: [c.notes, c.sha256 ? `SHA-256 ${c.sha256}` : ""].filter(Boolean).join(" · ") });
+    const mark = CARD_EVIDENCE_MARKS[c.state];
+    if (mark) {
+      const chip = stateChip("unverifiable", mark, mark);  // the map's attention triangle and colour
+      chip.classList.add("state-chip", "warning");
+      li.append(" ", chip);
+    }
+    list.append(li);
+  }
+  return list;
+}
+
 function showHome() {
   const body = $("pending").querySelector("tbody");
   body.replaceChildren(...state.pending.map((item) => {
-    const box = el("input", null, { type: "checkbox" });
-    const choice = el("select");
+    // a card offers only decisions the server would take: with none (its dependencies changed since its
+    // snapshot, #156, or the snapshot can't be read, #92) it can't be ticked, and says why and what to do next
+    const offered = item.decisions.length > 0;
+    const box = offered ? el("input", null, { type: "checkbox" }) : "";
+    const choice = offered ? el("select") : reviewBlocked(item.review_blocked);
     for (const decision of item.decisions) choice.append(el("option", decision));
-    const rationale = el("input", null, { placeholder: "why" });
+    const rationale = offered ? el("input", null, { placeholder: "why" }) : "";
     // a local node is reviewed in its studio (#71); an imported result on its own page
     const inStudio = item.kind !== "reference_review";
     const link = el("a", null, {
@@ -255,6 +287,7 @@ function showHome() {
       const proof = item.candidate_proof;
       const hash = proof.sha256 ? ` · ${proof.sha256.slice(0, 12)}…` : "";
       statement.append(el("p", `Snapshot v${proof.version}${hash}`, { class: "hint snap-meta", title: proof.sha256 ? `SHA-256 ${proof.sha256}` : "" }), keyIdeasCard(proof.key_ideas));
+      if ((item.evidence_checks || []).length) statement.append(cardEvidence(item.evidence_checks));
     }
     const tr = row([box, link, statement, choice, rationale]);
     tr.dataset.kind = item.kind; tr.dataset.target = item.node_id;
@@ -1000,7 +1033,9 @@ async function showNode(nodeId) {
   // reviewing a node trusted by rule explicitly (ADR-0014): the ordinary Reference review, its rationale prefilled
   const prefill = view.acceptance_state === "trusted-by-rule" ? `matched trust rule ${(view.trust_rule || []).join(", ")}; reviewed explicitly` : "";
   decisions.replaceChildren(...view.decisions.map((d) => decisionRow(d, proof, d.kind === "reference_review" && d.decision === "reference-review" ? prefill : "")));
-  if (!view.decisions.length) decisions.append(row(["No decision to make on this node right now.", "", "", ""]));
+  // its snapshot's dependencies changed (#156): no Acceptance decision is offered; the reason and the next step are
+  if (view.review_blocked) decisions.append(row([reviewBlocked(view.review_blocked), "", "", ""]));
+  else if (!view.decisions.length) decisions.append(row(["No decision to make on this node right now.", "", "", ""]));
   // when the node first met each Trust rule: on record as an event, never a decision (ADR-0014)
   const met = (view.rule_events || []).map((e) => el("li", `${e.at} · trusted by rule ${e.rule} since then — no decision written; the rule's declaration is the record`, { class: "rule-event" }));
   $("node-history").replaceChildren(...met, ...view.history.filter((r) => r.kind).map((r) => el("li", `${r.updated_at} · ${r.kind} · ${r.decision} · ${r.reviewer_id}${r.key_ideas_drafted_by ? ` · key ideas: ${KEY_IDEAS_BY[r.key_ideas_drafted_by] || r.key_ideas_drafted_by}` : ""}${r.rationale ? ` — ${r.rationale}` : ""}`)));

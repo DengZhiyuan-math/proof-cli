@@ -103,7 +103,13 @@
     box.append(links);
 
     const offered = view.decisions || [];
-    if (!offered.length) { box.append(h("p", "No decision to make on this node right now.", { class: "node-hint" })); return box; }
+    const blocked = view.review_blocked;
+    if (blocked) {
+      // its dependencies changed since the snapshot (#156): no decision would be taken; say why and what to do next
+      box.append(h("p", blocked.message, { class: "node-note bad review-blocked" }));
+      if (blocked.next) box.append(h("code", blocked.next, { class: "review-next" }));
+    }
+    if (!offered.length) { if (!blocked) box.append(h("p", "No decision to make on this node right now.", { class: "node-hint" })); return box; }
     let chosen = null;
     const choices = h("div", null, { class: "review-choices", role: "radiogroup" });
     const why = h("input", null, { class: "review-why", placeholder: "Why" });
