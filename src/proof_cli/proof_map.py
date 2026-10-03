@@ -1802,13 +1802,25 @@ def _require_awaiting_acceptance_review(store: ProjectStore, node_id: str) -> No
             "a Human Review decision only applies to a submitted Candidate proof awaiting review",
             details={"workflow_state": workflow_state},
         )
-    current = get_current_candidate_proof(store, node_id)
-    if current is not None and not _snapshot_dependencies_stand(store, require_node(store, node_id), current):
+    current = snapshot_with_changed_dependencies(store, node_id)
+    if current is not None:
         # the snapshot was made on other dependencies: deciding it would accept a proof of a different node
         raise ProofMapError(
             "DEPENDENCIES_CHANGED",
             f"{node_id}'s dependencies changed since snapshot v{current.version} was requested for review; request review again",
         )
+
+
+def snapshot_with_changed_dependencies(store: ProjectStore, node_id: str) -> CandidateProofRecord | None:
+    """The node's current snapshot if its dependencies changed since it was requested for review, else None.
+
+    The one rule by which an Acceptance decision on it is refused (DEPENDENCIES_CHANGED), and by which
+    the proof map page offers none (#156).
+    """
+    current = get_current_candidate_proof(store, node_id)
+    if current is not None and not _snapshot_dependencies_stand(store, require_node(store, node_id), current):
+        return current
+    return None
 
 
 def _snapshot_dependencies_stand(store: ProjectStore, node: ProofMapNode, snapshot: CandidateProofRecord) -> bool:
