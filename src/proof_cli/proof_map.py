@@ -11,6 +11,7 @@ import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 from typing import Any, Iterator
 
@@ -2772,7 +2773,7 @@ def _with_resolution(store: ProjectStore, challenge: Challenge) -> Challenge:
             update={
                 "status": _challenge_outcome(row),
                 "resolved_by": row["reviewer_id"],
-                "resolved_at": row["created_at"],
+                "resolved_at": datetime.fromisoformat(row["created_at"]),  # the row holds a string (#159)
                 "resolution_review_id": row["review_id"],
                 "resolution_rationale": verify_decision_row(store, row["id"]).payload.rationale,
             }
