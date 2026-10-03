@@ -19,6 +19,7 @@ const context = {
   location: { href: "" },
 };
 vm.createContext(context);
+vm.runInContext(fs.readFileSync(path.join(__dirname, "../../src/proof_cli/studio/static/status.js"), "utf8"), context);  // the status icons (issue #157)
 vm.runInContext(fs.readFileSync(path.join(__dirname, "../../src/proof_cli/webapp/static/app.js"), "utf8"), context);
 context.document.getElementById("tree-root").value = scenario.root;
 context.drawTree(scenario.nodes);
