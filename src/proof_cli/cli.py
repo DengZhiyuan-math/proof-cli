@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import json
 import os
 import sys
@@ -1165,8 +1166,19 @@ def _running_review_app(store) -> bool:
         return False
 
 
+def _bind_failure(exc: OSError) -> tuple[str, str]:
+    """Why the review port couldn't be bound, as (error code, message) (#160)."""
+    if exc.errno == errno.EADDRINUSE:
+        return "REVIEW_PORT_IN_USE", f"can't bind this project's review port ({exc}); is it already running? Try `proof map open`."
+    if exc.errno in (errno.EACCES, errno.EPERM):
+        return "REVIEW_PORT_NOT_PERMITTED", (
+            f"can't bind this project's review port ({exc}): binding a local port isn't permitted here (a permission or sandbox restriction)."
+        )
+    return "REVIEW_PORT_UNAVAILABLE", f"can't bind this project's review port: {exc}"
+
+
 @map_app.command("serve")
-def review_serve(root: str = ROOT_OPTION) -> None:
+def review_serve(root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
     """Run this project's proof map page on its own localhost origin — the only place Human Review decisions are made (ADR-0010).
 
     Runs in the foreground until interrupted. Bound to 127.0.0.1. Decisions
@@ -1179,9 +1191,16 @@ def review_serve(root: str = ROOT_OPTION) -> None:
     try:
         server = ReviewServer(store)
     except OSError as exc:
-        typer.echo(f"Error: can't bind this project's review port ({exc}); is it already running? Try `proof map open`.")
+        code, message = _bind_failure(exc)
+        if json_output:
+            typer.echo(dump_envelope(error_envelope("map.serve", code, message, details={"errno": errno.errorcode.get(exc.errno, exc.errno)})))
+        else:
+            typer.echo(f"Error: {message}")
         raise typer.Exit(code=1)
-    typer.echo(f"Proof map page for this project: {server.url}  (Ctrl-C to stop)")
+    if json_output:
+        typer.echo(dump_envelope(success_envelope("map.serve", {"url": server.url})))
+    else:
+        typer.echo(f"Proof map page for this project: {server.url}  (Ctrl-C to stop)")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

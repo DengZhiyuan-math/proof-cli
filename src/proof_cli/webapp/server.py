@@ -52,6 +52,7 @@ from ..authority import candidate_proof_sha256
 from .. import key_ideas
 from ..vault import OUT_DIR, SNAPSHOT_MANIFEST, archived_pdf_path, build_pdf_path, frozen_key_ideas, node_folder, snapshot_folder_file, snapshot_folder_files
 from ..studio.agent_run import ACTIONS as RUN_ACTIONS
+from .node_status import node_status
 from .studios import StudioHub
 
 
@@ -71,8 +72,9 @@ def project_origin(store: ProjectStore) -> str:
 
 _STATIC = resources.files("proof_cli.webapp") / "static"
 _CONTENT_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".woff2": "font/woff2"}
-# what the map page shares with the studio's static folder: the maths renderer and vendored KaTeX (ADR-0013)
-_SHARED_PREFIXES = ("mathtext.js", "vendor/katex.min.", "vendor/fonts/KaTeX_")
+# what the map page shares with the studio's static folder: the maths renderer and vendored KaTeX (ADR-0013),
+# and the status icons (issue #157)
+_SHARED_PREFIXES = ("mathtext.js", "status.js", "vendor/katex.min.", "vendor/fonts/KaTeX_")
 _MAX_BODY_BYTES = 2_000_000
 
 
@@ -161,6 +163,34 @@ def _evidence_checks(store: ProjectStore, node_id: str, current) -> list[dict]:
     return checks
 
 
+def _snapshot_evidence(store: ProjectStore, proof) -> list[dict]:
+    """The Evidence checks on the node's current snapshot, for its review card (#158): each with its outcome, who
+    ran it, when, and the SHA-256 it is bound to, read against the snapshot as it is now (`matches`, `changed`,
+    `unbound`, or `unverifiable` once the snapshot can't be read). An older snapshot's checks are left out."""
+    if proof is None:
+        return []
+    now = candidate_proof_sha256(store, proof.id)
+    checks = []
+    for check in proof_map.list_evidence_checks(store, proof.id):
+        binding = proof_map.evidence_binding(check, now)
+        shown = check.model_dump(mode="json", include={"id", "outcome", "run_by", "notes", "created_at"})
+        checks.append({**shown, "sha256": binding["sha256"], "state": "unverifiable" if now is None else binding["state"]})
+    return checks
+
+
+def _review_blocked(store: ProjectStore, node_id: str) -> dict | None:
+    """Why no Acceptance decision is offered on a node awaiting review, and what to do next (#156): its
+    dependencies changed since its snapshot, so each would be refused DEPENDENCIES_CHANGED."""
+    stale = proof_map.snapshot_with_changed_dependencies(store, node_id)
+    if stale is None:
+        return None
+    return {
+        "reason": "DEPENDENCIES_CHANGED",  # the code each decision would be refused with
+        "message": f"dependencies changed since snapshot v{stale.version} — request review again",
+        "next": f'proof node request-review {node_id} --rationale "…"',
+    }
+
+
 def _working_key_ideas(store: ProjectStore, node_id: str) -> dict:
     """Whether the node's working key-ideas.md exists, and what it still lacks before review can be requested."""
     try:
@@ -208,7 +238,8 @@ def _available_decisions(store: ProjectStore, node, *, claim, proof, dependencie
                 and proof_map.get_reference_review_state(store, other.id) != "no-longer-callable"
             ]
     else:
-        if proof_map.get_workflow_state(store, node.id) == "review-needed":
+        # not on a snapshot whose dependencies changed since: each would be refused DEPENDENCIES_CHANGED (#156)
+        if proof_map.get_workflow_state(store, node.id) == "review-needed" and _review_blocked(store, node.id) is None:
             offered += [{"kind": "acceptance", "target_id": node.id, "decision": d.value} for d in proof_map.AcceptanceDecision]
         accepted = proof_map.get_acceptance_state(store, node.id) == "accepted"
         if node.kind == ProofMapNodeKind.claim and accepted and not any(c.status.value == "open" for c in challenges):
@@ -361,6 +392,7 @@ class ReviewApp:
                     "core_idea": None if imported else _core_idea(self.store, node.id),
                 }
             )
+            nodes[-1]["status"] = node_status(nodes[-1])  # the one status every view shows (issue #157)
         return {"nodes": nodes}
 
     def _pdfs(self, node_id: str, proof) -> dict:
@@ -574,11 +606,16 @@ class ReviewApp:
                 proof = get_current_candidate_proof(self.store, node.id)
                 # still listed as awaiting review, but nothing is offered on a snapshot that can't be read (#92)
                 readable = proof is None or candidate_proof_sha256(self.store, proof.id) is not None
+                # nor on one whose dependencies changed since: each would be refused, so the card says why instead (#156)
+                blocked = _review_blocked(self.store, node.id)
                 pending.append(
                     {
                         "node_id": node.id,
                         "kind": "acceptance",
-                        "decisions": [decision.value for decision in proof_map.AcceptanceDecision] if readable else [],
+                        "decisions": [decision.value for decision in proof_map.AcceptanceDecision] if readable and blocked is None else [],
+                        "review_blocked": blocked,
+                        # the automated checks on this snapshot, bound to it by their SHA-256 (#158)
+                        "evidence_checks": _snapshot_evidence(self.store, proof),
                         "bindings": {d.value: _binding(self.store, "acceptance", node.id, d.value) for d in proof_map.AcceptanceDecision},
                         "statement": node.statement,
                         "acceptance_state": proof_map.get_acceptance_state(self.store, node.id),
@@ -602,10 +639,7 @@ class ReviewApp:
         challenges = proof_map.list_challenges(store, target_node_id=node_id)
         warnings = proof_map.list_integrity_warnings(store)
         claim = get_active_claim(store, node_id)
-        return {
-            # its assignee: a planning signal, cleared with `proof node unassign` (ADR-0010)
-            "claim": {"id": claim.id, "claimant_id": claim.claimant_id, "claimed_at": claim.claimed_at.isoformat()} if claim else None,
-            "node": node.model_dump(mode="json"),
+        axes = {
             "workflow_state": proof_map.get_workflow_state(store, node_id),
             "acceptance_state": (
                 proof_map.get_reference_review_state(store, node_id)
@@ -613,6 +647,17 @@ class ReviewApp:
                 else proof_map.get_acceptance_state(store, node_id)
             ),
             "integrity_state": proof_map.get_integrity_state(store, node_id),
+        }
+        frontier = any(other.id == node_id for other in proof_map.get_frontier(store))
+        run = self.studios.run_state(node_id)
+        return {
+            # its assignee: a planning signal, cleared with `proof node unassign` (ADR-0010)
+            "claim": {"id": claim.id, "claimant_id": claim.claimant_id, "claimed_at": claim.claimed_at.isoformat()} if claim else None,
+            "node": node.model_dump(mode="json"),
+            **axes,
+            # on the frontier, and the one status the map card shows for it (issue #157)
+            "frontier": frontier,
+            "status": node_status({**axes, "frontier": frontier, "assignee": claim.claimant_id if claim else None, "run": run}),
             "trust_rule": proof_map.trust_rules_of(store, node_id) if node.kind == ProofMapNodeKind.imported_result else [],
             # when it first met each rule (ADR-0014): an event, never a decision, listed with the history
             "rule_events": [{"rule": event.payload.get("rule"), "at": event.created_at.isoformat()} for event in proof_map.trust_rule_events(store, node_id)],
@@ -629,7 +674,7 @@ class ReviewApp:
             "citation": proof_map.node_citation(store, node),
             # the open fog near this node, and the fog item it was crystallized from (ADR-0008, spec #136)
             "fog_near": [proof_fog.fog_view(store, item) for item in proof_fog.fog_near(store, node_id)],
-            "run": self.studios.run_state(node_id),
+            "run": run,
             "crystallized_from": origin.id if (origin := proof_fog.crystallized_from(store, node_id)) is not None else None,
             "dependents": sorted(other.id for other in proof_map.list_nodes(store) if node_id in other.dependencies),
             "pdfs": self._pdfs(node_id, proof),
@@ -642,6 +687,8 @@ class ReviewApp:
             ],
             "warnings": _warnings_for(warnings, node_id, *(challenge.id for challenge in challenges)),
             "decisions": _available_decisions(store, node, claim=claim, proof=proof, dependencies=dependencies, challenges=challenges),
+            # why a snapshot awaiting review is offered no decision, and the next step (#156)
+            "review_blocked": _review_blocked(store, node_id) if proof_map.get_workflow_state(store, node_id) == "review-needed" else None,
         }
 
     # -- Proof fog (ADR-0008, spec #136): what the drawer reads and writes; the presentation is issue #137

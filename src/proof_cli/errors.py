@@ -14,6 +14,9 @@ ERROR_CODES: dict[str, str] = {
     "INVALID_INPUT": "a legacy command (`theorem add`, `reference import`) refused its input under --json, or the page's new reference (POST /api/references) was refused; the message says why",
     "PROJECT_NOT_FOUND": "a read was pointed at a folder with no proof project; nothing was created",
     "HUMAN_REVIEW_REQUIRED": "a Human Review decision, made only by the researcher on the proof map page; the error carries its URL",
+    "REVIEW_PORT_IN_USE": "`map serve` couldn't bind the project's review port because it is taken, likely by the page already running (`proof map open`); `errno` names the cause",
+    "REVIEW_PORT_NOT_PERMITTED": "`map serve` isn't permitted to bind a local port: a permission or sandbox restriction; `errno` names the cause",
+    "REVIEW_PORT_UNAVAILABLE": "`map serve` couldn't bind the project's review port for another reason; the message carries the system's error and `errno` its code",
     # -- nodes -------------------------------------------------------------------------
     "NODE_NOT_FOUND": "no proof map node has this id",
     "NODE_ALREADY_EXISTS": "a proof map node with this id already exists",

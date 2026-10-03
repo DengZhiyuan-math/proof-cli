@@ -15,6 +15,8 @@ from pathlib import Path
 
 import pytest
 
+from proof_cli.webapp.node_status import node_status
+
 STATIC = Path(__file__).resolve().parents[1] / "src" / "proof_cli" / "webapp" / "static"
 HARNESS = Path(__file__).resolve().parent / "js" / "map_home_harness.js"
 
@@ -24,6 +26,16 @@ def _node(node_id, kind="lemma", statement="", dependencies=(), **axes):
         "id": node_id, "kind": kind, "statement": statement or node_id, "display_label": None, "dependencies": list(dependencies),
         "acceptance_state": "unreviewed", "workflow_state": "open", "integrity_state": "current", "assignee": None, "frontier": False, **axes,
     }
+
+
+def _as_served(scenario):
+    """The map's nodes and the node pages as the server sends them: each with its status, derived the server's way (issue #157)."""
+    nodes = [{**n, "status": node_status(n)} for n in scenario["map"]["nodes"]]
+    pages = {}
+    for node_id, view in scenario["nodes"].items():
+        view = {"frontier": False, **view}
+        pages[node_id] = {**view, "status": node_status({"assignee": (view.get("claim") or {}).get("claimant_id"), **view})}
+    return {**scenario, "map": {**scenario["map"], "nodes": nodes}, "nodes": pages}
 
 
 MAP = {"nodes": [
@@ -50,7 +62,7 @@ def _home(state=None, steps=(), map_=None, nodes=None):
     if shutil.which("node") is None:
         pytest.skip("needs node")
     scenario = {"state": state or _state(PENDING), "map": map_ or MAP, "steps": list(steps), "nodes": nodes or {}}
-    done = subprocess.run(["node", str(HARNESS), json.dumps(scenario)], capture_output=True, text=True, timeout=30)
+    done = subprocess.run(["node", str(HARNESS), json.dumps(_as_served(scenario))], capture_output=True, text=True, timeout=30)
     assert done.returncode == 0, done.stderr
     return json.loads(done.stdout)
 
@@ -83,7 +95,8 @@ def test_a_frontier_node_in_the_tree_keeps_its_frontier_chip_beside_its_warning(
     chain = {"nodes": [_node("thm", "theorem", "Top", ["lem_ch"]), ACCEPTED_CHALLENGED_FRONTIER]}
     *_, tree = _home(map_=chain, steps=[{"view": "tree"}])
     (line,) = [line for line in tree["tree"] if line["id"] == "lem_ch"]
-    assert "frontier" in line["chips"] and "challenged" in line["chips"]
+    # its status as the card shows it (issue #157): the warning, then its Ready beside it
+    assert "challenged" in line["chips"] and [c["text"] for c in line["status"]] == ["Challenged", "Ready"]
 
 
 def test_the_frontier_border_is_never_overridden_by_a_state_border():
@@ -518,7 +531,7 @@ def _home_with_rules(steps):
                 "preview": {"losing": ["ref_bw"], "depended_on_by_accepted": ["ref_bw"], "gaining": []}}
     if shutil.which("node") is None:
         pytest.skip("needs node")
-    done = subprocess.run(["node", str(HARNESS), json.dumps(scenario)], capture_output=True, text=True, timeout=30)
+    done = subprocess.run(["node", str(HARNESS), json.dumps(_as_served(scenario))], capture_output=True, text=True, timeout=30)
     assert done.returncode == 0, done.stderr
     return json.loads(done.stdout)
 
@@ -569,7 +582,8 @@ def test_a_trusted_by_rule_node_reads_so_on_the_canvas_the_tree_and_its_page():
     assert card["title"].endswith("trusted by rule textbooks") and "trusted by rule textbooks" in card["label"]  # the names, a hover away
     (line,) = [li for li in tree["tree"] if li["id"] == "ref_bw"]
     assert line["chips"][0] == "trusted by rule textbooks"
-    assert opened["nodeAxes"][1] == "trusted by rule textbooks" and "state-accepted" in opened["nodeAxisClasses"][1]  # the accepted family, named
+    # after its status and workflow chips (issue #157): the accepted family, named
+    assert opened["nodeAxes"][2] == "trusted by rule textbooks" and "state-accepted" in opened["nodeAxisClasses"][2]
     assert opened["nodeHistory"] == ["2026-09-30T10:00:00+00:00 · trusted by rule textbooks since then — no decision written; the rule's declaration is the record"]
     assert opened["nodeDecisionRationales"] == ["matched trust rule textbooks; reviewed explicitly", ""]
 
@@ -579,7 +593,7 @@ def _home_rules(steps, **scenario):
         pytest.skip("needs node")
     full = {"state": _trusted_state(), "map": MAP, "steps": list(steps), "nodes": {}, "rules": RULES,
             "preview": {"losing": ["ref_bw"], "depended_on_by_accepted": ["ref_bw"], "gaining": []}, **scenario}
-    done = subprocess.run(["node", str(HARNESS), json.dumps(full)], capture_output=True, text=True, timeout=30)
+    done = subprocess.run(["node", str(HARNESS), json.dumps(_as_served(full))], capture_output=True, text=True, timeout=30)
     assert done.returncode == 0, done.stderr
     return json.loads(done.stdout)
 

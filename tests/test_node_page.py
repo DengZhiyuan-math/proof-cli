@@ -413,6 +413,7 @@ HARNESS = Path(__file__).resolve().parent / "js" / "node_panel_harness.js"
 VIEW = {
     "node": {"id": "A", "kind": "claim", "statement": "A", "assumptions": []},
     "workflow_state": "open", "acceptance_state": "unreviewed", "integrity_state": "current", "claim": None,
+    "frontier": True, "status": {"text": "Ready", "kind": "ready"},  # its one status, as /api/node sends it (issue #157)
     "candidate_proof": {"id": "cp-v1", "version": 1, "sha256": "abc"},
     "dependencies": [
         {"node_id": "lem", "kind": "lemma", "pin": {"pinned_version": 3, "pinned_fingerprint": "fp"}, "accepted_version": 4, "current": True, "remedy": "lightweight-re-review"},
@@ -573,7 +574,7 @@ def test_the_review_lives_in_the_agent_panel_and_the_agent_never_decides():
     chat = index[index.index('<aside id="chat">'):]
     assert 'id="review-card"' in chat
     panel = (STUDIO_STATIC / "node.js").read_text()
-    review = panel[panel.index("function reviewSection"):panel.index("const VALUE_STATE")]
+    review = panel[panel.index("function reviewSection"):panel.index("const SVG_NS")]
     assert 'call("/api/decide"' in review and "/api/agent" not in review  # recorded as the researcher, straight to the map
 
 

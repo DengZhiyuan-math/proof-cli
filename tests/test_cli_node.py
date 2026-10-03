@@ -498,6 +498,35 @@ def test_challenge_dismiss_clears_integrity_overlay(tmp_path: Path):
     assert json.loads(show_cleared.stdout)["data"]["integrity_state"] == "current"
 
 
+@pytest.mark.filterwarnings("error::UserWarning")
+def test_a_resolved_challenge_shows_without_a_serialization_warning(tmp_path: Path):
+    """#159: `resolved_at` is a datetime, not the decision row's raw string."""
+    from datetime import datetime
+
+    from _review_client import DirectClient
+
+    _create_and_accept_node(tmp_path)
+    open_result = runner.invoke(app, ["challenge", "open", "lem_1", "--root", str(tmp_path), "--json"])
+    challenge_id = json.loads(open_result.stdout)["data"]["id"]
+    researcher(load_project(tmp_path)).dismiss_challenge(challenge_id, rationale="checked")
+
+    shown = runner.invoke(app, ["node", "show", "lem_1", "--root", str(tmp_path), "--json"])
+    assert shown.exit_code == 0, shown.output  # a warning raised as an error would exit non-zero
+    challenge_shown = runner.invoke(app, ["challenge", "show", challenge_id, "--root", str(tmp_path), "--json"])
+    assert challenge_shown.exit_code == 0, challenge_shown.output
+    cli_challenge = json.loads(challenge_shown.stdout)["data"]
+    status, view = DirectClient(load_project(tmp_path)).get("/api/node/lem_1")
+    assert status == 200
+    (api_challenge,) = view["data"]["challenges"]
+
+    for challenge in (cli_challenge, api_challenge):
+        assert challenge["status"] == "dismissed"
+        # the format is unchanged: the decision's own `isoformat()`, offset `+00:00`, not `Z`
+        resolved_at = challenge["resolved_at"]
+        assert resolved_at.endswith("+00:00")
+        assert datetime.fromisoformat(resolved_at).isoformat() == resolved_at
+
+
 def test_challenge_unlocks_reclaim_of_accepted_node(tmp_path: Path):
     _create_and_accept_node(tmp_path)
 
