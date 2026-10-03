@@ -99,7 +99,7 @@ class FakeElement {
     "zoom-in", "zoom-out", "zoom-fit", "zoom-tidy", "zoom-level", "map-find", "map-find-count",
     "trusted", "trusted-count", "manage-rules", "rules-sheet", "rule-form", "rule-new", "rule-cancel", "rule-record",
     "cond-reviewed", "cond-doi", "cond-arxiv", "cond-types", "rule-name",
-    "fog-badge", "stat-fog", "fog-drawer", "fog-drawer-n", "fog-list", "fog-close", "fog-add-text", "fog-add-near", "fog-add", "fog-show-all", "fog-composer"];
+    "fog-badge", "stat-fog", "fog-drawer", "fog-drawer-n", "fog-list", "fog-close", "fog-add-text", "fog-add-near", "fog-add", "fog-show-all", "fog-composer", "map-legend"];
   const tags = { "tree-root": "select", "dag-svg": "svg", "map-find": "input", pending: "table", trusted: "table", "fog-add-near": "select", "fog-show-all": "input", "fog-add-text": "input" };
   const elements = Object.fromEntries(ids.map((id) => [id, new FakeElement(tags[id] || "div")]));
   for (const [id, element] of Object.entries(elements)) element.setAttribute("id", id);
@@ -147,8 +147,10 @@ class FakeElement {
       else if (url === "/api/references") data = { id: body.reference_id, title: body.title, authors: body.authors, year: Number(body.year), source_type: body.source_type, identifier: body.identifier, url: body.url, bibliographic_source: "" };
       else if (url === "/api/nodes") {
         data = { id: body.node_id, kind: body.kind, page: body.kind === "imported_result" ? `/#/node/${body.node_id}` : `/studio/${body.node_id}/` };
+        // the map as the server then sends it: the new node with the status the server derived (scenario.createdStatus)
         map = { nodes: [...map.nodes, { id: body.node_id, kind: body.kind, statement: body.statement, display_label: body.display_label, dependencies: body.dependencies,
-          acceptance_state: "unreviewed", workflow_state: "open", integrity_state: "current", assignee: null, frontier: false }] };
+          acceptance_state: "unreviewed", workflow_state: "open", integrity_state: "current", assignee: null, frontier: false,
+          status: scenario.createdStatus || { text: "Open", kind: "open" } }] };
       } else if (url.endsWith("/split")) data = { children: body.children, next: `/studio/${body.children[0].id}/` };
       else data = {};
       return { json: async () => ({ ok: true, data }) };
@@ -157,7 +159,7 @@ class FakeElement {
   const katexCalls = [];
   context.katex = require("./katex_stub.js")(katexCalls);
   vm.createContext(context);
-  for (const file of ["studio/static/mathtext.js", "webapp/static/app.js", "webapp/static/nodeform.js"]) {
+  for (const file of ["studio/static/mathtext.js", "studio/static/status.js", "webapp/static/app.js", "webapp/static/nodeform.js"]) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, "../../src/proof_cli", file), "utf8"), context);
   }
   listeners.DOMContentLoaded.forEach((fn) => fn());
@@ -203,9 +205,9 @@ class FakeElement {
       statementMath: q("[data-f=statement]").querySelectorAll("span.math").map((m) => ({ class: m.className, text: m.textContent })),
       assumptionPreviews: p.querySelectorAll(".nf-assumption .nf-preview").map((n) => n.textContent),
       depRows: q("[data-f=deps]").querySelectorAll("li").map((li) => ({ id: li.getAttribute("data-dep"), text: li.textContent, on: li.classList.contains("on"),
-        marks: li.querySelectorAll("mark").map((m) => m.textContent), chip: (li.querySelector("span.chip") || { className: null }).className })),
+        marks: li.querySelectorAll("mark").map((m) => m.textContent), chips: li.querySelectorAll("span.chip").map((c) => ({ text: c.textContent, class: c.className, icon: (c.querySelector("g.status-icon") || { className: null }).className })) })),
       depChips: q("[data-f=deps]").querySelectorAll(".nf-dep-chip").map((c) => c.getAttribute("data-chip")),
-      parentOptions: inPop("nf-parent").querySelectorAll("option").map((o) => o.value), parent: inPop("nf-parent").value,
+      parentOptions: inPop("nf-parent").querySelectorAll("option").map((o) => o.value), parentLabels: inPop("nf-parent").querySelectorAll("option").map((o) => o.textContent), parent: inPop("nf-parent").value,
       modesShown: !q(".nf-radios").hidden, mode: p.querySelectorAll("input[type=radio]").filter((r) => r.checked).map((r) => r.value)[0] || null,
       splitDisabled: p.querySelectorAll("input[type=radio]").find((r) => r.value === "split").disabled,
       reassignShown: !q(".nf-reassign").hidden, reassignText: q(".nf-reassign").textContent,
