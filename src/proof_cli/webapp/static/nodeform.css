@@ -1,0 +1,93 @@
+/* The map's node form (issue #154): the right-click menu, the popover (a bottom sheet on a narrow window)
+   and the ghost card. Only app.css's tokens: no colour gets a new job (four system colours, one job each),
+   so the ghost and the search marks are greys; red stays the refusal's, as #message.error's. */
+
+/* ---------- the menu */
+.ctx-menu { position: absolute; z-index: 12; min-width: 240px; max-width: calc(100% - 16px); padding: 5px; border-radius: 9px; display: grid;
+  background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: saturate(180%) blur(20px); -webkit-backdrop-filter: saturate(180%) blur(20px); box-shadow: var(--shadow-pop); }
+.ctx-menu button { justify-content: flex-start; border: 0; box-shadow: none; background: transparent; height: 28px; padding: 0 10px; border-radius: 5px; font-weight: 400; white-space: normal; text-align: left; }
+.ctx-menu button:hover, .ctx-menu button:focus-visible { background: var(--fill-2); box-shadow: none; }
+.ctx-menu .sep { height: .5px; background: var(--sep-strong); margin: 4px 6px; }
+.ctx-menu .head { font-size: 11px; color: var(--label-3); padding: 2px 10px 4px; font-family: var(--mono); }
+
+/* a long press on the canvas is the menu, not the system's own callout */
+.map-canvas { -webkit-touch-callout: none; }
+
+/* ---------- the ghost: where the new card lands */
+#dag-svg .ghost rect { fill: color-mix(in srgb, var(--label-3) 8%, transparent); stroke: var(--label-3); stroke-width: 1.6; stroke-dasharray: 6 5; }
+#dag-svg .ghost text { fill: var(--label-2); font-weight: 500; font-size: 12px; }
+
+/* ---------- the popover */
+.node-pop { position: absolute; z-index: 11; width: 400px; max-width: calc(100% - 24px); max-height: calc(100% - 24px); overflow: auto; overflow-x: hidden;
+  background: color-mix(in srgb, var(--surface) 96%, transparent); backdrop-filter: saturate(180%) blur(20px); -webkit-backdrop-filter: saturate(180%) blur(20px);
+  border-radius: 14px; box-shadow: var(--shadow-pop); padding: 14px 16px 12px; }
+.node-pop.wide { width: 480px; }
+.node-pop .nf-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.node-pop .nf-head h2 { font-size: 15px; }
+.node-pop .close { width: 26px; height: 26px; padding: 0; border: 0; box-shadow: none; background: var(--fill); border-radius: 13px; color: var(--label-2); margin-left: auto; }
+
+.nf { display: grid; gap: 12px; min-width: 0; }
+.nf-field { display: grid; gap: 4px; min-width: 0; }
+.nf-lbl { font-size: 12px; font-weight: 600; color: var(--label-2); }
+.nf-opt { font-weight: 400; color: var(--label-3); font-size: 11.5px; }
+.nf input[type="text"], .nf input[type="search"], .nf textarea, .nf select { width: 100%; min-width: 0; }
+.nf .mono, .nf textarea.tex { font-family: var(--mono); font-size: 12.5px; }
+.nf textarea.tex { min-height: 58px; }
+.nf .hint { margin: 0; }
+.nf button.small { height: 24px; font-size: 12px; padding: 0 9px; width: max-content; }
+.nf-preview { font-family: var(--serif); font-size: 15px; line-height: 1.5; padding: 6px 10px; border-radius: 8px; background: var(--surface-2); min-height: 32px; white-space: pre-wrap; overflow-x: auto; }
+.nf-preview:empty::before { content: "Preview"; color: var(--label-4); font-family: var(--font); font-size: 12px; }
+.nf-preview .math.unrendered { color: var(--red); font-family: var(--mono); font-size: 12px; border-bottom: 1px dotted var(--red); }
+.nf-err { color: var(--red); font-size: 11.5px; margin: 0; overflow-wrap: anywhere; }
+.nf-err:empty { display: none; }
+.nf-seg { display: inline-flex; flex-wrap: wrap; padding: 2px; border-radius: 8px; background: var(--fill); width: max-content; max-width: 100%; }
+.nf-seg button { height: 24px; padding: 0 10px; border: 0; background: transparent; box-shadow: none; border-radius: 6px; color: var(--label-2); font-weight: 500; }
+.nf-seg button[aria-pressed="true"] { background: var(--raised); color: var(--label); box-shadow: 0 .5px 1.5px rgba(0, 0, 0, .18), 0 0 0 .5px rgba(0, 0, 0, .04); }
+.nf-assumption { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: start; margin-bottom: 4px; }
+.nf-assumption .nf-preview { grid-column: 1 / -1; font-size: 13.5px; min-height: 0; padding: 2px 10px; }
+.nf-assumption .nf-preview:empty { display: none; }
+.nf-assumption button { height: 28px; width: 28px; padding: 0; }
+
+.nf-picklist { list-style: none; margin: 0; padding: 3px; border: .5px solid var(--sep-strong); border-radius: 8px; max-height: 168px; overflow: auto; background: var(--surface); }
+.nf-picklist li { display: flex; align-items: center; gap: 8px; padding: 5px 7px; border-radius: 6px; cursor: pointer; min-width: 0; }
+.nf-picklist li:hover { background: var(--fill); }
+.nf-picklist li.on { background: var(--fill-2); }
+.nf-picklist li.none { color: var(--label-3); cursor: default; }
+.nf-pid { font-family: var(--mono); font-size: 11.5px; color: var(--label-2); flex: none; }
+.nf-pst { color: var(--label-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; font-family: var(--serif); font-size: 13px; }
+.nf-ref { display: grid; gap: 1px; flex: 1; min-width: 0; }
+.nf-ref > span { color: var(--label-3); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nf-ref-title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nf-picklist mark { background: var(--fill-2); color: inherit; font-weight: 600; border-radius: 2px; }
+.nf-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.nf-chips:empty { display: none; }
+.nf-dep-chip { display: inline-flex; align-items: center; gap: 4px; font-family: var(--mono); font-size: 11px; padding: 1px 4px 1px 8px; border-radius: 9px; background: var(--fill); color: var(--label-2); max-width: 100%; }
+.nf-dep-chip button { height: 16px; width: 16px; padding: 0; border: 0; background: transparent; box-shadow: none; color: var(--label-3); font-size: 13px; }
+
+.nf-radios { display: grid; gap: 4px; font-size: 12.5px; }
+.nf-radios label, .nf-reassign { display: flex; gap: 6px; align-items: flex-start; font-size: 12.5px; }
+.nf-radios label.off { opacity: .45; }
+.nf-radios input, .nf-reassign input { margin-top: 2px; flex: none; }
+
+.nf-source { border: .5px solid var(--sep-strong); border-radius: 10px; padding: 10px 12px 12px; display: grid; gap: 10px; margin: 0; min-width: 0; }
+.nf-source legend { font-size: 12px; font-weight: 600; color: var(--label-2); padding: 0 4px; }
+.nf-immutable { font-size: 11.5px; color: var(--label-2); background: var(--fill); border-radius: 8px; padding: 7px 10px; margin: 0; }
+.nf-ref-new { display: grid; gap: 8px; padding: 10px; border-radius: 8px; background: var(--surface-2); }
+.nf-ref-new label { display: grid; gap: 2px; font-size: 11.5px; color: var(--label-2); min-width: 0; }
+.nf-row3 { display: grid; grid-template-columns: minmax(0, 1fr) 80px; gap: 6px; }
+.nf-row3 label:last-child { grid-column: 1 / -1; }
+.nf-suggest { font-size: 11.5px; color: var(--label-3); margin: 0; }
+
+.nf-refusal { font-family: var(--mono); font-size: 11.5px; color: var(--red); background: var(--fill); border-radius: 8px; padding: 6px 10px; margin: 0; overflow-wrap: anywhere; }
+.nf-refusal:empty { display: none; }
+.nf-cli-box { border-top: .5px solid var(--sep); padding-top: 10px; display: grid; gap: 4px; min-width: 0; }
+.nf-cli-head { display: flex; justify-content: space-between; align-items: center; }
+.nf-cli-note:empty { display: none; }
+.nf-cli { margin: 0; font-size: 11.5px; line-height: 1.5; color: var(--label); user-select: all; max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* ---------- a narrow window: a bottom sheet, the whole width, nothing scrolling sideways */
+@media (max-width: 760px) {
+  .node-pop, .node-pop.wide { position: fixed; left: 0 !important; right: 0; top: auto !important; bottom: 0; width: auto; max-width: none; max-height: 85vh;
+    border-radius: 14px 14px 0 0; z-index: 30; padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+  .ctx-menu { min-width: 0; width: calc(100% - 16px); left: 8px !important; }
+}

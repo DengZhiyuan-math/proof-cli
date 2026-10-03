@@ -66,7 +66,7 @@ let state = null;
 // A fog item is a difficulty not yet precise enough to be a Claim; it is never a node, and `near` is
 // an informal pointer, never a dependency. The drawer lists open items (dropped and crystallized ones
 // on request), adds, drops, reopens and records Experiments through /api/fog; crystallize is a CLI
-// command until the page's node form returns (#133). Hovering a row lights its near nodes up on the
+// command until it opens the map's node form (#155). Hovering a row lights its near nodes up on the
 // canvas the way the search box does, with nothing drawn on the map.
 let fogData = { items: [] };
 // form: {id, kind} of the one inline form showing; near: the hovered row's nodes, lit up on the map; found: the row a #/fog/<id> link asked for
@@ -153,7 +153,7 @@ function fogActions(item) {
   return box;
 }
 
-// a crystallize is a CLI command until the page's node form returns (#133): the command, ready to copy
+// a crystallize is a CLI command until it opens the map's node form (#155): the command, ready to copy
 function crystallizeHint(item) {
   const parent = item.near.length === 1 ? ` --parent ${item.near[0]}` : item.near.length > 1 ? ` --parent <one of ${item.near.join(", ")}>` : "";
   const hint = el("p", null, { class: "hint fog-cli-hint" });
@@ -732,7 +732,12 @@ function drawDag(nodes) {
   box.replaceChildren();
   if (!nodes.length) {
     view.content = null;
-    box.append(Object.assign(svg("text", { x: 16, y: 64, class: "empty" }), { textContent: "No nodes yet: create the first one with `proof node create`." }));
+    box.append(Object.assign(svg("text", { x: 16, y: 64, class: "empty" }), { textContent: "Right-click anywhere to create the first node, or run `proof node create`." }));
+    // an empty scene still: the node form's ghost card is drawn on it (issue #154)
+    const scene = svg("g", { id: "dag-view" });
+    box.append(scene);
+    applyView();
+    if (typeof drawNodeFormGhost === "function") drawNodeFormGhost(scene);
     return;
   }
   const rows = layers(nodes);
@@ -843,6 +848,7 @@ function drawDag(nodes) {
     g.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); } });
     scene.append(g);
   }
+  if (typeof drawNodeFormGhost === "function") drawNodeFormGhost(scene);  // the node form's ghost card, while it is open (issue #154)
   // a redraw of the same map (after a decision) keeps where you were; a new shape is fitted
   if (same && view.fitted) applyView(); else fitView();
 }

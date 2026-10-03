@@ -89,6 +89,8 @@ class DirectClient:
             return self._call(self.app.map)
         if path == "/api/trust-rules":
             return self._call(self.app.trust_rules)
+        if path == "/api/references":
+            return self._call(self.app.references)
         if path.startswith("/api/fog"):
             from urllib.parse import parse_qs, urlsplit
 
@@ -118,6 +120,8 @@ class DirectClient:
             return self._call(lambda: self.app.decide(body or {}))
         if path == "/api/nodes":
             return self._call(lambda: self.app.create_node(body or {}))
+        if path == "/api/references":
+            return self._call(lambda: self.app.import_reference(body or {}))
         if path == "/api/trust-rules/preview":
             return self._call(lambda: self.app.trust_rule_preview(body or {}))
         if path == "/api/fog":
