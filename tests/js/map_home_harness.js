@@ -220,6 +220,14 @@ class FakeElement {
     pendingCitationMissing: elements.pending.querySelectorAll("tbody tr").map((tr) => tr.querySelectorAll(".citation.warning").length > 0),
     // each review card's key ideas (ADR-0013): the text of its .key-ideas block
     pendingKeyIdeas: elements.pending.querySelectorAll("tbody tr").map((tr) => tr.querySelectorAll(".key-ideas").map((k) => k.textContent).join(" ")),
+    // each review card's decisions on offer (#156): its choices (null with no choice at all), whether it can be ticked,
+    // and why nothing is offered; and the Evidence checks on its snapshot (#158), each with its warning marks
+    pendingChoices: elements.pending.querySelectorAll("tbody tr").map((tr) => { const s = tr.querySelector("select"); return s ? s.children.map((o) => o.textContent) : null; }),
+    pendingTickable: elements.pending.querySelectorAll("tbody tr").map((tr) => tr.querySelectorAll("input[type=checkbox]").length > 0),
+    pendingBlocked: elements.pending.querySelectorAll("tbody tr").map((tr) => tr.querySelectorAll(".review-blocked").map((b) => b.textContent).join(" ")),
+    pendingEvidence: elements.pending.querySelectorAll("tbody tr").map((tr) => tr.querySelectorAll(".card-evidence li").map((li) => ({
+      text: li.textContent, warnings: li.querySelectorAll(".warning").map((w) => w.textContent),
+    }))),
     // the maths spans on the review cards, and every formula handed to KaTeX so far
     pendingMath: elements.pending.querySelectorAll("tbody tr").map((tr) => tr.querySelectorAll("span.math").map((m) => ({ class: m.className, text: m.textContent }))),
     katex: katexCalls,

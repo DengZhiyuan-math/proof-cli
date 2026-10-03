@@ -158,6 +158,34 @@ def _evidence_checks(store: ProjectStore, node_id: str, current) -> list[dict]:
     return checks
 
 
+def _snapshot_evidence(store: ProjectStore, proof) -> list[dict]:
+    """The Evidence checks on the node's current snapshot, for its review card (#158): each with its outcome, who
+    ran it, when, and the SHA-256 it is bound to, read against the snapshot as it is now (`matches`, `changed`,
+    `unbound`, or `unverifiable` once the snapshot can't be read). An older snapshot's checks are left out."""
+    if proof is None:
+        return []
+    now = candidate_proof_sha256(store, proof.id)
+    checks = []
+    for check in proof_map.list_evidence_checks(store, proof.id):
+        binding = proof_map.evidence_binding(check, now)
+        shown = check.model_dump(mode="json", include={"id", "outcome", "run_by", "notes", "created_at"})
+        checks.append({**shown, "sha256": binding["sha256"], "state": "unverifiable" if now is None else binding["state"]})
+    return checks
+
+
+def _review_blocked(store: ProjectStore, node_id: str) -> dict | None:
+    """Why no Acceptance decision is offered on a node awaiting review, and what to do next (#156): its
+    dependencies changed since its snapshot, so each would be refused DEPENDENCIES_CHANGED."""
+    stale = proof_map.snapshot_with_changed_dependencies(store, node_id)
+    if stale is None:
+        return None
+    return {
+        "reason": "DEPENDENCIES_CHANGED",  # the code each decision would be refused with
+        "message": f"dependencies changed since snapshot v{stale.version} — request review again",
+        "next": f'proof node request-review {node_id} --rationale "…"',
+    }
+
+
 def _working_key_ideas(store: ProjectStore, node_id: str) -> dict:
     """Whether the node's working key-ideas.md exists, and what it still lacks before review can be requested."""
     try:
@@ -205,7 +233,8 @@ def _available_decisions(store: ProjectStore, node, *, claim, proof, dependencie
                 and proof_map.get_reference_review_state(store, other.id) != "no-longer-callable"
             ]
     else:
-        if proof_map.get_workflow_state(store, node.id) == "review-needed":
+        # not on a snapshot whose dependencies changed since: each would be refused DEPENDENCIES_CHANGED (#156)
+        if proof_map.get_workflow_state(store, node.id) == "review-needed" and _review_blocked(store, node.id) is None:
             offered += [{"kind": "acceptance", "target_id": node.id, "decision": d.value} for d in proof_map.AcceptanceDecision]
         accepted = proof_map.get_acceptance_state(store, node.id) == "accepted"
         if node.kind == ProofMapNodeKind.claim and accepted and not any(c.status.value == "open" for c in challenges):
@@ -511,11 +540,16 @@ class ReviewApp:
                 proof = get_current_candidate_proof(self.store, node.id)
                 # still listed as awaiting review, but nothing is offered on a snapshot that can't be read (#92)
                 readable = proof is None or candidate_proof_sha256(self.store, proof.id) is not None
+                # nor on one whose dependencies changed since: each would be refused, so the card says why instead (#156)
+                blocked = _review_blocked(self.store, node.id)
                 pending.append(
                     {
                         "node_id": node.id,
                         "kind": "acceptance",
-                        "decisions": [decision.value for decision in proof_map.AcceptanceDecision] if readable else [],
+                        "decisions": [decision.value for decision in proof_map.AcceptanceDecision] if readable and blocked is None else [],
+                        "review_blocked": blocked,
+                        # the automated checks on this snapshot, bound to it by their SHA-256 (#158)
+                        "evidence_checks": _snapshot_evidence(self.store, proof),
                         "bindings": {d.value: _binding(self.store, "acceptance", node.id, d.value) for d in proof_map.AcceptanceDecision},
                         "statement": node.statement,
                         "acceptance_state": proof_map.get_acceptance_state(self.store, node.id),
@@ -579,6 +613,8 @@ class ReviewApp:
             ],
             "warnings": _warnings_for(warnings, node_id, *(challenge.id for challenge in challenges)),
             "decisions": _available_decisions(store, node, claim=claim, proof=proof, dependencies=dependencies, challenges=challenges),
+            # why a snapshot awaiting review is offered no decision, and the next step (#156)
+            "review_blocked": _review_blocked(store, node_id) if proof_map.get_workflow_state(store, node_id) == "review-needed" else None,
         }
 
     # -- Proof fog (ADR-0008, spec #136): what the drawer reads and writes; the presentation is issue #137
