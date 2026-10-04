@@ -30,7 +30,7 @@ It began as a copy of [prism-local](https://github.com/DengZhiyuan-math/Local-Ai
 
 Nothing is outstanding from the import. Since #69 there are no module globals: a `Studio` (`server.py`) holds one folder's state, and proof-cli's server runs one per node inside its own process (proof-web's `studios.py`, `StudioHub`). `python -m latex_agent.server` still serves a single folder on its own port, for developing the studio itself.
 
-The page's node panel (`static/node.js`), run pane (`static/run.js`) and maths renderer (`static/mathtext.js`, ADR-0013) are proof-cli's, not upstream's: they speak to proof-web's routes, so this package's page is the node page as a whole. Moving them to proof-web, with the page assembled there, is the next step of ADR-0018; the Python side already imports nothing of proof-cli.
+The page keeps containers a host may fill — `#node-panel`, `#run-pane`, `#plus-menu`, the review card — and the Work log / Files centre around them (`app.js`, spec #145); their styles are in `app.css`. The scripts that fill them and speak to the proof map are proof-web's (`static/studio/node.js`, `run.js`, `menu.js`, and the shared `status.js` and `mathtext.js`): proof-web appends them to this page when it serves it for a node (ADR-0018). Served on its own, the page leaves the containers empty. What is still proof-cli's in this package is the layout and the wording of that centre; moving those too would mean a page the host assembles from parts.
 
 ## Licences
 
