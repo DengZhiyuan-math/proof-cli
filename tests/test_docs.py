@@ -80,4 +80,4 @@ def test_adr_0013_records_provenance_in_project_state_and_typesets_maths_with_ka
     adr = next(ADR.glob("0013-*.md")).read_text()
     assert "proof_map_key_ideas_drafted" in adr and "agent draft, edited by author" in adr and "binding covers" in adr
     assert "KaTeX" in adr and "0.18.9" in adr and "the page ships no maths renderer" not in adr
-    assert "0.18.9" in (REPO / "src" / "proof_cli" / "studio" / "README.md").read_text()
+    assert "0.18.9" in (REPO / "packages" / "latex-agent" / "src" / "latex_agent" / "README.md").read_text()

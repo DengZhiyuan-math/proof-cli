@@ -254,8 +254,11 @@ def _root(path: str | None) -> Path:
 
 @app.command(rich_help_panel=PROOF_MAP_PANEL)
 def init(root: str = ROOT_OPTION) -> None:
-    """Start a proof project in ROOT."""
+    """Start a proof project in ROOT (and list it on the Home, `proof home`)."""
+    from .projects import register_project
+
     typer.echo(cmd_init(_root(root)))
+    register_project(_root(root))
 
 
 @app.command()
@@ -382,7 +385,7 @@ def _emit_node(node, json_output: bool, *, command: str) -> None:
 
 def human_review_required(root: str, *, command: str, kind: str, target_id: str, node_id: str | None, json_output: bool) -> None:
     """Every Human Review decision is made on the proof map page, never here (ADR-0010): say where, and fail."""
-    from .webapp.server import project_url
+    from .plugins import project_url  # proof-web's, when it is installed
 
     # not a project yet: nothing to decide, and a refusal shouldn't create one
     url = project_url(get_store(_root(root)), node_id) if (_root(root) / ".proof").exists() else None
@@ -1122,75 +1125,6 @@ node_app.add_typer(node_evidence_app, name="evidence")
 node_app.add_typer(node_medium_app, name="medium")
 
 
-def _running_review_app(store) -> bool:
-    """Whether this project's proof map page already answers on its origin."""
-    import urllib.request
-
-    from .storage import read_project_instance_id
-    from .webapp.server import project_url
-
-    try:
-        with urllib.request.urlopen(f"{project_url(store)}/api/health", timeout=2) as response:
-            return json.loads(response.read())["data"]["instance"] == read_project_instance_id(store)
-    except (OSError, ValueError, KeyError):
-        return False
-
-
-@map_app.command("serve")
-def review_serve(root: str = ROOT_OPTION) -> None:
-    """Run this project's proof map page on its own localhost origin — the only place Human Review decisions are made (ADR-0010).
-
-    Runs in the foreground until interrupted. Bound to 127.0.0.1. Decisions
-    are recorded as this process's git identity and committed with their
-    snapshots.
-    """
-    from .webapp.server import ReviewServer
-
-    store = get_store(_root(root))
-    try:
-        server = ReviewServer(store)
-    except OSError as exc:
-        typer.echo(f"Error: can't bind this project's review port ({exc}); is it already running? Try `proof map open`.")
-        raise typer.Exit(code=1)
-    typer.echo(f"Proof map page for this project: {server.url}  (Ctrl-C to stop)")
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        server.server_close()
-
-
-@map_app.command("open")
-def review_open(
-    node_id: str = typer.Argument("", help="Open this node's decision page"),
-    root: str = ROOT_OPTION,
-    json_output: bool = typer.Option(False, "--json"),
-) -> None:
-    """Open this project's proof map page (starting it in the background if needed), optionally at a node."""
-    import subprocess
-    import time
-    import webbrowser
-
-    from .webapp.server import project_url
-
-    store = get_store(_root(root))
-    if not _running_review_app(store):
-        subprocess.Popen(
-            [sys.executable, "-m", "proof_cli.cli", "map", "serve", "--root", str(_root(root))],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-        for _ in range(50):
-            if _running_review_app(store):
-                break
-            time.sleep(0.1)
-    url = project_url(store, node_id or None)
-    typer.echo(dump_envelope(success_envelope("map.open", {"url": url, "node_id": node_id or None})) if json_output else url)
-    webbrowser.open(url)
-
-
 @review_app.command("warnings")
 def review_warnings(root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
     """Everything about Human Review authority that doesn't verify, and Review snapshots the index never recorded."""
@@ -1231,9 +1165,6 @@ app.add_typer(bug_app, name="bug")
 app.add_typer(debug_app, name="debug")
 app.add_typer(review_app, name="review")
 app.add_typer(map_app, name="map", rich_help_panel=PROOF_MAP_PANEL)
-# the page's commands before it was the map's home (ADR-0010): kept, out of sight
-review_app.command("serve", hidden=True)(review_serve)
-review_app.command("open", hidden=True)(review_open)
 app.add_typer(contributor_app, name="contributor")
 app.add_typer(role_app, name="role")
 app.add_typer(comment_app, name="comment")
@@ -2191,6 +2122,15 @@ def verify_stale(
             cmd_proof_verify_stale(source_id, _root(root), reason=reason, changed_dependency_ids=dependency),
         )
     )
+
+
+# The other packages' commands (ADR-0018): proof-web adds `home`, `map open` and `map serve` through
+# the `proof_cli.commands` entry point. Without it, those commands say which package to install.
+from . import plugins as _plugins  # noqa: E402
+
+_plugins.load_commands(app, map_app, review_app)
+if "home" not in _plugins.command_names(app):
+    _plugins.install_web_fallbacks(app, map_app, panel=PROOF_MAP_PANEL)
 
 
 if __name__ == "__main__":

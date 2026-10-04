@@ -10,13 +10,17 @@ The project is designed to support rigorous research workflows without replacing
 
 ## Install for development
 
+The repository holds four packages (ADR-0018): **proof-cli**, the core and the `proof` CLI, at the root; and under `packages/`, **proof-agents** (the Proof agent's roles and its run), **latex-agent** (the LaTeX studio taken from prism-local: editor, build, PDF, agent panel) and **proof-web** (the Home, the proof map page and each node's page, which serves the other two). `proof` works with the core alone; `proof home` and `proof map open` need proof-web, and say so until it is installed.
+
 ```bash
-python -m pip install -e ".[dev]"
+python -m pip install -e ".[dev]"                                                         # proof-cli
+python -m pip install -e packages/proof-agents -e packages/latex-agent -e packages/proof-web   # the web app and what it serves
+pytest                                                                                     # every package's tests
 ```
 
 ## Command-line entry point
 
-The researcher's entry is the proof map page (`proof map open`, below). `proof` is the agents' interface, with `--json` for one envelope per call:
+The researcher's entry is the web app: `proof home` opens the **Home**, the list of your proof projects, and a project opens in its **proof map page** (`proof map open` in a project's folder goes straight there; both below). `proof` is the agents' interface, with `--json` for one envelope per call:
 
 ```bash
 proof --help
@@ -57,9 +61,13 @@ proof node request-review <id> --rationale "why it is scoped to prove directly"
 
 A request without `key-ideas.md`, or with 核心思路 or 主要步骤 empty, is refused with `KEY_IDEAS_REQUIRED`. Otherwise it freezes every input of the proof into an immutable snapshot, `proofs/<id>/snapshots/v<N>/`: the node's working sources (not `build/`, `scratch/` or older snapshots), its key-ideas summary and the shared preamble, with a `manifest.json` of each file's SHA-256. The snapshot's SHA-256, which decisions bind, is that of the manifest, so a change to any input, an `\input` file, a preamble macro or the summary alone included, is a new version to review. Review is always of a snapshot, never of the working files (ADR-0010, ADR-0011). The researcher reviews it in the node's studio: the review view shows the snapshot's key ideas and records the decisions, and links to the node's page for the frozen LaTeX and the archived PDF (ADR-0013). A snapshot from before summaries existed is reviewed as before, and says it has none.
 
+## The Home
+
+`proof home` opens the Home (ADR-0017), the web app's first page: your proof projects, each a card read live from its own folder — its id, its theorem, how many nodes, how many on the frontier, how many await you, how many are accepted, the open fog, whether its page is running, when you last opened it. Opening a card starts that project's proof map page (on the project's own localhost port, as before) and takes you there; the page's sidebar links back to the Home. **Add existing…** lists a folder that already holds a project, **New project…** starts one exactly as `proof init` does, and **Forget** drops a project from the list without touching its folder. The list is `projects.json` in the proof-cli config directory (`$PROOF_CLI_CONFIG_HOME`, else `$XDG_CONFIG_HOME/proof-cli`, else `~/.config/proof-cli`); `proof init` and `proof map open` keep it up to date, and nothing scans your disk. `proof home --foreground` runs it in the terminal.
+
 ## The proof map page
 
-`proof map open` starts the project's local page, bound to 127.0.0.1, and opens it:
+`proof map open` (in a project's folder, or with `--root`) opens the project's local page, bound to 127.0.0.1 on the project's own port — through the Home, started if need be, so the page links back to it:
 - **The map** is a DAG of every node, with a tree view rooted at any node. Frontier nodes (open, unblocked, unclaimed) are outlined as *ready to claim*. Each node shows its acceptance, workflow and integrity state, and its assignee; hovering it shows its snapshot's 核心思路.
 - **Awaiting review** lists each snapshot to decide on, with its 核心思路 and 难点.
 - **Nodes are created from the CLI** (`proof node create`): a theorem, lemma or claim with its assumptions and dependencies, or an imported result with its source. That covers the first node of an empty map, and a corrected source that replaces a withdrawn one.
@@ -99,8 +107,9 @@ proof fog list --all                                           # dropped and cry
 Decisions that change what the project trusts (accepting a Candidate proof, Reference review, dismissing a Challenge, promoting) are made only on the project's local proof map page:
 
 ```bash
-proof map serve         # start the proof map page for this project
-proof map open [<id>]   # open the map, or a node's page
+proof home              # the Home: your projects, each opening in its page
+proof map open [<id>]   # open this project's map, or a node's page (through the Home)
+proof map serve         # this project's page alone, in the foreground, without a Home
 ```
 
 Each decision is one line in the node's git-tracked `proofs/<id>/reviews.jsonl`, naming the SHA-256 of the snapshot it decides on. proof-cli commits that line together with the snapshot, as your own git identity (`user.name` / `user.email`); it never pushes. Once you push, the commit on GitHub is the record of who decided what (ADR-0010). Outside a git repository the decision is still recorded, just without that record. `proof review warnings` lists decisions git doesn't have yet.
