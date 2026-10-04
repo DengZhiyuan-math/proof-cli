@@ -10,11 +10,12 @@
 <link rel="stylesheet" href="static/vendor/foldgutter.css">
 <link rel="stylesheet" href="static/vendor/katex.min.css">
 <link rel="stylesheet" href="static/app.css">
+<!-- host:head -->
 </head>
 <body>
 <header id="top">
   <button id="btn-sidebar" class="icon" data-icon="menu" title="Show/hide the Files sidebar (⌘B)" aria-label="Files sidebar"></button>
-  <div class="brand"><a href="/" class="logo" title="Back to the proof map">Map</a> <span id="projname"></span></div>
+  <div class="brand"><!-- host:brand --> <span id="projname"></span></div>
   <div class="actions">
     <span id="build-status" class="status"></span>
   </div>
@@ -30,10 +31,7 @@
 
 <main id="layout">
   <aside id="sidebar">
-    <section id="node-section">
-      <h3>Node</h3>
-      <div id="node-panel"></div>
-    </section>
+    <!-- host:sidebar -->
     <section>
       <h3>Files</h3>
       <ul id="tree"></ul>
@@ -46,14 +44,10 @@
   <div class="gutter" data-resize="sidebar" id="sidebar-gutter"></div>
 
   <section id="centre">
-    <div id="centre-tabs" role="tablist" aria-label="Centre">
-      <button id="tab-log" type="button" role="tab" aria-selected="true">Work log</button>
-      <button id="tab-files" type="button" role="tab" aria-selected="false">Files</button>
-      <span class="spacer"></span>
-    </div>
+    <!-- host:centre-top -->
     <div id="centre-body">
-    <section id="run-pane" aria-label="The agent's run on this node"></section>
-  <section id="editor-pane" hidden>
+    <!-- host:centre-pane -->
+  <section id="editor-pane">
     <div id="editor-head">
       <div id="tabs"></div>
       <button id="btn-forward" class="ghost" data-icon="arrow" title="Show this line in the PDF (⌘J). Double-click (or Ctrl-click) the PDF to jump back to the source. ⌘F search · Ctrl-Space complete">PDF</button>
@@ -69,7 +63,7 @@
   </section>
   <div class="gutter" data-resize="pdf"></div>
 
-  <section id="pdf-pane" hidden>
+  <section id="pdf-pane">
     <div id="pdf-toolbar">
       <div id="compile-box" class="split-btn">
         <button id="btn-compile" class="primary" data-icon="play" title="Save all and compile (⌘↵)"><span id="compile-label">Compile</span></button>
@@ -109,14 +103,11 @@
     </div>
     <div id="chat-log"></div>
     <div id="chat-foot">
-      <section id="review-card" class="popover" aria-label="Review" hidden></section>
-      <div id="plus-menu" class="popover menu" role="menu" hidden></div>
+      <!-- host:chat-foot -->
       <div id="slash-menu" role="listbox" hidden></div>
       <textarea id="chat-input" rows="2" placeholder="Ask the agent about this node (read-only)…" title="A read-only question; the agent is driven from its run above · ↵ send, ⇧↵ newline"></textarea>
       <div class="chat-actions">
-        <button id="chat-plus" class="plus" type="button" aria-label="Actions and review" aria-haspopup="menu" aria-expanded="false" title="Ask the agent to…, or review a snapshot">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6v12M6 12h12"/></svg>
-        </button>
+        <!-- host:chat-actions -->
         <span id="chat-scope"></span>
         <span id="chat-status" class="status"></span>
         <button id="chat-send" class="primary">Send</button>
@@ -157,8 +148,9 @@
 <script src="static/pdfview.js"></script>
 <script src="static/app.js"></script>
 <script src="static/vendor/katex.min.js"></script>
-<!-- A host serving this page for a proof map node (proof-web) appends its own scripts here: the node panel
-     (#node-panel), the run pane (#run-pane), the agent panel's "+" menu (#plus-menu), the status glyphs and the
-     maths renderer. On its own, the studio leaves those containers empty. -->
+<!-- The studio alone: editor, PDF, build and the agent panel. A host serving this page for a proof map node (proof-web)
+     fills the host:* slots above with its own markup (a node section in the sidebar, the centre's Work log tab bar and
+     run pane, the review card and the "+" menu by the message box, a link back to its map), adds its stylesheet at
+     host:head and appends its scripts here. -->
 </body>
 </html>

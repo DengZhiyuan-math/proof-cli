@@ -430,14 +430,6 @@ pre.panel-view { font: 12px/1.5 var(--mono); white-space: pre-wrap; color: var(-
   #toolbar .hint, .toggle { display: none; }
 }
 
-/* the node panel (#70): the node, its three state axes, its dependencies, the agent-reachable actions */
-#node-section { max-height: 55%; overflow: auto; }
-#node-panel { padding: 0 8px 10px; font-size: 12.5px; }
-#node-panel .node-statement { font-family: var(--serif); font-size: 14.5px; line-height: 1.5; white-space: pre-wrap; margin: 4px 0 8px; padding: 10px 12px; background: var(--panel2); border-radius: 10px; box-shadow: var(--shadow-card); }
-#node-panel .node-assumption { color: var(--text2); font-family: var(--serif); margin: 2px 4px; }
-#node-panel .node-axes { display: flex; flex-wrap: wrap; gap: 5px; margin: 8px 0; }
-#node-panel .node-axes span { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 9px 0 4px; border-radius: 11px; font-size: 11.5px; font-weight: 600; color: var(--c-text); background: color-mix(in srgb, var(--c) 13%, transparent); }
-#node-panel .node-axes span.state-open, #node-panel .node-axes span.state-blocked { background: var(--fill); font-weight: 500; }
 /* the proof map's state icons and colours (the frontier's Ready in the map's blue, issue #157) */
 .state-ready { --c: var(--accent); --c-text: var(--accent); }
 .state-claimed { --c: var(--indigo); --c-text: var(--indigo); }
@@ -460,28 +452,9 @@ pre.panel-view { font: 12px/1.5 var(--mono); white-space: pre-wrap; color: var(-
 .status-icon.attention .disc { fill: var(--yellow); }
 .status-icon.attention .glyph { stroke: #1d1d1f; stroke-width: 1.9; }
 .status-icon.attention .glyph-fill { fill: #1d1d1f; }
-#node-panel h4 { margin: 12px 0 5px; font-size: 11px; font-weight: 600; color: var(--muted); }
-#node-panel .node-deps { margin: 0; padding: 4px 10px; list-style: none; font-size: 12px; color: var(--text2); background: var(--panel2); border-radius: 10px; box-shadow: var(--shadow-card); }
-#node-panel .node-deps li { padding: 5px 0; border-bottom: .5px solid var(--border2); }
-#node-panel .node-deps li:last-child { border-bottom: 0; }
-#node-panel .node-deps a { font-family: var(--mono); }
-#node-panel textarea, #node-panel input:not([type=checkbox]), #node-panel select { width: 100%; box-sizing: border-box; font: inherit; font-size: 12.5px; }
-#node-panel .node-note { font-size: 12px; color: var(--ok); }
-#node-panel .node-note:empty { display: none; }
-#node-panel .node-note.bad { color: var(--err); }
-#node-panel .node-hint { color: var(--muted); font-size: 12px; }
-#node-panel .node-links { font-size: 12px; }
 
 /* a Review snapshot's read-only tabs (#71) */
 .tab.readonly .name { font-style: italic; }
-/* the "+" button and what it opens: popovers rising from the message box */
-.chat-actions .plus {
-  position: relative; width: 28px; height: 28px; padding: 0; border-radius: 50%; border: 0; box-shadow: none;
-  background: var(--fill); color: var(--text2);
-}
-.chat-actions .plus:hover, .chat-actions .plus[aria-expanded="true"] { background: var(--fill2); color: var(--text); }
-.chat-actions .plus svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
-.chat-actions .plus.has-review::after { content: ""; position: absolute; top: 0; right: 0; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); box-shadow: 0 0 0 2px var(--panel); }
 /* the edit scope, as a small grey icon: a folder = any file in the project, a page = only the
    @-mentioned files, a lock = read-only (Ask); hover for the words. Colour stays for the review dot. */
 .chat-actions #chat-scope { flex: none; display: inline-flex; padding: 3px; color: var(--muted); cursor: help; }
@@ -491,88 +464,9 @@ pre.panel-view { font: 12px/1.5 var(--mono); white-space: pre-wrap; color: var(-
   background: var(--toolbar); backdrop-filter: saturate(180%) blur(24px); -webkit-backdrop-filter: saturate(180%) blur(24px);
   border-radius: 12px; box-shadow: var(--shadow-pop);
 }
-.popover.menu { right: auto; width: 250px; padding: 5px; }
-.menu-head { font-size: 11px; font-weight: 600; color: var(--muted); padding: 6px 9px 3px; }
-.menu-sep { border: 0; border-top: .5px solid var(--border); margin: 5px 4px; }
-.menu-item {
-  display: flex; width: 100%; height: 28px; justify-content: flex-start; padding: 0 9px; border: 0; border-radius: 6px;
-  background: transparent; box-shadow: none; font-weight: 400;
-}
-.menu-item:hover, .menu-item:focus-visible { background: var(--accent); color: #fff; box-shadow: none; }
-.menu-item.decide { font-weight: 500; }
-.menu-item.decide::before { content: ""; width: 7px; height: 7px; margin-right: 8px; border-radius: 50%; background: var(--warn); }
 
-/* the review sheet: title and Done, the key ideas, a link to the frozen files, one choice, one rationale, Record */
-#review-card { padding: 12px; max-height: 70vh; overflow: auto; }
-#review-card .node-review { display: flex; flex-direction: column; gap: 10px; }
-#review-card .review-head { display: flex; align-items: center; gap: 8px; }
-#review-card .review-head h4 { margin: 0; font-size: 13px; font-weight: 600; }
-#review-card .review-done { margin-left: auto; height: 24px; padding: 0 10px; border: 0; box-shadow: none; background: transparent; color: var(--accent); }
-#review-card .node-hint { margin: 0; color: var(--muted); font-size: 11.5px; line-height: 1.4; }
-#review-card .review-choices { display: flex; flex-direction: column; border-radius: 9px; background: var(--fill); overflow: hidden; }
-#review-card .review-choice {
-  height: 32px; justify-content: flex-start; gap: 9px; padding: 0 10px; border: 0; border-radius: 0; box-shadow: none; background: transparent; font-weight: 400;
-}
-#review-card .review-choice + .review-choice { border-top: .5px solid var(--border2); }
-#review-card .review-choice::before { content: ""; width: 14px; height: 14px; flex: none; border-radius: 50%; border: 1.5px solid var(--border-hi); box-sizing: border-box; }
-#review-card .review-choice:hover { background: var(--fill); }
-#review-card .review-choice.on { font-weight: 500; }
-#review-card .review-choice.on::before { border: 4.5px solid var(--accent); background: #fff; }
-#review-card .review-send { display: flex; gap: 8px; }
-#review-card .review-why { flex: 1; min-width: 0; font: 12.5px/1.4 var(--font); }
-#review-card .node-note { margin: 8px 0 0; font-size: 12px; color: var(--ok); }
-#review-card .node-note:empty { display: none; }
-#review-card .node-note.bad { color: var(--err); }
-/* the review reads the snapshot's key ideas (ADR-0013); its frozen LaTeX and PDF are on the node's page */
-#review-card .review-snap { margin: 0; font-family: var(--mono); font-size: 11px; color: var(--muted); cursor: help; }
-#review-card .key-ideas { border-left: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); padding: 2px 0 2px 10px; }
-#review-card .key-ideas h5 { margin: 8px 0 2px; font-size: 11px; font-weight: 600; color: var(--muted); }
-#review-card .key-ideas h5:first-child { margin-top: 0; }
-#review-card .key-ideas .key-idea { margin: 0; font-family: var(--serif); font-size: 14px; line-height: 1.5; white-space: pre-wrap; color: var(--text); }
-#review-card .key-ideas .key-idea.difficulties { color: var(--warn); }
-#review-card .key-ideas .drafted { margin-top: 6px; }
-#review-card .node-note.no-key-ideas { color: var(--warn); margin: 0; }
-#review-card .node-review-links { margin: 0; font-size: 12px; }
 
 /* ---------- the centre: the agent's run and the work log (spec #145, decided in #144 and #142) */
 /* The centre column: its tab bar (Work log · Files, and Run or Compile) stays whatever is shown below it. */
 #centre { flex: 1; min-width: 200px; display: flex; flex-direction: column; background: var(--bg); position: relative; }
 #centre-body { flex: 1; min-height: 0; display: flex; }
-#centre-tabs { display: flex; gap: 4px; align-items: center; padding: 0 8px; height: var(--bar-h); background: var(--panel); border-bottom: .5px solid var(--border); flex: none; }
-#centre-tabs button { height: 26px; padding: 0 12px; border: 0; background: transparent; box-shadow: none; border-radius: 7px; color: var(--text2); font-weight: 500; }
-#centre-tabs button[aria-selected="true"] { background: var(--panel2); color: var(--text); box-shadow: 0 .5px 1.5px rgba(0, 0, 0, .14), 0 0 0 .5px var(--border2); }
-#run-pane { flex: 1; overflow: auto; padding: 14px 18px 60px; display: grid; gap: 12px; align-content: start; max-width: 880px; width: 100%; margin: 0 auto; }
-.run-card { display: grid; gap: 10px; padding: 12px 14px; border-radius: 12px; background: var(--panel2); box-shadow: var(--shadow-card); border-left: 3px solid var(--accent); }
-.run-line { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; font-size: 13px; }
-.run-status { font-weight: 700; text-transform: capitalize; }
-.run-status.running, .run-status.starting { color: var(--accent); } .run-status.paused, .run-status.pausing { color: var(--warn); }
-.run-status.done { color: var(--ok); } .run-status.stuck, .run-status.budget, .run-status.release-failed { color: var(--err); } .run-status.idle, .run-status.released { color: var(--muted); }
-.run-status.needs-human { color: var(--warn); } .run-decision { margin: 0; font-size: 13px; font-weight: 600; color: var(--warn); }
-.run-where { font-weight: 600; } .run-meta, .run-reason { color: var(--muted); font-size: 12px; } .run-reason::before { content: "— "; }
-.run-hint { margin: 0; color: var(--muted); font-size: 12px; }
-.run-plan { margin: 0; padding-left: 22px; display: grid; gap: 3px; font-size: 13px; }
-.run-plan li.done { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--faint); }
-.run-plan li.started { font-weight: 600; } .run-plan li.stuck { color: var(--err); font-weight: 600; }
-.plan-mark { margin-left: 6px; font-size: 11px; font-weight: 600; color: var(--muted); }  /* the step's state in words (story 36) */
-.run-plan li.done .plan-mark { text-decoration: none; display: inline-block; }
-.run-controls { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-.run-controls .run-redirect { flex: 1; min-width: 180px; }
-.run-controls button.danger { color: var(--err); }
-.run-note { margin: 0; font-size: 12px; color: var(--muted); } .run-note.bad { color: var(--err); }
-.run-head { margin: 4px 2px 0; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
-.work-log { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
-.work-log li { display: grid; grid-template-columns: 44px 84px 1fr; gap: 10px; align-items: baseline; padding: 6px 10px; border-radius: 8px; font-size: 12.5px; background: var(--panel2); box-shadow: var(--shadow-card); }
-.work-log li.log-empty { display: block; color: var(--muted); box-shadow: none; background: transparent; }
-.log-time { font-family: var(--mono); font-size: 11px; color: var(--muted); }
-.log-role { font-weight: 600; color: var(--text2); }  /* the role is a word, never a colour: the four system colours keep their one job each */
-.log-body { color: var(--text); word-break: break-word; }
-.work-log li.log-step .log-body, .work-log li.log-plan .log-body { color: var(--text2); }
-.work-log li.log-review-requested { border-left: 3px solid var(--warn); }
-.log-turn { font-size: 12.5px; }  /* a turn's conversation, folded inside its work-log entry, under its step */
-.log-turn summary { cursor: pointer; color: var(--text2); font-weight: 500; }
-.turn-body { display: grid; gap: 6px; padding: 6px 0 2px; }
-.turn-prompt, .turn-files { margin: 0; color: var(--muted); font-size: 12px; }
-.turn-transcript { margin: 0; max-height: 240px; overflow: auto; font: 11.5px/1.5 var(--mono); color: var(--text2); white-space: pre-wrap; }
-.turn-transcript:empty { display: none; }
-#centre-tabs .spacer { flex: 1; }
-#centre-tabs #compile-box { margin-right: 4px; }
