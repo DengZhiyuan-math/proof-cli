@@ -66,11 +66,15 @@ class ProofMapNodeKind(str, Enum):
 
 
 class AgentRole(str, Enum):
-    """The three roles of a Proof agent's run (spec #145, decided in #144): who takes a turn on a node."""
+    """The roles of a Proof agent's run: who takes a turn on a node. Prover, Typesetter and Numerics
+    (spec #145, decided in #144); the Verifier, who reads the proof against the Prover and records a
+    verdict, and the Decomposer, who proposes a Theorem's split for the researcher (ADR-0019)."""
 
     prover = "prover"
     typesetter = "typesetter"
     numerics = "numerics"
+    verifier = "verifier"
+    decomposer = "decomposer"
 
 
 AGENT_ROLES = tuple(role.value for role in AgentRole)
