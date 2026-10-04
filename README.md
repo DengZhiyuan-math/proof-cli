@@ -10,13 +10,15 @@ The project is designed to support rigorous research workflows without replacing
 
 ## Install for development
 
-The repository holds four packages (ADR-0018): **proof-cli**, the core and the `proof` CLI, at the root; and under `packages/`, **proof-agents** (the Proof agent's roles and its run), **latex-agent** (the LaTeX studio taken from prism-local: editor, build, PDF, agent panel) and **proof-web** (the Home, the proof map page and each node's page, which serves the other two). `proof` works with the core alone; `proof home` and `proof map open` need proof-web, and say so until it is installed.
+proof-cli is one of four packages (ADR-0018). This repository holds **proof-cli**, the core and the `proof` CLI, and under `packages/`, **latex-agent**, the LaTeX studio taken from prism-local (editor, build, PDF, agent panel). The other two have repositories of their own in the zeqome organisation: [**proof-agents**](https://github.com/zeqome/proof-agents), the Proof agent's roles and its run, and [**proof-web**](https://github.com/zeqome/proof-web), the Home, the proof map page and each node's page, which serves the other three. `proof` works with the core alone; `proof home` and `proof map open` need proof-web, and say so until it is installed.
 
 ```bash
-python -m pip install -e ".[dev]"                                                         # proof-cli
-python -m pip install -e packages/proof-agents -e packages/latex-agent -e packages/proof-web   # the web app and what it serves
-pytest                                                                                     # every package's tests
+python -m pip install -e ".[dev]" -e packages/latex-agent                           # this repository
+python -m pip install "git+https://github.com/zeqome/proof-agents.git" "git+https://github.com/zeqome/proof-web.git"
+pytest                                                                               # the core's and latex-agent's tests
 ```
+
+For development, check the two out beside this folder and `pip install -e` them instead.
 
 ## Command-line entry point
 
