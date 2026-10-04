@@ -121,6 +121,7 @@ from .vault import (
     snapshots_on_disk,
     vault_dir,
     working_entry_path,
+    working_inputs_digest,
     working_proof_path,
     write_snapshot_folder,
     write_working_computation,
@@ -382,6 +383,8 @@ def create_node(
 
 # a step's status; `needs-human` names, in its note, a decision only the researcher can make (the run stops for it)
 PROGRESS_STATUSES = ("started", "done", "stuck", "needs-human")
+# a Verifier's verdict on the working proof as it stands (ADR-0019 point 2); the objections carry the nuance
+VERDICT_OUTCOMES = ("passed", "failed")
 PROGRESS_EVENT = "agent_progress"
 TURN_EVENT = "agent_turn"
 # a turn's raw conversation, kept with the project's state (never the node folder, which a snapshot freezes)
@@ -400,15 +403,41 @@ def record_progress(
     status: str | None = None,
     note: str = "",
     handoff: str | None = None,
+    verdict: str | None = None,
+    attempt: str | None = None,
+    method: str | None = None,
+    failed_on: str | None = None,
 ) -> dict:
-    """Report a plan (the steps the run means to take), one step's status, or a handoff to another role. Returns the log entry."""
-    require_node(store, node_id)
+    """Report a plan (the steps the run means to take), one step's status, a handoff to another role, the
+    Verifier's verdict on the working proof, or an attempt the role abandoned (ADR-0019). Returns the log entry.
+
+    A verdict is `passed` or `failed` with the objections as its note, and carries the inputs digest of the node
+    folder as it stands — what a Review snapshot's manifest would hash — so a later edit makes it stale by
+    construction; only the Verifier records one. An attempt is what the role tried to establish, how, and what it
+    failed on; any role records one. Both are insert-only events like the rest of the work log."""
+    node = require_node(store, node_id)
     if not role:
-        raise ProofMapError("ROLE_REQUIRED", "say which role reports: prover, typesetter or numerics (an agent's runtime sets PROOF_AGENT_ROLE)")
+        raise ProofMapError("ROLE_REQUIRED", f"say which role reports: {', '.join(AGENT_ROLES)} (an agent's runtime sets PROOF_AGENT_ROLE)")
     if role not in AGENT_ROLES:
         raise ProofMapError("INVALID_ROLE", f"'{role}' is not a Proof agent role; expected one of: {', '.join(AGENT_ROLES)}")
     steps = [str(item).strip() for item in (plan or []) if str(item).strip()]
-    if handoff is not None:
+    if verdict is not None:
+        if role != "verifier":
+            raise ProofMapError("VERDICT_ROLE_REQUIRED", f"only the verifier records a verdict; {role} reports steps, attempts and handoffs")
+        if verdict not in VERDICT_OUTCOMES:
+            raise ProofMapError("INVALID_VERDICT", f"'{verdict}' is not a verdict; expected one of: {', '.join(VERDICT_OUTCOMES)}")
+        if verdict == "failed" and not note.strip():
+            raise ProofMapError("OBJECTIONS_REQUIRED", "a failed verdict names its objections: --note \"1. <the step or citation it attacks> …\"")
+        payload = {"kind": "verdict", "role": role, "by": by, "outcome": verdict, "note": note.strip(), "inputs_sha256": _working_inputs_digest_or_none(store, node)}
+        message = f"{role} on {node_id}: verdict {verdict}" + (f" — {note.strip()}" if note.strip() else "")
+    elif attempt is not None or failed_on is not None:
+        goal = (attempt or "").strip()
+        obstruction = (failed_on or "").strip()
+        if not goal or not obstruction:
+            raise ProofMapError("ATTEMPT_INCOMPLETE", "an attempt is what was tried and what it failed on: --attempt \"<goal>\" --failed-on \"<the objection or obstruction>\"")
+        payload = {"kind": "attempt", "role": role, "by": by, "goal": goal, "method": (method or "").strip(), "failed_on": obstruction}
+        message = f"{role} on {node_id}: attempt at {goal} failed on {obstruction}"
+    elif handoff is not None:
         if handoff not in AGENT_ROLES:
             raise ProofMapError("INVALID_ROLE", f"'{handoff}' is not a Proof agent role to hand off to; expected one of: {', '.join(AGENT_ROLES)}")
         payload = {"kind": "handoff", "role": role, "by": by, "to": handoff, "note": note.strip()}
@@ -428,10 +457,49 @@ def record_progress(
         payload = {"kind": "step", "role": role, "by": by, "step": int(step), "status": status, "note": note.strip()}
         message = f"{role} on {node_id}: step {step} {status}" + (f" — {note.strip()}" if note.strip() else "")
     else:
-        raise ProofMapError("PROGRESS_EMPTY", "report a plan (--plan, repeatable), a step (--step N --status …) or a handoff (--handoff <role>)")
+        raise ProofMapError("PROGRESS_EMPTY", "report a plan (--plan, repeatable), a step (--step N --status …), a handoff (--handoff <role>), a verdict (--verdict passed|failed) or an attempt (--attempt … --failed-on …)")
     with store.transaction() as conn:
         append_event(store, PROGRESS_EVENT, message, entity_id=node_id, payload=payload, conn=conn)
     return {**payload, "node_id": node_id, "at": utc_now().isoformat()}
+
+
+def _working_inputs_digest_or_none(store: ProjectStore, node: ProofMapNode) -> str | None:
+    """The inputs digest a verdict is about (ADR-0019 point 2), or None when the folder can't be read or holds a
+    link where a snapshot would read: the verdict is still recorded — it is the Verifier's reading, not a snapshot —
+    and a verdict without a hash matches no snapshot, so it opens no gate."""
+    try:
+        return working_inputs_digest(store.root, node.id, node.medium)
+    except (OSError, NodeFolderLinks):
+        return None
+
+
+def _progress_entries(store: ProjectStore, node_id: str, kind: str) -> list[dict]:
+    """The node's `agent_progress` events of one kind, oldest first, each with its time."""
+    require_node(store, node_id)
+    return [
+        {"at": event.created_at.isoformat(), **(event.payload or {})}
+        for event in list_events(store)
+        if event.kind == PROGRESS_EVENT and event.entity_id == node_id and (event.payload or {}).get("kind") == kind
+    ]
+
+
+def verdicts(store: ProjectStore, node_id: str) -> list[dict]:
+    """The Verifier's verdicts on the node, newest last (ADR-0019 point 2): each its outcome, its objections (`note`),
+    the role and agent that made it, and the inputs digest it was about (`inputs_sha256`, None if unreadable then)."""
+    return _progress_entries(store, node_id, "verdict")
+
+
+def latest_verdict(store: ProjectStore, node_id: str) -> dict | None:
+    """The newest verdict on the node, or None: what the run compares with the working inputs' digest now to know
+    whether the Prover may request review (ADR-0019 point 3). A verdict whose hash is not the folder's is stale."""
+    found = verdicts(store, node_id)
+    return found[-1] if found else None
+
+
+def attempts(store: ProjectStore, node_id: str) -> list[dict]:
+    """What the roles tried on the node and abandoned, oldest first (ADR-0019 point 7): each its goal, its method
+    and what it failed on. The run briefs its next turn from these, newest first."""
+    return _progress_entries(store, node_id, "attempt")
 
 
 def record_agent_turn(
@@ -633,6 +701,24 @@ def require_node(store: ProjectStore, node_id: str) -> ProofMapNode:
 @memoized_read
 def list_nodes(store: ProjectStore) -> list[ProofMapNode]:
     return [_as_counted(store, node) for node in list_proof_map_nodes(store)]
+
+
+def dependents(store: ProjectStore, node_id: str) -> list[ProofMapNode]:
+    """The nodes that rest on `node_id`, in the map's order: what a briefing shares with, and what a Coordinator
+    redirects when the node is Accepted (ADR-0019 points 14 and 19)."""
+    require_node(store, node_id)
+    return [node for node in list_nodes(store) if node_id in node.dependencies]
+
+
+def siblings(store: ProjectStore, node_id: str) -> list[ProofMapNode]:
+    """The other dependencies of each node that rests on `node_id` — the children beside it under the same
+    parents — each once, in the map's order, never the node itself (ADR-0019 point 14). Two Claims under one
+    Lemma with no edge between them are often proved by the same technique; this is how a briefing finds them."""
+    require_node(store, node_id)
+    wanted: set[str] = set()
+    for parent in dependents(store, node_id):
+        wanted.update(dependency for dependency in parent.dependencies if dependency != node_id)
+    return [node for node in list_nodes(store) if node.id in wanted]
 
 
 def split_node(

@@ -115,7 +115,7 @@ from .commands import (
     cmd_theorem_show,
     get_store,
 )
-from .domain import ProofMapNodeKind, is_computation
+from .domain import AGENT_ROLES, ProofMapNodeKind, is_computation
 from .envelope import dump_envelope, error_envelope, success_envelope
 from .contract import ProofGroup
 from .theorems import LEGACY_TRUST_NOTICE
@@ -197,6 +197,7 @@ from .rendering import (
     render_trust_rule,
     render_trust_rule_list,
     render_work_log,
+    render_work_log_entry,
 )
 from .review import render_verification_output
 
@@ -938,6 +939,9 @@ def node_split(
         typer.echo(render_proof_map_node_list(children))
 
 
+_ROLES_HELP = ", ".join(AGENT_ROLES[:-1]) + f" or {AGENT_ROLES[-1]}"  # the roles, as the help spells them (ADR-0019: never by hand)
+
+
 @node_app.command("progress")
 def node_progress(
     node_id: str,
@@ -945,17 +949,21 @@ def node_progress(
     step: int = typer.Option(None, "--step", help="The step being reported, counting from 1"),
     status: str = typer.Option("", "--status", help="With --step: started, done, stuck, or needs-human (a decision only the researcher can make, named in --note)"),
     note: str = typer.Option("", "--note", help="A line about the step: what it found, why it is stuck, what the next role should do"),
-    handoff: str = typer.Option("", "--handoff", help="Hand the work to this role (prover, typesetter or numerics) and end the turn"),
-    role: str = typer.Option("", "--role", help="prover, typesetter or numerics (default: PROOF_AGENT_ROLE, set in the agent's runtime)"),
+    handoff: str = typer.Option("", "--handoff", help=f"Hand the work to this role ({_ROLES_HELP}) and end the turn"),
+    verdict: str = typer.Option("", "--verdict", help="The Verifier's verdict on the working proof as it stands: passed or failed, with the objections in --note (ADR-0019)"),
+    attempt: str = typer.Option("", "--attempt", help="Close an abandoned line: what it tried to establish; goes with --failed-on (ADR-0019)"),
+    method: str = typer.Option("", "--method", help="With --attempt: the approach"),
+    failed_on: str = typer.Option("", "--failed-on", help="With --attempt: the objection or obstruction it failed on"),
+    role: str = typer.Option("", "--role", help=f"{_ROLES_HELP} (default: PROOF_AGENT_ROLE, set in the agent's runtime)"),
     by: str = typer.Option("", "--by", help="Who reports; empty means PROOF_AGENT_NAME from the agent's runtime, else human"),
     root: str = ROOT_OPTION,
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
-    """A Proof agent's report of its plan or a step on this node — the studio's work log (spec #145).
-    Without --plan or --step: the node's work log so far."""
+    """A Proof agent's report on this node — the studio's work log (spec #145): its plan, a step, a handoff,
+    the Verifier's verdict or an abandoned attempt (ADR-0019). Without any of them: the node's work log so far."""
     store = get_store(_root(root))
     try:
-        if not plan and step is None and not handoff:
+        if not plan and step is None and not handoff and not verdict and not attempt and not failed_on:
             log = work_log(store, node_id)
             if json_output:
                 typer.echo(dump_envelope(success_envelope("node.progress", log)))
@@ -965,6 +973,7 @@ def node_progress(
         entry = record_progress(
             store, node_id, role=role or os.environ.get("PROOF_AGENT_ROLE") or None, by=by or os.environ.get("PROOF_AGENT_NAME") or "human",
             plan=plan or None, step=step, status=status or None, note=note, handoff=handoff or None,
+            verdict=verdict or None, attempt=attempt or None, method=method or None, failed_on=failed_on or None,
         )
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.progress")
@@ -972,8 +981,7 @@ def node_progress(
     if json_output:
         typer.echo(dump_envelope(success_envelope("node.progress", entry)))
     else:
-        body = f"plan of {len(entry['plan'])} step(s)" if entry["kind"] == "plan" else f"handed off to {entry['to']}" if entry["kind"] == "handoff" else f"step {entry['step']} {entry['status']}"
-        typer.echo(f"{entry['role']} on {node_id}: {body}" + (f" — {entry['note']}" if entry.get("note") else ""))
+        typer.echo(render_work_log_entry(node_id, entry))
 
 
 @node_medium_app.command("set")
