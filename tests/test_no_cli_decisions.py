@@ -53,7 +53,7 @@ from _proofs import submit_proof
 runner = CliRunner()
 
 # commands that don't return: a server, a browser
-SKIPPED = {("review", "serve"), ("review", "open"), ("map", "serve"), ("map", "open")}
+SKIPPED = {("review", "serve"), ("review", "open"), ("map", "serve"), ("map", "open"), ("home",)}
 
 
 def _submit(store, node_id, claimant="agent_a", session="s"):

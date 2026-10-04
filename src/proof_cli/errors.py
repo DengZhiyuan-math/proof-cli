@@ -14,6 +14,7 @@ ERROR_CODES: dict[str, str] = {
     "INVALID_INPUT": "a legacy command (`theorem add`, `reference import`) refused its input under --json; the message says why",
     "PROJECT_NOT_FOUND": "a read was pointed at a folder with no proof project; nothing was created",
     "HUMAN_REVIEW_REQUIRED": "a Human Review decision, made only by the researcher on the proof map page; the error carries its URL",
+    "WEB_APP_NOT_INSTALLED": "`proof home`, `proof map open` or `proof map serve` was run without the proof-web package, which serves the web app (ADR-0018)",
     # -- nodes -------------------------------------------------------------------------
     "NODE_NOT_FOUND": "no proof map node has this id",
     "NODE_ALREADY_EXISTS": "a proof map node with this id already exists",
@@ -133,6 +134,16 @@ ERROR_CODES: dict[str, str] = {
     "INVALID_REQUEST": "the page's request is missing what the action needs (a node id, which snapshot, …)",
     "NOT_FOUND": "no such page route or node action, or (a legacy command under --json) no such contract, reference or target",
     "NOT_THIS_NODE": "the snapshot, Candidate proof or review named belongs to another node",
+    # -- the Home (ADR-0017): the project list in front of the map ------------------------------
+    "PATH_REQUIRED": "the Home's request names no folder",
+    "PROJECT_UNKNOWN": "the folder isn't in the project list; add it first",
+    "FOLDER_NOT_FOUND": "no folder at that path",
+    "NOT_A_PROJECT": "the folder holds no proof project (no .proof/project.sqlite3); create one there instead",
+    "ALREADY_A_PROJECT": "the folder already holds a proof project; add it instead of creating one",
+    "BAD_PROJECT_ID": "a project id must be a non-empty string",
+    "CANNOT_CREATE": "the project folder couldn't be made or written",
+    "PORT_BUSY": "the project's own port is taken by something that isn't its page",
+    "PROJECT_REPLACED": "the page, studio or run was opened for a project that is no longer in its folder (deleted and started again there); nothing of the new project is read or written through it",
     # -- the Proof agent's work log (ADR-0016, spec #145) --
     "ROLE_REQUIRED": "a progress report names the role that makes it: PROOF_AGENT_ROLE in the agent's runtime, or --role",
     "INVALID_ROLE": "the Proof agent role is not prover, typesetter or numerics",

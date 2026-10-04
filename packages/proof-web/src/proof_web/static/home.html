@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Proof projects</title>
+  <link rel="stylesheet" href="/static/shared/vendor/katex.min.css">
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/shared/vendor/katex.min.js" defer></script>
+  <script src="/static/shared/mathtext.js" defer></script>
+  <script src="/static/home.js" defer></script>
+</head>
+<body class="home-body">
+  <header class="toolbar">
+    <div class="title">
+      <a href="/" id="project"><b>Proof projects</b></a>
+      <span id="map-caption"></span>
+    </div>
+    <div class="spacer"></div>
+    <button id="add-project" type="button" title="List a folder that already holds a proof project">Add existing…</button>
+    <button id="new-project" type="button" class="primary" title="Start a proof project in a folder, as `proof init` does">New project…</button>
+  </header>
+  <main>
+    <div id="message" role="status"></div>
+    <section class="page home-page">
+      <div id="projects" class="projects" aria-label="Your projects"></div>
+      <div id="empty" class="home-empty card pb" hidden>
+        <h2>No projects yet</h2>
+        <p class="hint">A proof project is a folder with a proof map in it: its theorem, the lemmas and claims it rests on, each with its own LaTeX proof. Start one here, or list a folder you already have.</p>
+        <p class="hint">From a terminal, <code>proof init</code> in a folder does the same and lists it here; <code>proof map open</code> opens a project's page.</p>
+        <div class="row-end"><button id="empty-add" type="button">Add existing…</button><button id="empty-new" type="button" class="primary">New project…</button></div>
+      </div>
+    </section>
+  </main>
+
+  <section id="add-sheet" class="overlay" hidden>
+    <form class="sheet" id="add-form">
+      <h2>Add an existing project</h2>
+      <p class="hint">The folder must already hold a proof project (a <code>.proof/project.sqlite3</code>). Nothing in it is changed.</p>
+      <label>Folder <input id="add-path" type="text" placeholder="~/maths/bounded-sequences" autocomplete="off" spellcheck="false"></label>
+      <div class="sheet-foot">
+        <button type="button" class="cancel">Cancel</button>
+        <button type="submit" class="primary">Add</button>
+      </div>
+    </form>
+  </section>
+
+  <section id="new-sheet" class="overlay" hidden>
+    <form class="sheet" id="new-form">
+      <h2>New project</h2>
+      <p class="hint">Starts a proof project in the folder (made if it doesn't exist), exactly as <code>proof init</code> does, and opens it. Nodes are then created from the CLI with <code>proof node create</code>.</p>
+      <label>Folder <input id="new-path" type="text" placeholder="~/maths/new-project" autocomplete="off" spellcheck="false"></label>
+      <label>Project id <input id="new-id" type="text" placeholder="proj_alpha (default)" autocomplete="off" spellcheck="false"></label>
+      <div class="sheet-foot">
+        <button type="button" class="cancel">Cancel</button>
+        <button type="submit" class="primary">Create and open</button>
+      </div>
+    </form>
+  </section>
+
+  <section id="forget-sheet" class="overlay" hidden>
+    <div class="sheet">
+      <h2>Forget this project?</h2>
+      <p class="hint" id="forget-what"></p>
+      <p class="hint">It leaves this list only. The folder, its proofs and its git history stay exactly as they are; add it again any time.</p>
+      <div class="sheet-foot">
+        <button type="button" class="cancel">Cancel</button>
+        <button type="button" id="forget-confirm" class="primary">Forget</button>
+      </div>
+    </div>
+  </section>
+</body>
+</html>

@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "proof-agents"
+version = "0.1.0"
+description = "The automated proving framework on a proof map node: the Proof agent's roles and the run that works a node as those roles in turn"
+requires-python = ">=3.11"
+dependencies = [
+  "mathematical-proof-cli",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.4"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

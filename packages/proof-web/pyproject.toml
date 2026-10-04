@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "proof-web"
+version = "0.1.0"
+description = "The proof map's local web app: the Home, each project's proof map page and each node's studio — where Human Review decisions are made"
+requires-python = ">=3.11"
+dependencies = [
+  "mathematical-proof-cli",
+  "proof-agents",
+  "latex-ai-agent",
+  "typer>=0.12",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.4"]
+
+# `proof home`, `proof map open` and `proof map serve` on the `proof` CLI (proof_cli.plugins)
+[project.entry-points."proof_cli.commands"]
+web = "proof_web.cli:register"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"proof_web" = ["static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

@@ -18,10 +18,10 @@ The CLI should help a researcher manage a proof map of nodes (theorems, lemmas, 
 
 ## Technology Stack
 
-- **Python 3.11+**, packaged with setuptools (`pyproject.toml`), source under `src/proof_cli/`
+- **Python 3.11+**, packaged with setuptools. Four packages in one repository (ADR-0018): the core `proof_cli` under `src/`, and under `packages/` the automated proving framework `proof_agents` (the Proof agent's roles and run), the LaTeX studio `latex_agent` (from prism-local; standard library only, needs a TeX distribution to compile) and the web app `proof_web` (Home, proof map page, node pages; adds `proof home` and `proof map …` to the CLI through the `proof_cli.commands` entry point). Dependencies point one way: proof_web → proof_agents, latex_agent, proof_cli; proof_agents → proof_cli; latex_agent → nothing in the repository.
 - **Typer** for the CLI (the `proof` entry point, rooted by `--root` or `$PROOF_ROOT`), **Rich** for terminal output, **Pydantic v2** for domain models
 - **SQLite** project state at `.proof/project.sqlite3`, collaboration state and memory included (the `side_documents` table; legacy `.proof/collaboration.json` and `.proof/memory.json` are migrated once and not read again)
-- **pytest** for tests (`tests/`)
+- **pytest** for tests: `tests/` for the core, `packages/<name>/tests/` for each package; one `pytest` at the root runs them all, and proof-web's tests borrow the core's test helpers from the checkout
 
 ## Workflow
 

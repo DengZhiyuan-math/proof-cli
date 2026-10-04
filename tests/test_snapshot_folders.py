@@ -224,17 +224,15 @@ def test_a_nodes_files_named_like_the_snapshots_own_are_frozen_without_colliding
 
 
 def test_a_broken_snapshot_still_shows_its_node_page_and_the_warning(tmp_path: Path):
-    from _review_client import DirectClient
+    ReviewApp = pytest.importorskip("proof_web.server").ReviewApp  # the page (proof-web), when it is installed
 
     store, folder = _node(tmp_path)
     _request(store)
     researcher(store).decide_acceptance("clm_1", "accept")
     (folder / "snapshots" / "v1" / "manifest.json").write_text("{ not json")
 
-    status, body = DirectClient(store).get("/api/node/clm_1")
+    view = ReviewApp(store).node("clm_1")
 
-    assert status == 200, body
-    view = body["data"]
     assert view["candidate_proof"]["unreadable"] is True and view["candidate_proof"]["sha256"] is None
     assert view["acceptance_state"] == "unverifiable"
     assert any(w["code"] == "DECISION_NO_LONGER_APPLIES" for w in view["warnings"])
@@ -309,23 +307,23 @@ def test_a_decision_line_naming_no_snapshot_hash_reads_unverifiable(tmp_path: Pa
 
 
 def test_the_page_offers_no_decision_on_an_unreadable_snapshot_and_says_why_one_is_refused(tmp_path: Path):
-    from _review_client import DirectClient
+    ReviewApp = pytest.importorskip("proof_web.server").ReviewApp  # the page (proof-web), when it is installed
 
     store, folder = _node(tmp_path)
     _request(store)
-    client = DirectClient(store)
-    offered = client.get("/api/node/clm_1")[1]["data"]
+    page = ReviewApp(store)
+    offered = page.node("clm_1")
     accept = next(d for d in offered["decisions"] if d["decision"] == "accept")
     shutil.rmtree(folder / "snapshots" / "v1")
 
-    view = client.get("/api/node/clm_1")[1]["data"]
+    view = page.node("clm_1")
     assert view["candidate_proof"]["unreadable"] is True
     assert not [d for d in view["decisions"] if d["kind"] == "acceptance"]
-    (pending,) = [item for item in client.get("/api/state")[1]["data"]["pending"] if item["node_id"] == "clm_1"]
+    (pending,) = [item for item in page.state()["pending"] if item["node_id"] == "clm_1"]
     assert pending["decisions"] == []
 
     # an Accept the page offered before the snapshot went is refused, with the reason
-    (result,) = client.post("/api/decide", {"decisions": [accept]})[1]["data"]["results"]
+    (result,) = page.decide({"decisions": [accept]})["results"]
     assert result["ok"] is False and result["error"]["code"] == "SNAPSHOT_UNREADABLE"
     assert not (folder / "reviews.jsonl").exists()
 
@@ -380,7 +378,7 @@ def test_an_old_single_file_snapshot_that_cant_be_read_is_refused_and_voids_its_
 
 @needs_permissions
 def test_a_folder_snapshot_file_that_cant_be_read_is_refused_and_its_page_still_shows(tmp_path: Path, unreadable):
-    from _review_client import DirectClient
+    ReviewApp = pytest.importorskip("proof_web.server").ReviewApp  # the page (proof-web), when it is installed
 
     store, folder = _node(tmp_path)
     _request(store)
@@ -388,9 +386,7 @@ def test_a_folder_snapshot_file_that_cant_be_read_is_refused_and_its_page_still_
     unreadable(folder / "snapshots" / "v1" / "node" / "body.tex")
 
     assert get_acceptance_state(store, "clm_1") == "unverifiable"
-    status, body = DirectClient(store).get("/api/node/clm_1")
-    assert status == 200, body
-    assert body["data"]["candidate_proof"]["sha256"] is None
+    assert ReviewApp(store).node("clm_1")["candidate_proof"]["sha256"] is None
 
 
 # -- #99: a lost snapshot is re-snapshotted from an unchanged working proof ----------------
