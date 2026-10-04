@@ -421,23 +421,28 @@ async function runProgram() {
   }
 }
 
-// The centre (spec #145, decided in #144): the agent's work log by default; the editor and the PDF — or the
-// program and out/ — behind the Files tab. #files opens on Files; the choice is remembered per node, and
-// applies while an agent is at work: with none, run.js opens the centre on Start (spec #145, story 42).
+// The centre. A host (proof-web, spec #145, decided in #144) puts a tab bar (#centre-tabs: Work log · Files) and its
+// own pane (#run-pane) in the page's host slots: the agent's work log shows by default, the editor and the PDF — or
+// the program and out/ — behind the Files tab; #files opens on Files, the choice is remembered per node, and the
+// host's run pane opens the centre on Start (story 42). On its own the studio has no tabs: the editor and the PDF are
+// the centre, and showCentre is a no-op the host's scripts may still call.
+const hostTabs = $("#centre-tabs");
 function showCentre(which, remember = true) {
-  const files = which === "files";
-  $("#run-pane").hidden = files;
+  const files = which === "files" || !hostTabs;
+  const pane = $("#run-pane"); if (pane) pane.hidden = files;
   $("#editor-pane").hidden = !files; $("#pdf-pane").hidden = !files;
   for (const g of document.querySelectorAll('.gutter[data-resize="pdf"]')) g.hidden = !files;
-  $("#tab-log").setAttribute("aria-selected", String(!files)); $("#tab-files").setAttribute("aria-selected", String(files));
-  if (remember) store.set("centre", which);
+  const log = $("#tab-log"), tab = $("#tab-files");
+  if (log) log.setAttribute("aria-selected", String(!files));
+  if (tab) tab.setAttribute("aria-selected", String(files));
+  if (remember && hostTabs) store.set("centre", which);
   if (files) cm.refresh();
 }
-$("#tab-log").onclick = () => showCentre("run");
-$("#tab-files").onclick = () => showCentre("files");
+if ($("#tab-log")) $("#tab-log").onclick = () => showCentre("run");
+if ($("#tab-files")) $("#tab-files").onclick = () => showCentre("files");
 showCentre(location.hash === "#files" ? "files" : store.get("centre", "run"));
-// the bar's primary action — Run or Compile, with its build menu — sits on the centre's tab bar, reachable from either view (#142)
-$("#centre-tabs").append($("#compile-box"));
+// the bar's primary action — Run or Compile, with its build menu — sits on the host's tab bar when there is one, reachable from either view (#142)
+if (hostTabs) hostTabs.append($("#compile-box"));
 
 async function loadConfig() {
   const r = await api("/api/config");
