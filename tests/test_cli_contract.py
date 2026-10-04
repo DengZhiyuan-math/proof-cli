@@ -229,10 +229,23 @@ def _scan_codes(source: str, where: str) -> tuple[dict[str, str], dict[str, str]
     return refusals, notices
 
 
+def _family_sources() -> list[Path]:
+    """The code the registry covers (ADR-0018): this repository's core and latex-agent, and the other two packages
+    of the family when they are installed beside it (proof-agents, proof-web); each raises codes of this registry."""
+    import importlib.util
+
+    folders = [SRC, SRC.parents[1] / "packages" / "latex-agent" / "src" / "latex_agent"]
+    for name in ("proof_agents", "proof_web"):
+        spec = importlib.util.find_spec(name)
+        if spec is not None and spec.origin:
+            folders.append(Path(spec.origin).parent)
+    return [folder for folder in folders if folder.is_dir()]
+
+
 def _codes() -> tuple[dict[str, str], dict[str, str]]:
     refusals: dict[str, str] = {}
     notices: dict[str, str] = {}
-    for path in SRC.rglob("*.py"):
+    for path in (path for folder in _family_sources() for path in folder.rglob("*.py")):
         found_refusals, found_notices = _scan_codes(path.read_text(), path.name)
         refusals.update(found_refusals)
         notices.update(found_notices)
@@ -272,10 +285,10 @@ told = errors.notice("PLANTED_I", "x", output_bytes=1)
     assert set(refusals) == {"PLANTED_A", "PLANTED_B", "PLANTED_C", "PLANTED_D", "PLANTED_E", "PLANTED_G", "PLANTED_H"}
     assert set(notices) == {"PLANTED_F", "PLANTED_I"}
     # the studio's own refusals are seen, and a notice code used as a refusal is not let through
-    studio = _scan_codes((SRC / "studio" / "server.py").read_text(), "server.py")[0]
+    studio = _scan_codes((SRC.parents[1] / "packages" / "latex-agent" / "src" / "latex_agent" / "server.py").read_text(), "server.py")[0]
     assert {"NOT_A_COMPUTATION", "INVALID_LINE", "OPEN_FAILED", "NOT_A_NODE_FILE", "STUDIO_CLOSED", "NO_SUCH_JOB"} <= set(studio)
     # the agent manager's answers carry registered codes too (PR #148)
-    agent = _scan_codes((SRC / "studio" / "agent.py").read_text(), "agent.py")[0]
+    agent = _scan_codes((SRC.parents[1] / "packages" / "latex-agent" / "src" / "latex_agent" / "agent.py").read_text(), "agent.py")[0]
     assert {"STUDIO_CLOSED", "AGENT_UNKNOWN_PROVIDER", "AGENT_UNAVAILABLE", "AGENT_INVALID_OPTION", "AGENT_BUSY", "TURN_CALLED_OFF"} <= set(agent)
     misused, _ = _scan_codes('{"error": "big", "code": "SNAPSHOT_LARGE_OUTPUT"}', "planted")
     assert "SNAPSHOT_LARGE_OUTPUT" in misused and "SNAPSHOT_LARGE_OUTPUT" not in errors.ERROR_CODES
@@ -284,6 +297,7 @@ told = errors.notice("PLANTED_I", "x", output_bytes=1)
 def test_the_agent_runs_refusals_are_registered_codes():
     """PR #148 seventh review: the run's answers are codes an agent or the page may branch on (ADR-0006)."""
     raised = _raised_codes()
+    pytest.importorskip("proof_agents")  # the run is proof-agents' (ADR-0018): its codes are seen when it is installed beside this checkout
     for code in ("RUN_ACTIVE", "RUN_SETTLING", "NO_RUN", "REDIRECT_EMPTY", "RUN_REFUSED", "RELEASE_FAILED", "AGENT_BUSY", "TURN_CALLED_OFF"):
         assert code in errors.ERROR_CODES, code
         assert code in raised or code == "RUN_REFUSED", code  # RUN_REFUSED is the fallback the map's route passes on

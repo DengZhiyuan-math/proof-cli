@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "latex-ai-agent"
+version = "0.1.0"
+description = "A LaTeX studio for one folder: editor, build, PDF with SyncTeX, and an agent panel on the Claude Code or Codex CLI (from prism-local)"
+requires-python = ">=3.11"
+# the standard library only; compiling needs a TeX distribution (or Tectonic) on the machine
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.4"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+# the page, the vendored CodeMirror, PDF.js and KaTeX (with its fonts), and the licences
+"latex_agent" = ["static/*", "static/vendor/*", "static/vendor/fonts/*", "LICENSE", "README.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

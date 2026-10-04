@@ -17,6 +17,7 @@ ERROR_CODES: dict[str, str] = {
     "REVIEW_PORT_IN_USE": "`map serve` couldn't bind the project's review port because it is taken, likely by the page already running (`proof map open`); `errno` names the cause",
     "REVIEW_PORT_NOT_PERMITTED": "`map serve` isn't permitted to bind a local port: a permission or sandbox restriction; `errno` names the cause",
     "REVIEW_PORT_UNAVAILABLE": "`map serve` couldn't bind the project's review port for another reason; the message carries the system's error and `errno` its code",
+    "WEB_APP_NOT_INSTALLED": "`proof home`, `proof map open` or `proof map serve` was run without the proof-web package, which serves the web app (ADR-0018)",
     # -- nodes -------------------------------------------------------------------------
     "NODE_NOT_FOUND": "no proof map node has this id",
     "NODE_ALREADY_EXISTS": "a proof map node with this id already exists",
@@ -160,6 +161,16 @@ ERROR_CODES: dict[str, str] = {
     "NO_SYNCTEX": "no SyncTeX data yet: build first",
     "NO_SYNCTEX_MATCH": "SyncTeX knows no place for that position",
     "EVIDENCE_SNAPSHOT_MISMATCH": "the snapshot hash an Evidence check names is not the snapshot's hash now; the message names the node's current snapshot",
+    # -- the Home (ADR-0017): the project list in front of the map ------------------------------
+    "PATH_REQUIRED": "the Home's request names no folder",
+    "PROJECT_UNKNOWN": "the folder isn't in the project list; add it first",
+    "FOLDER_NOT_FOUND": "no folder at that path",
+    "NOT_A_PROJECT": "the folder holds no proof project (no .proof/project.sqlite3); create one there instead",
+    "ALREADY_A_PROJECT": "the folder already holds a proof project; add it instead of creating one",
+    "BAD_PROJECT_ID": "a project id must be a non-empty string",
+    "CANNOT_CREATE": "the project folder couldn't be made or written",
+    "PORT_BUSY": "the project's own port is taken by something that isn't its page",
+    "PROJECT_REPLACED": "the page, studio or run was opened for a project that is no longer in its folder (deleted and started again there); nothing of the new project is read or written through it",
     # -- the Proof agent's work log (ADR-0016, spec #145) --
     "ROLE_REQUIRED": "a progress report names the role that makes it: PROOF_AGENT_ROLE in the agent's runtime, or --role",
     "INVALID_ROLE": "the Proof agent role is not prover, typesetter or numerics",

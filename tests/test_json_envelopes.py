@@ -174,7 +174,7 @@ def test_node_show_under_json_says_a_node_without_dependencies_has_none(tmp_path
 
 
 def test_node_show_under_json_matches_what_the_node_page_shows(tmp_path: Path):
-    from _review_client import DirectClient
+    ReviewApp = pytest.importorskip("proof_web.server").ReviewApp  # the page (proof-web), when it is installed
 
     store = ensure_project(tmp_path)
     _accepted(store, "lem")
@@ -182,7 +182,7 @@ def test_node_show_under_json_matches_what_the_node_page_shows(tmp_path: Path):
     submit_proof(store, "uses", claimant_id="agent_a", session_id="s", scoping_rationale="scoped", content="u")
 
     _, envelope = _json(tmp_path, "node", "show", "uses")
-    page = DirectClient(store).get("/api/node/uses")[1]["data"]
+    page = ReviewApp(store).node("uses")
 
     assert envelope["data"]["dependency_details"] == page["dependencies"]
 
