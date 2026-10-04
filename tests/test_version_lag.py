@@ -8,6 +8,8 @@ with `dependency-stale`, distinct from `dependency-challenged`.
 
 from pathlib import Path
 
+import pytest
+
 from _proofs import submit_proof
 from _researcher import researcher
 from proof_cli.proof_map import (
@@ -79,10 +81,10 @@ def test_a_pin_that_matches_the_accepted_version_does_not_lag(tmp_path: Path):
 
 
 def test_the_core_and_the_page_agree_on_the_lag(tmp_path: Path):
-    from _review_client import DirectClient
+    ReviewApp = pytest.importorskip("proof_web.server").ReviewApp  # the page (proof-web), when it is installed
 
     store = _lagging(tmp_path)
-    view = DirectClient(store).get("/api/node/M")[1]["data"]
+    view = ReviewApp(store).node("M")
     (dependency,) = view["dependencies"]
     assert dependency["remedy"] == "lightweight-re-review"
     assert view["integrity_state"] == "potentially-stale"

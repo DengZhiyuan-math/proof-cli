@@ -10,13 +10,19 @@ The project is designed to support rigorous research workflows without replacing
 
 ## Install for development
 
+proof-cli is one of four packages (ADR-0018). This repository holds **proof-cli**, the core and the `proof` CLI, and under `packages/`, **latex-agent**, the LaTeX studio taken from prism-local (editor, build, PDF, agent panel). The other two have repositories of their own in the zeqome organisation: [**proof-agents**](https://github.com/zeqome/proof-agents), the Proof agent's roles and its run, and [**proof-web**](https://github.com/zeqome/proof-web), the Home, the proof map page and each node's page, which serves the other three. `proof` works with the core alone; `proof home` and `proof map open` need proof-web, and say so until it is installed.
+
 ```bash
-python -m pip install -e ".[dev]"
+python -m pip install -e ".[dev]" -e packages/latex-agent                           # this repository
+python -m pip install "git+https://github.com/zeqome/proof-agents.git" "git+https://github.com/zeqome/proof-web.git"
+pytest                                                                               # the core's and latex-agent's tests
 ```
+
+For development, check the two out beside this folder and `pip install -e` them instead.
 
 ## Command-line entry point
 
-The researcher's entry is the proof map page (`proof map open`, below). `proof` is the agents' interface, with `--json` for one envelope per call:
+The researcher's entry is the web app: `proof home` opens the **Home**, the list of your proof projects, and a project opens in its **proof map page** (`proof map open` in a project's folder goes straight there; both below). `proof` is the agents' interface, with `--json` for one envelope per call:
 
 ```bash
 proof --help
@@ -65,9 +71,13 @@ A request without `key-ideas.md`, or with 核心思路 or 主要步骤 empty, is
 
 A snapshot, and an exchange export (`proof exchange export`), never freeze or carry secrets (`.env`, `.env.*`, `.envrc`, `.netrc`), hidden folders, or dotfiles other than a computation's allowlisted environment files (`.python-version`, `.tool-versions`, `.nvmrc`, `.node-version`, `.ruby-version`). Requesting review lists what it left out, by path only (ADR-0015). **Neither follows a symbolic link. This is a deliberate change: an export used to skip links silently.** An export now fails as a whole with `NODE_FOLDER_SYMLINK` if any node folder holds a link outside `scratch/`, `build/` and hidden folders, and the error names each link, dangling ones included. Replace each link with a copy of its target (`cp --remove-destination "$(readlink <link>)" <link>`), or move it into `scratch/`, then export again.
 
+## The Home
+
+`proof home` opens the Home (ADR-0017), the web app's first page: your proof projects, each a card read live from its own folder — its id, its theorem, how many nodes, how many on the frontier, how many await you, how many are accepted, the open fog, whether its page is running, when you last opened it. Opening a card starts that project's proof map page (on the project's own localhost port, as before) and takes you there; the page's sidebar links back to the Home. **Add existing…** lists a folder that already holds a project, **New project…** starts one exactly as `proof init` does, and **Forget** drops a project from the list without touching its folder. The list is `projects.json` in the proof-cli config directory (`$PROOF_CLI_CONFIG_HOME`, else `$XDG_CONFIG_HOME/proof-cli`, else `~/.config/proof-cli`); `proof init` and `proof map open` keep it up to date, and nothing scans your disk. `proof home --foreground` runs it in the terminal.
+
 ## The proof map page
 
-`proof map open` starts the project's local page, bound to 127.0.0.1, and opens it:
+`proof map open` (in a project's folder, or with `--root`) opens the project's local page, bound to 127.0.0.1 on the project's own port — through the Home, started if need be, so the page links back to it:
 - **The map** is a DAG of every node, with a tree view rooted at any node. Frontier nodes (open, unblocked, unclaimed) are outlined as *ready to claim*. Each node shows its acceptance, workflow and integrity state, and its assignee; hovering it shows its snapshot's 核心思路.
 - **Awaiting review** lists each snapshot to decide on, with its 核心思路 and 难点.
 - **Nodes are created on the page or from the CLI** (`proof node create`): a theorem, lemma or claim with its assumptions, dependencies and medium, or an imported result with its source and the reference it cites. Right-click the canvas (a long press on touch) for a new node there, or a card to split it, hang a node under it (`--parent`: the card rests on the new node, in one transaction) or rest a node on it. The form opens in place, previews the maths, says what the server would refuse, and shows the equivalent command to copy; a reference that isn't in `proof reference list` yet can be added from it. That covers the first node of an empty map, and a corrected source that replaces a withdrawn one.
@@ -110,8 +120,9 @@ proof fog list --all                                           # dropped and cry
 Decisions that change what the project trusts (accepting a Candidate proof, Reference review, dismissing a Challenge, promoting) are made only on the project's local proof map page:
 
 ```bash
-proof map serve         # start the proof map page for this project
-proof map open [<id>]   # open the map, or a node's page
+proof home              # the Home: your projects, each opening in its page
+proof map open [<id>]   # open this project's map, or a node's page (through the Home)
+proof map serve         # this project's page alone, in the foreground, without a Home
 ```
 
 Each decision is one line in the node's git-tracked `proofs/<id>/reviews.jsonl`, naming the SHA-256 of the snapshot it decides on. proof-cli commits that line together with the snapshot, as your own git identity (`user.name` / `user.email`); it never pushes. Once you push, the commit on GitHub is the record of who decided what (ADR-0010). Outside a git repository the decision is still recorded, just without that record. `proof review warnings` lists decisions git doesn't have yet.

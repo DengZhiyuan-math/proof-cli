@@ -233,7 +233,7 @@ def chain(tmp_path_factory):
 
 def _page(read: str):
     def run(store) -> None:
-        from proof_cli.webapp.server import ReviewApp
+        ReviewApp = pytest.importorskip("proof_web.server").ReviewApp  # the page (proof-web), when it is installed
 
         app = ReviewApp(store)
         try:
@@ -406,7 +406,7 @@ def test_a_map_read_folds_the_trust_rules_once(tmp_path: Path, review_reads):
     """Every imported result's state consults the rules in force; one page read folds the file once, not per node."""
     from proof_cli.references import ReferenceRecord, ReferenceSourceType
     from proof_cli.storage import import_reference
-    from proof_cli.webapp.server import ReviewApp
+    ReviewApp = pytest.importorskip("proof_web.server").ReviewApp  # the page (proof-web), when it is installed
 
     store = ensure_project(tmp_path)
     import_reference(store, ReferenceRecord(id="book", title="A Book", year=2000, source_type=ReferenceSourceType.textbook))

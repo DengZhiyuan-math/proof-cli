@@ -503,7 +503,7 @@ def test_a_resolved_challenge_shows_without_a_serialization_warning(tmp_path: Pa
     """#159: `resolved_at` is a datetime, not the decision row's raw string."""
     from datetime import datetime
 
-    from _review_client import DirectClient
+    ReviewApp = pytest.importorskip("proof_web.server").ReviewApp  # the page (proof-web), when it is installed
 
     _create_and_accept_node(tmp_path)
     open_result = runner.invoke(app, ["challenge", "open", "lem_1", "--root", str(tmp_path), "--json"])
@@ -515,9 +515,9 @@ def test_a_resolved_challenge_shows_without_a_serialization_warning(tmp_path: Pa
     challenge_shown = runner.invoke(app, ["challenge", "show", challenge_id, "--root", str(tmp_path), "--json"])
     assert challenge_shown.exit_code == 0, challenge_shown.output
     cli_challenge = json.loads(challenge_shown.stdout)["data"]
-    status, view = DirectClient(load_project(tmp_path)).get("/api/node/lem_1")
-    assert status == 200
-    (api_challenge,) = view["data"]["challenges"]
+    view = ReviewApp(load_project(tmp_path)).node("lem_1")  # as the page serialises it: datetimes to ISO strings
+    view = json.loads(json.dumps(view, default=str))
+    (api_challenge,) = view["challenges"]
 
     for challenge in (cli_challenge, api_challenge):
         assert challenge["status"] == "dismissed"

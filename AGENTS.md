@@ -18,10 +18,10 @@ The CLI should help a researcher manage a proof map of nodes (theorems, lemmas, 
 
 ## Technology Stack
 
-- **Python 3.11+**, packaged with setuptools (`pyproject.toml`), source under `src/proof_cli/`
+- **Python 3.11+**, packaged with setuptools. Four packages (ADR-0018): here, the core `proof_cli` under `src/` and the LaTeX studio `latex_agent` under `packages/latex-agent/` (from prism-local; standard library only, needs a TeX distribution to compile); in the zeqome organisation, `proof_agents` (github.com/zeqome/proof-agents: the Proof agent's roles and run) and `proof_web` (github.com/zeqome/proof-web: Home, proof map page, node pages; adds `proof home` and `proof map …` to the CLI through the `proof_cli.commands` entry point). Dependencies point one way: proof_web → proof_agents, latex_agent, proof_cli; proof_agents → proof_cli; latex_agent → nothing of proof-cli.
 - **Typer** for the CLI (the `proof` entry point, rooted by `--root` or `$PROOF_ROOT`), **Rich** for terminal output, **Pydantic v2** for domain models
 - **SQLite** project state at `.proof/project.sqlite3`, collaboration state and memory included (the `side_documents` table; legacy `.proof/collaboration.json` and `.proof/memory.json` are migrated once and not read again)
-- **pytest** for tests (`tests/`)
+- **pytest** for tests: `tests/` for the core, `packages/latex-agent/tests/` for the studio; one `pytest` at the root runs both. The core's few page checks run only when proof-web is importable (`pytest.importorskip`)
 
 ## Workflow
 

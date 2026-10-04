@@ -59,7 +59,6 @@ from proof_cli.storage import (
 )
 from proof_cli.theorems import add_theorem, list_theorems, theorem_callability
 from proof_cli.vault import archived_pdf_path, node_folder, working_proof_path
-from proof_cli.webapp.server import ReviewApp
 
 runner = CliRunner()
 
@@ -102,7 +101,7 @@ def test_an_accepted_map_moves_to_an_empty_project_with_its_files_and_arrives_un
     assert get_acceptance_state(target, "L") == "unreviewed"
     assert get_acceptance_state(target, "M") == "unreviewed"
     # the node page shows M's snapshot, rather than crashing on a missing file
-    page = ReviewApp(target).node("M")
+    page = pytest.importorskip("proof_web.server").ReviewApp(target).node("M")  # the page (proof-web), when it is installed
     assert page["candidate_proof"]["unreadable"] is False
     assert "M proof" in page["candidate_proof"]["text"]
     assert working_proof_path(target_root, "M").read_text().endswith("M proof\\end{document}\n")

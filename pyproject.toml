@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mathematical-proof-cli"
 version = "0.1.0"
-description = "CLI-first research proof OS"
+description = "CLI-first research proof OS: the proof map, its project state and the agents' command surface"
 requires-python = ">=3.11"
 dependencies = [
   "pydantic>=2.7",
@@ -28,11 +28,8 @@ package-dir = {"" = "src"}
 [tool.setuptools.packages.find]
 where = ["src"]
 
-[tool.setuptools.package-data]
-"proof_cli.webapp" = ["static/*"]
-# the studio (ADR-0011, #68): its page, the vendored CodeMirror, PDF.js and KaTeX (ADR-0013, with its fonts), and the licences
-"proof_cli.studio" = ["static/*", "static/vendor/*", "static/vendor/fonts/*", "LICENSE", "README.md"]
-
+# latex-agent, the studio taken from prism-local, lives in packages/ (ADR-0018); proof-agents and proof-web are
+# repositories of their own in the zeqome organisation. One `pytest` from here runs the core's and latex-agent's tests.
 [tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = ["src"]
+testpaths = ["tests", "packages/latex-agent/tests"]
+pythonpath = ["src", "packages/latex-agent/src"]
