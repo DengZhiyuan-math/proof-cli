@@ -385,7 +385,7 @@ def _emit_node(node, json_output: bool, *, command: str) -> None:
 
 def human_review_required(root: str, *, command: str, kind: str, target_id: str, node_id: str | None, json_output: bool) -> None:
     """Every Human Review decision is made on the proof map page, never here (ADR-0010): say where, and fail."""
-    from .plugins import project_url  # proof-web's, when it is installed
+    from .origins import project_url
 
     # not a project yet: nothing to decide, and a refusal shouldn't create one
     url = project_url(get_store(_root(root)), node_id) if (_root(root) / ".proof").exists() else None
