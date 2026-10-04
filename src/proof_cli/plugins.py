@@ -3,35 +3,19 @@
 proof-cli is the base: the project state, the proof map and the agents' command surface. The web
 app (proof-web) adds its own commands, `proof home`, `proof map open` and `proof map serve`, by
 publishing a `register(app, map_app, review_app)` function under the entry-point group
-`proof_cli.commands`; it also tells the CLI where a project's page is (`provide_project_url`), so
-a refused Human Review decision can say where to make it. Without proof-web installed, those
-commands exist as fallbacks that say which package to install, and no URL is known.
+`proof_cli.commands`. Without proof-web installed, those commands exist as fallbacks that say
+what to install. Where a project's page would be is the project's own matter (`origins.py`).
 """
 
 from __future__ import annotations
 
 from importlib.metadata import entry_points
-from typing import Callable
-
 import typer
 
 from .envelope import dump_envelope, error_envelope
 
 ENTRY_POINT_GROUP = "proof_cli.commands"
 WEB_PACKAGE = "proof-web"
-
-_project_url: Callable[..., str] | None = None
-
-
-def provide_project_url(fn: Callable[..., str]) -> None:
-    """Set the function that answers `project_url(store, node_id)` — proof-web's, when it is installed."""
-    global _project_url
-    _project_url = fn
-
-
-def project_url(store, node_id: str | None = None) -> str | None:
-    """The project's proof map page (at a node, if given), or None when no web app is installed."""
-    return _project_url(store, node_id) if _project_url is not None else None
 
 
 def load_commands(app: typer.Typer, map_app: typer.Typer, review_app: typer.Typer) -> None:
@@ -51,7 +35,8 @@ def drop_fallbacks(*typer_apps: typer.Typer) -> None:
 
 
 def install_web_fallbacks(app: typer.Typer, map_app: typer.Typer, *, panel: str) -> None:
-    """`proof home`, `proof map open` and `proof map serve` when proof-web isn't installed: say so, and fail."""
+    """`proof home`, `proof map open` and `proof map serve` when proof-web isn't installed: say so, and fail.
+    (The help texts avoid the word "package": `proof --help` must not advertise the frozen `pack` group.)"""
 
     def fallback(words: str, help_text: str):
         def command(
@@ -59,7 +44,7 @@ def install_web_fallbacks(app: typer.Typer, map_app: typer.Typer, *, panel: str)
             json_output: bool = typer.Option(False, "--json"),
         ) -> None:
             command_name = words.replace(" ", ".")
-            message = f"`proof {words}` is the proof map web app, which is the {WEB_PACKAGE} package: pip install {WEB_PACKAGE}"
+            message = f"`proof {words}` is the proof map web app, which is {WEB_PACKAGE}: pip install {WEB_PACKAGE}"
             typer.echo(dump_envelope(error_envelope(command_name, "WEB_APP_NOT_INSTALLED", message)) if json_output else f"Error: {message}")
             raise typer.Exit(code=1)
 
@@ -69,8 +54,8 @@ def install_web_fallbacks(app: typer.Typer, map_app: typer.Typer, *, panel: str)
 
     settings = {"allow_extra_args": True, "ignore_unknown_options": True}
     app.command("home", rich_help_panel=panel, context_settings=settings)(
-        fallback("home", f"Open the Home: your proof projects (needs the {WEB_PACKAGE} package)."))
+        fallback("home", f"Open the Home: your proof projects (needs {WEB_PACKAGE} installed)."))
     map_app.command("open", context_settings=settings)(
-        fallback("map open", f"Open this project's proof map page (needs the {WEB_PACKAGE} package)."))
+        fallback("map open", f"Open this project's proof map page (needs {WEB_PACKAGE} installed)."))
     map_app.command("serve", context_settings=settings)(
-        fallback("map serve", f"Run this project's proof map page in the foreground (needs the {WEB_PACKAGE} package)."))
+        fallback("map serve", f"Run this project's proof map page in the foreground (needs {WEB_PACKAGE} installed)."))
