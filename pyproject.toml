@@ -28,8 +28,8 @@ package-dir = {"" = "src"}
 [tool.setuptools.packages.find]
 where = ["src"]
 
-# The family's other packages live in packages/ (ADR-0018): proof-agents, latex-agent and proof-web.
-# One `pytest` from here runs every package's tests from the checkout; each also runs alone from its folder.
+# latex-agent, the studio taken from prism-local, lives in packages/ (ADR-0018); proof-agents and proof-web are
+# repositories of their own in the zeqome organisation. One `pytest` from here runs the core's and latex-agent's tests.
 [tool.pytest.ini_options]
-testpaths = ["tests", "packages/proof-agents/tests", "packages/latex-agent/tests", "packages/proof-web/tests"]
-pythonpath = ["src", "packages/proof-agents/src", "packages/latex-agent/src", "packages/proof-web/src"]
+testpaths = ["tests", "packages/latex-agent/tests"]
+pythonpath = ["src", "packages/latex-agent/src"]
