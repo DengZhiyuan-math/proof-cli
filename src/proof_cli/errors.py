@@ -7,6 +7,8 @@ source raises a code that isn't listed here.
 
 from __future__ import annotations
 
+from .domain import AGENT_ROLES
+
 ERROR_CODES: dict[str, str] = {
     # -- the CLI itself ----------------------------------------------------------------
     "USAGE_ERROR": "the command line didn't parse: a missing argument, an unknown option or command (exit 2)",
@@ -173,12 +175,19 @@ ERROR_CODES: dict[str, str] = {
     "PROJECT_REPLACED": "the page, studio or run was opened for a project that is no longer in its folder (deleted and started again there); nothing of the new project is read or written through it",
     # -- the Proof agent's work log (ADR-0016, spec #145) --
     "ROLE_REQUIRED": "a progress report names the role that makes it: PROOF_AGENT_ROLE in the agent's runtime, or --role",
-    "INVALID_ROLE": "the Proof agent role is not prover, typesetter or numerics",
+    "INVALID_ROLE": f"the Proof agent role is not one of {', '.join(AGENT_ROLES)}",
     "INVALID_PROGRESS_STATUS": "a step's status is started, done, stuck or needs-human",
     "INVALID_PROGRESS_STEP": "steps count from 1",
     "PROGRESS_STATUS_REQUIRED": "a step report needs its status",
-    "PROGRESS_EMPTY": "a progress report is a plan, a step or a handoff; this one is none of them",
+    "PROGRESS_EMPTY": "a progress report is a plan, a step, a handoff, a verdict or an attempt; this one is none of them",
     "DECISION_REQUIRED": "a step that needs a human decision names the decision in --note",
+    # -- the Verifier's verdict and the record of attempts (ADR-0019 parts A and B) --
+    "VERDICT_ROLE_REQUIRED": "only the verifier role records a verdict; the message names the role that tried",
+    "INVALID_VERDICT": "a verdict's outcome is passed or failed",
+    "OBJECTIONS_REQUIRED": "a failed verdict names its objections in --note",
+    "ATTEMPT_INCOMPLETE": "an attempt is recorded by what it tried to establish and what it failed on: --attempt needs --failed-on",
+    "GATE_MALFORMED": "`request-review --gated-by` is one SHA-256 of 64 hex digits, given once; a repeated, empty or malformed value is refused rather than read as no gate",
+    "VERDICT_STALE": "a run's Prover requested review naming a passing verdict's digest (--gated-by), but the node's files are no longer the ones the Verifier passed; nothing was frozen",
     # -- the Proof agent's run, through the studio and the map (ADR-0016, spec #145) --
     "RUN_ACTIVE": "an agent is already working on this node: pause, redirect or release it first",
     "RUN_SETTLING": "the previous run is still giving the node back; Start again in a moment",
