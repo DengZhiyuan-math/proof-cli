@@ -1,6 +1,6 @@
 # The run is a prove–verify loop, and the map is the agents' blackboard
 
-**Status**: proposed (drafted 2026-10-04; to be decided in an issue). Amends ADR-0016 points 1, 2 and 4: a run has a fourth role, the Verifier, whose passing verdict is the agent's gate to request review; a run keeps a record of its attempts and briefs each turn from it; and a run on a Theorem may be a coordinator over the Theorem's subtree. ADR-0004, ADR-0009 and ADR-0010 stand untouched: no role, no verdict and no coordinator makes a Review decision, and only the researcher changes acceptance. ADR-0018 stands: all of this is the proof-agents package, against `RunHooks` and the agent manager.
+**Status**: accepted (2026-10-05; [decision #174](https://github.com/DengZhiyuan-math/proof-cli/issues/174)). Amends ADR-0016 points 1, 2 and 4: a run has a fourth role, the Verifier, whose passing verdict is the agent's gate to request review; a run keeps a record of its attempts and briefs each turn from it; and a run on a Theorem may be a coordinator over the Theorem's subtree. ADR-0004, ADR-0009 and ADR-0010 stand untouched: no role, no verdict and no coordinator makes a Review decision, and only the researcher changes acceptance. ADR-0018 stands: all of this is the proof-agents package, against `RunHooks` and the agent manager.
 
 ## Context
 
