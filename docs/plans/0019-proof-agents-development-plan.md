@@ -78,3 +78,29 @@ Wave 2b can begin on the pane (its point 2) at once; its hooks (point 1) need 2a
 - Stop, Start: the new Prover's briefing lists every earlier attempt.
 - The researcher's Review what it has, and their own request-review on the page, work exactly as before, verdict or none.
 - `pytest` passes in all three repositories.
+
+## Phase 2 in detail (built 2026-10-05: branch `feat/0019-sharing` in each repository, stacked on phase 1's branch there)
+
+### proof-cli (core)
+
+1. A memory entry's `source` is free text: a run's role tags what it learned with `--source <agent>/<role>` (ADR-0019 point 8); the CLI's `memory add` help says so and what the three learned statuses mean.
+2. `retrieval.retrieve_memory(store, query, *, limit, statuses, exclude_node_ids)` ranks memory entries by the words of a query, best first and newest among equals; `proof retrieve --json` carries the hits as `memory` beside its candidates (point 14).
+3. Tests: `tests/test_memory_sharing.py`.
+
+### proof-agents
+
+1. The Prover's and the Verifier's briefs: what was learned, as against what was tried, goes to this node's memory — `proof memory add "<it>" --node-id <node> --layer episodic|procedural|semantic --status failed|tactic|tentative --source <name>/<role>` — and never another node's (points 8, 12); other nodes' notes are unverified and a result needed from another node is a Claim both depend on (point 11); a split-out Claim a sibling could use is left as a memory entry (point 15). The permission is `MEMORY_WRITE`, `Bash(proof memory add --node-id {node} *)`, with the node filled in per turn by `ProofAgentContext.claude_args`.
+2. `briefing.py`: a shared entry carries its `relation` to the node (dependency | dependent | sibling | retrieved) and a `progress` entry says where a neighbouring node stands (points 13, 14); `SHARED_SHOWN` is 12.
+3. `patterns.py`: `suggested_redirects(log, shared)` reads the record for the same objection in three failed verdicts and for a dead end this node hit that another node's memory holds. `AgentRun._suggest` records each once in the work log, after the turn that completed the pattern, as a progress note `suggested redirect: …` under the turn's role and name; `RunState.suggestion` (in `view()`) carries the newest for the page (point 17). No role is briefed with it; nothing is reallocated by it.
+4. Tests: `tests/test_patterns.py`; additions to `tests/test_briefing.py` and `tests/test_prove_verify_loop.py`.
+
+### proof-web
+
+1. `StudioHub._shared_notes`, in the subscription order, each source bounded (`OWN_NOTES` 4, `NEIGHBOUR_NOTES` 2, `RETRIEVED_NOTES` 4): the node's own learned entries; each dependency's and dependent's, with its standing (`_standing`: its claim, its step of its plan, its last verdict — project state already there); each sibling's; then `retrieve_memory` by the node's statement, leaving out the nodes already covered.
+2. The run pane shows `The record suggests: …` with a *Use as redirect* button that puts it in the redirect box while the run is active; only the researcher sends it.
+3. Tests: additions to `tests/test_run_hooks.py` and `tests/test_run_pane.py`; `tests/test_agent_run.py`'s rule check reads a rule that names an option.
+
+### Left to later phases
+
+- The Coordinator's redirect when a dependency is Accepted (point 19) is phase 3; a Decomposer's turn and the researcher's diff in the briefing (points 20, 21 in full) are phase 4.
+- On Codex the memory-write scope is the brief's rule, as every scope is there (ADR-0010).
