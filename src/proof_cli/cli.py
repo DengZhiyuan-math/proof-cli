@@ -1613,7 +1613,7 @@ def memory_add(
     content: str,
     root: str = ROOT_OPTION,
     layer: str = "working",
-    node_id: str = "",
+    node_id: list[str] = typer.Option(None, "--node-id", help="The node this is about; once. A run's role may name only its own node (ADR-0019 point 12)"),
     candidate_proof_id: str = "",
     review_id: str = "",
     route_id: str = "",
@@ -1631,14 +1631,22 @@ def memory_add(
     run's role records what it learned here — a dead end (--status failed), a
     technique that worked (--status tactic), an observation not yet trusted
     (--status tentative) — scoped to its own node and tagged with --source
-    <agent>/<role>; other nodes' briefings read it (ADR-0019 part C).
+    <agent>/<role>; other nodes' briefings read it (ADR-0019 part C). The
+    node is named once: a second --node-id, or an empty one, is refused, so
+    a permission that admits `proof memory add --node-id <node>` admits that
+    node's memory and no other's.
     """
+    given = list(node_id or [])
+    if len(given) > 1 or any(not value.strip() for value in given):
+        exc = ProofMapError("INVALID_INPUT", "--node-id names one node, once" if len(given) > 1 else "--node-id needs a node id")
+        _emit_error(exc, json_output, command="memory.add")
+        raise typer.Exit(code=1)
     try:
         output = cmd_memory_add(
             content,
             _root(root),
             layer=layer,
-            node_id=node_id,
+            node_id=given[0].strip() if given else "",
             candidate_proof_id=candidate_proof_id,
             review_id=review_id,
             route_id=route_id,
