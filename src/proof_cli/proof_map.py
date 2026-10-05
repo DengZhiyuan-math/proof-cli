@@ -121,7 +121,6 @@ from .vault import (
     snapshots_on_disk,
     vault_dir,
     working_entry_path,
-    working_inputs_digest,
     working_proof_path,
     write_snapshot_folder,
     write_working_computation,
@@ -428,7 +427,7 @@ def record_progress(
             raise ProofMapError("INVALID_VERDICT", f"'{verdict}' is not a verdict; expected one of: {', '.join(VERDICT_OUTCOMES)}")
         if verdict == "failed" and not note.strip():
             raise ProofMapError("OBJECTIONS_REQUIRED", "a failed verdict names its objections: --note \"1. <the step or citation it attacks> …\"")
-        payload = {"kind": "verdict", "role": role, "by": by, "outcome": verdict, "note": note.strip(), "inputs_sha256": _working_inputs_digest_or_none(store, node)}
+        payload = {"kind": "verdict", "role": role, "by": by, "outcome": verdict, "note": note.strip(), "inputs_sha256": _working_digest_or_none(store, node)}
         message = f"{role} on {node_id}: verdict {verdict}" + (f" — {note.strip()}" if note.strip() else "")
     elif attempt is not None or failed_on is not None:
         goal = (attempt or "").strip()
@@ -463,12 +462,14 @@ def record_progress(
     return {**payload, "node_id": node_id, "at": utc_now().isoformat()}
 
 
-def _working_inputs_digest_or_none(store: ProjectStore, node: ProofMapNode) -> str | None:
-    """The inputs digest a verdict is about (ADR-0019 point 2), or None when the folder can't be read or holds a
-    link where a snapshot would read: the verdict is still recorded — it is the Verifier's reading, not a snapshot —
-    and a verdict without a hash matches no snapshot, so it opens no gate."""
+def _working_digest_or_none(store: ProjectStore, node: ProofMapNode) -> str | None:
+    """The digest a verdict is about (ADR-0019 point 2): the SHA-256 a Review snapshot of the folder as it stands would
+    be known by — every file the Verifier read, a computation's `out/` and the key-ideas summary included, not the
+    inputs alone (those are a Run's Evidence rule, ADR-0015). None when the folder can't be read or holds a link where
+    a snapshot would read: the verdict is still recorded — it is the Verifier's reading, not a snapshot — and a verdict
+    without a hash matches no snapshot, so it opens no gate."""
     try:
-        return working_inputs_digest(store.root, node.id, node.medium)
+        return read_working_snapshot(store.root, node.id, node.medium).digest()
     except (OSError, NodeFolderLinks):
         return None
 
@@ -1252,7 +1253,7 @@ def release_node(
     return claim.model_copy(update={"released_by": claimant_id, "release_reason": release_reason, "released_at": released_at})
 
 
-def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rationale: str, unassign: bool = False) -> CandidateProofRecord:
+def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rationale: str, unassign: bool = False, gated_by: str | None = None) -> CandidateProofRecord:
     """Snapshot a node's working `proof.tex` for review (ADR-0010).
 
     The working sources are edited freely — in the node's studio, by agents —
@@ -1305,6 +1306,16 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
     contents = snapshot.files
     _require_key_ideas(store, node_id, contents.get(key_ideas.KEY_IDEAS_FILE))
     sha256 = snapshot.digest()
+    # The agent's gate, checked at the request itself (ADR-0019 point 3): a run's Prover names the passing verdict's
+    # digest; files edited since — by anyone, in the same turn — are not what the Verifier passed, so nothing is frozen.
+    # The researcher's own request names none and is never refused for this.
+    if gated_by is not None and gated_by != sha256:
+        raise ProofMapError(
+            "VERDICT_STALE",
+            f"the files of {node_id} are not the ones the Verifier passed: the verdict is about {gated_by[:12]}…, the folder now is {sha256[:12]}…; "
+            "have the Verifier read them again before requesting review",
+            details={"gated_by": gated_by, "working_sha256": sha256},
+        )
 
     # The holder check and every write are one SQLite write transaction (#18): a reassignment
     # can't slip in between them, it waits for this to commit. The files written go if it rolls

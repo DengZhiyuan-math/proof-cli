@@ -34,6 +34,7 @@ from proof_cli.proof_map import (
     siblings,
     verdicts,
     work_log,
+    request_review,
 )
 from proof_cli.storage import ensure_project
 
@@ -176,14 +177,14 @@ def test_a_verdict_is_bound_to_the_working_inputs_as_they_stand(tmp_path: Path):
     """The hash is the one a Review snapshot's manifest would have now, and a later edit to proof.tex makes it stale."""
     store = ensure_project(tmp_path)
     create_node(store, node_id="N", kind="claim", statement="a claim")
-    before = vault.working_inputs_digest(store.root, "N", Medium.latex)
+    before = vault.read_working_snapshot(store.root, "N", Medium.latex).digest()
     first = record_progress(store, "N", role="verifier", by="claude-code", verdict="failed", note="1. step 2 appeals to Lemma L for a bound L does not give")
     assert first["kind"] == "verdict" and first["outcome"] == "failed" and first["inputs_sha256"] == before
     assert first["role"] == "verifier" and first["by"] == "claude-code" and first["note"].startswith("1. step 2")
     assert set(first) == {"kind", "role", "by", "outcome", "note", "inputs_sha256", "node_id", "at"}
     with vault.working_proof_path(store.root, "N").open("a", encoding="utf-8") as handle:
         handle.write("% the bound is now justified\n")
-    after = vault.working_inputs_digest(store.root, "N", Medium.latex)
+    after = vault.read_working_snapshot(store.root, "N", Medium.latex).digest()
     assert after != before
     second = record_progress(store, "N", role="verifier", by="claude-code", verdict="passed")
     assert second["inputs_sha256"] == after and second["note"] == ""
@@ -236,17 +237,17 @@ def test_an_unreadable_node_folder_leaves_the_verdicts_hash_null_rather_than_ref
     def unreadable(root, node_id, medium=None):
         raise OSError(13, "Permission denied", str(root / "proofs" / node_id))
 
-    monkeypatch.setattr(proof_map, "working_inputs_digest", unreadable)
+    monkeypatch.setattr(proof_map, "read_working_snapshot", unreadable)
     entry = record_progress(store, "N", role="verifier", by="claude-code", verdict="failed", note="1. nothing could be read")
     assert entry["outcome"] == "failed" and entry["inputs_sha256"] is None
     assert latest_verdict(store, "N")["inputs_sha256"] is None
 
 
-def test_a_verdict_on_a_computation_node_hashes_its_inputs(tmp_path: Path):
+def test_a_verdict_on_a_computation_node_hashes_its_whole_folder(tmp_path: Path):
     store = ensure_project(tmp_path)
     create_node(store, node_id="C", kind="claim", statement="a check", medium="computation")
     entry = record_progress(store, "C", role="verifier", by="claude-code", verdict="passed")
-    assert entry["inputs_sha256"] == vault.working_inputs_digest(store.root, "C", Medium.computation)
+    assert entry["inputs_sha256"] == vault.read_working_snapshot(store.root, "C", Medium.computation).digest()
 
 
 def test_an_attempt_is_what_was_tried_how_and_what_it_failed_on(tmp_path: Path):
@@ -328,3 +329,45 @@ def test_the_cli_help_lists_the_five_roles():
     squeezed = " ".join(shown.replace("│", " ").split())  # Rich boxes and wraps the help; the words are what count
     assert "prover, typesetter, numerics, verifier or decomposer" in squeezed
     assert "--verdict" in squeezed and "--attempt" in squeezed and "--method" in squeezed and "--failed-on" in squeezed
+
+
+# -- the verdict's digest is a snapshot's, and the gate holds at the request itself (ADR-0019 points 2–4; audit P1 1–2) --
+
+
+def test_a_verdict_hashes_the_whole_folder_as_a_snapshot_would_outputs_included(tmp_path: Path):
+    """A computation's `out/` is what the Verifier checks: a passing verdict on output A must not gate a snapshot holding B."""
+    from proof_cli.authority import candidate_proof_sha256
+    from proof_cli.vault import working_inputs_digest
+
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="N", kind="claim", statement="a computation", medium="computation")
+    folder = tmp_path / "proofs" / "N"
+    (folder / "out").mkdir(exist_ok=True)
+    (folder / "out" / "result.txt").write_text("A\n")
+    passed = record_progress(store, "N", role="verifier", by="claude-code", verdict="passed")
+    (folder / "out" / "result.txt").write_text("B\n")
+    assert passed["inputs_sha256"] != record_progress(store, "N", role="verifier", by="claude-code", verdict="passed")["inputs_sha256"]
+    assert working_inputs_digest(store.root, "N") == working_inputs_digest(store.root, "N")  # the inputs alone never saw the change
+    # the digest is the one the snapshot of these very files is known by
+    from _proofs import write_key_ideas
+    write_key_ideas(store, "N")
+    current = record_progress(store, "N", role="verifier", by="claude-code", verdict="passed")
+    record = request_review(store, "N", requested_by="claude-code", rationale="checked", gated_by=current["inputs_sha256"])
+    assert candidate_proof_sha256(store, record.id) == current["inputs_sha256"]
+
+
+def test_a_gated_request_is_refused_once_the_files_changed_and_the_researchers_own_never_is(tmp_path: Path):
+    from _proofs import write_key_ideas
+
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="N", kind="claim", statement="s")
+    write_key_ideas(store, "N")
+    verdict = record_progress(store, "N", role="verifier", by="claude-code", verdict="passed")
+    (tmp_path / "proofs" / "N" / "proof.tex").write_text("\\documentclass{amsart}\\begin{document}edited after the verdict\\end{document}\n")
+    with pytest.raises(ProofMapError) as refused:
+        request_review(store, "N", requested_by="claude-code", rationale="r", gated_by=verdict["inputs_sha256"])
+    assert refused.value.code == "VERDICT_STALE" and refused.value.details["gated_by"] == verdict["inputs_sha256"]
+    assert not (tmp_path / "proofs" / "N" / "snapshots").exists() or not any((tmp_path / "proofs" / "N" / "snapshots").iterdir())
+    request_review(store, "N", requested_by="human", rationale="my own edit")  # the researcher names no verdict
+    result = _run(tmp_path, "node", "request-review", "N", "--rationale", "r", "--gated-by", verdict["inputs_sha256"], "--json")
+    assert result.exit_code == 1 and json.loads(result.output)["error"]["code"] == "VERDICT_STALE"
