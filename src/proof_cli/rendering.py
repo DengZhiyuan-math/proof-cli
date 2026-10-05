@@ -359,6 +359,8 @@ def _work_log_body(entry: dict) -> str:
         return f"verifier: {entry.get('outcome')}" + (f" — {entry['note']}" if entry.get("note") else "")
     if kind == "attempt":
         return f"attempt: {entry.get('goal')}" + (f" ({entry['method']})" if entry.get("method") else "") + f" failed on {entry.get('failed_on')}"
+    if kind == "coordinator":
+        return f"coordinator: {entry.get('note')}"
     if kind == "split":
         return "split into " + ", ".join(entry.get("nodes") or [])
     if kind == "review-requested":
@@ -380,6 +382,8 @@ def render_work_log_entry(node_id: str, entry: dict) -> str:
         body = f"plan of {len(entry.get('plan') or [])} step(s)" + (f" — {entry['note']}" if entry.get("note") else "")
     elif entry.get("kind") == "verdict":  # the role is already said: `verifier on N: verdict passed`
         body = f"verdict {entry.get('outcome')}" + (f" — {entry['note']}" if entry.get("note") else "")
+    elif entry.get("kind") == "coordinator":  # no role: the Coordinator holds no node and takes no turn (ADR-0019 point 18)
+        return f"coordinator on {node_id}: {entry.get('note')}"
     else:
         body = _work_log_body(entry)
     return f"{entry.get('role')} on {node_id}: {body}"

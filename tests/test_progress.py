@@ -425,3 +425,25 @@ def test_a_failed_verdict_committed_while_the_request_is_made_is_seen_on_the_wri
         request_review(store, "N", requested_by="claude-code", rationale="r", gated_by=passed["inputs_sha256"])
     assert injected and refused.value.code == "VERDICT_STALE" and refused.value.details["newest_verdict"]["outcome"] == "failed"
     assert not (tmp_path / "proofs" / "N" / "snapshots").exists() or not any((tmp_path / "proofs" / "N" / "snapshots").iterdir())
+
+
+# -- the Coordinator's notes (ADR-0019 point 18, phase 3) ------------------------------------------------------------
+
+
+def test_a_coordinator_note_names_no_role_and_reads_in_the_work_log(tmp_path: Path):
+    """A Coordinator holds no node and takes no turn: its note on the root's log is a `coordinator` entry, no role required."""
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="L", kind="lemma", statement="a lemma")
+    create_node(store, node_id="T", kind="theorem", statement="the theorem", dependencies=["L"])
+    entry = record_progress(store, "T", role=None, by="claude-code/coordinator", coordinator="started a run on L (start 1)")
+    assert entry["kind"] == "coordinator" and entry["role"] is None and entry["note"] == "started a run on L (start 1)"
+    (logged,) = [e for e in proof_map.work_log(store, "T") if e.get("kind") == "coordinator"]
+    assert logged["by"] == "claude-code/coordinator" and logged["note"] == "started a run on L (start 1)"
+    with pytest.raises(ProofMapError) as refused:
+        record_progress(store, "T", role=None, by="x", coordinator="   ")
+    assert refused.value.code == "PROGRESS_EMPTY"
+    done = runner.invoke(app, ["node", "progress", "T", "--coordinator", "L is Accepted: redirected the run on T", "--by", "claude-code/coordinator", "--json", "--root", str(tmp_path)])
+    assert done.exit_code == 0, done.output
+    assert json.loads(done.output)["data"]["kind"] == "coordinator"
+    shown = runner.invoke(app, ["node", "progress", "T", "--root", str(tmp_path)])
+    assert shown.exit_code == 0 and "coordinator: L is Accepted: redirected the run on T" in shown.output
