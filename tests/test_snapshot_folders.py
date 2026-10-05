@@ -330,7 +330,10 @@ def test_the_page_offers_no_decision_on_an_unreadable_snapshot_and_says_why_one_
 
 # -- PR #95 review: a snapshot file the process can't read is unreadable, not a crash ----------
 
-needs_permissions = pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0, reason="root reads a chmod 000 file")
+needs_permissions = pytest.mark.skipif(
+    os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+    reason="chmod 000 needs POSIX permissions and a non-root reader",
+)
 
 
 @pytest.fixture
