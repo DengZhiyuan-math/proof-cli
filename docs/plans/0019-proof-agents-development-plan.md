@@ -158,4 +158,3 @@ Wave 2b can begin on the pane (its point 2) at once; its hooks (point 1) need 2a
 ### Audit of phase 4 (2026-10-05)
 
 Four findings, all fixed on the same branches: P1, the Decomposer's unbound split rule (every node-acting rule now names the node; `--root` denied); P2, the budget read before the decision; P2, the digest and the text read apart; P2, a binary file compared as None. The audit also read ADR-0019 point 20's "no children" against this plan's "no dependencies": the plan now follows the ADR (`split_child`).
-
