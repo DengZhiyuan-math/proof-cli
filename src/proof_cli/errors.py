@@ -191,6 +191,10 @@ ERROR_CODES: dict[str, str] = {
     # -- the Proof agent's run, through the studio and the map (ADR-0016, spec #145) --
     "RUN_ACTIVE": "an agent is already working on this node: pause, redirect or release it first",
     "RUN_SETTLING": "the previous run is still giving the node back; Start again in a moment",
+    "RUN_GONE": "the node's run could not be reached: its node is gone from the map, or its studio is closed",
+    # the Decomposer, started alone on a Theorem not yet split (ADR-0019 point 20)
+    "ROLE_ALONE": "the Decomposer is started on its own, for one turn; it is not part of a run with other roles",
+    "NOT_DECOMPOSABLE": "the Decomposer works a Theorem or Lemma not yet split: this node is a Claim or an imported result, or already rests on the Claims a split made",
     "NO_RUN": "no agent run to act on: the folder is not a proof map node, or no run is active on it",
     # the Coordinator over a Theorem's or Lemma's subtree (ADR-0019 point 18)
     "NO_SUBTREE": "no subtree to coordinate: the node rests on nothing, or is an imported result",
