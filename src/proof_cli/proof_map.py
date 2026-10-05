@@ -1309,28 +1309,31 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
     # The agent's gate, checked at the request itself (ADR-0019 point 3): a run's Prover names the passing verdict's
     # digest; files edited since — by anyone, in the same turn — are not what the Verifier passed, so nothing is frozen.
     # The researcher's own request names none and is never refused for this.
-    if gated_by is not None:
-        newest = latest_verdict(store, node_id)
-        if gated_by != sha256:
-            raise ProofMapError(
-                "VERDICT_STALE",
-                f"the files of {node_id} are not the ones the Verifier passed: the verdict is about {gated_by[:12]}…, the folder now is {sha256[:12]}…; "
-                "have the Verifier read them again before requesting review",
-                details={"gated_by": gated_by, "working_sha256": sha256},
-            )
-        if newest is None or newest.get("outcome") != "passed" or newest.get("inputs_sha256") != sha256:  # a later verdict outranks the one named
-            raise ProofMapError(
-                "VERDICT_STALE",
-                f"the newest verdict on {node_id} is not a passing one on these files"
-                + (f" (it {newest.get('outcome')} {str(newest.get('inputs_sha256') or '')[:12]}…)" if newest else " (there is none)")
-                + "; have the Verifier read them again before requesting review",
-                details={"gated_by": gated_by, "working_sha256": sha256, "newest_verdict": newest},
-            )
+    if gated_by is not None and gated_by != sha256:
+        raise ProofMapError(
+            "VERDICT_STALE",
+            f"the files of {node_id} are not the ones the Verifier passed: the verdict is about {gated_by[:12]}…, the folder now is {sha256[:12]}…; "
+            "have the Verifier read them again before requesting review",
+            details={"gated_by": gated_by, "working_sha256": sha256},
+        )
 
     # The holder check and every write are one SQLite write transaction (#18): a reassignment
     # can't slip in between them, it waits for this to commit. The files written go if it rolls
     # back, before its write lock does, so no later request can have taken their version yet.
     with store.transaction() as conn:
+        # The gate's second half, on the write lock (re-audit P1): the newest verdict must be a passing one on these very
+        # files. Read here, a `failed` another process committed a moment ago is seen, and none can be committed before
+        # this request is — BEGIN IMMEDIATE holds the lock from here to the commit.
+        if gated_by is not None:
+            newest = latest_verdict(store, node_id)
+            if newest is None or newest.get("outcome") != "passed" or newest.get("inputs_sha256") != sha256:
+                raise ProofMapError(
+                    "VERDICT_STALE",
+                    f"the newest verdict on {node_id} is not a passing one on these files"
+                    + (f" (it {newest.get('outcome')} {str(newest.get('inputs_sha256') or '')[:12]}…)" if newest else " (there is none)")
+                    + "; have the Verifier read them again before requesting review",
+                    details={"gated_by": gated_by, "working_sha256": sha256, "newest_verdict": newest},
+                )
         claim = get_active_claim(store, node_id, conn=conn)
         unassigned = claim.claimant_id if claim is not None and claim.claimant_id != requested_by else None
         if unassigned is not None and not unassign:  # a node someone holds is theirs to hand over

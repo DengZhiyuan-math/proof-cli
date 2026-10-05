@@ -383,7 +383,8 @@ def test_the_gate_is_one_digest_given_once_and_the_newest_verdict_must_be_the_pa
     write_key_ideas(store, "N")
     passed = record_progress(store, "N", role="verifier", by="claude-code", verdict="passed")
     for bad in (["--gated-by", passed["inputs_sha256"], "--gated-by", ""], ["--gated-by", ""], ["--gated-by", "abc"],
-                ["--gated-by", passed["inputs_sha256"], "--gated-by", "0" * 64]):
+                ["--gated-by", passed["inputs_sha256"], "--gated-by", "0" * 64],
+                ["--gated-by", passed["inputs_sha256"], "--gated-by", passed["inputs_sha256"]]):  # given once: an equal repeat is a repeat
         result = _run(tmp_path, "node", "request-review", "N", "--rationale", "r", *bad, "--json")
         assert result.exit_code == 1 and json.loads(result.output)["error"]["code"] == "GATE_MALFORMED", bad
     record_progress(store, "N", role="verifier", by="claude-code", verdict="failed", note="1. step 2 is unjustified")  # same files, newer verdict
@@ -394,3 +395,31 @@ def test_the_gate_is_one_digest_given_once_and_the_newest_verdict_must_be_the_pa
     again = record_progress(store, "N", role="verifier", by="claude-code", verdict="passed")
     result = _run(tmp_path, "node", "request-review", "N", "--rationale", "r", "--gated-by", again["inputs_sha256"], "--json")
     assert result.exit_code == 0, result.output
+
+
+def test_a_failed_verdict_committed_while_the_request_is_made_is_seen_on_the_write_lock(tmp_path: Path, monkeypatch):
+    """Re-audit P1: the newest-verdict check is on the write lock. A `failed` another process commits after the files were
+    read but before the request's transaction is what the request sees, and nothing is frozen."""
+    from _proofs import write_key_ideas
+    from proof_cli import proof_map
+
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="N", kind="claim", statement="s")
+    write_key_ideas(store, "N")
+    passed = record_progress(store, "N", role="verifier", by="claude-code", verdict="passed")
+    real = proof_map.read_working_snapshot
+
+    injected = []
+
+    def read_then_someone_fails(root, node_id, medium=None):
+        snapshot = real(root, node_id, medium)
+        if not injected:  # once: the verdict's own digest read, inside record_progress, comes through here too
+            injected.append(True)
+            record_progress(store, "N", role="verifier", by="another-verifier", verdict="failed", note="1. the lemma is misapplied")  # between the read and the lock
+        return snapshot
+
+    monkeypatch.setattr(proof_map, "read_working_snapshot", read_then_someone_fails)
+    with pytest.raises(ProofMapError) as refused:
+        request_review(store, "N", requested_by="claude-code", rationale="r", gated_by=passed["inputs_sha256"])
+    assert refused.value.code == "VERDICT_STALE" and refused.value.details["newest_verdict"]["outcome"] == "failed"
+    assert not (tmp_path / "proofs" / "N" / "snapshots").exists() or not any((tmp_path / "proofs" / "N" / "snapshots").iterdir())
