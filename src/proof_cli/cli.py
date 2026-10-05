@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import os
 import sys
 from pathlib import Path
@@ -839,14 +840,18 @@ def node_request_review(
     node_id: str,
     rationale: str = typer.Option(..., "--rationale", help="Why this node is now appropriately scoped to prove directly"),
     requested_by: str = typer.Option("human", "--requested-by"),
-    gated_by: str = typer.Option("", "--gated-by", help="A run's Prover: the SHA-256 of the Verifier's passing verdict; refused (VERDICT_STALE) if the files changed since (ADR-0019)"),
+    gated_by: list[str] = typer.Option(None, "--gated-by", help="A run's Prover: the SHA-256 of the Verifier's passing verdict, once; refused (VERDICT_STALE) if the files changed since, or the newest verdict is not that passing one (ADR-0019)"),
     root: str = ROOT_OPTION,
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Snapshot the node's working proof.tex (or a computation's run.sh and out/) for review (ADR-0010). Needs no claim."""
     store = get_store(_root(root))
     try:
-        record = request_review(store, node_id, requested_by=requested_by, rationale=rationale, gated_by=gated_by or None)
+        # the gate is one digest, given once: a second --gated-by, or an empty one, is not a way out of it (ADR-0019 point 3)
+        gates = set(gated_by or [])
+        if gates and (len(gates) != 1 or not re.fullmatch(r"[0-9a-f]{64}", next(iter(gates)))):
+            raise ProofMapError("GATE_MALFORMED", "--gated-by is the passing verdict's SHA-256 (64 hex digits), given once; repeated, empty or malformed, the request is refused")
+        record = request_review(store, node_id, requested_by=requested_by, rationale=rationale, gated_by=next(iter(gates)) if gates else None)
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.request_review")
         raise typer.Exit(code=1)
