@@ -5,6 +5,9 @@ on:
     branches: [master]
   pull_request:
 
+env:
+  PYTHONUTF8: "1"
+
 jobs:
   core-and-studio:
     # proof-cli and latex-agent, from this repository alone (proof-agents and proof-web are private siblings: the
