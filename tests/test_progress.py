@@ -371,3 +371,26 @@ def test_a_gated_request_is_refused_once_the_files_changed_and_the_researchers_o
     request_review(store, "N", requested_by="human", rationale="my own edit")  # the researcher names no verdict
     result = _run(tmp_path, "node", "request-review", "N", "--rationale", "r", "--gated-by", verdict["inputs_sha256"], "--json")
     assert result.exit_code == 1 and json.loads(result.output)["error"]["code"] == "VERDICT_STALE"
+
+
+def test_the_gate_is_one_digest_given_once_and_the_newest_verdict_must_be_the_passing_one(tmp_path: Path):
+    """Re-audit P1: a second `--gated-by ""` is not a way out of the gate, and a failed verdict after the passing one on the
+    same files closes it."""
+    from _proofs import write_key_ideas
+
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="N", kind="claim", statement="s")
+    write_key_ideas(store, "N")
+    passed = record_progress(store, "N", role="verifier", by="claude-code", verdict="passed")
+    for bad in (["--gated-by", passed["inputs_sha256"], "--gated-by", ""], ["--gated-by", ""], ["--gated-by", "abc"],
+                ["--gated-by", passed["inputs_sha256"], "--gated-by", "0" * 64]):
+        result = _run(tmp_path, "node", "request-review", "N", "--rationale", "r", *bad, "--json")
+        assert result.exit_code == 1 and json.loads(result.output)["error"]["code"] == "GATE_MALFORMED", bad
+    record_progress(store, "N", role="verifier", by="claude-code", verdict="failed", note="1. step 2 is unjustified")  # same files, newer verdict
+    with pytest.raises(ProofMapError) as refused:
+        request_review(store, "N", requested_by="claude-code", rationale="r", gated_by=passed["inputs_sha256"])
+    assert refused.value.code == "VERDICT_STALE" and refused.value.details["newest_verdict"]["outcome"] == "failed"
+    assert not (tmp_path / "proofs" / "N" / "snapshots").exists() or not any((tmp_path / "proofs" / "N" / "snapshots").iterdir())
+    again = record_progress(store, "N", role="verifier", by="claude-code", verdict="passed")
+    result = _run(tmp_path, "node", "request-review", "N", "--rationale", "r", "--gated-by", again["inputs_sha256"], "--json")
+    assert result.exit_code == 0, result.output

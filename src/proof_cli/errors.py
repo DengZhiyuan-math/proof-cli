@@ -186,6 +186,7 @@ ERROR_CODES: dict[str, str] = {
     "INVALID_VERDICT": "a verdict's outcome is passed or failed",
     "OBJECTIONS_REQUIRED": "a failed verdict names its objections in --note",
     "ATTEMPT_INCOMPLETE": "an attempt is recorded by what it tried to establish and what it failed on: --attempt needs --failed-on",
+    "GATE_MALFORMED": "`request-review --gated-by` is one SHA-256 of 64 hex digits, given once; a repeated, empty or malformed value is refused rather than read as no gate",
     "VERDICT_STALE": "a run's Prover requested review naming a passing verdict's digest (--gated-by), but the node's files are no longer the ones the Verifier passed; nothing was frozen",
     # -- the Proof agent's run, through the studio and the map (ADR-0016, spec #145) --
     "RUN_ACTIVE": "an agent is already working on this node: pause, redirect or release it first",
