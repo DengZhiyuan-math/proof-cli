@@ -406,15 +406,26 @@ def record_progress(
     attempt: str | None = None,
     method: str | None = None,
     failed_on: str | None = None,
+    coordinator: str | None = None,
 ) -> dict:
     """Report a plan (the steps the run means to take), one step's status, a handoff to another role, the
-    Verifier's verdict on the working proof, or an attempt the role abandoned (ADR-0019). Returns the log entry.
+    Verifier's verdict on the working proof, an attempt the role abandoned (ADR-0019), or — on a Theorem or Lemma
+    a Coordinator works — what the Coordinator did (`coordinator`: started a node's run, redirected a dependent,
+    stopped; ADR-0019 point 18). A Coordinator holds no node and takes no turn, so its note names no role.
+    Returns the log entry.
 
     A verdict is `passed` or `failed` with the objections as its note, and carries the inputs digest of the node
     folder as it stands — what a Review snapshot's manifest would hash — so a later edit makes it stale by
     construction; only the Verifier records one. An attempt is what the role tried to establish, how, and what it
     failed on; any role records one. Both are insert-only events like the rest of the work log."""
     node = require_node(store, node_id)
+    if coordinator is not None:
+        if not coordinator.strip():
+            raise ProofMapError("PROGRESS_EMPTY", "say what the Coordinator did: --coordinator \"<what it started, redirected or stopped>\"")
+        payload = {"kind": "coordinator", "role": None, "by": by, "note": coordinator.strip()}
+        with store.transaction() as conn:
+            append_event(store, PROGRESS_EVENT, f"coordinator on {node_id}: {coordinator.strip()}", entity_id=node_id, payload=payload, conn=conn)
+        return {**payload, "node_id": node_id, "at": utc_now().isoformat()}
     if not role:
         raise ProofMapError("ROLE_REQUIRED", f"say which role reports: {', '.join(AGENT_ROLES)} (an agent's runtime sets PROOF_AGENT_ROLE)")
     if role not in AGENT_ROLES:
