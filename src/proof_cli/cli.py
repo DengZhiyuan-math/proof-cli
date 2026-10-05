@@ -839,13 +839,14 @@ def node_request_review(
     node_id: str,
     rationale: str = typer.Option(..., "--rationale", help="Why this node is now appropriately scoped to prove directly"),
     requested_by: str = typer.Option("human", "--requested-by"),
+    gated_by: str = typer.Option("", "--gated-by", help="A run's Prover: the SHA-256 of the Verifier's passing verdict; refused (VERDICT_STALE) if the files changed since (ADR-0019)"),
     root: str = ROOT_OPTION,
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Snapshot the node's working proof.tex (or a computation's run.sh and out/) for review (ADR-0010). Needs no claim."""
     store = get_store(_root(root))
     try:
-        record = request_review(store, node_id, requested_by=requested_by, rationale=rationale)
+        record = request_review(store, node_id, requested_by=requested_by, rationale=rationale, gated_by=gated_by or None)
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.request_review")
         raise typer.Exit(code=1)

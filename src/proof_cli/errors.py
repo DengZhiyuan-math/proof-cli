@@ -186,6 +186,7 @@ ERROR_CODES: dict[str, str] = {
     "INVALID_VERDICT": "a verdict's outcome is passed or failed",
     "OBJECTIONS_REQUIRED": "a failed verdict names its objections in --note",
     "ATTEMPT_INCOMPLETE": "an attempt is recorded by what it tried to establish and what it failed on: --attempt needs --failed-on",
+    "VERDICT_STALE": "a run's Prover requested review naming a passing verdict's digest (--gated-by), but the node's files are no longer the ones the Verifier passed; nothing was frozen",
     # -- the Proof agent's run, through the studio and the map (ADR-0016, spec #145) --
     "RUN_ACTIVE": "an agent is already working on this node: pause, redirect or release it first",
     "RUN_SETTLING": "the previous run is still giving the node back; Start again in a moment",
