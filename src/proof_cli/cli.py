@@ -1618,8 +1618,8 @@ def memory_add(
     review_id: str = "",
     route_id: str = "",
     importance: str = "medium",
-    status: str = "",
-    source: str = "manual",
+    status: str = typer.Option("", help="stable | tentative | failed | tactic: what was learned, as against what was tried (ADR-0019 point 8)"),
+    source: str = typer.Option("manual", help="Who learned it: manual, or a run's agent and role as <agent>/<role>"),
     tag: list[str] = typer.Option(None, "--tag"),
     notes: str = "",
     json_output: bool = typer.Option(False, "--json"),
@@ -1627,7 +1627,11 @@ def memory_add(
     """Record a memory entry, scoped to a proof-map node (and one of its Candidate proofs or reviews).
 
     The scope is checked against the map, and a bad one writes nothing. The
-    legacy theorem/goal/obligation/blocker scope is read-only (ADR-0012).
+    legacy theorem/goal/obligation/blocker scope is read-only (ADR-0012). A
+    run's role records what it learned here — a dead end (--status failed), a
+    technique that worked (--status tactic), an observation not yet trusted
+    (--status tentative) — scoped to its own node and tagged with --source
+    <agent>/<role>; other nodes' briefings read it (ADR-0019 part C).
     """
     try:
         output = cmd_memory_add(
