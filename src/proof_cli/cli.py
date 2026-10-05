@@ -960,6 +960,7 @@ def node_progress(
     attempt: str = typer.Option("", "--attempt", help="Close an abandoned line: what it tried to establish; goes with --failed-on (ADR-0019)"),
     method: str = typer.Option("", "--method", help="With --attempt: the approach"),
     failed_on: str = typer.Option("", "--failed-on", help="With --attempt: the objection or obstruction it failed on"),
+    coordinator: str = typer.Option("", "--coordinator", help="What a Coordinator did on this Theorem or Lemma's subtree: a run it started, a redirect, a stop (ADR-0019 point 18); no role"),
     role: str = typer.Option("", "--role", help=f"{_ROLES_HELP} (default: PROOF_AGENT_ROLE, set in the agent's runtime)"),
     by: str = typer.Option("", "--by", help="Who reports; empty means PROOF_AGENT_NAME from the agent's runtime, else human"),
     root: str = ROOT_OPTION,
@@ -969,7 +970,7 @@ def node_progress(
     the Verifier's verdict or an abandoned attempt (ADR-0019). Without any of them: the node's work log so far."""
     store = get_store(_root(root))
     try:
-        if not plan and step is None and not handoff and not verdict and not attempt and not failed_on:
+        if not plan and step is None and not handoff and not verdict and not attempt and not failed_on and not coordinator:
             log = work_log(store, node_id)
             if json_output:
                 typer.echo(dump_envelope(success_envelope("node.progress", log)))
@@ -979,7 +980,7 @@ def node_progress(
         entry = record_progress(
             store, node_id, role=role or os.environ.get("PROOF_AGENT_ROLE") or None, by=by or os.environ.get("PROOF_AGENT_NAME") or "human",
             plan=plan or None, step=step, status=status or None, note=note, handoff=handoff or None,
-            verdict=verdict or None, attempt=attempt or None, method=method or None, failed_on=failed_on or None,
+            verdict=verdict or None, attempt=attempt or None, method=method or None, failed_on=failed_on or None, coordinator=coordinator or None,
         )
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.progress")

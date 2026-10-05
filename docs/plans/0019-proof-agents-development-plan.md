@@ -104,3 +104,28 @@ Wave 2b can begin on the pane (its point 2) at once; its hooks (point 1) need 2a
 
 - The Coordinator's redirect when a dependency is Accepted (point 19) is phase 3; a Decomposer's turn and the researcher's diff in the briefing (points 20, 21 in full) are phase 4.
 - On Codex the memory-write scope is the brief's rule, as every scope is there (ADR-0010).
+
+## Phase 3 in detail (built 2026-10-05: branch `feat/0019-coordinator` in each repository, stacked on phase 2's)
+
+### proof-cli (core)
+
+1. `record_progress(..., coordinator="<note>")` and `proof node progress <node> --coordinator "<note>"`: a `coordinator` entry on a node's work log, with no role (a Coordinator holds no node and takes no turn); `rendering.py` shows it as `coordinator: <note>`. The Coordinator's refusal codes join `errors.py` (`NO_SUBTREE`, `COORDINATOR_ACTIVE`, `NO_COORDINATOR`, `NOT_PAUSED`, `NOTHING_OPEN`, `COORDINATOR_REFUSED`).
+2. Tests: `tests/test_progress.py`.
+
+### proof-agents
+
+1. `coordinator.py`: `Coordinator(hooks, root)` over several `AgentRun`s, with `CoordinatorHooks` (`subtree`, `run`, `budget`, `parallel`, `agent_name`, `record`), a `CoordinatorState` and `view()`. Its loop looks at the subtree every `TICK`: it starts node runs on the frontier within the subtree — the open nodes, which is the core's frontier rule, so the parent is startable once every child is Accepted — up to `parallel` at a time; restarts a node whose run ended on a failed verdict (`stuck` or `budget`, the newest verdict `failed`) while the node budget (one Start's turns) is not spent; redirects the running dependents of a newly Accepted node once, with its statement and key ideas (point 19); and ends when the root is requested for review or Accepted, when its budget (the node budget × the open nodes at Start) is spent, or when nothing runs, nothing can start and no node waits for review (every open node is stuck). A node waiting for review is not stuck: it holds the Coordinator waiting. Actions: `start(provider)`, `pause()` (no new run; the running ones pause after their turn), `resume()` (only the runs Pause held), `release()` (every run it started). Every action and ending is a `coordinator` note through `record`.
+2. `proof_agent.parallel(root)`: `[studio] parallel`, default 2.
+3. Tests: `tests/test_coordinator.py`, with fake runs and a subtree the test moves along.
+
+### proof-web
+
+1. `StudioHub.coordinator(root)` (one per root, made on first use; refused for an imported result or a node with no dependencies), `_subtree` (the root and what it rests on, transitively: Accepted or Reference-reviewed, the workflow axis, the claim, the key ideas once Accepted, whether a run can work it), `_run_of` (the node's run through a studio made on demand: no page needs to be open), `coordinator_action`, `coordinator_view` (with the subtree's counts and the parallelism), `coordinator_state` (for the map while active), and `_record_coordinator` (the note on the root's log). `close()` releases a Coordinator at work first.
+2. Routes: `GET /api/node/<id>/coordinator`, `POST /api/node/<id>/coordinator/<start|pause|resume|release>`; the map's node payload carries `coordinator` while one is active.
+3. The run pane: a *Subtree* card above the node's own run on a node that rests on others — Start subtree; while it works, where it stands (the runs on, accepted of total, turns of budget), Pause/Resume subtree, Stop subtree; a `coordinator` note in the work log.
+4. Tests: `tests/test_coordinator_hub.py` (the stub Claude Code works T over A and B one at a time, the root once both are Accepted; Stop and release releases the run it started), `tests/test_run_pane.py`.
+
+### Left to phase 4
+
+- The Decomposer's turn (point 20) and the researcher's diff in the briefing (point 21 in full).
+- A Coordinator's state lives in the page's process, as a run's does; its notes on the root's log are its record across a restart.

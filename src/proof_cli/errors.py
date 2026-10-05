@@ -192,6 +192,13 @@ ERROR_CODES: dict[str, str] = {
     "RUN_ACTIVE": "an agent is already working on this node: pause, redirect or release it first",
     "RUN_SETTLING": "the previous run is still giving the node back; Start again in a moment",
     "NO_RUN": "no agent run to act on: the folder is not a proof map node, or no run is active on it",
+    # the Coordinator over a Theorem's or Lemma's subtree (ADR-0019 point 18)
+    "NO_SUBTREE": "no subtree to coordinate: the node rests on nothing, or is an imported result",
+    "COORDINATOR_ACTIVE": "a Coordinator is already working this subtree: pause or stop it first",
+    "NO_COORDINATOR": "no Coordinator is working this subtree",
+    "NOT_PAUSED": "the Coordinator is not paused",
+    "NOTHING_OPEN": "nothing in the subtree is open: every node is Accepted, or none has a proof to write",
+    "COORDINATOR_REFUSED": "the Coordinator refused the action; the message says why",
     "REDIRECT_EMPTY": "a Redirect needs its one line of text",
     "RUN_REFUSED": "the run's Start was refused for a reason with no code of its own; the message says why",
     "RELEASE_FAILED": "the run ended but the node could not be given back; it is still assigned, and the message says why",
