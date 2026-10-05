@@ -63,12 +63,29 @@ class RetrievalSourceTrace(BaseModel):
     candidate_ids: list[str] = Field(default_factory=list)
 
 
+class MemoryHit(BaseModel):
+    """A memory entry retrieved by text (ADR-0019 point 14): what a node's briefing draws from memory elsewhere in the
+    map, after its dependencies', dependents' and siblings'. Nothing here is a fact: an entry is what a node's run
+    learned, and the briefing marks it unverified."""
+
+    id: str
+    node_id: str | None = None
+    layer: str
+    status: str
+    content: str
+    source: str
+    created_at: str
+    score: float
+    matched: list[str] = Field(default_factory=list)
+
+
 class RetrievalReport(BaseModel):
     query: str
     project_context: RetrievalContext
     source_order: list[RetrievalSourceKind] = Field(default_factory=list)
     candidates: list[RetrievalCandidate] = Field(default_factory=list)
     trace: list[RetrievalSourceTrace] = Field(default_factory=list)
+    memory: list[MemoryHit] = Field(default_factory=list)   # memory entries matching the query, best first (ADR-0019 point 14)
 
 
 class CrossProjectSourceKind(str, Enum):
@@ -788,6 +805,41 @@ __all__ = [
 ]
 
 
+def retrieve_memory(
+    store: ProjectStore,
+    query: str,
+    *,
+    limit: int = 5,
+    statuses: Sequence[str] | None = None,
+    exclude_node_ids: Sequence[str] = (),
+) -> list[MemoryHit]:
+    """The memory entries whose text matches `query`, best first, newest first among equals (ADR-0019 point 14: a
+    node's briefing draws from memory elsewhere in the map by the node's statement). `statuses` keeps only entries
+    of those statuses (failed, tactic, tentative: what was learned, as against what is settled); `exclude_node_ids`
+    leaves out the nodes the briefing already covers (the node itself, its dependencies, dependents and siblings).
+    A node-scoped entry is matched on its content, tags and notes; one with no node is matched the same and said to
+    have none. No match, no hit: an empty query retrieves nothing."""
+    terms = _tokens(query)
+    if not terms:
+        return []
+    wanted = {str(status) for status in statuses} if statuses else None
+    excluded = set(exclude_node_ids)
+    scored: list[tuple[float, float, MemoryHit]] = []
+    for artifact in list_memory_artifacts(store):
+        node_id = artifact.scope.node_id or artifact.linked_proof_state.node_id
+        if node_id in excluded or (wanted is not None and artifact.status.value not in wanted):
+            continue
+        score, reasons = _score_text(terms, artifact.content, " ".join(artifact.tags), artifact.linked_proof_state.notes or "")
+        if score <= 0:
+            continue
+        matched = sorted({token for reason in reasons for token in reason.removeprefix("matched ").split(", ")})
+        hit = MemoryHit(id=artifact.id, node_id=node_id, layer=artifact.layer.value, status=artifact.status.value, content=artifact.content,
+                        source=artifact.source, created_at=artifact.created_at.isoformat(), score=score, matched=matched)
+        scored.append((score, artifact.created_at.timestamp(), hit))
+    scored.sort(key=lambda item: (-item[0], -item[1]))
+    return [hit for _, _, hit in scored[:limit]]
+
+
 def retrieve_candidates(
     store: ProjectStore,
     *,
@@ -893,4 +945,5 @@ def retrieve_candidates(
         source_order=source_order,
         candidates=ranked,
         trace=trace,
+        memory=retrieve_memory(store, query or "", limit=limit) if query else [],
     )

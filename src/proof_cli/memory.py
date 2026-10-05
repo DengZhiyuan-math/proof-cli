@@ -124,7 +124,9 @@ class MemoryArtifact(BaseModel):
     content: str
     importance: MemoryImportance = MemoryImportance.medium
     linked_proof_state: LinkedProofState = Field(default_factory=LinkedProofState)
-    source: Literal["manual", "snapshot", "recovery", "migration"] = "manual"
+    # where the entry came from: manual | snapshot | recovery | migration, or, when a run's role learned it, the
+    # agent and role as `<agent>/<role>` (ADR-0019 point 8: memory's typed entries are the channel between nodes)
+    source: str = "manual"
     tags: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
@@ -1166,7 +1168,7 @@ def append_memory_artifact(
     method_id: str | None = None,
     linked_snapshot_id: str | None = None,
     status: MemoryStatus | str | None = None,
-    source: Literal["manual", "snapshot", "recovery", "migration"] = "manual",
+    source: str = "manual",
     tags: list[str] | None = None,
     notes: str = "",
 ) -> MemoryArtifact:
@@ -1235,7 +1237,7 @@ def record_memory(
     method_id: str | None = None,
     linked_snapshot_id: str | None = None,
     status: MemoryStatus | str | None = None,
-    source: Literal["manual", "snapshot", "recovery", "migration"] = "manual",
+    source: str = "manual",
     tags: list[str] | None = None,
     notes: str = "",
 ) -> LayeredMemory:
