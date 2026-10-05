@@ -18,6 +18,7 @@ how, and what it failed on; any role records one. Both are what the run briefs i
 import json
 from pathlib import Path
 
+import click
 import pytest
 from typer.testing import CliRunner
 
@@ -139,7 +140,7 @@ def test_a_step_that_needs_a_human_decision_names_it(tmp_path: Path):
     refused = _run(tmp_path, "node", "progress", "N", "--step", "1", "--status", "needs-human", "--json", env=env)
     assert refused.exit_code == 1 and json.loads(refused.output)["error"]["code"] == "DECISION_REQUIRED"
     shown = _run(tmp_path, "node", "progress", "N")
-    assert "needs a human decision — choose the norm" in shown.output
+    assert "needs a human decision — choose the norm" in " ".join(click.unstyle(shown.output).split())
 
 
 def test_automatic_entries_take_the_role_of_the_turn_that_made_them_and_a_turn_keeps_its_conversation(tmp_path: Path):
@@ -325,7 +326,7 @@ def test_the_cli_refuses_a_malformed_verdict_or_attempt_in_one_envelope(tmp_path
 
 
 def test_the_cli_help_lists_the_five_roles():
-    shown = runner.invoke(app, ["node", "progress", "--help"]).output
+    shown = click.unstyle(runner.invoke(app, ["node", "progress", "--help"]).output)
     squeezed = " ".join(shown.replace("│", " ").split())  # Rich boxes and wraps the help; the words are what count
     assert "prover, typesetter, numerics, verifier or decomposer" in squeezed
     assert "--verdict" in squeezed and "--attempt" in squeezed and "--method" in squeezed and "--failed-on" in squeezed
