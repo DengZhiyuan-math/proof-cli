@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import os
 import sys
 from pathlib import Path
@@ -115,12 +116,12 @@ from .commands import (
     cmd_theorem_show,
     get_store,
 )
-from .domain import ProofMapNodeKind, is_computation
+from .domain import AGENT_ROLES, ProofMapNodeKind, is_computation
 from .envelope import dump_envelope, error_envelope, success_envelope
 from .contract import ProofGroup
 from .theorems import LEGACY_TRUST_NOTICE
 from .collaboration import summarize_review_record
-from .storage import read_scoped
+from .storage import read_project_instance_id, read_scoped
 from .fog import (
     add_fog,
     crystallize_fog,
@@ -197,6 +198,7 @@ from .rendering import (
     render_trust_rule,
     render_trust_rule_list,
     render_work_log,
+    render_work_log_entry,
 )
 from .review import render_verification_output
 
@@ -838,13 +840,18 @@ def node_request_review(
     node_id: str,
     rationale: str = typer.Option(..., "--rationale", help="Why this node is now appropriately scoped to prove directly"),
     requested_by: str = typer.Option("human", "--requested-by"),
+    gated_by: list[str] = typer.Option(None, "--gated-by", help="A run's Prover: the SHA-256 of the Verifier's passing verdict, once; refused (VERDICT_STALE) if the files changed since, or the newest verdict is not that passing one (ADR-0019)"),
     root: str = ROOT_OPTION,
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Snapshot the node's working proof.tex (or a computation's run.sh and out/) for review (ADR-0010). Needs no claim."""
     store = get_store(_root(root))
     try:
-        record = request_review(store, node_id, requested_by=requested_by, rationale=rationale)
+        # the gate is one digest, given once: a second --gated-by, or an empty one, is not a way out of it (ADR-0019 point 3)
+        gates = list(gated_by or [])
+        if gates and (len(gates) != 1 or not re.fullmatch(r"[0-9a-f]{64}", gates[0])):  # given once: a repeat, equal or not, is refused
+            raise ProofMapError("GATE_MALFORMED", "--gated-by is the passing verdict's SHA-256 (64 hex digits), given once; repeated, empty or malformed, the request is refused")
+        record = request_review(store, node_id, requested_by=requested_by, rationale=rationale, gated_by=gates[0] if gates else None)
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.request_review")
         raise typer.Exit(code=1)
@@ -938,6 +945,9 @@ def node_split(
         typer.echo(render_proof_map_node_list(children))
 
 
+_ROLES_HELP = ", ".join(AGENT_ROLES[:-1]) + f" or {AGENT_ROLES[-1]}"  # the roles, as the help spells them (ADR-0019: never by hand)
+
+
 @node_app.command("progress")
 def node_progress(
     node_id: str,
@@ -945,17 +955,22 @@ def node_progress(
     step: int = typer.Option(None, "--step", help="The step being reported, counting from 1"),
     status: str = typer.Option("", "--status", help="With --step: started, done, stuck, or needs-human (a decision only the researcher can make, named in --note)"),
     note: str = typer.Option("", "--note", help="A line about the step: what it found, why it is stuck, what the next role should do"),
-    handoff: str = typer.Option("", "--handoff", help="Hand the work to this role (prover, typesetter or numerics) and end the turn"),
-    role: str = typer.Option("", "--role", help="prover, typesetter or numerics (default: PROOF_AGENT_ROLE, set in the agent's runtime)"),
+    handoff: str = typer.Option("", "--handoff", help=f"Hand the work to this role ({_ROLES_HELP}) and end the turn"),
+    verdict: str = typer.Option("", "--verdict", help="The Verifier's verdict on the working proof as it stands: passed or failed, with the objections in --note (ADR-0019)"),
+    attempt: str = typer.Option("", "--attempt", help="Close an abandoned line: what it tried to establish; goes with --failed-on (ADR-0019)"),
+    method: str = typer.Option("", "--method", help="With --attempt: the approach"),
+    failed_on: str = typer.Option("", "--failed-on", help="With --attempt: the objection or obstruction it failed on"),
+    coordinator: str = typer.Option("", "--coordinator", help="What a Coordinator did on this Theorem or Lemma's subtree: a run it started, a redirect, a stop (ADR-0019 point 18); no role"),
+    role: str = typer.Option("", "--role", help=f"{_ROLES_HELP} (default: PROOF_AGENT_ROLE, set in the agent's runtime)"),
     by: str = typer.Option("", "--by", help="Who reports; empty means PROOF_AGENT_NAME from the agent's runtime, else human"),
     root: str = ROOT_OPTION,
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
-    """A Proof agent's report of its plan or a step on this node — the studio's work log (spec #145).
-    Without --plan or --step: the node's work log so far."""
+    """A Proof agent's report on this node — the studio's work log (spec #145): its plan, a step, a handoff,
+    the Verifier's verdict or an abandoned attempt (ADR-0019). Without any of them: the node's work log so far."""
     store = get_store(_root(root))
     try:
-        if not plan and step is None and not handoff:
+        if not plan and step is None and not handoff and not verdict and not attempt and not failed_on and not coordinator:
             log = work_log(store, node_id)
             if json_output:
                 typer.echo(dump_envelope(success_envelope("node.progress", log)))
@@ -965,6 +980,7 @@ def node_progress(
         entry = record_progress(
             store, node_id, role=role or os.environ.get("PROOF_AGENT_ROLE") or None, by=by or os.environ.get("PROOF_AGENT_NAME") or "human",
             plan=plan or None, step=step, status=status or None, note=note, handoff=handoff or None,
+            verdict=verdict or None, attempt=attempt or None, method=method or None, failed_on=failed_on or None, coordinator=coordinator or None,
         )
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.progress")
@@ -972,8 +988,7 @@ def node_progress(
     if json_output:
         typer.echo(dump_envelope(success_envelope("node.progress", entry)))
     else:
-        body = f"plan of {len(entry['plan'])} step(s)" if entry["kind"] == "plan" else f"handed off to {entry['to']}" if entry["kind"] == "handoff" else f"step {entry['step']} {entry['status']}"
-        typer.echo(f"{entry['role']} on {node_id}: {body}" + (f" — {entry['note']}" if entry.get("note") else ""))
+        typer.echo(render_work_log_entry(node_id, entry))
 
 
 @node_medium_app.command("set")
@@ -1599,13 +1614,14 @@ def memory_add(
     content: str,
     root: str = ROOT_OPTION,
     layer: str = "working",
-    node_id: str = "",
+    node_id: list[str] = typer.Option(None, "--node-id", help="The node this is about; once. A run's role may name only its own node (ADR-0019 point 12)"),
+    project: list[str] = typer.Option(None, "--project", help="The project's instance id this entry is for; once. Refused when the project opened is another: a run's role writes its own project's memory and no other's"),
     candidate_proof_id: str = "",
     review_id: str = "",
     route_id: str = "",
     importance: str = "medium",
-    status: str = "",
-    source: str = "manual",
+    status: str = typer.Option("", help="stable | tentative | failed | tactic: what was learned, as against what was tried (ADR-0019 point 8)"),
+    source: str = typer.Option("manual", help="Who learned it: manual, or a run's agent and role as <agent>/<role>"),
     tag: list[str] = typer.Option(None, "--tag"),
     notes: str = "",
     json_output: bool = typer.Option(False, "--json"),
@@ -1613,14 +1629,38 @@ def memory_add(
     """Record a memory entry, scoped to a proof-map node (and one of its Candidate proofs or reviews).
 
     The scope is checked against the map, and a bad one writes nothing. The
-    legacy theorem/goal/obligation/blocker scope is read-only (ADR-0012).
+    legacy theorem/goal/obligation/blocker scope is read-only (ADR-0012). A
+    run's role records what it learned here — a dead end (--status failed), a
+    technique that worked (--status tactic), an observation not yet trusted
+    (--status tentative) — scoped to its own node and tagged with --source
+    <agent>/<role>; other nodes' briefings read it (ADR-0019 part C). The
+    node is named once: a second --node-id, or an empty one, is refused, so
+    a permission that admits `proof memory add --node-id <node>` admits that
+    node's memory and no other's.
     """
+    given = list(node_id or [])
+    projects = list(project or [])
+    refused = None
+    if len(given) > 1 or any(not value.strip() for value in given):
+        refused = "--node-id names one node, once" if len(given) > 1 else "--node-id needs a node id"
+    elif len(projects) > 1 or any(not value.strip() for value in projects):
+        refused = "--project names one project, once" if len(projects) > 1 else "--project needs a project instance id"
+    elif projects:
+        try:
+            opened = read_project_instance_id(get_store(_root(root)))
+        except Exception:  # noqa: BLE001 — no project there: not the one named either
+            opened = None
+        if opened != projects[0].strip():
+            refused = f"the project at {_root(root)} is not project {projects[0].strip()}: this entry is for another project"
+    if refused is not None:
+        _emit_error(ProofMapError("INVALID_INPUT", refused), json_output, command="memory.add")
+        raise typer.Exit(code=1)
     try:
         output = cmd_memory_add(
             content,
             _root(root),
             layer=layer,
-            node_id=node_id,
+            node_id=given[0].strip() if given else "",
             candidate_proof_id=candidate_proof_id,
             review_id=review_id,
             route_id=route_id,
