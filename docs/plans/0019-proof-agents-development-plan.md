@@ -127,5 +127,31 @@ Wave 2b can begin on the pane (its point 2) at once; its hooks (point 1) need 2a
 
 ### Left to phase 4
 
-- The Decomposer's turn (point 20) and the researcher's diff in the briefing (point 21 in full).
+- The Decomposer's turn (point 20) and the researcher's diff in the briefing (point 21 in full) — built, below.
 - A Coordinator's state lives in the page's process, as a run's does; its notes on the root's log are its record across a restart.
+
+## Phase 4 in detail (built 2026-10-05: branch `feat/0019-decomposer` in each repository, stacked on phase 3's)
+
+### proof-cli (core)
+
+Nothing: `AgentRole.decomposer` has been in the domain since phase 1, `proof node progress` reports under it, and `--status needs-human` is the step status the run already stops for (ADR-0019 point 20, as amended). Only this plan changes here.
+
+### proof-agents
+
+1. **The Decomposer** (point 20). `ROLES["decomposer"]`, a `Role` with `alone=True`: its brief reads the library and the literature first, splits the node into the Claims the course of the proof needs (`proof node split … --created-by <name>`, one call), puts what it cannot yet state in the fog near the node, keeps its notes under `scratch/decomposer/`, and ends with exactly `proof node progress <node> --step 1 --status needs-human --note "structure proposed; the researcher decides"` — or, when the node is one argument after all, says so and splits nothing. Its `proof` commands are the reads, `proof fog add` and `proof node split`; it writes `./scratch/decomposer/**`; it runs no program; it never requests review, never edits an edge, never hands off. `CYCLE_ROLES` is every role with a brief but one started alone: a whole run never gives the Decomposer a turn and a `--handoff decomposer` hands to nobody.
+2. **The run's side of the stop.** A Start naming the Decomposer with any other role is refused (`ROLE_ALONE`). A Start naming it alone is refused (`NOT_DECOMPOSABLE`) when the node brief's `kind` is not `theorem` or `lemma`, or when the node already has dependencies (it is split: a Coordinator's work now); a host whose brief has no `kind` refuses nothing on kind. After a Decomposer turn that recorded a split and no `needs-human` step of its own, the run ends `needs-human` anyway (`structure proposed (<n> Claim(s): …); the researcher decides`) and leaves that as its closing note: the human stop is the run's, not the brief's. *Implementation choice:* the ADR's point 20 says "a Theorem"; the Decomposer accepts a Lemma too, as the Coordinator (point 18) does, since the one proposes the structure the other works.
+3. **The researcher's diff** (point 21 in full). `RunHooks.working_inputs: Callable[[], dict[str, str | None]]` — the working inputs' text by path, None for a file that is not text — optional like the other ADR-0019 hooks. At each turn's end the run keeps the text with the digest (`_Start.inputs_text_after_turn`); at the next turn's start, when the digest differs, it diffs the two (`briefing.inputs_diff`: a unified diff per file, added and removed files named, a non-text file only "changed", cut at `DIFF_SHOWN` 2500 and marked). `BriefingParts.inputs_diff` heads the briefing for every role — "The researcher changed the working inputs since the last turn ended … the Verifier reads the changed steps as adversarially as any other, and the Prover does not revert them" — ahead of the verdict and the node; without the hook the hash-only sentence of phase 1 is said, and heads the briefing too. The diff is of one Start: across Stop and Start the next first turn reads the files as they are.
+4. Tests: `tests/test_briefing.py` (the diff heads every role's briefing, file by file, its cap), `tests/test_prove_verify_loop.py` (the diff between two turns and the fact without the hook; the Decomposer alone, its refusals, its forced stop, the cycle without it, its permissions).
+
+### proof-web
+
+1. `StudioHub._node_brief` carries `kind`; `_working_inputs(node_id)` reads exactly the files `_inputs_digest` hashes (`read_working_snapshot`) as UTF-8 text, None where a file is not text, and raises where the digest would (an unreadable folder, a link), so the run says the inputs changed and no more. Both are passed as hooks only where this proof-agents has the fields.
+2. The run pane: on a Theorem or Lemma that rests on nothing and is unreviewed, *Propose a split* beside *Start agent* (it reads the node's own payload when no run is on), which starts the Decomposer alone; a hint says what it does. The Decomposer's stop reads as every needs-human stop does: *Needs you: structure proposed …*. The role select already offered *Decomposer only*.
+3. Tests: `tests/test_run_hooks.py` (the kind, the text, the binary file, the link), `tests/test_run_pane.py` (the offer and where it is withheld), `tests/test_agent_run.py` (the stub Claude Code splits T into T1 and T2 through `proof` and the run stops needs-human with the claim kept; a Claim, a split node and a Start with the Prover are refused; an edit of proof.tex while the run is paused heads the next turn's prompt as a diff).
+
+### Done when (phase 4)
+
+- Start → Decomposer on a Theorem not yet split ends with the Claims on the map and the run stopped for the researcher; Start with any other role, or on a Claim or a split node, is refused before the node is assigned.
+- An edit of the working inputs between two turns of one Start is the first thing the next turn reads, as a diff; the Verifier's verdict on the earlier version is stale as before.
+- `pytest` passes in all three repositories (the core's and proof-web's port-binding tests excepted where a sandbox forbids binding).
+
