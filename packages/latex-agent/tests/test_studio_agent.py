@@ -393,7 +393,7 @@ class CompileTool(unittest.TestCase):
         (name,) = cfg["mcpServers"]
         args = cfg["mcpServers"][name]["args"]
         self.assertEqual(name, "studio")
-        self.assertTrue(args[0].endswith("latex_agent/mcp_compile.py"), args)
+        self.assertEqual(Path(args[0]).parts[-2:], ("latex_agent", "mcp_compile.py"))
         self.assertEqual(args[1:], ["--url", "http://127.0.0.1:9/studio/L1/"])
         self.assertIn("--strict-mcp-config", cmd)
         self.assertIn(backend_claude.COMPILE_TOOL, cmd[cmd.index("--allowedTools") + 1:])
