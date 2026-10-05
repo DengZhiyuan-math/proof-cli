@@ -89,3 +89,26 @@ def test_memory_add_names_the_node_once_so_a_permission_on_one_node_admits_no_ot
     assert entry.scope.node_id == "A"
     unscoped = runner.invoke(app, ["memory", "add", "the researcher's own project-wide note", "--root", str(tmp_path)])  # no --node-id at all: as before
     assert unscoped.exit_code == 0, unscoped.output
+
+
+def test_memory_add_bound_to_a_project_refuses_another_project_opened_by_root(tmp_path: Path):
+    """Re-audit P1: `--root <another project>` after the allowed prefix wrote that project's memory. With --project
+    <instance id> in the prefix, `proof` refuses when the project --root opens is another, and names one project once."""
+    from proof_cli.storage import read_project_instance_id
+
+    mine, other = tmp_path / "mine", tmp_path / "other"
+    store, other_store = _project(mine), _project(other)
+    me = read_project_instance_id(store)
+    assert me != read_project_instance_id(other_store)
+    elsewhere = runner.invoke(app, ["memory", "add", "--project", me, "--node-id", "A", "--root", str(other), "a note", "--json"])
+    assert elsewhere.exit_code == 1 and json.loads(elsewhere.output)["error"]["code"] == "INVALID_INPUT", elsewhere.output
+    assert "another project" in json.loads(elsewhere.output)["error"]["message"]
+    nowhere = runner.invoke(app, ["memory", "add", "--project", me, "--node-id", "A", "--root", str(tmp_path / "none"), "a note"])
+    assert nowhere.exit_code == 1
+    twice = runner.invoke(app, ["memory", "add", "--project", me, "--node-id", "A", "--project", "x", "--root", str(mine), "a note"])
+    assert twice.exit_code == 1 and "once" in twice.output
+    assert list_memory_artifacts(store) == [] and list_memory_artifacts(other_store) == []
+    here = runner.invoke(app, ["memory", "add", "--project", me, "--node-id", "A", "--layer", "episodic", "--status", "failed", "--source", "codex/prover", "a note", "--root", str(mine)])
+    assert here.exit_code == 0, here.output
+    (entry,) = list_memory_artifacts(store)
+    assert entry.scope.node_id == "A" and list_memory_artifacts(other_store) == []
