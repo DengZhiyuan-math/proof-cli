@@ -398,28 +398,30 @@ def test_the_gate_is_one_digest_given_once_and_the_newest_verdict_must_be_the_pa
 
 
 def test_a_failed_verdict_committed_while_the_request_is_made_is_seen_on_the_write_lock(tmp_path: Path, monkeypatch):
-    """Re-audit P1: the newest-verdict check is on the write lock. A `failed` another process commits after the files were
-    read but before the request's transaction is what the request sees, and nothing is frozen."""
+    """Re-audit P1: the newest-verdict check is on the write lock. A `failed` another process commits after everything
+    the request read outside its transaction, and just before it takes the lock, is what the request sees, and nothing is
+    frozen. (Injected at the transaction's door, after the digest and the files were read: a check made before the
+    transaction — the first implementation — would have read `passed` and frozen the snapshot.)"""
+    from contextlib import contextmanager
+
     from _proofs import write_key_ideas
-    from proof_cli import proof_map
 
     store = ensure_project(tmp_path)
     create_node(store, node_id="N", kind="claim", statement="s")
     write_key_ideas(store, "N")
     passed = record_progress(store, "N", role="verifier", by="claude-code", verdict="passed")
-    real = proof_map.read_working_snapshot
+    real_transaction, injected = store.transaction, []
 
-    injected = []
-
-    def read_then_someone_fails(root, node_id, medium=None):
-        snapshot = real(root, node_id, medium)
-        if not injected:  # once: the verdict's own digest read, inside record_progress, comes through here too
+    @contextmanager
+    def transaction_after_someone_fails():
+        if not injected:  # once: the injected verdict's own transaction comes through here too
             injected.append(True)
-            record_progress(store, "N", role="verifier", by="another-verifier", verdict="failed", note="1. the lemma is misapplied")  # between the read and the lock
-        return snapshot
+            record_progress(store, "N", role="verifier", by="another-verifier", verdict="failed", note="1. the lemma is misapplied")
+        with real_transaction() as conn:
+            yield conn
 
-    monkeypatch.setattr(proof_map, "read_working_snapshot", read_then_someone_fails)
+    monkeypatch.setattr(store, "transaction", transaction_after_someone_fails)
     with pytest.raises(ProofMapError) as refused:
         request_review(store, "N", requested_by="claude-code", rationale="r", gated_by=passed["inputs_sha256"])
-    assert refused.value.code == "VERDICT_STALE" and refused.value.details["newest_verdict"]["outcome"] == "failed"
+    assert injected and refused.value.code == "VERDICT_STALE" and refused.value.details["newest_verdict"]["outcome"] == "failed"
     assert not (tmp_path / "proofs" / "N" / "snapshots").exists() or not any((tmp_path / "proofs" / "N" / "snapshots").iterdir())
