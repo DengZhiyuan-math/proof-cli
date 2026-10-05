@@ -70,3 +70,22 @@ def test_proof_retrieve_carries_the_matching_memory_beside_its_candidates(tmp_pa
     payload = json.loads(done.output)
     data = payload.get("data", payload)
     assert data["memory"][0]["content"] == "the partial sums blow up without the tail bound"
+
+
+def test_memory_add_names_the_node_once_so_a_permission_on_one_node_admits_no_other(tmp_path: Path):
+    """Audit P1: `proof memory add --node-id N … --node-id Other` matched a rule that admits N's memory and wrote Other's
+    (Typer keeps the last value). A second --node-id, or an empty one, is refused and writes nothing."""
+    store = _project(tmp_path)
+    twice = runner.invoke(app, ["memory", "add", "--node-id", "A", "--layer", "episodic", "--status", "failed", "--node-id", "C", "a note", "--json", "--root", str(tmp_path)])
+    assert twice.exit_code == 1 and json.loads(twice.output)["error"]["code"] == "INVALID_INPUT", twice.output
+    empty = runner.invoke(app, ["memory", "add", "--node-id", "A", "--node-id", "", "a note", "--root", str(tmp_path)])
+    assert empty.exit_code == 1 and "INVALID_INPUT" in empty.output
+    blank = runner.invoke(app, ["memory", "add", "--node-id", " ", "a note", "--root", str(tmp_path)])
+    assert blank.exit_code == 1
+    assert list_memory_artifacts(store) == []
+    once = runner.invoke(app, ["memory", "add", "--node-id", "A", "--layer", "episodic", "--status", "failed", "--source", "codex/prover", "a note", "--root", str(tmp_path)])
+    assert once.exit_code == 0, once.output
+    (entry,) = list_memory_artifacts(store)
+    assert entry.scope.node_id == "A"
+    unscoped = runner.invoke(app, ["memory", "add", "the researcher's own project-wide note", "--root", str(tmp_path)])  # no --node-id at all: as before
+    assert unscoped.exit_code == 0, unscoped.output
