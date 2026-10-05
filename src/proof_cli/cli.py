@@ -121,7 +121,7 @@ from .envelope import dump_envelope, error_envelope, success_envelope
 from .contract import ProofGroup
 from .theorems import LEGACY_TRUST_NOTICE
 from .collaboration import summarize_review_record
-from .storage import read_scoped
+from .storage import read_project_instance_id, read_scoped
 from .fog import (
     add_fog,
     crystallize_fog,
@@ -1614,6 +1614,7 @@ def memory_add(
     root: str = ROOT_OPTION,
     layer: str = "working",
     node_id: list[str] = typer.Option(None, "--node-id", help="The node this is about; once. A run's role may name only its own node (ADR-0019 point 12)"),
+    project: list[str] = typer.Option(None, "--project", help="The project's instance id this entry is for; once. Refused when the project opened is another: a run's role writes its own project's memory and no other's"),
     candidate_proof_id: str = "",
     review_id: str = "",
     route_id: str = "",
@@ -1637,9 +1638,21 @@ def memory_add(
     node's memory and no other's.
     """
     given = list(node_id or [])
+    projects = list(project or [])
+    refused = None
     if len(given) > 1 or any(not value.strip() for value in given):
-        exc = ProofMapError("INVALID_INPUT", "--node-id names one node, once" if len(given) > 1 else "--node-id needs a node id")
-        _emit_error(exc, json_output, command="memory.add")
+        refused = "--node-id names one node, once" if len(given) > 1 else "--node-id needs a node id"
+    elif len(projects) > 1 or any(not value.strip() for value in projects):
+        refused = "--project names one project, once" if len(projects) > 1 else "--project needs a project instance id"
+    elif projects:
+        try:
+            opened = read_project_instance_id(get_store(_root(root)))
+        except Exception:  # noqa: BLE001 — no project there: not the one named either
+            opened = None
+        if opened != projects[0].strip():
+            refused = f"the project at {_root(root)} is not project {projects[0].strip()}: this entry is for another project"
+    if refused is not None:
+        _emit_error(ProofMapError("INVALID_INPUT", refused), json_output, command="memory.add")
         raise typer.Exit(code=1)
     try:
         output = cmd_memory_add(
