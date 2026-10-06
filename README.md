@@ -92,6 +92,7 @@ A snapshot, and an exchange export (`proof exchange export`), never freeze or ca
   - **It writes** files only in the node's sources and its `scratch/` folder, and changes project state only through `proof`. It never makes a Human Review decision.
   - **It is rooted at the project:** it runs in `proofs/<id>/` with `PROOF_ROOT` set to the project.
   - **It runs on the Claude Code or the Codex CLI**, whichever you are logged into; there is no API-model backend.
+  - **It runs with the environment of the Home**, the process that serves every project's page, so the login it finds is the one that process sees. `proof home` or `proof map open` starts the Home in the background the first time and it keeps running. If your Claude Code login lives in a profile other than `~/.claude` (`CLAUDE_CONFIG_DIR`), or your Codex one outside `~/.codex` (`CODEX_HOME`), set the variable in the shell that first starts the Home. A Home already running without it must be stopped first (`pkill -f "proof_web.cli home"`). Otherwise every Start ends at once with `the prover turn failed: Not logged in · Please run /login`.
   - **Undo** restores the turn's files, not a claim, a split, a snapshot or a decision.
 
   ```toml
