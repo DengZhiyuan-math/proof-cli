@@ -204,6 +204,9 @@ ERROR_CODES: dict[str, str] = {
     "NOTHING_OPEN": "nothing in the subtree is open: every node is Accepted, or none has a proof to write",
     "COORDINATOR_REFUSED": "the Coordinator refused the action; the message says why",
     "REDIRECT_EMPTY": "a Redirect needs its one line of text",
+    # the map-level discussion (issue #177)
+    "PROMPT_EMPTY": "a message to the map's agent needs its text",
+    "AGENT_REFUSED": "the agent's turn could not start for a reason with no code of its own; the message says why",
     "RUN_REFUSED": "the run's Start was refused for a reason with no code of its own; the message says why",
     "RELEASE_FAILED": "the run ended but the node could not be given back; it is still assigned, and the message says why",
     "AGENT_BUSY": "the studio's agent is still working on the previous turn",
