@@ -160,3 +160,49 @@ def test_the_audits_cases_comments_links_sub_files_the_environment_and_unknown_n
     from proof_cli import errors, node_check
 
     assert not hasattr(node_check, "CHECK_CODES") and all(code in errors.NOTICE_CODES for code in {f["code"] for f in found})
+
+
+def test_the_re_reviews_tex_cases_unreadable_sub_file_double_backslash_dotted_names_and_spacing(project):
+    """Re-review of #180: a sub-file the check cannot read is a finding, not a pass; `\\\\%` is a line break then a comment; `part.v1`
+    means `part.v1.tex` when it exists (TeX's rule); `\\input {x}`, `\\input⏎{x}` and TeX's `\\input x` are inputs."""
+    from proof_cli.node_check import _strip_comments
+
+    folder = node_folder(project.root, "N")
+    (folder / "key-ideas.md").write_text(IDEAS)
+    tex = (folder / "proof.tex").read_text()
+    assert _strip_comments("a \\% b % c\n") == "a \\% b \n" and _strip_comments("x \\\\% \\input{../../out}\n") == "x \\\\\n"
+    # an unreadable sub-file
+    (folder / "part.tex").write_text("fine")
+    (folder / "proof.tex").write_text(tex.replace("\\begin{document}", "\\input{part}\\begin{document}"))
+    _build(project, "N")
+    assert "CHECK_INPUT_OUTSIDE" not in _codes(check_node(project, "N"))
+    (folder / "part.tex").chmod(0)
+    try:
+        if os.access(folder / "part.tex", os.R_OK):
+            pytest.skip("runs as a user that reads everything")
+        found = check_node(project, "N")
+        assert "CHECK_INPUT_UNREADABLE" in _codes(found) and next(f for f in found if f["code"] == "CHECK_INPUT_UNREADABLE")["path"] == "part.tex"
+    finally:
+        (folder / "part.tex").chmod(0o644)
+    # a line break then a comment holding an outside input: the comment is a comment, the input is not one
+    (folder / "proof.tex").write_text(tex.replace("\\begin{document}", "a\\\\% \\input{../../out}\n\\begin{document}"))
+    _build(project, "N")
+    assert "CHECK_INPUT_OUTSIDE" not in _codes(check_node(project, "N"))
+    # a dotted name: part.v1 is part.v1.tex, whose outside input is found
+    (folder / "part.v1.tex").write_text("\\input{../../elsewhere}\n")
+    (folder / "proof.tex").write_text(tex.replace("\\begin{document}", "\\input{part.v1}\\begin{document}"))
+    _build(project, "N")
+    outside = [f for f in check_node(project, "N") if f["code"] == "CHECK_INPUT_OUTSIDE"]
+    assert len(outside) == 1 and outside[0]["path"] == "part.v1.tex"
+    # spacing and the brace-less form
+    for form in ("\\input {../../out}", "\\input\n{../../out}", "\\input ../../out "):
+        (folder / "proof.tex").write_text(tex.replace("\\begin{document}", form + "\\begin{document}"))
+        _build(project, "N")
+        assert "CHECK_INPUT_OUTSIDE" in _codes(check_node(project, "N")), form
+    # a longer control word is not an input: \includegraphics{../x.png}, \inputencoding{latin1}
+    (folder / "proof.tex").write_text(tex.replace("\\begin{document}", "\\includegraphics{../../fig.png}\\inputencoding{latin1}\\begin{document}"))
+    _build(project, "N")
+    assert "CHECK_INPUT_OUTSIDE" not in _codes(check_node(project, "N"))
+    (folder / "proof.tex").write_text(tex)
+    _build(project, "N")
+    assert check_node(project, "N") == []
