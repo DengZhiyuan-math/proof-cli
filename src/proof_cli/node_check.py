@@ -2,17 +2,18 @@
 
 A Proof agent's run spent turns on `ls`, `cat`, `grep error build/*.log` and reading `--help`: discovering the folder and
 checking what needs no judgment. These checks are that work, done once, deterministically and read-only — does the
-proof build and build cleanly, is the summary there with its four headings, does proof.tex state what the node states,
-do its `\\input`s stay in the folder, is each dependency at least mentioned. The run gates the Verifier on them (an
-error sends the work back to the role that owns the files; the Verifier is briefed that they passed and reads only the
-mathematics), and `proof node check` shows them to anyone. Nothing here is a verification: whether a step holds is the
-Verifier's and the researcher's. A finding is a notice, never a refusal, and never stops the researcher's own
-request-review.
+proof build and build cleanly, is the summary there with its four headings, does proof.tex's theorem environment state
+what the node states, do its `\\input`s (and theirs) stay in the folder, is each dependency at least mentioned. The run
+gates the Verifier on them (an error sends the work back to the role that owns the files; the Verifier is briefed that
+they passed and reads only the mathematics), and `proof node check` shows them to anyone. Nothing here is a
+verification: whether a step holds is the Verifier's and the researcher's. A finding is a notice (`CHECK_*` in
+errors.NOTICE_CODES), never a refusal, and never stops the researcher's own request-review.
 """
 
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 from .domain import ProofMapNodeKind, is_computation
 from .key_ideas import FIELDS, KEY_IDEAS_FILE, parse
@@ -20,23 +21,15 @@ from .storage import ProjectStore
 from .vault import build_is_current, build_pdf_path, node_folder, preamble_path, run_script_path, working_entry_path
 
 ERROR, NOTE = "error", "note"
-# the codes, as `errors.NOTICE_CODES` registers them: what each finding says
-CHECK_CODES: dict[str, str] = {
-    "CHECK_PROOF_MISSING": "the node's working proof.tex is not there (node check)",
-    "CHECK_RUN_SCRIPT_MISSING": "a computation node's run.sh is not there (node check)",
-    "CHECK_NOT_BUILT": "proof.tex has not been compiled: build/proof.pdf is missing (node check)",
-    "CHECK_BUILD_STALE": "an input changed after the last build: compile again (node check)",
-    "CHECK_COMPILE_ERRORS": "the last build's log has errors (`!` lines); the first is in the message (node check)",
-    "CHECK_UNDEFINED_REFERENCES": "the last build's log reports undefined references or citations (node check)",
-    "CHECK_STATEMENT_MISMATCH": "the node's statement, as the map has it, does not appear in proof.tex (node check)",
-    "CHECK_INPUT_OUTSIDE": "proof.tex \\input's a file outside the node folder and the shared preamble (node check)",
-    "CHECK_KEY_IDEAS_MISSING": "key-ideas.md is not there; request-review needs it (node check)",
-    "CHECK_KEY_IDEAS_HEADINGS": "key-ideas.md lacks one of its four headings (node check)",
-    "CHECK_KEY_IDEAS_EMPTY": "key-ideas.md has an empty required section (核心思路 or 主要步骤) (node check)",
-    "CHECK_DEPENDENCY_UNMENTIONED": "a dependency of the node is named neither in proof.tex nor in key-ideas.md (node check)",
-}
-_INPUT = re.compile(r"\\input\{([^}]*)\}")
+_INPUT = re.compile(r"\\(?:input|include)\{([^}]*)\}")
+_COMMENT = re.compile(r"(?<!\\)%.*")                 # a LaTeX comment, to the end of its line (an escaped \% is not one)
+_ENVIRONMENTS = ("theorem", "lemma", "claim", "proposition", "corollary")
+_ENV = re.compile(r"\\begin\{(" + "|".join(_ENVIRONMENTS) + r")\}(?:\[[^\]]*\])?(.*?)\\end\{\1\}", re.S)
 _UNDEFINED = re.compile(r"undefined (reference|citation)|There were undefined (references|citations)|Reference `[^']*' on page \d+ undefined|Citation `[^']*' on page \d+ undefined", re.I)
+_ID_LIKE = re.compile(r"[A-Za-z][A-Za-z0-9_.-]*")
+# how key-ideas.md's 主要步骤 names a node: `id`, (id) or \ref{id} (the Typesetter's guide: each step names the node it uses, by id)
+_NAMED = re.compile(r"`([^`\s]+)`|\(([A-Za-z][A-Za-z0-9_.-]*)\)|\\(?:eq|c|auto)?ref\{([^}]+)\}")
+MAX_INPUT_FILES = 50   # files read through \input, at most
 
 
 def _finding(code: str, level: str, message: str, path: str | None = None) -> dict:
@@ -55,10 +48,45 @@ def _mentions(node_id: str, *texts: str) -> bool:
     return any(pattern.search(text) for text in texts if text)
 
 
+def _sources(folder: Path, proof: Path, preamble: Path, findings: list[dict]) -> dict[str, str]:
+    """proof.tex and every file it \\input's inside the node folder, each by its path from the folder, comments stripped:
+    what the statement, the dependencies and the inputs are read from. An \\input that reaches outside the folder and the
+    shared preamble — by its path, or through a link, with or without the `.tex` TeX adds — is a finding, wherever it
+    stands; the preamble itself is not read."""
+    folder_r, preamble_r = folder.resolve(), preamble.resolve()
+    sources: dict[str, str] = {}
+    queue = [proof]
+    while queue and len(sources) < MAX_INPUT_FILES:
+        path = queue.pop(0)
+        resolved = path.resolve()
+        rel = resolved.relative_to(folder_r).as_posix() if resolved.is_relative_to(folder_r) else path.name
+        if rel in sources:
+            continue
+        try:
+            text = _COMMENT.sub("", path.read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            continue
+        sources[rel] = text
+        for match in _INPUT.finditer(text):
+            target = match.group(1).strip()
+            named = folder / target
+            if named.suffix == "" and not named.exists() or (named.suffix == "" and named.with_suffix(".tex").exists()):
+                named = named.with_suffix(".tex")   # TeX's rule: the suffix first, the path after; a link is followed as TeX would follow it
+            candidate = named.resolve()
+            if candidate == preamble_r:
+                continue
+            if not candidate.is_relative_to(folder_r):
+                findings.append(_finding("CHECK_INPUT_OUTSIDE", ERROR, f"\\input{{{target}}} in {rel} reaches outside the node folder; only its own files and ../preamble may be input", rel))
+                continue
+            if candidate.is_file():
+                queue.append(candidate)
+    return sources
+
+
 def check_node(store: ProjectStore, node_id: str) -> list[dict]:
     """The findings on the node's working folder, errors first: `{"code", "level": "error"|"note", "message", "path"?}`.
     An imported result has no working proof and no findings. Read-only."""
-    from .proof_map import get_node, require_node
+    from .proof_map import get_node, list_nodes, require_node
 
     node = require_node(store, node_id)
     if node.kind == ProofMapNodeKind.imported_result:
@@ -77,22 +105,16 @@ def check_node(store: ProjectStore, node_id: str) -> list[dict]:
         proof = working_entry_path(root, node.id, node.medium)
         if not proof.is_file():
             findings.append(_finding("CHECK_PROOF_MISSING", ERROR, f"{proof.name} is not in the node folder", proof.name))
-            tex = ""
         else:
-            tex = proof.read_text(encoding="utf-8", errors="replace")
-            texts.append(tex)
-            if _normal(node.statement) not in _normal(tex):
+            sources = _sources(folder, proof, preamble_path(root), findings)
+            texts.extend(sources.values())
+            stated = [_normal(body) for _, body in _ENV.findall(sources.get(proof.name, ""))]
+            if not stated:
                 findings.append(_finding("CHECK_STATEMENT_MISMATCH", ERROR,
-                                         "the node's statement is not in proof.tex as the map has it; the theorem environment must state exactly what the node states", proof.name))
-            preamble = preamble_path(root).resolve()
-            for match in _INPUT.finditer(tex):
-                target = match.group(1).strip()
-                candidate = (folder / target).resolve()
-                if candidate.suffix == "":
-                    candidate = candidate.with_suffix(".tex")
-                inside = candidate == preamble or candidate.is_relative_to(folder.resolve())
-                if not inside:
-                    findings.append(_finding("CHECK_INPUT_OUTSIDE", ERROR, f"\\input{{{target}}} reaches outside the node folder; only its own files and ../preamble may be input", proof.name))
+                                         "proof.tex has no theorem, lemma or claim environment stating the node's statement (a comment does not count)", proof.name))
+            elif not any(_normal(node.statement) in body for body in stated):
+                findings.append(_finding("CHECK_STATEMENT_MISMATCH", ERROR,
+                                         "the node's statement is not what proof.tex's theorem environment states; it must state exactly what the map has", proof.name))
             pdf = build_pdf_path(root, node.id)
             log = pdf.with_suffix(".log")
             if not pdf.is_file():
@@ -118,9 +140,13 @@ def check_node(store: ProjectStore, node_id: str) -> list[dict]:
             findings.append(_finding("CHECK_KEY_IDEAS_HEADINGS", ERROR, f"{KEY_IDEAS_FILE} lacks the heading(s) {', '.join(absent)}; it has exactly four: 核心思路, 主要步骤, 难点, 未覆盖", KEY_IDEAS_FILE))
         elif parsed.missing:
             findings.append(_finding("CHECK_KEY_IDEAS_EMPTY", ERROR, f"{KEY_IDEAS_FILE} leaves {', '.join(parsed.missing)} empty", KEY_IDEAS_FILE))
+        known = {other.id for other in list_nodes(store)}
+        named = {next(group for group in match.groups() if group) for match in _NAMED.finditer(parsed.fields.get("main_steps", ""))}
+        unknown = sorted(name for name in named if _ID_LIKE.fullmatch(name) and name not in known)
+        if unknown:
+            findings.append(_finding("CHECK_KEY_IDEAS_UNKNOWN_NODE", NOTE, f"主要步骤 names {', '.join(unknown)} as a node, and no such node is on the map", KEY_IDEAS_FILE))
     for dep_id in node.dependencies:
-        dep = get_node(store, dep_id)
-        if dep is not None and not _mentions(dep_id, *texts):
+        if get_node(store, dep_id) is not None and not _mentions(dep_id, *texts):
             findings.append(_finding("CHECK_DEPENDENCY_UNMENTIONED", NOTE, f"dependency {dep_id} is named neither in the proof nor in {KEY_IDEAS_FILE}: say where it is used, or drop the edge"))
     findings.sort(key=lambda f: (f["level"] != ERROR, f["code"]))
     return findings
@@ -137,4 +163,4 @@ def summary(findings: list[dict]) -> str:
     return "; ".join(f"{f['code']}: {f['message']}" for f in findings)
 
 
-__all__ = ["CHECK_CODES", "ERROR", "NOTE", "check_node", "errors_of", "summary"]
+__all__ = ["ERROR", "NOTE", "check_node", "errors_of", "summary"]

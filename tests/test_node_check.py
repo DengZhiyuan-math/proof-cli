@@ -120,3 +120,43 @@ def test_the_cli_lists_the_findings_and_exits_one_on_an_error(project):
     assert result.exit_code == 0 and "All checks passed" in result.output
     result = runner.invoke(app, ["node", "check", "nope", "--root", str(project.root), "--json"])
     assert result.exit_code == 1 and json.loads(result.output)["ok"] is False
+
+
+def test_the_audits_cases_comments_links_sub_files_the_environment_and_unknown_nodes(project):
+    """Re-review of #180: a comment is not the proof; an \\input is followed into sub-files and through links, with TeX's suffix rule;
+    the statement counts only inside a theorem environment; a step naming a node that is not on the map is noted."""
+    folder = node_folder(project.root, "N")
+    (folder / "key-ideas.md").write_text(IDEAS)
+    tex = (folder / "proof.tex").read_text()
+    # the statement only in a comment, the environment stating something else: a mismatch
+    (folder / "proof.tex").write_text(tex.replace("for every $n$ the bound holds", "for some $n$ the bound holds") + "% for every $n$ the bound holds\n")
+    _build(project, "N")
+    assert "CHECK_STATEMENT_MISMATCH" in _codes(check_node(project, "N"))
+    # an outside input in a comment is not an input; one in a sub-file is
+    (folder / "proof.tex").write_text(tex.replace("\\begin{document}", "% \\input{../../secrets}\n\\input{part}\\begin{document}"))
+    (folder / "part.tex").write_text("\\input{../../elsewhere}\n")
+    _build(project, "N")
+    found = check_node(project, "N")
+    outside = [f for f in found if f["code"] == "CHECK_INPUT_OUTSIDE"]
+    assert len(outside) == 1 and "../../elsewhere" in outside[0]["message"] and outside[0]["path"] == "part.tex"
+    # a link inside the folder to a file outside it, input without its suffix: found through the link
+    (folder / "part.tex").write_text("")
+    (project.root / "outside.tex").write_text("secret")
+    (folder / "linked.tex").symlink_to(project.root / "outside.tex")
+    (folder / "proof.tex").write_text(tex.replace("\\begin{document}", "\\input{linked}\\begin{document}"))
+    _build(project, "N")
+    assert [f["message"] for f in check_node(project, "N") if f["code"] == "CHECK_INPUT_OUTSIDE"] and "linked" in check_node(project, "N")[0]["message"]
+    (folder / "linked.tex").unlink()
+    (folder / "proof.tex").write_text(tex)
+    _build(project, "N")
+    assert "CHECK_INPUT_OUTSIDE" not in _codes(check_node(project, "N"))  # ../preamble is fine
+    # a step naming a node that does not exist, in any of the three spellings
+    (folder / "key-ideas.md").write_text(IDEAS.replace("1. use L", "1. use `GHOST` and (L) and \\ref{PHANTOM}; the field is $\\mathbb{R}$"))
+    notes = [f for f in check_node(project, "N") if f["code"] == "CHECK_KEY_IDEAS_UNKNOWN_NODE"]
+    assert len(notes) == 1 and "GHOST, PHANTOM" in notes[0]["message"] and notes[0]["level"] == "note"
+    (folder / "key-ideas.md").write_text(IDEAS)
+    assert "CHECK_KEY_IDEAS_UNKNOWN_NODE" not in _codes(check_node(project, "N"))
+    # the registry holds every code the checks raise, and nowhere else keeps a copy
+    from proof_cli import errors, node_check
+
+    assert not hasattr(node_check, "CHECK_CODES") and all(code in errors.NOTICE_CODES for code in {f["code"] for f in found})
