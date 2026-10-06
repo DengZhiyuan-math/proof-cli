@@ -238,6 +238,7 @@ NOTICE_CODES: dict[str, str] = {
     "CHECK_KEY_IDEAS_MISSING": "key-ideas.md is not there; request-review needs it (node check)",
     "CHECK_KEY_IDEAS_HEADINGS": "key-ideas.md lacks one of its four headings (node check)",
     "CHECK_KEY_IDEAS_EMPTY": "key-ideas.md has an empty required section (核心思路 or 主要步骤) (node check)",
+    "CHECK_KEY_IDEAS_UNKNOWN_NODE": "key-ideas.md's 主要步骤 names a node that is not on the map (node check)",
     "CHECK_DEPENDENCY_UNMENTIONED": "a dependency of the node is named neither in proof.tex nor in key-ideas.md (node check)",
 }
 
