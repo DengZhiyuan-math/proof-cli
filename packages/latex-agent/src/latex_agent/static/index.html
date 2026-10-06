@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>proof studio</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="static/vendor/codemirror.css">
+<link rel="stylesheet" href="static/vendor/dialog.css">
+<link rel="stylesheet" href="static/vendor/show-hint.css">
+<link rel="stylesheet" href="static/vendor/foldgutter.css">
+<link rel="stylesheet" href="static/vendor/katex.min.css">
+<link rel="stylesheet" href="static/app.css">
+<!-- host:head -->
+</head>
+<body>
+<header id="top">
+  <button id="btn-sidebar" class="icon" data-icon="menu" title="Show/hide the Files sidebar (⌘B)" aria-label="Files sidebar"></button>
+  <div class="brand"><!-- host:brand --> <span id="projname"></span></div>
+  <div class="actions">
+    <span id="build-status" class="status"></span>
+  </div>
+  <div class="actions right">
+    <button id="btn-open-editor" type="button" hidden data-icon="popout" title="Open this node's folder in VS Code">Open in VS Code</button>
+    <div id="agent-box" class="split-btn">
+      <button id="btn-chat" data-icon="spark" title="Show/hide the agent panel (⌘L sends the selection)">Agent</button>
+      <select id="chat-provider" title="Which CLI runs the node's proof agent: Claude Code or Codex"></select>
+    </div>
+    <button id="btn-theme" class="icon" data-icon="theme" title="Toggle light/dark" aria-label="Theme"></button>
+  </div>
+</header>
+
+<main id="layout">
+  <aside id="sidebar">
+    <!-- host:sidebar -->
+    <section>
+      <h3>Files</h3>
+      <ul id="tree"></ul>
+    </section>
+    <section class="grow">
+      <h3>Outline <button id="btn-refresh-outline" class="tiny icon ghost" data-icon="refresh" title="Refresh" aria-label="Refresh outline"></button></h3>
+      <ul id="outline"></ul>
+    </section>
+  </aside>
+  <div class="gutter" data-resize="sidebar" id="sidebar-gutter"></div>
+
+  <section id="centre">
+    <!-- host:centre-top -->
+    <div id="centre-body">
+    <!-- host:centre-pane -->
+  <section id="editor-pane">
+    <div id="editor-head">
+      <div id="tabs"></div>
+      <button id="btn-forward" class="ghost" data-icon="arrow" title="Show this line in the PDF (⌘J). Double-click (or Ctrl-click) the PDF to jump back to the source. ⌘F search · Ctrl-Space complete">PDF</button>
+    </div>
+    <div id="banner" hidden></div>
+    <div id="editor"></div>
+    <div id="empty-editor">Select a file on the left.</div>
+    <div id="agent-view" hidden>
+      <div id="agent-view-head"><span class="live-dot"></span><b>Agent</b><span id="agent-view-title"></span>
+        <button id="agent-view-hide" class="tiny ghost" title="Stop showing the agent's writing for this turn">Hide</button></div>
+      <div id="agent-view-cm"></div>
+    </div>
+  </section>
+  <div class="gutter" data-resize="pdf"></div>
+
+  <section id="pdf-pane">
+    <div id="pdf-toolbar">
+      <div id="compile-box" class="split-btn">
+        <button id="btn-compile" class="primary" data-icon="play" title="Save all and compile (⌘↵)"><span id="compile-label">Compile</span></button>
+        <button id="btn-compile-menu" class="primary caret" title="Build mode and auto-compile" aria-haspopup="menu" aria-expanded="false" data-icon-end="down"><span id="compile-mode-label">Draft</span></button>
+        <div id="compile-menu" class="dropdown" role="menu" hidden>
+          <div class="dd-head">Build mode</div>
+          <div id="build-modes"></div>
+          <hr>
+          <label class="dd-item" title="Compile automatically a moment after you stop typing"><input type="checkbox" id="auto-compile"> Auto-compile</label>
+          <hr>
+          <button type="button" class="dd-item" id="btn-clean-build" title="Delete what earlier builds left (.aux, .bbl, …) and compile again. Helps when a build keeps failing for no visible reason.">Recompile from scratch</button>
+          <div class="dd-note" id="build-info"></div>
+        </div>
+      </div>
+      <button id="zoom-out" class="icon" data-icon="minus" title="Zoom out" aria-label="Zoom out"></button>
+      <span id="zoom-label">100%</span>
+      <button id="zoom-in" class="icon" data-icon="plus" title="Zoom in" aria-label="Zoom in"></button>
+      <button id="zoom-fit" title="Fit width">Fit</button>
+      <span id="page-label"></span>
+      <a id="pdf-popout" class="btn ghost" data-icon="popout" href="viewer" title="Open the PDF in a separate tab (stays in sync)">Pop out</a>
+    </div>
+    <div id="pdf-scroll"><div id="pdf-pages"></div><div id="pdf-empty">No PDF yet — press Compile.</div></div>
+  </section>
+    </div>
+  </section>
+  <div class="gutter" data-resize="chat" id="chat-gutter"></div>
+
+  <aside id="chat">
+    <div id="chat-head">
+      <b data-icon="spark" aria-label="Agent"></b>
+      <button id="chat-info" class="icon" data-icon="gauge" aria-label="Account and usage limits" aria-haspopup="dialog" aria-expanded="false" title="Account and usage limits"></button>
+      <button id="chat-new" title="Start a new conversation">New chat</button>
+    </div>
+    <div id="agent-info" class="popover info" role="dialog" aria-label="Account and usage limits" hidden>
+      <div id="agent-account" hidden></div>
+      <div id="quota"></div>
+    </div>
+    <div id="chat-log"></div>
+    <div id="chat-foot">
+      <!-- host:chat-foot -->
+      <div id="slash-menu" role="listbox" hidden></div>
+      <textarea id="chat-input" rows="2" placeholder="Ask the agent about this node (read-only)…" title="A read-only question; the agent is driven from its run above · ↵ send, ⇧↵ newline"></textarea>
+      <div class="chat-actions">
+        <!-- host:chat-actions -->
+        <span id="chat-scope"></span>
+        <span id="chat-status" class="status"></span>
+        <button id="chat-send" class="primary">Send</button>
+      </div>
+    </div>
+  </aside>
+</main>
+
+<footer id="panel" class="collapsed">
+  <div id="panel-tabs">
+    <button data-panel="problems" class="active">Problems <span id="problem-count" class="badge"></span></button>
+    <button data-panel="output">Output</button>
+    <button data-panel="diff">Diff</button>
+    <button id="panel-toggle" class="icon ghost" data-icon="up" title="Show/hide panel" aria-label="Show/hide panel"></button>
+  </div>
+  <div id="panel-body">
+    <ul id="problems" class="panel-view"></ul>
+    <pre id="output" class="panel-view" hidden></pre>
+    <pre id="diff" class="panel-view" hidden></pre>
+  </div>
+</footer>
+
+<script src="static/vendor/codemirror.js"></script>
+<script src="static/vendor/stex.js"></script>
+<script src="static/vendor/markdown.js"></script>
+<script src="static/vendor/searchcursor.js"></script>
+<script src="static/vendor/dialog.js"></script>
+<script src="static/vendor/search.js"></script>
+<script src="static/vendor/matchbrackets.js"></script>
+<script src="static/vendor/closebrackets.js"></script>
+<script src="static/vendor/active-line.js"></script>
+<script src="static/vendor/show-hint.js"></script>
+<script src="static/vendor/foldcode.js"></script>
+<script src="static/vendor/foldgutter.js"></script>
+<script src="static/texfold.js"></script>
+<script src="static/vendor/pdf.js"></script>
+<script src="static/common.js"></script>
+<script src="static/pdfview.js"></script>
+<script src="static/app.js"></script>
+<script src="static/vendor/katex.min.js"></script>
+<!-- The studio alone: editor, PDF, build and the agent panel. A host serving this page for a proof map node (proof-web)
+     fills the host:* slots above with its own markup (a node section in the sidebar, the centre's Work log tab bar and
+     run pane, the review card and the "+" menu by the message box, a link back to its map), adds its stylesheet at
+     host:head and appends its scripts here. -->
+</body>
+</html>

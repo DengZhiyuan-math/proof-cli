@@ -7,13 +7,19 @@ source raises a code that isn't listed here.
 
 from __future__ import annotations
 
+from .domain import AGENT_ROLES
+
 ERROR_CODES: dict[str, str] = {
     # -- the CLI itself ----------------------------------------------------------------
     "USAGE_ERROR": "the command line didn't parse: a missing argument, an unknown option or command (exit 2)",
     "INTERNAL_ERROR": "an unexpected failure inside proof-cli; the message names it",
-    "INVALID_INPUT": "a legacy command (`theorem add`, `reference import`) refused its input under --json; the message says why",
+    "INVALID_INPUT": "a legacy command (`theorem add`, `reference import`) refused its input under --json, or the page's new reference (POST /api/references) was refused; the message says why",
     "PROJECT_NOT_FOUND": "a read was pointed at a folder with no proof project; nothing was created",
     "HUMAN_REVIEW_REQUIRED": "a Human Review decision, made only by the researcher on the proof map page; the error carries its URL",
+    "REVIEW_PORT_IN_USE": "`map serve` couldn't bind the project's review port because it is taken, likely by the page already running (`proof map open`); `errno` names the cause",
+    "REVIEW_PORT_NOT_PERMITTED": "`map serve` isn't permitted to bind a local port: a permission or sandbox restriction; `errno` names the cause",
+    "REVIEW_PORT_UNAVAILABLE": "`map serve` couldn't bind the project's review port for another reason; the message carries the system's error and `errno` its code",
+    "WEB_APP_NOT_INSTALLED": "`proof home`, `proof map open` or `proof map serve` was run without the proof-web package, which serves the web app (ADR-0018)",
     # -- nodes -------------------------------------------------------------------------
     "NODE_NOT_FOUND": "no proof map node has this id",
     "NODE_ALREADY_EXISTS": "a proof map node with this id already exists",
@@ -157,18 +163,46 @@ ERROR_CODES: dict[str, str] = {
     "NO_SYNCTEX": "no SyncTeX data yet: build first",
     "NO_SYNCTEX_MATCH": "SyncTeX knows no place for that position",
     "EVIDENCE_SNAPSHOT_MISMATCH": "the snapshot hash an Evidence check names is not the snapshot's hash now; the message names the node's current snapshot",
+    # -- the Home (ADR-0017): the project list in front of the map ------------------------------
+    "PATH_REQUIRED": "the Home's request names no folder",
+    "PROJECT_UNKNOWN": "the folder isn't in the project list; add it first",
+    "FOLDER_NOT_FOUND": "no folder at that path",
+    "NOT_A_PROJECT": "the folder holds no proof project (no .proof/project.sqlite3); create one there instead",
+    "ALREADY_A_PROJECT": "the folder already holds a proof project; add it instead of creating one",
+    "BAD_PROJECT_ID": "a project id must be a non-empty string",
+    "CANNOT_CREATE": "the project folder couldn't be made or written",
+    "PORT_BUSY": "the project's own port is taken by something that isn't its page",
+    "PROJECT_REPLACED": "the page, studio or run was opened for a project that is no longer in its folder (deleted and started again there); nothing of the new project is read or written through it",
     # -- the Proof agent's work log (ADR-0016, spec #145) --
     "ROLE_REQUIRED": "a progress report names the role that makes it: PROOF_AGENT_ROLE in the agent's runtime, or --role",
-    "INVALID_ROLE": "the Proof agent role is not prover, typesetter or numerics",
+    "INVALID_ROLE": f"the Proof agent role is not one of {', '.join(AGENT_ROLES)}",
     "INVALID_PROGRESS_STATUS": "a step's status is started, done, stuck or needs-human",
     "INVALID_PROGRESS_STEP": "steps count from 1",
     "PROGRESS_STATUS_REQUIRED": "a step report needs its status",
-    "PROGRESS_EMPTY": "a progress report is a plan, a step or a handoff; this one is none of them",
+    "PROGRESS_EMPTY": "a progress report is a plan, a step, a handoff, a verdict or an attempt; this one is none of them",
     "DECISION_REQUIRED": "a step that needs a human decision names the decision in --note",
+    # -- the Verifier's verdict and the record of attempts (ADR-0019 parts A and B) --
+    "VERDICT_ROLE_REQUIRED": "only the verifier role records a verdict; the message names the role that tried",
+    "INVALID_VERDICT": "a verdict's outcome is passed or failed",
+    "OBJECTIONS_REQUIRED": "a failed verdict names its objections in --note",
+    "ATTEMPT_INCOMPLETE": "an attempt is recorded by what it tried to establish and what it failed on: --attempt needs --failed-on",
+    "GATE_MALFORMED": "`request-review --gated-by` is one SHA-256 of 64 hex digits, given once; a repeated, empty or malformed value is refused rather than read as no gate",
+    "VERDICT_STALE": "a run's Prover requested review naming a passing verdict's digest (--gated-by), but the node's files are no longer the ones the Verifier passed; nothing was frozen",
     # -- the Proof agent's run, through the studio and the map (ADR-0016, spec #145) --
     "RUN_ACTIVE": "an agent is already working on this node: pause, redirect or release it first",
     "RUN_SETTLING": "the previous run is still giving the node back; Start again in a moment",
+    "RUN_GONE": "the node's run could not be reached: its node is gone from the map, or its studio is closed",
+    # the Decomposer, started alone on a Theorem not yet split (ADR-0019 point 20)
+    "ROLE_ALONE": "the Decomposer is started on its own, for one turn; it is not part of a run with other roles",
+    "NOT_DECOMPOSABLE": "the Decomposer works a Theorem or Lemma not yet split: this node is a Claim or an imported result, or already rests on the Claims a split made",
     "NO_RUN": "no agent run to act on: the folder is not a proof map node, or no run is active on it",
+    # the Coordinator over a Theorem's or Lemma's subtree (ADR-0019 point 18)
+    "NO_SUBTREE": "no subtree to coordinate: the node rests on nothing, or is an imported result",
+    "COORDINATOR_ACTIVE": "a Coordinator is already working this subtree: pause or stop it first",
+    "NO_COORDINATOR": "no Coordinator is working this subtree",
+    "NOT_PAUSED": "the Coordinator is not paused",
+    "NOTHING_OPEN": "nothing in the subtree is open: every node is Accepted, or none has a proof to write",
+    "COORDINATOR_REFUSED": "the Coordinator refused the action; the message says why",
     "REDIRECT_EMPTY": "a Redirect needs its one line of text",
     "RUN_REFUSED": "the run's Start was refused for a reason with no code of its own; the message says why",
     "RELEASE_FAILED": "the run ended but the node could not be given back; it is still assigned, and the message says why",
