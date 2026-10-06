@@ -47,6 +47,7 @@ if (pdfChannel) {
   pdfChannel.onmessage = async (ev) => {
     const m = ev.data || {};
     if (m.type === "jumped") jumped(m);
+    else if (m.type === "close") window.close();          // "Show here" in the studio
     else if (m.type === "pdf" && m.mtime !== PV.mtime) await PV.load(m.mtime);
     else if (m.type === "forward") {
       await checkPdf();

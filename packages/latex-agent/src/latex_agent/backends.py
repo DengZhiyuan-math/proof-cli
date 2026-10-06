@@ -32,6 +32,7 @@ Events a backend emits through ``job.emit`` (the panel understands exactly these
                                                 a tool call, with the file (and lines) a file tool works on
     {"t": "tool_result", "id": str, "error": bool, "preview": str}
     {"t": "build", "result": dict}              a build the agent ran (agent.py, not backends)
+    {"t": "context", "used": int, "window": int|None}   how full the context window is
     {"t": "rate", "rate": dict}                 Claude usage limits
     {"t": "error", "message": str}
 
@@ -181,8 +182,20 @@ class Backend:
     # False: the backend cannot stop writes outside the @-mentioned files, so the
     # manager reverts such writes after the turn.
     enforces_scope = True
+    # The environment a turn's CLI starts with, for the calls outside a turn too (the account check,
+    # the command list, the usage probe): the host's, e.g. a node's proof agent with its Claude Code
+    # profile folder (CLAUDE_CONFIG_DIR). None: this process's own. Set by the agent manager.
+    env_fn: Callable[[], dict | None] | None = None
     skills = False                    # offers skills / slash commands (/api/agent/commands)
     usage_limits = False              # reports subscription usage limits (/api/agent/usage)
+
+
+    def env(self) -> dict | None:
+        """The environment of the calls a backend makes outside a turn: the same as its turns'."""
+        try:
+            return self.env_fn() if self.env_fn else None
+        except Exception:  # noqa: BLE001 — no context to ask: this process's own environment
+            return None
 
     def __init__(self, pid: str, spec: dict | None = None):
         spec = spec or {}
