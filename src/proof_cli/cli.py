@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import os
 import sys
 from pathlib import Path
@@ -115,12 +116,12 @@ from .commands import (
     cmd_theorem_show,
     get_store,
 )
-from .domain import ProofMapNodeKind, is_computation
+from .domain import AGENT_ROLES, ProofMapNodeKind, is_computation
 from .envelope import dump_envelope, error_envelope, success_envelope
 from .contract import ProofGroup
 from .theorems import LEGACY_TRUST_NOTICE
 from .collaboration import summarize_review_record
-from .storage import read_scoped
+from .storage import read_project_instance_id, read_scoped
 from .fog import (
     add_fog,
     crystallize_fog,
@@ -148,6 +149,7 @@ from .proof_map import (
     add_dependency,
     claim_node,
     create_node,
+    create_node_under_parent,
     dependency_details,
     move_dependency,
     remove_dependency,
@@ -196,6 +198,7 @@ from .rendering import (
     render_trust_rule,
     render_trust_rule_list,
     render_work_log,
+    render_work_log_entry,
 )
 from .review import render_verification_output
 
@@ -258,8 +261,11 @@ def _root(path: str | None) -> Path:
 
 @app.command(rich_help_panel=PROOF_MAP_PANEL)
 def init(root: str = ROOT_OPTION) -> None:
-    """Start a proof project in ROOT."""
+    """Start a proof project in ROOT (and list it on the Home, `proof home`)."""
+    from .projects import register_project
+
     typer.echo(cmd_init(_root(root)))
+    register_project(_root(root))
 
 
 @app.command()
@@ -386,7 +392,7 @@ def _emit_node(node, json_output: bool, *, command: str) -> None:
 
 def human_review_required(root: str, *, command: str, kind: str, target_id: str, node_id: str | None, json_output: bool) -> None:
     """Every Human Review decision is made on the proof map page, never here (ADR-0010): say where, and fail."""
-    from .webapp.server import project_url
+    from .origins import project_url
 
     # not a project yet: nothing to decide, and a refusal shouldn't create one
     url = project_url(get_store(_root(root)), node_id) if (_root(root) / ".proof").exists() else None
@@ -438,12 +444,19 @@ def node_create(
         "", "--reference-id", help="imported_result only: the `reference list` entry it cites; fixed once the node exists"
     ),
     medium: str = typer.Option("", "--medium", help="What the candidate proof is made of: latex (default) or computation (run.sh, outputs in out/)"),
+    parent: str = typer.Option(
+        "", "--parent", help="A node that rests on the new one: it gains it as a dependency, in the same transaction (any kind; not a Split)"
+    ),
+    reassign: bool = typer.Option(False, "--reassign", help="With --parent: take the parent's claim over from whoever holds it"),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
+    """Create a proof map node. With --parent, the parent rests on it too: one transaction, and a refused
+    parent leaves no node and no folder (issue #154)."""
+    if reassign and not parent:
+        raise click.UsageError("--reassign goes with --parent: it takes the parent's claim over")
     store = get_store(_root(root))
     try:
-        node = create_node(
-            store,
+        fields = dict(
             node_id=node_id,
             kind=kind,
             statement=statement,
@@ -457,6 +470,7 @@ def node_create(
             medium=medium or None,
             created_by=created_by,
         )
+        node = create_node_under_parent(store, parent, reassign=reassign, **fields) if parent else create_node(store, **fields)
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.create")
         raise typer.Exit(code=1)
@@ -826,13 +840,18 @@ def node_request_review(
     node_id: str,
     rationale: str = typer.Option(..., "--rationale", help="Why this node is now appropriately scoped to prove directly"),
     requested_by: str = typer.Option("human", "--requested-by"),
+    gated_by: list[str] = typer.Option(None, "--gated-by", help="A run's Prover: the SHA-256 of the Verifier's passing verdict, once; refused (VERDICT_STALE) if the files changed since, or the newest verdict is not that passing one (ADR-0019)"),
     root: str = ROOT_OPTION,
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Snapshot the node's working proof.tex (or a computation's run.sh and out/) for review (ADR-0010). Needs no claim."""
     store = get_store(_root(root))
     try:
-        record = request_review(store, node_id, requested_by=requested_by, rationale=rationale)
+        # the gate is one digest, given once: a second --gated-by, or an empty one, is not a way out of it (ADR-0019 point 3)
+        gates = list(gated_by or [])
+        if gates and (len(gates) != 1 or not re.fullmatch(r"[0-9a-f]{64}", gates[0])):  # given once: a repeat, equal or not, is refused
+            raise ProofMapError("GATE_MALFORMED", "--gated-by is the passing verdict's SHA-256 (64 hex digits), given once; repeated, empty or malformed, the request is refused")
+        record = request_review(store, node_id, requested_by=requested_by, rationale=rationale, gated_by=gates[0] if gates else None)
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.request_review")
         raise typer.Exit(code=1)
@@ -891,13 +910,18 @@ def node_split(
     child: list[str] = typer.Option(
         ..., "--child", help="Repeatable, one per child: <child-id>=<statement>"
     ),
+    assumption: list[str] = typer.Option(None, "--assumption", help="Repeatable: an assumption of the one --child (as the page's split gives it)"),
+    display_label: str = typer.Option("", "--display-label", help="The one --child's display label"),
     root: str = ROOT_OPTION,
     created_by: str = "human",
     reassign: bool = typer.Option(False, "--reassign", help="Take the claim over from whoever holds it (recorded as `claim --reassign` records it); the node need not be on the frontier"),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Decompose parent_id into new claim-kind children. Ungated — no researcher approval needed.
-    All or nothing; a node someone else holds is theirs to split unless --reassign."""
+    All or nothing; a node someone else holds is theirs to split unless --reassign.
+    With a single --child, --assumption and --display-label give it those, as the page's split does (issue #154)."""
+    if (assumption or display_label) and len(child) != 1:
+        raise click.UsageError("--assumption and --display-label go with a single --child")
     store = get_store(_root(root))
     try:
         specs = []
@@ -907,7 +931,7 @@ def node_split(
                     "INVALID_CHILD_SPEC", f"'{entry}' is not in the form <child-id>=<statement>"
                 )
             child_id, statement = entry.split("=", 1)
-            specs.append({"id": child_id, "statement": statement})
+            specs.append({"id": child_id, "statement": statement, "assumptions": list(assumption or []), "display_label": display_label})
         children = split_node(store, parent_id, specs, created_by=created_by, reassign=reassign)
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.split")
@@ -921,6 +945,9 @@ def node_split(
         typer.echo(render_proof_map_node_list(children))
 
 
+_ROLES_HELP = ", ".join(AGENT_ROLES[:-1]) + f" or {AGENT_ROLES[-1]}"  # the roles, as the help spells them (ADR-0019: never by hand)
+
+
 @node_app.command("progress")
 def node_progress(
     node_id: str,
@@ -928,17 +955,22 @@ def node_progress(
     step: int = typer.Option(None, "--step", help="The step being reported, counting from 1"),
     status: str = typer.Option("", "--status", help="With --step: started, done, stuck, or needs-human (a decision only the researcher can make, named in --note)"),
     note: str = typer.Option("", "--note", help="A line about the step: what it found, why it is stuck, what the next role should do"),
-    handoff: str = typer.Option("", "--handoff", help="Hand the work to this role (prover, typesetter or numerics) and end the turn"),
-    role: str = typer.Option("", "--role", help="prover, typesetter or numerics (default: PROOF_AGENT_ROLE, set in the agent's runtime)"),
+    handoff: str = typer.Option("", "--handoff", help=f"Hand the work to this role ({_ROLES_HELP}) and end the turn"),
+    verdict: str = typer.Option("", "--verdict", help="The Verifier's verdict on the working proof as it stands: passed or failed, with the objections in --note (ADR-0019)"),
+    attempt: str = typer.Option("", "--attempt", help="Close an abandoned line: what it tried to establish; goes with --failed-on (ADR-0019)"),
+    method: str = typer.Option("", "--method", help="With --attempt: the approach"),
+    failed_on: str = typer.Option("", "--failed-on", help="With --attempt: the objection or obstruction it failed on"),
+    coordinator: str = typer.Option("", "--coordinator", help="What a Coordinator did on this Theorem or Lemma's subtree: a run it started, a redirect, a stop (ADR-0019 point 18); no role"),
+    role: str = typer.Option("", "--role", help=f"{_ROLES_HELP} (default: PROOF_AGENT_ROLE, set in the agent's runtime)"),
     by: str = typer.Option("", "--by", help="Who reports; empty means PROOF_AGENT_NAME from the agent's runtime, else human"),
     root: str = ROOT_OPTION,
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
-    """A Proof agent's report of its plan or a step on this node — the studio's work log (spec #145).
-    Without --plan or --step: the node's work log so far."""
+    """A Proof agent's report on this node — the studio's work log (spec #145): its plan, a step, a handoff,
+    the Verifier's verdict or an abandoned attempt (ADR-0019). Without any of them: the node's work log so far."""
     store = get_store(_root(root))
     try:
-        if not plan and step is None and not handoff:
+        if not plan and step is None and not handoff and not verdict and not attempt and not failed_on and not coordinator:
             log = work_log(store, node_id)
             if json_output:
                 typer.echo(dump_envelope(success_envelope("node.progress", log)))
@@ -948,6 +980,7 @@ def node_progress(
         entry = record_progress(
             store, node_id, role=role or os.environ.get("PROOF_AGENT_ROLE") or None, by=by or os.environ.get("PROOF_AGENT_NAME") or "human",
             plan=plan or None, step=step, status=status or None, note=note, handoff=handoff or None,
+            verdict=verdict or None, attempt=attempt or None, method=method or None, failed_on=failed_on or None, coordinator=coordinator or None,
         )
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.progress")
@@ -955,8 +988,7 @@ def node_progress(
     if json_output:
         typer.echo(dump_envelope(success_envelope("node.progress", entry)))
     else:
-        body = f"plan of {len(entry['plan'])} step(s)" if entry["kind"] == "plan" else f"handed off to {entry['to']}" if entry["kind"] == "handoff" else f"step {entry['step']} {entry['status']}"
-        typer.echo(f"{entry['role']} on {node_id}: {body}" + (f" — {entry['note']}" if entry.get("note") else ""))
+        typer.echo(render_work_log_entry(node_id, entry))
 
 
 @node_medium_app.command("set")
@@ -1137,75 +1169,6 @@ node_app.add_typer(node_evidence_app, name="evidence")
 node_app.add_typer(node_medium_app, name="medium")
 
 
-def _running_review_app(store) -> bool:
-    """Whether this project's proof map page already answers on its origin."""
-    import urllib.request
-
-    from .storage import read_project_instance_id
-    from .webapp.server import project_url
-
-    try:
-        with urllib.request.urlopen(f"{project_url(store)}/api/health", timeout=2) as response:
-            return json.loads(response.read())["data"]["instance"] == read_project_instance_id(store)
-    except (OSError, ValueError, KeyError):
-        return False
-
-
-@map_app.command("serve")
-def review_serve(root: str = ROOT_OPTION) -> None:
-    """Run this project's proof map page on its own localhost origin — the only place Human Review decisions are made (ADR-0010).
-
-    Runs in the foreground until interrupted. Bound to 127.0.0.1. Decisions
-    are recorded as this process's git identity and committed with their
-    snapshots.
-    """
-    from .webapp.server import ReviewServer
-
-    store = get_store(_root(root))
-    try:
-        server = ReviewServer(store)
-    except OSError as exc:
-        typer.echo(f"Error: can't bind this project's review port ({exc}); is it already running? Try `proof map open`.")
-        raise typer.Exit(code=1)
-    typer.echo(f"Proof map page for this project: {server.url}  (Ctrl-C to stop)")
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        server.server_close()
-
-
-@map_app.command("open")
-def review_open(
-    node_id: str = typer.Argument("", help="Open this node's decision page"),
-    root: str = ROOT_OPTION,
-    json_output: bool = typer.Option(False, "--json"),
-) -> None:
-    """Open this project's proof map page (starting it in the background if needed), optionally at a node."""
-    import subprocess
-    import time
-    import webbrowser
-
-    from .webapp.server import project_url
-
-    store = get_store(_root(root))
-    if not _running_review_app(store):
-        subprocess.Popen(
-            [sys.executable, "-m", "proof_cli.cli", "map", "serve", "--root", str(_root(root))],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-        for _ in range(50):
-            if _running_review_app(store):
-                break
-            time.sleep(0.1)
-    url = project_url(store, node_id or None)
-    typer.echo(dump_envelope(success_envelope("map.open", {"url": url, "node_id": node_id or None})) if json_output else url)
-    webbrowser.open(url)
-
-
 @review_app.command("warnings")
 def review_warnings(root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
     """Everything about Human Review authority that doesn't verify, and Review snapshots the index never recorded."""
@@ -1246,9 +1209,6 @@ app.add_typer(bug_app, name="bug")
 app.add_typer(debug_app, name="debug")
 app.add_typer(review_app, name="review")
 app.add_typer(map_app, name="map", rich_help_panel=PROOF_MAP_PANEL)
-# the page's commands before it was the map's home (ADR-0010): kept, out of sight
-review_app.command("serve", hidden=True)(review_serve)
-review_app.command("open", hidden=True)(review_open)
 app.add_typer(contributor_app, name="contributor")
 app.add_typer(role_app, name="role")
 app.add_typer(comment_app, name="comment")
@@ -1654,13 +1614,14 @@ def memory_add(
     content: str,
     root: str = ROOT_OPTION,
     layer: str = "working",
-    node_id: str = "",
+    node_id: list[str] = typer.Option(None, "--node-id", help="The node this is about; once. A run's role may name only its own node (ADR-0019 point 12)"),
+    project: list[str] = typer.Option(None, "--project", help="The project's instance id this entry is for; once. Refused when the project opened is another: a run's role writes its own project's memory and no other's"),
     candidate_proof_id: str = "",
     review_id: str = "",
     route_id: str = "",
     importance: str = "medium",
-    status: str = "",
-    source: str = "manual",
+    status: str = typer.Option("", help="stable | tentative | failed | tactic: what was learned, as against what was tried (ADR-0019 point 8)"),
+    source: str = typer.Option("manual", help="Who learned it: manual, or a run's agent and role as <agent>/<role>"),
     tag: list[str] = typer.Option(None, "--tag"),
     notes: str = "",
     json_output: bool = typer.Option(False, "--json"),
@@ -1668,14 +1629,38 @@ def memory_add(
     """Record a memory entry, scoped to a proof-map node (and one of its Candidate proofs or reviews).
 
     The scope is checked against the map, and a bad one writes nothing. The
-    legacy theorem/goal/obligation/blocker scope is read-only (ADR-0012).
+    legacy theorem/goal/obligation/blocker scope is read-only (ADR-0012). A
+    run's role records what it learned here — a dead end (--status failed), a
+    technique that worked (--status tactic), an observation not yet trusted
+    (--status tentative) — scoped to its own node and tagged with --source
+    <agent>/<role>; other nodes' briefings read it (ADR-0019 part C). The
+    node is named once: a second --node-id, or an empty one, is refused, so
+    a permission that admits `proof memory add --node-id <node>` admits that
+    node's memory and no other's.
     """
+    given = list(node_id or [])
+    projects = list(project or [])
+    refused = None
+    if len(given) > 1 or any(not value.strip() for value in given):
+        refused = "--node-id names one node, once" if len(given) > 1 else "--node-id needs a node id"
+    elif len(projects) > 1 or any(not value.strip() for value in projects):
+        refused = "--project names one project, once" if len(projects) > 1 else "--project needs a project instance id"
+    elif projects:
+        try:
+            opened = read_project_instance_id(get_store(_root(root)))
+        except Exception:  # noqa: BLE001 — no project there: not the one named either
+            opened = None
+        if opened != projects[0].strip():
+            refused = f"the project at {_root(root)} is not project {projects[0].strip()}: this entry is for another project"
+    if refused is not None:
+        _emit_error(ProofMapError("INVALID_INPUT", refused), json_output, command="memory.add")
+        raise typer.Exit(code=1)
     try:
         output = cmd_memory_add(
             content,
             _root(root),
             layer=layer,
-            node_id=node_id,
+            node_id=given[0].strip() if given else "",
             candidate_proof_id=candidate_proof_id,
             review_id=review_id,
             route_id=route_id,
@@ -2215,6 +2200,15 @@ def verify_stale(
             cmd_proof_verify_stale(source_id, _root(root), reason=reason, changed_dependency_ids=dependency),
         )
     )
+
+
+# The other packages' commands (ADR-0018): proof-web adds `home`, `map open` and `map serve` through
+# the `proof_cli.commands` entry point. Without it, those commands say which package to install.
+from . import plugins as _plugins  # noqa: E402
+
+_plugins.load_commands(app, map_app, review_app)
+if "home" not in _plugins.command_names(app):
+    _plugins.install_web_fallbacks(app, map_app, panel=PROOF_MAP_PANEL)
 
 
 if __name__ == "__main__":

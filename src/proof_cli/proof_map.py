@@ -11,6 +11,7 @@ import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 from typing import Any, Iterator
 
@@ -381,6 +382,8 @@ def create_node(
 
 # a step's status; `needs-human` names, in its note, a decision only the researcher can make (the run stops for it)
 PROGRESS_STATUSES = ("started", "done", "stuck", "needs-human")
+# a Verifier's verdict on the working proof as it stands (ADR-0019 point 2); the objections carry the nuance
+VERDICT_OUTCOMES = ("passed", "failed")
 PROGRESS_EVENT = "agent_progress"
 TURN_EVENT = "agent_turn"
 # a turn's raw conversation, kept with the project's state (never the node folder, which a snapshot freezes)
@@ -399,15 +402,52 @@ def record_progress(
     status: str | None = None,
     note: str = "",
     handoff: str | None = None,
+    verdict: str | None = None,
+    attempt: str | None = None,
+    method: str | None = None,
+    failed_on: str | None = None,
+    coordinator: str | None = None,
 ) -> dict:
-    """Report a plan (the steps the run means to take), one step's status, or a handoff to another role. Returns the log entry."""
-    require_node(store, node_id)
+    """Report a plan (the steps the run means to take), one step's status, a handoff to another role, the
+    Verifier's verdict on the working proof, an attempt the role abandoned (ADR-0019), or — on a Theorem or Lemma
+    a Coordinator works — what the Coordinator did (`coordinator`: started a node's run, redirected a dependent,
+    stopped; ADR-0019 point 18). A Coordinator holds no node and takes no turn, so its note names no role.
+    Returns the log entry.
+
+    A verdict is `passed` or `failed` with the objections as its note, and carries the inputs digest of the node
+    folder as it stands — what a Review snapshot's manifest would hash — so a later edit makes it stale by
+    construction; only the Verifier records one. An attempt is what the role tried to establish, how, and what it
+    failed on; any role records one. Both are insert-only events like the rest of the work log."""
+    node = require_node(store, node_id)
+    if coordinator is not None:
+        if not coordinator.strip():
+            raise ProofMapError("PROGRESS_EMPTY", "say what the Coordinator did: --coordinator \"<what it started, redirected or stopped>\"")
+        payload = {"kind": "coordinator", "role": None, "by": by, "note": coordinator.strip()}
+        with store.transaction() as conn:
+            append_event(store, PROGRESS_EVENT, f"coordinator on {node_id}: {coordinator.strip()}", entity_id=node_id, payload=payload, conn=conn)
+        return {**payload, "node_id": node_id, "at": utc_now().isoformat()}
     if not role:
-        raise ProofMapError("ROLE_REQUIRED", "say which role reports: prover, typesetter or numerics (an agent's runtime sets PROOF_AGENT_ROLE)")
+        raise ProofMapError("ROLE_REQUIRED", f"say which role reports: {', '.join(AGENT_ROLES)} (an agent's runtime sets PROOF_AGENT_ROLE)")
     if role not in AGENT_ROLES:
         raise ProofMapError("INVALID_ROLE", f"'{role}' is not a Proof agent role; expected one of: {', '.join(AGENT_ROLES)}")
     steps = [str(item).strip() for item in (plan or []) if str(item).strip()]
-    if handoff is not None:
+    if verdict is not None:
+        if role != "verifier":
+            raise ProofMapError("VERDICT_ROLE_REQUIRED", f"only the verifier records a verdict; {role} reports steps, attempts and handoffs")
+        if verdict not in VERDICT_OUTCOMES:
+            raise ProofMapError("INVALID_VERDICT", f"'{verdict}' is not a verdict; expected one of: {', '.join(VERDICT_OUTCOMES)}")
+        if verdict == "failed" and not note.strip():
+            raise ProofMapError("OBJECTIONS_REQUIRED", "a failed verdict names its objections: --note \"1. <the step or citation it attacks> …\"")
+        payload = {"kind": "verdict", "role": role, "by": by, "outcome": verdict, "note": note.strip(), "inputs_sha256": _working_digest_or_none(store, node)}
+        message = f"{role} on {node_id}: verdict {verdict}" + (f" — {note.strip()}" if note.strip() else "")
+    elif attempt is not None or failed_on is not None:
+        goal = (attempt or "").strip()
+        obstruction = (failed_on or "").strip()
+        if not goal or not obstruction:
+            raise ProofMapError("ATTEMPT_INCOMPLETE", "an attempt is what was tried and what it failed on: --attempt \"<goal>\" --failed-on \"<the objection or obstruction>\"")
+        payload = {"kind": "attempt", "role": role, "by": by, "goal": goal, "method": (method or "").strip(), "failed_on": obstruction}
+        message = f"{role} on {node_id}: attempt at {goal} failed on {obstruction}"
+    elif handoff is not None:
         if handoff not in AGENT_ROLES:
             raise ProofMapError("INVALID_ROLE", f"'{handoff}' is not a Proof agent role to hand off to; expected one of: {', '.join(AGENT_ROLES)}")
         payload = {"kind": "handoff", "role": role, "by": by, "to": handoff, "note": note.strip()}
@@ -427,10 +467,51 @@ def record_progress(
         payload = {"kind": "step", "role": role, "by": by, "step": int(step), "status": status, "note": note.strip()}
         message = f"{role} on {node_id}: step {step} {status}" + (f" — {note.strip()}" if note.strip() else "")
     else:
-        raise ProofMapError("PROGRESS_EMPTY", "report a plan (--plan, repeatable), a step (--step N --status …) or a handoff (--handoff <role>)")
+        raise ProofMapError("PROGRESS_EMPTY", "report a plan (--plan, repeatable), a step (--step N --status …), a handoff (--handoff <role>), a verdict (--verdict passed|failed) or an attempt (--attempt … --failed-on …)")
     with store.transaction() as conn:
         append_event(store, PROGRESS_EVENT, message, entity_id=node_id, payload=payload, conn=conn)
     return {**payload, "node_id": node_id, "at": utc_now().isoformat()}
+
+
+def _working_digest_or_none(store: ProjectStore, node: ProofMapNode) -> str | None:
+    """The digest a verdict is about (ADR-0019 point 2): the SHA-256 a Review snapshot of the folder as it stands would
+    be known by — every file the Verifier read, a computation's `out/` and the key-ideas summary included, not the
+    inputs alone (those are a Run's Evidence rule, ADR-0015). None when the folder can't be read or holds a link where
+    a snapshot would read: the verdict is still recorded — it is the Verifier's reading, not a snapshot — and a verdict
+    without a hash matches no snapshot, so it opens no gate."""
+    try:
+        return read_working_snapshot(store.root, node.id, node.medium).digest()
+    except (OSError, NodeFolderLinks):
+        return None
+
+
+def _progress_entries(store: ProjectStore, node_id: str, kind: str) -> list[dict]:
+    """The node's `agent_progress` events of one kind, oldest first, each with its time."""
+    require_node(store, node_id)
+    return [
+        {"at": event.created_at.isoformat(), **(event.payload or {})}
+        for event in list_events(store)
+        if event.kind == PROGRESS_EVENT and event.entity_id == node_id and (event.payload or {}).get("kind") == kind
+    ]
+
+
+def verdicts(store: ProjectStore, node_id: str) -> list[dict]:
+    """The Verifier's verdicts on the node, newest last (ADR-0019 point 2): each its outcome, its objections (`note`),
+    the role and agent that made it, and the inputs digest it was about (`inputs_sha256`, None if unreadable then)."""
+    return _progress_entries(store, node_id, "verdict")
+
+
+def latest_verdict(store: ProjectStore, node_id: str) -> dict | None:
+    """The newest verdict on the node, or None: what the run compares with the working inputs' digest now to know
+    whether the Prover may request review (ADR-0019 point 3). A verdict whose hash is not the folder's is stale."""
+    found = verdicts(store, node_id)
+    return found[-1] if found else None
+
+
+def attempts(store: ProjectStore, node_id: str) -> list[dict]:
+    """What the roles tried on the node and abandoned, oldest first (ADR-0019 point 7): each its goal, its method
+    and what it failed on. The run briefs its next turn from these, newest first."""
+    return _progress_entries(store, node_id, "attempt")
 
 
 def record_agent_turn(
@@ -634,6 +715,24 @@ def list_nodes(store: ProjectStore) -> list[ProofMapNode]:
     return [_as_counted(store, node) for node in list_proof_map_nodes(store)]
 
 
+def dependents(store: ProjectStore, node_id: str) -> list[ProofMapNode]:
+    """The nodes that rest on `node_id`, in the map's order: what a briefing shares with, and what a Coordinator
+    redirects when the node is Accepted (ADR-0019 points 14 and 19)."""
+    require_node(store, node_id)
+    return [node for node in list_nodes(store) if node_id in node.dependencies]
+
+
+def siblings(store: ProjectStore, node_id: str) -> list[ProofMapNode]:
+    """The other dependencies of each node that rests on `node_id` — the children beside it under the same
+    parents — each once, in the map's order, never the node itself (ADR-0019 point 14). Two Claims under one
+    Lemma with no edge between them are often proved by the same technique; this is how a briefing finds them."""
+    require_node(store, node_id)
+    wanted: set[str] = set()
+    for parent in dependents(store, node_id):
+        wanted.update(dependency for dependency in parent.dependencies if dependency != node_id)
+    return [node for node in list_nodes(store) if node.id in wanted]
+
+
 def split_node(
     store: ProjectStore,
     parent_id: str,
@@ -673,6 +772,36 @@ def split_node(
     with store.transaction() as conn:
         remove_new_node_folders_on_rollback(store, [spec["id"] for spec in child_specs])
         return _split(store, conn, parent_id, child_specs, created_by=created_by, reassign=reassign)
+
+
+def create_node_under_parent(
+    store: ProjectStore, parent_id: str, *, created_by: str = "human", reassign: bool = False, **fields: Any
+) -> ProofMapNode:
+    """Create a node and make `parent_id` rest on it, in one write transaction (issue #154).
+
+    Any kind, an imported result included: the parent gains the new node as a
+    dependency, exactly as `create_node` then `add_dependency(parent_id, …)`
+    would, with every refusal of either (NOT_CLAIMANT unless `reassign`,
+    NODE_ACCEPTED, DEPENDENCY_CYCLE, …). Unlike a Split, the node is not
+    derived from the parent. A refused parent leaves no node and no folder.
+    `fields` are `create_node`'s.
+    """
+    with store.transaction() as conn:
+        remove_new_node_folders_on_rollback(store, [fields["node_id"]])
+        node = create_node(store, created_by=created_by, **fields)
+        # add_dependency's checks, in its order; the new node is not yet visible outside this
+        # transaction, so the cycle is looked for from its own dependencies down to the parent
+        parent = require_node(store, parent_id)
+        _structure_editable(store, parent)
+        for dependency_id in node.dependencies:
+            path = _dependency_path(store, dependency_id, parent_id)
+            if path is not None:
+                raise _cycle(parent_id, [parent_id, node.id, *path])
+        claim = _held_by_another(store, conn, parent_id, created_by, reassign=reassign)
+        if claim is not None:
+            _take_over(store, conn, claim, created_by)
+        _gain_dependency(store, conn, parent, node.id, created_by)
+    return node
 
 
 def remove_new_node_folders_on_rollback(store: ProjectStore, node_ids: list[str]) -> None:
@@ -938,17 +1067,22 @@ def add_dependency(
         claim = _held_by_another(store, conn, node_id, edited_by, reassign=reassign)
         if claim is not None:
             _take_over(store, conn, claim, edited_by)
-        updated = _with_dependencies(node, [*node.dependencies, dependency_id], edited_by)
-        update_proof_map_node(store, updated, conn=conn)
-        append_event(
-            store,
-            "proof_map_dependency_added",
-            f"{node_id} now rests on {dependency_id}",
-            entity_id=node_id,
-            payload={"dependency_id": dependency_id, "edited_by": edited_by, "dependencies": {"before": node.dependencies, "after": updated.dependencies}},
-            conn=conn,
-        )
+        _gain_dependency(store, conn, node, dependency_id, edited_by)
     return DependencyEdit("add", dependency_id, get_node(store, node_id))
+
+
+def _gain_dependency(store: ProjectStore, conn: sqlite3.Connection, node: ProofMapNode, dependency_id: str, edited_by: str) -> None:
+    """Write `node` resting on `dependency_id` too, once every check has passed: the edge and its event."""
+    updated = _with_dependencies(node, [*node.dependencies, dependency_id], edited_by)
+    update_proof_map_node(store, updated, conn=conn)
+    append_event(
+        store,
+        "proof_map_dependency_added",
+        f"{node.id} now rests on {dependency_id}",
+        entity_id=node.id,
+        payload={"dependency_id": dependency_id, "edited_by": edited_by, "dependencies": {"before": node.dependencies, "after": updated.dependencies}},
+        conn=conn,
+    )
 
 
 def remove_dependency(
@@ -1130,7 +1264,7 @@ def release_node(
     return claim.model_copy(update={"released_by": claimant_id, "release_reason": release_reason, "released_at": released_at})
 
 
-def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rationale: str, unassign: bool = False) -> CandidateProofRecord:
+def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rationale: str, unassign: bool = False, gated_by: str | None = None) -> CandidateProofRecord:
     """Snapshot a node's working `proof.tex` for review (ADR-0010).
 
     The working sources are edited freely — in the node's studio, by agents —
@@ -1183,11 +1317,34 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
     contents = snapshot.files
     _require_key_ideas(store, node_id, contents.get(key_ideas.KEY_IDEAS_FILE))
     sha256 = snapshot.digest()
+    # The agent's gate, checked at the request itself (ADR-0019 point 3): a run's Prover names the passing verdict's
+    # digest; files edited since — by anyone, in the same turn — are not what the Verifier passed, so nothing is frozen.
+    # The researcher's own request names none and is never refused for this.
+    if gated_by is not None and gated_by != sha256:
+        raise ProofMapError(
+            "VERDICT_STALE",
+            f"the files of {node_id} are not the ones the Verifier passed: the verdict is about {gated_by[:12]}…, the folder now is {sha256[:12]}…; "
+            "have the Verifier read them again before requesting review",
+            details={"gated_by": gated_by, "working_sha256": sha256},
+        )
 
     # The holder check and every write are one SQLite write transaction (#18): a reassignment
     # can't slip in between them, it waits for this to commit. The files written go if it rolls
     # back, before its write lock does, so no later request can have taken their version yet.
     with store.transaction() as conn:
+        # The gate's second half, on the write lock (re-audit P1): the newest verdict must be a passing one on these very
+        # files. Read here, a `failed` another process committed a moment ago is seen, and none can be committed before
+        # this request is — BEGIN IMMEDIATE holds the lock from here to the commit.
+        if gated_by is not None:
+            newest = latest_verdict(store, node_id)
+            if newest is None or newest.get("outcome") != "passed" or newest.get("inputs_sha256") != sha256:
+                raise ProofMapError(
+                    "VERDICT_STALE",
+                    f"the newest verdict on {node_id} is not a passing one on these files"
+                    + (f" (it {newest.get('outcome')} {str(newest.get('inputs_sha256') or '')[:12]}…)" if newest else " (there is none)")
+                    + "; have the Verifier read them again before requesting review",
+                    details={"gated_by": gated_by, "working_sha256": sha256, "newest_verdict": newest},
+                )
         claim = get_active_claim(store, node_id, conn=conn)
         unassigned = claim.claimant_id if claim is not None and claim.claimant_id != requested_by else None
         if unassigned is not None and not unassign:  # a node someone holds is theirs to hand over
@@ -1801,13 +1958,25 @@ def _require_awaiting_acceptance_review(store: ProjectStore, node_id: str) -> No
             "a Human Review decision only applies to a submitted Candidate proof awaiting review",
             details={"workflow_state": workflow_state},
         )
-    current = get_current_candidate_proof(store, node_id)
-    if current is not None and not _snapshot_dependencies_stand(store, require_node(store, node_id), current):
+    current = snapshot_with_changed_dependencies(store, node_id)
+    if current is not None:
         # the snapshot was made on other dependencies: deciding it would accept a proof of a different node
         raise ProofMapError(
             "DEPENDENCIES_CHANGED",
             f"{node_id}'s dependencies changed since snapshot v{current.version} was requested for review; request review again",
         )
+
+
+def snapshot_with_changed_dependencies(store: ProjectStore, node_id: str) -> CandidateProofRecord | None:
+    """The node's current snapshot if its dependencies changed since it was requested for review, else None.
+
+    The one rule by which an Acceptance decision on it is refused (DEPENDENCIES_CHANGED), and by which
+    the proof map page offers none (#156).
+    """
+    current = get_current_candidate_proof(store, node_id)
+    if current is not None and not _snapshot_dependencies_stand(store, require_node(store, node_id), current):
+        return current
+    return None
 
 
 def _snapshot_dependencies_stand(store: ProjectStore, node: ProofMapNode, snapshot: CandidateProofRecord) -> bool:
@@ -2772,7 +2941,7 @@ def _with_resolution(store: ProjectStore, challenge: Challenge) -> Challenge:
             update={
                 "status": _challenge_outcome(row),
                 "resolved_by": row["reviewer_id"],
-                "resolved_at": row["created_at"],
+                "resolved_at": datetime.fromisoformat(row["created_at"]),  # the row holds a string (#159)
                 "resolution_review_id": row["review_id"],
                 "resolution_rationale": verify_decision_row(store, row["id"]).payload.rationale,
             }

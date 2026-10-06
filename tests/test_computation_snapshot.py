@@ -37,7 +37,11 @@ from proof_cli.vault import (
 )
 
 runner = CliRunner()
-as_root = pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0, reason="root reads a mode-000 file")
+needs_posix_modes = pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits are not Windows ACLs")
+needs_permissions = pytest.mark.skipif(
+    os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+    reason="chmod 000 needs POSIX permissions and a non-root reader",
+)
 
 
 def _computation(store, node_id="c1"):
@@ -67,7 +71,7 @@ def _manifest(store, proof) -> dict:
 # -- an unreadable file is refused, and nothing is written -------------------------------------------
 
 
-@as_root
+@needs_permissions
 @pytest.mark.parametrize("where", ["out/locked.bin", "check.py"])
 def test_an_unreadable_file_in_the_node_folder_is_refused_and_nothing_is_written(tmp_path: Path, where: str):
     store = ensure_project(tmp_path)
@@ -85,7 +89,7 @@ def test_an_unreadable_file_in_the_node_folder_is_refused_and_nothing_is_written
     assert not (folder / "snapshots").exists() and list_all_candidate_proofs(store) == []
 
 
-@as_root
+@needs_permissions
 def test_an_unreadable_folder_in_the_node_folder_is_refused_rather_than_skipped(tmp_path: Path):
     store = ensure_project(tmp_path)
     folder = _computation(store)
@@ -101,7 +105,7 @@ def test_an_unreadable_folder_in_the_node_folder_is_refused_rather_than_skipped(
     assert not (folder / "snapshots").exists()
 
 
-@as_root
+@needs_permissions
 def test_the_cli_answers_an_unreadable_file_with_its_code_not_an_internal_error(tmp_path: Path):
     store = ensure_project(tmp_path)
     folder = _computation(store)
@@ -281,6 +285,7 @@ def test_a_latex_snapshot_still_freezes_the_preamble_and_no_hidden_file(tmp_path
 # -- the executable bit ---------------------------------------------------------------------------------
 
 
+@needs_posix_modes
 def test_the_executable_bit_of_a_script_is_frozen_recorded_and_hashed(tmp_path: Path):
     store = ensure_project(tmp_path)
     folder = _computation(store)
@@ -301,7 +306,7 @@ def test_editing_a_snapshots_recorded_modes_breaks_its_hash(tmp_path: Path):
     proof = _review(store)
     manifest_path = store.root / proof.file_path
     manifest = json.loads(manifest_path.read_text())
-    manifest["executable"] = []
+    manifest["executable"] = ["check.py"]
     manifest_path.write_text(json.dumps(manifest))
     assert candidate_proof_sha256(store, proof.id) != proof.sha256
 
@@ -363,6 +368,7 @@ def test_a_summary_only_edit_leaves_the_inputs_digest_unchanged(tmp_path: Path):
     assert working_inputs_digest(tmp_path, "c1", Medium.computation) == frozen
 
 
+@needs_posix_modes
 def test_the_inputs_digest_ignores_out_and_sees_every_input_and_its_mode(tmp_path: Path):
     store = ensure_project(tmp_path)
     folder = _computation(store)
@@ -437,7 +443,7 @@ def test_an_export_carries_no_tool_cache_or_bytecode(tmp_path: Path):
     assert "proofs/c1/run.sh" in paths and "proofs/c1/out/table.csv" in paths
 
 
-@as_root
+@needs_permissions
 def test_an_export_reports_an_unreadable_folder_rather_than_skipping_it(tmp_path: Path):
     store = ensure_project(tmp_path)
     folder = _computation(store)
@@ -502,6 +508,7 @@ def test_a_manifest_of_an_unknown_format_is_unverifiable(tmp_path: Path, fmt):
     assert candidate_proof_sha256(store, proof.id) is None
 
 
+@needs_posix_modes
 def test_a_stored_script_that_lost_its_executable_bit_is_unverifiable(tmp_path: Path):
     store = ensure_project(tmp_path)
     _computation(store)
@@ -511,6 +518,7 @@ def test_a_stored_script_that_lost_its_executable_bit_is_unverifiable(tmp_path: 
     assert candidate_proof_sha256(store, proof.id) is None
 
 
+@needs_posix_modes
 def test_import_sets_an_executable_bit_only_where_the_file_is_readable(tmp_path: Path):
     source = ensure_project(tmp_path / "source")
     _computation(source)
@@ -618,15 +626,14 @@ def test_a_computation_snapshot_survives_a_medium_change_and_an_exchange_verifie
     assert not report.warnings
 
 
-@pytest.mark.parametrize("edit", ["drop", "add"])
-def test_a_bundle_whose_executable_flags_disagree_with_its_manifest_reads_unverifiable_with_a_warning(tmp_path: Path, edit: str):
+@pytest.mark.parametrize("name", ["run.sh", "check.py"])
+def test_a_bundle_whose_executable_flags_disagree_with_its_manifest_reads_unverifiable_with_a_warning(tmp_path: Path, name: str):
     source = ensure_project(tmp_path / "source")
     _computation(source)
     proof = _review(source)
     raw = json.loads(bundle_to_json(export_exchange_bundle(source)))
-    name = "run.sh" if edit == "drop" else "check.py"
     (stored,) = [f for f in raw["vault_files"] if f["path"] == f"proofs/c1/snapshots/v{proof.version}/node/{name}"]
-    stored["executable"] = edit == "add"
+    stored["executable"] = not stored["executable"]
     target = ensure_project(tmp_path / "target")
     report = import_exchange_bundle(target, raw)
     assert candidate_proof_sha256(target, proof.id) is None
@@ -651,6 +658,7 @@ def test_a_format_1_latex_snapshot_exchanges_unchanged(tmp_path: Path):
 
 
 @pytest.mark.parametrize(("before", "after"), [(0o444, 0o555), (0o644, 0o755), (0o600, 0o700), (0o640, 0o750), (0o666, 0o777)])
+@needs_posix_modes
 def test_set_executable_adds_x_only_where_r_is_set_and_never_write(tmp_path: Path, before: int, after: int):
     from proof_cli.vault import set_executable
 

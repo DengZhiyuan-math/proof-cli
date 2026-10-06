@@ -81,6 +81,7 @@ class KeyIdeas:
 def parse(text: str) -> KeyIdeas:
     """Read the four fields from a summary's Markdown. A field's text runs from its heading to
     the next field's; HTML comments don't count."""
+    text = text.replace("\r\n", "\n")
     matches = list(_HEADING.finditer(text))
     fields: dict[str, str] = {}
     key_of = {title: key for key, title in FIELDS}

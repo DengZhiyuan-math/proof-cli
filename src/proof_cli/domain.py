@@ -4,7 +4,7 @@ from enum import Enum
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_serializer, model_validator
 
 
 def utc_now() -> datetime:
@@ -66,11 +66,15 @@ class ProofMapNodeKind(str, Enum):
 
 
 class AgentRole(str, Enum):
-    """The three roles of a Proof agent's run (spec #145, decided in #144): who takes a turn on a node."""
+    """The roles of a Proof agent's run: who takes a turn on a node. Prover, Typesetter and Numerics
+    (spec #145, decided in #144); the Verifier, who reads the proof against the Prover and records a
+    verdict, and the Decomposer, who proposes a Theorem's split for the researcher (ADR-0019)."""
 
     prover = "prover"
     typesetter = "typesetter"
     numerics = "numerics"
+    verifier = "verifier"
+    decomposer = "decomposer"
 
 
 AGENT_ROLES = tuple(role.value for role in AgentRole)
@@ -330,6 +334,11 @@ class Challenge(BaseModel):
     resolution_review_id: str | None = None
     # that decision's signed rationale
     resolution_rationale: str | None = None
+
+    @field_serializer("resolved_at", when_used="json")
+    def _resolved_at_as_recorded(self, value: datetime | None) -> str | None:
+        # the decision's own `isoformat()` (`+00:00`), as `resolved_at` has always read (#159)
+        return None if value is None else value.isoformat()
 
 
 class EvidenceOutcome(str, Enum):

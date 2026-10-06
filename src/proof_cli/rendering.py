@@ -342,8 +342,55 @@ def render_challenge_list(challenges: list[Challenge]) -> str:
 
 
 
+def _work_log_body(entry: dict) -> str:
+    """One work log entry as a line's body: a plan, a step, a turn, a handoff, a verdict or an attempt
+    (ADR-0019), or what the agent did through another `proof` command."""
+    kind = entry.get("kind")
+    if kind == "plan":
+        return "plan: " + " → ".join(f"{i}. {step}" for i, step in enumerate(entry.get("plan") or [], start=1))
+    if kind == "step":
+        status = "needs a human decision" if entry.get("status") == "needs-human" else entry.get("status")
+        return f"step {entry.get('step')} {status}" + (f" — {entry['note']}" if entry.get("note") else "")
+    if kind == "turn":
+        return f"turn {entry.get('turn')} (job {entry.get('job')}" + (f", session {entry['session_id']}" if entry.get("session_id") else "") + ")"
+    if kind == "handoff":
+        return f"handed off to {entry.get('to')}" + (f" — {entry['note']}" if entry.get("note") else "")
+    if kind == "verdict":
+        return f"verifier: {entry.get('outcome')}" + (f" — {entry['note']}" if entry.get("note") else "")
+    if kind == "attempt":
+        return f"attempt: {entry.get('goal')}" + (f" ({entry['method']})" if entry.get("method") else "") + f" failed on {entry.get('failed_on')}"
+    if kind == "coordinator":
+        return f"coordinator: {entry.get('note')}"
+    if kind == "split":
+        return "split into " + ", ".join(entry.get("nodes") or [])
+    if kind == "review-requested":
+        return f"requested review of snapshot v{entry.get('version')}"
+    if kind == "evidence":
+        return f"Evidence check {entry.get('outcome')}"
+    if kind == "fog":
+        return f"fog {entry.get('fog_id')}: {entry.get('text')}"
+    if kind == "experiment":
+        return f"Experiment {entry.get('seq')} on {entry.get('fog_id')}: {entry.get('outcome')}"
+    if kind == "dependencies":
+        return f"dependency {entry.get('change')}: {entry.get('dependency')}"
+    return str(kind)
+
+
+def render_work_log_entry(node_id: str, entry: dict) -> str:
+    """The one line `proof node progress` answers a report with: who reported, on which node, and what."""
+    if entry.get("kind") == "plan":  # how many steps, not the steps: the log has them
+        body = f"plan of {len(entry.get('plan') or [])} step(s)" + (f" — {entry['note']}" if entry.get("note") else "")
+    elif entry.get("kind") == "verdict":  # the role is already said: `verifier on N: verdict passed`
+        body = f"verdict {entry.get('outcome')}" + (f" — {entry['note']}" if entry.get("note") else "")
+    elif entry.get("kind") == "coordinator":  # no role: the Coordinator holds no node and takes no turn (ADR-0019 point 18)
+        return f"coordinator on {node_id}: {entry.get('note')}"
+    else:
+        body = _work_log_body(entry)
+    return f"{entry.get('role')} on {node_id}: {body}"
+
+
 def render_work_log(node_id: str, log: list[dict]) -> str:
-    """A node's work log (spec #145): the agent's plan and steps, and what it did through `proof`, in time order."""
+    """A node's work log (spec #145): the agent's plan, steps, verdicts and attempts, and what it did through `proof`, in time order."""
     console = _console()
     console.rule(f"Work log: {node_id}")
     if not log:
@@ -352,29 +399,5 @@ def render_work_log(node_id: str, log: list[dict]) -> str:
     for entry in log:
         when = str(entry.get("at", ""))[:16].replace("T", " ")
         who = f"{entry.get('role') or ''}{'·' if entry.get('role') and entry.get('by') else ''}{entry.get('by') or ''}"
-        kind = entry.get("kind")
-        if kind == "plan":
-            body = "plan: " + " → ".join(f"{i}. {step}" for i, step in enumerate(entry.get("plan") or [], start=1))
-        elif kind == "step":
-            status = "needs a human decision" if entry.get("status") == "needs-human" else entry.get("status")
-            body = f"step {entry.get('step')} {status}" + (f" — {entry['note']}" if entry.get("note") else "")
-        elif kind == "turn":
-            body = f"turn {entry.get('turn')} (job {entry.get('job')}" + (f", session {entry['session_id']}" if entry.get("session_id") else "") + ")"
-        elif kind == "handoff":
-            body = f"handed off to {entry.get('to')}" + (f" — {entry['note']}" if entry.get("note") else "")
-        elif kind == "split":
-            body = "split into " + ", ".join(entry.get("nodes") or [])
-        elif kind == "review-requested":
-            body = f"requested review of snapshot v{entry.get('version')}"
-        elif kind == "evidence":
-            body = f"Evidence check {entry.get('outcome')}"
-        elif kind == "fog":
-            body = f"fog {entry.get('fog_id')}: {entry.get('text')}"
-        elif kind == "experiment":
-            body = f"Experiment {entry.get('seq')} on {entry.get('fog_id')}: {entry.get('outcome')}"
-        elif kind == "dependencies":
-            body = f"dependency {entry.get('change')}: {entry.get('dependency')}"
-        else:
-            body = str(kind)
-        console.print(f"{when}  {who:<24} {body}")
+        console.print(f"{when}  {who:<24} {_work_log_body(entry)}")
     return console.export_text()
