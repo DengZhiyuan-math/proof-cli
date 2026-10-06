@@ -45,6 +45,8 @@ class AgentManager:
         # a node's proof agent context, fresh each turn (proof_agent.py); None outside a proof map
         self.context_fn = context_fn
         self.backends, self.default, self.config_error = backends or load_backends()
+        for backend in self.backends.values():   # outside a turn the CLI sees what a turn would (the profile folder)
+            backend.env_fn = self._context_env
         self.jobs: dict[int, Job] = {}
         self.turns: dict[int, Job] = {}
         self.ids = itertools.count(1)
@@ -54,6 +56,11 @@ class AgentManager:
         # the studio's own URL for the agent's compile tool (mcp_compile.py), asked once per turn
         # (None: no compile tool, as on a computation node)
         self.compile_url: Callable[[], str | None] | None = None
+
+    def _context_env(self) -> dict | None:
+        """The environment a turn of this studio starts with (the context's), or None for this process's own."""
+        context = self.context_fn() if self.context_fn else None
+        return context.env() if context is not None and hasattr(context, "env") else None
 
     def backend(self, provider: str | None) -> Backend | None:
         return self.backends.get(provider or self.default)
@@ -227,7 +234,7 @@ class AgentManager:
                   "reverted": reverted,
                   "session_id": res.get("session_id") or job.session_id,
                   "duration": res.get("duration") or int((time.time() - t0) * 1000)}
-            for k in ("cost", "billing", "usage", "is_error", "subtype", "denials", "denied", "stderr"):
+            for k in ("cost", "billing", "usage", "context", "is_error", "subtype", "denials", "denied", "stderr"):
                 if res.get(k) is not None:
                     ev[k] = res[k]
             job.emit(ev)
