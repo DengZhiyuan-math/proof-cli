@@ -104,6 +104,36 @@ class ClaudeScope(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("--permission-mode") + 1], "plan")
         self.assertNotIn("--allowedTools", cmd)
 
+    def test_a_context_that_writes_no_file_gets_no_scope_note_and_one_that_does_still_does(self):
+        """A host's context may say its turn writes no file (`writes_files` False: proof-web's map discussion); then an edit
+        turn's prompt carries no "you may change any file" note. A context without the flag is told as before."""
+        class Context:
+            writes_files = False
+            compiles = False
+
+            def brief(self):
+                return "discuss"
+
+            def env(self):
+                return dict(os.environ)
+
+            def claude_args(self, edit, scope_rules=None, tools=()):
+                return ["--allowedTools", "Read"]
+
+        for context, expect_note in ((Context(), False), (type("Writes", (Context,), {"writes_files": True})(), True)):
+            jobs = []
+            m = agent.AgentManager(lambda: Path("."), lambda: [], backends=({"claude": self.claude}, "claude", None), context_fn=lambda turn=None, c=context: c)
+            m._run = lambda job, backend, jobs=jobs: jobs.append(job)
+            m.start("hi", None, "edit")
+            for _ in range(50):
+                if jobs:
+                    break
+                time.sleep(0.02)
+            cmd, prompt = self.claude.command(jobs[-1])
+            self.assertEqual(cmd[cmd.index("--permission-mode") + 1], "default")
+            self.assertEqual("[Scope for this turn]" in prompt, expect_note, prompt)
+            self.assertIs(jobs[-1].context, context, "the context is the turn's before the note is decided")
+
 
 class CodexBackend(unittest.TestCase):
     def setUp(self):

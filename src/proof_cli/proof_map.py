@@ -554,6 +554,83 @@ def record_agent_turn(
         append_event(store, TURN_EVENT, f"{role} on {node_id}: turn {turn} {phase}", entity_id=node_id, payload=payload, conn=conn)
 
 
+# the map-level discussion (issue #177): the researcher and the map's agent on the proof plan, kept with the project
+DISCUSSION_EVENT = "map_discussion"
+DISCUSSION_DIR = Path(".proof") / "discussion"
+DISCUSSION_REPLY_KEPT = 4000   # characters of the reply kept in the event itself; the transcript holds the whole
+
+
+def record_discussion_turn(
+    store: ProjectStore,
+    *,
+    phase: str,
+    turn: str,
+    by: str,
+    provider: str = "",
+    prompt: str | None = None,
+    fresh: bool = False,
+    job: int | None = None,
+    session_id: str | None = None,
+    events: list[dict] | None = None,
+    reply: str | None = None,
+    is_error: bool = False,
+) -> None:
+    """One exchange of the map-level discussion (issue #177): `started` with the researcher's message (and whether it
+    opens a new conversation, `fresh`), `ended` with the backend's session (how the next message continues it), the
+    reply's text and the conversation itself, kept under .proof/discussion/ as a node's agent turns are. Project state,
+    never a node's: the discussion is about the map. Never a decision."""
+    if phase not in ("started", "ended"):
+        raise ProofMapError("INVALID_REQUEST", f"a discussion turn is started or ended, not {phase!r}")
+    if not _TURN_ID.fullmatch(turn or ""):
+        raise ProofMapError("INVALID_REQUEST", f"not a turn id: {turn!r}")
+    payload: dict = {"phase": phase, "turn": turn, "by": by, "provider": provider}
+    if phase == "started":
+        payload.update(prompt=str(prompt or ""), fresh=bool(fresh))
+    else:
+        payload.update(job=job, session_id=session_id, reply=str(reply or "")[:DISCUSSION_REPLY_KEPT], is_error=bool(is_error))
+        if events is not None:
+            path = DISCUSSION_DIR / f"{turn}.json"
+            target = store.root / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            tmp = target.with_name(f"{target.name}.{uuid.uuid4().hex}.tmp")  # write-then-rename: never half a transcript
+            tmp.write_text(json.dumps({**payload, "prompt": prompt, "events": events}, ensure_ascii=False), encoding="utf-8")
+            os.replace(tmp, target)
+            payload["transcript"] = path.as_posix()
+    with store.transaction() as conn:
+        append_event(store, DISCUSSION_EVENT, f"discussion with {by}: turn {turn} {phase}", payload=payload, conn=conn)
+
+
+def discussion_turns(store: ProjectStore, limit: int = 50) -> list[dict]:
+    """The map-level discussion, oldest first, one entry per turn: the message, whether it opened a new conversation, and —
+    once the turn ended — the reply, the session it left and whether the backend failed. The last `limit` turns."""
+    turns: dict[str, dict] = {}
+    for event in list_events(store):
+        if event.kind != DISCUSSION_EVENT:
+            continue
+        payload = event.payload or {}
+        turn = str(payload.get("turn") or "")
+        entry = turns.setdefault(turn, {"turn": turn, "at": None, "by": payload.get("by"), "provider": payload.get("provider"), "prompt": "",
+                                        "fresh": False, "ended": False, "ended_at": None, "reply": "", "session_id": None, "is_error": False, "transcript": None})
+        if payload.get("phase") == "started":
+            entry.update(at=event.created_at.isoformat(), prompt=payload.get("prompt") or "", fresh=bool(payload.get("fresh")),
+                         by=payload.get("by"), provider=payload.get("provider"))
+        else:
+            entry.update(ended=True, ended_at=event.created_at.isoformat(), reply=payload.get("reply") or "", session_id=payload.get("session_id"),
+                         is_error=bool(payload.get("is_error")), transcript=payload.get("transcript"))
+    ordered = [entry for entry in turns.values()]
+    return ordered[-limit:] if limit and limit > 0 else ordered
+
+
+def discussion_transcript(store: ProjectStore, turn: str) -> dict | None:
+    """A discussion turn's record with its conversation (`events`), as record_discussion_turn kept it; None when there is none."""
+    if not _TURN_ID.fullmatch(turn or ""):
+        return None
+    try:
+        return json.loads((store.root / DISCUSSION_DIR / f"{turn}.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
 def agent_turn_transcript(store: ProjectStore, node_id: str, turn: str) -> dict | None:
     """A turn's record with its conversation (`events`), as record_agent_turn kept it; None when there is none."""
     if not _TURN_ID.fullmatch(turn or "") or not _SAFE_NODE_ID.fullmatch(node_id or ""):  # as node folders are named
