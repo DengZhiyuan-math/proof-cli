@@ -559,6 +559,44 @@ class ClaudeProfileFolder(unittest.TestCase):
         self.assertIs(m.backends["claude"], cc)
 
 
+class AgentEnvironment(unittest.TestCase):
+    """Upstream 624bff0: an agent's turn reaches no git remote and has no GitHub login, so it can never push over,
+    rewrite or delete the project's history there."""
+
+    def test_no_remote_and_no_login_and_the_context_kept(self):
+        base = {"PATH": "/bin", "PROOF_ROOT": "/p", "GH_TOKEN": "t", "GITHUB_TOKEN": "t", "CLAUDE_CONFIG_DIR": "/c"}
+        env = backends.agent_env(base)
+        self.assertEqual((env["PROOF_ROOT"], env["CLAUDE_CONFIG_DIR"], env["PATH"]), ("/p", "/c", "/bin"))
+        self.assertNotIn("GH_TOKEN", env)
+        self.assertNotIn("GITHUB_TOKEN", env)
+        self.assertEqual(env["GIT_TERMINAL_PROMPT"], "0")
+        self.assertNotIn(env["GIT_ALLOW_PROTOCOL"], ("", "https", "ssh", "file"))
+        self.assertIn("GH_CONFIG_DIR", env)
+        self.assertNotIn("GIT_ALLOW_PROTOCOL", base)    # the context's own environment is not changed
+
+    def test_a_turn_starts_with_it(self):
+        from unittest import mock
+        seen = {}
+
+        class Proc:
+            returncode, stdout, stderr = 0, iter(()), iter(())
+
+            def __init__(self):
+                self.stdin = mock.MagicMock()
+
+            def wait(self):
+                return 0
+
+        def popen(cmd, **kw):
+            seen.update(kw.get("env") or {})
+            return Proc()
+
+        backend = ClaudeCode("claude", {"bin": "claude"})
+        with mock.patch("latex_agent.backends.subprocess.Popen", popen):
+            backend.run(job_for(prompt="hi", root=Path(".")))
+        self.assertIn("GIT_ALLOW_PROTOCOL", seen)
+
+
 class ClaudeBilling(unittest.TestCase):
     """total_cost_usd is a list price: it is a real cost only with an API key (upstream 2938c05)."""
 

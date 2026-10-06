@@ -48,6 +48,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 from pathlib import Path
 from typing import Callable
@@ -170,6 +171,22 @@ class Job:
             return self.events[after:], self.done
 
 
+def agent_env(base: dict | None = None) -> dict:
+    """The environment of an agent's turn and of every command it starts (upstream prism-local 624bff0): git may
+    reach no remote — GIT_ALLOW_PROTOCOL names no protocol, so push, fetch and clone fail, --force and --no-verify
+    included — and the GitHub CLI has no login. A proof project's history is its decisions (ADR-0004, ADR-0010);
+    an agent never needs a remote, so it can never rewrite or delete that history there, whatever it is told.
+    Local git (a commit, a log, a diff) is untouched: it uses no transport."""
+    env = dict(os.environ if base is None else base)
+    env["GIT_ALLOW_PROTOCOL"] = "proof-agents-do-not-reach-remotes"
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    for key in ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"):
+        env.pop(key, None)
+    # an empty gh configuration: gh finds no login (it keeps its token there, or in the keyring that configuration names)
+    env["GH_CONFIG_DIR"] = os.path.join(tempfile.gettempdir(), "proof-agents-no-gh-login")
+    return env
+
+
 class Backend:
     """Base class. Subclasses set the class attributes and implement `run`."""
 
@@ -266,7 +283,8 @@ class CliBackend(Backend):
         # The prompt goes through stdin so it can never be parsed as a flag. TREE: Stop
         # also ends the commands the CLI started.
         job.proc = subprocess.Popen(cmd, cwd=job.root, stdin=subprocess.PIPE,
-                                    env=job.context.env() if job.context else None,   # PROOF_ROOT, `proof` on PATH
+                                    # PROOF_ROOT, `proof` on PATH; and no git remote, no GitHub login (upstream 624bff0)
+                                    env=agent_env(job.context.env() if job.context else None),
                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                     text=True, encoding="utf-8", errors="replace", bufsize=1,
                                     **TREE)
