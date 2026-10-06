@@ -52,6 +52,7 @@ from .domain import (
 )
 from .reviews import TRUST_RULES_FILE, DecisionKind, DecisionPayload, PinnedDependency, git_identity
 from .storage import (
+    get_definition,
     append_event,
     delete_dependency_pin,
     get_active_claim,
@@ -265,6 +266,7 @@ def create_node(
     derived_from: str | None = None,
     reference_id: str | None = None,
     medium: Medium | str | None = None,
+    definitions: list[str] | None = None,
 ) -> ProofMapNode:
     problem = node_id_problem(node_id)
     if problem is not None:
@@ -336,6 +338,7 @@ def create_node(
         display_label=display_label,
         statement=statement,
         assumptions=assumptions or [],
+        definitions=list(dict.fromkeys(definitions or [])),   # each once, in the order named
         dependencies=dependencies or [],
         source_locator=source_locator,
         source_version=source_version,
@@ -348,6 +351,11 @@ def create_node(
     )
     try:
         with store.transaction() as conn:
+            for definition_id in node.definitions:  # in the write: a definition can't be removed between the check and the node (ADR-0020)
+                if get_definition(store, definition_id, conn=conn) is None:
+                    raise ProofMapError(
+                        "DEFINITION_NOT_FOUND", f"definition {definition_id} does not exist; add it with `proof definition add` before a statement names it"
+                    )
             insert_proof_map_node(store, node, conn=conn)
             append_event(
                 store,
@@ -365,7 +373,7 @@ def create_node(
             ) from exc
         raise ProofMapError("NODE_ALREADY_EXISTS", f"proof map node {node_id} already exists") from exc
     if resolved_kind != ProofMapNodeKind.imported_result:
-        _write_working_files(store.root, node)
+        _write_working_files(store, node)
     elif reference_id is not None:
         # a citation may meet a Trust rule the moment it is linked (ADR-0014): on record from then
         note_trust_rule_matches(store, [node.id])
@@ -700,12 +708,15 @@ def _resolve_medium(kind: ProofMapNodeKind, medium: Medium | str | None) -> Medi
         raise ProofMapError("INVALID_MEDIUM", f"'{medium}' is not a medium; expected one of: {valid}") from exc
 
 
-def _write_working_files(root: Path, node: ProofMapNode) -> None:
-    """The node folder its Medium asks for: a LaTeX document, or a computation's run.sh (spec #145)."""
+def _write_working_files(store: ProjectStore, node: ProofMapNode) -> None:
+    """The node folder its Medium asks for: a LaTeX document, or a computation's run.sh (spec #145). The LaTeX document
+    opens with the definitions the statement is written in (ADR-0020), so it reads on its own."""
     if is_computation(node):
-        write_working_computation(root, node_id=node.id, kind=node.kind.value, statement=node.statement)
+        write_working_computation(store.root, node_id=node.id, kind=node.kind.value, statement=node.statement)
     else:
-        write_working_proof(root, node_id=node.id, kind=node.kind.value, statement=node.statement)
+        named = [get_definition(store, definition_id) for definition_id in node.definitions]
+        write_working_proof(store.root, node_id=node.id, kind=node.kind.value, statement=node.statement,
+                            definitions=[(d.term, d.text) for d in named if d is not None])
 
 
 def set_medium(store: ProjectStore, node_id: str, medium: Medium | str, *, edited_by: str = "human") -> ProofMapNode:
@@ -721,7 +732,7 @@ def set_medium(store: ProjectStore, node_id: str, medium: Medium | str, *, edite
     with store.transaction() as conn:
         # the scaffold first, undone if the transaction rolls back: an event is never left without its entry file
         _scaffold_on_rollback(store, node_id)
-        _write_working_files(store.root, changed)
+        _write_working_files(store, changed)
         update_proof_map_node(store, changed, conn=conn)
         append_event(
             store, "proof_map_node_medium_set", f"{node_id}: medium {node.medium.value} → {resolved.value}",
@@ -865,6 +876,8 @@ def create_node_under_parent(
     """
     with store.transaction() as conn:
         remove_new_node_folders_on_rollback(store, [fields["node_id"]])
+        # a node hung under a parent is written in the parent's definitions too (ADR-0020)
+        fields = {**fields, "definitions": [*require_node(store, parent_id).definitions, *(fields.get("definitions") or [])]}
         node = create_node(store, created_by=created_by, **fields)
         # add_dependency's checks, in its order; the new node is not yet visible outside this
         # transaction, so the cycle is looked for from its own dependencies down to the parent
@@ -951,6 +964,8 @@ def _split(
             created_by=created_by,
             derived_from=parent_id,
             medium=spec.get("medium"),
+            # a Claim of a node is about that node's objects: it is written in the parent's definitions (ADR-0020)
+            definitions=[*parent.definitions, *(spec.get("definitions") or [])],
         )
         children.append(child)
 
@@ -1769,7 +1784,7 @@ def _normalize_whitespace(text: str) -> str:
     return " ".join(text.split())
 
 
-def compute_interface_fingerprint(statement: str, assumptions: list[str]) -> str:
+def compute_interface_fingerprint(statement: str, assumptions: list[str], definitions: list[str] | tuple[str, ...] = ()) -> str:
     """SHA-256 hex digest over the canonical JSON pair `(statement, assumptions)`.
 
     That pair is the node's mathematical interface — what a dependent
@@ -1780,8 +1795,14 @@ def compute_interface_fingerprint(statement: str, assumptions: list[str]) -> str
     first, so two statements differing only by whitespace produce the same
     fingerprint. "Mathematical scope" is treated as already captured within
     statement + assumptions for v1.
+
+    A node written in Definitions (ADR-0020) has them in its interface too, by id: a definition a node names can
+    never change, so its id stands for its text. A node that names none is spelled exactly as before.
     """
-    return _digest([_normalize_whitespace(statement), [_normalize_whitespace(a) for a in assumptions]])
+    parts: list = [_normalize_whitespace(statement), [_normalize_whitespace(a) for a in assumptions]]
+    if definitions:
+        parts.append(list(definitions))
+    return _digest(parts)
 
 
 def _digest(parts: list) -> str:
@@ -1812,7 +1833,7 @@ def _same_interface(store: ProjectStore, node_id: str, left: str | None, right: 
     node = get_node(store, node_id)
     if node is None:
         return False
-    spellings = {compute_interface_fingerprint(node.statement, node.assumptions)} | {
+    spellings = {compute_interface_fingerprint(node.statement, node.assumptions, node.definitions)} | {
         _legacy_with_kind_fingerprint(kind.value, node.statement, node.assumptions) for kind in _FINGERPRINTED_KINDS
     }
     return left in spellings and right in spellings
@@ -1829,7 +1850,7 @@ def _interface_of(node: ProofMapNode) -> str:
     if node.kind == ProofMapNodeKind.imported_result:
         fields = ["imported_result", _normalize_whitespace(node.statement), node.source_locator or "", node.source_version or ""]
         return _digest(fields + ([node.reference_id] if node.reference_id is not None else []))
-    return compute_interface_fingerprint(node.statement, node.assumptions)
+    return compute_interface_fingerprint(node.statement, node.assumptions, node.definitions)
 
 
 @memoized_read
@@ -1843,7 +1864,7 @@ def get_accepted_interface_fingerprint(store: ProjectStore, node_id: str) -> str
     node = get_node(store, node_id)
     if node is None or get_acceptance_state(store, node_id) != "accepted":
         return None
-    return compute_interface_fingerprint(node.statement, node.assumptions)
+    return compute_interface_fingerprint(node.statement, node.assumptions, node.definitions)
 
 
 def pin_dependencies(store: ProjectStore, node: ProofMapNode) -> list[DependencyPin]:
@@ -2138,7 +2159,7 @@ def decide_acceptance(
         if current_proof is not None:
             set_candidate_proof_review_record_id(store, current_proof.id, record.id, conn=conn)
             if resolved_decision == AcceptanceDecision.accept:
-                fingerprint = compute_interface_fingerprint(node.statement, node.assumptions)
+                fingerprint = compute_interface_fingerprint(node.statement, node.assumptions, node.definitions)
                 set_candidate_proof_interface_fingerprint(store, current_proof.id, fingerprint, conn=conn)
 
         _resolve_open_challenges(

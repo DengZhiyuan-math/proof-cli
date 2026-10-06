@@ -36,6 +36,10 @@ _Avoid_: proof tree (see Proof map's own _Avoid_ — a proof map is a DAG; this 
 The single entity type for every vertex in a proof map — theorem, lemma, claim, or imported result. All four share one structure (statement, assumptions, dependencies, status, candidate proof); `kind` distinguishes what role a node plays, not its shape. See ADR-0001.
 _Avoid_: node (ambiguous with generic graph/UI nodes), ticket (carries software-wayfinder connotations), work unit
 
+**Definition**:
+A project's named piece of mathematical text — a definition, the setting of a model, notation — that node statements are written in. A Proof map node names its definitions when it is created, and the names never change; a Claim split from a node is written in that node's definitions too. A definition a node names is fixed, like the node's statement: a corrected one is a new definition, named by new nodes. What a node says is its statement, assumptions and definitions together. See ADR-0020.
+_Avoid_: notation file, glossary, context (as a noun for this), setting (say the definition's term)
+
 **Theorem** (a proof map node kind):
 The single target node of a proof map — the result the whole map exists to establish.
 _Avoid_: destination, goal
@@ -101,7 +105,7 @@ A claim, raised against an already-Accepted node or an Imported result, that it 
 _Avoid_: bug, finding
 
 **Accepted mathematical interface**:
-The part of a node's accepted content that other nodes actually depend on — its statement, assumptions, and mathematical scope. Never its internal proof, proof strategy, or Evidence checks: a dependent relies on what a node says, not how it was shown. Whether a dependency needs only a Lightweight re-review or a whole new Candidate proof after a revision turns on whether this — not the proof text — changed. See ADR-0005.
+The part of a node's accepted content that other nodes actually depend on — its statement, assumptions, the Definitions it names (ADR-0020), and mathematical scope. Never its internal proof, proof strategy, or Evidence checks: a dependent relies on what a node says, not how it was shown. Whether a dependency needs only a Lightweight re-review or a whole new Candidate proof after a revision turns on whether this — not the proof text — changed. See ADR-0005.
 _Avoid_: statement (too narrow — assumptions and scope matter too), interface version
 
 **Lightweight re-review**:

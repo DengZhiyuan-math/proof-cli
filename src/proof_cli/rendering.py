@@ -71,6 +71,7 @@ def render_proof_map_node(
     trust_rule: list[str] | None = None,
     crystallized_from: str | None = None,
     fog_near: list[str] | None = None,
+    definitions: list[dict] | None = None,
 ) -> str:
     console = _console()
     console.rule(f"Proof Map Node: {node.id}")
@@ -82,6 +83,8 @@ def render_proof_map_node(
         table.add_row("Medium", node.medium.value)  # what the candidate proof is made of (spec #145)
     if node.display_label:
         table.add_row("Display label", node.display_label)
+    for definition in definitions or []:  # what the statement's symbols are, before the statement (ADR-0020)
+        table.add_row(f"Definition {definition['id']}", f"{definition['term']}. {definition['text']}")
     table.add_row("Statement", node.statement)
     table.add_row("Assumptions", ", ".join(node.assumptions) or "none")
     table.add_row("Dependencies", ", ".join(node.dependencies) or "none")
@@ -419,4 +422,37 @@ def render_work_log(node_id: str, log: list[dict]) -> str:
         when = str(entry.get("at", ""))[:16].replace("T", " ")
         who = f"{entry.get('role') or ''}{'·' if entry.get('role') and entry.get('by') else ''}{entry.get('by') or ''}"
         console.print(f"{when}  {who:<24} {_work_log_body(entry)}")
+    return console.export_text()
+
+
+def render_definition_list(items: list[dict]) -> str:
+    """The project's Definitions (ADR-0020): id, term, the nodes that name it, the text."""
+    console = _console()
+    console.rule("Definitions")
+    if not items:
+        console.print("No definitions yet: `proof definition add <id> --term <term> <text>`.")
+        return console.export_text()
+    table = Table()
+    table.add_column("id")
+    table.add_column("term")
+    table.add_column("named by")
+    table.add_column("text")
+    for item in items:
+        table.add_row(item["id"], item["term"], ", ".join(item["used_by"]) or "— (editable)", item["text"])
+    console.print(table)
+    return console.export_text()
+
+
+def render_definition(view: dict) -> str:
+    """One definition in full (`proof definition show`)."""
+    console = _console()
+    console.rule(f"Definition: {view['id']}")
+    table = Table(show_header=False, box=None, pad_edge=False)
+    table.add_column("key", style="bold")
+    table.add_column("value")
+    table.add_row("Term", view["term"])
+    table.add_row("Text", view["text"])
+    table.add_row("Named by", ", ".join(view["used_by"]) or "no node yet: it can still be edited or removed")
+    table.add_row("Created by", view["created_by"])
+    console.print(table)
     return console.export_text()
