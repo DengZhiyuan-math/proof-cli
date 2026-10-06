@@ -48,10 +48,12 @@ OVERRIDE_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_
 _account_cache: dict = {}
 
 
-def auth_overrides(root: Path | None) -> list[str]:
-    """Settings that would take Claude Code away from the account login."""
-    found = [f"the environment variable {v}" for v in OVERRIDE_ENV if os.environ.get(v)]
-    cfg = Path(os.environ["CLAUDE_CONFIG_DIR"]) if os.environ.get("CLAUDE_CONFIG_DIR") \
+def auth_overrides(root: Path | None, env: dict | None = None) -> list[str]:
+    """Settings that would take Claude Code away from the account login (`env`: the environment
+    the CLI is started with, when not this process's)."""
+    env = os.environ if env is None else env
+    found = [f"the environment variable {v}" for v in OVERRIDE_ENV if env.get(v)]
+    cfg = Path(env["CLAUDE_CONFIG_DIR"]) if env.get("CLAUDE_CONFIG_DIR") \
         else Path.home() / ".claude"
     files = [cfg / "settings.json"]
     if root:
@@ -68,9 +70,10 @@ def auth_overrides(root: Path | None) -> list[str]:
     return found
 
 
-def claude_account(exe: str | None, root: Path | None = None, max_age: float = 30) -> dict:
-    """Who Claude Code is logged in as, from `claude auth status` (local, about 0.2 s)."""
-    key = (exe, str(root))
+def claude_account(exe: str | None, root: Path | None = None, max_age: float = 30, env: dict | None = None) -> dict:
+    """Who Claude Code is logged in as, from `claude auth status` (local, about 0.2 s). `env` is the
+    environment its turns start with — another profile folder (CLAUDE_CONFIG_DIR) is another login."""
+    key = (exe, str(root), (os.environ if env is None else env).get("CLAUDE_CONFIG_DIR"))
     hit = _account_cache.get(key)
     if hit and time.time() - hit[0] < max_age:
         return hit[1]
@@ -81,7 +84,7 @@ def claude_account(exe: str | None, root: Path | None = None, max_age: float = 3
         try:
             r = subprocess.run([exe, "auth", "status"], cwd=str(root) if root else None,
                                capture_output=True, text=True, encoding="utf-8",
-                               errors="replace", timeout=20, **NO_WINDOW)
+                               errors="replace", timeout=20, env=env, **NO_WINDOW)
             m = re.search(r"\{.*\}", r.stdout, re.S)
             d = json.loads(m.group(0)) if m else {}
             info = {"logged_in": bool(d.get("loggedIn")), "email": d.get("email"),
@@ -91,7 +94,7 @@ def claude_account(exe: str | None, root: Path | None = None, max_age: float = 3
                 info["error"] = (r.stderr or r.stdout).strip()[:300] or "no answer"
         except (OSError, subprocess.SubprocessError, ValueError) as e:
             info["error"] = str(e)
-    info["overrides"] = auth_overrides(root)
+    info["overrides"] = auth_overrides(root, env)
     _account_cache[key] = (time.time(), info)
     return info
 
@@ -126,6 +129,14 @@ def account_problem(info: dict, allowed: str) -> str | None:
 
 
 COMPILE_TOOL = f"mcp__{MCP_SERVER}__compile"       # the compile tool (backends.compile_tool_server), as Claude Code names it
+
+
+def context_tokens(usage: dict | None) -> int:
+    """How much of the context window a message used: what it read plus what it wrote."""
+    if not isinstance(usage, dict):
+        return 0
+    return sum(int(usage.get(k) or 0) for k in ("input_tokens", "cache_creation_input_tokens",
+                                                "cache_read_input_tokens", "output_tokens"))
 
 
 def _loads_compile_tool(block: dict) -> bool:
@@ -266,6 +277,8 @@ class ClaudeCode(CliBackend):
         # Skills and slash commands Claude Code offers in this project, from its init event.
         self.catalog: dict | None = None
         self.catalog_lock = threading.Lock()
+        # Each model's context window, from the last turn's result (modelUsage).
+        self.windows: dict[str, int] = {}
 
     def bin(self) -> str | None:
         return self.bin_override or claude_bin()
@@ -278,7 +291,7 @@ class ClaudeCode(CliBackend):
         return {**super().info(), "bin": self.bin(), "rate": self.rate}
 
     def account(self, root: Path | None, fresh: bool = False) -> dict:
-        info = claude_account(self.bin(), root, max_age=0 if fresh else 30)
+        info = claude_account(self.bin(), root, max_age=0 if fresh else 30, env=self.env())
         allowed = allowed_account()
         return {"account": info, "allowed": allowed, "problem": account_problem(info, allowed)}
 
@@ -328,6 +341,7 @@ class ClaudeCode(CliBackend):
             # "none": the claude.ai login, whose turns count against the plan's usage
             # limits; anything else is an API key, billed per token.
             st["api_key_source"] = d.get("apiKeySource")
+            st["model"] = d.get("model")
             self._remember_catalog(d)
             job.emit({"t": "init", "session_id": st["session_id"], "model": d.get("model")})
         elif t == "stream_event" and d.get("parent_tool_use_id") is None:
@@ -378,6 +392,10 @@ class ClaudeCode(CliBackend):
                 st["live"] = {}
                 job.emit({"t": "message_start"})
         elif t == "assistant" and d.get("parent_tool_use_id") is None:
+            used = context_tokens((d.get("message") or {}).get("usage"))
+            if used:
+                st["context"] = {"used": used, "window": self.windows.get(st.get("model") or "")}
+                job.emit({"t": "context", **st["context"]})
             for block in (d.get("message") or {}).get("content", []):
                 if block.get("type") == "text" and block.get("text"):
                     job.emit({"t": "text", "text": block["text"]})
@@ -408,6 +426,9 @@ class ClaudeCode(CliBackend):
             # claude.ai login nothing is billed, so report the tokens instead of a price.
             u = d.get("usage") or {}
             subscription = st.get("api_key_source") in (None, "none")
+            window = self._remember_window(d.get("modelUsage") or {}, st.get("model"))
+            if st.get("context"):
+                st["context"] = {**st["context"], "window": window or st["context"].get("window")}
             st.update(session_id=d.get("session_id") or st.get("session_id"),
                       cost=None if subscription else d.get("total_cost_usd"),
                       billing="subscription" if subscription else "api",
@@ -423,6 +444,20 @@ class ClaudeCode(CliBackend):
                                "what": _summarize_tool(p.get("tool_name") or "",
                                                        p.get("tool_input") or {}, job.root)}
                               for p in d.get("permission_denials") or []])
+
+    def _remember_window(self, model_usage: dict, model: str | None) -> int | None:
+        """The context window of the turn's model (modelUsage also lists side calls, e.g.
+        Haiku: take the turn's model, or else the one that read the most)."""
+        entries = {k: v for k, v in model_usage.items() if isinstance(v, dict) and v.get("contextWindow")}
+        if not entries:
+            return None
+        key = next((k for k in entries if model and (k == model or model.startswith(k))), None) \
+            or max(entries, key=lambda k: (entries[k].get("inputTokens") or 0)
+                   + (entries[k].get("cacheReadInputTokens") or 0))
+        window = int(entries[key]["contextWindow"])
+        if model:
+            self.windows[model] = window
+        return window
 
     def _remember_catalog(self, init: dict) -> None:
         skills = [s for s in init.get("skills") or [] if isinstance(s, str)]
@@ -455,7 +490,7 @@ class ClaudeCode(CliBackend):
             cmd = [exe, "-p", "--model", "haiku", "--tools", "", "--no-session-persistence",
                    "--output-format", "stream-json", "--verbose"]
             try:
-                proc = subprocess.Popen(cmd, cwd=root, stdin=subprocess.PIPE,
+                proc = subprocess.Popen(cmd, cwd=root, stdin=subprocess.PIPE, env=self.env(),
                                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                         text=True, encoding="utf-8", errors="replace", **TREE)
             except OSError as e:
@@ -497,7 +532,7 @@ class ClaudeCode(CliBackend):
                    "--no-session-persistence", "--strict-mcp-config",
                    "--disable-slash-commands", "--output-format", "stream-json", "--verbose"]
             try:
-                out = subprocess.run(cmd, input="ok", capture_output=True, text=True,
+                out = subprocess.run(cmd, input="ok", capture_output=True, text=True, env=self.env(),
                                      encoding="utf-8", errors="replace", timeout=90,
                                      cwd=tempfile.gettempdir(), **NO_WINDOW).stdout
             except subprocess.TimeoutExpired:
