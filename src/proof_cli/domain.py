@@ -184,6 +184,8 @@ class ProofMapNode(BaseModel):
     display_label: str = ""
     statement: str
     assumptions: list[str] = Field(default_factory=list)
+    # the Definitions the statement is written in (ADR-0020): named at creation and fixed, like the statement
+    definitions: list[str] = Field(default_factory=list)
     dependencies: list[str] = Field(default_factory=list)
     source_locator: str | None = None
     source_version: str | None = None
@@ -423,6 +425,20 @@ class ExperimentOutcome(str, Enum):
     refutes = "refutes"
     inconclusive = "inconclusive"
     error = "error"
+
+
+class Definition(BaseModel):
+    """A project's named piece of mathematical text — a definition, the setting of a model, notation — that node
+    statements are written in (ADR-0020). Text is Markdown with `$…$` maths, as a statement is. Editable and removable
+    only while no node names it; once one does, it is as fixed as that node's statement, and a corrected definition is
+    a new one."""
+
+    id: str
+    term: str
+    text: str
+    created_by: str = "human"
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
 
 
 class FogItem(BaseModel):

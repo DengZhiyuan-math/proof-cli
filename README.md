@@ -107,6 +107,17 @@ A snapshot, and an exchange export (`proof exchange export`), never freeze or ca
 
 When you request review after compiling in the studio, the fresh `build/proof.pdf` is archived as `snapshots/v<N>.pdf` next to the snapshot and committed with the decision. `proofs/.gitignore` keeps `build/` out of git. Compiling needs a TeX distribution or Tectonic; without one, the studio still edits and requests review.
 
+## Definitions
+
+A statement is written in **Definitions** (ADR-0020): a definition, the setting of a model or notation, written once under a name and named by the nodes whose statements use it. A node names its definitions when it is created, and its `proof.tex` opens with them. A Claim split from a node, or created under it, is written in that node's definitions too, so "in the setting of the Theorem" never has to be said. A definition no node names yet can be edited or removed. Once one names it, it is as fixed as that node's statement: a correction is a new definition under a new id, named by new nodes. What a node says is its statement, its assumptions and its definitions, and that is what Acceptance and the dependency pins bind.
+
+```bash
+proof definition add release-unit --term "Stochastic release unit" 'A unit has $M\in\mathbb N_{>0}$ release sites; $r(t)\in\{0,\dots,M\}$ of them are full at time $t$. …'
+proof node create MAIN theorem 'For every $n$, $\mathbb E[K_n]=Mu_n^-x_n^-$.' --definition release-unit
+proof node split MAIN --child 'MEAN=…'                         # MEAN names release-unit too
+proof definition list                                            # each with the nodes that name it
+```
+
 ## Proof fog
 
 A difficulty you can't state precisely yet goes in the **Proof fog** (ADR-0008), a flat list outside the map — never a node, never a dependency. Anyone, agents included, may add one, edit it, drop it with a reason or reopen it; an item may be *near* the nodes it is about. A numerical run about an item is an **Experiment**, recorded with what it showed (supports, refutes, inconclusive, error), who ran it and where its files are; it never changes the item's status. When the idea can be stated, **crystallize** it into a Claim in one step (a single-child Split of its parent when it has one); the item then reads crystallized and the node's page says where it came from. On the proof map page the fog is a drawer opened from the toolbar's Fog badge: hovering an item lights the nodes it is near up on the map, and **Crystallize…** on an item opens the map's node form on it, preset to a Claim split from its one near node; the statement is written there, never copied from the item (#155).

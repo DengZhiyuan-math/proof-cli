@@ -98,6 +98,13 @@ ERROR_CODES: dict[str, str] = {
     "TRUST_RULE_INVALID_CONDITION": "not a condition of the trust-rule vocabulary; the message names it",
     "TRUST_RULE_RATIONALE_REQUIRED": "a trust-rule decision needs a rationale",
     "TRUST_RULES_FILE_BLOCKED": "a node folder from before ADR-0014 stands where proofs/trust-rules.jsonl goes; no rule can be recorded",
+    # -- Definitions (ADR-0020) -----------------------------------------------------------------
+    "DEFINITION_NOT_FOUND": "no definition has this id; add it with `proof definition add` first",
+    "DEFINITION_ALREADY_EXISTS": "a definition with this id exists; choose another id",
+    "DEFINITION_IN_USE": "a node names this definition: it is as fixed as that node's statement; add a corrected one under a new id",
+    "DEFINITION_CONFLICT": "an import brings a definition whose id is here with another text; nothing was imported",
+    "DEFINITION_EMPTY": "a definition needs its term and its text",
+    "INVALID_DEFINITION_ID": "a definition id is letters, digits, '.', '_' or '-', at most 64 characters, starting with a letter or digit",
     # -- Proof fog (ADR-0008, spec #136; ungated, outside the map) -----------------------------
     "FOG_NOT_FOUND": "no fog item has this id",
     "FOG_NOT_OPEN": "the fog item is dropped (reopen it first) or crystallized (its node exists now); the message says which",
