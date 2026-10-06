@@ -78,7 +78,6 @@ from .commands import (
     cmd_handoff_create,
     cmd_proof_reuse_show,
     cmd_goal_list,
-    cmd_goal_open,
     cmd_goal_set,
     cmd_history,
     cmd_init,
@@ -185,6 +184,7 @@ from .trust_rules import get_trust_rule, list_trust_rules, trust_rule_history
 from .authority import candidate_proof_sha256
 from .vault import working_entry_path
 from .rendering import (
+    render_node_check,
     render_candidate_proof,
     render_challenge,
     render_challenge_list,
@@ -475,6 +475,34 @@ def node_create(
         _emit_error(exc, json_output, command="node.create")
         raise typer.Exit(code=1)
     _emit_node(node, json_output, command="node.create")
+
+
+@node_app.command("check")
+@read_scoped
+def node_check(
+    node_id: str,
+    root: str = ROOT_OPTION,
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """The mechanical checks of the node's working proof (issue #180): does it build cleanly, is key-ideas.md there with its four
+    headings, does proof.tex state the node's statement, do its \\input's stay in the folder, is each dependency mentioned.
+    Findings, never refusals: a run sends the work back on an error before the Verifier reads; the researcher's own
+    request-review is never stopped by one. Exit 1 when there is an error-level finding."""
+    from .node_check import check_node, errors_of
+
+    store = get_store(_root(root))
+    try:
+        findings = check_node(store, node_id)
+    except ProofMapError as exc:
+        _emit_error(exc, json_output, command="node.check")
+        raise typer.Exit(code=1)
+    failed = bool(errors_of(findings))
+    if json_output:
+        typer.echo(dump_envelope(success_envelope("node.check", {"node_id": node_id, "ok": not failed, "findings": findings})))
+    else:
+        typer.echo(render_node_check(node_id, findings))
+    if failed:
+        raise typer.Exit(code=1)
 
 
 @node_app.command("show")
