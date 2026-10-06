@@ -146,11 +146,14 @@ class AgentManager:
             self.jobs[job.id] = job
             self.active = job
         job.scope = scope if mode == "edit" and scope else None
+        # the turn's context first: it may say the turn writes no file at all (a host's discussion agent, `writes_files`
+        # False), and then no scope note tells it otherwise
+        job.context = (self.context_fn(turn) if turn is not None else self.context_fn()) if self.context_fn else None
         if job.scope:
             note = ("You may change ONLY these files in this turn: " + ", ".join(job.scope)
                     + ". Do not edit or create any other file; if the request needs that, "
                     "say so instead.")
-        elif mode == "edit":
+        elif mode == "edit" and getattr(job.context, "writes_files", True):
             note = ("You may change any file in the project and create new files in this "
                     "turn. File restrictions from earlier turns no longer apply.")
         else:
@@ -163,7 +166,6 @@ class AgentManager:
         job.provider, job.prompt, job.session_id = backend.id, prompt, session_id
         job.model, job.effort = model, effort
         job.root, job.files = self.root_fn(), self.files_fn
-        job.context = (self.context_fn(turn) if turn is not None else self.context_fn()) if self.context_fn else None
         job.turn = turn
         job.compile_url = self.compile_url() if self.compile_url else None
         job.writable = lambda rel: self._writable(job, rel)
