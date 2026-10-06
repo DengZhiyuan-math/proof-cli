@@ -9,8 +9,10 @@ from .domain import CandidateProofRecord, Challenge, ClaimRecord, ProjectSnapsho
 
 
 def _console() -> Console:
-    """A console that only records: each renderer returns its text, and the caller prints it once (#34)."""
-    return Console(record=True, width=100, file=io.StringIO())
+    """A console that only records: each renderer returns its text, and the caller prints it once (#34). Nothing here
+    is Rich markup: a statement's `$f\\colon [a,b] \\to \\mathbb{R}$` is mathematics, and `[a,b]` must not be read as a
+    style tag and dropped (as it was), nor `:sum:` as an emoji — so markup and emoji are off for every renderer."""
+    return Console(record=True, width=100, file=io.StringIO(), markup=False, emoji=False)
 
 
 def render_status(data: dict[str, object]) -> str:
