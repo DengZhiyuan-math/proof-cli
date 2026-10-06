@@ -206,6 +206,23 @@ def render_proof_map_node_list(nodes: list[ProofMapNode]) -> str:
     return console.export_text()
 
 
+def render_node_check(node_id: str, findings: list[dict]) -> str:
+    """The mechanical checks of a node (issue #180): each finding's level, code and message; or that all passed."""
+    console = _console()
+    console.rule(f"Node check: {node_id}")
+    if not findings:
+        console.print("All checks passed: the proof builds cleanly, key-ideas.md has its four headings, the statement is the node's.")
+        return console.export_text()
+    table = Table()
+    table.add_column("level")
+    table.add_column("code")
+    table.add_column("message")
+    for finding in findings:
+        table.add_row(str(finding.get("level")), str(finding.get("code")), str(finding.get("message")))
+    console.print(table)
+    return console.export_text()
+
+
 def render_trust_rule_list(rules: list[dict]) -> str:
     """The Trust rules (ADR-0014): name, conditions, what each trusts now."""
     console = _console()
