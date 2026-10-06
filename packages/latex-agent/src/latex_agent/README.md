@@ -32,6 +32,7 @@ It began as a copy of [prism-local](https://github.com/DengZhiyuan-math/Local-Ai
   - **acdce6f, af517b9, cd9fcf6, 085deca, 6326f45 and 8d0881f.** These are the Home's folders, tags and grouping, renaming a project and its folder, GitHub repositories per project, and their sync. proof-cli has its own Home (ADR-0017).
   - **d36e122**, upstream's README.
   - **37de720, Deep Code as a provider.** A role's write scope and its `proof` commands are enforced for Claude Code (permission rules) and Codex (sandbox) in proof-agents; a third CLI needs its own enforcement there before it can run a role.
+- **624bff0 (2026-10-06), "Automatic GitHub sync for co-authors".** Taken: `backends.agent_env`, the environment of every agent turn and of each command it starts. Git may reach no remote (`GIT_ALLOW_PROTOCOL` names no protocol, so push, fetch and clone fail, `--force` and `--no-verify` included), it never prompts, and the GitHub CLI has no login (its tokens unset, `GH_CONFIG_DIR` empty). A proof project's history is its decisions, and an agent never needs a remote, so it can never rewrite or delete that history there. Local git is untouched. Left out: the rest, which is built on `gitsync.py` — merging co-authors' diverged histories, `keepboth.py`'s "both versions kept" markers and the agents' note about them, the pre-push hook, undoing a force push, `.gitattributes`, branch protection, and the Home's "N new on GitHub".
 
 ## Changed on import
 
