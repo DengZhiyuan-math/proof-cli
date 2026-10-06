@@ -21,8 +21,8 @@ from .storage import ProjectStore
 from .vault import build_is_current, build_pdf_path, node_folder, preamble_path, run_script_path, working_entry_path
 
 ERROR, NOTE = "error", "note"
-_INPUT = re.compile(r"\\(?:input|include)\{([^}]*)\}")
-_COMMENT = re.compile(r"(?<!\\)%.*")                 # a LaTeX comment, to the end of its line (an escaped \% is not one)
+# \input{file}, \input {file}, \input⏎{file}, and TeX's own \input file␣ (no braces); \include{file} too — not \includegraphics, \inputencoding
+_INPUT = re.compile(r"\\(?:input|include)(?![A-Za-z@])\s*(?:\{([^}]*)\}|([^\s{}\\%]+))")
 _ENVIRONMENTS = ("theorem", "lemma", "claim", "proposition", "corollary")
 _ENV = re.compile(r"\\begin\{(" + "|".join(_ENVIRONMENTS) + r")\}(?:\[[^\]]*\])?(.*?)\\end\{\1\}", re.S)
 _UNDEFINED = re.compile(r"undefined (reference|citation)|There were undefined (references|citations)|Reference `[^']*' on page \d+ undefined|Citation `[^']*' on page \d+ undefined", re.I)
@@ -48,6 +48,34 @@ def _mentions(node_id: str, *texts: str) -> bool:
     return any(pattern.search(text) for text in texts if text)
 
 
+def _strip_comments(tex: str) -> str:
+    """The text without its comments: a `%` opens one unless an odd number of backslashes precedes it (`\\%` is a percent sign,
+    `\\\\%` is a line break and then a comment), to the end of the line."""
+    out: list[str] = []
+    for line in tex.splitlines(keepends=True):
+        backslashes = 0
+        for index, char in enumerate(line):
+            if char == "%" and backslashes % 2 == 0:
+                out.append(line[:index] + ("\n" if line.endswith("\n") else ""))
+                break
+            backslashes = backslashes + 1 if char == "\\" else 0
+        else:
+            out.append(line)
+    return "".join(out)
+
+
+def _input_candidates(folder: Path, target: str) -> list[Path]:
+    """Where TeX would look for `\\input{target}`: `target.tex` first, then `target` as written (so `part.v1` means `part.v1.tex`
+    when that exists); the existing one, else both, for the outside check."""
+    with_tex, as_is = folder / f"{target}.tex", folder / target
+    if target.endswith(".tex"):
+        return [as_is]
+    for candidate in (with_tex, as_is):
+        if candidate.exists() or candidate.is_symlink():
+            return [candidate]
+    return [with_tex, as_is]
+
+
 def _sources(folder: Path, proof: Path, preamble: Path, findings: list[dict]) -> dict[str, str]:
     """proof.tex and every file it \\input's inside the node folder, each by its path from the folder, comments stripped:
     what the statement, the dependencies and the inputs are read from. An \\input that reaches outside the folder and the
@@ -63,23 +91,24 @@ def _sources(folder: Path, proof: Path, preamble: Path, findings: list[dict]) ->
         if rel in sources:
             continue
         try:
-            text = _COMMENT.sub("", path.read_text(encoding="utf-8", errors="replace"))
-        except OSError:
+            text = _strip_comments(path.read_text(encoding="utf-8", errors="replace"))
+        except OSError as exc:  # a file the check cannot read is not a file that passed
+            findings.append(_finding("CHECK_INPUT_UNREADABLE", ERROR, f"{rel} could not be read ({exc.strerror or type(exc).__name__}): the checks cannot see what it inputs or states", rel))
             continue
         sources[rel] = text
         for match in _INPUT.finditer(text):
-            target = match.group(1).strip()
-            named = folder / target
-            if named.suffix == "" and not named.exists() or (named.suffix == "" and named.with_suffix(".tex").exists()):
-                named = named.with_suffix(".tex")   # TeX's rule: the suffix first, the path after; a link is followed as TeX would follow it
-            candidate = named.resolve()
-            if candidate == preamble_r:
+            target = (match.group(1) if match.group(1) is not None else match.group(2) or "").strip()
+            if not target:
                 continue
-            if not candidate.is_relative_to(folder_r):
-                findings.append(_finding("CHECK_INPUT_OUTSIDE", ERROR, f"\\input{{{target}}} in {rel} reaches outside the node folder; only its own files and ../preamble may be input", rel))
-                continue
-            if candidate.is_file():
-                queue.append(candidate)
+            for named in _input_candidates(folder, target):
+                candidate = named.resolve()   # a link is followed, as TeX follows it
+                if candidate == preamble_r:
+                    continue
+                if not candidate.is_relative_to(folder_r):
+                    findings.append(_finding("CHECK_INPUT_OUTSIDE", ERROR, f"\\input{{{target}}} in {rel} reaches outside the node folder; only its own files and ../preamble may be input", rel))
+                    break
+                if candidate.is_file():
+                    queue.append(candidate)
     return sources
 
 

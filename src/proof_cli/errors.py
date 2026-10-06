@@ -235,6 +235,7 @@ NOTICE_CODES: dict[str, str] = {
     "CHECK_UNDEFINED_REFERENCES": "the last build's log reports undefined references or citations (node check)",
     "CHECK_STATEMENT_MISMATCH": "the node's statement, as the map has it, does not appear in proof.tex (node check)",
     "CHECK_INPUT_OUTSIDE": "proof.tex \\input's a file outside the node folder and the shared preamble (node check)",
+    "CHECK_INPUT_UNREADABLE": "a file proof.tex \\input's could not be read, so the checks cannot see it (node check)",
     "CHECK_KEY_IDEAS_MISSING": "key-ideas.md is not there; request-review needs it (node check)",
     "CHECK_KEY_IDEAS_HEADINGS": "key-ideas.md lacks one of its four headings (node check)",
     "CHECK_KEY_IDEAS_EMPTY": "key-ideas.md has an empty required section (核心思路 or 主要步骤) (node check)",
