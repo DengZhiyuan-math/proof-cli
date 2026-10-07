@@ -241,10 +241,17 @@ def git_identity(root: Path) -> str:
 
 
 def in_git_repo(root: Path) -> bool:
+    """Whether the project is its own git repository: `root` is the work tree's top level.
+
+    A project inside some other repository (a trial under a checkout, say) is
+    treated as outside git, so its decisions never land in that repository's history (#185).
+    """
     try:
-        return _git(root, "rev-parse", "--is-inside-work-tree").stdout.strip() == "true"
+        result = _git(root, "rev-parse", "--show-toplevel")
     except (OSError, subprocess.SubprocessError):
         return False
+    top = result.stdout.strip()
+    return result.returncode == 0 and bool(top) and Path(top).resolve() == root.resolve()
 
 
 def commit_decision(root: Path, paths: list[Path], message: str) -> str | None:
