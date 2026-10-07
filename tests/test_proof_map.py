@@ -938,15 +938,6 @@ def test_frontier_lists_only_unclaimed_unblocked_nodes(tmp_path: Path):
     assert {node.id for node in get_frontier(store)} == {"clm_blocked"}
 
 
-def test_a_blocked_node_cant_be_claimed(tmp_path: Path):
-    store = ensure_project(tmp_path)
-    create_node(store, node_id="lem_base", kind="lemma", statement="Base lemma")
-    create_node(store, node_id="clm_blocked", kind="claim", statement="Blocked", dependencies=["lem_base"])
-    with pytest.raises(ProofMapError) as exc_info:
-        claim_node(store, "clm_blocked", claimant_id="agent_a")
-    assert exc_info.value.code == "NODE_BLOCKED"
-
-
 def test_compute_interface_fingerprint_ignores_whitespace_differences(tmp_path: Path):
     a = compute_interface_fingerprint("A  implies   B", ["  A  "])
     b = compute_interface_fingerprint("A implies B", ["A"])

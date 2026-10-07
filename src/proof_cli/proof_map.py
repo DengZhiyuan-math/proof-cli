@@ -842,8 +842,8 @@ def split_node(
 
     A node someone else has claimed is theirs to split (NOT_CLAIMANT), unless
     `reassign` takes the claim over for `created_by`, recorded as `claim --reassign`
-    records it — but without claim's frontier check: a split parent is usually
-    Blocked on its earlier children, and splitting it again is still fine.
+    records it — but without claim's checks: a split parent is usually Blocked
+    on its earlier children, and splitting it again is still fine.
     All or nothing (#26): the checks, every child and the parent's new
     dependencies are one write transaction, and a failed split leaves no
     child, no child folder, and the parent as it was.
@@ -1000,11 +1000,13 @@ def _not_claimant(node_id: str, claim: ClaimRecord) -> ProofMapError:
 
 
 def _not_pickable(store: ProjectStore, node: ProofMapNode) -> ProofMapError | None:
-    """Why `node` isn't on the frontier for anyone to claim, or None if it is.
+    """Why nobody may claim `node`, or None if anyone may.
 
-    The frontier and `claim_node` share this, so what the frontier offers is
-    exactly what can be claimed. Accepted nodes are off it unless an open
-    Challenge invites a revision (ADR-0005 Rule 4); Rejected ones for good.
+    The frontier and `claim_node` share this, so nothing the frontier offers is
+    refused. Accepted nodes are off it unless an open Challenge invites a
+    revision (ADR-0005 Rule 4); Rejected ones for good. A Blocked node may be
+    claimed and worked: Blocked holds back its Review decision, not work
+    (ADR-0021 point 1), and only the frontier asks more of its dependencies.
     """
     if node.kind == ProofMapNodeKind.imported_result:
         return ProofMapError("IMMUTABLE_NODE", f"imported_result node {node.id} has no proof to work on; use Reference review instead")
@@ -1018,8 +1020,6 @@ def _not_pickable(store: ProjectStore, node: ProofMapNode) -> ProofMapError | No
             "NODE_UNVERIFIABLE",
             f"node {node.id}'s latest Human Review decision doesn't count; the researcher must decide it afresh before anyone picks it up",
         )
-    if _has_unresolved_dependency(store, node):
-        return ProofMapError("NODE_BLOCKED", f"node {node.id} is Blocked: a dependency isn't Accepted (or Reference-reviewed) yet")
     return None
 
 
@@ -1276,10 +1276,10 @@ def claim_node(
     Idempotent for the same assignee. A node someone else holds is refused
     with CLAIM_CONFLICT naming the assignee, unless `reassign` takes it
     over — a claim is a planning signal, not a lock, so a stale one is simply
-    reassigned. Only a node on the frontier can be claimed (see
-    `_not_pickable`). The one-active-claim-per-node rule is the `claims`
-    table's partial unique index, so a race between two claimants still
-    resolves to one.
+    reassigned. Any node that may still be worked can be claimed, a Blocked
+    one included (see `_not_pickable`). The one-active-claim-per-node rule is
+    the `claims` table's partial unique index, so a race between two
+    claimants still resolves to one.
     """
     node = require_node(store, node_id)
     existing = get_active_claim(store, node_id)
@@ -2038,15 +2038,26 @@ def dependency_details(store: ProjectStore, node_id: str) -> list[dict]:
 def _require_awaiting_acceptance_review(store: ProjectStore, node_id: str) -> None:
     """A decision only ever answers a Candidate proof awaiting review.
 
-    `rejected` is terminal (story 24). Otherwise the node must read
-    `review-needed`: that one state already excludes a node with no
-    Candidate proof (`open`), one under an active claim (`claimed`), one
-    whose dependencies aren't settled (`blocked`), and a second decision on
-    a submission that was already decided (`open`/`revision-requested`).
+    `rejected` is terminal (story 24), and a Blocked node's decision waits
+    for its dependencies (NODE_BLOCKED, ADR-0021 point 1). Otherwise the node
+    must read `review-needed`: that one state already excludes a node with no
+    Candidate proof (`open`), one under an active claim (`claimed`), and a
+    second decision on a submission that was already decided
+    (`open`/`revision-requested`).
     """
     if get_acceptance_state(store, node_id) == "rejected":
         raise ProofMapError(
             "NODE_REJECTED", f"node {node_id} was Rejected; that decision is permanent and can't be revisited"
+        )
+    node = require_node(store, node_id)
+    if not _already_accepted(store, node) and _has_unresolved_dependency(store, node):
+        # Blocked holds back the decision, never the work: the snapshot waits for its dependencies (ADR-0021 point 1)
+        unsettled = [dependency_id for dependency_id in node.dependencies if not _dependency_satisfied(store, dependency_id)]
+        raise ProofMapError(
+            "NODE_BLOCKED",
+            f"node {node_id} is Blocked: {', '.join(unsettled)} isn't Accepted (or Reference-reviewed) yet; "
+            "decide what it rests on first",
+            details={"unsettled": unsettled, "awaiting_decision": _awaiting_decision(store, node) is not None},
         )
     workflow_state = get_workflow_state(store, node_id)
     if workflow_state != "review-needed":
@@ -3370,6 +3381,28 @@ def _already_accepted(store: ProjectStore, node: ProofMapNode) -> bool:
     return node.kind != ProofMapNodeKind.imported_result and get_acceptance_state(store, node.id) == "accepted"
 
 
+def _awaiting_decision(store: ProjectStore, node: ProofMapNode) -> CandidateProofRecord | None:
+    """The node's current snapshot if no counting Human Review decision covers it yet, else None.
+
+    Covered means the newest decision's *recorded payload* names the current
+    Candidate proof. Never the `review_record_id` column (advisory, and a
+    direct edit could point it anywhere), never timestamps. A decision that
+    doesn't count covers nothing, so the proof awaits the researcher afresh.
+    A Rejected node awaits nothing. Read apart from Blocked, which hides it on
+    the workflow axis but no longer holds the work back (ADR-0021 point 1).
+    """
+    if node.kind == ProofMapNodeKind.imported_result:
+        return None
+    current_proof = get_current_candidate_proof(store, node.id)
+    if current_proof is None:
+        return None
+    state, latest, _ = _acceptance(store, node)
+    if state == "rejected":
+        return None
+    covered = latest is not None and state != "unverifiable" and latest.verdict.payload.candidate_proof_id == current_proof.id
+    return None if covered else current_proof
+
+
 @memoized_read
 @read_scoped
 def get_workflow_state(store: ProjectStore, node_id: str) -> str:
@@ -3398,28 +3431,13 @@ def get_workflow_state(store: ProjectStore, node_id: str) -> str:
         # review governs it independently and doesn't move this axis.
         return "open"
 
-    current_proof = get_current_candidate_proof(store, node_id)
     state, latest, _ = _acceptance(store, node)
     if state == "rejected":
         return "open"  # terminal: nothing further happens on a Rejected node
-
-    # Whether the newest Human Review decision already covers the current
-    # submission: the Candidate proof its *recorded payload* names is the
-    # current one. Never the `review_record_id` column (advisory, and a
-    # direct edit could point it anywhere), never timestamps. A decision
-    # that doesn't count covers nothing, so the proof reads review-needed
-    # again, for the researcher to decide afresh.
-    review_is_current = (
-        latest is not None
-        and state != "unverifiable"
-        and (current_proof is None or latest.verdict.payload.candidate_proof_id == current_proof.id)
-    )
-
-    if review_is_current and latest.decision == ReviewGovernanceState.revision_requested:
-        return "revision-requested"
-
-    if current_proof is not None and not review_is_current:
+    if _awaiting_decision(store, node) is not None:
         return "review-needed"
+    if latest is not None and state != "unverifiable" and latest.decision == ReviewGovernanceState.revision_requested:
+        return "revision-requested"
 
     return "open"
 
@@ -3453,6 +3471,143 @@ def get_blocked_reason(store: ProjectStore, node_id: str) -> str | None:
     return "dependency-stale" if stale else "not-accepted"
 
 
+# The run's Evidence check for a passing verdict is recorded as `<agent name>/verifier` (ADR-0019 point 4)
+VERIFIER_CHECK_SUFFIX = "/verifier"
+
+
+def _verifier_passed(store: ProjectStore, proof: CandidateProofRecord) -> bool:
+    """Whether the Verifier's passing verdict was recorded on this very snapshot, and the researcher hasn't found
+    that check unusable (an evidence review decision, ADR-0004 point 5)."""
+    for check in list_evidence_checks_for_candidate_proof(store, proof.id):
+        if check.outcome != EvidenceOutcome.passed or not check.run_by.endswith(VERIFIER_CHECK_SUFFIX):
+            continue
+        if check.candidate_proof_sha256 is None or check.candidate_proof_sha256 != proof.sha256:
+            continue
+        reviews = decision_rows(store, _EVIDENCE_CHECK_OBJECT_TYPE, check.id, ReviewRecordKind.evidence_review.value)
+        if reviews and reviews[-1]["decision"] == ReviewGovernanceState.unusable.value:
+            continue
+        return True
+    return False
+
+
+@memoized_read
+@read_scoped
+def is_provisional(store: ProjectStore, node_id: str) -> bool:
+    """Whether an unaccepted node may be rested on for work, never for trust (ADR-0021 point 2).
+
+    A Theorem, Lemma or Claim whose current snapshot awaits a decision, on the
+    dependencies it was made on, with the Verifier's pass recorded on it; or an
+    imported result not yet Reference-reviewed (nor found no longer callable).
+    A node under an open Challenge, or resting on a node the researcher sent
+    back, is not: the support it was worked on is gone.
+    """
+    node = get_node(store, node_id)
+    if node is None:
+        return False
+    if node.kind == ProofMapNodeKind.imported_result:
+        return get_reference_review_state(store, node_id) in ("unreviewed", "unverifiable")
+    if get_acceptance_state(store, node_id) == "accepted" or has_open_challenge(store, node_id):
+        return False
+    proof = _awaiting_decision(store, node)
+    if proof is None or not _snapshot_dependencies_stand(store, node, proof) or not _verifier_passed(store, proof):
+        return False
+    return not _support_withdrawn(store, node_id)
+
+
+_UNSETTLED_SUPPORT = "unsettled_support"
+
+
+def _unsettled_support(store: ProjectStore, node_id: str) -> frozenset[str]:
+    """Every node `node_id` rests on, directly or through others, that hasn't reached the standing that unblocks
+    (`_dependency_satisfied`). The walk stops at a settled node: what that rests on was settled before it was.
+
+    One pass per read, like `_upstream_cause`: each node's answer goes in the read scope's memo as the walk leaves
+    it, with an explicit stack for deep chains, and a cycle (which no service creates) answered by plain reachability.
+    """
+    memo: dict[str, frozenset[str]] = scoped_memo(store, _UNSETTLED_SUPPORT)
+    if node_id in memo:
+        return memo[node_id]
+
+    def dependencies_of(current_id: str) -> list[str]:
+        node = get_node(store, current_id)
+        return node.dependencies if node is not None else []
+
+    stack: list[tuple[str, Iterator[str], set[str]]] = [(node_id, iter(dependencies_of(node_id)), set())]
+    on_path = {node_id}
+    while stack:
+        current_id, dependencies, found = stack[-1]
+        dependency_id = next(dependencies, None)
+        if dependency_id is None:
+            stack.pop()
+            on_path.discard(current_id)
+            memo[current_id] = frozenset(found)
+            if stack:
+                stack[-1][2].update(found)
+            continue
+        if _dependency_satisfied(store, dependency_id):
+            continue
+        found.add(dependency_id)
+        if dependency_id in memo:
+            found.update(memo[dependency_id])
+        elif dependency_id in on_path:
+            for path_id, _, _ in stack:
+                memo.pop(path_id, None)
+            return _reachable_unsettled(store, node_id)
+        else:
+            stack.append((dependency_id, iter(dependencies_of(dependency_id)), set()))
+            on_path.add(dependency_id)
+    return memo[node_id]
+
+
+def _reachable_unsettled(store: ProjectStore, node_id: str) -> frozenset[str]:
+    """`_unsettled_support` by plain reachability, remembering nothing: for a map with a cycle."""
+    found: set[str] = set()
+    pending = list(get_node(store, node_id).dependencies)
+    while pending:
+        current_id = pending.pop()
+        if current_id in found or _dependency_satisfied(store, current_id):
+            continue
+        found.add(current_id)
+        node = get_node(store, current_id)
+        if node is not None:
+            pending.extend(node.dependencies)
+    found.discard(node_id)
+    return frozenset(found)
+
+
+@read_scoped
+def conditional_on(store: ProjectStore, node_id: str) -> frozenset[str]:
+    """The Provisional nodes `node_id` rests on, directly or through others: its proof stands only if they do
+    (ADR-0021 point 2). Empty for a node that isn't Conditional, an Accepted one included; derived, and cleared
+    node by node as the researcher Accepts bottom-up."""
+    node = require_node(store, node_id)
+    if _already_accepted(store, node):
+        return frozenset()
+    return frozenset(dependency_id for dependency_id in _unsettled_support(store, node_id) if is_provisional(store, dependency_id))
+
+
+def _sent_back(store: ProjectStore, node_id: str) -> bool:
+    """Whether the researcher's newest decision on a local node withdrew it as support: a Reject, or a Revision
+    requested that no new snapshot has answered yet."""
+    node = get_node(store, node_id)
+    if node is None or node.kind == ProofMapNodeKind.imported_result:
+        return False
+    state, latest, _ = _acceptance(store, node)
+    if state == "rejected":
+        return True
+    return (
+        latest is not None
+        and state != "unverifiable"
+        and latest.decision == ReviewGovernanceState.revision_requested
+        and _awaiting_decision(store, node) is None
+    )
+
+
+def _support_withdrawn(store: ProjectStore, node_id: str) -> bool:
+    """Whether anything `node_id` rests on unsettled was sent back by the researcher (ADR-0021 point 4)."""
+    return any(_sent_back(store, dependency_id) for dependency_id in _unsettled_support(store, node_id))
+
+
 @memoized_read
 @read_scoped
 def get_integrity_state(store: ProjectStore, node_id: str) -> str:
@@ -3462,7 +3617,9 @@ def get_integrity_state(store: ProjectStore, node_id: str) -> str:
     `potentially-stale` if the node is Accepted and reachable (via
     dependency edges) from an open Challenge's target or a stale dependency
     pin — computed by graph reachability, nothing set directly (ADR-0004
-    point 4). `current` otherwise.
+    point 4); or if its snapshot awaits a decision and rests on a node the
+    researcher has since rejected or sent back for revision (ADR-0021 point
+    4). `current` otherwise.
     """
     require_node(store, node_id)
     if has_open_challenge(store, node_id):
@@ -3471,23 +3628,28 @@ def get_integrity_state(store: ProjectStore, node_id: str) -> str:
         store, node_id
     ):
         return "potentially-stale"
+    node = require_node(store, node_id)
+    if _awaiting_decision(store, node) is not None and _support_withdrawn(store, node_id):
+        return "potentially-stale"
     return "current"
 
 
 @read_scoped
 def get_frontier(store: ProjectStore) -> list[ProofMapNode]:
-    """The open, unblocked, unclaimed nodes: what an agent could claim right now (ADR-0010).
+    """The nodes ready to be worked right now: what an agent should claim next (ADR-0010, ADR-0021).
 
-    The nodes `claim_node` would accept from anyone — the same check,
-    `_not_pickable` — that nobody has claimed yet and that aren't already
-    awaiting the researcher's review.
+    Every dependency Accepted (or Reference-reviewed) or Provisional, nobody
+    holding it, and no snapshot of it already awaiting the researcher; among
+    the nodes `claim_node` would accept from anyone (the same check,
+    `_not_pickable`).
     """
     return [
         node
         for node in list_nodes(store)
         if get_active_claim(store, node.id) is None
         and _not_pickable(store, node) is None
-        and get_workflow_state(store, node.id) != "review-needed"
+        and _awaiting_decision(store, node) is None
+        and all(_dependency_satisfied(store, d) or is_provisional(store, d) for d in node.dependencies)
     ]
 
 
