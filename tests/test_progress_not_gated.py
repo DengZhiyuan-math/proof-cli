@@ -181,3 +181,17 @@ def test_node_show_and_the_frontier_name_what_is_provisional_and_what_rests_on_i
     assert listed == {"clm": True, "lem": False}
     text = runner.invoke(app, ["node", "show", "lem", "--root", str(tmp_path)]).stdout
     assert "Conditional on" in text and "clm" in text
+
+
+def test_restating_a_provisional_node_s_text_ends_its_provisional_standing(tmp_path: Path):
+    from proof_cli.proof_map import restate_node
+
+    store = _parent_on_claim(tmp_path)
+    _passed_by_verifier(store, "clm")
+    assert _frontier(store) == {"lem"}
+
+    restate_node(store, "clm", statement="C, corrected", reason="the draft's reading was wrong")
+
+    # the Verifier passed a proof of other text: nothing rests on it until it is read again
+    assert not is_provisional(store, "clm")
+    assert "lem" not in _frontier(store)
