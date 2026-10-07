@@ -181,3 +181,13 @@ def test_node_show_and_the_frontier_name_what_is_provisional_and_what_rests_on_i
     assert listed == {"clm": True, "lem": False}
     text = runner.invoke(app, ["node", "show", "lem", "--root", str(tmp_path)]).stdout
     assert "Conditional on" in text and "clm" in text
+
+
+def test_a_blocked_node_s_waiting_snapshot_is_readable(tmp_path: Path):
+    from proof_cli.proof_map import awaiting_decision
+
+    store = _parent_on_claim(tmp_path)
+    assert awaiting_decision(store, "lem") is None
+    proof = submit_proof(store, "lem", claimant_id="agent", scoping_rationale="scoped", content="proof")
+    assert get_workflow_state(store, "lem") == "blocked"
+    assert awaiting_decision(store, "lem").id == proof.id

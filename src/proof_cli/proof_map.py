@@ -3403,6 +3403,13 @@ def _awaiting_decision(store: ProjectStore, node: ProofMapNode) -> CandidateProo
     return None if covered else current_proof
 
 
+@read_scoped
+def awaiting_decision(store: ProjectStore, node_id: str) -> CandidateProofRecord | None:
+    """The node's snapshot awaiting a Human Review decision, Blocked or not, or None (ADR-0021 point 1): what the
+    review queue and the Coordinator read where the workflow axis shows `blocked`."""
+    return _awaiting_decision(store, require_node(store, node_id))
+
+
 @memoized_read
 @read_scoped
 def get_workflow_state(store: ProjectStore, node_id: str) -> str:
