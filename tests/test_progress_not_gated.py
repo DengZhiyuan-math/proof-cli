@@ -288,3 +288,18 @@ def test_an_imported_result_whose_review_no_longer_counts_is_not_provisional(tmp
 
     # the researcher has decided on it: what stands now is theirs to settle, not an unreviewed citation
     assert not is_provisional(store, "ref")
+
+
+def test_a_node_on_a_provisional_dependency_stays_off_the_frontier_while_claimed_or_awaiting_a_decision(tmp_path: Path):
+    store = _parent_on_claim(tmp_path)
+    _passed_by_verifier(store, "clm")
+    assert _frontier(store) == {"lem"}
+
+    claim_node(store, "lem", claimant_id="prover-2")
+    assert "lem" not in _frontier(store)
+
+    submit_proof(store, "lem", claimant_id="prover-2", scoping_rationale="scoped", content="proof of lem")
+    from proof_cli.storage import get_active_claim
+    assert get_active_claim(store, "lem") is None  # requesting review ended the claim
+    assert get_workflow_state(store, "lem") == "blocked"
+    assert "lem" not in _frontier(store)  # its snapshot awaits the researcher
