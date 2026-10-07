@@ -215,7 +215,7 @@ A proof map node has at least one dependency that has not yet reached Acceptance
 _Avoid_: waiting
 
 **Provisional**:
-An unaccepted node another node may rest on for work: a Theorem, Lemma or Claim whose current Review snapshot carries a passing Verifier Evidence check, or an imported result not yet Reference-reviewed. Its statement may be used, its proof never; it is not trust (ADR-0021).
+An unaccepted node another node may rest on for work: a Theorem, Lemma or Claim whose current Review snapshot carries a passing Verifier Evidence check (the newest on it) and whose own dependencies are each settled or Provisional, or an imported result no Reference review has decided. A Challenge, a sent-back node or a citation found no longer callable anywhere in its support ends it. Its statement may be used, its proof never; it is not trust (ADR-0021).
 _Avoid_: verified, accepted, trusted
 
 **Conditional**:
@@ -223,7 +223,7 @@ A node whose proof rests, directly or through others, on a Provisional node: it 
 _Avoid_: tentative, unproven
 
 **Unfixed**:
-A statement or Definition no Review decision has yet relied on. The researcher may restate any unfixed text, an agent only what an agent wrote; a restatement makes the verdicts on it and on what rests on it stale. The first Review decision on it or on a node resting on it fixes it (ADR-0021).
+A statement or Definition no Review decision has yet relied on. The researcher may restate any unfixed text, an agent only what an agent wrote (never a Definition a node of the researcher's names); a restatement is a work-log event and makes the verdicts on it and on what rests on it stale. The first Review decision on it, or on a node whose decided snapshot rested on it, fixes it (ADR-0021).
 _Avoid_: draft (a draft is the researcher's LaTeX), editable
 
 **Accepted** (an acceptance state):
