@@ -254,6 +254,15 @@ def in_git_repo(root: Path) -> bool:
     return result.returncode == 0 and bool(top) and Path(top).resolve() == root.resolve()
 
 
+def inside_another_repo(root: Path) -> bool:
+    """Whether the project sits inside some other repository's work tree, without being its own (#185)."""
+    try:
+        inside = _git(root, "rev-parse", "--is-inside-work-tree").stdout.strip() == "true"
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return inside and not in_git_repo(root)
+
+
 def commit_decision(root: Path, paths: list[Path], message: str) -> str | None:
     """Commit exactly `paths` as the configured git identity; the commit id, or None when not in a git repo.
 
