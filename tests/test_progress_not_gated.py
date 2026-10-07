@@ -195,3 +195,11 @@ def test_restating_a_provisional_node_s_text_ends_its_provisional_standing(tmp_p
     # the Verifier passed a proof of other text: nothing rests on it until it is read again
     assert not is_provisional(store, "clm")
     assert "lem" not in _frontier(store)
+def test_a_blocked_node_s_waiting_snapshot_is_readable(tmp_path: Path):
+    from proof_cli.proof_map import awaiting_decision
+
+    store = _parent_on_claim(tmp_path)
+    assert awaiting_decision(store, "lem") is None
+    proof = submit_proof(store, "lem", claimant_id="agent", scoping_rationale="scoped", content="proof")
+    assert get_workflow_state(store, "lem") == "blocked"
+    assert awaiting_decision(store, "lem").id == proof.id
