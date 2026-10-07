@@ -164,3 +164,29 @@ def test_an_accepted_claim_takes_no_decomposer_edge_without_its_claim(tmp_path: 
     with pytest.raises(ProofMapError) as exc_info:
         add_dependency(store, "c2", "c1", edited_by="dec-1")  # onto an Accepted Claim: the target is not unaccepted
     assert exc_info.value.code == "NOT_CLAIMANT"
+
+
+def test_claims_of_different_parents_take_no_decomposer_edge_without_the_claim(tmp_path: Path):
+    store = _split_and_hold(ensure_project(tmp_path))
+    create_node(store, node_id="other", kind="lemma", statement="O")
+    split_node(store, "other", [{"id": "d1", "statement": "D"}], created_by="dec-1")
+
+    with pytest.raises(ProofMapError) as exc_info:
+        add_dependency(store, "c2", "d1", edited_by="dec-1")  # the same agent's Claims, but of two Splits
+    assert exc_info.value.code == "NOT_CLAIMANT"
+
+
+def test_the_researcher_s_own_split_takes_no_edge_past_a_run_s_claim(tmp_path: Path):
+    store = _split_and_hold(ensure_project(tmp_path), created_by="human")
+    with pytest.raises(ProofMapError) as exc_info:
+        add_dependency(store, "c2", "c1", edited_by="human")  # the researcher edits as anyone does: --reassign
+    assert exc_info.value.code == "NOT_CLAIMANT"
+
+
+def test_a_decomposer_edge_that_would_close_a_cycle_is_refused(tmp_path: Path):
+    store = _split_and_hold(ensure_project(tmp_path))
+    add_dependency(store, "c2", "c1", edited_by="dec-1")
+
+    with pytest.raises(ProofMapError) as exc_info:
+        add_dependency(store, "c1", "c2", edited_by="dec-1")
+    assert exc_info.value.code == "DEPENDENCY_CYCLE"

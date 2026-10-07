@@ -1351,14 +1351,14 @@ def add_dependency(
 
 
 def _own_split_edge(store: ProjectStore, node: ProofMapNode, dependency_id: str, edited_by: str) -> bool:
-    """Whether `edited_by` is adding an edge between two Claims its own Split created, both unaccepted (ADR-0021
-    point 7). An edge between unaccepted Claims decides nothing, so the Decomposer adds it without holding either
-    Claim and without taking over the run that holds one."""
+    """Whether agent `edited_by` is adding an edge between two Claims its own Split of one parent created, both
+    unaccepted (ADR-0021 point 7). An edge between unaccepted siblings decides nothing, so the Decomposer adds it
+    without holding either Claim and without taking over the run that holds one. The researcher edits as anyone does."""
     dependency = get_node(store, dependency_id)
+    if edited_by == RESEARCHER or dependency is None or node.derived_from is None or dependency.derived_from != node.derived_from:
+        return False
     return all(
-        claim is not None
-        and claim.kind == ProofMapNodeKind.claim
-        and claim.derived_from is not None
+        claim.kind == ProofMapNodeKind.claim
         and claim.created_by == edited_by
         and get_acceptance_state(store, claim.id) not in ("accepted", "unverifiable", "rejected")
         for claim in (node, dependency)
