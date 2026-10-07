@@ -190,3 +190,74 @@ def test_a_decomposer_edge_that_would_close_a_cycle_is_refused(tmp_path: Path):
     with pytest.raises(ProofMapError) as exc_info:
         add_dependency(store, "c1", "c2", edited_by="dec-1")
     assert exc_info.value.code == "DEPENDENCY_CYCLE"
+
+
+# -- a resplit: the Decomposer takes its own Claim back off the parent
+
+
+def _split_held_parent(store):
+    create_node(store, node_id="thm", kind="theorem", statement="T")
+    split_node(store, "thm", [{"id": "c1", "statement": "A"}, {"id": "c2", "statement": "B"}], created_by="dec-1")
+    claim_node(store, "thm", claimant_id="prover-1")  # a run holds the parent
+    return store
+
+
+def test_the_decomposer_removes_its_own_claim_from_the_parent_without_holding_it(tmp_path: Path):
+    from proof_cli.proof_map import remove_dependency
+    from proof_cli.storage import get_active_claim
+
+    store = _split_held_parent(ensure_project(tmp_path))
+
+    edit = remove_dependency(store, "thm", "c1", edited_by="dec-1")
+
+    assert edit.node.dependencies == ["c2"]
+    assert get_active_claim(store, "thm").claimant_id == "prover-1"  # nobody's claim was taken over
+    [entry] = [e for e in work_log(store, "thm") if e["kind"] == "dependencies"]
+    assert (entry["by"], entry["change"], entry["dependency"], entry["resplit"]) == ("dec-1", "removed", "c1", True)
+
+
+def test_the_cli_removes_the_decomposer_s_own_claim(tmp_path: Path):
+    store = _split_held_parent(ensure_project(tmp_path))
+    result = runner.invoke(app, ["node", "depend", "thm", "--remove", "c1", "--by", "dec-1", "--root", str(tmp_path), "--json"])
+    assert result.exit_code == 0, result.output
+    assert get_node(store, "thm").dependencies == ["c2"]
+
+
+@pytest.mark.parametrize("case", ["another agent", "the researcher", "accepted claim", "fixed parent", "not derived"])
+def test_any_other_removal_still_needs_the_parent_s_claim(tmp_path: Path, case):
+    from proof_cli.proof_map import remove_dependency
+
+    store = _split_held_parent(ensure_project(tmp_path))
+    by, target = "dec-1", "c1"
+    if case == "another agent":
+        by = "dec-2"
+    elif case == "the researcher":
+        store = ensure_project(tmp_path / "h")
+        create_node(store, node_id="thm", kind="theorem", statement="T")
+        split_node(store, "thm", [{"id": "c1", "statement": "A"}], created_by="human")
+        claim_node(store, "thm", claimant_id="prover-1")
+        by = "human"
+    elif case == "accepted claim":
+        submit_proof(store, "c1", claimant_id="prover-2", scoping_rationale="scoped", content="proof")
+        researcher(store).decide_acceptance("c1", "accept")
+    elif case == "fixed parent":
+        submit_proof(store, "c1", claimant_id="prover-2", scoping_rationale="scoped", content="proof")
+        researcher(store).decide_acceptance("c1", "accept")
+        submit_proof(store, "c2", claimant_id="prover-2", scoping_rationale="scoped", content="proof")
+        researcher(store).decide_acceptance("c2", "accept")
+        submit_proof(store, "thm", claimant_id="prover-1", scoping_rationale="scoped", content="proof")
+        researcher(store).decide_acceptance("thm", "accept")
+        from proof_cli.proof_map import open_challenge
+        open_challenge(store, "thm", rationale="step 3")  # its structure is editable again, its text still fixed
+        claim_node(store, "thm", claimant_id="prover-1", reassign=True)
+        create_node(store, node_id="c3", kind="claim", statement="C", created_by="dec-1", derived_from="thm")
+        add_dependency(store, "thm", "c3", edited_by="prover-1")
+        target = "c3"
+    elif case == "not derived":
+        create_node(store, node_id="lem", kind="lemma", statement="L", created_by="dec-1")
+        add_dependency(store, "thm", "lem", edited_by="prover-1")
+        target = "lem"
+
+    with pytest.raises(ProofMapError) as exc_info:
+        remove_dependency(store, "thm", target, edited_by=by)
+    assert exc_info.value.code == "NOT_CLAIMANT"

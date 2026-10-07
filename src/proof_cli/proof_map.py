@@ -746,7 +746,8 @@ def work_log(store: ProjectStore, node_id: str) -> list[dict]:
         elif event.kind == "proof_fog_experiment_recorded" and event.entity_id in near_fog:
             entries.append({"at": at, "kind": "experiment", "by": payload.get("run_by"), "fog_id": event.entity_id, "outcome": payload.get("outcome"), "seq": payload.get("seq")})
         elif event.kind in ("proof_map_dependency_added", "proof_map_dependency_removed", "proof_map_dependency_moved") and event.entity_id == node_id:
-            entries.append({"at": at, "kind": "dependencies", "by": payload.get("edited_by") or payload.get("by"), "change": event.kind.rsplit("_", 1)[1], "dependency": payload.get("dependency_id") or payload.get("dependency")})
+            entries.append({"at": at, "kind": "dependencies", "by": payload.get("edited_by") or payload.get("by"), "change": event.kind.rsplit("_", 1)[1], "dependency": payload.get("dependency_id") or payload.get("dependency"),
+                            "resplit": bool(payload.get("resplit"))})
         elif event.kind in ("proof_map_node_claimed", "proof_map_claim_reassigned") and event.entity_id == node_id:
             entries.append({"at": at, "kind": "claimed", "by": payload.get("claimant_id") or payload.get("assignee")})
         for entry in entries[before:]:  # an automatic entry: the role of the turn it happened in, when the run's agent did it
@@ -1382,15 +1383,21 @@ def _gain_dependency(store: ProjectStore, conn: sqlite3.Connection, node: ProofM
 def remove_dependency(
     store: ProjectStore, node_id: str, dependency_id: str, *, edited_by: str = "human", reassign: bool = False
 ) -> DependencyEdit:
-    """Stop `node_id` resting on `dependency_id` (#96). The edge's pin goes with it."""
+    """Stop `node_id` resting on `dependency_id` (#96). The edge's pin goes with it.
+
+    A node someone else holds is theirs (NOT_CLAIMANT) unless `reassign`, except a resplit: an agent taking a Claim
+    its own Split of `node_id` created back off it, while the Claim is unaccepted and no decision has fixed
+    `node_id` (ADR-0021 points 7 and 9). Recorded in `node_id`'s work log, naming the Claim and the agent."""
     with store.transaction() as conn:
         node = require_node(store, node_id)
         _structure_editable(store, node)
         if dependency_id not in node.dependencies:
             raise ProofMapError("NOT_A_DEPENDENCY", f"{dependency_id} is not a dependency of {node_id}")
-        claim = _held_by_another(store, conn, node_id, edited_by, reassign=reassign)
-        if claim is not None:
-            _take_over(store, conn, claim, edited_by)
+        resplit = _own_split_removal(store, node, dependency_id, edited_by)
+        if not resplit:
+            claim = _held_by_another(store, conn, node_id, edited_by, reassign=reassign)
+            if claim is not None:
+                _take_over(store, conn, claim, edited_by)
         updated = _with_dependencies(node, [d for d in node.dependencies if d != dependency_id], edited_by)
         update_proof_map_node(store, updated, conn=conn)
         delete_dependency_pin(store, node_id, dependency_id, conn=conn)
@@ -1399,10 +1406,29 @@ def remove_dependency(
             "proof_map_dependency_removed",
             f"{node_id} no longer rests on {dependency_id}",
             entity_id=node_id,
-            payload={"dependency_id": dependency_id, "edited_by": edited_by, "dependencies": {"before": node.dependencies, "after": updated.dependencies}},
+            payload={
+                "dependency_id": dependency_id, "edited_by": edited_by, "dependencies": {"before": node.dependencies, "after": updated.dependencies},
+                **({"resplit": True} if resplit else {}),
+            },
             conn=conn,
         )
     return DependencyEdit("remove", dependency_id, get_node(store, node_id))
+
+
+def _own_split_removal(store: ProjectStore, parent: ProofMapNode, claim_id: str, edited_by: str) -> bool:
+    """Whether agent `edited_by` is taking back off `parent` an unaccepted Claim its own Split of `parent` created,
+    while no decision has fixed `parent` (ADR-0021 point 9: one further Decomposer turn tries another structure).
+    Nothing relied on that edge, so the Decomposer removes it without holding `parent`."""
+    claim = get_node(store, claim_id)
+    return (
+        edited_by != RESEARCHER
+        and claim is not None
+        and claim.kind == ProofMapNodeKind.claim
+        and claim.derived_from == parent.id
+        and claim.created_by == edited_by
+        and get_acceptance_state(store, claim_id) not in ("accepted", "unverifiable")
+        and fixed_by(store, parent.id) is None
+    )
 
 
 def move_dependency(

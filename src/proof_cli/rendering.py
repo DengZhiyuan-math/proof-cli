@@ -405,7 +405,7 @@ def _work_log_body(entry: dict) -> str:
     if kind == "experiment":
         return f"Experiment {entry.get('seq')} on {entry.get('fog_id')}: {entry.get('outcome')}"
     if kind == "dependencies":
-        return f"dependency {entry.get('change')}: {entry.get('dependency')}"
+        return f"dependency {entry.get('change')}: {entry.get('dependency')}" + (" (resplit: the Decomposer took its own Claim back)" if entry.get("resplit") else "")
     return str(kind)
 
 
