@@ -3755,18 +3755,17 @@ VERIFIER_CHECK_SUFFIX = "/verifier"
 
 
 def _verifier_passed(store: ProjectStore, proof: CandidateProofRecord) -> bool:
-    """Whether the Verifier's passing verdict was recorded on this very snapshot, and the researcher hasn't found
-    that check unusable (an evidence review decision, ADR-0004 point 5)."""
-    for check in list_evidence_checks_for_candidate_proof(store, proof.id):
-        if check.outcome != EvidenceOutcome.passed or not check.run_by.endswith(VERIFIER_CHECK_SUFFIX):
-            continue
-        if check.candidate_proof_sha256 is None or check.candidate_proof_sha256 != proof.sha256:
-            continue
-        reviews = decision_rows(store, _EVIDENCE_CHECK_OBJECT_TYPE, check.id, ReviewRecordKind.evidence_review.value)
-        if reviews and reviews[-1]["decision"] == ReviewGovernanceState.unusable.value:
-            continue
-        return True
-    return False
+    """Whether the Verifier's newest check on this very snapshot passed, and the researcher hasn't found that check
+    unusable (an evidence review decision, ADR-0004 point 5). A later failed reading of the same snapshot ends it."""
+    checks = [
+        check
+        for check in list_evidence_checks_for_candidate_proof(store, proof.id)
+        if check.run_by.endswith(VERIFIER_CHECK_SUFFIX) and check.candidate_proof_sha256 is not None and check.candidate_proof_sha256 == proof.sha256
+    ]
+    if not checks or checks[-1].outcome != EvidenceOutcome.passed:  # oldest first: the newest decides
+        return False
+    reviews = decision_rows(store, _EVIDENCE_CHECK_OBJECT_TYPE, checks[-1].id, ReviewRecordKind.evidence_review.value)
+    return not (reviews and reviews[-1]["decision"] == ReviewGovernanceState.unusable.value)
 
 
 @memoized_read
