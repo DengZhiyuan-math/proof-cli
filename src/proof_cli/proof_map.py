@@ -505,8 +505,14 @@ def _progress_entries(store: ProjectStore, node_id: str, kind: str) -> list[dict
 
 def verdicts(store: ProjectStore, node_id: str) -> list[dict]:
     """The Verifier's verdicts on the node, newest last (ADR-0019 point 2): each its outcome, its objections (`note`),
-    the role and agent that made it, and the inputs digest it was about (`inputs_sha256`, None if unreadable then)."""
-    return _progress_entries(store, node_id, "verdict")
+    the role and agent that made it, the inputs digest it was about (`inputs_sha256`, None if unreadable then), and
+    whether it is `stale`: the text it read the proof against — the node's or anything it rests on — was restated
+    after it (ADR-0021 point 6). A stale verdict opens no gate, whatever its digest."""
+    restated = restated_at(store, node_id)
+    return [
+        {**entry, "stale": restated is not None and datetime.fromisoformat(entry["at"]) < restated}
+        for entry in _progress_entries(store, node_id, "verdict")
+    ]
 
 
 def latest_verdict(store: ProjectStore, node_id: str) -> dict | None:
@@ -737,6 +743,128 @@ def set_medium(store: ProjectStore, node_id: str, medium: Medium | str, *, edite
         append_event(
             store, "proof_map_node_medium_set", f"{node_id}: medium {node.medium.value} → {resolved.value}",
             entity_id=node_id, payload={"from": node.medium.value, "to": resolved.value, "by": edited_by}, conn=conn,
+        )
+    return changed
+
+
+# -- Unfixed text (ADR-0021 point 6) -------------------------------------------------------------------------------
+
+RESTATED_EVENT = "proof_map_node_restated"
+DEFINITION_EDITED_EVENT = "definition_edited"
+RESEARCHER = "human"  # the `--by` / `created_by` of the researcher's own writes; anything else is an agent
+
+
+def _resting_on(store: ProjectStore, node_id: str) -> set[str]:
+    """`node_id` and every node that rests on it, directly or through others."""
+    dependents_of: dict[str, list[str]] = {}
+    for node in list_nodes(store):
+        for dependency_id in node.dependencies:
+            dependents_of.setdefault(dependency_id, []).append(node.id)
+    found = {node_id}
+    pending = [node_id]
+    while pending:
+        for dependent_id in dependents_of.get(pending.pop(), []):
+            if dependent_id not in found:
+                found.add(dependent_id)
+                pending.append(dependent_id)
+    return found
+
+
+def _rests_on(store: ProjectStore, node_id: str) -> set[str]:
+    """`node_id` and every node it rests on, directly or through others."""
+    found = {node_id}
+    pending = [node_id]
+    while pending:
+        node = get_node(store, pending.pop())
+        for dependency_id in node.dependencies if node is not None else []:
+            if dependency_id not in found:
+                found.add(dependency_id)
+                pending.append(dependency_id)
+    return found
+
+
+def fixed_by(store: ProjectStore, node_id: str) -> dict | None:
+    """The Review decision that fixed a node's statement, assumptions and named definitions, or None while they are
+    Unfixed (ADR-0021 point 6): the first Acceptance decision of any outcome, or Reference review, on the node or on
+    any node resting on it. A decision relied on the text, so no restatement may change it under that decision."""
+    first: dict | None = None
+    for decided_id in sorted(_resting_on(store, node_id)):
+        for kind in (ReviewRecordKind.acceptance, ReviewRecordKind.reference_review):
+            for row in decision_rows(store, _ACCEPTANCE_OBJECT_TYPE, decided_id, kind.value):
+                if row["decision"] == ReviewGovernanceState.proposed_for_review.value:
+                    continue
+                if first is None or row["created_at"] < first["decided_at"]:
+                    first = {"node_id": decided_id, "review_id": row["review_id"], "kind": kind.value, "decision": row["decision"], "decided_at": row["created_at"]}
+                break  # the oldest of this kind on this node
+    return first
+
+
+def restated_at(store: ProjectStore, node_id: str) -> datetime | None:
+    """When the text a node's proof is read against last changed, or None if it never did since its creation: the
+    newest restatement of the node or of a node it rests on, or edit of a Definition any of them names."""
+    nodes = _rests_on(store, node_id)
+    named = {definition_id for current_id in nodes for definition_id in (getattr(get_node(store, current_id), "definitions", None) or [])}
+    newest: datetime | None = None
+    for event in list_events(store):
+        if (event.kind == RESTATED_EVENT and event.entity_id in nodes) or (event.kind == DEFINITION_EDITED_EVENT and event.entity_id in named):
+            newest = event.created_at if newest is None or event.created_at > newest else newest
+    return newest
+
+
+def require_restatable(store: ProjectStore, *, what: str, created_by: str, by: str, fixed: dict | None, fixed_code: str) -> None:
+    """Refuse a change to fixed text (`fixed_code`, naming the decision), or an agent's change to the researcher's."""
+    if fixed is not None:
+        raise ProofMapError(
+            fixed_code,
+            f"{what} is fixed: the {fixed['kind'].replace('_', ' ')} decision {fixed['review_id']} on {fixed['node_id']} relied on it; "
+            "state a corrected version as a new node or definition",
+            details={"fixed_by": fixed},
+        )
+    if by != RESEARCHER and created_by == RESEARCHER:
+        raise ProofMapError("RESEARCHER_TEXT", f"{what} was written by the researcher: only the researcher restates it")
+
+
+def restate_node(
+    store: ProjectStore,
+    node_id: str,
+    *,
+    statement: str | None = None,
+    assumptions: list[str] | None = None,
+    definitions: list[str] | None = None,
+    reason: str,
+    by: str = RESEARCHER,
+) -> ProofMapNode:
+    """Change a node's statement, assumptions or named definitions while they are Unfixed (ADR-0021 point 6).
+
+    The researcher may restate any unfixed text, an agent only a node an agent created (RESEARCHER_TEXT). Fixed text
+    is refused (TEXT_FIXED, naming the decision that fixed it). Recorded in the work log with the reason; every
+    verdict on the node and on what rests on it goes stale (`verdicts`), and the snapshots there awaiting a decision
+    read Potentially stale. The working proof is the role's, and is left as it is."""
+    if not (reason or "").strip():
+        raise ProofMapError("RESTATE_REASON_REQUIRED", "a restatement says why: --reason \"<what was wrong or unclear>\"")
+    update: dict[str, Any] = {}
+    with store.transaction() as conn:
+        node = require_node(store, node_id)
+        if statement is not None and statement.strip() and statement.strip() != node.statement:
+            update["statement"] = statement.strip()
+        if assumptions is not None and [a.strip() for a in assumptions if a.strip()] != node.assumptions:
+            update["assumptions"] = [a.strip() for a in assumptions if a.strip()]
+        if definitions is not None:
+            named = list(dict.fromkeys(definitions))
+            for definition_id in named:
+                if get_definition(store, definition_id, conn=conn) is None:
+                    raise ProofMapError("DEFINITION_NOT_FOUND", f"definition {definition_id} does not exist; add it with `proof definition add` before a statement names it")
+            if named != node.definitions:
+                update["definitions"] = named
+        if not update:
+            raise ProofMapError("RESTATE_EMPTY", f"nothing to restate: give {node_id} a different --statement, --assumption or --definition")
+        require_restatable(store, what=f"{node_id}'s statement", created_by=node.created_by, by=by, fixed=fixed_by(store, node_id), fixed_code="TEXT_FIXED")
+        changed = node.model_copy(update={**update, "updated_by": by, "updated_at": utc_now()})
+        update_proof_map_node(store, changed, conn=conn)
+        append_event(
+            store, RESTATED_EVENT, f"{node_id} restated by {by}: {reason.strip()}", entity_id=node_id,
+            payload={"by": by, "reason": reason.strip(), "from": {key: getattr(node, key) for key in update}, "to": update},
+            conn=conn,
         )
     return changed
 
@@ -1429,11 +1557,12 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
         # this request is — BEGIN IMMEDIATE holds the lock from here to the commit.
         if gated_by is not None:
             newest = latest_verdict(store, node_id)
-            if newest is None or newest.get("outcome") != "passed" or newest.get("inputs_sha256") != sha256:
+            if newest is None or newest.get("outcome") != "passed" or newest.get("inputs_sha256") != sha256 or newest.get("stale"):
                 raise ProofMapError(
                     "VERDICT_STALE",
                     f"the newest verdict on {node_id} is not a passing one on these files"
-                    + (f" (it {newest.get('outcome')} {str(newest.get('inputs_sha256') or '')[:12]}…)" if newest else " (there is none)")
+                    + (f" (it {newest.get('outcome')} {str(newest.get('inputs_sha256') or '')[:12]}…"
+                       + (", before a restatement of what it read the proof against)" if newest.get("stale") else ")") if newest else " (there is none)")
                     + "; have the Verifier read them again before requesting review",
                     details={"gated_by": gated_by, "working_sha256": sha256, "newest_verdict": newest},
                 )
@@ -1796,8 +1925,8 @@ def compute_interface_fingerprint(statement: str, assumptions: list[str], defini
     fingerprint. "Mathematical scope" is treated as already captured within
     statement + assumptions for v1.
 
-    A node written in Definitions (ADR-0020) has them in its interface too, by id: a definition a node names can
-    never change, so its id stands for its text. A node that names none is spelled exactly as before.
+    A node written in Definitions (ADR-0020) has them in its interface too, by id: a decision fixes the definitions
+    it relied on (ADR-0021 point 6), so under it an id stands for its text. A node that names none is spelled exactly as before.
     """
     parts: list = [_normalize_whitespace(statement), [_normalize_whitespace(a) for a in assumptions]]
     if definitions:
@@ -3462,7 +3591,9 @@ def get_integrity_state(store: ProjectStore, node_id: str) -> str:
     `potentially-stale` if the node is Accepted and reachable (via
     dependency edges) from an open Challenge's target or a stale dependency
     pin — computed by graph reachability, nothing set directly (ADR-0004
-    point 4). `current` otherwise.
+    point 4); or if its current snapshot, relied on by no decision yet, was
+    frozen before the text it proves was restated (ADR-0021 point 6).
+    `current` otherwise.
     """
     require_node(store, node_id)
     if has_open_challenge(store, node_id):
@@ -3471,7 +3602,19 @@ def get_integrity_state(store: ProjectStore, node_id: str) -> str:
         store, node_id
     ):
         return "potentially-stale"
+    if _snapshot_restated_under(store, node_id):
+        return "potentially-stale"
     return "current"
+
+
+def _snapshot_restated_under(store: ProjectStore, node_id: str) -> bool:
+    """Whether the node's current snapshot, not yet relied on by any decision, was frozen before the text it proves —
+    its own or what it rests on — was restated (ADR-0021 point 6). A new snapshot answers it."""
+    current = get_current_candidate_proof(store, node_id)
+    if current is None:
+        return False
+    restated = restated_at(store, node_id)
+    return restated is not None and current.created_at < restated and fixed_by(store, node_id) is None
 
 
 @read_scoped
