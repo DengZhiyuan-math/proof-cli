@@ -506,11 +506,18 @@ def _working_digest_or_none(store: ProjectStore, node: ProofMapNode) -> str | No
 def _progress_entries(store: ProjectStore, node_id: str, kind: str) -> list[dict]:
     """The node's `agent_progress` events of one kind, oldest first, each with its time."""
     require_node(store, node_id)
-    return [
-        {"at": event.created_at.isoformat(), **(event.payload or {})}
-        for event in list_events(store)
-        if event.kind == PROGRESS_EVENT and event.entity_id == node_id and (event.payload or {}).get("kind") == kind
-    ]
+    return [dict(entry) for entry in _progress_index(store).get((node_id, kind), [])]
+
+
+@memoized_read
+def _progress_index(store: ProjectStore) -> dict[tuple[str, str], list[dict]]:
+    """Every `agent_progress` entry by node and kind, from one pass over the log: a read asks for every node's."""
+    found: dict[tuple[str, str], list[dict]] = {}
+    for event in list_events(store):
+        if event.kind == PROGRESS_EVENT and event.entity_id is not None:
+            payload = event.payload or {}
+            found.setdefault((event.entity_id, str(payload.get("kind"))), []).append({"at": event.created_at.isoformat(), **payload})
+    return found
 
 
 def verdicts(store: ProjectStore, node_id: str) -> list[dict]:
@@ -914,13 +921,75 @@ def _relied_on(store: ProjectStore, row: dict) -> set[str]:
 
 def restated_at(store: ProjectStore, node_id: str) -> datetime | None:
     """When the text a node's proof is read against last changed, or None if it never did since its creation: the
-    newest restatement of the node or of a node it rests on, or edit of a Definition any of them names."""
+    newest restatement of the node or of a node it rests on, or edit of a Definition any of them names.
+
+    One pass per read, like `_unsettled_support`: the event log is indexed once (`_text_changes`), and each node's
+    answer goes in the read scope's memo as the walk leaves it, with an explicit stack for deep chains."""
+    memo: dict[str, datetime | None] = scoped_memo(store, _RESTATED_AT)
+    if node_id in memo:
+        return memo[node_id]
+    restated, edited = _text_changes(store)
+
+    def own(current_id: str) -> tuple[datetime | None, list[str]]:
+        node = get_node(store, current_id)
+        if node is None:
+            return restated.get(current_id), []
+        changes = [at for at in (restated.get(current_id), *(edited.get(d) for d in node.definitions)) if at is not None]
+        return (max(changes) if changes else None), list(node.dependencies)
+
+    newest, dependencies = own(node_id)
+    stack: list[list] = [[node_id, iter(dependencies), newest]]
+    on_path = {node_id}
+    while stack:
+        top = stack[-1]
+        dependency_id = next(top[1], None)
+        if dependency_id is None:
+            stack.pop()
+            on_path.discard(top[0])
+            memo[top[0]] = top[2]
+            if stack:
+                stack[-1][2] = _later(stack[-1][2], top[2])
+            continue
+        if dependency_id in memo:
+            top[2] = _later(top[2], memo[dependency_id])
+        elif dependency_id in on_path:  # a cycle, which no service creates: plain reachability, remembering nothing
+            for path_id, _, _ in stack:
+                memo.pop(path_id, None)
+            return _reachable_restated_at(store, node_id)
+        else:
+            newest, dependencies = own(dependency_id)
+            stack.append([dependency_id, iter(dependencies), newest])
+            on_path.add(dependency_id)
+    return memo[node_id]
+
+
+_RESTATED_AT = "restated_at"
+
+
+def _later(a: datetime | None, b: datetime | None) -> datetime | None:
+    return b if a is None or (b is not None and b > a) else a
+
+
+@memoized_read
+def _text_changes(store: ProjectStore) -> tuple[dict[str, datetime], dict[str, datetime]]:
+    """The newest restatement of each node, and the newest edit of each Definition, from one pass over the log."""
+    restated: dict[str, datetime] = {}
+    edited: dict[str, datetime] = {}
+    for event in list_events(store):
+        found = restated if event.kind == RESTATED_EVENT else edited if event.kind == DEFINITION_EDITED_EVENT else None
+        if found is not None and event.entity_id is not None:
+            found[event.entity_id] = _later(found.get(event.entity_id), event.created_at)
+    return restated, edited
+
+
+def _reachable_restated_at(store: ProjectStore, node_id: str) -> datetime | None:
+    """`restated_at` by plain reachability: for a map with a cycle."""
+    restated, edited = _text_changes(store)
     nodes = _rests_on(store, node_id)
     named = {definition_id for current_id in nodes for definition_id in (getattr(get_node(store, current_id), "definitions", None) or [])}
     newest: datetime | None = None
-    for event in list_events(store):
-        if (event.kind == RESTATED_EVENT and event.entity_id in nodes) or (event.kind == DEFINITION_EDITED_EVENT and event.entity_id in named):
-            newest = event.created_at if newest is None or event.created_at > newest else newest
+    for at in [*(restated.get(n) for n in nodes), *(edited.get(d) for d in named)]:
+        newest = _later(newest, at)
     return newest
 
 
