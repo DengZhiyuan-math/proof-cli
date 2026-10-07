@@ -5,15 +5,18 @@ into it, or were left out and every reader — the researcher and each agent —
 once, under a name: an id, a term to show, and Markdown with `$…$` maths, as a statement is.
 
 A node names the definitions its statement is written in, when it is created (`proof node create --definition <id>`),
-and the names never change afterwards, as the statement never does. A Split's children, and a node created under a
+and the names change afterwards only by a restatement while Unfixed, as the statement does. A Split's children, and a node created under a
 parent, name their parent's definitions too: a Claim of a Theorem is about the Theorem's objects. What a node says is
 its statement, its assumptions and the definitions it names — its Accepted mathematical interface, so they are in its
-interface fingerprint (ids only: a definition a node names can no longer change).
+interface fingerprint (ids only: a decision fixes the definitions it relied on, so under it an id stands for its text).
 
-A definition is editable and removable only while no node names it (DEFINITION_IN_USE); once one does, it is as fixed
-as that node's statement, and a corrected definition is a new one, named by new nodes. That is the whole trust story:
-no edit anywhere can change what an existing node, Accepted or not, says. Snapshots freeze the proof, not the
-statement, so they don't copy definitions; the review page shows them from the record, where they cannot move.
+A definition is Unfixed until a Review decision relies on it (ADR-0021 point 6): until the first decision on a node
+naming it, or on a node resting on one. Until then it may be edited, with a reason — by the researcher, or by an agent
+if an agent wrote it — and the edit is a restatement of every node naming it: the verdicts there go stale. Once fixed
+it is as fixed as those nodes' statements (DEFINITION_FIXED, naming the decision), and a corrected definition is a new
+one, named by new nodes. It is removable only while no node names it (DEFINITION_IN_USE). That is the whole trust
+story: no edit anywhere can change what a node says under a decision that relied on it. Snapshots freeze the proof,
+not the statement, so they don't copy definitions; the review page shows them from the record.
 
 This module is the seam the CLI, the proof map page and `proof_map` call.
 """
@@ -23,7 +26,7 @@ from __future__ import annotations
 import re
 
 from .domain import Definition, ProofMapNode, utc_now
-from .proof_map import ProofMapError
+from .proof_map import DEFINITION_EDITED_EVENT, ProofMapError, fixed_by, require_restatable
 from .storage import (
     ProjectStore,
     append_event,
@@ -108,14 +111,24 @@ def _unused(store: ProjectStore, definition_id: str, conn, doing: str) -> None:
     if using:
         raise ProofMapError(
             "DEFINITION_IN_USE",
-            f"definition {definition_id} is named by {', '.join(using)}: it is as fixed as their statements, and cannot be {doing}; "
-            "add a corrected definition under a new id and name it from new nodes",
+            f"definition {definition_id} is named by {', '.join(using)}, and cannot be {doing}; "
+            "edit it while it is unfixed, or add a corrected definition under a new id and name it from new nodes",
             details={"nodes": using},
         )
 
 
-def edit_definition(store: ProjectStore, definition_id: str, *, term: str | None = None, text: str | None = None, edited_by: str = "human") -> Definition:
-    """Change a definition no node names yet. Changing nothing changes and records nothing."""
+def fixed_by_definition(store: ProjectStore, definition_id: str) -> dict | None:
+    """The Review decision that fixed a definition — the first that fixed a node naming it — or None while Unfixed."""
+    found = [decided for node_id in nodes_naming(store, definition_id) if (decided := fixed_by(store, node_id)) is not None]
+    return min(found, key=lambda decided: decided["decided_at"]) if found else None
+
+
+def edit_definition(
+    store: ProjectStore, definition_id: str, *, term: str | None = None, text: str | None = None, edited_by: str = "human", reason: str = ""
+) -> Definition:
+    """Change an Unfixed definition (ADR-0021 point 6): the researcher any, an agent one an agent wrote
+    (RESEARCHER_TEXT); a fixed one is refused (DEFINITION_FIXED). Once a node names it, the edit restates that node
+    and needs a reason. Changing nothing changes and records nothing."""
     with store.transaction() as conn:
         current = require_definition(store, definition_id, conn=conn)
         update = {}
@@ -125,11 +138,14 @@ def edit_definition(store: ProjectStore, definition_id: str, *, term: str | None
             update["text"] = _clean(text, "text")
         if not update:
             return current
-        _unused(store, definition_id, conn, "edited")
+        require_restatable(store, what=f"definition {definition_id}", created_by=current.created_by, by=edited_by,
+                           fixed=fixed_by_definition(store, definition_id), fixed_code="DEFINITION_FIXED")
+        if nodes_naming(store, definition_id, conn=conn) and not (reason or "").strip():
+            raise ProofMapError("RESTATE_REASON_REQUIRED", f"definition {definition_id} is named by a node: editing it restates that node, so say why with --reason")
         changed = current.model_copy(update={**update, "updated_at": utc_now()})
         update_definition(store, changed, conn=conn)
-        append_event(store, "definition_edited", f"definition {definition_id} edited by {edited_by}", entity_id=definition_id,
-                     payload={"by": edited_by, **update}, conn=conn)
+        append_event(store, DEFINITION_EDITED_EVENT, f"definition {definition_id} edited by {edited_by}", entity_id=definition_id,
+                     payload={"by": edited_by, **update, **({"reason": reason.strip()} if (reason or "").strip() else {})}, conn=conn)
     return changed
 
 

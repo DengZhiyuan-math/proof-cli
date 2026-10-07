@@ -157,6 +157,8 @@ from .proof_map import (
     get_blocked_reason,
     get_frontier,
     is_provisional,
+    fixed_by,
+    restate_node,
     get_integrity_state,
     get_reference_review_state,
     get_workflow_state,
@@ -185,7 +187,7 @@ from .proof_map import (
 from .trust_rules import get_trust_rule, list_trust_rules, trust_rule_history
 from .authority import candidate_proof_sha256
 from .vault import working_entry_path
-from .definitions import add_definition, all_definitions, definitions_of, edit_definition, nodes_naming, remove_definition, require_definition
+from .definitions import add_definition, all_definitions, definitions_of, edit_definition, fixed_by_definition, nodes_naming, remove_definition, require_definition
 from .rendering import (
     render_definition,
     render_definition_list,
@@ -231,7 +233,7 @@ goal_app = typer.Typer(help="(legacy) Goal operations; a goal becomes a Claim no
 theorem_app = typer.Typer(help="(legacy) Theorem-contract registry; the proof map's nodes replace it")
 node_app = typer.Typer(help="Proof map node operations")
 trust_rule_app = typer.Typer(help="Trust rules: the researcher's standing Reference reviews, read-only here (declared on the proof map page; ADR-0014)")
-definition_app = typer.Typer(help="Definitions: the named text node statements are written in — a model's setting, a definition, notation (ADR-0020). A node names its definitions when it is created; a definition a node names is fixed, like that node's statement")
+definition_app = typer.Typer(help="Definitions: the named text node statements are written in — a model's setting, a definition, notation (ADR-0020). A node names its definitions when it is created; a definition is fixed, like the statements naming it, once a Review decision relies on it (ADR-0021)")
 fog_app = typer.Typer(help="Proof fog: difficulties not yet precise enough to be a Claim, kept outside the map (ADR-0008). Ungated: anyone, agents included, may add, edit, drop or crystallize one")
 fog_experiment_app = typer.Typer(help="Experiments: numerical runs recorded against a fog item; they never change its status")
 node_evidence_app = typer.Typer(help="Evidence check workflows")
@@ -445,7 +447,7 @@ def node_create(
     display_label: str = "",
     assumption: list[str] = typer.Option(None, "--assumption"),
     dependency: list[str] = typer.Option(None, "--dependency"),
-    definition: list[str] = typer.Option(None, "--definition", help="Repeatable: a definition the statement is written in (`proof definition list`); fixed once the node exists"),
+    definition: list[str] = typer.Option(None, "--definition", help="Repeatable: a definition the statement is written in (`proof definition list`); restated with `proof node restate` until a Review decision fixes it"),
     created_by: str = "human",
     source_locator: str = typer.Option("", "--source-locator", help="Required for imported_result nodes"),
     source_version: str = typer.Option("", "--source-version", help="Required for imported_result nodes"),
@@ -486,6 +488,31 @@ def node_create(
         _emit_error(exc, json_output, command="node.create")
         raise typer.Exit(code=1)
     _emit_node(node, json_output, command="node.create")
+
+
+@node_app.command("restate")
+def node_restate(
+    node_id: str,
+    statement: str = typer.Option(None, "--statement"),
+    assumption: list[str] = typer.Option(None, "--assumption", help="Repeatable: the assumptions as they now read (all of them)"),
+    definition: list[str] = typer.Option(None, "--definition", help="Repeatable: the definitions the statement is now written in (all of them)"),
+    reason: str = typer.Option("", "--reason", help="Why: what was wrong or unclear in the text as it stood"),
+    by: str = typer.Option("human", "--by", help="Who restates: the researcher (human) any unfixed text, an agent only what an agent wrote"),
+    root: str = ROOT_OPTION,
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Restate a node's statement, assumptions or definitions while no Review decision relies on them (ADR-0021).
+    Every verdict on the node and on what rests on it goes stale; fixed text is refused (TEXT_FIXED)."""
+    store = get_store(_root(root))
+    try:
+        node = restate_node(store, node_id, statement=statement, assumptions=assumption, definitions=definition, reason=reason, by=by)
+    except ProofMapError as exc:
+        _emit_error(exc, json_output, command="node.restate")
+        raise typer.Exit(code=1)
+    if json_output:
+        typer.echo(dump_envelope(success_envelope("node.restate", {**node.model_dump(mode="json"), "fixed_by": None})))
+        return
+    _emit_node(node, json_output, command="node.restate")
 
 
 @node_app.command("check")
@@ -566,6 +593,8 @@ def node_show(
         payload["blocked_reason"] = blocked_reason
         payload["provisional"] = provisional
         payload["conditional_on"] = conditional
+        # the Review decision that fixed its text, or None while it may still be restated (ADR-0021)
+        payload["fixed_by"] = fixed_by(store, node_id)
         payload["working_proof"] = working_proof
         payload["snapshots"] = snapshots
         # each Evidence check with its own bound hash, read against its snapshot as it is now (PR #147)
@@ -660,7 +689,7 @@ def _emit_fog(store, item, json_output: bool, *, command: str) -> None:
 
 
 def _definition_view(store, definition) -> dict:
-    return {**definition.model_dump(mode="json"), "used_by": nodes_naming(store, definition.id)}
+    return {**definition.model_dump(mode="json"), "used_by": nodes_naming(store, definition.id), "fixed_by": fixed_by_definition(store, definition.id)}
 
 
 def _emit_definition(store, definition, json_output: bool, *, command: str) -> None:
@@ -693,13 +722,14 @@ def definition_edit(
     text: str = typer.Option(None, "--text"),
     term: str = typer.Option(None, "--term"),
     root: str = ROOT_OPTION,
-    edited_by: str = typer.Option("human", "--by"),
+    edited_by: str = typer.Option("human", "--by", help="The researcher (human) may edit any unfixed definition, an agent only one an agent wrote"),
+    reason: str = typer.Option("", "--reason", help="Why; required once a node names it, since the edit restates that node"),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
-    """Change a definition no node names yet (DEFINITION_IN_USE otherwise: add a corrected one under a new id)."""
+    """Change a definition while no Review decision relies on it (ADR-0021; DEFINITION_FIXED otherwise: add a corrected one under a new id)."""
     store = get_store(_root(root))
     try:
-        definition = edit_definition(store, definition_id, term=term, text=text, edited_by=edited_by)
+        definition = edit_definition(store, definition_id, term=term, text=text, edited_by=edited_by, reason=reason)
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="definition.edit")
         raise typer.Exit(code=1)
