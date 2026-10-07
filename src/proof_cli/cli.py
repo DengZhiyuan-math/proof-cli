@@ -143,6 +143,7 @@ from .exchange import (
     summarize_import_report,
     summarize_inspect_report,
 )
+from .references import ReferenceSourceType
 from .proof_map import (
     ProofMapError,
     add_dependency,
@@ -1570,7 +1571,7 @@ def reference_import(
     year: int,
     root: str = ROOT_OPTION,
     author: list[str] = typer.Option(None, "--author"),
-    source_type: str = "other",
+    source_type: str = typer.Option("other", "--source-type", help=f"One of: {', '.join(member.value for member in ReferenceSourceType)}"),
     origin: str = "",
     bibliographic_source: str = "",
     identifier: str = "",
@@ -1595,6 +1596,9 @@ def reference_import(
                 notes=notes,
             )
         )
+    except ProofMapError as exc:
+        _emit_error(exc, json_output, command="reference.import")
+        raise typer.Exit(code=1)
     except ValueError as exc:
         _legacy_input_error("reference.import", exc, json_output)
     _emit_legacy_json("reference.import", json_output, lambda: output)

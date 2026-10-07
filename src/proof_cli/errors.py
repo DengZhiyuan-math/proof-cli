@@ -35,6 +35,7 @@ ERROR_CODES: dict[str, str] = {
     "NOT_IMPORTED_RESULT": "the operation applies only to an imported result",
     "REFERENCE_ID_NOT_IMPORTED_RESULT": "only an imported result links a reference (--reference-id)",
     "REFERENCE_NOT_FOUND": "no reference has this id: the linked citation doesn't exist here",
+    "INVALID_SOURCE_TYPE": "not a reference source type (`reference import --source-type`)",
     "NOT_A_CLAIM": "only a Claim can be promoted",
     # -- claims (a planning signal, ADR-0010) --------------------------------------------
     "CLAIM_CONFLICT": "someone else holds the claim; the error names them (pass --reassign to take it over)",
