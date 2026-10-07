@@ -390,6 +390,10 @@ def _work_log_body(entry: dict) -> str:
         return f"attempt: {entry.get('goal')}" + (f" ({entry['method']})" if entry.get("method") else "") + f" failed on {entry.get('failed_on')}"
     if kind == "coordinator":
         return f"coordinator: {entry.get('note')}"
+    if kind == "question":  # a Standing question (ADR-0021): the choice made, open until the researcher answers
+        return f"chose {entry.get('question')} ({entry.get('id')})"
+    if kind == "answer":
+        return f"answered {entry.get('question_id')}: " + ("the choice stands" if entry.get("keep") else f"redirect — {entry.get('redirect')}")
     if kind == "split":
         return "split into " + ", ".join(entry.get("nodes") or [])
     if kind == "review-requested":

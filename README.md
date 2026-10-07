@@ -41,6 +41,9 @@ proof node create C3 claim "For every n ≤ 10^4 …" --medium computation   # a
 #   agent_name = "claude-code"      # the name the run claims and records under (default: the provider's)
 #   budget_turns = 40               # per Start; budget_minutes = 60
 proof node progress N              # the node's work log: what the agent planned, did, handed over
+proof node answer N <question> --keep | --answer "<the reading to follow>"
+                                   # a Standing question: a choice a role made instead of stopping (`node progress --question`);
+                                   # an answer that differs is a redirect for the node's next run (ADR-0021)
 proof node check N                 # the mechanical checks of its working proof: builds cleanly, key-ideas.md's four headings, the statement
                                    # is the node's, \input's stay in the folder, each dependency is mentioned. Findings, not refusals: a run
                                    # sends the work back on an error before the Verifier reads; the researcher's request-review is never stopped

@@ -171,6 +171,7 @@ from .proof_map import (
     node_citation,
     open_challenge,
     record_evidence_check,
+    questions,
     record_progress,
     release_node,
     require_challenge,
@@ -183,6 +184,7 @@ from .proof_map import (
     trust_rule_view,
     trust_rules_of,
     work_log,
+    answer_question,
 )
 from .trust_rules import get_trust_rule, list_trust_rules, trust_rule_history
 from .authority import candidate_proof_sha256
@@ -595,6 +597,8 @@ def node_show(
         payload["conditional_on"] = conditional
         # the Review decision that fixed its text, or None while it may still be restated (ADR-0021)
         payload["fixed_by"] = fixed_by(store, node_id)
+        # the choices its runs made instead of stopping, and the researcher's answers (ADR-0021)
+        payload["questions"] = questions(store, node_id)
         payload["working_proof"] = working_proof
         payload["snapshots"] = snapshots
         # each Evidence check with its own bound hash, read against its snapshot as it is now (PR #147)
@@ -1132,16 +1136,18 @@ def node_progress(
     method: str = typer.Option("", "--method", help="With --attempt: the approach"),
     failed_on: str = typer.Option("", "--failed-on", help="With --attempt: the objection or obstruction it failed on"),
     coordinator: str = typer.Option("", "--coordinator", help="What a Coordinator did on this Theorem or Lemma's subtree: a run it started, a redirect, a stop (ADR-0019 point 18); no role"),
+    question: str = typer.Option("", "--question", help="A judgement call made instead of stopping: \"<the choice made; the alternative>\", a Standing question the researcher answers later (ADR-0021)"),
     role: str = typer.Option("", "--role", help=f"{_ROLES_HELP} (default: PROOF_AGENT_ROLE, set in the agent's runtime)"),
     by: str = typer.Option("", "--by", help="Who reports; empty means PROOF_AGENT_NAME from the agent's runtime, else human"),
     root: str = ROOT_OPTION,
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """A Proof agent's report on this node — the studio's work log (spec #145): its plan, a step, a handoff,
-    the Verifier's verdict or an abandoned attempt (ADR-0019). Without any of them: the node's work log so far."""
+    the Verifier's verdict, an abandoned attempt (ADR-0019) or a choice made (ADR-0021). Without any of them: the node's
+    work log so far."""
     store = get_store(_root(root))
     try:
-        if not plan and step is None and not handoff and not verdict and not attempt and not failed_on and not coordinator:
+        if not plan and step is None and not handoff and not verdict and not attempt and not failed_on and not coordinator and not question:
             log = work_log(store, node_id)
             if json_output:
                 typer.echo(dump_envelope(success_envelope("node.progress", log)))
@@ -1152,6 +1158,7 @@ def node_progress(
             store, node_id, role=role or os.environ.get("PROOF_AGENT_ROLE") or None, by=by or os.environ.get("PROOF_AGENT_NAME") or "human",
             plan=plan or None, step=step, status=status or None, note=note, handoff=handoff or None,
             verdict=verdict or None, attempt=attempt or None, method=method or None, failed_on=failed_on or None, coordinator=coordinator or None,
+            question=question or None,
         )
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.progress")
@@ -1160,6 +1167,31 @@ def node_progress(
         typer.echo(dump_envelope(success_envelope("node.progress", entry)))
     else:
         typer.echo(render_work_log_entry(node_id, entry))
+
+
+@node_app.command("answer")
+def node_answer(
+    node_id: str,
+    question_id: str,
+    keep: bool = typer.Option(False, "--keep", help="The choice the role made stands"),
+    answer: str = typer.Option("", "--answer", help="The reading to follow instead: recorded as a redirect for the node's next run"),
+    by: str = typer.Option("human", "--by", help="Who answers: the researcher"),
+    root: str = ROOT_OPTION,
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Answer a Standing question on the node: keep the choice the role made, or redirect it (ADR-0021)."""
+    store = get_store(_root(root))
+    try:
+        if os.environ.get("PROOF_AGENT_ROLE"):  # an agent's runtime: the answer is the researcher's
+            raise ProofMapError("ANSWER_IS_THE_RESEARCHERS", "a Standing question is answered by the researcher, not by a Proof agent")
+        entry = answer_question(store, node_id, question_id, keep=keep, answer=answer or None, by=by)
+    except ProofMapError as exc:
+        _emit_error(exc, json_output, command="node.answer")
+        raise typer.Exit(code=1)
+    if json_output:
+        typer.echo(dump_envelope(success_envelope("node.answer", entry)))
+    else:
+        typer.echo(f"{question_id} on {node_id}: " + ("the choice stands" if entry["keep"] else f"redirect — {entry['redirect']}"))
 
 
 @node_medium_app.command("set")
