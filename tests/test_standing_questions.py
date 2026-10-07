@@ -74,11 +74,37 @@ def test_an_answer_that_differs_is_a_redirect(tmp_path: Path):
     create_node(store, node_id="thm", kind="theorem", statement="T")
     asked = _ask(store)
 
-    answered = answer_question(store, "thm", asked["id"], answer="over a compact set: the cusp is handled in Lemma 3", by="researcher")
+    answered = answer_question(store, "thm", asked["id"], answer="over a compact set: the cusp is handled in Lemma 3", by="human")
 
     assert answered["redirect"] == "over a compact set: the cusp is handled in Lemma 3"
     [question] = questions(store, "thm")
-    assert question["answer"]["by"] == "researcher" and question["answer"]["keep"] is False
+    assert question["answer"]["by"] == "human" and question["answer"]["keep"] is False
+
+
+def test_only_the_researcher_answers_a_question(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="thm", kind="theorem", statement="T")
+    asked = _ask(store)
+
+    with pytest.raises(ProofMapError) as exc_info:
+        answer_question(store, "thm", asked["id"], keep=True, by="prover-1")
+    assert exc_info.value.code == "ANSWER_IS_THE_RESEARCHERS"
+    assert questions(store, "thm")[0]["state"] == "open"
+
+
+@pytest.mark.parametrize("same", [
+    "read H as the sup over the cusp",
+    "  Read H as the sup over the cusp  ",
+    "read H as the sup over the cusp; the alternative: over a compact set",
+])
+def test_an_answer_that_repeats_the_choice_is_no_redirect(tmp_path: Path, same):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="thm", kind="theorem", statement="T")
+    asked = _ask(store)
+
+    answered = answer_question(store, "thm", asked["id"], answer=same)
+
+    assert (answered["keep"], answered["redirect"]) == (True, None)
 
 
 def test_a_question_is_answered_once_and_must_exist(tmp_path: Path):

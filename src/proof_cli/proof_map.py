@@ -553,11 +553,14 @@ def answer_question(
 ) -> dict:
     """The researcher's answer to a Standing question (ADR-0021 point 8): `keep` the choice the role made, or give the
     other reading as `answer`. An answer that differs from the choice is a redirect: recorded as the answer's
-    `redirect`, the line the node's next run is briefed with. Each question is answered once. Never a Review
+    `redirect`, the line the node's next run is briefed with; one that repeats the choice keeps it. Only the researcher
+    answers (`by` is RESEARCHER; ANSWER_IS_THE_RESEARCHERS otherwise). Each question is answered once. Never a Review
     decision: it fixes nothing and decides no trust."""
     text = (answer or "").strip()
     if keep == bool(text):
         raise ProofMapError("ANSWER_REQUIRED", "keep the choice (--keep) or give the other reading (--answer \"<the reading to follow>\"), not both")
+    if by != RESEARCHER:
+        raise ProofMapError("ANSWER_IS_THE_RESEARCHERS", f"a Standing question is answered by the researcher, not by {by}", details={"by": by})
     with store.transaction() as conn:
         asked = next((entry for entry in questions(store, node_id) if entry.get("id") == question_id), None)
         if asked is None:
@@ -568,6 +571,8 @@ def answer_question(
                 f"{question_id} on {node_id} was already answered by {asked['answer']['by']}; a further redirect goes to the node's run",
                 details={"answer": asked["answer"]},
             )
+        if text and _same_reading(text, asked.get("question") or ""):
+            keep, text = True, ""  # the choice, said again: it stands
         payload = {
             "kind": "answer", "role": None, "by": by, "question_id": question_id,
             "keep": keep, "answer": text or None, "redirect": text or None,
@@ -575,6 +580,15 @@ def answer_question(
         message = f"{by} answered {question_id} on {node_id}: " + ("the choice stands" if keep else f"redirect — {text}")
         append_event(store, PROGRESS_EVENT, message, entity_id=node_id, payload=payload, conn=conn)
     return {**payload, "node_id": node_id, "at": utc_now().isoformat()}
+
+
+def _same_reading(answer: str, question: str) -> bool:
+    """Whether an answer only repeats the recorded choice: the question as a whole, or its choice before the
+    alternative ("<the choice made>; <the alternative>"), up to spacing and case."""
+    def plain(value: str) -> str:
+        return " ".join(value.split()).casefold()
+
+    return plain(answer) in (plain(question), plain(question.split(";", 1)[0]))
 
 
 def attempts(store: ProjectStore, node_id: str) -> list[dict]:
