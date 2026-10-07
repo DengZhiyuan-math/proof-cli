@@ -243,3 +243,14 @@ def test_a_challenge_on_an_accepted_node_in_the_support_ends_provisional_standin
 
     assert not is_provisional(store, "x")
     assert not is_provisional(store, "c")  # two steps above the Challenge
+
+
+def test_a_later_failed_verifier_check_on_the_same_snapshot_ends_provisional_standing(tmp_path: Path):
+    store = _parent_on_claim(tmp_path)
+    check = _passed_by_verifier(store, "clm")
+    assert is_provisional(store, "clm")
+
+    record_evidence_check(store, check.candidate_proof_id, "failed", run_by="prover-1/verifier", notes="1. step 3 cites nothing")
+
+    assert not is_provisional(store, "clm")
+    assert "lem" not in _frontier(store)
