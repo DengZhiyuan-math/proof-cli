@@ -101,7 +101,12 @@ ERROR_CODES: dict[str, str] = {
     # -- Definitions (ADR-0020) -----------------------------------------------------------------
     "DEFINITION_NOT_FOUND": "no definition has this id; add it with `proof definition add` first",
     "DEFINITION_ALREADY_EXISTS": "a definition with this id exists; choose another id",
-    "DEFINITION_IN_USE": "a node names this definition: it is as fixed as that node's statement; add a corrected one under a new id",
+    "DEFINITION_IN_USE": "a node names this definition, so it can't be removed; edit it while it is unfixed, or add a corrected one under a new id",
+    "DEFINITION_FIXED": "a Review decision relied on this definition (details.fixed_by names it): add a corrected one under a new id",
+    "TEXT_FIXED": "a Review decision relied on this node's statement (details.fixed_by names it): state the correction as a new node",
+    "RESEARCHER_TEXT": "the researcher wrote this text: an agent restates only text an agent created",
+    "RESTATE_REASON_REQUIRED": "a restatement says why: --reason",
+    "RESTATE_EMPTY": "nothing to restate: the statement, assumptions and definitions given are the node's own",
     "DEFINITION_CONFLICT": "an import brings a definition whose id is here with another text; nothing was imported",
     "DEFINITION_EMPTY": "a definition needs its term and its text",
     "INVALID_DEFINITION_ID": "a definition id is letters, digits, '.', '_' or '-', at most 64 characters, starting with a letter or digit",
@@ -194,7 +199,7 @@ ERROR_CODES: dict[str, str] = {
     "OBJECTIONS_REQUIRED": "a failed verdict names its objections in --note",
     "ATTEMPT_INCOMPLETE": "an attempt is recorded by what it tried to establish and what it failed on: --attempt needs --failed-on",
     "GATE_MALFORMED": "`request-review --gated-by` is one SHA-256 of 64 hex digits, given once; a repeated, empty or malformed value is refused rather than read as no gate",
-    "VERDICT_STALE": "a run's Prover requested review naming a passing verdict's digest (--gated-by), but the node's files are no longer the ones the Verifier passed; nothing was frozen",
+    "VERDICT_STALE": "a run's Prover requested review naming a passing verdict's digest (--gated-by), but the node's files are no longer the ones the Verifier passed, or the text it read them against was restated since; nothing was frozen",
     # -- the Proof agent's run, through the studio and the map (ADR-0016, spec #145) --
     "RUN_ACTIVE": "an agent is already working on this node: pause, redirect or release it first",
     "RUN_SETTLING": "the previous run is still giving the node back; Start again in a moment",

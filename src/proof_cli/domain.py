@@ -429,9 +429,9 @@ class ExperimentOutcome(str, Enum):
 
 class Definition(BaseModel):
     """A project's named piece of mathematical text — a definition, the setting of a model, notation — that node
-    statements are written in (ADR-0020). Text is Markdown with `$…$` maths, as a statement is. Editable and removable
-    only while no node names it; once one does, it is as fixed as that node's statement, and a corrected definition is
-    a new one."""
+    statements are written in (ADR-0020). Text is Markdown with `$…$` maths, as a statement is. Editable while Unfixed —
+    until a Review decision relies on it (ADR-0021) — and removable only while no node names it; once fixed, a
+    corrected definition is a new one."""
 
     id: str
     term: str

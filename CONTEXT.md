@@ -37,7 +37,7 @@ The single entity type for every vertex in a proof map — theorem, lemma, claim
 _Avoid_: node (ambiguous with generic graph/UI nodes), ticket (carries software-wayfinder connotations), work unit
 
 **Definition**:
-A project's named piece of mathematical text — a definition, the setting of a model, notation — that node statements are written in. A Proof map node names its definitions when it is created, and the names never change; a Claim split from a node is written in that node's definitions too. The researcher or the Reader writes them. A definition is Unfixed until a Review decision relies on it, then fixed like a statement: a corrected one is a new definition, named by new nodes. What a node says is its statement, assumptions and definitions together. See ADR-0020, ADR-0021.
+A project's named piece of mathematical text — a definition, the setting of a model, notation — that node statements are written in. A Proof map node names its definitions when it is created, and they change only by a restatement while Unfixed; a Claim split from a node is written in that node's definitions too. The researcher or the Reader writes them. A definition is Unfixed until a Review decision relies on it, then fixed like a statement: a corrected one is a new definition, named by new nodes. What a node says is its statement, assumptions and definitions together. See ADR-0020, ADR-0021.
 _Avoid_: notation file, glossary, context (as a noun for this), setting (say the definition's term)
 
 **Theorem** (a proof map node kind):

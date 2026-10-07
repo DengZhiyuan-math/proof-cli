@@ -46,7 +46,7 @@ def test_a_node_names_its_definitions_and_its_document_opens_with_them(tmp_path:
     assert get_node(store, "X") is None and not (tmp_path / "proofs" / "X").exists()  # refused: no node, no folder
 
 
-def test_a_definition_is_editable_until_a_node_names_it_and_then_fixed(tmp_path: Path):
+def test_a_definition_is_editable_until_a_decision_relies_on_it_and_removable_until_a_node_names_it(tmp_path: Path):
     store = ensure_project(tmp_path)
     D.add_definition(store, "unit", term="Simple graph", text=UNIT)
     assert D.edit_definition(store, "unit", text="A graph has $n$ vertices.").text == "A graph has $n$ vertices."
@@ -54,10 +54,13 @@ def test_a_definition_is_editable_until_a_node_names_it_and_then_fixed(tmp_path:
     assert _code(lambda: D.add_definition(store, "bad id", term="t", text="x")) == "INVALID_DEFINITION_ID"
     assert _code(lambda: D.add_definition(store, "empty", term=" ", text="x")) == "DEFINITION_EMPTY"
     create_node(store, node_id="L", kind="lemma", statement="s", definitions=["unit"])
+    # named, but no decision relies on it yet (ADR-0021): an edit restates L, with a reason
+    assert _code(lambda: D.edit_definition(store, "unit", text="something else")) == "RESTATE_REASON_REQUIRED"
+    assert D.edit_definition(store, "unit", text="A graph has $n\\ge 1$ vertices.", reason="n is positive").text == "A graph has $n\\ge 1$ vertices."
+    D.edit_definition(store, "unit", text="A graph has $n$ vertices.", reason="back")
     with pytest.raises(ProofMapError) as caught:
-        D.edit_definition(store, "unit", text="something else")
+        D.remove_definition(store, "unit")
     assert caught.value.code == "DEFINITION_IN_USE" and caught.value.details == {"nodes": ["L"]}
-    assert _code(lambda: D.remove_definition(store, "unit")) == "DEFINITION_IN_USE"
     assert D.edit_definition(store, "unit", text="A graph has $n$ vertices.").text == "A graph has $n$ vertices."  # the same text: no change, no refusal
     D.add_definition(store, "spare", term="Spare", text="unused")
     D.remove_definition(store, "spare")
@@ -101,7 +104,8 @@ def test_the_cli_adds_lists_shows_and_names_definitions(tmp_path: Path):
     assert shown["definitions"] == ["unit"] and shown["definition_details"] == [{"id": "unit", "term": "Simple graph", "text": UNIT}]
     assert run("definition", "list")["data"][0]["used_by"] == ["T"]
     assert run("definition", "show", "unit")["data"]["used_by"] == ["T"]
-    assert run("definition", "edit", "unit", "--text", "x", ok=False)["error"]["code"] == "DEFINITION_IN_USE"
+    assert run("definition", "edit", "unit", "--text", "x", ok=False)["error"]["code"] == "RESTATE_REASON_REQUIRED"
+    assert run("definition", "remove", "unit", ok=False)["error"]["code"] == "DEFINITION_IN_USE"
     run("definition", "add", "pair", "Two vertices.", "--term", "Adjacent pair")
     child = run("node", "split", "T", "--child", "C=one", "--definition", "pair")["data"][0]
     assert child["definitions"] == ["unit", "pair"]
