@@ -852,6 +852,7 @@ def cmd_reference_import(
     identifier: str = "",
     url: str = "",
     notes: str = "",
+    created_by: str = "human",
 ) -> str:
     store = get_store(root)
     source_type_enum = source_type if isinstance(source_type, ReferenceSourceType) else ReferenceSourceType(source_type)
@@ -866,6 +867,7 @@ def cmd_reference_import(
         identifier=identifier,
         url=url,
         notes=notes,
+        created_by=created_by,
     )
     stored = import_reference(store, reference)
     _append_history(store, f"reference_import:{reference_id}", message=f"imported reference {reference_id}")

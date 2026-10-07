@@ -269,6 +269,17 @@ def _root(path: str | None) -> Path:
     return Path(path or ".")
 
 
+def _author(flag: str | None) -> str:
+    """Who writes or edits (ADR-0021 points 5–6): the explicit flag, else the agent whose runtime this is
+    (PROOF_AGENT_NAME), else the researcher. Agent-written text is restatable by agents; the researcher's is not, so
+    an agent's write must never fall back to "human"."""
+    return (flag or "").strip() or os.environ.get("PROOF_AGENT_NAME") or "human"
+
+
+CREATED_BY_HELP = "Who writes it (default: PROOF_AGENT_NAME from an agent's runtime, else human)"
+EDITED_BY_HELP = "Who edits (default: PROOF_AGENT_NAME from an agent's runtime, else human)"
+
+
 @app.command(rich_help_panel=PROOF_MAP_PANEL)
 def init(root: str = ROOT_OPTION) -> None:
     """Start a proof project in ROOT (and list it on the Home, `proof home`)."""
@@ -450,7 +461,7 @@ def node_create(
     assumption: list[str] = typer.Option(None, "--assumption"),
     dependency: list[str] = typer.Option(None, "--dependency"),
     definition: list[str] = typer.Option(None, "--definition", help="Repeatable: a definition the statement is written in (`proof definition list`); restated with `proof node restate` until a Review decision fixes it"),
-    created_by: str = "human",
+    created_by: str = typer.Option("", "--created-by", help=CREATED_BY_HELP),
     source_locator: str = typer.Option("", "--source-locator", help="Required for imported_result nodes"),
     source_version: str = typer.Option("", "--source-version", help="Required for imported_result nodes"),
     trust_level: str = typer.Option("", "--trust-level"),
@@ -483,7 +494,7 @@ def node_create(
             trust_level=trust_level or None,
             reference_id=reference_id or None,
             medium=medium or None,
-            created_by=created_by,
+            created_by=_author(created_by),
         )
         node = create_node_under_parent(store, parent, reassign=reassign, **fields) if parent else create_node(store, **fields)
     except ProofMapError as exc:
@@ -499,7 +510,7 @@ def node_restate(
     assumption: list[str] = typer.Option(None, "--assumption", help="Repeatable: the assumptions as they now read (all of them)"),
     definition: list[str] = typer.Option(None, "--definition", help="Repeatable: the definitions the statement is now written in (all of them)"),
     reason: str = typer.Option("", "--reason", help="Why: what was wrong or unclear in the text as it stood"),
-    by: str = typer.Option("human", "--by", help="Who restates: the researcher (human) any unfixed text, an agent only what an agent wrote"),
+    by: str = typer.Option("", "--by", help="Who restates: the researcher (human) any unfixed text, an agent only what an agent wrote (default: PROOF_AGENT_NAME, else human)"),
     root: str = ROOT_OPTION,
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
@@ -507,7 +518,7 @@ def node_restate(
     Every verdict on the node and on what rests on it goes stale; fixed text is refused (TEXT_FIXED)."""
     store = get_store(_root(root))
     try:
-        node = restate_node(store, node_id, statement=statement, assumptions=assumption, definitions=definition, reason=reason, by=by)
+        node = restate_node(store, node_id, statement=statement, assumptions=assumption, definitions=definition, reason=reason, by=_author(by))
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.restate")
         raise typer.Exit(code=1)
@@ -707,13 +718,13 @@ def definition_add(
     text: str,
     term: str = typer.Option(..., "--term", help="The name the page and the node show it under, e.g. \"Stochastic release unit\""),
     root: str = ROOT_OPTION,
-    created_by: str = typer.Option("human", "--created-by"),
+    created_by: str = typer.Option("", "--created-by", help=CREATED_BY_HELP),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Add a definition: TEXT is Markdown with $…$ maths, as a statement is. Name it from a node with `--definition`."""
     store = get_store(_root(root))
     try:
-        definition = add_definition(store, definition_id, term=term, text=text, created_by=created_by)
+        definition = add_definition(store, definition_id, term=term, text=text, created_by=_author(created_by))
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="definition.add")
         raise typer.Exit(code=1)
@@ -726,14 +737,14 @@ def definition_edit(
     text: str = typer.Option(None, "--text"),
     term: str = typer.Option(None, "--term"),
     root: str = ROOT_OPTION,
-    edited_by: str = typer.Option("human", "--by", help="The researcher (human) may edit any unfixed definition, an agent only one an agent wrote"),
+    edited_by: str = typer.Option("", "--by", help="The researcher (human) may edit any unfixed definition, an agent only one an agent wrote (default: PROOF_AGENT_NAME, else human)"),
     reason: str = typer.Option("", "--reason", help="Why; required once a node names it, since the edit restates that node"),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Change a definition while no Review decision relies on it (ADR-0021; DEFINITION_FIXED otherwise: add a corrected one under a new id)."""
     store = get_store(_root(root))
     try:
-        definition = edit_definition(store, definition_id, term=term, text=text, edited_by=edited_by, reason=reason)
+        definition = edit_definition(store, definition_id, term=term, text=text, edited_by=_author(edited_by), reason=reason)
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="definition.edit")
         raise typer.Exit(code=1)
@@ -744,13 +755,13 @@ def definition_edit(
 def definition_remove(
     definition_id: str,
     root: str = ROOT_OPTION,
-    removed_by: str = typer.Option("human", "--by"),
+    removed_by: str = typer.Option("", "--by", help=EDITED_BY_HELP),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Remove a definition no node names."""
     store = get_store(_root(root))
     try:
-        removed = remove_definition(store, definition_id, removed_by=removed_by)
+        removed = remove_definition(store, definition_id, removed_by=_author(removed_by))
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="definition.remove")
         raise typer.Exit(code=1)
@@ -788,13 +799,13 @@ def fog_add(
     root: str = ROOT_OPTION,
     near: list[str] = typer.Option([], "--near", help="A node this is about (repeatable); never a dependency"),
     notes: str = typer.Option("", "--notes"),
-    created_by: str = typer.Option("human", "--created-by"),
+    created_by: str = typer.Option("", "--created-by", help=CREATED_BY_HELP),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Add a fog item: a difficulty you can't state precisely yet."""
     store = get_store(_root(root))
     try:
-        item = add_fog(store, text, near=near, notes=notes, created_by=created_by)
+        item = add_fog(store, text, near=near, notes=notes, created_by=_author(created_by))
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="fog.add")
         raise typer.Exit(code=1)
@@ -834,7 +845,7 @@ def fog_edit(
     near: list[str] = typer.Option(None, "--near", help="Replace the near nodes (repeatable)"),
     clear_near: bool = typer.Option(False, "--clear-near", help="Near no node"),
     notes: str | None = typer.Option(None, "--notes"),
-    edited_by: str = typer.Option("human", "--by"),
+    edited_by: str = typer.Option("", "--by", help=EDITED_BY_HELP),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Change an open item's text, notes or near nodes; what isn't given stays."""
@@ -842,7 +853,7 @@ def fog_edit(
     try:
         if clear_near and near:
             raise ProofMapError("FOG_FLAG_CONFLICT", "fog edit takes either --near or --clear-near, not both")
-        item = edit_fog(store, fog_id, text=text, near=[] if clear_near else (near or None), notes=notes, edited_by=edited_by)
+        item = edit_fog(store, fog_id, text=text, near=[] if clear_near else (near or None), notes=notes, edited_by=_author(edited_by))
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="fog.edit")
         raise typer.Exit(code=1)
@@ -854,13 +865,13 @@ def fog_drop(
     fog_id: str,
     root: str = ROOT_OPTION,
     reason: str = typer.Option(..., "--reason", help="Why this direction is given up"),
-    dropped_by: str = typer.Option("human", "--by"),
+    dropped_by: str = typer.Option("", "--by", help=EDITED_BY_HELP),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Give an item up, saying why. Reversible with `fog reopen`."""
     store = get_store(_root(root))
     try:
-        item = drop_fog(store, fog_id, reason=reason, dropped_by=dropped_by)
+        item = drop_fog(store, fog_id, reason=reason, dropped_by=_author(dropped_by))
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="fog.drop")
         raise typer.Exit(code=1)
@@ -868,11 +879,11 @@ def fog_drop(
 
 
 @fog_app.command("reopen")
-def fog_reopen(fog_id: str, root: str = ROOT_OPTION, by: str = typer.Option("human", "--by"), json_output: bool = typer.Option(False, "--json")) -> None:
+def fog_reopen(fog_id: str, root: str = ROOT_OPTION, by: str = typer.Option("", "--by", help=EDITED_BY_HELP), json_output: bool = typer.Option(False, "--json")) -> None:
     """Take a dropped item back."""
     store = get_store(_root(root))
     try:
-        item = reopen_fog(store, fog_id, by=by)
+        item = reopen_fog(store, fog_id, by=_author(by))
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="fog.reopen")
         raise typer.Exit(code=1)
@@ -890,7 +901,7 @@ def fog_crystallize(
     reassign: bool = typer.Option(False, "--reassign", help="Take the parent's claim over from whoever holds it"),
     assumption: list[str] = typer.Option([], "--assumption"),
     display_label: str = typer.Option("", "--display-label"),
-    created_by: str = typer.Option("human", "--created-by"),
+    created_by: str = typer.Option("", "--created-by", help=CREATED_BY_HELP),
     medium: str = typer.Option("", "--medium", help="The new Claim's medium: latex (default) or computation"),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
@@ -899,7 +910,7 @@ def fog_crystallize(
     try:
         made = crystallize_fog(
             store, fog_id, node_id, statement, parent=parent, no_parent=no_parent, reassign=reassign,
-            assumptions=assumption, display_label=display_label, created_by=created_by,
+            assumptions=assumption, display_label=display_label, created_by=_author(created_by),
             medium=medium or None,
         )
     except ProofMapError as exc:
@@ -1087,7 +1098,7 @@ def node_split(
     display_label: str = typer.Option("", "--display-label", help="The one --child's display label"),
     definition: list[str] = typer.Option(None, "--definition", help="Repeatable: a definition the one --child is written in, beside the parent's, which every child names"),
     root: str = ROOT_OPTION,
-    created_by: str = "human",
+    created_by: str = typer.Option("", "--created-by", help=CREATED_BY_HELP),
     reassign: bool = typer.Option(False, "--reassign", help="Take the claim over from whoever holds it (recorded as `claim --reassign` records it); the node need not be on the frontier"),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
@@ -1107,7 +1118,7 @@ def node_split(
             child_id, statement = entry.split("=", 1)
             specs.append({"id": child_id, "statement": statement, "assumptions": list(assumption or []), "display_label": display_label,
                           "definitions": list(definition or [])})
-        children = split_node(store, parent_id, specs, created_by=created_by, reassign=reassign)
+        children = split_node(store, parent_id, specs, created_by=_author(created_by), reassign=reassign)
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.split")
         raise typer.Exit(code=1)
@@ -1198,14 +1209,14 @@ def node_answer(
 def node_medium_set(
     node_id: str,
     medium: str = typer.Argument(..., help="latex or computation"),
-    by: str = typer.Option("human", "--by", help="Who is switching (an agent or person name)"),
+    by: str = typer.Option("", "--by", help="Who is switching (default: PROOF_AGENT_NAME from an agent's runtime, else human)"),
     root: str = ROOT_OPTION,
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Switch a node's medium. Allowed at any time: files stay, the missing entry (run.sh or proof.tex) is scaffolded, an Acceptance stands."""
     store = get_store(_root(root))
     try:
-        node = set_medium(store, node_id, medium, edited_by=by)
+        node = set_medium(store, node_id, medium, edited_by=_author(by))
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.medium.set")
         raise typer.Exit(code=1)
@@ -1219,7 +1230,7 @@ def node_depend(
     remove: str = typer.Option("", "--remove", help="Stop the node resting on this dependency"),
     move: str = typer.Option("", "--move", help="Move this dependency down onto the node given by --to"),
     to: str = typer.Option("", "--to", help="With --move: one of the node's own dependencies, e.g. a split child"),
-    by: str = typer.Option("human", "--by", help="Who is editing (an agent or person name)"),
+    by: str = typer.Option("", "--by", help="Who is editing (default: PROOF_AGENT_NAME from an agent's runtime, else human)"),
     reassign: bool = typer.Option(False, "--reassign", help="Take the claim over from whoever holds it (recorded as `claim --reassign` records it)"),
     root: str = ROOT_OPTION,
     json_output: bool = typer.Option(False, "--json"),
@@ -1234,6 +1245,7 @@ def node_depend(
     if bool(to) != bool(move):
         raise click.UsageError("--move and --to go together: --move <dependency> --to <child>")
     store = get_store(_root(root))
+    by = _author(by)
     try:
         if add:
             edit = add_dependency(store, node_id, add, edited_by=by, reassign=reassign)
@@ -1752,6 +1764,7 @@ def reference_import(
     identifier: str = "",
     url: str = "",
     notes: str = "",
+    created_by: str = typer.Option("", "--created-by", help=CREATED_BY_HELP),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Import a reference as a citation. Its legacy trust fields are not a trust source (ADR-0012)."""
@@ -1769,6 +1782,7 @@ def reference_import(
                 identifier=identifier,
                 url=url,
                 notes=notes,
+                created_by=_author(created_by),
             )
         )
     except ValueError as exc:
