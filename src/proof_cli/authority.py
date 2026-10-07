@@ -37,6 +37,7 @@ from .reviews import (
     commit_decision,
     git_identity,
     in_git_repo,
+    inside_another_repo,
     load_entries,
     new_review_id,
     next_seq,
@@ -239,11 +240,17 @@ def list_authority_warnings(store: ProjectStore) -> list[AuthorityWarning]:
         for problem in problems
     ]
     if in_git_repo(store.root):
+        advice = "commit and push it so the decisions have their record"
+    elif inside_another_repo(store.root):  # never committed into that repository's history (#185)
+        advice = "the project is inside another git repository; make the project its own repository so the decisions have their record"
+    else:
+        advice = None
+    if advice:
         for path in uncommitted_review_files(store.root):
             warnings.append(
                 AuthorityWarning(
                     code="REVIEWS_NOT_COMMITTED",
-                    message=f"{path} has decisions git doesn't have yet; commit and push it so the decisions have their record",
+                    message=f"{path} has decisions git doesn't have yet; {advice}",
                     details={"path": path},
                 )
             )
