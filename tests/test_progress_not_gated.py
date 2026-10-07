@@ -195,6 +195,8 @@ def test_restating_a_provisional_node_s_text_ends_its_provisional_standing(tmp_p
     # the Verifier passed a proof of other text: nothing rests on it until it is read again
     assert not is_provisional(store, "clm")
     assert "lem" not in _frontier(store)
+
+
 def test_a_blocked_node_s_waiting_snapshot_is_readable(tmp_path: Path):
     from proof_cli.proof_map import awaiting_decision
 
@@ -203,3 +205,41 @@ def test_a_blocked_node_s_waiting_snapshot_is_readable(tmp_path: Path):
     proof = submit_proof(store, "lem", claimant_id="agent", scoping_rationale="scoped", content="proof")
     assert get_workflow_state(store, "lem") == "blocked"
     assert awaiting_decision(store, "lem").id == proof.id
+
+
+def test_a_node_resting_on_nothing_settled_or_provisional_is_not_provisional(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="x", kind="claim", statement="X")
+    create_node(store, node_id="c", kind="claim", statement="C", dependencies=["x"])
+    create_node(store, node_id="t", kind="lemma", statement="T", dependencies=["c"])
+
+    _passed_by_verifier(store, "c")  # x has no proof at all: c's proof rests on nothing yet
+
+    assert not is_provisional(store, "c")
+    assert "t" not in _frontier(store)
+    assert conditional_on(store, "t") == frozenset()
+
+    _passed_by_verifier(store, "x")  # once x is Provisional, so is c
+
+    assert is_provisional(store, "c")
+    assert "t" in _frontier(store)
+    assert conditional_on(store, "t") == frozenset({"x", "c"})
+
+
+def test_a_challenge_on_an_accepted_node_in_the_support_ends_provisional_standing(tmp_path: Path):
+    from proof_cli.proof_map import open_challenge
+
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="a", kind="claim", statement="A")
+    create_node(store, node_id="x", kind="claim", statement="X", dependencies=["a"])
+    create_node(store, node_id="c", kind="claim", statement="C", dependencies=["x"])
+    submit_proof(store, "a", claimant_id="agent", scoping_rationale="scoped", content="proof of a")
+    researcher(store).decide_acceptance("a", "accept")
+    _passed_by_verifier(store, "x")
+    _passed_by_verifier(store, "c")
+    assert is_provisional(store, "x") and is_provisional(store, "c")
+
+    open_challenge(store, "a", rationale="step 2 is wrong")
+
+    assert not is_provisional(store, "x")
+    assert not is_provisional(store, "c")  # two steps above the Challenge
