@@ -153,8 +153,10 @@ from .proof_map import (
     move_dependency,
     remove_dependency,
     get_acceptance_state,
+    conditional_on,
     get_blocked_reason,
     get_frontier,
+    is_provisional,
     get_integrity_state,
     get_reference_review_state,
     get_workflow_state,
@@ -323,12 +325,15 @@ def _acceptance_axis(store, node) -> str:
 
 
 def _with_state_axes(store, node) -> dict:
-    """A node under --json, with its three state axes (ADR-0002) and, for an imported result, the Trust rules it meets."""
+    """A node under --json, with its three state axes (ADR-0002), whether it is Provisional and the Provisional nodes
+    it is Conditional on (ADR-0021), and, for an imported result, the Trust rules it meets."""
     return {
         **node.model_dump(mode="json"),
         "workflow_state": get_workflow_state(store, node.id),
         "acceptance_state": _acceptance_axis(store, node),
         "integrity_state": get_integrity_state(store, node.id),
+        "provisional": is_provisional(store, node.id),
+        "conditional_on": sorted(conditional_on(store, node.id)),
         "trust_rule": trust_rules_of(store, node.id),
     }
 
@@ -336,7 +341,7 @@ def _with_state_axes(store, node) -> dict:
 @app.command(rich_help_panel=PROOF_MAP_PANEL)
 @read_scoped
 def frontier(root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
-    """The open, unblocked, unclaimed nodes: what an agent could claim right now."""
+    """The nodes ready to be worked: every dependency Accepted or Provisional, nobody holding them, none awaiting review."""
     store = get_store(_root(root))
     nodes = get_frontier(store)
     if json_output:
@@ -529,6 +534,9 @@ def node_show(
         origin = crystallized_from(store, node_id)
         near = [item.id for item in fog_near(store, node_id)]
         blocked_reason = get_blocked_reason(store, node_id) if workflow_state == "blocked" else None
+        # what it may be rested on for, and what its own proof rests on unaccepted (ADR-0021)
+        provisional = is_provisional(store, node_id)
+        conditional = sorted(conditional_on(store, node_id))
         # the text of the definitions the statement is written in (ADR-0020)
         definition_details = [{"id": d.id, "term": d.term, "text": d.text} for d in definitions_of(store, node)]
     except ProofMapError as exc:
@@ -556,6 +564,8 @@ def node_show(
         payload["crystallized_from"] = origin.id if origin else None
         payload["fog_near"] = near
         payload["blocked_reason"] = blocked_reason
+        payload["provisional"] = provisional
+        payload["conditional_on"] = conditional
         payload["working_proof"] = working_proof
         payload["snapshots"] = snapshots
         # each Evidence check with its own bound hash, read against its snapshot as it is now (PR #147)
@@ -576,6 +586,8 @@ def node_show(
                 acceptance_state=acceptance_state,
                 integrity_state=integrity_state,
                 blocked_reason=blocked_reason,
+                provisional=provisional,
+                conditional_on=conditional,
                 working_proof=working_proof,
                 snapshots=snapshots,
                 citation=citation,
@@ -917,7 +929,7 @@ def node_claim(
     root: str = ROOT_OPTION,
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
-    """Assign a frontier node to yourself before working on it: a planning signal, not a lock (ADR-0010)."""
+    """Assign a node to yourself before working on it, usually one on the frontier: a planning signal, not a lock (ADR-0010)."""
     store = get_store(_root(root))
     try:
         claim = claim_node(store, node_id, claimant_id=assignee, reassign=reassign)

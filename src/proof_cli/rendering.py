@@ -65,6 +65,8 @@ def render_proof_map_node(
     acceptance_state: str | None = None,
     integrity_state: str | None = None,
     blocked_reason: str | None = None,
+    provisional: bool = False,
+    conditional_on: list[str] | None = None,
     working_proof: str | None = None,
     snapshots: list[dict] | None = None,
     citation: dict | None = None,
@@ -119,6 +121,11 @@ def render_proof_map_node(
         table.add_row("Workflow state", workflow_state)
     if blocked_reason is not None:
         table.add_row("Blocked reason", blocked_reason)
+    if provisional:
+        # rested on for work, never for trust (ADR-0021)
+        table.add_row("Provisional", "yes: its statement may be used until the researcher decides it")
+    if conditional_on:
+        table.add_row("Conditional on", ", ".join(conditional_on))
     if acceptance_state is not None:
         table.add_row("Acceptance state", acceptance_state)
     if trust_rule:
