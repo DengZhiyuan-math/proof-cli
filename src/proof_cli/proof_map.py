@@ -415,6 +415,7 @@ def record_progress(
     method: str | None = None,
     failed_on: str | None = None,
     coordinator: str | None = None,
+    question: str | None = None,
 ) -> dict:
     """Report a plan (the steps the run means to take), one step's status, a handoff to another role, the
     Verifier's verdict on the working proof, an attempt the role abandoned (ADR-0019), or — on a Theorem or Lemma
@@ -425,7 +426,11 @@ def record_progress(
     A verdict is `passed` or `failed` with the objections as its note, and carries the inputs digest of the node
     folder as it stands — what a Review snapshot's manifest would hash — so a later edit makes it stale by
     construction; only the Verifier records one. An attempt is what the role tried to establish, how, and what it
-    failed on; any role records one. Both are insert-only events like the rest of the work log."""
+    failed on; any role records one. Both are insert-only events like the rest of the work log.
+
+    A question is a Standing question (ADR-0021 point 8): a judgement call the role made itself instead of stopping,
+    worded as the choice made and the alternative. It gets an id and stays open until the researcher answers it
+    (`answer_question`)."""
     node = require_node(store, node_id)
     if coordinator is not None:
         if not coordinator.strip():
@@ -439,7 +444,12 @@ def record_progress(
     if role not in AGENT_ROLES:
         raise ProofMapError("INVALID_ROLE", f"'{role}' is not a Proof agent role; expected one of: {', '.join(AGENT_ROLES)}")
     steps = [str(item).strip() for item in (plan or []) if str(item).strip()]
-    if verdict is not None:
+    if question is not None:
+        if not question.strip():
+            raise ProofMapError("PROGRESS_EMPTY", "say what was chosen and the alternative: --question \"<the choice made; the alternative>\"")
+        payload = {"kind": "question", "id": f"q_{uuid.uuid4().hex[:10]}", "role": role, "by": by, "question": question.strip()}
+        message = f"{role} on {node_id}: chose {question.strip()}"
+    elif verdict is not None:
         if role != "verifier":
             raise ProofMapError("VERDICT_ROLE_REQUIRED", f"only the verifier records a verdict; {role} reports steps, attempts and handoffs")
         if verdict not in VERDICT_OUTCOMES:
@@ -475,7 +485,7 @@ def record_progress(
         payload = {"kind": "step", "role": role, "by": by, "step": int(step), "status": status, "note": note.strip()}
         message = f"{role} on {node_id}: step {step} {status}" + (f" — {note.strip()}" if note.strip() else "")
     else:
-        raise ProofMapError("PROGRESS_EMPTY", "report a plan (--plan, repeatable), a step (--step N --status …), a handoff (--handoff <role>), a verdict (--verdict passed|failed) or an attempt (--attempt … --failed-on …)")
+        raise ProofMapError("PROGRESS_EMPTY", "report a plan (--plan, repeatable), a step (--step N --status …), a handoff (--handoff <role>), a verdict (--verdict passed|failed), an attempt (--attempt … --failed-on …) or a choice made (--question …)")
     with store.transaction() as conn:
         append_event(store, PROGRESS_EVENT, message, entity_id=node_id, payload=payload, conn=conn)
     return {**payload, "node_id": node_id, "at": utc_now().isoformat()}
@@ -520,6 +530,51 @@ def latest_verdict(store: ProjectStore, node_id: str) -> dict | None:
     whether the Prover may request review (ADR-0019 point 3). A verdict whose hash is not the folder's is stale."""
     found = verdicts(store, node_id)
     return found[-1] if found else None
+
+
+def questions(store: ProjectStore, node_id: str) -> list[dict]:
+    """The node's Standing questions, oldest first (ADR-0021 point 8): each its id, the choice made and the
+    alternative (`question`), the role and agent that made it, `state` (`open` or `answered`) and the researcher's
+    `answer` (who, whether the choice was kept, the other reading, and the redirect it made), or None while open."""
+    answers = {entry.get("question_id"): entry for entry in _progress_entries(store, node_id, "answer")}
+    found = []
+    for entry in _progress_entries(store, node_id, "question"):
+        answer = answers.get(entry.get("id"))
+        found.append({
+            **entry,
+            "state": "open" if answer is None else "answered",
+            "answer": None if answer is None else {key: answer.get(key) for key in ("at", "by", "keep", "answer", "redirect")},
+        })
+    return found
+
+
+def answer_question(
+    store: ProjectStore, node_id: str, question_id: str, *, keep: bool = False, answer: str | None = None, by: str = "human"
+) -> dict:
+    """The researcher's answer to a Standing question (ADR-0021 point 8): `keep` the choice the role made, or give the
+    other reading as `answer`. An answer that differs from the choice is a redirect: recorded as the answer's
+    `redirect`, the line the node's next run is briefed with. Each question is answered once. Never a Review
+    decision: it fixes nothing and decides no trust."""
+    text = (answer or "").strip()
+    if keep == bool(text):
+        raise ProofMapError("ANSWER_REQUIRED", "keep the choice (--keep) or give the other reading (--answer \"<the reading to follow>\"), not both")
+    with store.transaction() as conn:
+        asked = next((entry for entry in questions(store, node_id) if entry.get("id") == question_id), None)
+        if asked is None:
+            raise ProofMapError("QUESTION_NOT_FOUND", f"{node_id} has no standing question {question_id}", details={"node_id": node_id, "question_id": question_id})
+        if asked["state"] == "answered":
+            raise ProofMapError(
+                "QUESTION_ANSWERED",
+                f"{question_id} on {node_id} was already answered by {asked['answer']['by']}; a further redirect goes to the node's run",
+                details={"answer": asked["answer"]},
+            )
+        payload = {
+            "kind": "answer", "role": None, "by": by, "question_id": question_id,
+            "keep": keep, "answer": text or None, "redirect": text or None,
+        }
+        message = f"{by} answered {question_id} on {node_id}: " + ("the choice stands" if keep else f"redirect — {text}")
+        append_event(store, PROGRESS_EVENT, message, entity_id=node_id, payload=payload, conn=conn)
+    return {**payload, "node_id": node_id, "at": utc_now().isoformat()}
 
 
 def attempts(store: ProjectStore, node_id: str) -> list[dict]:
@@ -1274,6 +1329,9 @@ def add_dependency(
 
     Structural, like Split: no researcher approval, agent-reachable. The
     target must exist and not already rest on the node (DEPENDENCY_CYCLE).
+    A node someone else holds is theirs (NOT_CLAIMANT) unless `reassign`,
+    except an edge between two unaccepted Claims `edited_by`'s own Split
+    created: the Decomposer adds those itself (ADR-0021 point 7).
     No pin is taken here: the next request-review pins what the edge offers.
     """
     with store.transaction() as conn:
@@ -1284,11 +1342,27 @@ def add_dependency(
         if dependency_id in node.dependencies:
             raise ProofMapError("ALREADY_A_DEPENDENCY", f"{node_id} already rests on {dependency_id}")
         _refuse_cycle(store, node_id, dependency_id)
-        claim = _held_by_another(store, conn, node_id, edited_by, reassign=reassign)
-        if claim is not None:
-            _take_over(store, conn, claim, edited_by)
+        if not _own_split_edge(store, node, dependency_id, edited_by):
+            claim = _held_by_another(store, conn, node_id, edited_by, reassign=reassign)
+            if claim is not None:
+                _take_over(store, conn, claim, edited_by)
         _gain_dependency(store, conn, node, dependency_id, edited_by)
     return DependencyEdit("add", dependency_id, get_node(store, node_id))
+
+
+def _own_split_edge(store: ProjectStore, node: ProofMapNode, dependency_id: str, edited_by: str) -> bool:
+    """Whether `edited_by` is adding an edge between two Claims its own Split created, both unaccepted (ADR-0021
+    point 7). An edge between unaccepted Claims decides nothing, so the Decomposer adds it without holding either
+    Claim and without taking over the run that holds one."""
+    dependency = get_node(store, dependency_id)
+    return all(
+        claim is not None
+        and claim.kind == ProofMapNodeKind.claim
+        and claim.derived_from is not None
+        and claim.created_by == edited_by
+        and get_acceptance_state(store, claim.id) not in ("accepted", "unverifiable", "rejected")
+        for claim in (node, dependency)
+    )
 
 
 def _gain_dependency(store: ProjectStore, conn: sqlite3.Connection, node: ProofMapNode, dependency_id: str, edited_by: str) -> None:
