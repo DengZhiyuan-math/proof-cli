@@ -103,6 +103,7 @@ def test_a_project_inside_another_repo_never_commits_into_it(tmp_path: Path):
 
     assert get_acceptance_state(store, "clm_1") == "accepted"  # recorded, as outside any repo
     assert _git(outer, "log", "--format=%s").splitlines() == ["outer history"]  # the outer repo's history is not the project's
+    assert "REVIEWS_NOT_COMMITTED" in _codes(store)  # and marked as not yet committed (ADR-0010)
 
 
 def test_a_decision_git_doesnt_have_yet_is_warned_about(tmp_path: Path):
