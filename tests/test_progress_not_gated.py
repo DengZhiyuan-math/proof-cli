@@ -254,3 +254,37 @@ def test_a_later_failed_verifier_check_on_the_same_snapshot_ends_provisional_sta
 
     assert not is_provisional(store, "clm")
     assert "lem" not in _frontier(store)
+
+
+def test_a_citation_found_no_longer_callable_makes_the_snapshots_resting_on_it_potentially_stale(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="ref", kind="imported_result", statement="Known", source_locator="doi:x", source_version="v1")
+    create_node(store, node_id="mid", kind="claim", statement="M", dependencies=["ref"])
+    create_node(store, node_id="lem", kind="lemma", statement="L", dependencies=["mid"])
+    _passed_by_verifier(store, "mid")
+    submit_proof(store, "lem", claimant_id="agent", scoping_rationale="scoped", content="proof of lem")
+    assert get_integrity_state(store, "lem") == "current"
+
+    researcher(store).decide_reference_review("ref", "no-longer-callable", rationale="the cited theorem needs compact support")
+
+    assert get_integrity_state(store, "mid") == "potentially-stale"
+    assert get_integrity_state(store, "lem") == "potentially-stale"
+    assert not is_provisional(store, "mid")
+
+
+def test_an_imported_result_whose_review_no_longer_counts_is_not_provisional(tmp_path: Path):
+    import json
+
+    from proof_cli.proof_map import get_reference_review_state
+
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="ref", kind="imported_result", statement="Known", source_locator="doi:x", source_version="v1")
+    researcher(store).decide_reference_review("ref", rationale="checked")
+    path = store.root / "proofs" / "ref" / "reviews.jsonl"
+    line = json.loads(path.read_text())
+    line["payload"]["interface_fingerprint"] = "made on something else"  # a decision that no longer binds this node
+    path.write_text(json.dumps(line) + "\n")
+    assert get_reference_review_state(store, "ref") == "unverifiable"
+
+    # the researcher has decided on it: what stands now is theirs to settle, not an unreviewed citation
+    assert not is_provisional(store, "ref")

@@ -3878,11 +3878,13 @@ def conditional_on(store: ProjectStore, node_id: str) -> frozenset[str]:
 
 
 def _sent_back(store: ProjectStore, node_id: str) -> bool:
-    """Whether the researcher's newest decision on a local node withdrew it as support: a Reject, or a Revision
-    requested that no new snapshot has answered yet."""
+    """Whether the researcher's newest decision on a node withdrew it as support: a Reject, or a Revision requested
+    that no new snapshot has answered yet; on an imported result, its Reference review found it no longer callable."""
     node = get_node(store, node_id)
-    if node is None or node.kind == ProofMapNodeKind.imported_result:
+    if node is None:
         return False
+    if node.kind == ProofMapNodeKind.imported_result:
+        return _no_longer_callable(store, node_id)
     state, latest, _ = _acceptance(store, node)
     if state == "rejected":
         return True
