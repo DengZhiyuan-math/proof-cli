@@ -268,3 +268,16 @@ def test_a_decision_on_a_dependent_fixes_a_definition_through_the_node_naming_it
     assert fixed_by(store, "ref")["node_id"] == "L"
     assert D.fixed_by_definition(store, "cont")["node_id"] == "L"
     assert _code(lambda: D.edit_definition(store, "cont", text="anything", edited_by="reader-1", reason="r")) == "DEFINITION_FIXED"
+
+
+def test_an_agent_may_not_edit_its_own_definition_once_the_researcher_s_text_names_it(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    D.add_definition(store, "height", term="Height", text="sup", created_by="reader-1")
+    create_node(store, node_id="MAIN", kind="theorem", statement="h is proper", definitions=["height"])  # the researcher's
+
+    with pytest.raises(ProofMapError) as caught:
+        D.edit_definition(store, "height", text="max", edited_by="reader-1", reason="the sup is infinite")
+    assert caught.value.code == "RESEARCHER_TEXT"
+    assert caught.value.details["nodes"] == ["MAIN"]
+    # the researcher may, while it is unfixed
+    assert D.edit_definition(store, "height", text="max", edited_by="human", reason="the sup is infinite").text == "max"

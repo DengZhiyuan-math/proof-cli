@@ -26,7 +26,7 @@ from __future__ import annotations
 import re
 
 from .domain import Definition, ProofMapNode, utc_now
-from .proof_map import DEFINITION_EDITED_EVENT, ProofMapError, fixed_by, require_restatable
+from .proof_map import DEFINITION_EDITED_EVENT, RESEARCHER, ProofMapError, fixed_by, require_restatable
 from .storage import (
     ProjectStore,
     append_event,
@@ -59,9 +59,13 @@ def require_definition(store: ProjectStore, definition_id: str, *, conn=None) ->
 
 def nodes_naming(store: ProjectStore, definition_id: str, *, conn=None) -> list[str]:
     """The ids of the nodes whose statement is written in this definition (read on `conn` when a writer passes its own)."""
-    def scan(c) -> list[str]:
+    return [node.id for node in _nodes_naming(store, definition_id, conn=conn)]
+
+
+def _nodes_naming(store: ProjectStore, definition_id: str, *, conn=None) -> list[ProofMapNode]:
+    def scan(c) -> list[ProofMapNode]:
         rows = c.execute("SELECT data FROM proof_map_nodes ORDER BY id").fetchall()
-        return [node.id for node in (ProofMapNode.model_validate_json(row["data"]) for row in rows) if definition_id in node.definitions]
+        return [node for node in (ProofMapNode.model_validate_json(row["data"]) for row in rows) if definition_id in node.definitions]
 
     if conn is not None:
         return scan(conn)
@@ -126,9 +130,10 @@ def fixed_by_definition(store: ProjectStore, definition_id: str) -> dict | None:
 def edit_definition(
     store: ProjectStore, definition_id: str, *, term: str | None = None, text: str | None = None, edited_by: str = "human", reason: str = ""
 ) -> Definition:
-    """Change an Unfixed definition (ADR-0021 point 6): the researcher any, an agent one an agent wrote
-    (RESEARCHER_TEXT); a fixed one is refused (DEFINITION_FIXED). Once a node names it, the edit restates that node
-    and needs a reason. Changing nothing changes and records nothing."""
+    """Change an Unfixed definition (ADR-0021 point 6): the researcher any, an agent one an agent wrote and no node
+    of the researcher's names (RESEARCHER_TEXT: the edit would restate the researcher's statement); a fixed one is
+    refused (DEFINITION_FIXED). Once a node names it, the edit restates that node and needs a reason. Any change is
+    an edit; changing nothing changes and records nothing."""
     with store.transaction() as conn:
         current = require_definition(store, definition_id, conn=conn)
         update = {}
@@ -140,7 +145,15 @@ def edit_definition(
             return current
         require_restatable(store, what=f"definition {definition_id}", created_by=current.created_by, by=edited_by,
                            fixed=fixed_by_definition(store, definition_id), fixed_code="DEFINITION_FIXED")
-        if nodes_naming(store, definition_id, conn=conn) and not (reason or "").strip():
+        naming = _nodes_naming(store, definition_id, conn=conn)
+        theirs = [node.id for node in naming if node.created_by == RESEARCHER]
+        if edited_by != RESEARCHER and theirs:
+            raise ProofMapError(
+                "RESEARCHER_TEXT",
+                f"definition {definition_id} is named by the researcher's {', '.join(theirs)}: editing it would restate their text, so only the researcher edits it",
+                details={"nodes": theirs},
+            )
+        if naming and not (reason or "").strip():
             raise ProofMapError("RESTATE_REASON_REQUIRED", f"definition {definition_id} is named by a node: editing it restates that node, so say why with --reason")
         changed = current.model_copy(update={**update, "updated_at": utc_now()})
         update_definition(store, changed, conn=conn)
