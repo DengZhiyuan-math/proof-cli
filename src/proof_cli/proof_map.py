@@ -3775,8 +3775,8 @@ def is_provisional(store: ProjectStore, node_id: str) -> bool:
 
     A Theorem, Lemma or Claim whose current snapshot awaits a decision, on the
     dependencies it was made on, with the Verifier's pass recorded on it; or an
-    imported result not yet Reference-reviewed (nor found no longer callable).
-    A node under an open Challenge, or resting on a node the researcher sent
+    imported result no Reference review has decided (not found no longer
+    callable, nor reviewed on what no longer stands). A node under an open Challenge, or resting on a node the researcher sent
     back, is not: the support it was worked on is gone. And each thing it rests
     on is settled or Provisional itself: a pass on a proof that cites nothing
     yet worked on is no support (ADR-0021 point 3). Read without recursion: the
@@ -3795,7 +3795,8 @@ def _provisional_itself(store: ProjectStore, node_id: str) -> bool:
     if node is None:
         return False
     if node.kind == ProofMapNodeKind.imported_result:
-        return get_reference_review_state(store, node_id) in ("unreviewed", "unverifiable")
+        # unverifiable is a Reference review the researcher made that no longer counts: theirs to settle again
+        return get_reference_review_state(store, node_id) == "unreviewed"
     if get_acceptance_state(store, node_id) == "accepted" or has_open_challenge(store, node_id):
         return False
     proof = _awaiting_decision(store, node)
