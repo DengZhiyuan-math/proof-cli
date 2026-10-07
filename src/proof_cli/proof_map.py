@@ -848,17 +848,54 @@ def _rests_on(store: ProjectStore, node_id: str) -> set[str]:
 def fixed_by(store: ProjectStore, node_id: str) -> dict | None:
     """The Review decision that fixed a node's statement, assumptions and named definitions, or None while they are
     Unfixed (ADR-0021 point 6): the first Acceptance decision of any outcome, or Reference review, on the node or on
-    any node resting on it. A decision relied on the text, so no restatement may change it under that decision."""
-    first: dict | None = None
-    for decided_id in sorted(_resting_on(store, node_id)):
-        for kind in (ReviewRecordKind.acceptance, ReviewRecordKind.reference_review):
-            for row in decision_rows(store, _ACCEPTANCE_OBJECT_TYPE, decided_id, kind.value):
-                if row["decision"] == ReviewGovernanceState.proposed_for_review.value:
-                    continue
-                if first is None or row["created_at"] < first["decided_at"]:
-                    first = {"node_id": decided_id, "review_id": row["review_id"], "kind": kind.value, "decision": row["decision"], "decided_at": row["created_at"]}
-                break  # the oldest of this kind on this node
+    a node that rested on it when decided. A decision relied on the text, so no restatement may change it under that
+    decision; a node that came to rest under it later (a Claim split from a parent sent back) is no part of it."""
+    return _fixed_index(store).get(node_id)
+
+
+@memoized_read
+def _fixed_index(store: ProjectStore) -> dict[str, dict]:
+    """Every fixed node's first fixing decision, by node id: one pass over the decisions for a whole read."""
+    first: dict[str, dict] = {}
+    kinds = (ReviewRecordKind.acceptance.value, ReviewRecordKind.reference_review.value)
+    for row in list_decisions(store):
+        if row["object_type"] != _ACCEPTANCE_OBJECT_TYPE or row["kind"] not in kinds or row["decision"] == ReviewGovernanceState.proposed_for_review.value:
+            continue
+        decided = {"node_id": row["object_id"], "review_id": row["review_id"], "kind": row["kind"], "decision": row["decision"], "decided_at": row["created_at"]}
+        for relied_id in _relied_on(store, row):
+            if relied_id not in first or decided["decided_at"] < first[relied_id]["decided_at"]:
+                first[relied_id] = decided
     return first
+
+
+def _relied_on(store: ProjectStore, row: dict) -> set[str]:
+    """The nodes whose text a decision relied on: the decided node, what its decided snapshot rested on, and below
+    each of those what its own newest snapshot by then rested on (a proof cites statements). A decision with no record
+    of what it was made on reads the node's dependencies as they stand now."""
+    at = datetime.fromisoformat(row["created_at"])
+    payload = row.get("payload")
+    node = get_node(store, row["object_id"])
+    if node is None:
+        return {row["object_id"]}
+    proof = _get_candidate_proof(store, payload.candidate_proof_id) if payload is not None and payload.candidate_proof_id else None
+    if proof is not None and proof.dependencies is not None:
+        below = list(proof.dependencies)
+    elif proof is not None:  # a snapshot from before its dependencies were recorded: the pins it was decided against
+        below = [pin.target_node_id for pin in payload.dependency_pins]
+    else:
+        below = list(node.dependencies)
+    found = {node.id}
+    while below:
+        current_id = below.pop()
+        if current_id in found:
+            continue
+        found.add(current_id)
+        then = [proof for proof in list_candidate_proofs_for_node(store, current_id) if proof.created_at <= at]
+        if then:
+            newest = max(then, key=lambda proof: proof.created_at)
+            current = get_node(store, current_id)
+            below.extend(newest.dependencies if newest.dependencies is not None else (current.dependencies if current is not None else []))
+    return found
 
 
 def restated_at(store: ProjectStore, node_id: str) -> datetime | None:

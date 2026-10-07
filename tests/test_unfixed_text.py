@@ -231,3 +231,40 @@ def test_a_restatement_and_a_definition_edit_are_in_the_work_log_with_who_why_an
     text = " ".join(render_work_log("H", log).split())  # as read, whatever the terminal's width
     assert "restated" in text and "not proper on all of X" in text and "h is proper → h is proper on a Siegel set" in text
     assert "definition height edited" in text and "sup → max" in text
+
+
+def test_a_decision_fixes_only_what_the_decided_snapshot_rested_on_then(tmp_path: Path):
+    from proof_cli.proof_map import split_node
+
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="T", kind="theorem", statement="t", created_by="reader-1")
+    submit_proof(store, "T", claimant_id="prover-1", scoping_rationale="scoped", content="a first try")
+    researcher(store).decide_acceptance("T", "revision-requested")
+
+    split_node(store, "T", [{"id": "c1", "statement": "A"}], created_by="dec-1")
+
+    # T's decision was made before c1 existed: it relied on nothing c1 says
+    assert fixed_by(store, "c1") is None
+    assert restate_node(store, "c1", statement="A, sharpened", reason="the split's first reading", by="dec-1").statement == "A, sharpened"
+    assert fixed_by(store, "T")["node_id"] == "T"
+
+
+def test_a_decision_on_a_dependent_fixes_a_definition_through_the_node_naming_it(tmp_path: Path):
+    from proof_cli.references import ReferenceRecord, ReferenceSourceType
+    from proof_cli.storage import import_reference
+
+    store = ensure_project(tmp_path)
+    import_reference(store, ReferenceRecord(id="rudin", title="Principles", authors=["W. Rudin"], year=1976, source_type=ReferenceSourceType.textbook))
+    researcher(store).declare_trust_rule("textbooks", conditions=[{"kind": "source_type_in", "values": ["textbook"]}], rationale="standard")
+    D.add_definition(store, "cont", term="Continuity", text="eps-delta", created_by="reader-1")
+    # a rule-trusted citation has no decision of its own: its dependent's decision is the first to rely on its text
+    create_node(store, node_id="ref", kind="imported_result", statement="Heine–Cantor", definitions=["cont"], source_locator="Thm 4.19",
+                source_version="3rd", reference_id="rudin", created_by="reader-1")
+    create_node(store, node_id="L", kind="lemma", statement="l", dependencies=["ref"], created_by="reader-1")
+    assert D.fixed_by_definition(store, "cont") is None
+
+    _accepted(store, "L")
+
+    assert fixed_by(store, "ref")["node_id"] == "L"
+    assert D.fixed_by_definition(store, "cont")["node_id"] == "L"
+    assert _code(lambda: D.edit_definition(store, "cont", text="anything", edited_by="reader-1", reason="r")) == "DEFINITION_FIXED"
