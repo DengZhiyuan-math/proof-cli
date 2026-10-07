@@ -854,7 +854,11 @@ def cmd_reference_import(
     notes: str = "",
 ) -> str:
     store = get_store(root)
-    source_type_enum = source_type if isinstance(source_type, ReferenceSourceType) else ReferenceSourceType(source_type)
+    try:
+        source_type_enum = ReferenceSourceType(source_type)
+    except ValueError as exc:
+        valid = ", ".join(member.value for member in ReferenceSourceType)
+        raise ProofMapError("INVALID_SOURCE_TYPE", f"'{source_type}' is not a valid source type; expected one of: {valid}") from exc
     reference = ReferenceRecord(
         id=reference_id,
         title=title,

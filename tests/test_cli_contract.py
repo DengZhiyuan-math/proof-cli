@@ -430,3 +430,17 @@ def test_the_skills_node_workflow_runs_as_written(tmp_path: Path):
             ensure_key_ideas(tmp_path, args[2])  # what the agent writes beside proof.tex before it asks (ADR-0013)
         result = runner.invoke(app, [*args, "--json"])
         assert result.exit_code == 0 and _envelope(result)["ok"], (args, result.output)
+
+
+def test_an_unknown_reference_source_type_names_the_valid_ones_with_a_code(tmp_path: Path):
+    """As --trust-level and a node's kind do: the refused value, every valid one, and an error code."""
+    root = str(_project(tmp_path))
+    args = ["reference", "import", "R1", "A title", "2020", "--source-type", "paper", "--root", root]
+
+    envelope = _envelope(runner.invoke(app, [*args, "--json"]))
+    assert envelope["error"]["code"] == "INVALID_SOURCE_TYPE"
+    assert envelope["error"]["message"] == ("'paper' is not a valid source type; expected one of: standard_reference, research_paper, "
+                                            "textbook, survey, monograph, website, other")
+    text = runner.invoke(app, args)
+    assert text.exit_code == 1 and "expected one of: standard_reference" in text.stdout and "[INVALID_SOURCE_TYPE]" in text.stdout
+    assert "research_paper" in " ".join(runner.invoke(app, ["reference", "import", "--help"]).stdout.split())
