@@ -206,3 +206,28 @@ def test_the_cli_restates_and_edits_with_a_reason(tmp_path: Path):
     assert shown["fixed_by"] is None
     run("node", "create", "M", "theorem", "theirs")
     assert run("node", "restate", "M", "--statement", "x", "--reason", "r", "--by", "reader-1", ok=False)["error"]["code"] == "RESEARCHER_TEXT"
+
+
+def test_a_restatement_and_a_definition_edit_are_in_the_work_log_with_who_why_and_what_changed(tmp_path: Path):
+    from proof_cli.proof_map import work_log
+    from proof_cli.rendering import render_work_log
+
+    store = ensure_project(tmp_path)
+    D.add_definition(store, "height", term="Height", text="sup", created_by="reader-1")
+    create_node(store, node_id="H", kind="lemma", statement="h is proper", definitions=["height"], created_by="reader-1")
+    create_node(store, node_id="other", kind="lemma", statement="o", created_by="reader-1")
+
+    restate_node(store, "H", statement="h is proper on a Siegel set", reason="not proper on all of X", by="reader-1")
+    D.edit_definition(store, "height", text="max", edited_by="reader-1", reason="the sup is infinite")
+
+    log = work_log(store, "H")
+    restated, edited = [entry for entry in log if entry["kind"] in ("restated", "definition-edited")]
+    assert (restated["by"], restated["reason"]) == ("reader-1", "not proper on all of X")
+    assert (restated["from"], restated["to"]) == ({"statement": "h is proper"}, {"statement": "h is proper on a Siegel set"})
+    assert (edited["by"], edited["definition_id"], edited["reason"]) == ("reader-1", "height", "the sup is infinite")
+    assert (edited["from"], edited["to"]) == ({"text": "sup"}, {"text": "max"})
+    assert not [entry for entry in work_log(store, "other") if entry["kind"] in ("restated", "definition-edited")]
+
+    text = " ".join(render_work_log("H", log).split())  # as read, whatever the terminal's width
+    assert "restated" in text and "not proper on all of X" in text and "h is proper → h is proper on a Siegel set" in text
+    assert "definition height edited" in text and "sup → max" in text

@@ -714,7 +714,7 @@ def work_log(store: ProjectStore, node_id: str) -> list[dict]:
     """The node's work log: the agent's reports merged, in time order, with what it did through `proof` and its turns.
     What the run's agent did during one of its turns carries that turn's role; anything else — outside a turn, or by
     someone else while a turn runs (the researcher's own split, a fog item from the map) — keeps its own actor and has none."""
-    require_node(store, node_id)
+    named = set(require_node(store, node_id).definitions)
     proof_ids = {proof.id for proof in list_candidate_proofs(store, node_id)}
     fog = {item.id: item for item in list_fog_items(store)}
     near_fog = {fog_id for fog_id, item in fog.items() if node_id in item.near}  # the fog about this node: its Experiments belong here
@@ -748,6 +748,12 @@ def work_log(store: ProjectStore, node_id: str) -> list[dict]:
         elif event.kind in ("proof_map_dependency_added", "proof_map_dependency_removed", "proof_map_dependency_moved") and event.entity_id == node_id:
             entries.append({"at": at, "kind": "dependencies", "by": payload.get("edited_by") or payload.get("by"), "change": event.kind.rsplit("_", 1)[1], "dependency": payload.get("dependency_id") or payload.get("dependency"),
                             "resplit": bool(payload.get("resplit"))})
+        elif event.kind == RESTATED_EVENT and event.entity_id == node_id:  # ADR-0021 point 6: who, why, and old → new
+            entries.append({"at": at, "kind": "restated", "by": payload.get("by"), "reason": payload.get("reason"), "from": payload.get("from"), "to": payload.get("to")})
+        elif event.kind == DEFINITION_EDITED_EVENT and event.entity_id in named:  # a restatement of every node naming it
+            changed = {key: payload[key] for key in ("term", "text") if key in payload}
+            entries.append({"at": at, "kind": "definition-edited", "by": payload.get("by"), "definition_id": event.entity_id,
+                            "reason": payload.get("reason"), "from": payload.get("from"), "to": payload.get("to") or changed})
         elif event.kind in ("proof_map_node_claimed", "proof_map_claim_reassigned") and event.entity_id == node_id:
             entries.append({"at": at, "kind": "claimed", "by": payload.get("claimant_id") or payload.get("assignee")})
         for entry in entries[before:]:  # an automatic entry: the role of the turn it happened in, when the run's agent did it

@@ -371,6 +371,10 @@ def render_challenge_list(challenges: list[Challenge]) -> str:
 
 
 
+def _shown(value) -> str:
+    return ", ".join(str(item) for item in value) or "none" if isinstance(value, list) else str(value)
+
+
 def _work_log_body(entry: dict) -> str:
     """One work log entry as a line's body: a plan, a step, a turn, a handoff, a verdict or an attempt
     (ADR-0019), or what the agent did through another `proof` command."""
@@ -404,6 +408,11 @@ def _work_log_body(entry: dict) -> str:
         return f"fog {entry.get('fog_id')}: {entry.get('text')}"
     if kind == "experiment":
         return f"Experiment {entry.get('seq')} on {entry.get('fog_id')}: {entry.get('outcome')}"
+    if kind in ("restated", "definition-edited"):  # ADR-0021 point 6: why, and what changed from what
+        what = "restated" if kind == "restated" else f"definition {entry.get('definition_id')} edited"
+        before, after = entry.get("from") or {}, entry.get("to") or {}
+        changes = "; ".join(f"{key}: {_shown(before.get(key)) if key in before else '…'} → {_shown(value)}" for key, value in after.items())
+        return f"{what}" + (f" — {entry['reason']}" if entry.get("reason") else "") + (f" ({changes})" if changes else "")
     if kind == "dependencies":
         return f"dependency {entry.get('change')}: {entry.get('dependency')}" + (" (resplit: the Decomposer took its own Claim back)" if entry.get("resplit") else "")
     return str(kind)
