@@ -3778,8 +3778,20 @@ def is_provisional(store: ProjectStore, node_id: str) -> bool:
     dependencies it was made on, with the Verifier's pass recorded on it; or an
     imported result not yet Reference-reviewed (nor found no longer callable).
     A node under an open Challenge, or resting on a node the researcher sent
-    back, is not: the support it was worked on is gone.
+    back, is not: the support it was worked on is gone. And each thing it rests
+    on is settled or Provisional itself: a pass on a proof that cites nothing
+    yet worked on is no support (ADR-0021 point 3). Read without recursion: the
+    node's unsettled support is walked once, and each node in it judged on its
+    own standing, as Provisional is closed under that support.
     """
+    if not _provisional_itself(store, node_id):
+        return False
+    return all(_provisional_itself(store, support_id) for support_id in _unsettled_support(store, node_id))
+
+
+@memoized_read
+def _provisional_itself(store: ProjectStore, node_id: str) -> bool:
+    """`is_provisional` on the node's own standing, without asking whether what it rests on is Provisional."""
     node = get_node(store, node_id)
     if node is None:
         return False
