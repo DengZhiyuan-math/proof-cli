@@ -145,7 +145,8 @@ def edit_definition(
         changed = current.model_copy(update={**update, "updated_at": utc_now()})
         update_definition(store, changed, conn=conn)
         append_event(store, DEFINITION_EDITED_EVENT, f"definition {definition_id} edited by {edited_by}", entity_id=definition_id,
-                     payload={"by": edited_by, **update, **({"reason": reason.strip()} if (reason or "").strip() else {})}, conn=conn)
+                     payload={"by": edited_by, **update, "from": {key: getattr(current, key) for key in update}, "to": update,
+                              **({"reason": reason.strip()} if (reason or "").strip() else {})}, conn=conn)
     return changed
 
 
