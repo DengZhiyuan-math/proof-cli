@@ -1,0 +1,1644 @@
+diff --git a/src/proof_web/home.py b/src/proof_web/home.py
+index b1a7cac..cc4ce98 100644
+--- a/src/proof_web/home.py
++++ b/src/proof_web/home.py
+@@ -24,10 +24,12 @@ from pathlib import Path
+ from urllib.parse import urlsplit
+ 
+ from proof_cli import proof_map
++from proof_agents.proof_agent import library_folders
+ from proof_cli.domain import ProofMapNodeKind
+ from proof_cli.fog import list_fog
+ from proof_cli.projects import forget_project, is_project, list_registered, project_key, register_project
+ from proof_cli.storage import ProjectStore, ensure_project, read_only, read_project_instance_id, read_scope, read_state
++from .studios import StudioHub
+ from .server import RP_ID, _ORIGIN_PORT_BASE, _ORIGIN_PORT_SPAN, RequestError, ReviewServer, _Handler, project_origin
+ 
+ HOME_PORT = _ORIGIN_PORT_BASE + int(hashlib.sha256(b"proof-cli home").hexdigest()[:8], 16) % _ORIGIN_PORT_SPAN
+@@ -193,6 +195,7 @@ class HomeApp:
+             "project_id": None,
+             "theorem": None,
+             "counts": None,
++            "can_pursue": False,  # a library holding a draft, and no map yet: Pursue starts from the draft (ADR-0021 point 7)
+             "error": None,
+         }
+         if not card["exists"]:
+@@ -224,6 +227,8 @@ class HomeApp:
+                     url=project_origin(store),
+                     theorem=theorem,
+                     counts={"nodes": len(nodes), "frontier": frontier, "awaiting": awaiting, "accepted": accepted, "fog": len(list_fog(store))},
++                    # as the project's page decides it: no map, a library, and a proof-agents with a project pursuit
++                    can_pursue=not nodes and bool(library_folders(path)) and StudioHub.project_pursuit_available(),
+                 )
+         except Exception as exc:  # a damaged or locked database: the card says so, the list still shows
+             card["error"] = f"The project can't be read ({type(exc).__name__})."
+diff --git a/src/proof_web/node_status.py b/src/proof_web/node_status.py
+index 7d72224..4386529 100644
+--- a/src/proof_web/node_status.py
++++ b/src/proof_web/node_status.py
+@@ -6,8 +6,9 @@ its own. The three axes stay separate (ADR-0004) and are still shown beside it;
+ the at-a-glance reading of them.
+ 
+ What needs the researcher comes first (a Challenge, a moved dependency, a decision that no
+-longer applies: one "attention" kind, the word saying which), then a rejected route, then the
+-frontier, the agent's run, a claim, a review request, blocked, accepted. The frontier is the
++longer applies: one "attention" kind, the word saying which), then a rejected route, then a
++node a Coordinator parked and nobody has decided since (attention too), then the frontier,
++the agent's run, a claim, a review request, blocked, accepted. The frontier is the
+ strongest signal (ADR-0008, CONTEXT.md): a node on it reads Ready whatever its workflow state,
+ Revision requested included. A frontier node with a warning reads the warning, and every view
+ shows its Ready mark beside it, never in its place (`frontier` is sent alongside).
+@@ -45,6 +46,9 @@ def node_status(node: dict) -> dict:
+         text, kind = "decision outdated", "attention"
+     elif acceptance in ("rejected", "no-longer-callable"):
+         text, kind = ("rejected" if acceptance == "rejected" else "no longer callable"), "rejected"
++    elif node.get("parked") and acceptance not in ("accepted", "reviewed", "trusted-by-rule"):
++        # where the agents could not go (ADR-0021 point 9), first in the review queue, until the researcher decides it
++        text, kind = "parked", "attention"
+     elif node.get("frontier"):
+         text, kind = "ready", "ready"
+     elif run and run.get("status") != "idle":
+diff --git a/src/proof_web/review_queue.py b/src/proof_web/review_queue.py
+new file mode 100644
+index 0000000..823d87b
+--- /dev/null
++++ b/src/proof_web/review_queue.py
+@@ -0,0 +1,148 @@
++"""The researcher's review queue (ADR-0021 point 10): everything waiting on them, bottom-up, none of it holding the agents back.
++
++The queue holds:
++- the Provisional nodes awaiting Acceptance;
++- the unreviewed imported results;
++- the Unfixed text agents wrote (statements and Definitions), with the Reader's departures from the draft;
++- the Standing questions, answered in place;
++- the Parked nodes, with their attempts.
++
++Bottom-up means by depth over the unaccepted map: a node resting on nothing unaccepted comes first, then what rests
++on it, so that each Accept makes the next decision possible. The parked nodes come before everything else (point 9). Everything here is derived from project state each
++read; nothing is stored for the queue.
++"""
++
++from __future__ import annotations
++
++from proof_cli import proof_map
++from proof_cli.definitions import all_definitions, fixed_by_definition, nodes_naming
++from proof_cli.domain import ProofMapNodeKind
++from proof_cli.storage import ProjectStore, get_current_candidate_proof
++
++# a Coordinator's note on a node it parked (ADR-0021 point 9), as `StudioHub._park` records it
++PARKED_NOTE = "parked: "
++# the Reader records every place it departed from the draft here (ADR-0021 point 5)
++DEPARTURES = ("scratch", "reader", "departures.md")
++# the work-log kinds that are work on the node itself: one after a parked note means the node is worked again
++_WORK = ("plan", "step", "verdict", "attempt", "handoff", "turn")
++# the acceptance states a Review decision left the node in: a decided node is no longer where the agents could not go
++_DECIDED = ("accepted", "rejected", "no-longer-callable")
++
++
++def awaiting_review(store: ProjectStore, node) -> bool:
++    """Whether a snapshot of the node awaits a Review decision, even where the workflow axis reads Blocked (ADR-0021 point 1)."""
++    if node.kind == ProofMapNodeKind.imported_result:
++        return False
++    return proof_map.awaiting_decision(store, node.id) is not None
++
++
++def parked_reason(store: ProjectStore, node_id: str) -> str | None:
++    """Why the node is parked, from the newest parked note on its work log, or None: never parked, worked since, or
++    decided since (Accepted, Rejected, no longer callable): the researcher's decision ends what parking asked of them.
++    An imported result is never parked: no run works it."""
++    node = proof_map.get_node(store, node_id)
++    if node is None or node.kind == ProofMapNodeKind.imported_result:
++        return None
++    if proof_map.get_acceptance_state(store, node_id) in _DECIDED:
++        return None
++    reason = None
++    for entry in proof_map.work_log(store, node_id):
++        kind = entry.get("kind")
++        if kind == "coordinator" and str(entry.get("note") or "").startswith(PARKED_NOTE):
++            reason = str(entry["note"])[len(PARKED_NOTE):]
++        elif kind in _WORK:
++            reason = None
++    return reason
++
++
++def _depths(store: ProjectStore, nodes: list) -> dict[str, int]:
++    """Each node's depth over the unaccepted map: 0 when it rests on nothing unsettled, else one more than the deepest
++    unsettled node it rests on. Settled nodes are 0. A cycle, which no service creates, counts its edge once."""
++    by_id = {node.id: node for node in nodes}
++    settled = {node.id for node in nodes if _settled(store, node)}
++    depth: dict[str, int] = {}
++    for start in by_id:
++        stack, on_path = [(start, iter(by_id[start].dependencies))], {start}
++        best = {start: 0}
++        while stack:
++            current, deps = stack[-1]
++            dep = next(deps, None)
++            if dep is None:
++                stack.pop()
++                on_path.discard(current)
++                depth[current] = best[current]
++                if stack:
++                    parent = stack[-1][0]
++                    best[parent] = max(best[parent], depth[current] + 1)
++                continue
++            if current in settled or dep not in by_id or dep in settled or dep in on_path:
++                continue
++            if dep in depth:
++                best[current] = max(best[current], depth[dep] + 1)
++                continue
++            best[dep] = 0
++            on_path.add(dep)
++            stack.append((dep, iter(by_id[dep].dependencies)))
++    return depth
++
++
++def _settled(store: ProjectStore, node) -> bool:
++    if node.kind == ProofMapNodeKind.imported_result:
++        return proof_map.get_reference_review_state(store, node.id) in ("reviewed", "trusted-by-rule")
++    return proof_map.get_acceptance_state(store, node.id) == "accepted"
++
++
++def review_queue(store: ProjectStore) -> dict:
++    """{"items": [...], "departures": the Reader's departures or None}: every item has `kind`, `depth`, and the node or
++    Definition it is about. The order is the researcher's reading order:
++    - the parked nodes first, bottom-up: the places the agents could not go;
++    - then the rest bottom-up, node by node: a node's Standing questions and its unfixed statement before its
++      Provisional (or Reference review) entry, so the text is read before the decision that fixes it;
++    - an unfixed Definition just before the first entry on a node that names it (a parked one included), or at the
++      start of the rest when no node in the queue names it."""
++    nodes = proof_map.list_nodes(store)
++    depth = _depths(store, nodes)
++    order = sorted(range(len(nodes)), key=lambda i: (depth.get(nodes[i].id, 0), i))  # bottom-up, then the map's order
++    parked: list[dict] = []
++    rest: list[dict] = []
++    for node in (nodes[i] for i in order):
++        base = {"node_id": node.id, "node_kind": node.kind.value, "statement": node.statement, "depth": depth.get(node.id, 0)}
++        imported = node.kind == ProofMapNodeKind.imported_result
++        rejected = not imported and proof_map.get_acceptance_state(store, node.id) == "rejected"
++        reason = parked_reason(store, node.id)
++        if reason is not None:
++            parked.append({**base, "kind": "parked", "reason": reason, "attempts": proof_map.attempts(store, node.id)[-5:]})
++        for question in proof_map.questions(store, node.id):
++            if question["state"] == "open":
++                rest.append({**base, "kind": "question", "question_id": question["id"], "question": question.get("question"),
++                             "by": question.get("by"), "role": question.get("role"), "at": question.get("at")})
++        if not rejected and node.created_by != proof_map.RESEARCHER and proof_map.fixed_by(store, node.id) is None:
++            rest.append({**base, "kind": "unfixed", "by": node.created_by, "assumptions": list(node.assumptions),
++                         "definitions": list(node.definitions)})
++        if proof_map.is_provisional(store, node.id):
++            if imported:
++                rest.append({**base, "kind": "imported", "citation": proof_map.node_citation(store, node)})
++            else:
++                proof = get_current_candidate_proof(store, node.id)
++                rest.append({**base, "kind": "provisional", "conditional_on": sorted(proof_map.conditional_on(store, node.id)),
++                             "workflow_state": proof_map.get_workflow_state(store, node.id),
++                             "snapshot": proof.version if proof is not None else None})
++    items = parked + rest
++    unnamed: list[dict] = []
++    for definition in all_definitions(store):
++        if definition.created_by != proof_map.RESEARCHER and fixed_by_definition(store, definition.id) is None:
++            named = nodes_naming(store, definition.id)
++            item = {"kind": "unfixed", "definition_id": definition.id, "term": definition.term, "text": definition.text,
++                    "by": definition.created_by, "named_by": named}
++            first = next((i for i, entry in enumerate(items) if entry.get("node_id") in named), None)
++            if first is None:
++                unnamed.append({**item, "depth": min((depth.get(n, 0) for n in named), default=0)})
++            else:
++                items.insert(first, {**item, "depth": items[first]["depth"]})
++    at = max((i + 1 for i, entry in enumerate(items) if entry["kind"] == "parked"), default=0)  # where the rest begins
++    items[at:at] = unnamed
++    try:
++        departures = store.root.joinpath(*DEPARTURES).read_text(encoding="utf-8")
++    except OSError:
++        departures = None
++    return {"items": items, "departures": departures}
+diff --git a/src/proof_web/server.py b/src/proof_web/server.py
+index ebe1feb..c4f143e 100644
+--- a/src/proof_web/server.py
++++ b/src/proof_web/server.py
+@@ -53,6 +53,7 @@ from proof_cli.vault import OUT_DIR, SNAPSHOT_MANIFEST, archived_pdf_path, build
+ from proof_agents.agent_run import ACTIONS as RUN_ACTIONS
+ from .node_status import node_status
+ from proof_agents.coordinator import ACTIONS as COORDINATOR_ACTIONS
++from .review_queue import review_queue
+ from .studios import NoStudio, StudioHub
+ 
+ 
+@@ -398,6 +399,11 @@ class ReviewApp:
+                     "integrity_state": proof_map.get_integrity_state(self.store, node.id),
+                     "assignee": claim.claimant_id if claim else None,
+                     "frontier": node.id in frontier,
++                    # ADR-0021: rested on for work (never trust); the Provisional nodes its proof rests on; why a
++                    # Coordinator parked it, while it is
++                    "provisional": proof_map.is_provisional(self.store, node.id),
++                    "conditional_on": sorted(proof_map.conditional_on(self.store, node.id)),
++                    "parked": None if imported else self.studios.parked(node.id),
+                     # the hover shows the current snapshot's 核心思路 (ADR-0013)
+                     "core_idea": None if imported else _core_idea(self.store, node.id),
+                 }
+@@ -494,6 +500,34 @@ class ReviewApp:
+             raise RequestError(HTTPStatus(status), str(data.get("code") or "NO_SUCH_JOB"), str(data.get("error") or "refused"))
+         return data
+ 
++    def review_queue(self) -> dict:
++        """Everything waiting on the researcher, bottom-up, none of it holding the agents back (ADR-0021 point 10)."""
++        with self._one_state():
++            return review_queue(self.store)
++
++    def answer(self, node_id: str, body: dict) -> dict:
++        """The researcher's answer to a Standing question, in place (ADR-0021 point 8): keep the choice, or the other reading."""
++        question = str(body.get("question") or "").strip()
++        if not question:
++            raise RequestError(HTTPStatus.BAD_REQUEST, "INVALID_REQUEST", "an answer names the question it answers")
++        keep = body.get("keep", False)
++        if not isinstance(keep, bool):  # a JSON boolean only: "false" or 1 must never read as keeping the choice
++            raise RequestError(HTTPStatus.BAD_REQUEST, "INVALID_REQUEST", "keep is true or false")
++        answer = body.get("answer")
++        return proof_map.answer_question(self.store, node_id, question, keep=keep,
++                                         answer=str(answer) if answer is not None else None,
++                                         by=proof_map.RESEARCHER)  # the page is the researcher's: only they answer (the core checks)
++
++    def pursuit(self) -> dict:
++        """Pursue on the project (ADR-0021 point 7): its state, and whether it starts from the draft."""
++        return self.studios.pursuit_view()
++
++    def pursuit_action(self, action: str, body: dict) -> dict:
++        status, data = self.studios.pursuit_action(action, body)
++        if status >= 400:
++            raise RequestError(HTTPStatus(status), str(data.get("code") or "PURSUIT_REFUSED"), str(data.get("error") or "refused"))
++        return data
++
+     def coordinator_action(self, node_id: str, action: str, body: dict) -> dict:
+         """Start, pause, resume or stop and release the Coordinator of a node's subtree, from the node's page or the map."""
+         if action not in COORDINATOR_ACTIONS:
+@@ -616,6 +650,8 @@ class ReviewApp:
+             if op == "remove":
+                 return proof_map.remove_dependency(self.store, node_id, dependency, **who).as_json()
+             return proof_map.move_dependency(self.store, node_id, dependency, to=to, **who).as_json()
++        if action == "answer":  # a Standing question, answered in place from the review queue (ADR-0021 point 8)
++            return self.answer(node_id, body)
+         if action == "request-review":
+             return proof_map.request_review(self.store, node_id, requested_by=actor, rationale=str(body.get("rationale") or "")).model_dump(mode="json")
+         if action == "challenge":
+@@ -927,6 +963,10 @@ class _Handler(BaseHTTPRequestHandler):
+             return self._guarded(lambda: self.app.fog(include_all=include_all))
+         if path == "/api/discussion":  # the map's agent (issue #177)
+             return self._guarded(self.app.discussion)
++        if path == "/api/review-queue":  # what waits on the researcher, bottom-up (ADR-0021 point 10)
++            return self._guarded(self.app.review_queue)
++        if path == "/api/pursue":  # Pursue on the project (ADR-0021 point 7)
++            return self._guarded(self.app.pursuit)
+         if path == "/api/discussion/events":
+             query = parse_qs(urlsplit(self.path).query)
+             return self._guarded(lambda: self.app.discussion_events(query.get("job", [""])[0], query.get("after", ["0"])[0]))
+@@ -1013,6 +1053,9 @@ class _Handler(BaseHTTPRequestHandler):
+             "/api/discussion/stop": lambda: self.app.discussion_stop(body),
+         }
+         route = routes.get(path)
++        if route is None and path.startswith("/api/pursue/"):  # Pursue on the project, and its Stop (ADR-0021 point 7)
++            action = path.removeprefix("/api/pursue/")
++            route = lambda: self.app.pursuit_action(action, body)
+         if route is None and path.startswith("/api/node/") and "/coordinator/" in path:  # the subtree's Coordinator (ADR-0019 point 18)
+             node_id, _, action = path.removeprefix("/api/node/").rpartition("/coordinator/")
+             route = lambda: self.app.coordinator_action(unquote(node_id), action, body)
+diff --git a/src/proof_web/static/app.css b/src/proof_web/static/app.css
+index e920bf0..c7d6f0c 100644
+--- a/src/proof_web/static/app.css
++++ b/src/proof_web/static/app.css
+@@ -478,3 +478,25 @@ td a { font-family: var(--mono); font-size: 12px; }
+ .discuss-status { flex: 1; font-size: 11.5px; color: var(--label-3); }
+ .discuss-status.bad { color: var(--red); }
+ #rail-discuss.on { background: var(--fill-2); font-weight: 500; }
++
++/* ADR-0021: Pursue from the draft, the review queue, Conditional and Parked on the map */
++.pursue-banner { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 10px; padding: 10px 14px; border-radius: 10px; background: var(--surface-2); }
++.pursue-banner p { margin: 0; flex: 1 1 40ch; color: var(--label-2); font-size: 13px; }
++.queue-section { margin-top: 20px; }
++.review-queue { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
++.review-queue > li { background: var(--surface); border: 1px solid var(--sep); border-radius: 10px; padding: 10px 12px; display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; }
++.review-queue .queue-kind { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--label-3); grid-row: span 3; min-width: 9ch; }
++.review-queue .queue-kind.parked { color: var(--orange); }
++.review-queue .queue-kind.question { color: var(--indigo); }
++.review-queue .queue-body { color: var(--label); min-width: 0; overflow-wrap: anywhere; }
++.review-queue .queue-meta { color: var(--label-3); font-size: 12px; }
++.review-queue .queue-answer { display: flex; gap: 8px; flex-wrap: wrap; }
++.review-queue .queue-answer input { flex: 1 1 24ch; min-width: 0; }
++.review-queue .queue-attempts { margin: 2px 0 0; padding-left: 18px; color: var(--label-2); font-size: 12px; }
++.queue-departures { margin: 0 4px 10px; }
++.queue-departures pre { max-height: 240px; overflow: auto; }
++#dag-svg .node.conditional .box { stroke-dasharray: 6 4; }
++#dag-svg .node.parked .box { stroke: var(--orange); stroke-width: 2; }
++#dag-svg .node .marks { font-size: 10px; font-weight: 600; fill: var(--label-3); }
++#dag-svg .node .marks .parked { fill: var(--orange); }
++@media (max-width: 760px) { .review-queue > li { grid-template-columns: 1fr; } .review-queue .queue-kind { grid-row: auto; } }
+diff --git a/src/proof_web/static/app.js b/src/proof_web/static/app.js
+index 5c85c3c..e96fd17 100644
+--- a/src/proof_web/static/app.js
++++ b/src/proof_web/static/app.js
+@@ -247,6 +247,109 @@ function cardEvidence(checks) {
+   return list;
+ }
+ 
++// -- ADR-0021: Provisional, Conditional and Parked on the map ------------------------------------------
++function nodeMarks(n) {
++  const marks = [];
++  if (n.parked) marks.push({ cls: "parked", text: "parked", title: `Parked: ${n.parked}. The agents went on with the rest; it waits in the review queue.` });
++  if (n.provisional) marks.push({ cls: "provisional", text: "provisional", title: "Provisional: rested on for work by its statement, never its proof. Not trust until you decide it." });
++  const on = n.conditional_on || [];
++  if (on.length) marks.push({ cls: "conditional", text: "conditional", title: `Conditional on ${on.join(", ")}: it stands only if they do.` });
++  return marks;
++}
++
++// -- the review queue (ADR-0021 point 10): everything waiting on the researcher, bottom-up -------------
++const QUEUE_KIND = { parked: "Parked", provisional: "Provisional", imported: "Citation", question: "Question", unfixed: "Unfixed text" };
++let queueData = { items: [], departures: null };
++
++function queueLink(id) {
++  const n = mapData && mapData.nodes.find((m) => m.id === id);
++  return el("a", id, { href: n ? pageOf(n) : `#/node/${encodeURIComponent(id)}` });
++}
++
++function queueItem(item) {
++  const li = el("li");
++  li.dataset.kind = item.kind;
++  const body = el("div", null, { class: "queue-body" });
++  const meta = el("div", null, { class: "queue-meta" });
++  if (item.node_id) { body.append(queueLink(item.node_id), el("span", ` · ${item.statement}`)); }
++  if (item.kind === "parked") {
++    meta.textContent = `the agents could not go on: ${item.reason}`;
++    const tried = el("ul", null, { class: "queue-attempts" });
++    for (const a of item.attempts || []) tried.append(el("li", `${a.goal} — ${a.method ? `${a.method}: ` : ""}failed on ${a.failed_on}`));
++    li.append(el("span", QUEUE_KIND[item.kind], { class: `queue-kind ${item.kind}` }), body, meta);
++    if (tried.children.length) li.append(tried);
++    return li;
++  }
++  if (item.kind === "provisional") meta.textContent = `the Verifier passed snapshot v${item.snapshot}; Accept it to make what rests on it decidable` + ((item.conditional_on || []).length ? ` · itself conditional on ${item.conditional_on.join(", ")}` : "");
++  if (item.kind === "imported") meta.textContent = "an imported result no one has Reference-reviewed: the runs rely on its statement";
++  if (item.kind === "unfixed") {
++    if (item.definition_id) {
++      body.append(el("b", `${item.definition_id} · ${item.term}`), el("span", ` ${item.text}`));
++      meta.textContent = `a Definition ${item.by} wrote; named by ${(item.named_by || []).join(", ") || "no node yet"}; editable until a decision relies on it`;
++    } else meta.textContent = `stated by ${item.by}; editable until a Review decision relies on it`;
++  }
++  li.append(el("span", QUEUE_KIND[item.kind], { class: `queue-kind ${item.kind}` }), body, meta);
++  if (item.kind === "question") {
++    body.append(el("p", item.question, { class: "queue-question" }));
++    meta.textContent = `the choice ${item.by || "a role"} made instead of stopping`;
++    const form = el("div", null, { class: "queue-answer" });
++    const other = el("input", null, { placeholder: "the other reading, if it should change" });
++    const keep = el("button", "Keep the choice", { type: "button" });
++    const answer = el("button", "Redirect", { type: "button", class: "primary" });
++    const send = async (payload) => {
++      try { await api(`/api/node/${encodeURIComponent(item.node_id)}/answer`, { question: item.question_id, ...payload }); }
++      catch (error) { showError(error); return; }
++      say(payload.keep ? `The choice on ${item.node_id} stands.` : `${item.node_id}'s next run is redirected.`, "ok");
++      await loadQueue();
++    };
++    keep.addEventListener("click", () => send({ keep: true }));
++    answer.addEventListener("click", () => { if (other.value.trim()) return send({ answer: other.value.trim() }); say("Say the reading to follow.", "error"); });
++    form.append(other, keep, answer);
++    li.append(form);
++  }
++  return li;
++}
++
++function showQueue() {
++  $("review-queue").replaceChildren(...queueData.items.map(queueItem));
++  if (!queueData.items.length) $("review-queue").append(el("li", "Nothing is waiting on you.", { class: "queue-none" }));
++  $("queue-count").textContent = queueData.items.length ? String(queueData.items.length) : "";
++  $("queue-departures").hidden = !queueData.departures;
++  $("queue-departures-text").textContent = queueData.departures || "";
++}
++
++async function loadQueue() {
++  if (!$("review-queue")) return;  // a page drawn without the review page (the node form's own harness)
++  const data = await api("/api/review-queue");
++  queueData = { items: data.items || [], departures: data.departures || null };
++  showQueue();
++}
++
++// -- Pursue on a project with a library and no map (ADR-0021 point 7) ----------------------------------
++let pursuitTimer = null;
++function showPursuit(view) {
++  if (!$("pursue-banner")) return;
++  const running = ["reading", "pursuing"].includes(view.status);
++  $("pursue-banner").hidden = !(view.can_pursue || running || view.status !== "idle");
++  $("pursue-start").hidden = running || !view.can_pursue;
++  $("pursue-stop").hidden = !running;
++  $("pursue-status").textContent = view.stopping ? "Stopping: the Reader's turn is ending…" :  // Pursue again once it has
++    view.status === "idle" ? "" :
++    view.status === "reading" ? "The Reader is stating the draft…" :
++    view.status === "pursuing" ? `Pursuing ${view.current} (${(view.theorems || []).join(", ")})` : `${view.status}${view.reason ? ` — ${view.reason}` : ""}`;
++  clearTimeout(pursuitTimer);
++  if (running || view.stopping) pursuitTimer = setTimeout(() => refresh().catch(showError), 5000);
++}
++
++async function pursue(action) {
++  try { showPursuit(await api(`/api/pursue/${action}`, {})); } catch (error) {
++    // a Stop on a pursuit that had already ended: nothing to stop, so no error; show where it stands
++    if (action === "stop" && error.code === "NO_PURSUIT") { try { showPursuit(await api("/api/pursue")); } catch (again) { showError(again); } return; }
++    showError(error); return;
++  }
++  if (action === "start") say("Pursue started: the Reader reads the draft, then each Theorem is worked.", "ok");
++}
++
+ function showHome() {
+   const body = $("pending").querySelector("tbody");
+   body.replaceChildren(...state.pending.map((item) => {
+@@ -768,7 +871,8 @@ function drawDag(nodes) {
+   }
+   for (const n of nodes) {
+     const left = -BOX.w / 2, top = -BOX.h / 2;
+-    const classes = ["node", `state-${n.status.kind}`, n.frontier ? "frontier" : "", rejected(n) ? "rejected" : ""].filter(Boolean).join(" ");
++    const classes = ["node", `state-${n.status.kind}`, n.frontier ? "frontier" : "", rejected(n) ? "rejected" : "",
++                     (n.conditional_on || []).length ? "conditional" : "", n.parked ? "parked" : ""].filter(Boolean).join(" ");
+     const place = () => { const p = at.get(n.id); g.setAttribute("transform", `translate(${p.x},${p.y})`); };
+     const g = svg("g", { class: classes, "data-node-id": n.id, tabindex: 0, role: "link", "aria-label": `${n.kind} ${n.id}: ${acceptanceText(n)}, ${n.workflow_state}, ${n.integrity_state}${n.assignee ? `, claimed by ${n.assignee}` : ""}${n.frontier ? ", on the frontier" : ""}` });
+     place();
+@@ -783,6 +887,13 @@ function drawDag(nodes) {
+     const meta = svg("text", { class: "meta", x: left + 14, y: top + 58 });
+     meta.textContent = n.display_label ? short(n.statement, 30) : "";
+     g.append(kind, label, meta);
++    // ADR-0021: what it may be rested on for, what its proof rests on unaccepted, and where the agents could not go
++    const marks = nodeMarks(n);
++    if (marks.length) {
++      const line = svg("text", { class: "marks", x: left + BOX.w - 14, y: top + 21, "text-anchor": "end" });
++      for (const mark of marks) { const t = svg("tspan", { class: mark.cls }); t.textContent = ` ${mark.text}`; line.append(t); }
++      g.append(line);
++    }
+     // the node's one state (the server's, issue #157), as a word along the bottom
+     const [own, ...beside] = statusMarks(n.status, n.frontier);
+     const status = svg("g", { class: `status ${own.kind}` });
+@@ -811,6 +922,7 @@ function drawDag(nodes) {
+     // hovering shows the current snapshot's 核心思路 (ADR-0013), under the statement it proves
+     const title = svg("title");
+     title.textContent = n.core_idea ? `${n.statement}\n核心思路：${n.core_idea}` : n.statement;
++    for (const mark of nodeMarks(n)) title.textContent += `\n${mark.title}`;
+     if (n.acceptance_state === "trusted-by-rule") title.textContent += `\n${acceptanceText(n)}`;  // the card's word is short; the names are a hover away
+     g.append(title);
+     // drag a node to move it (its edges follow); a click without a drag opens it
+@@ -869,6 +981,7 @@ function drawTree(nodes) {
+     li.append(small(stateChip(n.acceptance_state, acceptanceText(n))), small(stateChip(n.workflow_state)), small(stateChip(n.integrity_state)));
+     if (n.assignee) li.append(small(stateChip("claimed", n.assignee, `claimed by ${n.assignee}`)));
+     li.append(...statusChips(n.status, n.frontier).map(small));  // the card's status, and its Ready beside a warning (issue #157)
++    for (const mark of nodeMarks(n)) li.append(small(kindChip(mark.cls === "parked" ? "attention" : "open", mark.text, mark.title)));  // ADR-0021
+     if ((parents.get(id) || 0) > 1) li.append(el("span", "shared", { class: "state-chip shared-chip", title: `used by ${parents.get(id)} nodes; see the DAG` }));
+     if (ancestors.has(id)) { li.append(" (cycle: not expanded again)"); return li; }
+     if (n.dependencies.length) {
+@@ -1145,6 +1258,8 @@ async function route() {
+   const match = location.hash.match(/^#\/node\/(.+)$/);
+   const fogLink = location.hash.match(/^#\/fog\/(.+)$/);
+   const page = match ? "node" : { "#/review": "review", "#/warnings": "warnings" }[location.hash] || "map";
++  // #/pursue: the Home's Pursue (ADR-0021 point 7) lands on the map with the Pursue button in hand; the click is the researcher's
++  if (location.hash === "#/pursue" && $("pursue-start") && !$("pursue-start").hidden) { $("pursue-start").focus(); say("Press Pursue to have the agents state the draft and work it.", "ok"); }
+   if (fogLink) await openFogAt(decodeURIComponent(fogLink[1]));
+   document.body.dataset.page = page;
+   $("home").hidden = page !== "map";
+@@ -1168,6 +1283,8 @@ async function refresh() {
+   showHome();
+   showMap();
+   showAttention();
++  try { await loadQueue(); } catch (error) { say(`The review queue couldn't be read: ${error.message}`, "error"); }  // a section: never the page
++  try { showPursuit(await api("/api/pursue")); } catch (error) { showError(error); }
+   try { await loadFog(); } catch (error) { say(`The fog couldn't be read: ${error.message}`, "error"); }  // a side drawer: never the page
+   await route();
+ }
+@@ -1214,6 +1331,10 @@ document.addEventListener("DOMContentLoaded", () => {
+     if (!decisions.length) return say("Tick at least one decision.", "error");
+     try { await decide(decisions); } catch (error) { showError(error); }
+   });
++  if ($("pursue-start")) {
++    $("pursue-start").addEventListener("click", () => pursue("start"));
++    $("pursue-stop").addEventListener("click", () => pursue("stop"));
++  }
+   wireCanvas();
+   wireFind();
+   // the sidebar hides (remembered in this browser); on a narrow window it slides over the map
+diff --git a/src/proof_web/static/home.js b/src/proof_web/static/home.js
+index 2226b90..b0ef8fb 100644
+--- a/src/proof_web/static/home.js
++++ b/src/proof_web/static/home.js
+@@ -50,11 +50,11 @@ async function refresh() {
+ }
+ 
+ // Open: the Home serves the project's page (starting it if need be), then the browser moves there.
+-async function openProject(project) {
++async function openProject(project, hash) {
+   say(`Opening ${project.name}…`);
+   try {
+     const { url } = await api("/api/projects/open", { path: project.path });
+-    location.href = url;
++    location.href = hash ? `${url.replace(/#.*$/, "")}${hash}` : url;
+   } catch (error) { showError(error); }
+ }
+ 
+@@ -98,6 +98,11 @@ function card(project) {
+     create.addEventListener("click", () => createProject(project.path, "").catch(showError));
+     foot.append(create);
+   } else if (!project.error) {
++    if (project.can_pursue) {  // a draft in the library and no map yet (ADR-0021 point 7): the page asks once more, then pursues
++      const pursue = el("button", "Pursue…", { type: "button", title: "Open the project to pursue the draft in its library: the agents state it as a map and work it" });
++      pursue.addEventListener("click", () => openProject(project, "#/pursue"));
++      foot.append(pursue);
++    }
+     const open = el("button", "Open", { type: "button", class: "primary" });
+     open.addEventListener("click", () => openProject(project));
+     foot.append(open);
+diff --git a/src/proof_web/static/index.html b/src/proof_web/static/index.html
+index ab38eff..c9950b0 100644
+--- a/src/proof_web/static/index.html
++++ b/src/proof_web/static/index.html
+@@ -67,6 +67,12 @@
+     <main>
+       <div id="message" role="status"></div>
+       <section id="home">
++        <div id="pursue-banner" class="pursue-banner" hidden>
++          <p><b>Your library has a draft and the map is empty.</b> Pursue reads the draft, states it as a map, and works every Theorem as far as the agents can go. What it leaves you is the review queue; nothing it does is trust until you Accept it.</p>
++          <span id="pursue-status" class="hint" role="status"></span>
++          <button id="pursue-start" type="button" class="primary">Pursue</button>
++          <button id="pursue-stop" type="button" class="danger" hidden>Stop</button>
++        </div>
+         <div class="stage" id="map-stage">
+           <div id="map-dag" class="map-canvas"><svg id="dag-svg" role="img" aria-label="Dependency graph of the proof map"></svg></div>
+           <div id="map-tree" hidden></div>
+@@ -115,6 +121,15 @@
+           <table id="pending"><thead><tr><th></th><th>Node</th><th>Statement and key ideas</th><th>Decision</th><th>Rationale</th></tr></thead><tbody></tbody></table>
+           <div class="card-foot"><button id="decide-batch" type="button" class="primary">Record Selected Decisions</button></div>
+         </div>
++        <section id="queue-section" class="queue-section" aria-labelledby="queue-head">
++          <h2 class="group-head" id="queue-head">Review queue <span class="n" id="queue-count"></span>
++            <span class="hint">bottom-up: each Accept makes the next decision possible; nothing here holds the agents back</span></h2>
++          <details id="queue-departures" class="queue-departures" hidden>
++            <summary>Where the Reader departed from your draft</summary>
++            <pre id="queue-departures-text"></pre>
++          </details>
++          <ol id="review-queue" class="review-queue"></ol>
++        </section>
+         <details id="trusted-section" class="group trusted-section">
+           <summary class="group-head">Trusted by rule <span class="n" id="trusted-count"></span>
+             <span class="hint">imported results you haven't looked at, callable under a Trust rule</span>
+diff --git a/src/proof_web/static/studio/run.js b/src/proof_web/static/studio/run.js
+index 42ffdc4..2f06fe6 100644
+--- a/src/proof_web/static/studio/run.js
++++ b/src/proof_web/static/studio/run.js
+@@ -62,7 +62,7 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
+     if (action === "start" && chosenProvider()) body = { ...body, provider: chosenProvider() };
+     const r = await api(`../../api/node/${encodeURIComponent(nodeId())}/coordinator/${action}`, body);
+     if (r._status >= 400) { const err = r.error && typeof r.error === "object" ? r.error : { code: r.code, message: r.error }; tell(`${err.code || "refused"}: ${err.message || ""}`.trim(), true); return r; }
+-    tell(action === "start" ? "The subtree's Coordinator started: it works the open nodes under this one." : `subtree ${action}: ${(r.data || r).status || "done"}.`);
++    tell(action === "start" ? "Pursue started: the agents work everything under this node to the end, and what they leave you is the review queue." : `subtree ${action}: ${(r.data || r).status || "done"}.`);
+     await refresh(true);
+     return r;
+   }
+@@ -84,16 +84,25 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
+       if (c.can_release) {
+         line.append(button("Stop subtree", "release", "danger", "Release the runs this Coordinator started before starting again"));
+       } else {
+-        line.append(button("Start subtree", "start", "primary", `Work every open node under this one, up to ${c.parallel || 2} at a time; this node's own run starts once every child is Accepted`));
++        line.append(button("Pursue", "start", "primary", `Work everything under this node to the end, up to ${c.parallel || 2} runs at a time: split it first if it has no Claims; each node starts once what it rests on is Accepted or Provisional. Nothing waits for you`));
+       }
+     } else {
+       const sub = c.subtree || {};
+-      const where = c.running && c.running.length ? `running: ${c.running.join(", ")}` : "no run on now: waiting on your review";
++      const where = c.running && c.running.length ? `running: ${c.running.join(", ")}` : "no run on now";
+       line.append(h("span", c.status, { class: `coordinator-status ${c.status}` }),
+                   h("span", `${where} · ${(c.accepted || []).length} accepted of ${sub.nodes || 0} · turns ${c.turns}/${c.turns_max}`, { class: "coordinator-meta" }),
+                   c.status === "paused" ? button("Resume subtree", "resume", "primary") : button("Pause subtree", "pause", "", "No new node run begins; the running ones hold after their turn"),
+                   button("Stop subtree", "release", "danger", "Stop the Coordinator and release every run it started"));
+     }
++    // the nodes it parked (ADR-0021 point 9): where the agents could not go; the rest went on without them, and each
++    // waits in the map's review queue with its attempts
++    if ((c.parked || []).length) {
++      line.append(h("span", c.parked.map((p) => `${p.node} parked — ${p.reason}`).join("; "), { class: "coordinator-meta coordinator-parked", title: "In the map's review queue, with its attempts" }));
++    }
++    // the nodes it left for the researcher: a run that ended needing them; the rest goes on without them
++    if ((c.held || []).length) {
++      line.append(h("span", c.held.map((x) => `${x.node} waits for you — ${x.reason}`).join("; "), { class: "coordinator-meta coordinator-held", title: "The Coordinator does not restart these; open the node to see why" }));
++    }
+     card.append(line);
+     return card;
+   }
+diff --git a/src/proof_web/studios.py b/src/proof_web/studios.py
+index 80c85f7..120b712 100644
+--- a/src/proof_web/studios.py
++++ b/src/proof_web/studios.py
+@@ -33,12 +33,22 @@ from proof_cli.key_ideas import KEY_IDEAS_FILE
+ from proof_cli.storage import ProjectStore, get_active_claim, get_current_candidate_proof, read_project_instance_id
+ from proof_agents.agent_run import ACTIVE, AgentRun, RunHooks
+ from proof_agents.coordinator import Coordinator, CoordinatorHooks
++try:  # ADR-0021: Pursue on a project with no map; an older proof-agents has no Reader and no project pursuit
++    from proof_agents.coordinator import ProjectPursuit, PursuitHooks
++    from proof_agents.reader import ReaderContext
++except ImportError:  # pragma: no cover — the page then offers Pursue on a Theorem only
++    ProjectPursuit = PursuitHooks = ReaderContext = None
+ from proof_agents.map_agent import MAP_AGENT_NAME, MapAgentContext
+ from proof_agents.proof_agent import ProofAgentContext, agent_name, budget, library_folders, open_command, parallel, studio_settings
+ 
+ _CONTEXT_HAS_GATE = "review_gate" in {f.name for f in dataclasses.fields(ProofAgentContext)}  # ADR-0019 wave 2a
+ _CONTEXT_HAS_PROJECT = "project_id" in {f.name for f in fields(ProofAgentContext)}  # re-audit P1: the memory rule names the project too
++_CONTEXT_HAS_PURSUE = "pursue" in {f.name for f in fields(ProofAgentContext)}  # ADR-0021 point 7: a Coordinator's Decomposer does not stop
++_COORDINATOR_PARKS = "park" in {f.name for f in fields(CoordinatorHooks)}  # ADR-0021 point 9
++# a project pursuit's Stop while its Reader reads stops the Reader's turn too (contract C4); an older one leaves it to the host
++_PURSUIT_STOPS_READ = PursuitHooks is not None and "stop_read" in {f.name for f in fields(PursuitHooks)}
+ from latex_agent.agent import AgentManager
++from proof_web.review_queue import PARKED_NOTE, awaiting_review, parked_reason
+ from latex_agent.server import ComputationHooks, FinishedRun, RunInputs, RunRecord, Studio
+ from proof_cli.vault import (read_working_snapshot, RUN_SCRIPT, SNAPSHOT_MANIFEST, NodeFolderLinks, frozen_digests, frozen_role, inputs_digest, is_executable,
+                      node_folder, working_inputs, working_links)
+@@ -137,7 +147,11 @@ class StudioHub:
+         self._instance = read_project_instance_id(store)
+         self._detached = False
+         self._coordinators: dict[str, Coordinator] = {}   # one per subtree root it was started on (ADR-0019 point 18)
++        self._pursuit = None  # Pursue on a project with no map (ADR-0021 point 7): a Reader turn, then each Theorem's Coordinator
+         self._discussion: AgentManager | None = None   # the map's agent (issue #177), made on first use; one turn at a time
++        self._reader: AgentManager | None = None       # the Reader's (ADR-0021 point 5), for Pursue on a project with no map
++        self._read_job: int | None = None              # the Reader's turn while one runs: what Stop stops
++        self._read_stopped = False                     # Stop came while the Reader's turn was being prepared: it never starts
+         self._discussion_live: dict | None = None      # {"job", "turn", "provider"} while a discussion turn runs (or is starting)
+         self._discussion_pending: dict[str, dict] = {}  # ended turns whose record could not be written yet: kept, shown, written on the next read (audit)
+ 
+@@ -176,6 +190,9 @@ class StudioHub:
+                         # the project's instance id (ADR-0019 point 12): a role's memory writes are bound to this project
+                         # and node by `proof memory add --project <id> --node-id <node>`, the one form the rule admits
+                         **({"project_id": self._instance} if _CONTEXT_HAS_PROJECT else {}),
++                        # a turn a Coordinator's Pursue started (ADR-0021 point 7): its Decomposer adds its Claims' edges
++                        # and does not stop for the researcher
++                        **({"pursue": bool((turn or {}).get("pursue"))} if _CONTEXT_HAS_PURSUE else {}),
+                     ),
+                     # the node's run (proof-agents, spec #145), on this studio's agent manager
+                     run=lambda agent: AgentRun(agent, self._run_hooks(node_id)),
+@@ -244,6 +261,12 @@ class StudioHub:
+             return
+         proof_map.record_progress(self.store, node_id, role=role, by=name, step=self._last_step(node_id), status=status, note=note)
+ 
++    def _record_question(self, node_id: str, role: str, name: str, text: str) -> None:
++        """A Standing question the run's role recorded (ADR-0021 point 8) — unless the project is gone from the folder."""
++        if not self._attached():
++            return
++        proof_map.record_progress(self.store, node_id, role=role, by=name, question=text)
++
+     def _record_turn(self, node_id: str, turn: dict) -> None:
+         """A turn's record (started, ended, its conversation) — unless the project it ran on is gone from the folder."""
+         if not self._attached():
+@@ -278,6 +301,8 @@ class StudioHub:
+             "working_inputs": lambda: self._working_inputs(node_id),  # phase 4: the files' text, for the researcher's diff (point 21)
+             "check_inputs": lambda: node_check.check_node(self.store, node_id) if self._attached() else [],  # the mechanical checks (issue #180)
+             "shared_notes": lambda: self._shared_notes(node_id),
++            # ADR-0021 point 8: a choice the role made, recorded as a Standing question on the node
++            "record_question": lambda role, name, text: self._record_question(node_id, role, name, text),
+             "record_evidence": lambda candidate_proof_id, outcome, *, run_by, notes, inputs_sha256: self._record_evidence(
+                 node_id, candidate_proof_id, outcome, run_by=run_by, notes=notes, inputs_sha256=inputs_sha256),
+         }
+@@ -327,12 +352,21 @@ class StudioHub:
+             dep = proof_map.get_node(self.store, dep_id)
+             if dep is None:
+                 continue
+-            accepted = proof_map.get_acceptance_state(self.store, dep_id) == "accepted"
+-            dependencies.append({"id": dep.id, "statement": dep.statement, "accepted": accepted,
+-                                 "key_ideas": self._key_ideas_text(dep_id) if accepted else None,
++            accepted = self._settled(dep)
++            dependencies.append({"id": dep.id, "kind": dep.kind.value, "statement": dep.statement, "accepted": accepted,
++                                 # rested on for its statement, never its proof (ADR-0021 point 3)
++                                 "provisional": proof_map.is_provisional(self.store, dep_id),
++                                 "key_ideas": self._key_ideas_text(dep_id) if accepted and dep.kind != ProofMapNodeKind.imported_result else None,
+                                  "split_child": dep.derived_from == node.id})  # a child a split made, as against a premise (point 20)
+         return {"node_id": node.id, "kind": node.kind.value, "statement": node.statement, "dependencies": dependencies}
+ 
++    def _settled(self, node) -> bool:
++        """Whether a node is what a dependent may rest on for trust: Accepted, or for an imported result Reference-reviewed
++        or trusted by a rule (ADR-0014)."""
++        if node.kind == ProofMapNodeKind.imported_result:
++            return proof_map.get_reference_review_state(self.store, node.id) in ("reviewed", "trusted-by-rule")
++        return proof_map.get_acceptance_state(self.store, node.id) == "accepted"
++
+     def _key_ideas_text(self, node_id: str) -> str | None:
+         """The node's current key-ideas.md as text, or None when it has none."""
+         try:
+@@ -463,7 +497,8 @@ class StudioHub:
+             raise NoStudio("NODE_NOT_FOUND", f"proof map node {root_id} not found")
+         if node.kind == ProofMapNodeKind.imported_result:
+             raise NoStudio("NO_SUBTREE", f"{root_id} is an imported result: it has no subtree to work")
+-        if not node.dependencies:
++        if not node.dependencies and node.kind not in (ProofMapNodeKind.theorem, ProofMapNodeKind.lemma):
++            # a Theorem or Lemma with no Claims yet is pursued from a Decomposer turn (ADR-0021 point 7)
+             raise NoStudio("NO_SUBTREE", f"{root_id} rests on nothing: there is no subtree to coordinate")
+         with self._lock:
+             if self._closed:
+@@ -477,9 +512,143 @@ class StudioHub:
+                     parallel=lambda: parallel(root),
+                     agent_name=lambda provider: agent_name(root, provider),
+                     record=lambda note: self._record_coordinator(root_id, note),
++                    **({"park": lambda node_id, reason: self._park(root_id, node_id, reason)} if _COORDINATOR_PARKS else {}),
+                 ), root_id)
+             return self._coordinators[root_id]
+ 
++    # -- Pursue on a project (ADR-0021 point 7): the Reader states the draft, then each Theorem is pursued -------------
++
++    @staticmethod
++    def project_pursuit_available() -> bool:
++        """Whether this proof-agents has a project pursuit (a Reader and ProjectPursuit): the Home asks it too."""
++        return ProjectPursuit is not None
++
++    def can_pursue(self) -> bool:
++        """Whether Pursue starts from the draft: a library to read, no map yet, and no pursuit still at work."""
++        return (self.project_pursuit_available() and bool(library_folders(self.store.root)) and not proof_map.list_nodes(self.store)
++                and not self._pursuit_busy())
++
++    def pursuit(self):
++        """The project's pursuit, made on first use."""
++        if ProjectPursuit is None:
++            raise NoStudio("NO_SUBTREE", "this proof-agents has no project pursuit; pursue a Theorem from its page")
++        if not self._attached():
++            raise NoStudio("PROJECT_REPLACED", "the project this page was opened for is no longer in its folder; open the project from the Home")
++        with self._lock:
++            if self._closed:
++                raise NoStudio("STUDIO_CLOSED", "the proof map's server is shutting down")
++            if self._pursuit is None:
++                self._pursuit = ProjectPursuit(PursuitHooks(
++                    read=lambda provider: self._read_turn(provider),
++                    theorems=lambda: [n.id for n in proof_map.list_nodes(self.store) if n.kind == ProofMapNodeKind.theorem] if self._attached() else [],
++                    coordinator=lambda theorem: self.coordinator(theorem),
++                    record=lambda note: None,
++                    **({"stop_read": self._stop_read} if _PURSUIT_STOPS_READ else {}),
++                ))
++            return self._pursuit
++
++    def _reader_agent(self) -> AgentManager:
++        """The Reader's agent manager: one for the project, rooted at it, made on first use, closed with the hub."""
++        with self._lock:
++            if self._closed:
++                raise NoStudio("STUDIO_CLOSED", "the proof map's server is shutting down")
++            if self._reader is None:
++                root = self.store.root
++                self._reader = AgentManager(lambda: root, lambda: [], None, context_fn=lambda turn=None: ReaderContext(
++                    root, library_folders(root), project_id=self._instance))
++            return self._reader
++
++    def _read_turn(self, provider: str) -> dict:
++        """One Reader turn on the whole library, run to its end (ADR-0021 point 5): {} once it ended, or the refusal."""
++        agent = self._reader_agent()
++        try:
++            started = agent.start("Read the draft in the library and state it as the proof map, as your brief says.",
++                                  None, "edit", None, None, None, provider or None,
++                                  unless=lambda: self._read_stopped, begin=self._reading)
++            if "error" in started:
++                return {"error": str(started["error"]), "code": str(started.get("code") or "AGENT_REFUSED")}
++            job = agent.jobs[started["job"]]
++            if self._read_job is None:  # a manager that did not call `begin`
++                self._reading(job)
++            with job.cond:
++                while not job.done:
++                    job.cond.wait(1.0)
++        finally:
++            with self._lock:
++                self._read_job = None
++        done = next((e for e in reversed(job.events) if e.get("t") == "done"), {})
++        if done.get("is_error") or done.get("exit") not in (None, 0):
++            return {"error": str(done.get("stderr") or done.get("subtype") or "the Reader's turn failed").strip(), "code": "READER_FAILED"}
++        return {}
++
++    def _reading(self, job) -> None:
++        """The Reader's turn exists: Stop now stops it; a Stop that came first stops it at once."""
++        with self._lock:
++            self._read_job = job.id
++            stopped, reader = self._read_stopped, self._reader
++        if stopped and reader is not None:
++            reader.stop(job.id)
++
++    def _stop_read(self) -> None:
++        """Stop the Reader's turn, running or about to start (ADR-0021 point 7's Stop, while the pursuit reads)."""
++        with self._lock:
++            self._read_stopped = True
++            job, reader = self._read_job, self._reader
++        if job is not None and reader is not None:
++            reader.stop(job)
++
++    def _pursuit_busy(self) -> bool:
++        """Whether the project's pursuit is still at work: pursuing, or stopped but its thread or its Reader's turn not
++        yet ended. A second Pursue then waits, though the map may still be empty."""
++        pursuit = self._pursuit
++        if pursuit is None:
++            return False
++        if pursuit.view()["status"] in ("reading", "pursuing") or self._read_job is not None:
++            return True
++        if hasattr(pursuit, "active"):  # contract C4: its thread alive, a Stop's Reader or Coordinator not yet ended
++            return pursuit.active()
++        thread = getattr(pursuit, "_thread", None)  # an older proof-agents
++        return thread is not None and thread.is_alive()
++
++    def pursuit_action(self, action: str, body: dict) -> tuple[int, dict]:
++        """Pursue on the project (start) and Stop."""
++        try:
++            pursuit = self.pursuit()
++        except NoStudio as exc:
++            code, message = exc.args
++            return int(HTTPStatus.GONE if code == "PROJECT_REPLACED" else HTTPStatus.CONFLICT), {"error": message, "code": code}
++        if action == "start":
++            if self._pursuit_busy():
++                return int(HTTPStatus.CONFLICT), {"error": "this project is still being pursued, or its Stop has not ended the "
++                                                  "Reader's turn yet; wait for it", "code": "PURSUIT_ACTIVE"}
++            provider = str(body.get("provider") or "").strip()
++            if not provider:
++                backend = self._reader_agent().backend(None)
++                provider = backend.id if backend is not None else ""
++            with self._lock:
++                self._read_stopped = False  # a new pursuit's Reader: the last Stop is over
++            answer = pursuit.start(provider)
++        elif action == "stop":
++            reading = pursuit.view()["status"] == "reading"
++            answer = pursuit.stop()
++            if reading and not _PURSUIT_STOPS_READ:  # an older pursuit does not stop its Reader: the host does
++                self._stop_read()
++            if answer.get("code") == "NO_PURSUIT":  # it had ended already: nothing to stop, its ending stands
++                return int(HTTPStatus.OK), self.pursuit_view()
++        else:
++            return int(HTTPStatus.NOT_FOUND), {"error": f"no pursue action {action!r}", "code": "NOT_FOUND"}
++        return (int(HTTPStatus.CONFLICT) if "error" in answer else int(HTTPStatus.OK)), answer
++
++    def pursuit_view(self) -> dict:
++        view = self._pursuit.view() if self._pursuit is not None else {"status": "idle", "reason": "", "theorems": [], "current": None, "results": {}}
++        running = view["status"] in ("reading", "pursuing")
++        # stopped, but its Reader's turn (or its thread) not ended yet: no Pursue until it has
++        return {**view, "can_pursue": self.can_pursue(), "stopping": not running and self._pursuit_busy()}
++
++    def parked(self, node_id: str) -> str | None:
++        """Why a node is parked: as a Coordinator at work here parked it, else as its work log last said."""
++        return parked_reason(self.store, node_id)
++
+     def _run_of(self, node_id: str):
+         """A node's run, its studio made if none is open: how the Coordinator starts a run without a page on the node."""
+         run = self.studio(node_id).run
+@@ -506,19 +675,39 @@ class StudioHub:
+             if node is None:
+                 continue
+             imported = node.kind == ProofMapNodeKind.imported_result
+-            if imported:
+-                accepted = proof_map.get_reference_review_state(self.store, node_id) in ("reviewed", "trusted-by-rule")
+-            else:
+-                accepted = proof_map.get_acceptance_state(self.store, node_id) == "accepted"
++            accepted = self._settled(node)
+             claim = get_active_claim(self.store, node_id)
+             out.append({"id": node.id, "kind": node.kind.value, "statement": node.statement, "dependencies": list(node.dependencies),
+                         "accepted": accepted, "workflow": proof_map.get_workflow_state(self.store, node_id),
+                         "claimed_by": claim.claimant_id if claim is not None else None,
+                         "key_ideas": self._key_ideas_text(node_id) if accepted and not imported else None,
+-                        "has_run": not imported and node_folder(self.store.root, node_id).is_dir()})
++                        "has_run": not imported and node_folder(self.store.root, node_id).is_dir(),
++                        # ADR-0021: rested on for work; a snapshot awaiting the researcher even where the axis reads
++                        # Blocked; and the Claims its Split made
++                        "provisional": proof_map.is_provisional(self.store, node_id),
++                        "awaiting_review": awaiting_review(self.store, node),
++                        "split_children": self._split_children(node)})
+             queue.extend(node.dependencies)
+         return out
+ 
++    def _split_children(self, node) -> list[str]:
++        """The Claims a Split of `node` made that it still rests on."""
++        children = []
++        for dep_id in node.dependencies:
++            dep = proof_map.get_node(self.store, dep_id)
++            if dep is not None and dep.derived_from == node.id:
++                children.append(dep_id)
++        return children
++
++    def _park(self, root_id: str, node_id: str, reason: str) -> None:
++        """A node the Coordinator of `root_id` parked (ADR-0021 point 9), on the node's own work log: the map marks it and
++        the review queue lists it, with its attempts, until work on it begins again."""
++        if not self._attached():
++            return
++        coordinator = self._coordinators.get(root_id)
++        name = (coordinator.state.name if coordinator is not None else "") or "coordinator"
++        proof_map.record_progress(self.store, node_id, role=None, by=f"{name}/coordinator", coordinator=f"{PARKED_NOTE}{reason}")
++
+     def _record_coordinator(self, root_id: str, note: str) -> None:
+         """What the Coordinator did, on the root's work log — unless the project is gone from the folder."""
+         if not self._attached():
+@@ -852,13 +1041,18 @@ class StudioHub:
+         return 200, {"ok": True}
+ 
+     def close(self) -> None:
++        pursuit = self._pursuit
++        if pursuit is not None and pursuit.view()["status"] in ("reading", "pursuing"):
++            pursuit.stop()  # before the hub closes: its Stop releases the Coordinator it is on through the hub
+         with self._lock:
+             self._closed = True
+             studios, self._studios = list(self._studios.values()), {}
+             coordinators, self._coordinators = list(self._coordinators.values()), {}
+             discussion, self._discussion = self._discussion, None
+-        if discussion is not None:  # the map's agent, with the studios (issue #177)
+-            discussion.shutdown()
++            reader, self._reader = self._reader, None
++        for manager in (discussion, reader):  # the map's agent (issue #177) and the Reader's, with the studios
++            if manager is not None:
++                manager.shutdown()
+         for coordinator in coordinators:  # a Coordinator at work releases every run it started before the studios close
+             if coordinator.active():
+                 coordinator.release()
+diff --git a/tests/_review_client.py b/tests/_review_client.py
+index 5bdb33f..511b57e 100644
+--- a/tests/_review_client.py
++++ b/tests/_review_client.py
+@@ -115,6 +115,10 @@ class DirectClient:
+             return self._call(lambda: self.app.coordinator(node_id))
+         if path == "/api/discussion":  # the map's agent (issue #177)
+             return self._call(self.app.discussion)
++        if path == "/api/review-queue":  # what waits on the researcher (ADR-0021 point 10)
++            return self._call(self.app.review_queue)
++        if path == "/api/pursue":  # Pursue on the project (ADR-0021 point 7)
++            return self._call(self.app.pursuit)
+         if path.startswith("/api/discussion/events"):
+             from urllib.parse import parse_qs, urlsplit
+ 
+@@ -140,6 +144,8 @@ class DirectClient:
+             return self._call(lambda: self.app.discussion_start(body or {}))
+         if path == "/api/discussion/stop":
+             return self._call(lambda: self.app.discussion_stop(body or {}))
++        if path.startswith("/api/pursue/"):  # Pursue on the project (ADR-0021 point 7)
++            return self._call(lambda: self.app.pursuit_action(path.removeprefix("/api/pursue/"), body or {}))
+         if path.startswith("/api/node/") and "/agent/" in path:
+             node_id, _, action = path.removeprefix("/api/node/").rpartition("/agent/")
+             return self._call(lambda: self.app.run_action(node_id, action, body or {}))
+diff --git a/tests/js/map_home_harness.js b/tests/js/map_home_harness.js
+index 2f7f7fe..fa7663c 100644
+--- a/tests/js/map_home_harness.js
++++ b/tests/js/map_home_harness.js
+@@ -105,12 +105,15 @@ class FakeElement {
+     // the fog drawer (issue #137) and the node page's fog block
+     "fog-badge", "stat-fog", "fog-drawer", "fog-drawer-n", "fog-list", "fog-close", "fog-add-text", "fog-add-near", "fog-add", "fog-show-all", "fog-composer", "node-fog", "node-outputs", "node-run",
+     // the legend (issue #157)
+-    "map-legend"];
++    "map-legend",
++    // ADR-0021: Pursue on a project with a draft and no map, and the review queue
++    "pursue-banner", "pursue-start", "pursue-stop", "pursue-status", "queue-count", "queue-departures", "queue-departures-text", "review-queue"];
+   const tags = { "tree-root": "select", "dag-svg": "svg", "decide-batch": "button", pending: "table", warnings: "ul", "map-find": "input", "attention-nodes": "ul",
+     "node-deps": "table", "node-decisions": "table", "node-challenges": "ul", "node-evidence": "ul", "node-history": "ul",
+     trusted: "table", "rules-list": "ul", "rules-retired-list": "ul", "rule-name": "input", "rule-rationale": "input", "rule-decision": "input",
+     "cond-reviewed": "input", "cond-doi": "input", "cond-arxiv": "input", "manage-rules": "button", "rule-record": "button", "rule-cancel": "button", "rule-new": "button",
+-    "map-legend": "ul", "fog-badge": "a", "stat-fog": "b", "fog-drawer": "aside", "fog-list": "ul", "fog-close": "button", "fog-add-text": "input", "fog-add-near": "select", "fog-add": "button", "fog-show-all": "input", "fog-composer": "form" };
++    "map-legend": "ul", "fog-badge": "a", "stat-fog": "b", "fog-drawer": "aside", "fog-list": "ul", "fog-close": "button", "fog-add-text": "input", "fog-add-near": "select", "fog-add": "button", "fog-show-all": "input", "fog-composer": "form",
++    "pursue-start": "button", "pursue-stop": "button", "review-queue": "ol", "queue-departures": "details", "queue-departures-text": "pre" };
+   const elements = Object.fromEntries(ids.map((id) => [id, new FakeElement(tags[id] || "div")]));
+   Object.assign(elements["map-dag"], { clientWidth: 800, clientHeight: 600 });  // the canvas has a size, so it can be fitted and panned
+   focus.body = focus.on = new FakeElement("body");
+@@ -130,7 +133,7 @@ class FakeElement {
+   const crystallized = [];
+   const context = {
+     nfCrystallize: (item) => { crystallized.push(item.id); },
+-    console, location, setTimeout() {}, Node: FakeElement,
++    console, location, setTimeout() {}, clearTimeout() {}, Node: FakeElement,
+     document: {
+       title: "", getElementById: byId,
+       get activeElement() { return focus.on; }, get body() { return focus.body; },
+@@ -147,6 +150,9 @@ class FakeElement {
+         : url === "/api/trust-rules/preview" ? (scenario.preview || { losing: [], depended_on_by_accepted: [], gaining: [] })
+         : url === "/api/fog" ? (scenario.fog || { items: [] })
+         : url === "/api/fog?all=1" ? (scenario.fogAll || scenario.fog || { items: [] })
++        : url === "/api/pursue" ? (scenario.pursue || { status: "idle", reason: "", theorems: [], current: null, results: {}, can_pursue: false })
++        : url.startsWith("/api/pursue/") ? { ...(scenario.pursue || {}), status: "reading", can_pursue: false }
++        : url === "/api/review-queue" ? (scenario.queue || { items: [], departures: null })
+         : node || { results: [] };
+       if (url === "/api/trust-rules/preview") {
+         // scenario.previewFails: the server refuses every preview; scenario.previewOutOfOrder: the first preview's
+@@ -304,6 +310,12 @@ class FakeElement {
+       text: li.textContent, href: li.querySelector("a").getAttribute("href"), image: li.querySelectorAll("img").map((i) => i.getAttribute("src")),
+     })),
+     page: (focus.body.dataset || {}).page || null,
++    // ADR-0021: the review queue (each item's kind and text), the Reader's departures, and the Pursue banner
++    queue: elements["review-queue"].children.filter((li) => li.tagName === "LI").map((li) => ({ kind: li.dataset.kind || null, text: li.textContent })),
++    queueCount: elements["queue-count"].textContent,
++    departures: elements["queue-departures"].hidden ? null : elements["queue-departures-text"].textContent,
++    pursue: { shown: !elements["pursue-banner"].hidden, start: !elements["pursue-start"].hidden, stop: !elements["pursue-stop"].hidden,
++              status: elements["pursue-status"].textContent, focused: focus.on === elements["pursue-start"] },
+   });
+   const readings = [read()];
+   // a key pressed where the focus is: the focused element hears it first, then it bubbles to the document
+@@ -374,6 +386,12 @@ class FakeElement {
+       if (step.runButton.redirect !== undefined) elements["node-run"].querySelector("input").value = step.runButton.redirect;
+       await elements["node-run"].querySelectorAll("button").find((b) => b.textContent === step.runButton.text).dispatch("click"); await settle();
+     }
++    if (step.pursue) { await elements[`pursue-${step.pursue}`].dispatch("click"); await settle(); }  // ADR-0021: Pursue / Stop
++    if (step.queueAnswer) {  // a Standing question answered in place: {node, keep: true} or {node, answer: "<reading>"}
++      const li = elements["review-queue"].children.find((l) => l.dataset.kind === "question" && l.textContent.includes(step.queueAnswer.node));
++      if (step.queueAnswer.answer !== undefined) li.querySelector("input").value = step.queueAnswer.answer;
++      await li.querySelectorAll("button").find((b) => b.textContent === (step.queueAnswer.keep ? "Keep the choice" : "Redirect")).dispatch("click"); await settle();
++    }
+     if (step.fogFill) {
+       const field = fogRow(step.fogFill.id)._all().find((n) => n.getAttribute("name") === step.fogFill.name);
+       field.value = step.fogFill.value;
+diff --git a/tests/test_coordinator_hub.py b/tests/test_coordinator_hub.py
+index c566e91..35aeea1 100644
+--- a/tests/test_coordinator_hub.py
++++ b/tests/test_coordinator_hub.py
+@@ -13,7 +13,7 @@ import pytest
+ from _proofs import write_key_ideas
+ from _researcher import researcher
+ from _review_client import DirectClient
+-from proof_cli.proof_map import create_node, get_active_claim, get_workflow_state, work_log
++from proof_cli.proof_map import create_node, get_active_claim, get_workflow_state, split_node, work_log
+ from proof_cli.storage import ensure_project
+ from proof_web.studios import StudioHub
+ from test_agent_run import FAKE_CLAUDE, SRC, _executable, _queue, _turns, _until
+@@ -24,9 +24,9 @@ def subtree(tmp_path: Path, monkeypatch):
+     """A theorem T over claims A and B, a stub Claude Code on PATH, `proof` running this checkout, one run at a time."""
+     project = tmp_path / "project"
+     store = ensure_project(project)
+-    create_node(store, node_id="A", kind="claim", statement="A holds")
+-    create_node(store, node_id="B", kind="claim", statement="B holds")
+-    create_node(store, node_id="T", kind="theorem", statement="T holds", dependencies=["A", "B"])
++    # T split into A and B: a pursued Theorem with no Split children would begin with a Decomposer turn (ADR-0021 point 7)
++    create_node(store, node_id="T", kind="theorem", statement="T holds")
++    split_node(store, "T", [{"id": "A", "statement": "A holds"}, {"id": "B", "statement": "B holds"}])
+     (project / "proof.toml").write_text("[studio]\nparallel = 1\n")
+     bin_dir = tmp_path / "bin"
+     bin_dir.mkdir()
+diff --git a/tests/test_pursue_review_queue.py b/tests/test_pursue_review_queue.py
+new file mode 100644
+index 0000000..477c899
+--- /dev/null
++++ b/tests/test_pursue_review_queue.py
+@@ -0,0 +1,432 @@
++"""ADR-0021 on the page: Pursue, the review queue, and Conditional / Parked on the map.
++
++Pursue is a Coordinator started on a Theorem — split first when it has no Claims yet — or on a project with a library
++and no map, where a Reader turn states the draft first. What the agents leave the researcher is one queue, ordered
++bottom-up so that each Accept makes the next decision possible; none of it holds the agents back.
++"""
++
++import dataclasses
++from pathlib import Path
++
++import pytest
++
++from _proofs import submit_proof
++from _researcher import researcher
++from _review_client import DirectClient
++from proof_cli.definitions import add_definition
++from proof_cli.proof_map import create_node, record_evidence_check, record_progress, questions, work_log
++from proof_cli.storage import ensure_project
++from proof_web.studios import StudioHub
++
++
++def _passed(store, node_id: str):
++    proof = submit_proof(store, node_id, claimant_id="prover-1", scoping_rationale="scoped", content=f"proof of {node_id}")
++    record_evidence_check(store, proof.id, "passed", run_by="prover-1/verifier", notes="no objections")
++
++
++@pytest.fixture
++def project(tmp_path: Path):
++    """A Theorem T over a Lemma L over a Claim C the Verifier passed, beside an unreviewed citation R that L also uses;
++    C and L are an agent's, T is the researcher's."""
++    store = ensure_project(tmp_path / "project")
++    create_node(store, node_id="R", kind="imported_result", statement="Known", source_locator="doi:x", source_version="v1", created_by="reader-1")
++    create_node(store, node_id="C", kind="claim", statement="C holds", created_by="decomposer-1")
++    create_node(store, node_id="L", kind="lemma", statement="L holds", dependencies=["C", "R"], created_by="reader-1")
++    create_node(store, node_id="T", kind="theorem", statement="T holds", dependencies=["L"])
++    _passed(store, "C")
++    client = DirectClient(store)
++    yield store, client
++    client.app.close()
++
++
++def _nodes(client) -> dict:
++    return {n["id"]: n for n in client.get("/api/map")[1]["data"]["nodes"]}
++
++
++def test_the_map_marks_provisional_and_conditional_nodes(project):
++    store, client = project
++    nodes = _nodes(client)
++    assert (nodes["C"]["provisional"], nodes["C"]["conditional_on"]) == (True, [])
++    assert nodes["R"]["provisional"] is True
++    assert nodes["L"]["conditional_on"] == ["C", "R"] and nodes["L"]["frontier"]
++    assert nodes["T"]["conditional_on"] == ["C", "R"] and not nodes["T"]["frontier"]
++    assert not any(n["parked"] for n in nodes.values())
++
++
++def test_a_parked_node_is_marked_on_the_map_until_work_on_it_resumes(project):
++    store, client = project
++    hub = client.app.studios
++    hub._park("T", "L", "out of budget after 3 start(s)")
++    assert _nodes(client)["L"]["parked"] == "out of budget after 3 start(s)"
++    assert any(e.get("kind") == "coordinator" and e.get("note", "").startswith("parked") for e in work_log(store, "L"))
++    record_progress(store, "L", role="prover", by="prover-2", step=1, status="started")
++    assert _nodes(client)["L"]["parked"] is None
++
++
++def test_the_review_queue_holds_everything_waiting_on_the_researcher_bottom_up(project):
++    store, client = project
++    add_definition(store, "D", term="height", text="h(x) = sup 1/Im", created_by="reader-1")
++    record_progress(store, "C", role="prover", by="prover-1", question="read Γ as SL2(Z[1/p]); the alternative: a congruence subgroup")
++    departures = store.root / "scratch" / "reader"
++    departures.mkdir(parents=True)
++    (departures / "departures.md").write_text("- the height's sup 1/Im is infinite; took the inf\n")
++    client.app.studios._park("T", "L", "out of budget")
++
++    queue = client.get("/api/review-queue")[1]["data"]
++    kinds = [(item["kind"], item.get("node_id") or item.get("definition_id")) for item in queue["items"]]
++    # the places the agents could not go first, then the rest bottom-up
++    assert kinds[0] == ("parked", "L")
++    assert kinds.index(("provisional", "C")) < kinds.index(("unfixed", "L"))
++    assert ("imported", "R") in kinds
++    assert ("question", "C") in kinds
++    unfixed = {key for kind, key in kinds if kind == "unfixed"}
++    assert unfixed >= {"C", "L", "D"} and "T" not in unfixed  # T is the researcher's own text: fixed for agents from the start
++    assert queue["departures"] == "- the height's sup 1/Im is infinite; took the inf\n"
++    question = next(item for item in queue["items"] if item["kind"] == "question")
++    assert question["question"].startswith("read Γ as SL2(Z[1/p])")
++
++
++def test_the_queue_reads_parked_first_then_each_node_s_text_before_the_decision_that_fixes_it(tmp_path: Path):
++    """Parked nodes first, bottom-up; then the rest bottom-up, a node's questions and unfixed text (its statement, the
++    Definitions it names) before its Accept, and a Definition no later than the first node that names it."""
++    store = ensure_project(tmp_path / "project")
++    add_definition(store, "D", term="height", text="h(x) = inf 1/Im", created_by="reader-1")
++    add_definition(store, "E", term="orbit", text="the horocycle orbit", created_by="reader-1")
++    create_node(store, node_id="C", kind="claim", statement="C holds", definitions=["D"], created_by="decomposer-1")
++    create_node(store, node_id="L", kind="lemma", statement="L holds", dependencies=["C"], definitions=["D", "E"], created_by="reader-1")
++    create_node(store, node_id="M", kind="lemma", statement="M holds", dependencies=["L"], created_by="reader-1")
++    create_node(store, node_id="P", kind="lemma", statement="P holds", created_by="reader-1")
++    create_node(store, node_id="T", kind="theorem", statement="T holds", dependencies=["M", "P"])
++    _passed(store, "C")
++    _passed(store, "L")
++    record_progress(store, "C", role="prover", by="prover-1", question="took n ≥ 2; the alternative: n ≥ 1")
++    record_progress(store, "L", role="prover", by="prover-1", question="read Γ as SL2(Z[1/p])")
++    client = DirectClient(store)
++    try:
++        client.app.studios._park("T", "M", "out of budget")
++        client.app.studios._park("T", "P", "out of budget")
++        items = client.get("/api/review-queue")[1]["data"]["items"]
++    finally:
++        client.app.close()
++    keys = [(item["kind"], item.get("node_id") or item.get("definition_id")) for item in items]
++    at = keys.index
++
++    assert keys[:2] == [("parked", "P"), ("parked", "M")]  # parked first overall, bottom-up: P rests on nothing unsettled
++    assert at(("unfixed", "D")) < min(i for i, (_, key) in enumerate(keys) if key == "C")  # before the first node naming it
++    assert at(("question", "C")) < at(("provisional", "C")) and at(("unfixed", "C")) < at(("provisional", "C"))
++    assert at(("provisional", "C")) < at(("question", "L"))  # bottom-up across nodes: C's decision makes L's possible
++    assert at(("unfixed", "E")) < at(("provisional", "L"))  # a Definition L names, read before L's Accept
++    assert at(("question", "L")) < at(("provisional", "L")) and at(("unfixed", "L")) < at(("provisional", "L"))
++
++
++def test_a_standing_question_is_answered_in_place(project):
++    store, client = project
++    record_progress(store, "C", role="prover", by="prover-1", question="took n ≥ 2; the alternative: n ≥ 1")
++    question_id = questions(store, "C")[0]["id"]
++
++    status, answered = client.post("/api/node/C/answer", {"question": question_id, "answer": "take n ≥ 1"})
++    assert status == 200, answered
++    assert questions(store, "C")[0]["answer"]["redirect"] == "take n ≥ 1"
++    assert not any(item["kind"] == "question" for item in client.get("/api/review-queue")[1]["data"]["items"])
++    again = client.post("/api/node/C/answer", {"question": question_id, "keep": True})
++    assert again[1]["error"]["code"] == "QUESTION_ANSWERED"  # each is answered once
++    assert client.post("/api/node/C/answer", {"question": "q_nope", "keep": True})[1]["error"]["code"] == "QUESTION_NOT_FOUND"
++
++
++@pytest.mark.parametrize("keep", ["false", "yes", 1, 0, None, [True], {"keep": True}])
++def test_an_answer_s_keep_is_a_json_boolean_and_nothing_else(project, keep):
++    store, client = project
++    record_progress(store, "C", role="prover", by="prover-1", question="took n ≥ 2; the alternative: n ≥ 1")
++    question_id = questions(store, "C")[0]["id"]
++    status, refused = client.post("/api/node/C/answer", {"question": question_id, "keep": keep})
++    assert (status, refused["error"]["code"]) == (400, "INVALID_REQUEST")
++    assert questions(store, "C")[0]["state"] == "open"  # nothing recorded
++    assert client.post("/api/node/C/answer", {"question": question_id, "keep": True})[0] == 200
++
++
++def test_the_coordinator_reads_provisional_awaiting_review_and_split_children(project):
++    store, client = project
++    hub = client.app.studios
++    subtree = {n["id"]: n for n in hub._subtree("T")}
++    assert subtree["C"]["provisional"] and subtree["C"]["awaiting_review"]
++    submit_proof(store, "L", claimant_id="prover-1", scoping_rationale="scoped", content="proof of L")
++    subtree = {n["id"]: n for n in hub._subtree("T")}
++    assert subtree["L"]["workflow"] == "blocked" and subtree["L"]["awaiting_review"]  # Blocked on the axis, awaiting all the same
++    assert subtree["T"]["split_children"] == []
++
++
++def test_a_brief_names_each_dependency_s_kind_and_whether_it_is_provisional(project):
++    store, client = project
++    brief = client.app.studios._node_brief("L")
++    deps = {d["id"]: d for d in brief["dependencies"]}
++    assert (deps["C"]["kind"], deps["C"]["provisional"], deps["C"]["accepted"]) == ("claim", True, False)
++    assert (deps["R"]["kind"], deps["R"]["provisional"]) == ("imported_result", True)
++    researcher(store).decide_reference_review("R")
++    deps = {d["id"]: d for d in client.app.studios._node_brief("L")["dependencies"]}
++    assert (deps["R"]["accepted"], deps["R"]["provisional"]) == (True, False)  # Reference-reviewed counts as accepted here
++
++
++def test_pursue_on_a_theorem_with_no_claims_has_a_coordinator(tmp_path: Path):
++    store = ensure_project(tmp_path / "project")
++    create_node(store, node_id="T", kind="theorem", statement="T holds")
++    create_node(store, node_id="X", kind="claim", statement="X holds")
++    client = DirectClient(store)
++    try:
++        assert client.get("/api/node/T/coordinator")[1]["data"]["status"] == "idle"  # Pursue splits it first (ADR-0021 point 7)
++        assert client.get("/api/node/X/coordinator")[0] == 404  # a Claim that rests on nothing has nothing to pursue
++    finally:
++        client.app.close()
++
++
++def test_pursue_on_a_project_with_a_library_and_no_map(tmp_path: Path):
++    root = tmp_path / "project"
++    store = ensure_project(root)
++    (root / "library").mkdir()
++    (root / "library" / "main.tex").write_text("\\begin{theorem}T\\end{theorem}\n")
++    (root / "proof.toml").write_text('[studio]\nlibrary = ["library"]\n')
++    client = DirectClient(store)
++    try:
++        view = client.get("/api/pursue")[1]["data"]
++        assert view["status"] == "idle" and view["can_pursue"] is True
++        hub = client.app.studios
++        read = []
++        # the Reader's turn is the host's: a stand-in states one Theorem, then each Theorem gets its Coordinator
++        hub._read_turn = lambda provider: read.append(provider) or create_node(store, node_id="T", kind="theorem", statement="T") and {}
++        pursuit = hub.pursuit()
++        assert pursuit.hooks.theorems() == []
++        assert pursuit.hooks.read("claude") == {} and read == ["claude"]
++        assert pursuit.hooks.theorems() == ["T"]
++        assert pursuit.hooks.coordinator("T") is hub.coordinator("T")
++        assert client.get("/api/pursue")[1]["data"]["can_pursue"] is False  # a map now: Pursue goes on its Theorems
++    finally:
++        client.app.close()
++
++
++def test_the_home_offers_pursue_for_a_project_with_a_draft_and_no_map(tmp_path: Path):
++    from proof_cli import projects
++    from proof_web.home import HomeApp
++
++    root = tmp_path / "horo"
++    store = ensure_project(root)
++    (root / "library").mkdir()
++    (root / "library" / "main.tex").write_text("\\begin{theorem}T\\end{theorem}\n")
++    projects.register_project(root)
++    home = HomeApp()
++    try:
++        assert home.projects()["projects"][0]["can_pursue"] is False  # no library listed yet
++        (root / "proof.toml").write_text('[studio]\nlibrary = ["library"]\n')
++        assert home.projects()["projects"][0]["can_pursue"] is True
++        create_node(store, node_id="T", kind="theorem", statement="T")
++        assert home.projects()["projects"][0]["can_pursue"] is False  # a map: Pursue goes on a Theorem, from its page
++    finally:
++        home.close()
++
++
++def test_the_home_does_not_offer_pursue_when_proof_agents_has_no_project_pursuit(tmp_path: Path, monkeypatch):
++    from proof_cli import projects
++    from proof_web import studios
++    from proof_web.home import HomeApp
++
++    root = tmp_path / "horo"
++    ensure_project(root)
++    (root / "library").mkdir()
++    (root / "library" / "main.tex").write_text("\\begin{theorem}T\\end{theorem}\n")
++    (root / "proof.toml").write_text('[studio]\nlibrary = ["library"]\n')
++    projects.register_project(root)
++    monkeypatch.setattr(studios, "ProjectPursuit", None)  # an older proof-agents: no Reader, no project pursuit
++    home = HomeApp()
++    try:
++        assert home.projects()["projects"][0]["can_pursue"] is False
++    finally:
++        home.close()
++
++
++def test_a_parked_node_reads_parked(project):
++    store, client = project
++    client.app.studios._park("T", "L", "out of budget")
++    assert _nodes(client)["L"]["status"] == {"text": "Parked", "kind": "attention"}
++
++
++def test_a_turn_a_coordinator_s_pursue_started_reaches_the_role_as_pursue(project):
++    store, client = project
++    hub = client.app.studios
++    assert hub.studio("T").agent.context_fn({"role": "decomposer", "name": "claude-code", "pursue": True}).pursue is True
++    assert hub.studio("T").agent.context_fn({"role": "decomposer", "name": "claude-code"}).pursue is False  # started alone: it stops
++
++
++@pytest.mark.parametrize("decision", ["accept", "reject"])
++def test_a_parked_node_stops_reading_parked_once_the_researcher_decides_it(project, decision):
++    store, client = project
++    client.app.studios._park("T", "C", "out of budget")
++    assert _nodes(client)["C"]["parked"] == "out of budget"
++    researcher(store).decide_acceptance("C", decision)
++
++    node = _nodes(client)["C"]
++    assert node["parked"] is None
++    assert node["status"]["text"] != "Parked"
++    queue = client.get("/api/review-queue")[1]["data"]["items"]
++    assert not any(item["kind"] == "parked" and item.get("node_id") == "C" for item in queue)
++
++
++def test_a_decided_node_never_reads_parked_whatever_the_map_field_says():
++    from proof_web.node_status import node_status
++
++    for acceptance, text in (("accepted", "Accepted"), ("rejected", "Rejected"), ("no-longer-callable", "No longer callable")):
++        node = {"workflow_state": "accepted" if acceptance == "accepted" else "rejected", "acceptance_state": acceptance,
++                "integrity_state": "valid", "parked": "out of budget"}
++        assert node_status(node)["text"] == text
++
++
++class _ReaderStandIn:
++    """The Reader's agent manager, standing in: a turn that runs until it is stopped, and a stop that ends it only
++    when the test lets it (`ends`), as a backend may take a while to wind down."""
++
++    def __init__(self) -> None:
++        import threading
++        from types import SimpleNamespace
++
++        self.started, self.stopped, self.ends = threading.Event(), [], threading.Event()
++        self.job = SimpleNamespace(id=7, cond=threading.Condition(), done=False, events=[])
++        self.jobs = {7: self.job}
++
++    def start(self, *args, begin=None, unless=None, **kwargs):
++        if unless is not None and unless():
++            return {"error": "stopped", "code": "STOPPED"}
++        if begin is not None:
++            begin(self.job)
++        self.started.set()
++        return {"job": 7}
++
++    def stop(self, job_id):
++        self.stopped.append(job_id)
++        import threading
++
++        def end():
++            self.ends.wait(10)
++            with self.job.cond:
++                self.job.events.append({"t": "done", "exit": 1, "is_error": True, "subtype": "stopped"})
++                self.job.done = True
++                self.job.cond.notify_all()
++        threading.Thread(target=end, daemon=True).start()
++        return {"ok": True}
++
++    def backend(self, provider):
++        return None
++
++    def shutdown(self):
++        self.ends.set()
++
++
++@pytest.fixture
++def drafted(tmp_path: Path):
++    """A project with a draft in its library and no map, its Reader stood in for."""
++    root = tmp_path / "project"
++    store = ensure_project(root)
++    (root / "library").mkdir()
++    (root / "library" / "main.tex").write_text("\\begin{theorem}T\\end{theorem}\n")
++    (root / "proof.toml").write_text('[studio]\nlibrary = ["library"]\n')
++    from proof_web import studios
++
++    if studios.ProjectPursuit is None:
++        pytest.skip("this proof-agents has no project pursuit")
++    client = DirectClient(store)
++    reader = _ReaderStandIn()
++    client.app.studios._reader = reader
++    yield store, client, reader
++    reader.ends.set()
++    client.app.close()
++
++
++def _until(condition, timeout=10.0):
++    import time
++
++    deadline = time.monotonic() + timeout
++    while not condition():
++        assert time.monotonic() < deadline, "timed out"
++        time.sleep(0.02)
++
++
++def test_stop_while_the_reader_reads_stops_the_reader_s_turn(drafted):
++    store, client, reader = drafted
++    status, started = client.post("/api/pursue/start", {"provider": "claude"})
++    assert status == 200, started
++    assert reader.started.wait(10)
++    assert client.get("/api/pursue")[1]["data"]["status"] == "reading"
++
++    assert client.post("/api/pursue/stop", {})[0] == 200
++    assert reader.stopped == [7]  # the Reader's own turn, not only the pursuit's flag
++
++
++def test_pursue_is_neither_offered_nor_started_again_until_the_stopped_reader_has_ended(drafted):
++    store, client, reader = drafted
++    client.post("/api/pursue/start", {"provider": "claude"})
++    assert reader.started.wait(10)
++    client.post("/api/pursue/stop", {})
++
++    view = client.get("/api/pursue")[1]["data"]
++    assert view["can_pursue"] is False and view["stopping"] is True  # the map is still empty, but the Reader's turn has not ended yet
++    status, again = client.post("/api/pursue/start", {"provider": "claude"})
++    assert status == 409 and again["error"]["code"] == "PURSUIT_ACTIVE"
++
++    reader.ends.set()
++    _until(lambda: client.get("/api/pursue")[1]["data"]["can_pursue"] is True)
++    assert client.get("/api/pursue")[1]["data"]["stopping"] is False
++
++
++
++def test_pursue_start_is_refused_from_another_origin(drafted):
++    import io
++
++    from proof_web.server import _Handler
++
++    store, client, reader = drafted
++    app = client.app
++    handler_class = type("InProcessHandler", (_Handler,), {"app": app})
++    netloc = app.origin.split("://", 1)[1]
++    for origin in ("http://evil.example", None):
++        headers = {"Host": netloc, "Content-Type": "application/json", "Content-Length": "2", **({"Origin": origin} if origin else {})}
++        raw = "POST /api/pursue/start HTTP/1.1\r\n" + "".join(f"{k}: {v}\r\n" for k, v in headers.items()) + "\r\n{}"
++        handler = handler_class.__new__(handler_class)
++        handler.rfile, handler.wfile = io.BytesIO(raw.encode()), io.BytesIO()
++        handler.client_address, handler.server, handler.request = ("127.0.0.1", 0), None, None
++        handler.handle_one_request()
++        status_line = handler.wfile.getvalue().split(b"\r\n", 1)[0].decode()
++        assert status_line.split()[1] == "403", status_line
++        assert b"WRONG_ORIGIN" in handler.wfile.getvalue()
++    assert not reader.started.is_set() and client.get("/api/pursue")[1]["data"]["status"] == "idle"
++
++
++def test_the_pursuit_is_handed_the_hub_s_stop_read(drafted):
++    from proof_agents.coordinator import PursuitHooks
++
++    if "stop_read" not in {f.name for f in dataclasses.fields(PursuitHooks)}:
++        pytest.skip("this proof-agents has no stop_read (contract C4)")
++    store, client, reader = drafted
++    hub = client.app.studios
++    assert hub.pursuit().hooks.stop_read == hub._stop_read
++    hub._stop_read()  # no Reader running: nothing to stop
++    assert reader.stopped == []
++
++
++def test_stop_on_a_pursuit_that_already_ended_is_no_error_and_keeps_its_ending(drafted):
++    store, client, reader = drafted
++    status, view = client.post("/api/pursue/stop", {})  # never started
++    assert status == 200 and view["data"]["status"] == "idle", view
++    client.app.studios._read_turn = lambda provider: {"error": "no backend", "code": "NO_BACKEND"}
++    client.post("/api/pursue/start", {"provider": "claude"})
++    _until(lambda: client.get("/api/pursue")[1]["data"]["status"] == "stuck" and not client.app.studios._pursuit_busy())
++    status, view = client.post("/api/pursue/stop", {})
++    assert status == 200 and view["data"]["status"] == "stuck", view  # its ending stands; nothing was released
++
++
++def test_a_run_s_standing_question_is_recorded_on_the_node(project):
++    from proof_agents.agent_run import RunHooks
++
++    if "record_question" not in {f.name for f in dataclasses.fields(RunHooks)}:
++        pytest.skip("this proof-agents has no record_question")
++    store, client = project
++    hooks = client.app.studios._run_hooks("C")
++    hooks.record_question("prover", "prover-1", "took n ≥ 2; the alternative: n ≥ 1")
++    (asked,) = questions(store, "C")
++    assert asked["question"] == "took n ≥ 2; the alternative: n ≥ 1" and asked["state"] == "open"
++    assert any(item["kind"] == "question" and item["node_id"] == "C" for item in client.get("/api/review-queue")[1]["data"]["items"])
+diff --git a/tests/test_review_queue_page.py b/tests/test_review_queue_page.py
+new file mode 100644
+index 0000000..ae3a988
+--- /dev/null
++++ b/tests/test_review_queue_page.py
+@@ -0,0 +1,83 @@
++"""ADR-0021 on the map page's own script: the review queue, Conditional and Parked on the map, and Pursue from the draft."""
++
++import json
++import shutil
++import subprocess
++
++import pytest
++
++from test_map_home import HARNESS, _as_served, _node, _state
++
++
++def _page(*, map_nodes, queue=None, pursue=None, steps=()):
++    if shutil.which("node") is None:
++        pytest.skip("needs node")
++    scenario = {"state": _state(), "map": {"nodes": map_nodes}, "steps": list(steps), "nodes": {}}
++    scenario = _as_served(scenario)
++    if queue is not None:
++        scenario["queue"] = queue
++    if pursue is not None:
++        scenario["pursue"] = pursue
++    done = subprocess.run(["node", str(HARNESS), json.dumps(scenario)], capture_output=True, text=True, timeout=30)
++    assert done.returncode == 0, done.stderr
++    return json.loads(done.stdout)
++
++
++MAP = [
++    _node("C", "claim", "C holds", provisional=True, conditional_on=[], parked=None, workflow_state="review-needed"),
++    _node("L", "lemma", "L holds", ["C"], provisional=False, conditional_on=["C"], parked="out of budget after 3 start(s)", workflow_state="blocked"),
++    _node("T", "theorem", "T holds", ["L"], provisional=False, conditional_on=["C"], parked=None, workflow_state="blocked"),
++]
++QUEUE = {"departures": "- the height's sup 1/Im is infinite; took the inf\n", "items": [
++    {"kind": "provisional", "node_id": "C", "node_kind": "claim", "statement": "C holds", "depth": 0, "conditional_on": [], "snapshot": 1, "workflow_state": "review-needed"},
++    {"kind": "question", "node_id": "C", "node_kind": "claim", "statement": "C holds", "depth": 0, "question_id": "q_1", "question": "took n ≥ 2; the alternative: n ≥ 1", "by": "prover-1", "role": "prover"},
++    {"kind": "parked", "node_id": "L", "node_kind": "lemma", "statement": "L holds", "depth": 1, "reason": "out of budget after 3 start(s)",
++     "attempts": [{"goal": "the height bound", "method": "Siegel sets", "failed_on": "the cusp at p"}]},
++    {"kind": "unfixed", "definition_id": "D", "term": "height", "text": "h(x) = inf 1/Im", "by": "reader-1", "named_by": ["L"], "depth": 1},
++]}
++
++
++def test_the_map_marks_conditional_and_parked_nodes():
++    (shown,) = _page(map_nodes=MAP)
++    assert "conditional" in shown["dag"]["T"]["classes"] and "parked" not in shown["dag"]["T"]["classes"]
++    assert {"conditional", "parked"} <= set(shown["dag"]["L"]["classes"])
++    assert "Conditional on C: it stands only if they do." in shown["dag"]["T"]["title"]
++    assert "Parked: out of budget after 3 start(s)" in shown["dag"]["L"]["title"]
++    assert shown["dag"]["L"]["status"]["text"] == "Parked"
++    assert any("provisional" in text for text in shown["dag"]["C"]["texts"])
++
++
++def test_the_review_queue_lists_what_waits_bottom_up_and_answers_a_question_in_place():
++    shown, kept, redirected = _page(map_nodes=MAP, queue=QUEUE, steps=[{"queueAnswer": {"node": "C", "keep": True}},
++                                                                        {"queueAnswer": {"node": "C", "answer": "take n ≥ 1"}}])
++    assert [item["kind"] for item in shown["queue"]] == ["provisional", "question", "parked", "unfixed"]
++    assert shown["queueCount"] == "4"
++    assert "the height bound — Siegel sets: failed on the cusp at p" in shown["queue"][2]["text"]
++    assert "D · height" in shown["queue"][3]["text"] and "named by L" in shown["queue"][3]["text"]
++    assert shown["departures"].startswith("- the height's sup 1/Im")
++    assert kept["posted"][-1] == {"url": "/api/node/C/answer", "body": {"question": "q_1", "keep": True}}
++    assert redirected["posted"][-1] == {"url": "/api/node/C/answer", "body": {"question": "q_1", "answer": "take n ≥ 1"}}
++
++
++def test_an_empty_queue_says_nothing_waits():
++    (shown,) = _page(map_nodes=MAP, queue={"items": [], "departures": None})
++    assert [item["text"] for item in shown["queue"]] == ["Nothing is waiting on you."] and shown["departures"] is None
++
++
++def test_a_project_with_a_draft_and_no_map_offers_pursue_and_the_homes_link_hands_it_over():
++    idle = {"status": "idle", "reason": "", "theorems": [], "current": None, "results": {}, "can_pursue": True}
++    shown, landed, pressed = _page(map_nodes=[], pursue=idle, steps=[{"hash": "#/pursue"}, {"pursue": "start"}])
++    assert shown["pursue"]["shown"] and shown["pursue"]["start"] and not shown["pursue"]["stop"]
++    assert landed["pursue"]["focused"] and landed["posted"] == []  # the Home's link never starts the agents itself
++    assert pressed["posted"][-1] == {"url": "/api/pursue/start", "body": {}}
++    assert pressed["pursue"]["stop"] and pressed["pursue"]["status"] == "The Reader is stating the draft…"
++    (mapped,) = _page(map_nodes=MAP)
++    assert not mapped["pursue"]["shown"]  # a map already: Pursue is on a Theorem's page
++
++
++def test_a_stopped_pursuit_whose_reader_has_not_ended_offers_neither_pursue_nor_stop():
++    stopping = {"status": "released", "reason": "stopped by the researcher", "theorems": [], "current": None, "results": {},
++                "can_pursue": False, "stopping": True}
++    (shown,) = _page(map_nodes=[], pursue=stopping)
++    assert shown["pursue"]["shown"] and not shown["pursue"]["start"] and not shown["pursue"]["stop"]
++    assert shown["pursue"]["status"] == "Stopping: the Reader's turn is ending…"
+diff --git a/tests/test_run_pane.py b/tests/test_run_pane.py
+index 16bd696..b6dc2d9 100644
+--- a/tests/test_run_pane.py
++++ b/tests/test_run_pane.py
+@@ -285,11 +285,11 @@ COORDINATOR_RUNNING = {**COORDINATOR_IDLE, "status": "running", "active": True,
+ 
+ def test_a_node_with_children_shows_its_subtrees_coordinator_and_start_subtree_posts_to_the_maps_api():
+     """ADR-0019 point 18: the Coordinator's card sits above the node's own run, only on a node that rests on others."""
+-    (shown, pressed) = _pane(run=IDLE, log=[], coordinator=COORDINATOR_IDLE, press="Start subtree", provider="codex")
+-    assert shown["coordinator"].startswith("Subtree") and "3 open of 4 node(s) under this one" in shown["coordinator"] and "Start subtree" in shown["buttons"]
++    (shown, pressed) = _pane(run=IDLE, log=[], coordinator=COORDINATOR_IDLE, press="Pursue", provider="codex")
++    assert shown["coordinator"].startswith("Subtree") and "3 open of 4 node(s) under this one" in shown["coordinator"] and "Pursue" in shown["buttons"]
+     assert pressed["posted"] == [{"url": "../../api/node/N/coordinator/start", "body": {"provider": "codex"}}]
+     (leaf,) = _pane(run=IDLE, log=[])
+-    assert leaf["coordinator"] is None and "Start subtree" not in leaf["buttons"]
++    assert leaf["coordinator"] is None and "Pursue" not in leaf["buttons"]
+ 
+ 
+ def test_a_working_coordinator_says_where_it_stands_and_pause_and_stop_post_their_actions():
+@@ -298,9 +298,17 @@ def test_a_working_coordinator_says_where_it_stands_and_pause_and_stop_post_thei
+     assert [b for b in shown["buttons"] if "subtree" in b] == ["Pause subtree", "Stop subtree"]
+     assert paused["posted"] == [{"url": "../../api/node/N/coordinator/pause", "body": {}}]
+     (held, resumed) = _pane(run=IDLE, log=[], coordinator={**COORDINATOR_RUNNING, "status": "paused", "running": []}, press="Resume subtree")
+-    assert "no run on now: waiting on your review" in held["coordinator"] and resumed["posted"][0]["url"] == "../../api/node/N/coordinator/resume"
++    assert "no run on now" in held["coordinator"] and resumed["posted"][0]["url"] == "../../api/node/N/coordinator/resume"
+     (ended,) = _pane(run=IDLE, log=[], coordinator={**COORDINATOR_IDLE, "status": "stuck", "reason": "every open node in the subtree is stuck or waiting for you: L2"})
+-    assert "stuck — every open node in the subtree is stuck or waiting for you: L2" in ended["coordinator"] and "Start subtree" in ended["buttons"]
++    assert "stuck — every open node in the subtree is stuck or waiting for you: L2" in ended["coordinator"] and "Pursue" in ended["buttons"]
++    # ADR-0021 point 9: the nodes it parked are named on the card, with why; the rest went on without them
++    (parked,) = _pane(run=IDLE, log=[], coordinator={**COORDINATOR_IDLE, "status": "parked", "reason": "every open node is parked",
++                                                     "parked": [{"node": "L2", "reason": "out of budget after 3 start(s)"}]})
++    assert "L2 parked — out of budget after 3 start(s)" in parked["coordinator"] and "Pursue" in parked["buttons"]
++    # the nodes it left for the researcher (a run that ended needing them) are named beside them; a resplit breaks nothing
++    (held,) = _pane(run=IDLE, log=[], coordinator={**COORDINATOR_RUNNING, "resplit": ["T"],
++                                                   "held": [{"node": "L3", "reason": "the run ended needs-human: two readings"}]})
++    assert "L3 waits for you — the run ended needs-human: two readings" in held["coordinator"]
+ 
+ 
+ def test_the_work_log_shows_a_coordinators_note():
+@@ -313,21 +321,21 @@ def test_a_coordinator_whose_stop_failed_offers_stop_again_not_a_new_start():
+     """Re-audit P5: the recovery from release-failed is Stop again; a Start is refused by the Coordinator anyway."""
+     (shown, pressed) = _pane(run=IDLE, log=[], coordinator={**COORDINATOR_IDLE, "status": "release-failed", "reason": "the node(s) are still assigned: L1: giving it back failed"}, press="Stop subtree")
+     assert "release failed — the node(s) are still assigned: L1" in shown["coordinator"]
+-    assert "Stop subtree" in shown["buttons"] and "Start subtree" not in shown["buttons"]
++    assert "Stop subtree" in shown["buttons"] and "Pursue" not in shown["buttons"]
+     assert pressed["posted"] == [{"url": "../../api/node/N/coordinator/release", "body": {}}]
+ 
+ 
+ @pytest.mark.parametrize("status", ["stuck", "budget", "done"])
+ def test_an_ended_coordinator_with_unreleased_runs_offers_stop_before_a_new_start(status):
+     shown, pressed = _pane(run=IDLE, log=[], coordinator={**COORDINATOR_IDLE, "status": status, "can_release": True}, press="Stop subtree")
+-    assert "Stop subtree" in shown["buttons"] and "Start subtree" not in shown["buttons"]
++    assert "Stop subtree" in shown["buttons"] and "Pursue" not in shown["buttons"]
+     assert pressed["posted"] == [{"url": "../../api/node/N/coordinator/release", "body": {}}]
+ 
+ 
+ def test_a_stopped_coordinator_waits_for_its_previous_start_to_settle():
+     (shown,) = _pane(run=IDLE, log=[], coordinator={**COORDINATOR_IDLE, "status": "released", "settling": True})
+     assert "wait for its runs to settle" in shown["coordinator"]
+-    assert "Start subtree" not in shown["buttons"]
++    assert "Pursue" not in shown["buttons"]
+ 
+ 
+ # -- the Decomposer's offer (ADR-0019 point 20, phase 4) ---------------------------------------------------------------

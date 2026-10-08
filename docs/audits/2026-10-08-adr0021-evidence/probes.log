@@ -1,0 +1,149 @@
+FFFFFF                                                                   [100%]
+=================================== FAILURES ===================================
+___ test_reader_import_must_not_gain_trust_without_own_review[default-other] ___
+
+tmp_path = PosixPath('/private/tmp/proof-0021-audit-kpquveoz/pytest-probes2/test_reader_import_must_not_ga0')
+reuse = False
+
+    @pytest.mark.parametrize("reuse", [False, True], ids=["default-other", "reuse-human-citation"])
+    def test_reader_import_must_not_gain_trust_without_own_review(tmp_path, reuse):
+        store = ensure_project(tmp_path)
+        if reuse:
+            reference = ReferenceRecord(id="paper", title="Source", year=2020,
+                                        source_type=ReferenceSourceType.research_paper,
+                                        identifier="10.1000/example", created_by="human")
+            conditions = [{"kind": "identifier_has_doi"}]
+        else:
+            reference = ReferenceRecord(id="paper", title="Source", year=2020, created_by="reader")
+            conditions = [{"kind": "source_type_in", "values": ["other"]}]
+        import_reference(store, reference)
+        decide_trust_rule(store, "sources", "declare", conditions=conditions,
+                          reviewer="Researcher <human@example.org>", rationale="the declared source class")
+        # Same node-create arguments the Reader is permitted to use. No --identifier or --source-type.
+        create_node(store, node_id="IMPORTED", kind="imported_result", statement="A Reader paraphrase",
+                    reference_id="paper", source_locator="Theorem 1", source_version="v1", created_by="reader")
+>       assert get_reference_review_state(store, "IMPORTED") == "unreviewed"
+E       AssertionError: assert 'trusted-by-rule' == 'unreviewed'
+E         
+E         - unreviewed
+E         + trusted-by-rule
+
+/private/tmp/proof-0021-audit-kpquveoz/test_audit_probes.py:31: AssertionError
+_ test_reader_import_must_not_gain_trust_without_own_review[reuse-human-citation] _
+
+tmp_path = PosixPath('/private/tmp/proof-0021-audit-kpquveoz/pytest-probes2/test_reader_import_must_not_ga1')
+reuse = True
+
+    @pytest.mark.parametrize("reuse", [False, True], ids=["default-other", "reuse-human-citation"])
+    def test_reader_import_must_not_gain_trust_without_own_review(tmp_path, reuse):
+        store = ensure_project(tmp_path)
+        if reuse:
+            reference = ReferenceRecord(id="paper", title="Source", year=2020,
+                                        source_type=ReferenceSourceType.research_paper,
+                                        identifier="10.1000/example", created_by="human")
+            conditions = [{"kind": "identifier_has_doi"}]
+        else:
+            reference = ReferenceRecord(id="paper", title="Source", year=2020, created_by="reader")
+            conditions = [{"kind": "source_type_in", "values": ["other"]}]
+        import_reference(store, reference)
+        decide_trust_rule(store, "sources", "declare", conditions=conditions,
+                          reviewer="Researcher <human@example.org>", rationale="the declared source class")
+        # Same node-create arguments the Reader is permitted to use. No --identifier or --source-type.
+        create_node(store, node_id="IMPORTED", kind="imported_result", statement="A Reader paraphrase",
+                    reference_id="paper", source_locator="Theorem 1", source_version="v1", created_by="reader")
+>       assert get_reference_review_state(store, "IMPORTED") == "unreviewed"
+E       AssertionError: assert 'trusted-by-rule' == 'unreviewed'
+E         
+E         - unreviewed
+E         + trusted-by-rule
+
+/private/tmp/proof-0021-audit-kpquveoz/test_audit_probes.py:31: AssertionError
+__________ test_project_stop_must_surface_coordinator_release_failure __________
+
+    def test_project_stop_must_surface_coordinator_release_failure():
+        pursuit = ProjectPursuit(PursuitHooks(read=lambda _: {}, theorems=lambda: ["T"],
+                                            coordinator=lambda _: RefusesRelease()))
+        pursuit.state.update(status="pursuing", current="T")
+        result = pursuit.stop()
+>       assert result.get("code") == "RELEASE_FAILED", result
+E       AssertionError: {'current': 'T', 'reason': 'stopped by the researcher', 'results': {}, 'status': 'released', ...}
+E       assert None == 'RELEASE_FAILED'
+E        +  where None = <built-in method get of dict object at 0x11bde3e40>('code')
+E        +    where <built-in method get of dict object at 0x11bde3e40> = {'current': 'T', 'reason': 'stopped by the researcher', 'results': {}, 'status': 'released', ...}.get
+
+/private/tmp/proof-0021-audit-kpquveoz/test_audit_probes.py:44: AssertionError
+_____________ test_next_theorem_waits_when_previous_release_failed _____________
+
+    def test_next_theorem_waits_when_previous_release_failed():
+        started = []
+        class Tracked(BudgetCoordinator):
+            def __init__(self, name):
+                self.name = name
+            def start(self, provider):
+                started.append(self.name)
+                return super().start(provider)
+        coordinators = {name: Tracked(name) for name in ["T1", "T2"]}
+        pursuit = ProjectPursuit(PursuitHooks(read=lambda _: {}, theorems=lambda: ["T1", "T2"],
+                                            coordinator=coordinators.__getitem__))
+        pursuit._loop("stub")
+>       assert started == ["T1"], started
+E       AssertionError: ['T1', 'T2']
+E       assert ['T1', 'T2'] == ['T1']
+E         
+E         Left contains one more item: 'T2'
+E         Use -v to get more diff
+
+/private/tmp/proof-0021-audit-kpquveoz/test_audit_probes.py:71: AssertionError
+__________ test_node_roles_can_read_the_definitions_created_by_reader __________
+
+tmp_path = PosixPath('/private/tmp/proof-0021-audit-kpquveoz/pytest-probes2/test_node_roles_can_read_the_d0')
+
+    def test_node_roles_can_read_the_definitions_created_by_reader(tmp_path):
+        context = ProofAgentContext("T", tmp_path, role="verifier")
+        args = context.claude_args(True)
+        allowed = args[args.index("--allowedTools") + 1:args.index("--disallowedTools")]
+>       assert "Bash(proof definition list *)" in allowed
+E       AssertionError: assert 'Bash(proof definition list *)' in ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'Bash(proof search *)', ...]
+
+/private/tmp/proof-0021-audit-kpquveoz/test_audit_probes.py:79: AssertionError
+________________ test_project_pursuit_ending_survives_a_new_hub ________________
+
+tmp_path = PosixPath('/private/tmp/proof-0021-audit-kpquveoz/pytest-probes2/test_project_pursuit_ending_su0')
+
+    def test_project_pursuit_ending_survives_a_new_hub(tmp_path):
+        store = ensure_project(tmp_path)
+        first = StudioHub(store)
+        first._read_turn = lambda provider: {}
+        first.pursuit_action("start", {"provider": "stub"})
+        deadline = time.monotonic() + 2
+        while first.pursuit().active() and time.monotonic() < deadline:
+            time.sleep(0.005)
+        assert first.pursuit_view()["status"] == "stuck"
+        first.close()
+        second = StudioHub(store)
+        try:
+>           assert second.pursuit_view()["status"] == "stuck"
+E           AssertionError: assert 'idle' == 'stuck'
+E             
+E             - stuck
+E             + idle
+
+/private/tmp/proof-0021-audit-kpquveoz/test_audit_probes.py:95: AssertionError
+=============================== warnings summary ===============================
+../../../../../../opt/anaconda3/lib/python3.11/site-packages/_pytest/cacheprovider.py:475
+  /opt/anaconda3/lib/python3.11/site-packages/_pytest/cacheprovider.py:475: PytestCacheWarning: could not create cache path /dev/.pytest_cache/v/cache/nodeids: [Errno 1] Operation not permitted: '/dev/pytest-cache-files-ww3j52lx'
+    config.cache.set("cache/nodeids", sorted(self.cached_nodeids))
+
+../../../../../../opt/anaconda3/lib/python3.11/site-packages/_pytest/cacheprovider.py:429
+  /opt/anaconda3/lib/python3.11/site-packages/_pytest/cacheprovider.py:429: PytestCacheWarning: could not create cache path /dev/.pytest_cache/v/cache/lastfailed: [Errno 1] Operation not permitted: '/dev/pytest-cache-files-dtv0f8lo'
+    config.cache.set("cache/lastfailed", self.lastfailed)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED ../../../../../../dev::test_reader_import_must_not_gain_trust_without_own_review[default-other]
+FAILED ../../../../../../dev::test_reader_import_must_not_gain_trust_without_own_review[reuse-human-citation]
+FAILED ../../../../../../dev::test_project_stop_must_surface_coordinator_release_failure
+FAILED ../../../../../../dev::test_next_theorem_waits_when_previous_release_failed
+FAILED ../../../../../../dev::test_node_roles_can_read_the_definitions_created_by_reader
+FAILED ../../../../../../dev::test_project_pursuit_ending_survives_a_new_hub
+6 failed, 2 warnings in 0.32s
