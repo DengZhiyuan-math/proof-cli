@@ -1,0 +1,45 @@
+{
+  "date": "2026-10-08",
+  "issue": "DengZhiyuan-math/proof-cli#198",
+  "interpreter": "/opt/anaconda3/bin/python",
+  "note": "The core head is the commit that adds this manifest's parent (the merge of master). Run inside the Claude Code sandbox: local port binding and tectonic's network are blocked, so the failures listed as sandbox are environmental and must be rerun outside it.",
+  "core": {
+    "repo": "https://github.com/DengZhiyuan-math/proof-cli.git",
+    "branch": "integ/0021",
+    "head": "e96170e882ad76e4f19bcc3f7f9d11f5eeda507a",
+    "base": "origin/master",
+    "base_sha": "c259da02f2ddb7c255aecf0db3d5ec2af40bb357",
+    "merge_base": "c259da02f2ddb7c255aecf0db3d5ec2af40bb357",
+    "merged_for_198": [
+      "origin/master c259da0 (merge; the branch has merges, so no rebase)"
+    ]
+  },
+  "agents": {
+    "repo": "https://github.com/zeqome/proof-agents.git",
+    "branch": "integ/0021",
+    "head": "36c291f6ff26bebc0720b36dcb5708c98d9b8736",
+    "base": "origin/master",
+    "base_sha": "dc802c068a4b81f611b2d791b1c5087405c24844",
+    "merge_base": "dc802c068a4b81f611b2d791b1c5087405c24844",
+    "merged_for_198": [
+      "origin/master dc802c0 (Definitions, #9); conflicts in agent_run.py, briefing.py, proof_agent.py, test_prove_verify_loop.py resolved by keeping both"
+    ]
+  },
+  "web": {
+    "repo": "https://github.com/zeqome/proof-web.git",
+    "branch": "feat/0021-pursue-review-queue",
+    "head": "864a2c29bd4f41a5344ae7be960b842a1d4aed62",
+    "base": "origin/master",
+    "base_sha": "2f6df88617f41c5f5b69dff3e9a16f968db604ca",
+    "merge_base": "2f6df88617f41c5f5b69dff3e9a16f968db604ca",
+    "merged_for_198": [
+      "origin/feat/definitions b0c43b8 (PR #6, not yet merged to master)"
+    ]
+  },
+  "tests": {
+    "agents": "154 passed",
+    "web": "722 passed, 1 skipped, 5 failed, 14 errors; all 19 are PermissionError on binding a local port (sandbox). test_coordinator_hub failed once under load alongside the core suite and passed when rerun alone.",
+    "core": "1106 passed, 15 skipped, 4 failed: test_every_error_code_the_code_raises_is_registered (#200); test_the_working_file_compiles_standalone, test_a_real_build_is_archived_with_the_snapshot, SyncTeX::test_source_to_pdf_and_back (tectonic panics without network: sandbox)",
+    "audit_probes": "9 run: test_node_roles_can_read_the_definitions_created_by_reader passes; 8 fail as expected: trust x2 (#199), release x2 (zeqome/proof-agents#17), new hub (zeqome/proof-web#10), needs-human (zeqome/proof-agents#15), unchecked-source warning (zeqome/proof-web#9), Parked at budget (zeqome/proof-agents#18)"
+  }
+}
