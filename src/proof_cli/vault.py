@@ -544,8 +544,9 @@ def build_is_current(root: Path, node_id: str) -> bool:
     return all(source.stat().st_mtime <= built for source in inputs.values() if source.exists())
 
 
-def write_working_proof(root: Path, *, node_id: str, kind: str, statement: str) -> None:
-    """Create the project preamble and a node's working `proof.tex`, if missing. Never overwrites."""
+def write_working_proof(root: Path, *, node_id: str, kind: str, statement: str, definitions: list[tuple[str, str]] = ()) -> None:
+    """Create the project preamble and a node's working `proof.tex`, if missing. Never overwrites. A statement written in
+    Definitions (ADR-0020) is preceded by them, each `(term, text)`, so the document says what its symbols are."""
     preamble = preamble_path(root)
     if not preamble.exists():
         preamble.parent.mkdir(parents=True, exist_ok=True)
@@ -560,7 +561,8 @@ def write_working_proof(root: Path, *, node_id: str, kind: str, statement: str) 
         "\\documentclass{amsart}\n"
         "\\input{../preamble}\n"
         "\\begin{document}\n\n"
-        f"% Proof map node {node_id} ({kind}).\n"
+        + ("\\section*{Definitions}\n" + "".join(f"\\paragraph{{{term}.}} {text}\n\n" for term, text in definitions) if definitions else "")
+        + f"% Proof map node {node_id} ({kind}).\n"
         f"\\begin{{{environment}}}\n{statement}\n\\end{{{environment}}}\n\n"
         "\\begin{proof}\n% Write the proof here.\n\\end{proof}\n\n"
         "\\end{document}\n",

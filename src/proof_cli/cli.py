@@ -184,7 +184,10 @@ from .proof_map import (
 from .trust_rules import get_trust_rule, list_trust_rules, trust_rule_history
 from .authority import candidate_proof_sha256
 from .vault import working_entry_path
+from .definitions import add_definition, all_definitions, definitions_of, edit_definition, nodes_naming, remove_definition, require_definition
 from .rendering import (
+    render_definition,
+    render_definition_list,
     render_node_check,
     render_candidate_proof,
     render_challenge,
@@ -227,6 +230,7 @@ goal_app = typer.Typer(help="(legacy) Goal operations; a goal becomes a Claim no
 theorem_app = typer.Typer(help="(legacy) Theorem-contract registry; the proof map's nodes replace it")
 node_app = typer.Typer(help="Proof map node operations")
 trust_rule_app = typer.Typer(help="Trust rules: the researcher's standing Reference reviews, read-only here (declared on the proof map page; ADR-0014)")
+definition_app = typer.Typer(help="Definitions: the named text node statements are written in — a model's setting, a definition, notation (ADR-0020). A node names its definitions when it is created; a definition a node names is fixed, like that node's statement")
 fog_app = typer.Typer(help="Proof fog: difficulties not yet precise enough to be a Claim, kept outside the map (ADR-0008). Ungated: anyone, agents included, may add, edit, drop or crystallize one")
 fog_experiment_app = typer.Typer(help="Experiments: numerical runs recorded against a fog item; they never change its status")
 node_evidence_app = typer.Typer(help="Evidence check workflows")
@@ -437,6 +441,7 @@ def node_create(
     display_label: str = "",
     assumption: list[str] = typer.Option(None, "--assumption"),
     dependency: list[str] = typer.Option(None, "--dependency"),
+    definition: list[str] = typer.Option(None, "--definition", help="Repeatable: a definition the statement is written in (`proof definition list`); fixed once the node exists"),
     created_by: str = "human",
     source_locator: str = typer.Option("", "--source-locator", help="Required for imported_result nodes"),
     source_version: str = typer.Option("", "--source-version", help="Required for imported_result nodes"),
@@ -464,6 +469,7 @@ def node_create(
             display_label=display_label,
             assumptions=assumption,
             dependencies=dependency,
+            definitions=list(definition or []),
             source_locator=source_locator or None,
             source_version=source_version or None,
             trust_level=trust_level or None,
@@ -524,6 +530,8 @@ def node_show(
         origin = crystallized_from(store, node_id)
         near = [item.id for item in fog_near(store, node_id)]
         blocked_reason = get_blocked_reason(store, node_id) if workflow_state == "blocked" else None
+        # the text of the definitions the statement is written in (ADR-0020)
+        definition_details = [{"id": d.id, "term": d.term, "text": d.text} for d in definitions_of(store, node)]
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.show")
         raise typer.Exit(code=1)
@@ -559,6 +567,7 @@ def node_show(
         ]
         # what the node page shows of each dependency: its pin, whether current, the remedy (#97)
         payload["dependency_details"] = dependency_details(store, node_id)
+        payload["definition_details"] = definition_details
         typer.echo(dump_envelope(success_envelope("node.show", payload)))
     else:
         typer.echo(
@@ -574,6 +583,7 @@ def node_show(
                 trust_rule=trust_rule,
                 crystallized_from=origin.id if origin else None,
                 fog_near=near,
+                definitions=definition_details,
             )
         )
 
@@ -636,6 +646,95 @@ def _emit_fog(store, item, json_output: bool, *, command: str) -> None:
         typer.echo(dump_envelope(success_envelope(command, view)))
     else:
         typer.echo(render_fog_item(view))
+
+
+def _definition_view(store, definition) -> dict:
+    return {**definition.model_dump(mode="json"), "used_by": nodes_naming(store, definition.id)}
+
+
+def _emit_definition(store, definition, json_output: bool, *, command: str) -> None:
+    view = _definition_view(store, definition)
+    typer.echo(dump_envelope(success_envelope(command, view)) if json_output else render_definition(view))
+
+
+@definition_app.command("add")
+def definition_add(
+    definition_id: str,
+    text: str,
+    term: str = typer.Option(..., "--term", help="The name the page and the node show it under, e.g. \"Stochastic release unit\""),
+    root: str = ROOT_OPTION,
+    created_by: str = typer.Option("human", "--created-by"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Add a definition: TEXT is Markdown with $…$ maths, as a statement is. Name it from a node with `--definition`."""
+    store = get_store(_root(root))
+    try:
+        definition = add_definition(store, definition_id, term=term, text=text, created_by=created_by)
+    except ProofMapError as exc:
+        _emit_error(exc, json_output, command="definition.add")
+        raise typer.Exit(code=1)
+    _emit_definition(store, definition, json_output, command="definition.add")
+
+
+@definition_app.command("edit")
+def definition_edit(
+    definition_id: str,
+    text: str = typer.Option(None, "--text"),
+    term: str = typer.Option(None, "--term"),
+    root: str = ROOT_OPTION,
+    edited_by: str = typer.Option("human", "--by"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Change a definition no node names yet (DEFINITION_IN_USE otherwise: add a corrected one under a new id)."""
+    store = get_store(_root(root))
+    try:
+        definition = edit_definition(store, definition_id, term=term, text=text, edited_by=edited_by)
+    except ProofMapError as exc:
+        _emit_error(exc, json_output, command="definition.edit")
+        raise typer.Exit(code=1)
+    _emit_definition(store, definition, json_output, command="definition.edit")
+
+
+@definition_app.command("remove")
+def definition_remove(
+    definition_id: str,
+    root: str = ROOT_OPTION,
+    removed_by: str = typer.Option("human", "--by"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Remove a definition no node names."""
+    store = get_store(_root(root))
+    try:
+        removed = remove_definition(store, definition_id, removed_by=removed_by)
+    except ProofMapError as exc:
+        _emit_error(exc, json_output, command="definition.remove")
+        raise typer.Exit(code=1)
+    if json_output:
+        typer.echo(dump_envelope(success_envelope("definition.remove", removed.model_dump(mode="json"))))
+    else:
+        typer.echo(f"removed definition {removed.id}")
+
+
+@definition_app.command("list")
+@read_scoped
+def definition_list(root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
+    """The project's definitions, oldest first, with the nodes that name each."""
+    store = get_store(_root(root))
+    views = [_definition_view(store, d) for d in all_definitions(store)]
+    typer.echo(dump_envelope(success_envelope("definition.list", views)) if json_output else render_definition_list(views))
+
+
+@definition_app.command("show")
+@read_scoped
+def definition_show(definition_id: str, root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
+    """One definition in full, with the nodes that name it."""
+    store = get_store(_root(root))
+    try:
+        definition = require_definition(store, definition_id)
+    except ProofMapError as exc:
+        _emit_error(exc, json_output, command="definition.show")
+        raise typer.Exit(code=1)
+    _emit_definition(store, definition, json_output, command="definition.show")
 
 
 @fog_app.command("add")
@@ -941,6 +1040,7 @@ def node_split(
     ),
     assumption: list[str] = typer.Option(None, "--assumption", help="Repeatable: an assumption of the one --child (as the page's split gives it)"),
     display_label: str = typer.Option("", "--display-label", help="The one --child's display label"),
+    definition: list[str] = typer.Option(None, "--definition", help="Repeatable: a definition the one --child is written in, beside the parent's, which every child names"),
     root: str = ROOT_OPTION,
     created_by: str = "human",
     reassign: bool = typer.Option(False, "--reassign", help="Take the claim over from whoever holds it (recorded as `claim --reassign` records it); the node need not be on the frontier"),
@@ -949,8 +1049,8 @@ def node_split(
     """Decompose parent_id into new claim-kind children. Ungated — no researcher approval needed.
     All or nothing; a node someone else holds is theirs to split unless --reassign.
     With a single --child, --assumption and --display-label give it those, as the page's split does (issue #154)."""
-    if (assumption or display_label) and len(child) != 1:
-        raise click.UsageError("--assumption and --display-label go with a single --child")
+    if (assumption or display_label or definition) and len(child) != 1:
+        raise click.UsageError("--assumption, --display-label and --definition go with a single --child")
     store = get_store(_root(root))
     try:
         specs = []
@@ -960,7 +1060,8 @@ def node_split(
                     "INVALID_CHILD_SPEC", f"'{entry}' is not in the form <child-id>=<statement>"
                 )
             child_id, statement = entry.split("=", 1)
-            specs.append({"id": child_id, "statement": statement, "assumptions": list(assumption or []), "display_label": display_label})
+            specs.append({"id": child_id, "statement": statement, "assumptions": list(assumption or []), "display_label": display_label,
+                          "definitions": list(definition or [])})
         children = split_node(store, parent_id, specs, created_by=created_by, reassign=reassign)
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.split")
@@ -1228,6 +1329,7 @@ app.add_typer(challenge_app, name="challenge", rich_help_panel=PROOF_MAP_PANEL)
 app.add_typer(trust_rule_app, name="trust-rule", rich_help_panel=PROOF_MAP_PANEL)
 fog_app.add_typer(fog_experiment_app, name="experiment")
 app.add_typer(fog_app, name="fog", rich_help_panel=PROOF_MAP_PANEL)
+app.add_typer(definition_app, name="definition", rich_help_panel=PROOF_MAP_PANEL)
 app.add_typer(obligation_app, name="obligation", rich_help_panel=LEGACY_PANEL)
 app.add_typer(blocker_app, name="blocker", rich_help_panel=LEGACY_PANEL)
 app.add_typer(reference_app, name="reference")

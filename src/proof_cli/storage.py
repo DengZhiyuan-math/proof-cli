@@ -17,6 +17,7 @@ from pydantic import TypeAdapter
 
 from .db import SCHEMA, connect, initialize
 from .domain import (
+    Definition,
     BlockerRecord,
     CandidateProofRecord,
     Challenge,
@@ -180,6 +181,16 @@ CREATE TABLE IF NOT EXISTS foreign_attestations (
   object_id TEXT NOT NULL,
   data TEXT NOT NULL,
   imported_at TEXT NOT NULL
+);
+"""
+
+# Definitions (ADR-0020): the named text node statements are written in. The record is the JSON of a Definition.
+DEFINITIONS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS definitions (
+  id TEXT PRIMARY KEY,
+  data TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
 );
 """
 
@@ -536,6 +547,7 @@ def _apply_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(PROOF_LEDGER_SCHEMA)
     conn.executescript(SIDE_DOCUMENTS_SCHEMA)
     conn.executescript(FOG_SCHEMA)
+    conn.executescript(DEFINITIONS_SCHEMA)
     conn.commit()
     conn.execute(f"PRAGMA user_version = {_schema_stamp(conn)}")  # leaves the schema cookie alone
     conn.commit()
@@ -2104,3 +2116,42 @@ def list_fog_experiments(store: ProjectStore, fog_id: str, *, conn: sqlite3.Conn
         FogExperiment(fog_id=row["fog_id"], seq=row["seq"], outcome=row["outcome"], summary=row["summary"], run_by=row["run_by"], recorded_at=row["recorded_at"], path=row["path"])
         for row in rows
     ]
+
+
+# -- definitions (ADR-0020) ----------------------------------------------------------------------
+
+
+def insert_definition(store: ProjectStore, definition: Definition, *, conn: sqlite3.Connection | None = None) -> Definition:
+    with _writing(store, conn) as conn:
+        conn.execute(
+            "INSERT INTO definitions(id, data, created_at, updated_at) VALUES (?, ?, ?, ?)",
+            (definition.id, definition.model_dump_json(), definition.created_at.isoformat(), definition.updated_at.isoformat()),
+        )
+    return definition
+
+
+def update_definition(store: ProjectStore, definition: Definition, *, conn: sqlite3.Connection | None = None) -> Definition:
+    with _writing(store, conn) as conn:
+        conn.execute(
+            "UPDATE definitions SET data = ?, updated_at = ? WHERE id = ?",
+            (definition.model_dump_json(), definition.updated_at.isoformat(), definition.id),
+        )
+    return definition
+
+
+def delete_definition(store: ProjectStore, definition_id: str, *, conn: sqlite3.Connection | None = None) -> None:
+    with _writing(store, conn) as conn:
+        conn.execute("DELETE FROM definitions WHERE id = ?", (definition_id,))
+
+
+def get_definition(store: ProjectStore, definition_id: str, *, conn: sqlite3.Connection | None = None) -> Definition | None:
+    with _reading(store, conn) as conn:
+        row = conn.execute("SELECT data FROM definitions WHERE id = ? LIMIT 1", (definition_id,)).fetchone()
+    return Definition.model_validate_json(row["data"]) if row else None
+
+
+def list_definitions(store: ProjectStore, *, conn: sqlite3.Connection | None = None) -> list[Definition]:
+    """Every definition, oldest first."""
+    with _reading(store, conn) as conn:
+        rows = conn.execute("SELECT data FROM definitions ORDER BY created_at, id").fetchall()
+    return [Definition.model_validate_json(row["data"]) for row in rows]
