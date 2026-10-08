@@ -27,8 +27,9 @@ _ENVIRONMENTS = ("theorem", "lemma", "claim", "proposition", "corollary")
 _ENV = re.compile(r"\\begin\{(" + "|".join(_ENVIRONMENTS) + r")\}(?:\[[^\]]*\])?(.*?)\\end\{\1\}", re.S)
 _UNDEFINED = re.compile(r"undefined (reference|citation)|There were undefined (references|citations)|Reference `[^']*' on page \d+ undefined|Citation `[^']*' on page \d+ undefined", re.I)
 _ID_LIKE = re.compile(r"[A-Za-z][A-Za-z0-9_.-]*")
-# how key-ideas.md's 主要步骤 names a node: `id`, (id) or \ref{id} (the Typesetter's guide: each step names the node it uses, by id)
-_NAMED = re.compile(r"`([^`\s]+)`|\(([A-Za-z][A-Za-z0-9_.-]*)\)|\\(?:eq|c|auto)?ref\{([^}]+)\}")
+# how key-ideas.md's 主要步骤 names a node: `id` or \ref{id} (the Typesetter's guide: each step names the node it uses, by id).
+# Not (id): (i), (ii), (a_n) are math, and can't be told from a name (#188).
+_NAMED = re.compile(r"`([^`\s]+)`|\\(?:eq|c|auto)?ref\{([^}]+)\}")
 MAX_INPUT_FILES = 50   # files read through \input, at most
 
 

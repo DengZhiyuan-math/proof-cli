@@ -151,9 +151,9 @@ def test_the_audits_cases_comments_links_sub_files_the_environment_and_unknown_n
     _build(project, "N")
     assert "CHECK_INPUT_OUTSIDE" not in _codes(check_node(project, "N"))  # ../preamble is fine
     # a step naming a node that does not exist, in any of the three spellings
-    (folder / "key-ideas.md").write_text(IDEAS.replace("1. use L", "1. use `GHOST` and (L) and \\ref{PHANTOM}; the field is $\\mathbb{R}$"))
+    (folder / "key-ideas.md").write_text(IDEAS.replace("1. use L", "1. use `GHOST` and (L) and \\ref{PHANTOM}; the field is $\\mathbb{R}$; cases (i), (ii) and (a_n), with (s) fixed"))
     notes = [f for f in check_node(project, "N") if f["code"] == "CHECK_KEY_IDEAS_UNKNOWN_NODE"]
-    assert len(notes) == 1 and "GHOST, PHANTOM" in notes[0]["message"] and notes[0]["level"] == "note"
+    assert len(notes) == 1 and notes[0]["message"].startswith("主要步骤 names GHOST, PHANTOM as a node") and notes[0]["level"] == "note"  # (i), (a_n): math, not names (#188)
     (folder / "key-ideas.md").write_text(IDEAS)
     assert "CHECK_KEY_IDEAS_UNKNOWN_NODE" not in _codes(check_node(project, "N"))
     # the registry holds every code the checks raise, and nowhere else keeps a copy
