@@ -3103,8 +3103,30 @@ def trust_rules_of(store: ProjectStore, node_id: str, *, rules: list[TrustRule] 
     A pure function of the rules in force (or `rules`, to preview a change),
     the node, its citation as it stands, and the *explicit* Reference review
     state of the other citations of the same reference. Empty for a local
-    node, a node with no citation, and a node found no longer callable.
+    node, a node with no citation, a node found no longer callable, and an
+    imported result an agent created: a rule vouches for the source, not for
+    an agent's statement of it (ADR-0022).
     """
+    if require_node(store, node_id).created_by != RESEARCHER:
+        return []
+    return _rules_the_citation_meets(store, node_id, rules=rules)
+
+
+@memoized_read
+@read_scoped
+def would_meet_trust_rules(store: ProjectStore, node_id: str) -> list[str]:
+    """The Trust rules an imported result an agent created would meet had the researcher created it (ADR-0022 point 3).
+
+    Shown beside it in the review queue to make its own Reference review
+    cheap; it gives the node no standing. Empty for the researcher's imports,
+    whose rules `trust_rules_of` reads.
+    """
+    if require_node(store, node_id).created_by == RESEARCHER:
+        return []
+    return _rules_the_citation_meets(store, node_id)
+
+
+def _rules_the_citation_meets(store: ProjectStore, node_id: str, *, rules: list[TrustRule] | None = None) -> list[str]:
     node = require_node(store, node_id)
     if node.kind != ProofMapNodeKind.imported_result or node.reference_id is None:
         return []

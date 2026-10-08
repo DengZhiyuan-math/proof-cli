@@ -184,6 +184,7 @@ from .proof_map import (
     trust_rule_events,
     trust_rule_view,
     trust_rules_of,
+    would_meet_trust_rules,
     work_log,
     answer_question,
 )
@@ -342,7 +343,8 @@ def _acceptance_axis(store, node) -> str:
 
 def _with_state_axes(store, node) -> dict:
     """A node under --json, with its three state axes (ADR-0002), whether it is Provisional and the Provisional nodes
-    it is Conditional on (ADR-0021), and, for an imported result, the Trust rules it meets."""
+    it is Conditional on (ADR-0021), and, for an imported result, the Trust rules it meets (an agent's import:
+    those it would meet had the researcher created it, ADR-0022)."""
     return {
         **node.model_dump(mode="json"),
         "workflow_state": get_workflow_state(store, node.id),
@@ -351,6 +353,7 @@ def _with_state_axes(store, node) -> dict:
         "provisional": is_provisional(store, node.id),
         "conditional_on": sorted(conditional_on(store, node.id)),
         "trust_rule": trust_rules_of(store, node.id),
+        "would_meet_trust_rule": would_meet_trust_rules(store, node.id),
     }
 
 
@@ -601,6 +604,8 @@ def node_show(
         payload["integrity_state"] = integrity_state
         # the Trust rules an imported result meets, and when it first met each (ADR-0014)
         payload["trust_rule"] = trust_rule
+        # an agent's import meets no rule; the rules it would meet, for its own Reference review (ADR-0022)
+        payload["would_meet_trust_rule"] = would_meet_trust_rules(store, node_id)
         payload["trust_rule_events"] = [{"rule": event.payload.get("rule"), "at": event.created_at.isoformat()} for event in trust_rule_events(store, node_id)]
         payload["crystallized_from"] = origin.id if origin else None
         payload["fog_near"] = near
