@@ -218,6 +218,10 @@ ERROR_CODES: dict[str, str] = {
     "AGENT_INVALID_OPTION": "the model or effort asked for is not one the agent's CLI accepts",
     "AGENT_NO_USAGE_LIMITS": "this agent backend reports no usage limits to probe",
     "TURN_CALLED_OFF": "the run was stopped while its turn was being prepared, so no turn started",
+    # -- the project's Pursue: a Reader states its Theorems, then each is pursued (ADR-0021) --
+    "PURSUIT_ACTIVE": "the project is being pursued already, or a stopped pursuit is still ending: stop it, or Start again once it settles",
+    "NO_PURSUIT": "no pursuit is running on this project to stop; the answer carries how the last one ended",
+    "READER_FAILED": "the Reader's turn failed or was stopped before it ended; the message says why, and what it stated stays on the map",
 }
 
 
