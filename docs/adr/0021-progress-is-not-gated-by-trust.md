@@ -1,6 +1,6 @@
 # Progress is not gated by trust: the agents pursue a draft to the end, and the researcher's decisions come after
 
-**Status**: accepted (2026-10-07; the researcher's decision after setting up the #132 tier 3 horocycle trial). Amends:
+**Status**: accepted (2026-10-07; the researcher's decision after setting up the #132 tier 3 horocycle trial). Amended by ADR-0022: ADR-0014 no longer stands untouched; a Trust rule does not cover an imported result an agent created, so the Reader's imports reach the review queue unreviewed. Amends:
 - ADR-0019 points 10, 11, 17, 18 and 20: a parent is worked on its children's passing verdicts; the Decomposer does not stop; the Coordinator does not wait.
 - ADR-0020 points 4 and 7: an agent may write Definitions, and a statement or definition is fixed at the first Review decision that relies on it, not at creation.
 - CONTEXT.md's Blocked: it holds back a Review decision, not work.
