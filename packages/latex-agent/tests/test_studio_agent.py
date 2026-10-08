@@ -509,6 +509,94 @@ class DisplayMathRule(unittest.TestCase):
     def bullets(self, text):
         return ["- " + b for b in text.split("\n- ")[1:]]
 
+class ClaudeContext(unittest.TestCase):
+    """How full the context window is: each message's usage, the window from modelUsage (upstream d000c82)."""
+
+    def test_used_and_window(self):
+        cc, j, st = ClaudeCode("claude", {"bin": "claude"}), job_for(), {}
+        msg = lambda inp, read, out: {"type": "assistant", "parent_tool_use_id": None, "message": {  # noqa: E731
+            "content": [], "usage": {"input_tokens": inp, "cache_creation_input_tokens": 0,
+                                     "cache_read_input_tokens": read, "output_tokens": out}}}
+        cc.handle({"type": "system", "subtype": "init", "model": "claude-sonnet-5-5"}, j, st)
+        cc.handle(msg(10, 1000, 50), j, st)
+        self.assertEqual(j.events[-1], {"t": "context", "used": 1060, "window": None})
+        cc.handle({"type": "result", "usage": {}, "modelUsage": {
+            "claude-haiku-4-5": {"contextWindow": 200000, "inputTokens": 5},
+            "claude-sonnet-5-5": {"contextWindow": 1000000, "inputTokens": 10}}}, j, st)
+        self.assertEqual(st["context"], {"used": 1060, "window": 1000000})
+        # The next turn knows the window from its first message on.
+        j2, st2 = job_for(), {}
+        cc.handle({"type": "system", "subtype": "init", "model": "claude-sonnet-5-5"}, j2, st2)
+        cc.handle(msg(5, 2000, 10), j2, st2)
+        self.assertEqual(j2.events[-1], {"t": "context", "used": 2015, "window": 1000000})
+
+
+class ClaudeProfileFolder(unittest.TestCase):
+    """Upstream 245a535 lets the editor use another Claude Code login (CLAUDE_CONFIG_DIR). Here the node's context
+    gives a turn its environment; the account check, the command list and the usage probe now run with the same one."""
+
+    def test_the_account_check_runs_with_the_contexts_environment_and_is_cached_per_profile(self):
+        d = tmpdir()
+        fake = Path(d) / "claude"
+        fake.write_text("#!" + sys.executable + "\nimport json, os\n"
+                        "print(json.dumps({'loggedIn': True, 'email': (os.environ.get('CLAUDE_CONFIG_DIR') or 'default') + '@x'}))\n")
+        fake.chmod(0o755)
+
+        class Context:
+            profile = "/profiles/a"
+
+            def env(self):
+                return {**os.environ, "CLAUDE_CONFIG_DIR": Context.profile}
+
+        cc = ClaudeCode("claude", {"bin": str(fake)})
+        m = agent.AgentManager(lambda: Path(d), lambda: [], backends=({"claude": cc}, "claude", None), context_fn=lambda turn=None: Context())
+        self.assertEqual(cc.account(Path(d), fresh=True)["account"]["email"], "/profiles/a@x")
+        Context.profile = "/profiles/b"     # another profile is another login, not the cached one
+        self.assertEqual(cc.account(Path(d))["account"]["email"], "/profiles/b@x")
+        plain = ClaudeCode("claude", {"bin": str(fake)})   # outside a proof map: this process's own environment
+        agent.AgentManager(lambda: Path(d), lambda: [], backends=({"claude": plain}, "claude", None))
+        self.assertIsNone(plain.env())
+        self.assertIs(m.backends["claude"], cc)
+
+
+class AgentEnvironment(unittest.TestCase):
+    """Upstream 624bff0: an agent's turn reaches no git remote and has no GitHub login, so it can never push over,
+    rewrite or delete the project's history there."""
+
+    def test_no_remote_and_no_login_and_the_context_kept(self):
+        base = {"PATH": "/bin", "PROOF_ROOT": "/p", "GH_TOKEN": "t", "GITHUB_TOKEN": "t", "CLAUDE_CONFIG_DIR": "/c"}
+        env = backends.agent_env(base)
+        self.assertEqual((env["PROOF_ROOT"], env["CLAUDE_CONFIG_DIR"], env["PATH"]), ("/p", "/c", "/bin"))
+        self.assertNotIn("GH_TOKEN", env)
+        self.assertNotIn("GITHUB_TOKEN", env)
+        self.assertEqual(env["GIT_TERMINAL_PROMPT"], "0")
+        self.assertNotIn(env["GIT_ALLOW_PROTOCOL"], ("", "https", "ssh", "file"))
+        self.assertIn("GH_CONFIG_DIR", env)
+        self.assertNotIn("GIT_ALLOW_PROTOCOL", base)    # the context's own environment is not changed
+
+    def test_a_turn_starts_with_it(self):
+        from unittest import mock
+        seen = {}
+
+        class Proc:
+            returncode, stdout, stderr = 0, iter(()), iter(())
+
+            def __init__(self):
+                self.stdin = mock.MagicMock()
+
+            def wait(self):
+                return 0
+
+        def popen(cmd, **kw):
+            seen.update(kw.get("env") or {})
+            return Proc()
+
+        backend = ClaudeCode("claude", {"bin": "claude"})
+        with mock.patch("latex_agent.backends.subprocess.Popen", popen):
+            backend.run(job_for(prompt="hi", root=Path(".")))
+        self.assertIn("GIT_ALLOW_PROTOCOL", seen)
+
+
 class ClaudeBilling(unittest.TestCase):
     """total_cost_usd is a list price: it is a real cost only with an API key (upstream 2938c05)."""
 

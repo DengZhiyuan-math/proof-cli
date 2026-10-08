@@ -623,8 +623,12 @@ $("#pdf-scroll").addEventListener("click", (e) => {
 $("#pdf-scroll").addEventListener("dblclick", () => clearTimeout(pdfHintTimer));
 
 // Pop-out viewer: while a viewer tab is alive, the inline PDF pane is hidden.
-const POP = { alive: false, last: 0 };
+// The top bar says where the PDF went: "Show here" closes that tab, or, where the browser does not let it
+// close, shows the PDF here anyway until it is popped out again (upstream d000c82).
+const POP = { alive: false, last: 0, here: false };
 function setPopped(on) {
+  if (on && POP.here) on = false;
+  $("#btn-pdf-here").hidden = !on;
   if (POP.alive === on) return;
   POP.alive = on;
   $("#pdf-pane").hidden = on; document.querySelector('.gutter[data-resize="pdf"]').hidden = on;
@@ -634,7 +638,13 @@ function setPopped(on) {
   if (!on && S.pdfMtime && S.pdfMtime !== PV.mtime) PV.load(S.pdfMtime);
 }
 let popWin = null;
+$("#btn-pdf-here").onclick = () => {
+  if (pdfChannel) pdfChannel.postMessage({ type: "close" });
+  POP.here = true; setPopped(false);
+  if (S.pdfMtime) PV.load(S.pdfMtime);
+};
 function popOut() {
+  POP.here = false;
   popWin = window.open("viewer", "proof-studio-pdf:" + NODE);
   if (popWin) popWin.focus();
 }
@@ -779,7 +789,41 @@ async function loadAccount() {
 }
 function loadProvider() {
   C.session = provGet("session"); C.model = provGet("model"); C.effort = provGet("effort");
+  const c = provGet("context");                    // how full this conversation's context is
+  renderContext(c && c.session === C.session ? c : null);
 }
+
+/* How full the conversation's context window is, as a ring by the Send button (like the
+   Claude desktop app); the details open on hover or click. From Claude Code's usage of
+   each message: what the model read plus what it wrote. */
+function renderContext(c) {
+  const box = $("#ctx");
+  if (!c || !c.used) { box.hidden = true; return; }
+  box.hidden = false;
+  const k = (n) => (n >= 1e6 ? +(n / 1e6).toFixed(n % 1e6 ? 1 : 0) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "k" : String(n));
+  const used = c.window ? Math.min(1, c.used / c.window) : null;
+  const pct = used === null ? null : Math.round(used * 100);
+  const ring = $("#ctx-ring .fill"), len = 2 * Math.PI * 7.5;
+  ring.style.strokeDasharray = `${len}`;
+  ring.style.strokeDashoffset = `${len * (1 - (used ?? 0))}`;
+  const level = used === null ? "" : used >= 0.9 ? "err" : used >= 0.75 ? "warn" : "";
+  $("#ctx-ring").className = "ghost " + level;
+  // The percentage shows by the ring once half the window is used; before, on hover.
+  $("#ctx-label").textContent = pct !== null && pct >= 50 ? `${pct}%` : "";
+  $("#ctx-ring").title = "";
+  $("#ctx-pop").innerHTML = `<div class="ctx-head"><b>Context window</b>${pct !== null ? `<span class="${level}">${pct}% used</span>` : ""}</div>`
+    + `<div class="ctx-bar"><i class="${level}" style="width:${Math.max(1, pct ?? 0)}%"></i></div>`
+    + `<div class="ctx-num">${k(c.used)}${c.window ? ` / ${k(c.window)}` : ""} tokens${c.window ? ` · ${k(Math.max(0, c.window - c.used))} left` : ""}</div>`
+    + `<div class="ctx-note">${used !== null && used >= 0.75
+      ? "Nearly full. Claude Code summarizes the conversation automatically when it runs out; type <code>/compact</code> to do it now, or start a <b>New</b> chat."
+      : "Everything in this conversation so far: your messages, the files the agent read, its replies. <b>New</b> starts an empty one."}</div>`;
+}
+$("#ctx-ring").onclick = (e) => {
+  e.stopPropagation();
+  const pop = $("#ctx-pop"); pop.hidden = !pop.hidden;
+  $("#ctx-ring").setAttribute("aria-expanded", String(!pop.hidden));
+};
+document.addEventListener("click", (e) => { if (!e.target.closest("#ctx")) { $("#ctx-pop").hidden = true; $("#ctx-ring").setAttribute("aria-expanded", "false"); } });
 loadProvider();
 
 function chatHidden(h) {
@@ -1200,7 +1244,16 @@ async function followTurn(r, provider) {
           status("working…");
         } else if (e.t === "build") showBuild(e.result);         // the agent compiled
         else if (e.t === "error") chatAppend(`<div class="err">${esc(e.message)}</div>`, "card");
-        else if (e.t === "done") { renderTurnCard(e); loadAccount(); }
+        else if (e.t === "context") {                          // grows with each message
+          if (C.provider === provider) renderContext({ ...e, window: e.window || (provGet("context") || {}).window });
+        }
+        else if (e.t === "done") {
+          renderTurnCard(e); loadAccount();
+          if (e.context && C.provider === provider) {
+            const c = { ...e.context, window: e.context.window || (provGet("context") || {}).window, session: e.session_id };
+            provSet("context", c); renderContext(c);
+          }
+        }
       }
       if (pending) flush(stick);
       draw(stick);
@@ -1578,6 +1631,9 @@ $("#chat-new").onclick = () => {
   if (C.job) return;
   C.session = null; provSet("session", null);
   if (C.provider === "claude") store.set("chat.session", null);    // the key from before providers
+  const c = provGet("context");                                    // a new chat starts empty (keep the window size)
+  if (c) provSet("context", { window: c.window });
+  renderContext(null);
   $("#chat-log").innerHTML = ""; chatIntro(); saveChatLog();
 };
 function askAboutSelection() {

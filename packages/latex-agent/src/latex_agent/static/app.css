@@ -400,6 +400,30 @@ details.live-file > pre { font: 11.5px/1.4 var(--mono); color: var(--text); whit
 .chat-actions { display: flex; align-items: center; gap: 8px; }
 .chat-actions .status { margin-right: auto; font-size: 11.5px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
+/* Context window ring (renderContext in app.js), after the Claude desktop app. */
+#ctx { position: relative; flex: none; }
+#ctx[hidden] { display: none; }
+#ctx-ring { height: 26px; padding: 0 5px; gap: 4px; border-color: transparent; background: none; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+#ctx-ring:hover, #ctx-ring[aria-expanded="true"] { background: var(--panel2); border-color: var(--border); }
+#ctx-ring svg { width: 16px; height: 16px; transform: rotate(-90deg); }
+#ctx-ring circle { fill: none; stroke-width: 2.5; }
+#ctx-ring .track { stroke: var(--border); }
+#ctx-ring .fill { stroke: var(--muted); stroke-linecap: round; transition: stroke-dashoffset .4s ease; }
+#ctx-ring.warn .fill { stroke: var(--warn); } #ctx-ring.warn { color: var(--warn); }
+#ctx-ring.err .fill { stroke: var(--err); } #ctx-ring.err { color: var(--err); }
+#ctx-pop { position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 20; width: 260px; padding: 10px 12px; font-size: 12px; line-height: 1.45;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.28); }
+#ctx-pop[hidden] { display: none; }
+#ctx:hover #ctx-pop { display: block; }
+#ctx-pop .ctx-head { display: flex; justify-content: space-between; margin-bottom: 6px; }
+#ctx-pop .ctx-head .warn { color: var(--warn); } #ctx-pop .ctx-head .err { color: var(--err); }
+#ctx-pop .ctx-bar { height: 5px; border-radius: 3px; background: var(--border); overflow: hidden; }
+#ctx-pop .ctx-bar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+#ctx-pop .ctx-bar i.warn { background: var(--warn); } #ctx-pop .ctx-bar i.err { background: var(--err); }
+#ctx-pop .ctx-num { margin-top: 6px; color: var(--text); font-variant-numeric: tabular-nums; }
+#ctx-pop .ctx-note { margin-top: 6px; color: var(--muted); }
+#ctx-pop code { font: 11px var(--mono); }
+
 /* ---------- bottom panel */
 #panel { flex: none; background: var(--panel); border-top: .5px solid var(--border); display: flex; flex-direction: column; height: 200px; }
 #panel.collapsed { height: 33px; }
