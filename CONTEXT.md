@@ -178,6 +178,10 @@ _Avoid_: blocker, needs-human (which is for what no choice settles)
 A node whose run budget is spent under a Coordinator. The Coordinator goes on with the rest of the subtree; a parked node waits in the Review queue with its Attempts (ADR-0021).
 _Avoid_: stuck (a run's state), failed
 
+**Interrupted**:
+A node a Coordinator would have started again when its Start's total budget was spent: its last run ended short of review with node budget left. Not Parked: the agents did not exhaust it, the Start's budget ran out first; a new Pursue works it again (ADR-0021).
+_Avoid_: parked, stuck (a run's state)
+
 **Review queue**:
 Everything waiting on the researcher, ordered bottom-up, none of which holds the agents back: Provisional nodes, unreviewed imported results, Unfixed agent-written text, Standing questions and Parked nodes (ADR-0021).
 _Avoid_: inbox, approvals

@@ -66,6 +66,7 @@ The guarantee that has to survive is narrower than the gates. An Accepted node r
    - **Parked node.** The Coordinator goes on with every node that does not need it.
    - **Parked Claim.** It may start one further Decomposer turn on the Claim's parent, to try another structure, once per parent.
    - **What the researcher sees.** Parked nodes, with their attempts, are what the researcher sees first in the review queue. They are the places the agents could not go.
+   - **At the Start's budget.** When the Coordinator's total budget is spent, no turn starts. The runs still going end under their own caps, and each node is then recorded: Parked by the rule above, or **Interrupted** when its last run ended short of review with node budget left. A node still running is neither. (Amended for zeqome/proof-agents#18.)
 10. **The researcher's work is a queue, not a series of gates.** The proof map page gains a review queue, ordered bottom-up so that each Accept makes the next decision possible. It holds:
     - the Provisional nodes awaiting Acceptance;
     - the unreviewed imported results;
