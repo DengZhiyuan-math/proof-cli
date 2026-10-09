@@ -1185,6 +1185,22 @@ def list_events(store: ProjectStore) -> list[EventRecord]:
     return events
 
 
+def list_events_of_kind(store: ProjectStore, kind: str, *, conn: sqlite3.Connection | None = None) -> list[EventRecord]:
+    """Every event of `kind`, in the order written (`rowid` breaks a tie in `created_at`)."""
+    with _reading(store, conn) as conn:
+        rows = conn.execute(
+            "SELECT id, kind, entity_id, message, payload, created_at FROM events WHERE kind = ? ORDER BY created_at, rowid",
+            (kind,),
+        ).fetchall()
+    return [
+        EventRecord(
+            id=row["id"], kind=row["kind"], entity_id=row["entity_id"], message=row["message"],
+            payload=json.loads(row["payload"]), created_at=row["created_at"],
+        )
+        for row in rows
+    ]
+
+
 def _upsert_reference(store: ProjectStore, reference: ReferenceRecord) -> ReferenceRecord:
     with _writing(store, None) as conn:
         conn.execute(
