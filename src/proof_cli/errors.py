@@ -234,6 +234,12 @@ ERROR_CODES: dict[str, str] = {
     "AGENT_INVALID_OPTION": "the model or effort asked for is not one the agent's CLI accepts",
     "AGENT_NO_USAGE_LIMITS": "this agent backend reports no usage limits to probe",
     "TURN_CALLED_OFF": "the run was stopped while its turn was being prepared, so no turn started",
+    # -- a project Pursue's history: the `pursuit` events (ADR-0021 audit section 1, issue #201) --
+    "INVALID_PURSUIT_PHASE": "not a pursuit phase (start, reader_end, theorem, stop, release_failed, end), or a start given an id: a start makes its own",
+    "PURSUIT_NOT_FOUND": "no pursuit was started under this id",
+    "PURSUIT_ENDED": "the pursuit has ended; nothing more is recorded for it",
+    "PURSUIT_OUTCOME_REQUIRED": "a pursuit's end names its outcome",
+    "PURSUIT_RECORD_FAILED": "the pursuit event could not be written; on a start, no provider is started",
 }
 
 

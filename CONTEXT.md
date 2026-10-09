@@ -167,7 +167,7 @@ States a draft in the library as a map: Definitions, Theorems and Lemmas, import
 _Avoid_: importer, parser, formalizer
 
 **Pursue**:
-The researcher's one action that sets the agents working to the end: a Coordinator on a Theorem, preceded by a Decomposer turn when it has no Claims, or by a Reader turn when started on a project with no map (ADR-0021).
+The researcher's one action that sets the agents working to the end: a Coordinator on a Theorem, preceded by a Decomposer turn when it has no Claims, or by a Reader turn when started on a project with no map (ADR-0021). A project Pursue's steps are recorded as `pursuit` events, read by `proof project progress`; one with no recorded end reads interrupted, and nothing resumes it (issue #201).
 _Avoid_: autopilot, auto mode
 
 **Standing question**:

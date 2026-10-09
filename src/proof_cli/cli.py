@@ -191,10 +191,12 @@ from .trust_rules import get_trust_rule, list_trust_rules, trust_rule_history
 from .authority import candidate_proof_sha256
 from .vault import working_entry_path
 from .definitions import add_definition, all_definitions, definitions_of, edit_definition, fixed_by_definition, nodes_naming, remove_definition, require_definition
+from .pursuit import project_progress
 from .rendering import (
     render_definition,
     render_definition_list,
     render_node_check,
+    render_project_progress,
     render_candidate_proof,
     render_challenge,
     render_challenge_list,
@@ -1620,6 +1622,14 @@ def benchmark_run(
 @project_app.command("analyze")
 def project_analyze(root: str = ROOT_OPTION, query: str = "", limit: int = 5) -> None:
     typer.echo(cmd_project_analyze(_root(root), query=query, limit=limit))
+
+
+@project_app.command("progress")
+@read_scoped
+def project_progress_command(root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
+    """The project Pursue history, oldest first: each pursuit's status and events. One with no recorded end reads interrupted."""
+    pursuits = project_progress(get_store(_root(root)))
+    typer.echo(dump_envelope(success_envelope("project.progress", pursuits)) if json_output else render_project_progress(pursuits))
 
 
 @goal_app.command("set")
