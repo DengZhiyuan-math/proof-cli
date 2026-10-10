@@ -163,7 +163,7 @@ A subtree controller started by the researcher on a Theorem or Lemma. It holds n
 Starts alone on a Theorem or Lemma with no children created by Split; ordinary dependency nodes are not children. It retrieves first and proposes a Split into Claims, with unresolved statements in the Proof fog. It adds the edges between its own Claims. Under a Coordinator its Split is the structure worked next; started alone, the Split stops the run for the researcher (ADR-0019, ADR-0021).
 
 **Reader** (a Proof agent role):
-States a draft in the library as a map: Definitions, Theorems and Lemmas, imported results with their references, and fog. It records where it departed from the draft and why, and proves nothing (ADR-0021).
+States a draft in the library as a map: Definitions, Theorems and Lemmas, imported results with their references, and fog. It records where it departed from the draft and why, and proves nothing (ADR-0021). Its runtime sets the reader role (`PROOF_AGENT_ROLE=reader`, no node role), under which `proof node create` refuses, on the parsed arguments, a Claim, `--parent` and `--reassign` (READER_ROLE_REFUSED); a statement's text is never searched (#203).
 _Avoid_: importer, parser, formalizer
 
 **Pursue**:
