@@ -189,6 +189,7 @@ ERROR_CODES: dict[str, str] = {
     # -- the Proof agent's work log (ADR-0016, spec #145) --
     "ROLE_REQUIRED": "a progress report names the role that makes it: PROOF_AGENT_ROLE in the agent's runtime, or --role",
     "INVALID_ROLE": f"the Proof agent role is not one of {', '.join(AGENT_ROLES)}",
+    "READER_ROLE_REFUSED": "under the reader role (PROOF_AGENT_ROLE=reader), `node create` makes no Claim and takes no --parent or --reassign; the error names which",
     "INVALID_PROGRESS_STATUS": "a step's status is started, done, stuck or needs-human",
     "INVALID_PROGRESS_STEP": "steps count from 1",
     "PROGRESS_STATUS_REQUIRED": "a step report needs its status",
