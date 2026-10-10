@@ -1285,8 +1285,8 @@ def import_reference(store: ProjectStore, reference: ReferenceRecord) -> Referen
     return stored
 
 
-def get_reference(store: ProjectStore, reference_id: str) -> ReferenceRecord | None:
-    with store.connect() as conn:
+def get_reference(store: ProjectStore, reference_id: str, *, conn: sqlite3.Connection | None = None) -> ReferenceRecord | None:
+    with _reading(store, conn) as conn:
         row = conn.execute(
             "SELECT data FROM reference_records WHERE id = ? LIMIT 1",
             (reference_id,),
