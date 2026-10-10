@@ -144,6 +144,7 @@ from .exchange import (
     summarize_inspect_report,
 )
 from .references import ReferenceSourceType
+from .reference_edit import edit_reference
 from .proof_map import (
     ProofMapError,
     add_dependency,
@@ -1792,6 +1793,49 @@ def reference_import(
     except ValueError as exc:
         _legacy_input_error("reference.import", exc, json_output)
     _emit_legacy_json("reference.import", json_output, lambda: output)
+
+
+@reference_app.command("edit")
+def reference_edit(
+    reference_id: str,
+    reason: str = typer.Option("", "--reason", help="Why the citation is corrected (required for any change)"),
+    root: str = ROOT_OPTION,
+    title: str = typer.Option(None, "--title"),
+    author: list[str] = typer.Option(None, "--author", help="Every author, in order: replaces the list"),
+    year: int = typer.Option(None, "--year"),
+    source_type: str = typer.Option(None, "--source-type", help=f"One of: {', '.join(member.value for member in ReferenceSourceType)}"),
+    origin: str = typer.Option(None, "--origin"),
+    bibliographic_source: str = typer.Option(None, "--bibliographic-source"),
+    identifier: str = typer.Option(None, "--identifier", help="A DOI, arXiv id, ISBN, ..."),
+    url: str = typer.Option(None, "--url"),
+    notes: str = typer.Option(None, "--notes"),
+    statement: str = typer.Option(None, "--statement", hidden=True),
+    source_locator: str = typer.Option(None, "--source-locator", hidden=True),
+    source_version: str = typer.Option(None, "--source-version", hidden=True),
+    new_reference_id: str = typer.Option(None, "--reference-id", hidden=True),
+    edited_by: str = typer.Option("", "--by", help=EDITED_BY_HELP),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Correct a citation's bibliography in place (title, authors, year, source type, identifier, URL, notes, ...): what
+    isn't given keeps its value, and the edit is recorded with its reason and old and new values. An imported result's
+    statement, source and reference id are not edited here: cite another work or version as a new imported result."""
+    given = {
+        "title": title, "authors": author or None, "year": year, "source_type": source_type, "origin": origin,
+        "bibliographic_source": bibliographic_source, "identifier": identifier, "url": url, "notes": notes,
+        # the mathematical interface: named only to be refused with its code
+        "statement": statement, "source_locator": source_locator, "source_version": source_version, "reference_id": new_reference_id,
+    }
+    store = get_store(_root(root))
+    try:
+        reference = edit_reference(store, reference_id, {field: value for field, value in given.items() if value is not None},
+                                   edited_by=_author(edited_by), reason=reason)
+    except ProofMapError as exc:
+        _emit_error(exc, json_output, command="reference.edit")
+        raise typer.Exit(code=1)
+    if json_output:
+        typer.echo(dump_envelope(success_envelope("reference.edit", {"legacy_notice": LEGACY_TRUST_NOTICE, **reference.model_dump(mode="json")})))
+    else:
+        typer.echo(f"reference {reference.id}: {reference.title} ({reference.year})")
 
 
 
