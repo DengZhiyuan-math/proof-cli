@@ -115,7 +115,7 @@ from .commands import (
     cmd_theorem_show,
     get_store,
 )
-from .domain import AGENT_ROLES, ProofMapNodeKind, is_computation
+from .domain import AGENT_ROLES, READER_ROLE, ProofMapNodeKind, is_computation
 from .envelope import dump_envelope, error_envelope, success_envelope
 from .contract import ProofGroup
 from .theorems import LEGACY_TRUST_NOTICE
@@ -452,6 +452,20 @@ def _emit_claim(claim, json_output: bool, *, command: str) -> None:
         typer.echo(render_claim(claim))
 
 
+def _reader_refuses(kind: str, parent: str, reassign: bool) -> ProofMapError | None:
+    """The reader role's limits on `node create`, read from the parsed arguments (#203): the statement's text is
+    never searched, so a statement quoting `claim "` is the Reader's to write."""
+    if kind.strip().lower() == ProofMapNodeKind.claim.value:
+        option, what = "kind=claim", "creates no Claim: a Claim is a Split's"
+    elif parent:
+        option, what = "--parent", "rests no node on another (--parent)"
+    elif reassign:
+        option, what = "--reassign", "takes no claim over (--reassign)"
+    else:
+        return None
+    return ProofMapError("READER_ROLE_REFUSED", f"the Reader {what}", details={"option": option, "role": READER_ROLE})
+
+
 @node_app.command("create")
 def node_create(
     node_id: str,
@@ -478,6 +492,11 @@ def node_create(
 ) -> None:
     """Create a proof map node. With --parent, the parent rests on it too: one transaction, and a refused
     parent leaves no node and no folder (issue #154)."""
+    if os.environ.get("PROOF_AGENT_ROLE") == READER_ROLE:
+        refused = _reader_refuses(kind, parent, reassign)
+        if refused:
+            _emit_error(refused, json_output, command="node.create")
+            raise typer.Exit(code=1)
     if reassign and not parent:
         raise click.UsageError("--reassign goes with --parent: it takes the parent's claim over")
     store = get_store(_root(root))
