@@ -202,7 +202,8 @@ def _code_of(node) -> str | None:
 def _scan_codes(source: str, where: str) -> tuple[dict[str, str], dict[str, str]]:
     """(refusals, notices) in one module's source: every literal code it refuses with — passed to ProofMapError,
     RequestError, error_envelope or the studio's _Refused, or answered as `{"error": CODE}`, `{"error": …, "code": CODE}`
-    or `{"error": {"code": CODE}}` — and every literal code it tells as a notice: a `{"code": CODE, …}` with no `error`."""
+    or `{"error": {"code": CODE}}`, or relabelled as `{**answer, "code": CODE}` (the answer it spreads is a refusal's, its
+    `error` carried over) — and every literal code it tells as a notice: a `{"code": CODE, …}` with no `error`."""
     refusals: dict[str, str] = {}
     notices: dict[str, str] = {}
     tree = ast.parse(source)
@@ -215,7 +216,8 @@ def _scan_codes(source: str, where: str) -> tuple[dict[str, str], dict[str, str]
     for node in ast.walk(tree):
         if isinstance(node, ast.Dict):
             fields = {key.value: value for key, value in zip(node.keys, node.values) if isinstance(key, ast.Constant)}
-            refusal = "error" in fields or id(node) in inside_error
+            spread = None in node.keys   # {**answer, "code": CODE}: an answer relabelled, its error carried over
+            refusal = "error" in fields or spread or id(node) in inside_error
             for name in ("error", "code"):
                 code = _code_of(fields.get(name))
                 if code:
@@ -279,10 +281,11 @@ old = {"error": "PLANTED_D", "message": "x"}
 envelope = {"ok": False, "error": {"code": "PLANTED_E", "message": "x"}}
 notice = [{"code": "PLANTED_F", "message": "x"}]
 answer = _err(404, "PLANTED_G", "x")
+relabelled = {**answer, "code": "PLANTED_J"}
 hub = _error(HTTPStatus.NOT_FOUND, "PLANTED_H", "x")
 told = errors.notice("PLANTED_I", "x", output_bytes=1)
 """, "planted")
-    assert set(refusals) == {"PLANTED_A", "PLANTED_B", "PLANTED_C", "PLANTED_D", "PLANTED_E", "PLANTED_G", "PLANTED_H"}
+    assert set(refusals) == {"PLANTED_A", "PLANTED_B", "PLANTED_C", "PLANTED_D", "PLANTED_E", "PLANTED_G", "PLANTED_H", "PLANTED_J"}
     assert set(notices) == {"PLANTED_F", "PLANTED_I"}
     # the studio's own refusals are seen, and a notice code used as a refusal is not let through
     studio = _scan_codes((SRC.parents[1] / "packages" / "latex-agent" / "src" / "latex_agent" / "server.py").read_text(), "server.py")[0]

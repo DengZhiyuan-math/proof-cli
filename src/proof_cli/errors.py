@@ -248,6 +248,10 @@ ERROR_CODES: dict[str, str] = {
     "PURSUIT_ACTIVE": "the project is being pursued already, or a stopped pursuit is still ending: stop it, or Start again once it settles",
     "NO_PURSUIT": "no pursuit is running on this project to stop; the answer carries how the last one ended",
     "READER_FAILED": "the Reader's turn failed or was stopped before it ended; the message says why, and what it stated stays on the map",
+    # -- a Pursue's total turns and time limit, fixed at its Start (zeqome/proof-agents#19, zeqome/proof-web#18) --
+    "INVALID_LIMITS": "a Pursue's limits are a whole number of turns (at least one) and a number of minutes (more than none)",
+    "BUDGET_SPENT": "the Pursue's total turns or its time limit is spent; no new part of it starts",
+    "NO_BUDGET": "no node budget to compute a Pursue's default total from before the Reader states the map",
 }
 
 
