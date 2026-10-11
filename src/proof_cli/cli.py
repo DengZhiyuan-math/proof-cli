@@ -162,6 +162,7 @@ from .proof_map import (
     fixed_by,
     restate_node,
     get_integrity_state,
+    get_stale_cause,
     get_reference_review_state,
     get_workflow_state,
     evidence_binding,
@@ -624,6 +625,7 @@ def node_show(
         payload["workflow_state"] = workflow_state
         payload["acceptance_state"] = acceptance_state
         payload["integrity_state"] = integrity_state
+        payload["stale_cause"] = get_stale_cause(store, node_id)  # why it may no longer hold (#197)
         # the Trust rules an imported result meets, and when it first met each (ADR-0014)
         payload["trust_rule"] = trust_rule
         # an agent's import meets no rule; the rules it would meet, for its own Reference review (ADR-0022)

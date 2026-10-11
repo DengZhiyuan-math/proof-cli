@@ -4037,6 +4037,35 @@ def get_integrity_state(store: ProjectStore, node_id: str) -> str:
     return "current"
 
 
+@read_scoped
+def get_stale_cause(store: ProjectStore, node_id: str) -> dict | None:
+    """Why the node reads `potentially-stale`, in `get_integrity_state`'s order, or None when it doesn't (T8, #197):
+    `{"cause": "upstream-challenged" | "upstream-stale"}` for an Accepted node; `{"cause": "support-withdrawn",
+    "nodes": [...]}`, the support the researcher sent back; or the newest change to the text it is read against,
+    `{"cause": "restated", "node_id", "by", "reason", "at"}` or `{"cause": "definition-edited", "definition_id", …}`."""
+    if get_integrity_state(store, node_id) != "potentially-stale":
+        return None
+    node = require_node(store, node_id)
+    if get_acceptance_state(store, node_id) == "accepted":
+        upstream = _upstream_cause(store, node_id)
+        if upstream is not None:
+            return {"cause": f"upstream-{upstream}"}
+    if _awaiting_decision(store, node) is not None and _support_withdrawn(store, node_id):
+        return {"cause": "support-withdrawn", "nodes": sorted(d for d in _unsettled_support(store, node_id) if _sent_back(store, d))}
+    nodes = _rests_on(store, node_id)
+    named = {definition_id for current_id in nodes for definition_id in (getattr(get_node(store, current_id), "definitions", None) or [])}
+    newest = None
+    for event in list_events(store):
+        if (event.kind == RESTATED_EVENT and event.entity_id in nodes) or (event.kind == DEFINITION_EDITED_EVENT and event.entity_id in named):
+            if newest is None or event.created_at >= newest.created_at:
+                newest = event
+    if newest is None:  # pragma: no cover — potentially-stale under a restatement always has one
+        return None
+    payload = newest.payload or {}
+    what = {"cause": "restated", "node_id": newest.entity_id} if newest.kind == RESTATED_EVENT else {"cause": "definition-edited", "definition_id": newest.entity_id}
+    return {**what, "by": payload.get("by"), "reason": payload.get("reason"), "at": newest.created_at.isoformat()}
+
+
 def _snapshot_restated_under(store: ProjectStore, node_id: str) -> bool:
     """Whether the node's current snapshot, not yet relied on by any decision, was frozen before the text it proves —
     its own or what it rests on — was restated (ADR-0021 point 6). A new snapshot answers it."""
