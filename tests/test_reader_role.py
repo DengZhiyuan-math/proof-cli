@@ -82,8 +82,9 @@ def test_without_the_reader_role_nothing_changes(tmp_path: Path, args, env):
 
 def test_reassign_without_parent_stays_a_usage_error_without_the_role(tmp_path: Path):
     _project(tmp_path)
-    result = runner.invoke(app, ["node", "create", "lem_1", "lemma", "x", "--reassign", "--root", str(tmp_path)], env={"PROOF_AGENT_ROLE": ""})
-    assert result.exit_code == 2 and "--reassign goes with --parent" in result.output
+    result = runner.invoke(app, ["node", "create", "lem_1", "lemma", "x", "--reassign", "--root", str(tmp_path), "--json"], env={"PROOF_AGENT_ROLE": ""})
+    error = json.loads(result.stdout)["error"]   # the envelope, not Rich's usage panel, which CI colours
+    assert result.exit_code == 2 and error["code"] == "USAGE_ERROR" and error["message"].startswith("--reassign goes with --parent")
 
 
 def test_the_reader_role_is_no_node_role(tmp_path: Path):
