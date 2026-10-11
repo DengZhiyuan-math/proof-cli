@@ -257,9 +257,10 @@ def test_a_decision_on_a_dependent_fixes_a_definition_through_the_node_naming_it
     import_reference(store, ReferenceRecord(id="rudin", title="Principles", authors=["W. Rudin"], year=1976, source_type=ReferenceSourceType.textbook))
     researcher(store).declare_trust_rule("textbooks", conditions=[{"kind": "source_type_in", "values": ["textbook"]}], rationale="standard")
     D.add_definition(store, "cont", term="Continuity", text="eps-delta", created_by="reader-1")
-    # a rule-trusted citation has no decision of its own: its dependent's decision is the first to rely on its text
+    # a rule-trusted citation has no decision of its own: its dependent's decision is the first to rely on its text.
+    # The researcher's import, since an agent's meets no rule (ADR-0022); the definition it names is the agent's.
     create_node(store, node_id="ref", kind="imported_result", statement="Heine–Cantor", definitions=["cont"], source_locator="Thm 4.19",
-                source_version="3rd", reference_id="rudin", created_by="reader-1")
+                source_version="3rd", reference_id="rudin")
     create_node(store, node_id="L", kind="lemma", statement="l", dependencies=["ref"], created_by="reader-1")
     assert D.fixed_by_definition(store, "cont") is None
 
