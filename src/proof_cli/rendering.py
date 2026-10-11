@@ -463,6 +463,29 @@ def render_definition_list(items: list[dict]) -> str:
     return console.export_text()
 
 
+def render_project_progress(pursuits: list[dict]) -> str:
+    """The project's Pursue history (`proof project progress`): each pursuit, its status and its events."""
+    console = _console()
+    console.rule("Project Pursue")
+    if not pursuits:
+        console.print("No project Pursue was recorded here.")
+        return console.export_text()
+    for pursuit in pursuits:
+        console.print(f"{pursuit['pursuit_id']}  {pursuit['status']}  provider {pursuit['provider'] or '—'}  started {pursuit['started_at']}")
+        if pursuit["reason"]:
+            console.print(f"  {pursuit['reason']}")
+        for event in pursuit["events"]:
+            parts = [event["created_at"], event["phase"]]
+            parts += [x for x in (event["outcome"], event["theorem"]) if x]
+            line = "  · " + " ".join(parts)
+            if event["reason"]:
+                line += f": {event['reason']}"
+            if event["budget"] is not None:
+                line += f" (budget {event['budget']})"
+            console.print(line)
+    return console.export_text()
+
+
 def render_definition(view: dict) -> str:
     """One definition in full (`proof definition show`)."""
     console = _console()
