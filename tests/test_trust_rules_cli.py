@@ -94,6 +94,20 @@ def test_node_show_and_list_json_report_trusted_by_rule_and_the_rules(tmp_path: 
     assert "trusted-by-rule" in text.output and "textbooks" in text.output
 
 
+def test_an_agents_import_reads_unreviewed_with_the_rules_it_would_meet_under_json(tmp_path: Path):
+    store = _project(tmp_path)
+    create_node(store, node_id="ref_reader", kind="imported_result", statement="the reader's Bolzano-Weierstrass",
+                source_locator="Theorem 3.6", source_version="3rd edition", reference_id="rudin", created_by="reader")
+
+    shown = _json(tmp_path, "node", "show", "ref_reader")["data"]
+    assert shown["acceptance_state"] == "unreviewed" and shown["trust_rule"] == []
+    assert shown["would_meet_trust_rule"] == ["textbooks"] and shown["trust_rule_events"] == []
+
+    listed = {node["id"]: node for node in _json(tmp_path, "node", "list")["data"]}
+    assert listed["ref_reader"]["would_meet_trust_rule"] == ["textbooks"]
+    assert listed["ref_bw"]["trust_rule"] == ["textbooks"] and listed["ref_bw"]["would_meet_trust_rule"] == []
+
+
 def test_an_explicitly_reviewed_imported_result_reads_reviewed_under_json(tmp_path: Path):
     store = _project(tmp_path, rule=False)
     researcher(store).decide_reference_review("ref_bw", rationale="checked")
