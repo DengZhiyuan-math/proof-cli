@@ -79,6 +79,12 @@ class AgentRole(str, Enum):
 
 AGENT_ROLES = tuple(role.value for role in AgentRole)
 
+# The Reader's runtime (PROOF_AGENT_ROLE=reader): the project Pursue's Reader states the Theorem, its Lemmas and its
+# imported results, and never creates a Claim, rests a node on another or takes a claim over (ADR-0021 audit, #203).
+# Not a node role: it takes no turn on a node, so `proof node progress` refuses it. A cooperative agent's contract
+# (ADR-0010), not authentication.
+READER_ROLE = "reader"
+
 
 class Medium(str, Enum):
     """What a Theorem, Lemma or Claim's candidate proof is made of (spec #145, decided in #141).
