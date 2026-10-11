@@ -244,6 +244,10 @@ ERROR_CODES: dict[str, str] = {
     "PURSUIT_ENDED": "the pursuit has ended; nothing more is recorded for it",
     "PURSUIT_OUTCOME_REQUIRED": "a pursuit's end names its outcome",
     "PURSUIT_RECORD_FAILED": "the pursuit event could not be written; on a start, no provider is started",
+    # -- the project's Pursue: a Reader states its Theorems, then each is pursued (ADR-0021) --
+    "PURSUIT_ACTIVE": "the project is being pursued already, or a stopped pursuit is still ending: stop it, or Start again once it settles",
+    "NO_PURSUIT": "no pursuit is running on this project to stop; the answer carries how the last one ended",
+    "READER_FAILED": "the Reader's turn failed or was stopped before it ended; the message says why, and what it stated stays on the map",
 }
 
 
