@@ -234,6 +234,10 @@ ERROR_CODES: dict[str, str] = {
     "AGENT_INVALID_OPTION": "the model or effort asked for is not one the agent's CLI accepts",
     "AGENT_NO_USAGE_LIMITS": "this agent backend reports no usage limits to probe",
     "TURN_CALLED_OFF": "the run was stopped while its turn was being prepared, so no turn started",
+    # -- a Pursue's total turns and time limit, fixed at its Start (zeqome/proof-agents#19, zeqome/proof-web#18) --
+    "INVALID_LIMITS": "a Pursue's limits are a whole number of turns (at least one) and a number of minutes (more than none)",
+    "BUDGET_SPENT": "the Pursue's total turns or its time limit is spent; no new part of it starts",
+    "NO_BUDGET": "no node budget to compute a Pursue's default total from before the Reader states the map",
 }
 
 
