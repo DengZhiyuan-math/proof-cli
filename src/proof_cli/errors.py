@@ -36,6 +36,9 @@ ERROR_CODES: dict[str, str] = {
     "REFERENCE_ID_NOT_IMPORTED_RESULT": "only an imported result links a reference (--reference-id)",
     "REFERENCE_NOT_FOUND": "no reference has this id: the linked citation doesn't exist here",
     "INVALID_SOURCE_TYPE": "not a reference source type (`reference import --source-type`)",
+    "REFERENCE_FIELD_NOT_EDITABLE": "`reference edit` corrects bibliography only; an imported result's statement, source and reference id are its mathematical interface: cite another work or version as a new imported result",
+    "REFERENCE_EDIT_REASON_REQUIRED": "a citation's correction says why (`reference edit --reason`)",
+    "REFERENCE_TITLE_REQUIRED": "a citation keeps a title",
     "NOT_A_CLAIM": "only a Claim can be promoted",
     # -- claims (a planning signal, ADR-0010) --------------------------------------------
     "CLAIM_CONFLICT": "someone else holds the claim; the error names them (pass --reassign to take it over)",
