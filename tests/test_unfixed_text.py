@@ -335,3 +335,22 @@ def test_a_snapshot_resting_on_support_sent_back_names_that_support(tmp_path: Pa
 
     assert get_integrity_state(store, "L") == "potentially-stale"
     assert get_stale_cause(store, "L") == {"cause": "support-withdrawn", "nodes": ["C"]}
+
+
+def test_the_stale_causes_of_a_whole_map_read_the_event_log_once(tmp_path: Path, monkeypatch):
+    """Audit P2 (2026-10-12): a cause comes from the index `restated_at` already built, not a fresh pass per node."""
+    from proof_cli import proof_map
+    from proof_cli.storage import read_scope
+
+    store = ensure_project(tmp_path)
+    D.add_definition(store, "D", term="Positive parameter", text="$n \\ge 1$", created_by="reader-1")
+    for index in range(5):
+        create_node(store, node_id=f"C{index}", kind="claim", statement=f"c{index}", definitions=["D"], created_by="reader-1")
+        submit_proof(store, f"C{index}", claimant_id="prover-1", scoping_rationale="scoped", content="proof")
+    D.edit_definition(store, "D", text="$n \\ge 2$", edited_by="reader-1", reason="n = 1 is degenerate")
+    calls = []
+    monkeypatch.setattr(proof_map, "list_events", lambda store: calls.append(1) or list_events(store))
+
+    with read_scope():
+        causes = [proof_map.get_stale_cause(store, f"C{index}") for index in range(5)]
+    assert {cause["definition_id"] for cause in causes} == {"D"} and len(calls) == 1
