@@ -41,6 +41,9 @@ proof node create C3 claim "For every n ≤ 10^4 …" --medium computation   # a
 #   agent_name = "claude-code"      # the name the run claims and records under (default: the provider's)
 #   budget_turns = 40               # per Start; budget_minutes = 60
 proof node progress N              # the node's work log: what the agent planned, did, handed over
+proof node answer N <question> --keep | --answer "<the reading to follow>"
+                                   # a Standing question: a choice a role made instead of stopping (`node progress --question`);
+                                   # an answer that differs is a redirect for the node's next run (ADR-0021)
 proof node check N                 # the mechanical checks of its working proof: builds cleanly, key-ideas.md's four headings, the statement
                                    # is the node's, \input's stay in the folder, each dependency is mentioned. Findings, not refusals: a run
                                    # sends the work back on an error before the Verifier reads; the researcher's request-review is never stopped
@@ -81,7 +84,7 @@ A snapshot, and an exchange export (`proof exchange export`), never freeze or ca
 ## The proof map page
 
 `proof map open` (in a project's folder, or with `--root`) opens the project's local page, bound to 127.0.0.1 on the project's own port — through the Home, started if need be, so the page links back to it:
-- **The map** is a DAG of every node, with a tree view rooted at any node. Frontier nodes (open, unblocked, unclaimed) are outlined as *ready to claim*. Each node shows its acceptance, workflow and integrity state, and its assignee; hovering it shows its snapshot's 核心思路.
+- **The map** is a DAG of every node, with a tree view rooted at any node. Frontier nodes (every dependency Accepted or Provisional, unclaimed) are outlined as *ready to claim*. Each node shows its acceptance, workflow and integrity state, and its assignee; hovering it shows its snapshot's 核心思路.
 - **Awaiting review** lists each snapshot to decide on, with its 核心思路 and 难点.
 - **Nodes are created on the page or from the CLI** (`proof node create`): a theorem, lemma or claim with its assumptions, dependencies and medium, or an imported result with its source and the reference it cites. Right-click the canvas (a long press on touch) for a new node there, or a card to split it, hang a node under it (`--parent`: the card rests on the new node, in one transaction) or rest a node on it. The form opens in place, previews the maths, says what the server would refuse, and shows the equivalent command to copy; a reference that isn't in `proof reference list` yet can be added from it. That covers the first node of an empty map, and a corrected source that replaces a withdrawn one.
 - **A theorem, lemma or claim opens in its studio** (ADR-0011), a LaTeX workspace built from prism-local's code: editor (with folding of sections and environments), compile, PDF with SyncTeX both ways (links with Back, text selection, search, bookmarks), and the agent panel. The agent compiles through the studio's own build (its `compile` tool), so the PDF and the Problems list the researcher sees are the ones it worked from, and the page shows it at work: the lines it reads, the file as it writes it, the lines it changed. Beside them, the **node panel** shows the node's statement, state axes, assignee and dependencies, and offers claim or unassign, split into Claims, edit its dependencies (add, remove, or move one onto a child, as `proof node depend` does), request review, open a Challenge, and record an Evidence check, as the page's git identity.
@@ -106,6 +109,17 @@ A snapshot, and an exchange export (`proof exchange export`), never freeze or ca
 - **An imported result's page** shows its source, trust level and dependents, and its Reference review.
 
 When you request review after compiling in the studio, the fresh `build/proof.pdf` is archived as `snapshots/v<N>.pdf` next to the snapshot and committed with the decision. `proofs/.gitignore` keeps `build/` out of git. Compiling needs a TeX distribution or Tectonic; without one, the studio still edits and requests review.
+
+## Definitions
+
+A statement is written in **Definitions** (ADR-0020): a definition, the setting of a model or notation, written once under a name and named by the nodes whose statements use it. A node names its definitions when it is created, and its `proof.tex` opens with them. A Claim split from a node, or created under it, is written in that node's definitions too, so "in the setting of the Theorem" never has to be said. A definition no node names yet can be removed. A definition, like a node's statement, assumptions and named definitions, is Unfixed until a Review decision relies on it — the first decision on a node naming it, or on a node resting on one (an imported result: its Reference review) — and until then can be restated with a reason: `proof definition edit <id> --text … --reason … --by …`, `proof node restate <node> --statement … [--assumption …] [--definition …] --reason … --by …` (ADR-0021). The researcher may restate any unfixed text, an agent only what an agent wrote, and never a definition a node of the researcher's names. Who wrote it is `--created-by`, else the agent's `PROOF_AGENT_NAME`, else the researcher (`human`); `--by` resolves the same way. A restatement is in the work log, makes stale every verdict on the node and on what rests on it, and makes a snapshot there awaiting a decision Potentially stale. Fixed text is refused (`TEXT_FIXED`, `DEFINITION_FIXED`, naming the decision): a correction is a new definition under a new id, or a new node. What a node says is its statement, its assumptions and its definitions, and that is what Acceptance and the dependency pins bind.
+
+```bash
+proof definition add simple-graph --term "Simple graph" 'A simple graph $G=(V,E)$ has a finite vertex set $V$ and an edge set $E\subseteq\binom V2$. …'
+proof node create MAIN theorem 'Every simple graph on $n$ vertices has at most $\binom n2$ edges.' --definition simple-graph
+proof node split MAIN --child 'DEG=…'                          # DEG names simple-graph too
+proof definition list                                            # each with the nodes that name it
+```
 
 ## Proof fog
 
@@ -135,7 +149,7 @@ A **Trust rule** (ADR-0014) is a Reference review you declare in advance for a c
 
 No CLI command or agent tool can make these decisions. Those commands answer `HUMAN_REVIEW_REQUIRED` with the page's URL. That is a boundary for cooperative agents on your own machine, not a security mechanism, which suits personal use or a small team on GitHub. A project from before ADR-0010 has its decisions moved into `reviews.jsonl` the first time it's opened, and every node keeps its state.
 
-A claim is a wayfinder-style assignment, not a lock (ADR-0010). `proof node claim <id> --assignee <name>` marks a frontier node as taken so that other agents skip it. `--reassign` takes over a stale claim, and `proof node unassign <id> --by <name>` clears one. `proof frontier` lists the open, unblocked, unclaimed nodes with their three state axes.
+A claim is a wayfinder-style assignment, not a lock (ADR-0010). `proof node claim <id> --assignee <name>` marks a frontier node as taken so that other agents skip it. `--reassign` takes over a stale claim, and `proof node unassign <id> --by <name>` clears one. `proof frontier` lists the nodes ready to be worked — every dependency Accepted or Provisional, nobody holding them, none awaiting review — with their three state axes. A Blocked node may still be claimed and worked; Blocked holds back only its Review decision, which waits until what it rests on is Accepted (ADR-0021). A node resting on a Provisional one, an unaccepted node whose snapshot the Verifier passed or an unreviewed imported result, is Conditional on it: `proof node show` and `--json` name them under `conditional_on`.
 
 Proof state is persisted locally. Generated workspace state under `.proof/` is intentionally excluded from version control.
 

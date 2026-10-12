@@ -65,12 +65,15 @@ def render_proof_map_node(
     acceptance_state: str | None = None,
     integrity_state: str | None = None,
     blocked_reason: str | None = None,
+    provisional: bool = False,
+    conditional_on: list[str] | None = None,
     working_proof: str | None = None,
     snapshots: list[dict] | None = None,
     citation: dict | None = None,
     trust_rule: list[str] | None = None,
     crystallized_from: str | None = None,
     fog_near: list[str] | None = None,
+    definitions: list[dict] | None = None,
 ) -> str:
     console = _console()
     console.rule(f"Proof Map Node: {node.id}")
@@ -82,6 +85,8 @@ def render_proof_map_node(
         table.add_row("Medium", node.medium.value)  # what the candidate proof is made of (spec #145)
     if node.display_label:
         table.add_row("Display label", node.display_label)
+    for definition in definitions or []:  # what the statement's symbols are, before the statement (ADR-0020)
+        table.add_row(f"Definition {definition['id']}", f"{definition['term']}. {definition['text']}")
     table.add_row("Statement", node.statement)
     table.add_row("Assumptions", ", ".join(node.assumptions) or "none")
     table.add_row("Dependencies", ", ".join(node.dependencies) or "none")
@@ -116,6 +121,11 @@ def render_proof_map_node(
         table.add_row("Workflow state", workflow_state)
     if blocked_reason is not None:
         table.add_row("Blocked reason", blocked_reason)
+    if provisional:
+        # rested on for work, never for trust (ADR-0021)
+        table.add_row("Provisional", "yes: its statement may be used until the researcher decides it")
+    if conditional_on:
+        table.add_row("Conditional on", ", ".join(conditional_on))
     if acceptance_state is not None:
         table.add_row("Acceptance state", acceptance_state)
     if trust_rule:
@@ -361,6 +371,10 @@ def render_challenge_list(challenges: list[Challenge]) -> str:
 
 
 
+def _shown(value) -> str:
+    return ", ".join(str(item) for item in value) or "none" if isinstance(value, list) else str(value)
+
+
 def _work_log_body(entry: dict) -> str:
     """One work log entry as a line's body: a plan, a step, a turn, a handoff, a verdict or an attempt
     (ADR-0019), or what the agent did through another `proof` command."""
@@ -380,6 +394,10 @@ def _work_log_body(entry: dict) -> str:
         return f"attempt: {entry.get('goal')}" + (f" ({entry['method']})" if entry.get("method") else "") + f" failed on {entry.get('failed_on')}"
     if kind == "coordinator":
         return f"coordinator: {entry.get('note')}"
+    if kind == "question":  # a Standing question (ADR-0021): the choice made, open until the researcher answers
+        return f"chose {entry.get('question')} ({entry.get('id')})"
+    if kind == "answer":
+        return f"answered {entry.get('question_id')}: " + ("the choice stands" if entry.get("keep") else f"redirect — {entry.get('redirect')}")
     if kind == "split":
         return "split into " + ", ".join(entry.get("nodes") or [])
     if kind == "review-requested":
@@ -390,8 +408,13 @@ def _work_log_body(entry: dict) -> str:
         return f"fog {entry.get('fog_id')}: {entry.get('text')}"
     if kind == "experiment":
         return f"Experiment {entry.get('seq')} on {entry.get('fog_id')}: {entry.get('outcome')}"
+    if kind in ("restated", "definition-edited"):  # ADR-0021 point 6: why, and what changed from what
+        what = "restated" if kind == "restated" else f"definition {entry.get('definition_id')} edited"
+        before, after = entry.get("from") or {}, entry.get("to") or {}
+        changes = "; ".join(f"{key}: {_shown(before.get(key)) if key in before else '…'} → {_shown(value)}" for key, value in after.items())
+        return f"{what}" + (f" — {entry['reason']}" if entry.get("reason") else "") + (f" ({changes})" if changes else "")
     if kind == "dependencies":
-        return f"dependency {entry.get('change')}: {entry.get('dependency')}"
+        return f"dependency {entry.get('change')}: {entry.get('dependency')}" + (" (resplit: the Decomposer took its own Claim back)" if entry.get("resplit") else "")
     return str(kind)
 
 
@@ -419,4 +442,60 @@ def render_work_log(node_id: str, log: list[dict]) -> str:
         when = str(entry.get("at", ""))[:16].replace("T", " ")
         who = f"{entry.get('role') or ''}{'·' if entry.get('role') and entry.get('by') else ''}{entry.get('by') or ''}"
         console.print(f"{when}  {who:<24} {_work_log_body(entry)}")
+    return console.export_text()
+
+
+def render_definition_list(items: list[dict]) -> str:
+    """The project's Definitions (ADR-0020): id, term, the nodes that name it, the text."""
+    console = _console()
+    console.rule("Definitions")
+    if not items:
+        console.print("No definitions yet: `proof definition add <id> --term <term> <text>`.")
+        return console.export_text()
+    table = Table()
+    table.add_column("id")
+    table.add_column("term")
+    table.add_column("named by")
+    table.add_column("text")
+    for item in items:
+        table.add_row(item["id"], item["term"], ", ".join(item["used_by"]) or "— (editable)", item["text"])
+    console.print(table)
+    return console.export_text()
+
+
+def render_project_progress(pursuits: list[dict]) -> str:
+    """The project's Pursue history (`proof project progress`): each pursuit, its status and its events."""
+    console = _console()
+    console.rule("Project Pursue")
+    if not pursuits:
+        console.print("No project Pursue was recorded here.")
+        return console.export_text()
+    for pursuit in pursuits:
+        console.print(f"{pursuit['pursuit_id']}  {pursuit['status']}  provider {pursuit['provider'] or '—'}  started {pursuit['started_at']}")
+        if pursuit["reason"]:
+            console.print(f"  {pursuit['reason']}")
+        for event in pursuit["events"]:
+            parts = [event["created_at"], event["phase"]]
+            parts += [x for x in (event["outcome"], event["theorem"]) if x]
+            line = "  · " + " ".join(parts)
+            if event["reason"]:
+                line += f": {event['reason']}"
+            if event["budget"] is not None:
+                line += f" (budget {event['budget']})"
+            console.print(line)
+    return console.export_text()
+
+
+def render_definition(view: dict) -> str:
+    """One definition in full (`proof definition show`)."""
+    console = _console()
+    console.rule(f"Definition: {view['id']}")
+    table = Table(show_header=False, box=None, pad_edge=False)
+    table.add_column("key", style="bold")
+    table.add_column("value")
+    table.add_row("Term", view["term"])
+    table.add_row("Text", view["text"])
+    table.add_row("Named by", ", ".join(view["used_by"]) or "no node yet: it can still be edited or removed")
+    table.add_row("Created by", view["created_by"])
+    console.print(table)
     return console.export_text()

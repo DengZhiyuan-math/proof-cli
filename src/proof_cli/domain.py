@@ -79,6 +79,12 @@ class AgentRole(str, Enum):
 
 AGENT_ROLES = tuple(role.value for role in AgentRole)
 
+# The Reader's runtime (PROOF_AGENT_ROLE=reader): the project Pursue's Reader states the Theorem, its Lemmas and its
+# imported results, and never creates a Claim, rests a node on another or takes a claim over (ADR-0021 audit, #203).
+# Not a node role: it takes no turn on a node, so `proof node progress` refuses it. A cooperative agent's contract
+# (ADR-0010), not authentication.
+READER_ROLE = "reader"
+
 
 class Medium(str, Enum):
     """What a Theorem, Lemma or Claim's candidate proof is made of (spec #145, decided in #141).
@@ -184,6 +190,8 @@ class ProofMapNode(BaseModel):
     display_label: str = ""
     statement: str
     assumptions: list[str] = Field(default_factory=list)
+    # the Definitions the statement is written in (ADR-0020): named at creation and fixed, like the statement
+    definitions: list[str] = Field(default_factory=list)
     dependencies: list[str] = Field(default_factory=list)
     source_locator: str | None = None
     source_version: str | None = None
@@ -423,6 +431,20 @@ class ExperimentOutcome(str, Enum):
     refutes = "refutes"
     inconclusive = "inconclusive"
     error = "error"
+
+
+class Definition(BaseModel):
+    """A project's named piece of mathematical text — a definition, the setting of a model, notation — that node
+    statements are written in (ADR-0020). Text is Markdown with `$…$` maths, as a statement is. Editable while Unfixed —
+    until a Review decision relies on it (ADR-0021) — and removable only while no node names it; once fixed, a
+    corrected definition is a new one."""
+
+    id: str
+    term: str
+    text: str
+    created_by: str = "human"
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
 
 
 class FogItem(BaseModel):

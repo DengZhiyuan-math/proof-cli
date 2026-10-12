@@ -57,6 +57,7 @@ from pydantic import BaseModel, Field, ValidationError
 from .authority import list_decisions
 from .collaboration import CollaborationState, import_review_records, load_collaboration, save_collaboration
 from .domain import (
+    Definition,
     BlockerRecord,
     BlockerStatus,
     CandidateProofRecord,
@@ -94,6 +95,9 @@ from .proof_state import load_state, save_state
 from .publication import PublicationWorkspace, load_publication_workspace, save_publication_workspace
 from .references import ReferenceRecord, ReferenceReviewRecord
 from .storage import (
+    get_definition,
+    insert_definition,
+    list_definitions,
     ProjectStore,
     append_event,
     ensure_project,
@@ -176,6 +180,8 @@ class ExchangeBundle(BaseModel):
     policies: list[GovernancePolicyRecord] = Field(default_factory=list)
     publication_workspace: PublicationWorkspace | None = None
     proof_map_nodes: list[ProofMapNode] = Field(default_factory=list)
+    # the definitions node statements are written in (ADR-0020): what a node says travels with it
+    definitions: list[Definition] = Field(default_factory=list)
     claims: list[ClaimRecord] = Field(default_factory=list)
     # the Candidate proof index; the snapshot files it points at are in vault_files
     candidate_proofs: list[CandidateProofRecord] = Field(default_factory=list)
@@ -347,6 +353,7 @@ def export_exchange_bundle(store: ProjectStore, *, note: str = "") -> ExchangeBu
         policies=list_policy_records(store),
         publication_workspace=load_publication_workspace(store),
         proof_map_nodes=nodes,
+        definitions=list_definitions(store),
         claims=list_all_claims(store),
         candidate_proofs=list_all_candidate_proofs(store),
         dependency_pins=list_all_dependency_pins(store),
@@ -436,6 +443,7 @@ def inspect_exchange_bundle(bundle: ExchangeBundle | dict[str, Any]) -> Exchange
         "domain_packs": len(bundle.domain_packs),
         "policies": len(bundle.policies),
         "proof_map_nodes": len(bundle.proof_map_nodes),
+        "definitions": len(bundle.definitions),
         "claims": len(bundle.claims),
         "active_claims": sum(1 for claim in bundle.claims if claim.released_at is None),
         "candidate_proofs": len(bundle.candidate_proofs),
@@ -477,6 +485,7 @@ class _Plan:
     warnings: list[str] = field(default_factory=list)
     kept_local: dict[str, int] = field(default_factory=dict)
     nodes: list[ProofMapNode] = field(default_factory=list)
+    definitions: list[Definition] = field(default_factory=list)
     claims: list[ClaimRecord] = field(default_factory=list)
     released_claims: list[dict[str, str]] = field(default_factory=list)
     proofs: list[CandidateProofRecord] = field(default_factory=list)
@@ -679,6 +688,27 @@ def _plan_import(store: ProjectStore, bundle: ExchangeBundle) -> _Plan:
         missing = [dependency for dependency in node.dependencies if dependency not in local_ids | new_ids]
         if missing:
             plan.problem("DEPENDENCY_NOT_FOUND", f"node {node.id} depends on {', '.join(missing)}, in neither the bundle nor this project", node_id=node.id)
+    # the definitions (ADR-0020): a bundle's definition joins this project unless one of the same id is here. Then it
+    # must say the same: a node written in it would otherwise mean here what it did not mean there. Every definition a
+    # new node names must be in the bundle or here.
+    known_definitions: set[str] = set()
+    for definition in bundle.definitions:
+        if definition.id in known_definitions:
+            plan.problem("IMPORT_ID_CONFLICT", f"definition {definition.id} appears twice in the bundle", section="definitions", id=definition.id)
+            continue
+        known_definitions.add(definition.id)
+        local = get_definition(store, definition.id)
+        if local is None:
+            plan.definitions.append(definition)
+        elif (local.term, local.text) != (definition.term, definition.text):
+            plan.problem("DEFINITION_CONFLICT", f"definition {definition.id} here says something else than the bundle's; nodes written in it would change meaning",
+                         definition_id=definition.id)
+        else:
+            plan.keep("definitions", 1)
+    for node in plan.nodes:
+        missing = [d for d in node.definitions if d not in known_definitions and get_definition(store, d) is None]
+        if missing:
+            plan.problem("DEFINITION_NOT_FOUND", f"node {node.id} is written in {', '.join(missing)}, in neither the bundle nor this project", node_id=node.id)
     theorems = [node.id for node in local_nodes if node.kind == ProofMapNodeKind.theorem] + [
         node.id for node in plan.nodes if node.kind == ProofMapNodeKind.theorem
     ]
@@ -906,6 +936,8 @@ def _write_import(store: ProjectStore, bundle: ExchangeBundle, plan: _Plan) -> E
             insert_governance_record(store, kind=kind, data=json.dumps(record.model_dump(mode="json"), sort_keys=True))
             written[section] = written.get(section, 0) + 1
 
+        for definition in plan.definitions:
+            insert_definition(store, definition)
         for node in plan.nodes:
             insert_proof_map_node(store, node)
         for claim in plan.claims:
@@ -948,6 +980,7 @@ def _write_import(store: ProjectStore, bundle: ExchangeBundle, plan: _Plan) -> E
             "references": len(plan.references),
             "reference_reviews": len(plan.reference_reviews),
             "proof_map_nodes": len(plan.nodes),
+            "definitions": len(plan.definitions),
             "claims": len(plan.claims),
             "candidate_proofs": len(plan.proofs),
             "dependency_pins": len(plan.pins),

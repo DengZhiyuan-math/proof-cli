@@ -88,8 +88,9 @@ def test_a_node_with_unaccepted_dependencies_cannot_be_decided(tmp_path: Path):
     with pytest.raises(ProofMapError) as exc_info:
         _decide(store, "clm_1", "accept")
 
-    assert exc_info.value.code == "NOT_REVIEW_NEEDED"
-    assert exc_info.value.details["workflow_state"] == "blocked"
+    # Blocked holds back the decision, not the work that led to it (ADR-0021 point 1)
+    assert exc_info.value.code == "NODE_BLOCKED"
+    assert exc_info.value.details == {"unsettled": ["lem_dep"], "awaiting_decision": True}
     assert get_acceptance_state(store, "clm_1") == "unreviewed"
 
 

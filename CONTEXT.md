@@ -9,7 +9,7 @@ The evolving dependency graph of one research effort, from its target theorem do
 _Avoid_: proof tree (it is a DAG), project
 
 **Frontier**:
-The set of proof map nodes ready to be worked right now — no unresolved dependency, no active claim. The first thing an agent or a researcher checks, and the strongest visual signal in any Proof map view, ahead of workflow/acceptance/integrity state. See ADR-0006, ADR-0008.
+The set of proof map nodes ready to be worked right now — every dependency Accepted or Provisional, no active claim. The first thing an agent or a researcher checks, and the strongest visual signal in any Proof map view, ahead of workflow/acceptance/integrity state. See ADR-0006, ADR-0008, ADR-0021.
 _Avoid_: ready queue, backlog
 
 **Proof fog**:
@@ -36,6 +36,10 @@ _Avoid_: proof tree (see Proof map's own _Avoid_ — a proof map is a DAG; this 
 The single entity type for every vertex in a proof map — theorem, lemma, claim, or imported result. All four share one structure (statement, assumptions, dependencies, status, candidate proof); `kind` distinguishes what role a node plays, not its shape. See ADR-0001.
 _Avoid_: node (ambiguous with generic graph/UI nodes), ticket (carries software-wayfinder connotations), work unit
 
+**Definition**:
+A project's named piece of mathematical text — a definition, the setting of a model, notation — that node statements are written in. A Proof map node names its definitions when it is created, and they change only by a restatement while Unfixed; a Claim split from a node is written in that node's definitions too. The researcher or the Reader writes them. A definition is Unfixed until a Review decision relies on it, then fixed like a statement: a corrected one is a new definition, named by new nodes. What a node says is its statement, assumptions and definitions together. See ADR-0020, ADR-0021.
+_Avoid_: notation file, glossary, context (as a noun for this), setting (say the definition's term)
+
 **Theorem** (a proof map node kind):
 The single target node of a proof map — the result the whole map exists to establish.
 _Avoid_: destination, goal
@@ -49,7 +53,7 @@ A local proof obligation serving a specific parent node, not yet judged reusable
 _Avoid_: obligation, proof obligation, open goal
 
 **Imported result** (a proof map node kind):
-An external, already-established result pulled in as a dependency. It carries a trust level instead of a candidate proof, and enters the map through Reference review rather than Acceptance. Immutable once created — its statement, source locator, and source version never change in place. If the cited source is corrected or reinterpreted, that's a new Imported result node, not a revision of this one; dependents migrate to it deliberately. An Imported result has no dependencies of its own: it is established elsewhere. Its `ReferenceRecord` is only the citation (paper, book, arXiv entry), linked by the node's immutable `reference_id` (#91). It has no trust of its own: it is relied on only through the Reference review of the Imported result that links it, or a Trust rule its citation meets. See ADR-0005, ADR-0012, ADR-0014.
+An external, already-established result pulled in as a dependency. It carries a trust level instead of a candidate proof, and enters the map through Reference review rather than Acceptance. Immutable once created — its statement, source locator, and source version never change in place. If the cited source is corrected or reinterpreted, that's a new Imported result node, not a revision of this one; dependents migrate to it deliberately. An Imported result has no dependencies of its own: it is established elsewhere. Its `ReferenceRecord` is only the citation (paper, book, arXiv entry), linked by the node's immutable `reference_id` (#91). Its bibliography (title, authors, year, source type, identifier, URL, notes) is corrected in place with `proof reference edit … --reason`, recorded as an event with the editor, the reason and the old and new values; the node's statement, source and `reference_id` are not edited there (#202). It has no trust of its own: it is relied on only through the Reference review of the Imported result that links it, or a Trust rule its citation meets. See ADR-0005, ADR-0012, ADR-0014.
 _Avoid_: reference, external theorem
 
 **Candidate proof**:
@@ -81,11 +85,11 @@ The researcher's explicit decision that an Imported result's external source is 
 _Avoid_: acceptance, verification
 
 **Trust rule**:
-A standing Reference review the researcher declares in advance: any Imported result whose citation meets the rule's conditions may be depended on without a review of its own. Declared and changed only by the researcher, on the proof map page, like every other Human Review decision; the declaration is the only record (one line per decision in the project's git-tracked `proofs/trust-rules.jsonl`: declare, amend, retire), no decision is written on the nodes it covers. A rule has an immutable name, a required rationale and one or more conditions, all of which must hold; several rules each count on their own. The conditions are a closed vocabulary: `source already reviewed` (another citation of the same reference at the same version carries the researcher's explicit Reference review, never another rule-trusted node), `source_type in {…}`, `identifier has DOI`, `identifier has arXiv`. Never the node's own trust level, free text or library folders. `proof trust-rule list` and `show` read the rules; no CLI command writes one. See ADR-0014.
+A standing Reference review the researcher declares in advance: any Imported result whose citation meets the rule's conditions may be depended on without a review of its own. Declared and changed only by the researcher, on the proof map page, like every other Human Review decision; the declaration is the only record (one line per decision in the project's git-tracked `proofs/trust-rules.jsonl`: declare, amend, retire), no decision is written on the nodes it covers. A rule has an immutable name, a required rationale and one or more conditions, all of which must hold; several rules each count on their own. The conditions are a closed vocabulary: `source already reviewed` (another citation of the same reference at the same version carries the researcher's explicit Reference review, never another rule-trusted node), `source_type in {…}`, `identifier has DOI`, `identifier has arXiv`. Never the node's own trust level, free text or library folders. A rule covers only Imported results the researcher created: one an agent created (its `created_by`, never the citation's) meets no rule and needs its own Reference review, since a rule vouches for the source, not for an agent's statement of it. `proof trust-rule list` and `show` read the rules; no CLI command writes one. See ADR-0014, ADR-0022.
 _Avoid_: auto-trust, policy, whitelist, auto-accept
 
 **Trusted by rule** (an acceptance state, Imported results only):
-Derived, never stored: the node has no counting Reference review of its own but meets a Trust rule. Dependents treat it as Reference-reviewed. An explicit decision on the node, made or later, takes precedence; No longer callable is final regardless. The review page lists such nodes in their own section, apart from what awaits the researcher, each with a button to review it explicitly. Losing the rule (tightened or retired) is losing standing, nothing more: unaccepted dependents block, Accepted ones keep their Acceptance.
+Derived, never stored: the node, created by the researcher, has no counting Reference review of its own but meets a Trust rule. Dependents treat it as Reference-reviewed. An explicit decision on the node, made or later, takes precedence; No longer callable is final regardless. The review page lists such nodes in their own section, apart from what awaits the researcher, each with a button to review it explicitly. Losing the rule (tightened or retired) is losing standing, nothing more: unaccepted dependents block, Accepted ones keep their Acceptance.
 _Avoid_: auto-reviewed, pre-approved, reviewed (that is the explicit decision)
 
 **Promote**:
@@ -101,7 +105,7 @@ A claim, raised against an already-Accepted node or an Imported result, that it 
 _Avoid_: bug, finding
 
 **Accepted mathematical interface**:
-The part of a node's accepted content that other nodes actually depend on — its statement, assumptions, and mathematical scope. Never its internal proof, proof strategy, or Evidence checks: a dependent relies on what a node says, not how it was shown. Whether a dependency needs only a Lightweight re-review or a whole new Candidate proof after a revision turns on whether this — not the proof text — changed. See ADR-0005.
+The part of a node's accepted content that other nodes actually depend on — its statement, assumptions, the Definitions it names (ADR-0020), and mathematical scope. Never its internal proof, proof strategy, or Evidence checks: a dependent relies on what a node says, not how it was shown. Whether a dependency needs only a Lightweight re-review or a whole new Candidate proof after a revision turns on whether this — not the proof text — changed. See ADR-0005.
 _Avoid_: statement (too narrow — assumptions and scope matter too), interface version
 
 **Lightweight re-review**:
@@ -125,7 +129,7 @@ A local node's page on the proof map page: the Proof agent's workbench, watched 
 _Avoid_: prism-local (the separate project it was copied from), editor window, LaTeX editor
 
 **Proof agent**:
-The agent run a node's studio starts and the researcher watches: one run holds the node's claim under the project's agent name and works the node to a review request on its own, in a prove–verify cycle with Prover, Typesetter, Numerics and Verifier. A Decomposer starts alone and proposes a Split for the researcher. It reads the whole project, the library folders `proof.toml` lists, and the web; it runs `proof` and computation; it writes files only in the node's folder, within each role's scope, and changes project state only through `proof`. It runs in the node's folder with `PROOF_ROOT` set to the project, on the Claude Code or the Codex CLI, with explicit permissions and none of the repository's own instructions. It reports its plan and each step with `proof node progress`, stops for a review request, a decision only a human can make, its budget or when stuck, and never makes a Review decision. Started once, from the map, the node page or the studio; paused, redirected, resumed or released by the researcher. Its roles and its run (the state machine) are the proof-agents package (ADR-0018). See ADR-0011, ADR-0016, ADR-0019.
+The agent run a node's studio starts and the researcher watches: one run holds the node's claim under the project's agent name and works the node to a review request on its own, in a prove–verify cycle with Prover, Typesetter, Numerics and Verifier. A Reader states a draft as a map; a Decomposer splits a Theorem into Claims. It reads the whole project, the library folders `proof.toml` lists, and the web; it runs `proof` and computation; it writes files only in the node's folder, within each role's scope, and changes project state only through `proof`. It runs in the node's folder with `PROOF_ROOT` set to the project, on the Claude Code or the Codex CLI, with explicit permissions and none of the repository's own instructions. It reports its plan and each step with `proof node progress`, makes a choice it can make and records it as a Standing question, stops for a review request, a fact only a human can know, its budget or when stuck, and never makes a Review decision. Started once, from the map, the node page or the studio; paused, redirected, resumed or released by the researcher. Its roles and its run (the state machine) are the proof-agents package (ADR-0018). See ADR-0011, ADR-0016, ADR-0019.
 _Avoid_: assistant, chat, agent panel (the panel is where it is watched), prompt-driven
 
 **Prover** (a Proof agent role):
@@ -153,10 +157,30 @@ An insert-only Work log entry naming what a proof approach tried to establish, i
 The bounded context the run builds for each turn from statements, the researcher's redirect, hand-off, Verdict objections, Attempts and shared Memory. Shared observations stay unverified. The researcher's working-input diff comes first when the inputs changed since the previous turn ended (ADR-0019).
 
 **Coordinator**:
-A subtree controller started by the researcher on a Theorem or Lemma. It holds no claim and takes no turn. It starts frontier node runs within the parallel limit, retries within each node's remaining budget, and redirects dependents after Acceptance. It waits for Human Review and never makes a Review decision. Pause holds its runs at turn boundaries; Stop and release releases the runs it still owns (ADR-0019).
+A subtree controller started by the researcher on a Theorem or Lemma. It holds no claim and takes no turn. It starts frontier node runs within the parallel limit, retries within each node's remaining budget, and redirects dependents after Acceptance. It starts a parent once every child is Accepted or Provisional, restarts stuck runs and parks a node whose budget is spent; it never waits for Human Review and never makes a Review decision. Pause holds its runs at turn boundaries; Stop and release releases the runs it still owns (ADR-0019, ADR-0021).
 
 **Decomposer** (a Proof agent role):
-Starts alone on a Theorem or Lemma with no children created by Split; ordinary dependency nodes are not children. It retrieves first and proposes a Split into Claims, with unresolved statements in the Proof fog. A Split stops the run as needs-human, even when that turn exhausts its budget. The researcher decides the structure and whether to start a Coordinator (ADR-0019).
+Starts alone on a Theorem or Lemma with no children created by Split; ordinary dependency nodes are not children. It retrieves first and proposes a Split into Claims, with unresolved statements in the Proof fog. It adds the edges between its own Claims. Under a Coordinator its Split is the structure worked next; started alone, the Split stops the run for the researcher (ADR-0019, ADR-0021).
+
+**Reader** (a Proof agent role):
+States a draft in the library as a map: Definitions, Theorems and Lemmas, imported results with their references, and fog. It records where it departed from the draft and why, and proves nothing (ADR-0021). Its runtime sets the reader role (`PROOF_AGENT_ROLE=reader`, no node role), under which `proof node create` refuses, on the parsed arguments, a Claim, `--parent` and `--reassign` (READER_ROLE_REFUSED); a statement's text is never searched (#203).
+_Avoid_: importer, parser, formalizer
+
+**Pursue**:
+The researcher's one action that sets the agents working to the end: a Coordinator on a Theorem, preceded by a Decomposer turn when it has no Claims, or by a Reader turn when started on a project with no map (ADR-0021). A project Pursue's steps are recorded as `pursuit` events, read by `proof project progress`; one with no recorded end reads interrupted, and nothing resumes it (issue #201).
+_Avoid_: autopilot, auto mode
+
+**Standing question**:
+A choice a role made itself where the text admits more than one reading, recorded in the Work log with the alternative, and answered by the researcher later from the Review queue; an answer that differs is a redirect (ADR-0021).
+_Avoid_: blocker, needs-human (which is for what no choice settles)
+
+**Parked**:
+A node whose run budget is spent under a Coordinator. The Coordinator goes on with the rest of the subtree; a parked node waits in the Review queue with its Attempts (ADR-0021).
+_Avoid_: stuck (a run's state), failed
+
+**Review queue**:
+Everything waiting on the researcher, ordered bottom-up, none of which holds the agents back: Provisional nodes, unreviewed imported results, Unfixed agent-written text, Standing questions and Parked nodes (ADR-0021).
+_Avoid_: inbox, approvals
 
 **Work log**:
 A node's record of what its Proof agent did, in time order: the plan, each step, Verdicts, Attempts and Coordinator notes reported with `proof node progress`, merged with what they did through other `proof` commands — a split, a review request, an Evidence check, a fog item, a dependency edit — each with the role of the turn it happened in — and the turns themselves, each with its job, its backend session and the step it belongs to. Project state (events), never a file in the node folder; a turn's raw conversation is kept beside it under `.proof/agent-turns/`. What the studio's centre shows.
@@ -187,8 +211,20 @@ The researcher's decision that a Candidate proof does not stand, but the node it
 _Avoid_: rejected, needs work
 
 **Blocked** (a workflow state):
-A proof map node has at least one dependency that has not yet reached Acceptance (for a Theorem, Lemma, or Claim dependency) or Reference review (for an Imported result dependency). Blocked overrides Claimed, Review-needed, and Revision requested within the workflow axis. It says nothing about a node's acceptance or integrity state — those are separate axes, tracked and shown alongside it, not competed with for the same slot.
+A proof map node has at least one dependency that has not yet reached Acceptance (for a Theorem, Lemma, or Claim dependency) or Reference review (for an Imported result dependency). Blocked overrides Claimed, Review-needed, and Revision requested within the workflow axis. It says nothing about a node's acceptance or integrity state — those are separate axes, tracked and shown alongside it, not competed with for the same slot. Blocked holds back a Review decision, not work: a Blocked node can be claimed, worked and requested for review, and its decision waits for its dependencies (ADR-0021).
 _Avoid_: waiting
+
+**Provisional**:
+An unaccepted node another node may rest on for work: a Theorem, Lemma or Claim whose current Review snapshot carries a passing Verifier Evidence check (the newest on it) and whose own dependencies are each settled or Provisional, or an imported result no Reference review has decided. A Challenge, a sent-back node or a citation found no longer callable anywhere in its support ends it. Its statement may be used, its proof never; it is not trust (ADR-0021).
+_Avoid_: verified, accepted, trusted
+
+**Conditional**:
+A node whose proof rests, directly or through others, on a Provisional node: it stands only if they do. Derived, and cleared as the researcher Accepts bottom-up (ADR-0021).
+_Avoid_: tentative, unproven
+
+**Unfixed**:
+A statement or Definition no Review decision has yet relied on. The researcher may restate any unfixed text, an agent only what an agent wrote (never a Definition a node of the researcher's names); a restatement is a work-log event and makes the verdicts on it and on what rests on it stale. The first Review decision on it, or on a node whose decided snapshot rested on it, fixes it (ADR-0021).
+_Avoid_: draft (a draft is the researcher's LaTeX), editable
 
 **Accepted** (an acceptance state):
 The researcher has given this node Acceptance (or, for an Imported result, Reference review); it may be depended on. Only a Human Review decision sets or changes this — no other subsystem may.
@@ -213,6 +249,9 @@ _Avoid_: stale, out of date
 **Split**:
 Decomposing a Theorem, Lemma, or Claim into new Claim nodes that become its dependencies, so each can be worked and Accepted independently. Not gated by review — it proposes work structure, not a mathematical result — so any agent or collaborator may do it, except that a node someone else has claimed is theirs to split unless it is taken over (`--reassign`), which moves the claim to the splitter — even for a node that is Blocked and so can't be claimed. A split is all or nothing: if any new Claim can't be created, none is, and the parent is left as it was. Splitting doesn't resolve the parent: once its new dependencies are Accepted, the parent still needs its own Candidate proof (even a short one) and its own Acceptance, combining them. A parent's existing dependencies aren't automatically reassigned to the new children; only a person or agent explicitly moving one decides that (`proof node depend <parent> --move <dependency> --to <child>`, which also adds or removes an edge; the same claimant and Accepted-node rules apply, and the pins are taken at the next request-review). A new Claim may name dependencies of its own, which may not rest on the node being split. Split doesn't apply to an Imported result (nothing to decompose) or a Rejected node (pursue a new node instead of reviving that one). A node produced by a split records which node it was split from, in `derived_from`.
 _Avoid_: decompose (fine informally, but keep decisions and CLI/agent protocol on "split"), break down
+
+**Search route**:
+One possible way to prove a statement, recorded through attempts and memory; alternative search routes are choices, while a proof map node's dependencies are the premises required by its chosen proof.
 
 ### Publication
 

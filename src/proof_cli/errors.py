@@ -36,6 +36,9 @@ ERROR_CODES: dict[str, str] = {
     "REFERENCE_ID_NOT_IMPORTED_RESULT": "only an imported result links a reference (--reference-id)",
     "REFERENCE_NOT_FOUND": "no reference has this id: the linked citation doesn't exist here",
     "INVALID_SOURCE_TYPE": "not a reference source type (`reference import --source-type`)",
+    "REFERENCE_FIELD_NOT_EDITABLE": "`reference edit` corrects bibliography only; an imported result's statement, source and reference id are its mathematical interface: cite another work or version as a new imported result",
+    "REFERENCE_EDIT_REASON_REQUIRED": "a citation's correction says why (`reference edit --reason`)",
+    "REFERENCE_TITLE_REQUIRED": "a citation keeps a title",
     "NOT_A_CLAIM": "only a Claim can be promoted",
     # -- claims (a planning signal, ADR-0010) --------------------------------------------
     "CLAIM_CONFLICT": "someone else holds the claim; the error names them (pass --reassign to take it over)",
@@ -99,6 +102,18 @@ ERROR_CODES: dict[str, str] = {
     "TRUST_RULE_INVALID_CONDITION": "not a condition of the trust-rule vocabulary; the message names it",
     "TRUST_RULE_RATIONALE_REQUIRED": "a trust-rule decision needs a rationale",
     "TRUST_RULES_FILE_BLOCKED": "a node folder from before ADR-0014 stands where proofs/trust-rules.jsonl goes; no rule can be recorded",
+    # -- Definitions (ADR-0020) -----------------------------------------------------------------
+    "DEFINITION_NOT_FOUND": "no definition has this id; add it with `proof definition add` first",
+    "DEFINITION_ALREADY_EXISTS": "a definition with this id exists; choose another id",
+    "DEFINITION_IN_USE": "a node names this definition, so it can't be removed; edit it while it is unfixed, or add a corrected one under a new id",
+    "DEFINITION_FIXED": "a Review decision relied on this definition (details.fixed_by names it): add a corrected one under a new id",
+    "TEXT_FIXED": "a Review decision relied on this node's statement (details.fixed_by names it): state the correction as a new node",
+    "RESEARCHER_TEXT": "the researcher wrote this text: an agent restates only text an agent created",
+    "RESTATE_REASON_REQUIRED": "a restatement says why: --reason",
+    "RESTATE_EMPTY": "nothing to restate: the statement, assumptions and definitions given are the node's own",
+    "DEFINITION_CONFLICT": "an import brings a definition whose id is here with another text; nothing was imported",
+    "DEFINITION_EMPTY": "a definition needs its term and its text",
+    "INVALID_DEFINITION_ID": "a definition id is letters, digits, '.', '_' or '-', at most 64 characters, starting with a letter or digit",
     # -- Proof fog (ADR-0008, spec #136; ungated, outside the map) -----------------------------
     "FOG_NOT_FOUND": "no fog item has this id",
     "FOG_NOT_OPEN": "the fog item is dropped (reopen it first) or crystallized (its node exists now); the message says which",
@@ -177,18 +192,23 @@ ERROR_CODES: dict[str, str] = {
     # -- the Proof agent's work log (ADR-0016, spec #145) --
     "ROLE_REQUIRED": "a progress report names the role that makes it: PROOF_AGENT_ROLE in the agent's runtime, or --role",
     "INVALID_ROLE": f"the Proof agent role is not one of {', '.join(AGENT_ROLES)}",
+    "READER_ROLE_REFUSED": "under the reader role (PROOF_AGENT_ROLE=reader), `node create` makes no Claim and takes no --parent or --reassign; the error names which",
     "INVALID_PROGRESS_STATUS": "a step's status is started, done, stuck or needs-human",
     "INVALID_PROGRESS_STEP": "steps count from 1",
     "PROGRESS_STATUS_REQUIRED": "a step report needs its status",
-    "PROGRESS_EMPTY": "a progress report is a plan, a step, a handoff, a verdict or an attempt; this one is none of them",
+    "PROGRESS_EMPTY": "a progress report is a plan, a step, a handoff, a verdict, an attempt or a choice made (--question); this one is none of them",
     "DECISION_REQUIRED": "a step that needs a human decision names the decision in --note",
     # -- the Verifier's verdict and the record of attempts (ADR-0019 parts A and B) --
     "VERDICT_ROLE_REQUIRED": "only the verifier role records a verdict; the message names the role that tried",
     "INVALID_VERDICT": "a verdict's outcome is passed or failed",
     "OBJECTIONS_REQUIRED": "a failed verdict names its objections in --note",
+    "QUESTION_NOT_FOUND": "the node has no Standing question with that id",
+    "QUESTION_ANSWERED": "the Standing question was already answered; a further redirect goes to the node's run",
+    "ANSWER_REQUIRED": "an answer keeps the choice (--keep) or gives the other reading (--answer), exactly one",
+    "ANSWER_IS_THE_RESEARCHERS": "a Standing question is answered by the researcher, not by a Proof agent",
     "ATTEMPT_INCOMPLETE": "an attempt is recorded by what it tried to establish and what it failed on: --attempt needs --failed-on",
     "GATE_MALFORMED": "`request-review --gated-by` is one SHA-256 of 64 hex digits, given once; a repeated, empty or malformed value is refused rather than read as no gate",
-    "VERDICT_STALE": "a run's Prover requested review naming a passing verdict's digest (--gated-by), but the node's files are no longer the ones the Verifier passed; nothing was frozen",
+    "VERDICT_STALE": "a run's Prover requested review naming a passing verdict's digest (--gated-by), but the node's files are no longer the ones the Verifier passed, or the text it read them against was restated since; nothing was frozen",
     # -- the Proof agent's run, through the studio and the map (ADR-0016, spec #145) --
     "RUN_ACTIVE": "an agent is already working on this node: pause, redirect or release it first",
     "RUN_SETTLING": "the previous run is still giving the node back; Start again in a moment",
@@ -218,6 +238,20 @@ ERROR_CODES: dict[str, str] = {
     "AGENT_INVALID_OPTION": "the model or effort asked for is not one the agent's CLI accepts",
     "AGENT_NO_USAGE_LIMITS": "this agent backend reports no usage limits to probe",
     "TURN_CALLED_OFF": "the run was stopped while its turn was being prepared, so no turn started",
+    # -- a project Pursue's history: the `pursuit` events (ADR-0021 audit section 1, issue #201) --
+    "INVALID_PURSUIT_PHASE": "not a pursuit phase (start, reader_end, theorem, stop, release_failed, end), or a start given an id: a start makes its own",
+    "PURSUIT_NOT_FOUND": "no pursuit was started under this id",
+    "PURSUIT_ENDED": "the pursuit has ended; nothing more is recorded for it",
+    "PURSUIT_OUTCOME_REQUIRED": "a pursuit's end names its outcome",
+    "PURSUIT_RECORD_FAILED": "the pursuit event could not be written; on a start, no provider is started",
+    # -- the project's Pursue: a Reader states its Theorems, then each is pursued (ADR-0021) --
+    "PURSUIT_ACTIVE": "the project is being pursued already, or a stopped pursuit is still ending: stop it, or Start again once it settles",
+    "NO_PURSUIT": "no pursuit is running on this project to stop; the answer carries how the last one ended",
+    "READER_FAILED": "the Reader's turn failed or was stopped before it ended; the message says why, and what it stated stays on the map",
+    # -- a Pursue's total turns and time limit, fixed at its Start (zeqome/proof-agents#19, zeqome/proof-web#18) --
+    "INVALID_LIMITS": "a Pursue's limits are a whole number of turns (at least one) and a number of minutes (more than none)",
+    "BUDGET_SPENT": "the Pursue's total turns or its time limit is spent; no new part of it starts",
+    "NO_BUDGET": "no node budget to compute a Pursue's default total from before the Reader states the map",
 }
 
 

@@ -115,7 +115,7 @@ from .commands import (
     cmd_theorem_show,
     get_store,
 )
-from .domain import AGENT_ROLES, ProofMapNodeKind, is_computation
+from .domain import AGENT_ROLES, READER_ROLE, ProofMapNodeKind, is_computation
 from .envelope import dump_envelope, error_envelope, success_envelope
 from .contract import ProofGroup
 from .theorems import LEGACY_TRUST_NOTICE
@@ -144,6 +144,7 @@ from .exchange import (
     summarize_inspect_report,
 )
 from .references import ReferenceSourceType
+from .reference_edit import edit_reference
 from .proof_map import (
     ProofMapError,
     add_dependency,
@@ -154,9 +155,14 @@ from .proof_map import (
     move_dependency,
     remove_dependency,
     get_acceptance_state,
+    conditional_on,
     get_blocked_reason,
     get_frontier,
+    is_provisional,
+    fixed_by,
+    restate_node,
     get_integrity_state,
+    get_stale_cause,
     get_reference_review_state,
     get_workflow_state,
     evidence_binding,
@@ -168,6 +174,7 @@ from .proof_map import (
     node_citation,
     open_challenge,
     record_evidence_check,
+    questions,
     record_progress,
     release_node,
     require_challenge,
@@ -179,13 +186,20 @@ from .proof_map import (
     trust_rule_events,
     trust_rule_view,
     trust_rules_of,
+    would_meet_trust_rules,
     work_log,
+    answer_question,
 )
 from .trust_rules import get_trust_rule, list_trust_rules, trust_rule_history
 from .authority import candidate_proof_sha256
 from .vault import working_entry_path
+from .definitions import add_definition, all_definitions, definitions_of, edit_definition, fixed_by_definition, nodes_naming, remove_definition, require_definition
+from .pursuit import project_progress
 from .rendering import (
+    render_definition,
+    render_definition_list,
     render_node_check,
+    render_project_progress,
     render_candidate_proof,
     render_challenge,
     render_challenge_list,
@@ -227,6 +241,7 @@ goal_app = typer.Typer(help="(legacy) Goal operations; a goal becomes a Claim no
 theorem_app = typer.Typer(help="(legacy) Theorem-contract registry; the proof map's nodes replace it")
 node_app = typer.Typer(help="Proof map node operations")
 trust_rule_app = typer.Typer(help="Trust rules: the researcher's standing Reference reviews, read-only here (declared on the proof map page; ADR-0014)")
+definition_app = typer.Typer(help="Definitions: the named text node statements are written in — a model's setting, a definition, notation (ADR-0020). A node names its definitions when it is created; a definition is fixed, like the statements naming it, once a Review decision relies on it (ADR-0021)")
 fog_app = typer.Typer(help="Proof fog: difficulties not yet precise enough to be a Claim, kept outside the map (ADR-0008). Ungated: anyone, agents included, may add, edit, drop or crystallize one")
 fog_experiment_app = typer.Typer(help="Experiments: numerical runs recorded against a fog item; they never change its status")
 node_evidence_app = typer.Typer(help="Evidence check workflows")
@@ -258,6 +273,17 @@ verify_app = typer.Typer(help="(legacy) Machine-check log; advisory, and no back
 
 def _root(path: str | None) -> Path:
     return Path(path or ".")
+
+
+def _author(flag: str | None) -> str:
+    """Who writes or edits (ADR-0021 points 5–6): the explicit flag, else the agent whose runtime this is
+    (PROOF_AGENT_NAME), else the researcher. Agent-written text is restatable by agents; the researcher's is not, so
+    an agent's write must never fall back to "human"."""
+    return (flag or "").strip() or os.environ.get("PROOF_AGENT_NAME") or "human"
+
+
+CREATED_BY_HELP = "Who writes it (default: PROOF_AGENT_NAME from an agent's runtime, else human)"
+EDITED_BY_HELP = "Who edits (default: PROOF_AGENT_NAME from an agent's runtime, else human)"
 
 
 @app.command(rich_help_panel=PROOF_MAP_PANEL)
@@ -320,20 +346,25 @@ def _acceptance_axis(store, node) -> str:
 
 
 def _with_state_axes(store, node) -> dict:
-    """A node under --json, with its three state axes (ADR-0002) and, for an imported result, the Trust rules it meets."""
+    """A node under --json, with its three state axes (ADR-0002), whether it is Provisional and the Provisional nodes
+    it is Conditional on (ADR-0021), and, for an imported result, the Trust rules it meets (an agent's import:
+    those it would meet had the researcher created it, ADR-0022)."""
     return {
         **node.model_dump(mode="json"),
         "workflow_state": get_workflow_state(store, node.id),
         "acceptance_state": _acceptance_axis(store, node),
         "integrity_state": get_integrity_state(store, node.id),
+        "provisional": is_provisional(store, node.id),
+        "conditional_on": sorted(conditional_on(store, node.id)),
         "trust_rule": trust_rules_of(store, node.id),
+        "would_meet_trust_rule": would_meet_trust_rules(store, node.id),
     }
 
 
 @app.command(rich_help_panel=PROOF_MAP_PANEL)
 @read_scoped
 def frontier(root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
-    """The open, unblocked, unclaimed nodes: what an agent could claim right now."""
+    """The nodes ready to be worked: every dependency Accepted or Provisional, nobody holding them, none awaiting review."""
     store = get_store(_root(root))
     nodes = get_frontier(store)
     if json_output:
@@ -428,6 +459,20 @@ def _emit_claim(claim, json_output: bool, *, command: str) -> None:
         typer.echo(render_claim(claim))
 
 
+def _reader_refuses(kind: str, parent: str, reassign: bool) -> ProofMapError | None:
+    """The reader role's limits on `node create`, read from the parsed arguments (#203): the statement's text is
+    never searched, so a statement quoting `claim "` is the Reader's to write."""
+    if kind.strip().lower() == ProofMapNodeKind.claim.value:
+        option, what = "kind=claim", "creates no Claim: a Claim is a Split's"
+    elif parent:
+        option, what = "--parent", "rests no node on another (--parent)"
+    elif reassign:
+        option, what = "--reassign", "takes no claim over (--reassign)"
+    else:
+        return None
+    return ProofMapError("READER_ROLE_REFUSED", f"the Reader {what}", details={"option": option, "role": READER_ROLE})
+
+
 @node_app.command("create")
 def node_create(
     node_id: str,
@@ -437,7 +482,8 @@ def node_create(
     display_label: str = "",
     assumption: list[str] = typer.Option(None, "--assumption"),
     dependency: list[str] = typer.Option(None, "--dependency"),
-    created_by: str = "human",
+    definition: list[str] = typer.Option(None, "--definition", help="Repeatable: a definition the statement is written in (`proof definition list`); restated with `proof node restate` until a Review decision fixes it"),
+    created_by: str = typer.Option("", "--created-by", help=CREATED_BY_HELP),
     source_locator: str = typer.Option("", "--source-locator", help="Required for imported_result nodes"),
     source_version: str = typer.Option("", "--source-version", help="Required for imported_result nodes"),
     trust_level: str = typer.Option("", "--trust-level"),
@@ -453,6 +499,11 @@ def node_create(
 ) -> None:
     """Create a proof map node. With --parent, the parent rests on it too: one transaction, and a refused
     parent leaves no node and no folder (issue #154)."""
+    if os.environ.get("PROOF_AGENT_ROLE") == READER_ROLE:
+        refused = _reader_refuses(kind, parent, reassign)
+        if refused:
+            _emit_error(refused, json_output, command="node.create")
+            raise typer.Exit(code=1)
     if reassign and not parent:
         raise click.UsageError("--reassign goes with --parent: it takes the parent's claim over")
     store = get_store(_root(root))
@@ -464,18 +515,44 @@ def node_create(
             display_label=display_label,
             assumptions=assumption,
             dependencies=dependency,
+            definitions=list(definition or []),
             source_locator=source_locator or None,
             source_version=source_version or None,
             trust_level=trust_level or None,
             reference_id=reference_id or None,
             medium=medium or None,
-            created_by=created_by,
+            created_by=_author(created_by),
         )
         node = create_node_under_parent(store, parent, reassign=reassign, **fields) if parent else create_node(store, **fields)
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.create")
         raise typer.Exit(code=1)
     _emit_node(node, json_output, command="node.create")
+
+
+@node_app.command("restate")
+def node_restate(
+    node_id: str,
+    statement: str = typer.Option(None, "--statement"),
+    assumption: list[str] = typer.Option(None, "--assumption", help="Repeatable: the assumptions as they now read (all of them)"),
+    definition: list[str] = typer.Option(None, "--definition", help="Repeatable: the definitions the statement is now written in (all of them)"),
+    reason: str = typer.Option("", "--reason", help="Why: what was wrong or unclear in the text as it stood"),
+    by: str = typer.Option("", "--by", help="Who restates: the researcher (human) any unfixed text, an agent only what an agent wrote (default: PROOF_AGENT_NAME, else human)"),
+    root: str = ROOT_OPTION,
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Restate a node's statement, assumptions or definitions while no Review decision relies on them (ADR-0021).
+    Every verdict on the node and on what rests on it goes stale; fixed text is refused (TEXT_FIXED)."""
+    store = get_store(_root(root))
+    try:
+        node = restate_node(store, node_id, statement=statement, assumptions=assumption, definitions=definition, reason=reason, by=_author(by))
+    except ProofMapError as exc:
+        _emit_error(exc, json_output, command="node.restate")
+        raise typer.Exit(code=1)
+    if json_output:
+        typer.echo(dump_envelope(success_envelope("node.restate", {**node.model_dump(mode="json"), "fixed_by": None})))
+        return
+    _emit_node(node, json_output, command="node.restate")
 
 
 @node_app.command("check")
@@ -524,6 +601,11 @@ def node_show(
         origin = crystallized_from(store, node_id)
         near = [item.id for item in fog_near(store, node_id)]
         blocked_reason = get_blocked_reason(store, node_id) if workflow_state == "blocked" else None
+        # what it may be rested on for, and what its own proof rests on unaccepted (ADR-0021)
+        provisional = is_provisional(store, node_id)
+        conditional = sorted(conditional_on(store, node_id))
+        # the text of the definitions the statement is written in (ADR-0020)
+        definition_details = [{"id": d.id, "term": d.term, "text": d.text} for d in definitions_of(store, node)]
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.show")
         raise typer.Exit(code=1)
@@ -543,12 +625,21 @@ def node_show(
         payload["workflow_state"] = workflow_state
         payload["acceptance_state"] = acceptance_state
         payload["integrity_state"] = integrity_state
+        payload["stale_cause"] = get_stale_cause(store, node_id)  # why it may no longer hold (#197)
         # the Trust rules an imported result meets, and when it first met each (ADR-0014)
         payload["trust_rule"] = trust_rule
+        # an agent's import meets no rule; the rules it would meet, for its own Reference review (ADR-0022)
+        payload["would_meet_trust_rule"] = would_meet_trust_rules(store, node_id)
         payload["trust_rule_events"] = [{"rule": event.payload.get("rule"), "at": event.created_at.isoformat()} for event in trust_rule_events(store, node_id)]
         payload["crystallized_from"] = origin.id if origin else None
         payload["fog_near"] = near
         payload["blocked_reason"] = blocked_reason
+        payload["provisional"] = provisional
+        payload["conditional_on"] = conditional
+        # the Review decision that fixed its text, or None while it may still be restated (ADR-0021)
+        payload["fixed_by"] = fixed_by(store, node_id)
+        # the choices its runs made instead of stopping, and the researcher's answers (ADR-0021)
+        payload["questions"] = questions(store, node_id)
         payload["working_proof"] = working_proof
         payload["snapshots"] = snapshots
         # each Evidence check with its own bound hash, read against its snapshot as it is now (PR #147)
@@ -559,6 +650,7 @@ def node_show(
         ]
         # what the node page shows of each dependency: its pin, whether current, the remedy (#97)
         payload["dependency_details"] = dependency_details(store, node_id)
+        payload["definition_details"] = definition_details
         typer.echo(dump_envelope(success_envelope("node.show", payload)))
     else:
         typer.echo(
@@ -568,12 +660,15 @@ def node_show(
                 acceptance_state=acceptance_state,
                 integrity_state=integrity_state,
                 blocked_reason=blocked_reason,
+                provisional=provisional,
+                conditional_on=conditional,
                 working_proof=working_proof,
                 snapshots=snapshots,
                 citation=citation,
                 trust_rule=trust_rule,
                 crystallized_from=origin.id if origin else None,
                 fog_near=near,
+                definitions=definition_details,
             )
         )
 
@@ -638,19 +733,109 @@ def _emit_fog(store, item, json_output: bool, *, command: str) -> None:
         typer.echo(render_fog_item(view))
 
 
+def _definition_view(store, definition) -> dict:
+    return {**definition.model_dump(mode="json"), "used_by": nodes_naming(store, definition.id), "fixed_by": fixed_by_definition(store, definition.id)}
+
+
+def _emit_definition(store, definition, json_output: bool, *, command: str) -> None:
+    view = _definition_view(store, definition)
+    typer.echo(dump_envelope(success_envelope(command, view)) if json_output else render_definition(view))
+
+
+@definition_app.command("add")
+def definition_add(
+    definition_id: str,
+    text: str,
+    term: str = typer.Option(..., "--term", help="The name the page and the node show it under, e.g. \"Simple graph\""),
+    root: str = ROOT_OPTION,
+    created_by: str = typer.Option("", "--created-by", help=CREATED_BY_HELP),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Add a definition: TEXT is Markdown with $…$ maths, as a statement is. Name it from a node with `--definition`."""
+    store = get_store(_root(root))
+    try:
+        definition = add_definition(store, definition_id, term=term, text=text, created_by=_author(created_by))
+    except ProofMapError as exc:
+        _emit_error(exc, json_output, command="definition.add")
+        raise typer.Exit(code=1)
+    _emit_definition(store, definition, json_output, command="definition.add")
+
+
+@definition_app.command("edit")
+def definition_edit(
+    definition_id: str,
+    text: str = typer.Option(None, "--text"),
+    term: str = typer.Option(None, "--term"),
+    root: str = ROOT_OPTION,
+    edited_by: str = typer.Option("", "--by", help="The researcher (human) may edit any unfixed definition, an agent only one an agent wrote (default: PROOF_AGENT_NAME, else human)"),
+    reason: str = typer.Option("", "--reason", help="Why; required once a node names it, since the edit restates that node"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Change a definition while no Review decision relies on it (ADR-0021; DEFINITION_FIXED otherwise: add a corrected one under a new id)."""
+    store = get_store(_root(root))
+    try:
+        definition = edit_definition(store, definition_id, term=term, text=text, edited_by=_author(edited_by), reason=reason)
+    except ProofMapError as exc:
+        _emit_error(exc, json_output, command="definition.edit")
+        raise typer.Exit(code=1)
+    _emit_definition(store, definition, json_output, command="definition.edit")
+
+
+@definition_app.command("remove")
+def definition_remove(
+    definition_id: str,
+    root: str = ROOT_OPTION,
+    removed_by: str = typer.Option("", "--by", help=EDITED_BY_HELP),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Remove a definition no node names."""
+    store = get_store(_root(root))
+    try:
+        removed = remove_definition(store, definition_id, removed_by=_author(removed_by))
+    except ProofMapError as exc:
+        _emit_error(exc, json_output, command="definition.remove")
+        raise typer.Exit(code=1)
+    if json_output:
+        typer.echo(dump_envelope(success_envelope("definition.remove", removed.model_dump(mode="json"))))
+    else:
+        typer.echo(f"removed definition {removed.id}")
+
+
+@definition_app.command("list")
+@read_scoped
+def definition_list(root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
+    """The project's definitions, oldest first, with the nodes that name each."""
+    store = get_store(_root(root))
+    views = [_definition_view(store, d) for d in all_definitions(store)]
+    typer.echo(dump_envelope(success_envelope("definition.list", views)) if json_output else render_definition_list(views))
+
+
+@definition_app.command("show")
+@read_scoped
+def definition_show(definition_id: str, root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
+    """One definition in full, with the nodes that name it."""
+    store = get_store(_root(root))
+    try:
+        definition = require_definition(store, definition_id)
+    except ProofMapError as exc:
+        _emit_error(exc, json_output, command="definition.show")
+        raise typer.Exit(code=1)
+    _emit_definition(store, definition, json_output, command="definition.show")
+
+
 @fog_app.command("add")
 def fog_add(
     text: str,
     root: str = ROOT_OPTION,
     near: list[str] = typer.Option([], "--near", help="A node this is about (repeatable); never a dependency"),
     notes: str = typer.Option("", "--notes"),
-    created_by: str = typer.Option("human", "--created-by"),
+    created_by: str = typer.Option("", "--created-by", help=CREATED_BY_HELP),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Add a fog item: a difficulty you can't state precisely yet."""
     store = get_store(_root(root))
     try:
-        item = add_fog(store, text, near=near, notes=notes, created_by=created_by)
+        item = add_fog(store, text, near=near, notes=notes, created_by=_author(created_by))
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="fog.add")
         raise typer.Exit(code=1)
@@ -690,7 +875,7 @@ def fog_edit(
     near: list[str] = typer.Option(None, "--near", help="Replace the near nodes (repeatable)"),
     clear_near: bool = typer.Option(False, "--clear-near", help="Near no node"),
     notes: str | None = typer.Option(None, "--notes"),
-    edited_by: str = typer.Option("human", "--by"),
+    edited_by: str = typer.Option("", "--by", help=EDITED_BY_HELP),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Change an open item's text, notes or near nodes; what isn't given stays."""
@@ -698,7 +883,7 @@ def fog_edit(
     try:
         if clear_near and near:
             raise ProofMapError("FOG_FLAG_CONFLICT", "fog edit takes either --near or --clear-near, not both")
-        item = edit_fog(store, fog_id, text=text, near=[] if clear_near else (near or None), notes=notes, edited_by=edited_by)
+        item = edit_fog(store, fog_id, text=text, near=[] if clear_near else (near or None), notes=notes, edited_by=_author(edited_by))
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="fog.edit")
         raise typer.Exit(code=1)
@@ -710,13 +895,13 @@ def fog_drop(
     fog_id: str,
     root: str = ROOT_OPTION,
     reason: str = typer.Option(..., "--reason", help="Why this direction is given up"),
-    dropped_by: str = typer.Option("human", "--by"),
+    dropped_by: str = typer.Option("", "--by", help=EDITED_BY_HELP),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Give an item up, saying why. Reversible with `fog reopen`."""
     store = get_store(_root(root))
     try:
-        item = drop_fog(store, fog_id, reason=reason, dropped_by=dropped_by)
+        item = drop_fog(store, fog_id, reason=reason, dropped_by=_author(dropped_by))
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="fog.drop")
         raise typer.Exit(code=1)
@@ -724,11 +909,11 @@ def fog_drop(
 
 
 @fog_app.command("reopen")
-def fog_reopen(fog_id: str, root: str = ROOT_OPTION, by: str = typer.Option("human", "--by"), json_output: bool = typer.Option(False, "--json")) -> None:
+def fog_reopen(fog_id: str, root: str = ROOT_OPTION, by: str = typer.Option("", "--by", help=EDITED_BY_HELP), json_output: bool = typer.Option(False, "--json")) -> None:
     """Take a dropped item back."""
     store = get_store(_root(root))
     try:
-        item = reopen_fog(store, fog_id, by=by)
+        item = reopen_fog(store, fog_id, by=_author(by))
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="fog.reopen")
         raise typer.Exit(code=1)
@@ -746,7 +931,7 @@ def fog_crystallize(
     reassign: bool = typer.Option(False, "--reassign", help="Take the parent's claim over from whoever holds it"),
     assumption: list[str] = typer.Option([], "--assumption"),
     display_label: str = typer.Option("", "--display-label"),
-    created_by: str = typer.Option("human", "--created-by"),
+    created_by: str = typer.Option("", "--created-by", help=CREATED_BY_HELP),
     medium: str = typer.Option("", "--medium", help="The new Claim's medium: latex (default) or computation"),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
@@ -755,7 +940,7 @@ def fog_crystallize(
     try:
         made = crystallize_fog(
             store, fog_id, node_id, statement, parent=parent, no_parent=no_parent, reassign=reassign,
-            assumptions=assumption, display_label=display_label, created_by=created_by,
+            assumptions=assumption, display_label=display_label, created_by=_author(created_by),
             medium=medium or None,
         )
     except ProofMapError as exc:
@@ -819,7 +1004,7 @@ def node_claim(
     root: str = ROOT_OPTION,
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
-    """Assign a frontier node to yourself before working on it: a planning signal, not a lock (ADR-0010)."""
+    """Assign a node to yourself before working on it, usually one on the frontier: a planning signal, not a lock (ADR-0010)."""
     store = get_store(_root(root))
     try:
         claim = claim_node(store, node_id, claimant_id=assignee, reassign=reassign)
@@ -941,16 +1126,17 @@ def node_split(
     ),
     assumption: list[str] = typer.Option(None, "--assumption", help="Repeatable: an assumption of the one --child (as the page's split gives it)"),
     display_label: str = typer.Option("", "--display-label", help="The one --child's display label"),
+    definition: list[str] = typer.Option(None, "--definition", help="Repeatable: a definition the one --child is written in, beside the parent's, which every child names"),
     root: str = ROOT_OPTION,
-    created_by: str = "human",
+    created_by: str = typer.Option("", "--created-by", help=CREATED_BY_HELP),
     reassign: bool = typer.Option(False, "--reassign", help="Take the claim over from whoever holds it (recorded as `claim --reassign` records it); the node need not be on the frontier"),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Decompose parent_id into new claim-kind children. Ungated — no researcher approval needed.
     All or nothing; a node someone else holds is theirs to split unless --reassign.
     With a single --child, --assumption and --display-label give it those, as the page's split does (issue #154)."""
-    if (assumption or display_label) and len(child) != 1:
-        raise click.UsageError("--assumption and --display-label go with a single --child")
+    if (assumption or display_label or definition) and len(child) != 1:
+        raise click.UsageError("--assumption, --display-label and --definition go with a single --child")
     store = get_store(_root(root))
     try:
         specs = []
@@ -960,8 +1146,9 @@ def node_split(
                     "INVALID_CHILD_SPEC", f"'{entry}' is not in the form <child-id>=<statement>"
                 )
             child_id, statement = entry.split("=", 1)
-            specs.append({"id": child_id, "statement": statement, "assumptions": list(assumption or []), "display_label": display_label})
-        children = split_node(store, parent_id, specs, created_by=created_by, reassign=reassign)
+            specs.append({"id": child_id, "statement": statement, "assumptions": list(assumption or []), "display_label": display_label,
+                          "definitions": list(definition or [])})
+        children = split_node(store, parent_id, specs, created_by=_author(created_by), reassign=reassign)
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.split")
         raise typer.Exit(code=1)
@@ -990,16 +1177,18 @@ def node_progress(
     method: str = typer.Option("", "--method", help="With --attempt: the approach"),
     failed_on: str = typer.Option("", "--failed-on", help="With --attempt: the objection or obstruction it failed on"),
     coordinator: str = typer.Option("", "--coordinator", help="What a Coordinator did on this Theorem or Lemma's subtree: a run it started, a redirect, a stop (ADR-0019 point 18); no role"),
+    question: str = typer.Option("", "--question", help="A judgement call made instead of stopping: \"<the choice made; the alternative>\", a Standing question the researcher answers later (ADR-0021)"),
     role: str = typer.Option("", "--role", help=f"{_ROLES_HELP} (default: PROOF_AGENT_ROLE, set in the agent's runtime)"),
     by: str = typer.Option("", "--by", help="Who reports; empty means PROOF_AGENT_NAME from the agent's runtime, else human"),
     root: str = ROOT_OPTION,
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """A Proof agent's report on this node — the studio's work log (spec #145): its plan, a step, a handoff,
-    the Verifier's verdict or an abandoned attempt (ADR-0019). Without any of them: the node's work log so far."""
+    the Verifier's verdict, an abandoned attempt (ADR-0019) or a choice made (ADR-0021). Without any of them: the node's
+    work log so far."""
     store = get_store(_root(root))
     try:
-        if not plan and step is None and not handoff and not verdict and not attempt and not failed_on and not coordinator:
+        if not plan and step is None and not handoff and not verdict and not attempt and not failed_on and not coordinator and not question:
             log = work_log(store, node_id)
             if json_output:
                 typer.echo(dump_envelope(success_envelope("node.progress", log)))
@@ -1010,6 +1199,7 @@ def node_progress(
             store, node_id, role=role or os.environ.get("PROOF_AGENT_ROLE") or None, by=by or os.environ.get("PROOF_AGENT_NAME") or "human",
             plan=plan or None, step=step, status=status or None, note=note, handoff=handoff or None,
             verdict=verdict or None, attempt=attempt or None, method=method or None, failed_on=failed_on or None, coordinator=coordinator or None,
+            question=question or None,
         )
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.progress")
@@ -1020,18 +1210,43 @@ def node_progress(
         typer.echo(render_work_log_entry(node_id, entry))
 
 
+@node_app.command("answer")
+def node_answer(
+    node_id: str,
+    question_id: str,
+    keep: bool = typer.Option(False, "--keep", help="The choice the role made stands"),
+    answer: str = typer.Option("", "--answer", help="The reading to follow instead: recorded as a redirect for the node's next run"),
+    by: str = typer.Option("human", "--by", help="Who answers: the researcher"),
+    root: str = ROOT_OPTION,
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Answer a Standing question on the node: keep the choice the role made, or redirect it (ADR-0021)."""
+    store = get_store(_root(root))
+    try:
+        if os.environ.get("PROOF_AGENT_ROLE"):  # an agent's runtime: the answer is the researcher's
+            raise ProofMapError("ANSWER_IS_THE_RESEARCHERS", "a Standing question is answered by the researcher, not by a Proof agent")
+        entry = answer_question(store, node_id, question_id, keep=keep, answer=answer or None, by=by)
+    except ProofMapError as exc:
+        _emit_error(exc, json_output, command="node.answer")
+        raise typer.Exit(code=1)
+    if json_output:
+        typer.echo(dump_envelope(success_envelope("node.answer", entry)))
+    else:
+        typer.echo(f"{question_id} on {node_id}: " + ("the choice stands" if entry["keep"] else f"redirect — {entry['redirect']}"))
+
+
 @node_medium_app.command("set")
 def node_medium_set(
     node_id: str,
     medium: str = typer.Argument(..., help="latex or computation"),
-    by: str = typer.Option("human", "--by", help="Who is switching (an agent or person name)"),
+    by: str = typer.Option("", "--by", help="Who is switching (default: PROOF_AGENT_NAME from an agent's runtime, else human)"),
     root: str = ROOT_OPTION,
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Switch a node's medium. Allowed at any time: files stay, the missing entry (run.sh or proof.tex) is scaffolded, an Acceptance stands."""
     store = get_store(_root(root))
     try:
-        node = set_medium(store, node_id, medium, edited_by=by)
+        node = set_medium(store, node_id, medium, edited_by=_author(by))
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.medium.set")
         raise typer.Exit(code=1)
@@ -1045,7 +1260,7 @@ def node_depend(
     remove: str = typer.Option("", "--remove", help="Stop the node resting on this dependency"),
     move: str = typer.Option("", "--move", help="Move this dependency down onto the node given by --to"),
     to: str = typer.Option("", "--to", help="With --move: one of the node's own dependencies, e.g. a split child"),
-    by: str = typer.Option("human", "--by", help="Who is editing (an agent or person name)"),
+    by: str = typer.Option("", "--by", help="Who is editing (default: PROOF_AGENT_NAME from an agent's runtime, else human)"),
     reassign: bool = typer.Option(False, "--reassign", help="Take the claim over from whoever holds it (recorded as `claim --reassign` records it)"),
     root: str = ROOT_OPTION,
     json_output: bool = typer.Option(False, "--json"),
@@ -1060,6 +1275,7 @@ def node_depend(
     if bool(to) != bool(move):
         raise click.UsageError("--move and --to go together: --move <dependency> --to <child>")
     store = get_store(_root(root))
+    by = _author(by)
     try:
         if add:
             edit = add_dependency(store, node_id, add, edited_by=by, reassign=reassign)
@@ -1228,6 +1444,7 @@ app.add_typer(challenge_app, name="challenge", rich_help_panel=PROOF_MAP_PANEL)
 app.add_typer(trust_rule_app, name="trust-rule", rich_help_panel=PROOF_MAP_PANEL)
 fog_app.add_typer(fog_experiment_app, name="experiment")
 app.add_typer(fog_app, name="fog", rich_help_panel=PROOF_MAP_PANEL)
+app.add_typer(definition_app, name="definition", rich_help_panel=PROOF_MAP_PANEL)
 app.add_typer(obligation_app, name="obligation", rich_help_panel=LEGACY_PANEL)
 app.add_typer(blocker_app, name="blocker", rich_help_panel=LEGACY_PANEL)
 app.add_typer(reference_app, name="reference")
@@ -1434,6 +1651,14 @@ def project_analyze(root: str = ROOT_OPTION, query: str = "", limit: int = 5) ->
     typer.echo(cmd_project_analyze(_root(root), query=query, limit=limit))
 
 
+@project_app.command("progress")
+@read_scoped
+def project_progress_command(root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
+    """The project Pursue history, oldest first: each pursuit's status and events. One with no recorded end reads interrupted."""
+    pursuits = project_progress(get_store(_root(root)))
+    typer.echo(dump_envelope(success_envelope("project.progress", pursuits)) if json_output else render_project_progress(pursuits))
+
+
 @goal_app.command("set")
 def goal_set(goal: str, root: str = ROOT_OPTION) -> None:
     typer.echo(cmd_goal_set(goal, root=_root(root)))
@@ -1577,6 +1802,7 @@ def reference_import(
     identifier: str = "",
     url: str = "",
     notes: str = "",
+    created_by: str = typer.Option("", "--created-by", help=CREATED_BY_HELP),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Import a reference as a citation. Its legacy trust fields are not a trust source (ADR-0012)."""
@@ -1594,6 +1820,7 @@ def reference_import(
                 identifier=identifier,
                 url=url,
                 notes=notes,
+                created_by=_author(created_by),
             )
         )
     except ProofMapError as exc:
@@ -1602,6 +1829,49 @@ def reference_import(
     except ValueError as exc:
         _legacy_input_error("reference.import", exc, json_output)
     _emit_legacy_json("reference.import", json_output, lambda: output)
+
+
+@reference_app.command("edit")
+def reference_edit(
+    reference_id: str,
+    reason: str = typer.Option("", "--reason", help="Why the citation is corrected (required for any change)"),
+    root: str = ROOT_OPTION,
+    title: str = typer.Option(None, "--title"),
+    author: list[str] = typer.Option(None, "--author", help="Every author, in order: replaces the list"),
+    year: int = typer.Option(None, "--year"),
+    source_type: str = typer.Option(None, "--source-type", help=f"One of: {', '.join(member.value for member in ReferenceSourceType)}"),
+    origin: str = typer.Option(None, "--origin"),
+    bibliographic_source: str = typer.Option(None, "--bibliographic-source"),
+    identifier: str = typer.Option(None, "--identifier", help="A DOI, arXiv id, ISBN, ..."),
+    url: str = typer.Option(None, "--url"),
+    notes: str = typer.Option(None, "--notes"),
+    statement: str = typer.Option(None, "--statement", hidden=True),
+    source_locator: str = typer.Option(None, "--source-locator", hidden=True),
+    source_version: str = typer.Option(None, "--source-version", hidden=True),
+    new_reference_id: str = typer.Option(None, "--reference-id", hidden=True),
+    edited_by: str = typer.Option("", "--by", help=EDITED_BY_HELP),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Correct a citation's bibliography in place (title, authors, year, source type, identifier, URL, notes, ...): what
+    isn't given keeps its value, and the edit is recorded with its reason and old and new values. An imported result's
+    statement, source and reference id are not edited here: cite another work or version as a new imported result."""
+    given = {
+        "title": title, "authors": author or None, "year": year, "source_type": source_type, "origin": origin,
+        "bibliographic_source": bibliographic_source, "identifier": identifier, "url": url, "notes": notes,
+        # the mathematical interface: named only to be refused with its code
+        "statement": statement, "source_locator": source_locator, "source_version": source_version, "reference_id": new_reference_id,
+    }
+    store = get_store(_root(root))
+    try:
+        reference = edit_reference(store, reference_id, {field: value for field, value in given.items() if value is not None},
+                                   edited_by=_author(edited_by), reason=reason)
+    except ProofMapError as exc:
+        _emit_error(exc, json_output, command="reference.edit")
+        raise typer.Exit(code=1)
+    if json_output:
+        typer.echo(dump_envelope(success_envelope("reference.edit", {"legacy_notice": LEGACY_TRUST_NOTICE, **reference.model_dump(mode="json")})))
+    else:
+        typer.echo(f"reference {reference.id}: {reference.title} ({reference.year})")
 
 
 

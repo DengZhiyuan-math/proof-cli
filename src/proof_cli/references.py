@@ -55,6 +55,7 @@ class ReferenceRecord(BaseModel):
     identifier: str = ""
     url: str = ""
     notes: str = ""
+    created_by: str = "human"  # the researcher, or the agent that imported it (ADR-0021 point 5: the Reader)
     review_status: ReferenceReviewStatus = ReferenceReviewStatus.candidate
     trust_level: ReferenceTrustLevel = ReferenceTrustLevel.tentative_source
     is_callable: bool = False
