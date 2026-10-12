@@ -921,21 +921,29 @@ def _relied_on(store: ProjectStore, row: dict) -> set[str]:
 
 def restated_at(store: ProjectStore, node_id: str) -> datetime | None:
     """When the text a node's proof is read against last changed, or None if it never did since its creation: the
-    newest restatement of the node or of a node it rests on, or edit of a Definition any of them names.
+    newest restatement of the node or of a node it rests on, or edit of a Definition any of them names."""
+    change = newest_text_change(store, node_id)
+    return change.created_at if change is not None else None
+
+
+def newest_text_change(store: ProjectStore, node_id: str) -> EventRecord | None:
+    """The event behind `restated_at`: the newest restatement or Definition edit under the node, or None.
 
     One pass per read, like `_unsettled_support`: the event log is indexed once (`_text_changes`), and each node's
     answer goes in the read scope's memo as the walk leaves it, with an explicit stack for deep chains."""
-    memo: dict[str, datetime | None] = scoped_memo(store, _RESTATED_AT)
+    memo: dict[str, EventRecord | None] = scoped_memo(store, _RESTATED_AT)
     if node_id in memo:
         return memo[node_id]
     restated, edited = _text_changes(store)
 
-    def own(current_id: str) -> tuple[datetime | None, list[str]]:
+    def own(current_id: str) -> tuple[EventRecord | None, list[str]]:
         node = get_node(store, current_id)
         if node is None:
             return restated.get(current_id), []
-        changes = [at for at in (restated.get(current_id), *(edited.get(d) for d in node.definitions)) if at is not None]
-        return (max(changes) if changes else None), list(node.dependencies)
+        newest = restated.get(current_id)
+        for definition_id in node.definitions:
+            newest = _later(newest, edited.get(definition_id))
+        return newest, list(node.dependencies)
 
     newest, dependencies = own(node_id)
     stack: list[list] = [[node_id, iter(dependencies), newest]]
@@ -955,7 +963,7 @@ def restated_at(store: ProjectStore, node_id: str) -> datetime | None:
         elif dependency_id in on_path:  # a cycle, which no service creates: plain reachability, remembering nothing
             for path_id, _, _ in stack:
                 memo.pop(path_id, None)
-            return _reachable_restated_at(store, node_id)
+            return _reachable_text_change(store, node_id)
         else:
             newest, dependencies = own(dependency_id)
             stack.append([dependency_id, iter(dependencies), newest])
@@ -966,30 +974,32 @@ def restated_at(store: ProjectStore, node_id: str) -> datetime | None:
 _RESTATED_AT = "restated_at"
 
 
-def _later(a: datetime | None, b: datetime | None) -> datetime | None:
-    return b if a is None or (b is not None and b > a) else a
+def _later(a: EventRecord | None, b: EventRecord | None) -> EventRecord | None:
+    """The newer of two events; on a tie, `a`."""
+    return b if a is None or (b is not None and b.created_at > a.created_at) else a
 
 
 @memoized_read
-def _text_changes(store: ProjectStore) -> tuple[dict[str, datetime], dict[str, datetime]]:
-    """The newest restatement of each node, and the newest edit of each Definition, from one pass over the log."""
-    restated: dict[str, datetime] = {}
-    edited: dict[str, datetime] = {}
+def _text_changes(store: ProjectStore) -> tuple[dict[str, EventRecord], dict[str, EventRecord]]:
+    """The newest restatement event of each node, and the newest edit event of each Definition, from one pass over
+    the log; of two at the same instant, the later written."""
+    restated: dict[str, EventRecord] = {}
+    edited: dict[str, EventRecord] = {}
     for event in list_events(store):
         found = restated if event.kind == RESTATED_EVENT else edited if event.kind == DEFINITION_EDITED_EVENT else None
         if found is not None and event.entity_id is not None:
-            found[event.entity_id] = _later(found.get(event.entity_id), event.created_at)
+            found[event.entity_id] = _later(event, found.get(event.entity_id))
     return restated, edited
 
 
-def _reachable_restated_at(store: ProjectStore, node_id: str) -> datetime | None:
-    """`restated_at` by plain reachability: for a map with a cycle."""
+def _reachable_text_change(store: ProjectStore, node_id: str) -> EventRecord | None:
+    """`newest_text_change` by plain reachability: for a map with a cycle."""
     restated, edited = _text_changes(store)
     nodes = _rests_on(store, node_id)
     named = {definition_id for current_id in nodes for definition_id in (getattr(get_node(store, current_id), "definitions", None) or [])}
-    newest: datetime | None = None
-    for at in [*(restated.get(n) for n in nodes), *(edited.get(d) for d in named)]:
-        newest = _later(newest, at)
+    newest: EventRecord | None = None
+    for change in [*(restated.get(n) for n in nodes), *(edited.get(d) for d in named)]:
+        newest = _later(newest, change)
     return newest
 
 
@@ -4052,13 +4062,7 @@ def get_stale_cause(store: ProjectStore, node_id: str) -> dict | None:
             return {"cause": f"upstream-{upstream}"}
     if _awaiting_decision(store, node) is not None and _support_withdrawn(store, node_id):
         return {"cause": "support-withdrawn", "nodes": sorted(d for d in _unsettled_support(store, node_id) if _sent_back(store, d))}
-    nodes = _rests_on(store, node_id)
-    named = {definition_id for current_id in nodes for definition_id in (getattr(get_node(store, current_id), "definitions", None) or [])}
-    newest = None
-    for event in list_events(store):
-        if (event.kind == RESTATED_EVENT and event.entity_id in nodes) or (event.kind == DEFINITION_EDITED_EVENT and event.entity_id in named):
-            if newest is None or event.created_at >= newest.created_at:
-                newest = event
+    newest = newest_text_change(store, node_id)  # what `restated_at` read, from the same one-pass index
     if newest is None:  # pragma: no cover — potentially-stale under a restatement always has one
         return None
     payload = newest.payload or {}
