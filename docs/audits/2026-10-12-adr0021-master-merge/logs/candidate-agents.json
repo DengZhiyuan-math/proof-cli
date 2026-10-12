@@ -1,0 +1,31 @@
+{
+  "name": "candidate-agents",
+  "command": [
+    "/opt/anaconda3/bin/python",
+    "-m",
+    "pytest",
+    "-q",
+    "-ra",
+    "--durations=10",
+    "-p",
+    "no:cacheprovider",
+    "-c",
+    "/private/tmp/proof-0021-merge-jbf0__fm/agents/pyproject.toml",
+    "--junitxml=/private/tmp/proof-0021-merge-jbf0__fm/logs/candidate-agents.xml"
+  ],
+  "cwd": "/private/tmp/proof-0021-merge-jbf0__fm/agents",
+  "exit": 0,
+  "seconds": 18.44521375000477,
+  "platform": "macOS-27.2-arm64-arm-64bit",
+  "python": "3.11.14 (main, Oct 21 2025, 18:27:30) [Clang 20.1.8 ]",
+  "heads": {
+    "core": "912c28e017e6cd657dcf08bf86c11583958065f3",
+    "agents": "03ffc878cd132a02262d234a620b599777fec505",
+    "web": "ef8cc1f510e02dc97c14f46c4ba355f2ce40f6ab"
+  },
+  "tests": 200,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "skips": []
+}

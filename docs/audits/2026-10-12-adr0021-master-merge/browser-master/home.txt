@@ -1,0 +1,32 @@
+- banner
+  - link "Proof projects" [ref=e1]
+  - StaticText "1 project"
+  - button "Add existing…" [ref=e2]
+  - button "New project…" [ref=e3]
+- main
+  - status
+  - article
+    - sectionheader
+      - link "project" [ref=e4]
+      - StaticText "ADR0021-master-smoke"
+    - paragraph
+      - StaticText "Smoke fixture theorem."
+    - paragraph
+      - StaticText "/private/tmp/proof-0021-merge-jbf0__fm/browser-master/project"
+    - list
+      - listitem [level=1]
+        - ListMarker "• "
+        - StaticText "2 nodes"
+      - listitem [level=1]
+        - ListMarker "• "
+        - StaticText "0 on the frontier"
+      - listitem [level=1]
+        - ListMarker "• "
+        - StaticText "1 awaiting you"
+      - listitem [level=1]
+        - ListMarker "• "
+        - StaticText "0 accepted"
+    - sectionfooter
+      - StaticText "opened 5 min ago"
+      - button "Forget" [ref=e5]
+      - button "Open" [ref=e6]

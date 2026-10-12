@@ -1,0 +1,46 @@
+........................................................................ [  6%]
+........................................................................ [ 12%]
+........................................................................ [ 18%]
+........................................................................ [ 24%]
+........................................................................ [ 30%]
+........................................................................ [ 36%]
+........................................................................ [ 42%]
+..................................................s.......s............. [ 49%]
+........................................................................ [ 55%]
+........................................................................ [ 61%]
+........................................................................ [ 67%]
+........................................................................ [ 73%]
+........................................................................ [ 79%]
+........................................................................ [ 85%]
+........................................................................ [ 92%]
+.........................................................s.....sssssssss [ 98%]
+ss..........s........                                                    [100%]
+- generated xml file: /private/tmp/proof-0021-merge-jbf0__fm/logs/candidate-core.xml -
+============================= slowest 10 durations =============================
+48.36s call     tests/test_no_cli_decisions.py::test_no_command_changes_any_protected_state
+14.56s call     tests/test_proof_map.py::test_stale_pin_reachability_walk_does_not_recurse_on_a_deep_chain
+14.42s setup    tests/test_performance.py::test_one_read_visits_each_upstream_node_once[frontier]
+4.28s call     tests/test_concurrent_side_files.py::test_concurrent_collaboration_and_memory_writes_are_all_kept
+4.11s call     tests/test_performance.py::test_the_frontier_and_a_node_read_grow_linearly_with_the_chain
+4.07s call     tests/test_performance.py::test_a_decision_on_the_top_of_a_chain_grows_linearly_with_it
+3.65s call     tests/test_performance.py::test_the_one_pass_derives_exactly_what_a_walk_per_node_does
+2.60s call     tests/test_cli_contract.py::test_only_the_commands_that_start_a_project_create_one
+2.47s call     tests/test_latex_snapshots.py::test_the_working_file_compiles_standalone
+2.20s call     packages/latex-agent/tests/test_studio_server.py::SyncTeX::test_source_to_pdf_and_back
+=========================== short test summary info ============================
+SKIPPED [1] tests/test_performance.py:284: wall-clock benchmark: set PROOF_BENCHMARK=1
+SKIPPED [1] tests/test_performance.py:473: wall-clock benchmark: set PROOF_BENCHMARK=1
+SKIPPED [1] packages/latex-agent/tests/test_studio_build.py:249: Windows code pages
+SKIPPED [1] packages/latex-agent/tests/test_studio_build.py:391: needs a TeX distribution (pdflatex on PATH)
+SKIPPED [1] packages/latex-agent/tests/test_studio_build.py:364: needs a TeX distribution (pdflatex on PATH)
+SKIPPED [1] packages/latex-agent/tests/test_studio_build.py:311: needs a TeX distribution (pdflatex on PATH)
+SKIPPED [1] packages/latex-agent/tests/test_studio_build.py:283: needs a TeX distribution (pdflatex on PATH)
+SKIPPED [1] packages/latex-agent/tests/test_studio_build.py:355: needs a TeX distribution (pdflatex on PATH)
+SKIPPED [1] packages/latex-agent/tests/test_studio_build.py:345: needs a TeX distribution (pdflatex on PATH)
+SKIPPED [1] packages/latex-agent/tests/test_studio_build.py:398: needs a TeX distribution (pdflatex on PATH)
+SKIPPED [1] packages/latex-agent/tests/test_studio_build.py:338: needs a TeX distribution (pdflatex on PATH)
+SKIPPED [1] packages/latex-agent/tests/test_studio_build.py:372: needs a TeX distribution (pdflatex on PATH)
+SKIPPED [1] packages/latex-agent/tests/test_studio_build.py:410: needs a TeX distribution (pdflatex on PATH)
+SKIPPED [1] packages/latex-agent/tests/test_studio_build.py:324: needs a TeX distribution (pdflatex on PATH)
+SKIPPED [1] packages/latex-agent/tests/test_studio_server.py:103: Windows file sharing
+1158 passed, 15 skipped in 187.40s (0:03:07)

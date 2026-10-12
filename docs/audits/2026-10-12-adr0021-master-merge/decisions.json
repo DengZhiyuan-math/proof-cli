@@ -1,0 +1,59 @@
+{
+  "Q1": {
+    "choice": "a",
+    "integration_prs": {
+      "core": [
+        210,
+        211,
+        212
+      ],
+      "agents": [
+        27,
+        28
+      ],
+      "web": [
+        22,
+        23
+      ]
+    },
+    "all_merged_before_master": true
+  },
+  "Q2": {
+    "real_provider_trial": "after master integration",
+    "issue": 197,
+    "run_in_this_task": false
+  },
+  "Q3": {
+    "merge_order": [
+      "core",
+      "agents",
+      "web"
+    ],
+    "manifest_format": "extended #198 heads, bases, merge-bases, plus latex-agent"
+  },
+  "Q4": {
+    "gates": [
+      "local macOS full suites on merged master",
+      "browser Home → Proof map → Studio → Review without model calls"
+    ],
+    "not_gates": [
+      "real provider Pursue (#197)",
+      "researcher mathematical Acceptance (#132)"
+    ],
+    "sandbox_skips_count_as_pass": false
+  },
+  "Q5": {
+    "web5": "closed as superseded",
+    "core184": "merged automatically after integration",
+    "web6": "merged automatically after integration",
+    "web17": "merged independently",
+    "core183": "trimmed, remains open",
+    "agents8": "closed per Q6"
+  },
+  "Q6": {
+    "choice": "b",
+    "CLAUDE_CONFIG_DIR": "serving-process environment",
+    "project_setting_removed_from_core183": true,
+    "unknown_keys_branches": "preserved; no extra PR or branch deletion"
+  }
+}

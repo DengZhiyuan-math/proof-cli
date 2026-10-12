@@ -1,0 +1,16 @@
+........................................................................ [ 36%]
+........................................................................ [ 72%]
+........................................................                 [100%]
+- generated xml file: /private/tmp/proof-0021-merge-jbf0__fm/logs/after-core-agents.xml -
+============================= slowest 10 durations =============================
+5.16s call     tests/test_coordinator.py::test_a_stop_before_the_theorems_coordinator_started_leaves_no_coordinator_running
+1.62s call     tests/test_prove_verify_loop.py::test_a_stop_for_the_split_start_never_releases_a_start_that_began_while_it_waited
+1.32s call     tests/test_pursue_budget.py::test_the_time_limit_starts_no_new_turn_and_caps_each_run_by_what_is_left_of_it
+1.02s call     tests/test_prove_verify_loop.py::test_a_role_that_asks_for_a_decision_as_the_budget_ends_is_heard
+1.01s call     tests/test_prove_verify_loop.py::test_a_decomposer_turn_the_time_budget_ends_still_stops_the_run_for_the_researcher_when_it_split
+0.39s call     tests/test_run_state_machine.py::test_a_start_waits_while_the_previous_run_is_still_giving_the_node_back
+0.33s call     tests/test_run_state_machine.py::test_an_old_starts_assignment_coming_back_late_does_not_release_the_new_runs_claim
+0.25s call     tests/test_coordinator.py::test_an_acceptance_redirects_the_running_dependents_once_with_the_statement_and_the_key_ideas
+0.23s call     tests/test_prove_verify_loop.py::test_a_stop_that_outwaits_the_give_back_says_so_instead_of_reporting_a_release
+0.18s call     tests/test_coordinator.py::test_the_claims_a_running_decomposer_turn_split_off_wait_for_its_end[needs-human]
+200 passed in 17.02s

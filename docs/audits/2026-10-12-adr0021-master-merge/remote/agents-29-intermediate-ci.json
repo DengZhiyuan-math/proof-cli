@@ -1,0 +1,28 @@
+{
+  "baseRefOid": "dc802c068a4b81f611b2d791b1c5087405c24844",
+  "headRefOid": "8599fcc6f1695b47ccb7a01acee49c3f319ef28e",
+  "number": 29,
+  "state": "OPEN",
+  "statusCheckRollup": [
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-12T16:37:20Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/zeqome/proof-agents/actions/runs/38278608348/job/114910090576",
+      "name": "agents (3.11)",
+      "startedAt": "2026-10-12T16:36:46Z",
+      "status": "COMPLETED",
+      "workflowName": "tests"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-12T16:37:22Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/zeqome/proof-agents/actions/runs/38278608348/job/114910090134",
+      "name": "agents (3.12)",
+      "startedAt": "2026-10-12T16:36:46Z",
+      "status": "COMPLETED",
+      "workflowName": "tests"
+    }
+  ]
+}

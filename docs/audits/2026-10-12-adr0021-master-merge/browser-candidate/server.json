@@ -1,0 +1,12 @@
+{
+  "pid": 81053,
+  "url": "http://localhost:32029",
+  "project": "/private/tmp/proof-0021-merge-jbf0__fm/browser-candidate/project",
+  "providers_disabled": true,
+  "sources": {
+    "proof_cli.proof_map": "/private/tmp/proof-0021-merge-jbf0__fm/core/src/proof_cli/proof_map.py",
+    "latex_agent.agent": "/private/tmp/proof-0021-merge-jbf0__fm/core/packages/latex-agent/src/latex_agent/agent.py",
+    "proof_agents.proof_agent": "/private/tmp/proof-0021-merge-jbf0__fm/agents/src/proof_agents/proof_agent.py",
+    "proof_web.home": "/private/tmp/proof-0021-merge-jbf0__fm/web/src/proof_web/home.py"
+  }
+}

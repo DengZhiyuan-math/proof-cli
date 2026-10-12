@@ -1,0 +1,104 @@
+- banner
+  - button "Files sidebar" [ref=e1]
+  - link "Map" [ref=e2]
+  - StaticText "C"
+  - generic
+    - button "Agent" [ref=e4]
+  - button "Theme" [ref=e3]
+- main
+  - complementary
+    - generic
+      - heading "Node" [level=3, ref=e9]
+      - generic
+        - heading "Definitions" [level=4, ref=e20]
+        - generic
+          - StaticText "Smoke fixture. UI fixture only. No mathematical Acceptance."
+        - paragraph
+          - StaticText "Smoke fixture claim."
+        - StaticText "Awaiting review"
+        - StaticText "review-needed"
+        - StaticText "unreviewed"
+        - StaticText "current"
+        - StaticText "unclaimed"
+        - heading "Depends on" [level=4, ref=e21]
+        - list
+          - listitem [level=1, ref=e28] clickable [cursor:pointer]
+            - StaticText "no dependencies"
+    - generic
+      - heading "Files" [level=3, ref=e10]
+      - list
+        - listitem [level=1, ref=e22] clickable [cursor:pointer]
+          - StaticText "proof.tex"
+        - listitem [level=1, ref=e23] clickable [cursor:pointer]
+          - StaticText "key-ideas.md"
+    - generic
+      - heading "Outline Refresh outline" [level=3, ref=e11]
+        - StaticText "Outline"
+        - button "Refresh outline" [ref=e24]
+      - list
+        - listitem [level=1]
+          - StaticText "No sections yet."
+  - generic
+    - tablist "Centre"
+      - tab "Work log" [selected, ref=e12]
+      - tab "Files" [ref=e13]
+      - generic
+        - button "Compile" [ref=e25]
+          - StaticText "Compile"
+        - button "Draft" [expanded=false, ref=e26]
+          - StaticText "Draft"
+    - generic
+      - region "The agent's run on this node" [ref=e14]
+        - generic
+          - StaticText "No Agent Is Working On This Node."
+          - paragraph
+            - StaticText "Start it once: it works the node on its own — the Prover finds the proof, the Typesetter writes it, Numerics computes, the Verifier reads it against them — and stops when it requests review or needs you."
+          - button "Start agent" [ref=e29]
+          - combobox "Or one role alone, for one turn" [expanded=false, ref=e30]: all roles
+            - MenuListPopup
+              - option "all roles" [selected, ref=e33]
+              - option "Prover only" [ref=e34]
+              - option "Typesetter only" [ref=e35]
+              - option "Numerics only" [ref=e36]
+              - option "Verifier only" [ref=e37]
+              - option "Decomposer only" [ref=e38]
+          - button "Start" [ref=e31]
+          - status
+        - heading "WORK LOG" [level=3, ref=e27]
+        - list
+          - listitem [level=1]
+            - StaticText "16:32"
+            - StaticText "smoke-fixture"
+            - StaticText "requested review of "
+            - link "snapshot v1" [ref=e32]
+  - complementary
+    - generic
+      - button "Account and usage limits" [expanded=false, ref=e15]
+      - button "New chat" [ref=e16]
+    - generic
+      - generic
+        - StaticText "This is the node's proof agent: it reads the project, its library and the web, runs\n"
+        - code
+          - StaticText "proof"
+        - StaticText " and computations, and writes this node's proof. Pick Claude Code or Codex CLI above.\nHere you only Ask: read-only questions about the node — the agent works it from its run, in the centre.\nType "
+        - code
+          - StaticText "@"
+        - StaticText " to point it at a file or the selection (or select text and press "
+        - code
+          - StaticText "⌘L"
+        - StaticText ").\nType "
+        - code
+          - StaticText "/"
+        - StaticText " for commands.\nCommits, pushes and non-allowlisted shell commands are not permitted from here."
+      - StaticText "The prism-local server is older than this page. Close every Prism page for this project, wait about 10 seconds, and open it again to restart it."
+      - StaticText "No AI provider is set up."
+    - generic
+      - textbox "A read-only question; the agent is driven from its run above · ↵ send, ⇧↵ newline" [ref=e17]
+      - button "Actions and review" [expanded=false, ref=e18]
+      - button "Send" [ref=e19]
+- contentinfo
+  - generic
+    - button "Problems" [ref=e5]
+    - button "Output" [ref=e6]
+    - button "Diff" [ref=e7]
+    - button "Show/hide panel" [ref=e8]

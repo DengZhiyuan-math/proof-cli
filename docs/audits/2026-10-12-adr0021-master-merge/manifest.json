@@ -1,0 +1,493 @@
+{
+  "date": "2026-10-12",
+  "recordedAt": "2026-10-12T16:53:45.564435+00:00",
+  "issue": "DengZhiyuan-math/proof-cli#198",
+  "interpreter": "/opt/anaconda3/bin/python",
+  "host": "macOS-27.2-arm64-arm-64bit",
+  "note": "Each base_sha is the master head immediately before its integration merge. All final test and browser sources are pinned to the final master heads. latex-agent shares the core repository commit; its source tree and last path commit are also pinned.",
+  "merge_order": [
+    "core",
+    "agents",
+    "web"
+  ],
+  "core": {
+    "repo": "https://github.com/DengZhiyuan-math/proof-cli.git",
+    "branch": "master",
+    "head": "d433159214156239e31094d1eaea3b7b991b927f",
+    "tree": "113d189e96b8e52d746ec8335668bf298eefc163",
+    "base": "master",
+    "base_sha": "c259da02f2ddb7c255aecf0db3d5ec2af40bb357",
+    "merge_base": "c259da02f2ddb7c255aecf0db3d5ec2af40bb357",
+    "integration_branch": "integ/0021",
+    "integration_head": "5a5da1989ca8ea9b33aac73fb62b96ce7cb40fe0",
+    "merge_base_with_integration": "5a5da1989ca8ea9b33aac73fb62b96ce7cb40fe0",
+    "pull_request": "https://github.com/DengZhiyuan-math/proof-cli/pull/217",
+    "source_path": "/private/tmp/proof-0021-merge-jbf0__fm/core",
+    "status": ""
+  },
+  "agents": {
+    "repo": "https://github.com/zeqome/proof-agents.git",
+    "branch": "master",
+    "head": "7d3f312269b9868415e06302b97637db1a490220",
+    "tree": "44930c238389bf4bce723d5e17d0158809507431",
+    "base": "master",
+    "base_sha": "dc802c068a4b81f611b2d791b1c5087405c24844",
+    "merge_base": "dc802c068a4b81f611b2d791b1c5087405c24844",
+    "integration_branch": "integ/0021",
+    "integration_head": "8599fcc6f1695b47ccb7a01acee49c3f319ef28e",
+    "merge_base_with_integration": "8599fcc6f1695b47ccb7a01acee49c3f319ef28e",
+    "pull_request": "https://github.com/zeqome/proof-agents/pull/29",
+    "source_path": "/private/tmp/proof-0021-merge-jbf0__fm/agents",
+    "status": ""
+  },
+  "web": {
+    "repo": "https://github.com/zeqome/proof-web.git",
+    "branch": "master",
+    "head": "af687b02b7d03dbf5bd2b60062284d8421dfa5c0",
+    "tree": "f0cbb44b5cd95ae1e338f9b333e6957f10b4d269",
+    "base": "master",
+    "base_sha": "045307a54bf03e8fda9558d9ecd127bdd8dc15f6",
+    "merge_base": "045307a54bf03e8fda9558d9ecd127bdd8dc15f6",
+    "integration_branch": "feat/0021-pursue-review-queue",
+    "integration_head": "13db61bfe2bb5747ec0e9ea46d1fcb919f530d15",
+    "merge_base_with_integration": "13db61bfe2bb5747ec0e9ea46d1fcb919f530d15",
+    "pull_request": "https://github.com/zeqome/proof-web/pull/24",
+    "source_path": "/private/tmp/proof-0021-merge-jbf0__fm/web",
+    "status": ""
+  },
+  "latex_agent": {
+    "repo": "https://github.com/DengZhiyuan-math/proof-cli.git",
+    "branch": "master",
+    "head": "d433159214156239e31094d1eaea3b7b991b927f",
+    "tree": "72963b022cca3ac9b4b6416aa6e9c81e92506893",
+    "base": "master",
+    "base_sha": "c259da02f2ddb7c255aecf0db3d5ec2af40bb357",
+    "merge_base": "c259da02f2ddb7c255aecf0db3d5ec2af40bb357",
+    "integration_branch": "integ/0021",
+    "integration_head": "5a5da1989ca8ea9b33aac73fb62b96ce7cb40fe0",
+    "merge_base_with_integration": "5a5da1989ca8ea9b33aac73fb62b96ce7cb40fe0",
+    "pull_request": "https://github.com/DengZhiyuan-math/proof-cli/pull/217",
+    "source_path": "/private/tmp/proof-0021-merge-jbf0__fm/core/packages/latex-agent",
+    "status": "",
+    "path": "packages/latex-agent",
+    "last_path_commit": "3702db501fd908701d726edc749c6dd2db6aac04",
+    "shares_commit_with": "core"
+  },
+  "tests": {
+    "core": {
+      "name": "final-core",
+      "command": [
+        "/opt/anaconda3/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-ra",
+        "--durations=10",
+        "-p",
+        "no:cacheprovider",
+        "-c",
+        "/private/tmp/proof-0021-merge-jbf0__fm/core/pyproject.toml",
+        "--junitxml=/private/tmp/proof-0021-merge-jbf0__fm/logs/final-core.xml"
+      ],
+      "cwd": "/private/tmp/proof-0021-merge-jbf0__fm/core",
+      "exit": 0,
+      "seconds": 190.59023425000487,
+      "platform": "macOS-27.2-arm64-arm-64bit",
+      "python": "3.11.14 (main, Oct 21 2025, 18:27:30) [Clang 20.1.8 ]",
+      "heads": {
+        "core": "d433159214156239e31094d1eaea3b7b991b927f",
+        "agents": "7d3f312269b9868415e06302b97637db1a490220",
+        "web": "af687b02b7d03dbf5bd2b60062284d8421dfa5c0"
+      },
+      "tests": 1173,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 15,
+      "skips": [
+        {
+          "class": "tests.test_performance",
+          "name": "test_benchmark_a_200_node_chain",
+          "reason": "wall-clock benchmark: set PROOF_BENCHMARK=1"
+        },
+        {
+          "class": "tests.test_performance",
+          "name": "test_benchmark_the_frontier_of_a_1000_node_chain",
+          "reason": "wall-clock benchmark: set PROOF_BENCHMARK=1"
+        },
+        {
+          "class": "packages.latex-agent.tests.test_studio_build.Platform",
+          "name": "test_ascii_alias_for_names_the_code_page_cannot_spell",
+          "reason": "Windows code pages"
+        },
+        {
+          "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+          "name": "test_a_broken_aux_from_an_earlier_build_is_repaired",
+          "reason": "needs a TeX distribution (pdflatex on PATH)"
+        },
+        {
+          "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+          "name": "test_biber_in_a_chinese_folder",
+          "reason": "needs a TeX distribution (pdflatex on PATH)"
+        },
+        {
+          "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+          "name": "test_biblatex_with_biber",
+          "reason": "needs a TeX distribution (pdflatex on PATH)"
+        },
+        {
+          "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+          "name": "test_bibtex_and_cross_references",
+          "reason": "needs a TeX distribution (pdflatex on PATH)"
+        },
+        {
+          "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+          "name": "test_bibtex_in_a_chinese_folder",
+          "reason": "needs a TeX distribution (pdflatex on PATH)"
+        },
+        {
+          "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+          "name": "test_ctex_in_a_chinese_folder",
+          "reason": "needs a TeX distribution (pdflatex on PATH)"
+        },
+        {
+          "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+          "name": "test_errors_draft_goes_on_and_strict_stops",
+          "reason": "needs a TeX distribution (pdflatex on PATH)"
+        },
+        {
+          "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+          "name": "test_fontspec_documents_are_built_with_xelatex",
+          "reason": "needs a TeX distribution (pdflatex on PATH)"
+        },
+        {
+          "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+          "name": "test_index_glossary_and_nomenclature",
+          "reason": "needs a TeX distribution (pdflatex on PATH)"
+        },
+        {
+          "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+          "name": "test_stop_and_time_limit",
+          "reason": "needs a TeX distribution (pdflatex on PATH)"
+        },
+        {
+          "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+          "name": "test_the_projects_own_bst_and_included_subfolders",
+          "reason": "needs a TeX distribution (pdflatex on PATH)"
+        },
+        {
+          "class": "packages.latex-agent.tests.test_studio_server.Files",
+          "name": "test_save_while_another_program_reads_the_file",
+          "reason": "Windows file sharing"
+        }
+      ]
+    },
+    "agents": {
+      "name": "final-agents",
+      "command": [
+        "/opt/anaconda3/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-ra",
+        "--durations=10",
+        "-p",
+        "no:cacheprovider",
+        "-c",
+        "/private/tmp/proof-0021-merge-jbf0__fm/agents/pyproject.toml",
+        "--junitxml=/private/tmp/proof-0021-merge-jbf0__fm/logs/final-agents.xml"
+      ],
+      "cwd": "/private/tmp/proof-0021-merge-jbf0__fm/agents",
+      "exit": 0,
+      "seconds": 18.313125334010692,
+      "platform": "macOS-27.2-arm64-arm-64bit",
+      "python": "3.11.14 (main, Oct 21 2025, 18:27:30) [Clang 20.1.8 ]",
+      "heads": {
+        "core": "d433159214156239e31094d1eaea3b7b991b927f",
+        "agents": "7d3f312269b9868415e06302b97637db1a490220",
+        "web": "af687b02b7d03dbf5bd2b60062284d8421dfa5c0"
+      },
+      "tests": 200,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "skips": []
+    },
+    "web": {
+      "name": "final-web",
+      "command": [
+        "/opt/anaconda3/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-ra",
+        "--durations=10",
+        "-p",
+        "no:cacheprovider",
+        "-c",
+        "/private/tmp/proof-0021-merge-jbf0__fm/web/pyproject.toml",
+        "--junitxml=/private/tmp/proof-0021-merge-jbf0__fm/logs/final-web.xml"
+      ],
+      "cwd": "/private/tmp/proof-0021-merge-jbf0__fm/web",
+      "exit": 0,
+      "seconds": 266.51731875000405,
+      "platform": "macOS-27.2-arm64-arm-64bit",
+      "python": "3.11.14 (main, Oct 21 2025, 18:27:30) [Clang 20.1.8 ]",
+      "heads": {
+        "core": "d433159214156239e31094d1eaea3b7b991b927f",
+        "agents": "7d3f312269b9868415e06302b97637db1a490220",
+        "web": "af687b02b7d03dbf5bd2b60062284d8421dfa5c0"
+      },
+      "tests": 822,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1,
+      "skips": [
+        {
+          "class": "tests.test_studio_nodes",
+          "name": "test_a_studio_build_is_the_pdf_review_archives_and_a_failed_one_leaves_it_stale",
+          "reason": "needs pdflatex"
+        }
+      ]
+    }
+  },
+  "upstream_validation": [
+    {
+      "name": "master-core",
+      "command": [
+        "/opt/anaconda3/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-ra",
+        "--durations=10",
+        "-p",
+        "no:cacheprovider",
+        "-c",
+        "/private/tmp/proof-0021-merge-jbf0__fm/core/pyproject.toml",
+        "--junitxml=/private/tmp/proof-0021-merge-jbf0__fm/logs/master-core.xml"
+      ],
+      "cwd": "/private/tmp/proof-0021-merge-jbf0__fm/core",
+      "exit": 0,
+      "seconds": 173.04865887499182,
+      "platform": "macOS-27.2-arm64-arm-64bit",
+      "python": "3.11.14 (main, Oct 21 2025, 18:27:30) [Clang 20.1.8 ]",
+      "heads": {
+        "core": "d433159214156239e31094d1eaea3b7b991b927f",
+        "agents": "03ffc878cd132a02262d234a620b599777fec505",
+        "web": "2d45f46e52f19c5db184a1d54a0d97c5db158e9f"
+      },
+      "tests": 1173,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 15,
+      "skips": [
+        {
+          "class": "tests.test_performance",
+          "name": "test_benchmark_a_200_node_chain",
+          "reason": "wall-clock benchmark: set PROOF_BENCHMARK=1"
+        },
+        {
+          "class": "tests.test_performance",
+          "name": "test_benchmark_the_frontier_of_a_1000_node_chain",
+          "reason": "wall-clock benchmark: set PROOF_BENCHMARK=1"
+        },
+        {
+          "class": "packages.latex-agent.tests.test_studio_build.Platform",
+          "name": "test_ascii_alias_for_names_the_code_page_cannot_spell",
+          "reason": "Windows code pages"
+        },
+        {
+          "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+          "name": "test_a_broken_aux_from_an_earlier_build_is_repaired",
+          "reason": "needs a TeX distribution (pdflatex on PATH)"
+        },
+        {
+          "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+          "name": "test_biber_in_a_chinese_folder",
+          "reason": "needs a TeX distribution (pdflatex on PATH)"
+        },
+        {
+          "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+          "name": "test_biblatex_with_biber",
+          "reason": "needs a TeX distribution (pdflatex on PATH)"
+        },
+        {
+          "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+          "name": "test_bibtex_and_cross_references",
+          "reason": "needs a TeX distribution (pdflatex on PATH)"
+        },
+        {
+          "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+          "name": "test_bibtex_in_a_chinese_folder",
+          "reason": "needs a TeX distribution (pdflatex on PATH)"
+        },
+        {
+          "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+          "name": "test_ctex_in_a_chinese_folder",
+          "reason": "needs a TeX distribution (pdflatex on PATH)"
+        },
+        {
+          "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+          "name": "test_errors_draft_goes_on_and_strict_stops",
+          "reason": "needs a TeX distribution (pdflatex on PATH)"
+        },
+        {
+          "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+          "name": "test_fontspec_documents_are_built_with_xelatex",
+          "reason": "needs a TeX distribution (pdflatex on PATH)"
+        },
+        {
+          "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+          "name": "test_index_glossary_and_nomenclature",
+          "reason": "needs a TeX distribution (pdflatex on PATH)"
+        },
+        {
+          "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+          "name": "test_stop_and_time_limit",
+          "reason": "needs a TeX distribution (pdflatex on PATH)"
+        },
+        {
+          "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+          "name": "test_the_projects_own_bst_and_included_subfolders",
+          "reason": "needs a TeX distribution (pdflatex on PATH)"
+        },
+        {
+          "class": "packages.latex-agent.tests.test_studio_server.Files",
+          "name": "test_save_while_another_program_reads_the_file",
+          "reason": "Windows file sharing"
+        }
+      ]
+    },
+    {
+      "name": "after-core-agents",
+      "command": [
+        "/opt/anaconda3/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-ra",
+        "--durations=10",
+        "-p",
+        "no:cacheprovider",
+        "-c",
+        "/private/tmp/proof-0021-merge-jbf0__fm/agents/pyproject.toml",
+        "--junitxml=/private/tmp/proof-0021-merge-jbf0__fm/logs/after-core-agents.xml"
+      ],
+      "cwd": "/private/tmp/proof-0021-merge-jbf0__fm/agents",
+      "exit": 0,
+      "seconds": 17.913989584019873,
+      "platform": "macOS-27.2-arm64-arm-64bit",
+      "python": "3.11.14 (main, Oct 21 2025, 18:27:30) [Clang 20.1.8 ]",
+      "heads": {
+        "core": "d433159214156239e31094d1eaea3b7b991b927f",
+        "agents": "03ffc878cd132a02262d234a620b599777fec505",
+        "web": "2d45f46e52f19c5db184a1d54a0d97c5db158e9f"
+      },
+      "tests": 200,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "skips": []
+    },
+    {
+      "name": "after-agents-web",
+      "command": [
+        "/opt/anaconda3/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-ra",
+        "--durations=10",
+        "-p",
+        "no:cacheprovider",
+        "-c",
+        "/private/tmp/proof-0021-merge-jbf0__fm/web/pyproject.toml",
+        "--junitxml=/private/tmp/proof-0021-merge-jbf0__fm/logs/after-agents-web.xml"
+      ],
+      "cwd": "/private/tmp/proof-0021-merge-jbf0__fm/web",
+      "exit": 0,
+      "seconds": 259.98224766601925,
+      "platform": "macOS-27.2-arm64-arm-64bit",
+      "python": "3.11.14 (main, Oct 21 2025, 18:27:30) [Clang 20.1.8 ]",
+      "heads": {
+        "core": "d433159214156239e31094d1eaea3b7b991b927f",
+        "agents": "7d3f312269b9868415e06302b97637db1a490220",
+        "web": "2d45f46e52f19c5db184a1d54a0d97c5db158e9f"
+      },
+      "tests": 822,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1,
+      "skips": [
+        {
+          "class": "tests.test_studio_nodes",
+          "name": "test_a_studio_build_is_the_pdf_review_archives_and_a_failed_one_leaves_it_stale",
+          "reason": "needs pdflatex"
+        }
+      ]
+    }
+  ],
+  "browser": {
+    "passed": true,
+    "path": [
+      "Home",
+      "Proof map",
+      "Studio",
+      "Review"
+    ],
+    "checks": {
+      "home": {
+        "passed": true,
+        "url": "http://localhost:32029/",
+        "screenshot": "home.png",
+        "snapshot": "home.txt"
+      },
+      "map": {
+        "passed": true,
+        "url": "http://localhost:34633/",
+        "screenshot": "map.png",
+        "snapshot": "map.txt"
+      },
+      "studio": {
+        "passed": true,
+        "url": "http://localhost:34633/studio/C/",
+        "screenshot": "studio.png",
+        "snapshot": "studio.txt"
+      },
+      "review": {
+        "passed": true,
+        "url": "http://localhost:34633/#/review",
+        "screenshot": "review.png",
+        "snapshot": "review.txt"
+      }
+    },
+    "model_calls": 0,
+    "provider_mode": "non-model CLI stand-ins",
+    "provider_bins": {
+      "claude": "/usr/bin/false",
+      "codex": "/usr/bin/false"
+    },
+    "real_provider_run": false,
+    "mathematical_acceptance": false,
+    "heads": {
+      "core": "d433159214156239e31094d1eaea3b7b991b927f",
+      "agents": "7d3f312269b9868415e06302b97637db1a490220",
+      "web": "af687b02b7d03dbf5bd2b60062284d8421dfa5c0"
+    },
+    "loaded_sources": {
+      "proof_cli.proof_map": "/private/tmp/proof-0021-merge-jbf0__fm/core/src/proof_cli/proof_map.py",
+      "latex_agent.agent": "/private/tmp/proof-0021-merge-jbf0__fm/core/packages/latex-agent/src/latex_agent/agent.py",
+      "proof_agents.proof_agent": "/private/tmp/proof-0021-merge-jbf0__fm/agents/src/proof_agents/proof_agent.py",
+      "proof_web.home": "/private/tmp/proof-0021-merge-jbf0__fm/web/src/proof_web/home.py"
+    },
+    "note": "Both CLI executables point to /usr/bin/false, which exits without contacting any provider. Read-only fixture traversal; no Start, Send, Compile or Record Selected Decisions action."
+  },
+  "real_provider": {
+    "status": "not_run",
+    "issue": 197
+  },
+  "mathematical_acceptance": {
+    "status": "not_performed",
+    "issue": 132
+  }
+}

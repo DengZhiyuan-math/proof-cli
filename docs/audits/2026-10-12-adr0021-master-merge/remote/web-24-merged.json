@@ -1,0 +1,11 @@
+{
+  "baseRefName": "master",
+  "headRefOid": "13db61bfe2bb5747ec0e9ea46d1fcb919f530d15",
+  "mergeCommit": {
+    "oid": "af687b02b7d03dbf5bd2b60062284d8421dfa5c0"
+  },
+  "mergedAt": "2026-10-12T16:45:54Z",
+  "number": 24,
+  "state": "MERGED",
+  "url": "https://github.com/zeqome/proof-web/pull/24"
+}

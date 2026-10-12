@@ -1,0 +1,25 @@
+{
+  "pid": 3526,
+  "url": "http://localhost:32029",
+  "project": "/private/tmp/proof-0021-merge-jbf0__fm/browser-master/project",
+  "provider_mode": "non-model CLI stand-ins",
+  "provider_bins": {
+    "claude": "/usr/bin/false",
+    "codex": "/usr/bin/false"
+  },
+  "provider_ids": [
+    "claude",
+    "codex"
+  ],
+  "heads": {
+    "core": "d433159214156239e31094d1eaea3b7b991b927f",
+    "agents": "7d3f312269b9868415e06302b97637db1a490220",
+    "web": "af687b02b7d03dbf5bd2b60062284d8421dfa5c0"
+  },
+  "sources": {
+    "proof_cli.proof_map": "/private/tmp/proof-0021-merge-jbf0__fm/core/src/proof_cli/proof_map.py",
+    "latex_agent.agent": "/private/tmp/proof-0021-merge-jbf0__fm/core/packages/latex-agent/src/latex_agent/agent.py",
+    "proof_agents.proof_agent": "/private/tmp/proof-0021-merge-jbf0__fm/agents/src/proof_agents/proof_agent.py",
+    "proof_web.home": "/private/tmp/proof-0021-merge-jbf0__fm/web/src/proof_web/home.py"
+  }
+}

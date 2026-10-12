@@ -1,0 +1,18 @@
+.........................................................s.....sssssssss [ 77%]
+ss..........s........                                                    [100%]
+- generated xml file: /private/tmp/proof-0021-merge-jbf0__fm/logs/core183-latex.xml -
+=========================== short test summary info ============================
+SKIPPED [1] packages/latex-agent/tests/test_studio_build.py:249: Windows code pages
+SKIPPED [1] packages/latex-agent/tests/test_studio_build.py:391: needs a TeX distribution (pdflatex on PATH)
+SKIPPED [1] packages/latex-agent/tests/test_studio_build.py:364: needs a TeX distribution (pdflatex on PATH)
+SKIPPED [1] packages/latex-agent/tests/test_studio_build.py:311: needs a TeX distribution (pdflatex on PATH)
+SKIPPED [1] packages/latex-agent/tests/test_studio_build.py:283: needs a TeX distribution (pdflatex on PATH)
+SKIPPED [1] packages/latex-agent/tests/test_studio_build.py:355: needs a TeX distribution (pdflatex on PATH)
+SKIPPED [1] packages/latex-agent/tests/test_studio_build.py:345: needs a TeX distribution (pdflatex on PATH)
+SKIPPED [1] packages/latex-agent/tests/test_studio_build.py:398: needs a TeX distribution (pdflatex on PATH)
+SKIPPED [1] packages/latex-agent/tests/test_studio_build.py:338: needs a TeX distribution (pdflatex on PATH)
+SKIPPED [1] packages/latex-agent/tests/test_studio_build.py:372: needs a TeX distribution (pdflatex on PATH)
+SKIPPED [1] packages/latex-agent/tests/test_studio_build.py:410: needs a TeX distribution (pdflatex on PATH)
+SKIPPED [1] packages/latex-agent/tests/test_studio_build.py:324: needs a TeX distribution (pdflatex on PATH)
+SKIPPED [1] packages/latex-agent/tests/test_studio_server.py:103: Windows file sharing
+80 passed, 13 skipped in 5.36s

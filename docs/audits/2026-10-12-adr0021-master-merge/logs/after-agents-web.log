@@ -1,0 +1,27 @@
+........................................................................ [  8%]
+........................................................................ [ 17%]
+........................................................................ [ 26%]
+........................................................................ [ 35%]
+........................................................................ [ 43%]
+........................................................................ [ 52%]
+........................................................................ [ 61%]
+........................................................................ [ 70%]
+........................................................................ [ 78%]
+........................................................................ [ 87%]
+................s....................................................... [ 96%]
+..............................                                           [100%]
+- generated xml file: /private/tmp/proof-0021-merge-jbf0__fm/logs/after-agents-web.xml -
+============================= slowest 10 durations =============================
+29.29s call     tests/test_coordinator_hub.py::test_a_naturally_stuck_coordinator_can_release_its_claims_through_the_page
+20.66s call     tests/test_agent_run.py::test_a_start_right_after_stop_and_release_is_not_ended_by_the_old_coordinator
+5.64s call     tests/test_discussion_web.py::test_one_turn_at_a_time_and_stop_ends_it
+5.42s call     tests/test_coordinator_hub.py::test_the_coordinator_works_the_children_then_the_root_and_the_page_and_the_map_read_it
+5.38s call     tests/test_agent_run.py::test_a_files_save_of_the_summary_waits_while_an_agent_edit_turn_runs
+5.26s call     tests/test_studio_hub_detach.py::test_a_drafting_turn_that_ends_after_the_project_was_replaced_records_nothing_even_before_anyone_retires_the_page
+5.24s call     tests/test_studio_hub_detach.py::test_the_same_drafting_turn_on_a_live_project_records_its_draft
+4.45s call     tests/test_agent_run.py::test_pause_stops_the_budget_clock_and_resume_continues_with_what_is_left
+3.84s call     tests/test_agent_run.py::test_the_map_and_the_node_payload_show_the_runs_role_and_step
+2.94s call     tests/test_agent_run.py::test_a_typesetter_turn_that_leaves_the_proof_unbuilt_is_sent_back_before_the_verifier_reads
+=========================== short test summary info ============================
+SKIPPED [1] tests/test_studio_nodes.py:141: needs pdflatex
+821 passed, 1 skipped in 258.87s (0:04:18)

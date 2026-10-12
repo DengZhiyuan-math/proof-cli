@@ -1,0 +1,107 @@
+{
+  "name": "candidate-core",
+  "command": [
+    "/opt/anaconda3/bin/python",
+    "-m",
+    "pytest",
+    "-q",
+    "-ra",
+    "--durations=10",
+    "-p",
+    "no:cacheprovider",
+    "-c",
+    "/private/tmp/proof-0021-merge-jbf0__fm/core/pyproject.toml",
+    "--junitxml=/private/tmp/proof-0021-merge-jbf0__fm/logs/candidate-core.xml"
+  ],
+  "cwd": "/private/tmp/proof-0021-merge-jbf0__fm/core",
+  "exit": 0,
+  "seconds": 188.67771054198965,
+  "platform": "macOS-27.2-arm64-arm-64bit",
+  "python": "3.11.14 (main, Oct 21 2025, 18:27:30) [Clang 20.1.8 ]",
+  "heads": {
+    "core": "912c28e017e6cd657dcf08bf86c11583958065f3",
+    "agents": "03ffc878cd132a02262d234a620b599777fec505",
+    "web": "ef8cc1f510e02dc97c14f46c4ba355f2ce40f6ab"
+  },
+  "tests": 1173,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 15,
+  "skips": [
+    {
+      "class": "tests.test_performance",
+      "name": "test_benchmark_a_200_node_chain",
+      "reason": "wall-clock benchmark: set PROOF_BENCHMARK=1"
+    },
+    {
+      "class": "tests.test_performance",
+      "name": "test_benchmark_the_frontier_of_a_1000_node_chain",
+      "reason": "wall-clock benchmark: set PROOF_BENCHMARK=1"
+    },
+    {
+      "class": "packages.latex-agent.tests.test_studio_build.Platform",
+      "name": "test_ascii_alias_for_names_the_code_page_cannot_spell",
+      "reason": "Windows code pages"
+    },
+    {
+      "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+      "name": "test_a_broken_aux_from_an_earlier_build_is_repaired",
+      "reason": "needs a TeX distribution (pdflatex on PATH)"
+    },
+    {
+      "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+      "name": "test_biber_in_a_chinese_folder",
+      "reason": "needs a TeX distribution (pdflatex on PATH)"
+    },
+    {
+      "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+      "name": "test_biblatex_with_biber",
+      "reason": "needs a TeX distribution (pdflatex on PATH)"
+    },
+    {
+      "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+      "name": "test_bibtex_and_cross_references",
+      "reason": "needs a TeX distribution (pdflatex on PATH)"
+    },
+    {
+      "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+      "name": "test_bibtex_in_a_chinese_folder",
+      "reason": "needs a TeX distribution (pdflatex on PATH)"
+    },
+    {
+      "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+      "name": "test_ctex_in_a_chinese_folder",
+      "reason": "needs a TeX distribution (pdflatex on PATH)"
+    },
+    {
+      "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+      "name": "test_errors_draft_goes_on_and_strict_stops",
+      "reason": "needs a TeX distribution (pdflatex on PATH)"
+    },
+    {
+      "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+      "name": "test_fontspec_documents_are_built_with_xelatex",
+      "reason": "needs a TeX distribution (pdflatex on PATH)"
+    },
+    {
+      "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+      "name": "test_index_glossary_and_nomenclature",
+      "reason": "needs a TeX distribution (pdflatex on PATH)"
+    },
+    {
+      "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+      "name": "test_stop_and_time_limit",
+      "reason": "needs a TeX distribution (pdflatex on PATH)"
+    },
+    {
+      "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+      "name": "test_the_projects_own_bst_and_included_subfolders",
+      "reason": "needs a TeX distribution (pdflatex on PATH)"
+    },
+    {
+      "class": "packages.latex-agent.tests.test_studio_server.Files",
+      "name": "test_save_while_another_program_reads_the_file",
+      "reason": "Windows file sharing"
+    }
+  ]
+}

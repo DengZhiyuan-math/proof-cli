@@ -1,0 +1,11 @@
+{
+  "baseRefName": "master",
+  "headRefOid": "5a5da1989ca8ea9b33aac73fb62b96ce7cb40fe0",
+  "mergeCommit": {
+    "oid": "d433159214156239e31094d1eaea3b7b991b927f"
+  },
+  "mergedAt": "2026-10-12T16:37:22Z",
+  "number": 217,
+  "state": "MERGED",
+  "url": "https://github.com/DengZhiyuan-math/proof-cli/pull/217"
+}

@@ -1,0 +1,19 @@
+{
+  "baseRefName": "master",
+  "baseRefOid": "045307a54bf03e8fda9558d9ecd127bdd8dc15f6",
+  "headRefOid": "13db61bfe2bb5747ec0e9ea46d1fcb919f530d15",
+  "mergeable": "MERGEABLE",
+  "state": "OPEN",
+  "statusCheckRollup": [
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-12T16:38:33Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/zeqome/proof-web/actions/runs/38278795296/job/114910707602",
+      "name": "package",
+      "startedAt": "2026-10-12T16:38:22Z",
+      "status": "COMPLETED",
+      "workflowName": "package"
+    }
+  ]
+}

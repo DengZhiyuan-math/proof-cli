@@ -1,0 +1,37 @@
+{
+  "name": "candidate-web",
+  "command": [
+    "/opt/anaconda3/bin/python",
+    "-m",
+    "pytest",
+    "-q",
+    "-ra",
+    "--durations=10",
+    "-p",
+    "no:cacheprovider",
+    "-c",
+    "/private/tmp/proof-0021-merge-jbf0__fm/web/pyproject.toml",
+    "--junitxml=/private/tmp/proof-0021-merge-jbf0__fm/logs/candidate-web.xml"
+  ],
+  "cwd": "/private/tmp/proof-0021-merge-jbf0__fm/web",
+  "exit": 0,
+  "seconds": 268.57834220898803,
+  "platform": "macOS-27.2-arm64-arm-64bit",
+  "python": "3.11.14 (main, Oct 21 2025, 18:27:30) [Clang 20.1.8 ]",
+  "heads": {
+    "core": "912c28e017e6cd657dcf08bf86c11583958065f3",
+    "agents": "03ffc878cd132a02262d234a620b599777fec505",
+    "web": "ef8cc1f510e02dc97c14f46c4ba355f2ce40f6ab"
+  },
+  "tests": 822,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 1,
+  "skips": [
+    {
+      "class": "tests.test_studio_nodes",
+      "name": "test_a_studio_build_is_the_pdf_review_archives_and_a_failed_one_leaves_it_stale",
+      "reason": "needs pdflatex"
+    }
+  ]
+}

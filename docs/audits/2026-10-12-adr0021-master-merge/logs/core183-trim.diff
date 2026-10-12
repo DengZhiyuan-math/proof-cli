@@ -1,0 +1,198 @@
+diff --git a/README.md b/README.md
+index b040291..375afa3 100644
+--- a/README.md
++++ b/README.md
+@@ -92,7 +92,7 @@ A snapshot, and an exchange export (`proof exchange export`), never freeze or ca
+   - **It writes** files only in the node's sources and its `scratch/` folder, and changes project state only through `proof`. It never makes a Human Review decision.
+   - **It is rooted at the project:** it runs in `proofs/<id>/` with `PROOF_ROOT` set to the project.
+   - **It runs on the Claude Code or the Codex CLI**, whichever you are logged into; there is no API-model backend.
+-  - **It runs with the environment of the process serving the page**, so the login it finds is the one that process sees. That process is usually the Home: `proof home` and `proof map open` start it in the background the first time, it serves every project's page, and it keeps running. A page can also be served on its own by `proof map serve`, run by you or started by `proof map open` when the Home could not serve it. If your Claude Code login lives in a profile other than `~/.claude`, name that folder in the project's proof.toml (`[studio]` `claude_config_dir = "~/.claude-work"`): every agent turn of the project, and the studio's account check, then use it, whatever shell started the page. Otherwise, or for Codex outside `~/.codex` (`CODEX_HOME`), set the variable in the shell that starts that process. A process already running keeps the environment it started with. Stop it (Ctrl-C if you ran it with `--foreground` or `proof map serve`, or `pkill -f 'proof(_web\.cli)? (home|map serve)'` for any of them), then start it again from the right shell. Otherwise every Start ends at once with `the prover turn failed: Not logged in · Please run /login`.
++  - **It runs with the environment of the process serving the page**, so the login it finds is the one that process sees. That process is usually the Home: `proof home` and `proof map open` start it in the background the first time, it serves every project's page, and it keeps running. A page can also be served on its own by `proof map serve`, run by you or started by `proof map open` when the Home could not serve it. If your Claude Code login lives in a profile other than `~/.claude` (`CLAUDE_CONFIG_DIR`), or your Codex one outside `~/.codex` (`CODEX_HOME`), set the variable in the shell that starts that process. A process already running keeps the environment it started with. Stop it (Ctrl-C if you ran it with `--foreground` or `proof map serve`, or `pkill -f 'proof(_web\.cli)? (home|map serve)'` for any of them), then start it again from the right shell. Otherwise every Start ends at once with `the prover turn failed: Not logged in · Please run /login`.
+   - **Undo** restores the turn's files, not a claim, a split, a snapshot or a decision.
+ 
+   ```toml
+diff --git a/packages/latex-agent/src/latex_agent/README.md b/packages/latex-agent/src/latex_agent/README.md
+index 62ca947..65f22b3 100644
+--- a/packages/latex-agent/src/latex_agent/README.md
++++ b/packages/latex-agent/src/latex_agent/README.md
+@@ -24,9 +24,8 @@ It began as a copy of [prism-local](https://github.com/DengZhiyuan-math/Local-Ai
+   - **The context ring.** The Claude backend reports how full the conversation's context window is: each message's tokens (`context_tokens`), the model's window from the result's `modelUsage`, a `context` event as the turn goes, and `context` on the `done` event. A ring by Send shows it, with the numbers on hover, and turns orange and then red as the window fills.
+   - **"Show here".** While the PDF is in its own tab, the top bar says so, and "Show here" closes that tab and shows the PDF in the studio again. It is ported onto proof-cli's Web Lock viewer watch, since the files no longer match upstream.
+ 
+-  Taken from 245a535, "Choose the Claude Code profile folder in Home → Settings", as a port. proof-cli has no Home settings for it, and one page server serves several projects, so the setting is the project's: `[studio] claude_config_dir` in proof.toml. proof-agents puts it into every turn's environment (`ProofAgentContext.env`). The studio's account check, command list and usage probe now run with that same environment (`Backend.env`, set by the agent manager from its context), so they see the login the turns use. The account cache is keyed by the profile folder.
+-
+   Left out:
++  - **245a535, "Choose the Claude Code profile folder in Home → Settings".** The profile folder is machine-local runtime configuration. Set `CLAUDE_CONFIG_DIR` in the environment that starts `proof home`; do not store it in a project's `proof.toml`. The account check and agent turns inherit that process environment.
+   - **d000c82's files in the chat, `gitsync.py`, the History tab and the GitHub button.** prism-local commits, pushes and pulls a project on its own; proof-cli's project is a repository whose commits are the decisions recorded through `proof` (ADR-0004, ADR-0010), and an uploaded file would be one more input outside the node's snapshot rules.
+   - **8b5f6c6** (a new repository found by an open editor, and the Diff panel's label), which belongs to `gitsync`.
+   - **acdce6f, af517b9, cd9fcf6, 085deca, 6326f45 and 8d0881f.** These are the Home's folders, tags and grouping, renaming a project and its folder, GitHub repositories per project, and their sync. proof-cli has its own Home (ADR-0017).
+diff --git a/packages/latex-agent/src/latex_agent/agent.py b/packages/latex-agent/src/latex_agent/agent.py
+index 5b194ac..e763231 100644
+--- a/packages/latex-agent/src/latex_agent/agent.py
++++ b/packages/latex-agent/src/latex_agent/agent.py
+@@ -45,8 +45,6 @@ class AgentManager:
+         # a node's proof agent context, fresh each turn (proof_agent.py); None outside a proof map
+         self.context_fn = context_fn
+         self.backends, self.default, self.config_error = backends or load_backends()
+-        for backend in self.backends.values():   # outside a turn the CLI sees what a turn would (the profile folder)
+-            backend.env_fn = self._context_env
+         self.jobs: dict[int, Job] = {}
+         self.turns: dict[int, Job] = {}
+         self.ids = itertools.count(1)
+@@ -57,11 +55,6 @@ class AgentManager:
+         # (None: no compile tool, as on a computation node)
+         self.compile_url: Callable[[], str | None] | None = None
+ 
+-    def _context_env(self) -> dict | None:
+-        """The environment a turn of this studio starts with (the context's), or None for this process's own."""
+-        context = self.context_fn() if self.context_fn else None
+-        return context.env() if context is not None and hasattr(context, "env") else None
+-
+     def backend(self, provider: str | None) -> Backend | None:
+         return self.backends.get(provider or self.default)
+ 
+diff --git a/packages/latex-agent/src/latex_agent/backend_claude.py b/packages/latex-agent/src/latex_agent/backend_claude.py
+index c726378..0e843ec 100644
+--- a/packages/latex-agent/src/latex_agent/backend_claude.py
++++ b/packages/latex-agent/src/latex_agent/backend_claude.py
+@@ -48,12 +48,10 @@ OVERRIDE_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_
+ _account_cache: dict = {}
+ 
+ 
+-def auth_overrides(root: Path | None, env: dict | None = None) -> list[str]:
+-    """Settings that would take Claude Code away from the account login (`env`: the environment
+-    the CLI is started with, when not this process's)."""
+-    env = os.environ if env is None else env
+-    found = [f"the environment variable {v}" for v in OVERRIDE_ENV if env.get(v)]
+-    cfg = Path(env["CLAUDE_CONFIG_DIR"]) if env.get("CLAUDE_CONFIG_DIR") \
++def auth_overrides(root: Path | None) -> list[str]:
++    """Settings that would take Claude Code away from the account login."""
++    found = [f"the environment variable {v}" for v in OVERRIDE_ENV if os.environ.get(v)]
++    cfg = Path(os.environ["CLAUDE_CONFIG_DIR"]) if os.environ.get("CLAUDE_CONFIG_DIR") \
+         else Path.home() / ".claude"
+     files = [cfg / "settings.json"]
+     if root:
+@@ -70,10 +68,9 @@ def auth_overrides(root: Path | None, env: dict | None = None) -> list[str]:
+     return found
+ 
+ 
+-def claude_account(exe: str | None, root: Path | None = None, max_age: float = 30, env: dict | None = None) -> dict:
+-    """Who Claude Code is logged in as, from `claude auth status` (local, about 0.2 s). `env` is the
+-    environment its turns start with — another profile folder (CLAUDE_CONFIG_DIR) is another login."""
+-    key = (exe, str(root), (os.environ if env is None else env).get("CLAUDE_CONFIG_DIR"))
++def claude_account(exe: str | None, root: Path | None = None, max_age: float = 30) -> dict:
++    """Who Claude Code is logged in as, from `claude auth status` (local, about 0.2 s)."""
++    key = (exe, str(root))
+     hit = _account_cache.get(key)
+     if hit and time.time() - hit[0] < max_age:
+         return hit[1]
+@@ -84,7 +81,7 @@ def claude_account(exe: str | None, root: Path | None = None, max_age: float = 3
+         try:
+             r = subprocess.run([exe, "auth", "status"], cwd=str(root) if root else None,
+                                capture_output=True, text=True, encoding="utf-8",
+-                               errors="replace", timeout=20, env=env, **NO_WINDOW)
++                               errors="replace", timeout=20, **NO_WINDOW)
+             m = re.search(r"\{.*\}", r.stdout, re.S)
+             d = json.loads(m.group(0)) if m else {}
+             info = {"logged_in": bool(d.get("loggedIn")), "email": d.get("email"),
+@@ -94,7 +91,7 @@ def claude_account(exe: str | None, root: Path | None = None, max_age: float = 3
+                 info["error"] = (r.stderr or r.stdout).strip()[:300] or "no answer"
+         except (OSError, subprocess.SubprocessError, ValueError) as e:
+             info["error"] = str(e)
+-    info["overrides"] = auth_overrides(root, env)
++    info["overrides"] = auth_overrides(root)
+     _account_cache[key] = (time.time(), info)
+     return info
+ 
+@@ -291,7 +288,7 @@ class ClaudeCode(CliBackend):
+         return {**super().info(), "bin": self.bin(), "rate": self.rate}
+ 
+     def account(self, root: Path | None, fresh: bool = False) -> dict:
+-        info = claude_account(self.bin(), root, max_age=0 if fresh else 30, env=self.env())
++        info = claude_account(self.bin(), root, max_age=0 if fresh else 30)
+         allowed = allowed_account()
+         return {"account": info, "allowed": allowed, "problem": account_problem(info, allowed)}
+ 
+@@ -490,7 +487,7 @@ class ClaudeCode(CliBackend):
+             cmd = [exe, "-p", "--model", "haiku", "--tools", "", "--no-session-persistence",
+                    "--output-format", "stream-json", "--verbose"]
+             try:
+-                proc = subprocess.Popen(cmd, cwd=root, stdin=subprocess.PIPE, env=self.env(),
++                proc = subprocess.Popen(cmd, cwd=root, stdin=subprocess.PIPE,
+                                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                         text=True, encoding="utf-8", errors="replace", **TREE)
+             except OSError as e:
+@@ -532,7 +529,7 @@ class ClaudeCode(CliBackend):
+                    "--no-session-persistence", "--strict-mcp-config",
+                    "--disable-slash-commands", "--output-format", "stream-json", "--verbose"]
+             try:
+-                out = subprocess.run(cmd, input="ok", capture_output=True, text=True, env=self.env(),
++                out = subprocess.run(cmd, input="ok", capture_output=True, text=True,
+                                      encoding="utf-8", errors="replace", timeout=90,
+                                      cwd=tempfile.gettempdir(), **NO_WINDOW).stdout
+             except subprocess.TimeoutExpired:
+diff --git a/packages/latex-agent/src/latex_agent/backends.py b/packages/latex-agent/src/latex_agent/backends.py
+index 99b2afc..8bf524e 100644
+--- a/packages/latex-agent/src/latex_agent/backends.py
++++ b/packages/latex-agent/src/latex_agent/backends.py
+@@ -199,21 +199,10 @@ class Backend:
+     # False: the backend cannot stop writes outside the @-mentioned files, so the
+     # manager reverts such writes after the turn.
+     enforces_scope = True
+-    # The environment a turn's CLI starts with, for the calls outside a turn too (the account check,
+-    # the command list, the usage probe): the host's, e.g. a node's proof agent with its Claude Code
+-    # profile folder (CLAUDE_CONFIG_DIR). None: this process's own. Set by the agent manager.
+-    env_fn: Callable[[], dict | None] | None = None
+     skills = False                    # offers skills / slash commands (/api/agent/commands)
+     usage_limits = False              # reports subscription usage limits (/api/agent/usage)
+ 
+ 
+-    def env(self) -> dict | None:
+-        """The environment of the calls a backend makes outside a turn: the same as its turns'."""
+-        try:
+-            return self.env_fn() if self.env_fn else None
+-        except Exception:  # noqa: BLE001 — no context to ask: this process's own environment
+-            return None
+-
+     def __init__(self, pid: str, spec: dict | None = None):
+         spec = spec or {}
+         self.id = pid
+diff --git a/packages/latex-agent/tests/test_studio_agent.py b/packages/latex-agent/tests/test_studio_agent.py
+index 756f8f9..10aa80e 100644
+--- a/packages/latex-agent/tests/test_studio_agent.py
++++ b/packages/latex-agent/tests/test_studio_agent.py
+@@ -531,34 +531,6 @@ class ClaudeContext(unittest.TestCase):
+         self.assertEqual(j2.events[-1], {"t": "context", "used": 2015, "window": 1000000})
+ 
+ 
+-class ClaudeProfileFolder(unittest.TestCase):
+-    """Upstream 245a535 lets the editor use another Claude Code login (CLAUDE_CONFIG_DIR). Here the node's context
+-    gives a turn its environment; the account check, the command list and the usage probe now run with the same one."""
+-
+-    def test_the_account_check_runs_with_the_contexts_environment_and_is_cached_per_profile(self):
+-        d = tmpdir()
+-        fake = Path(d) / "claude"
+-        fake.write_text("#!" + sys.executable + "\nimport json, os\n"
+-                        "print(json.dumps({'loggedIn': True, 'email': (os.environ.get('CLAUDE_CONFIG_DIR') or 'default') + '@x'}))\n")
+-        fake.chmod(0o755)
+-
+-        class Context:
+-            profile = "/profiles/a"
+-
+-            def env(self):
+-                return {**os.environ, "CLAUDE_CONFIG_DIR": Context.profile}
+-
+-        cc = ClaudeCode("claude", {"bin": str(fake)})
+-        m = agent.AgentManager(lambda: Path(d), lambda: [], backends=({"claude": cc}, "claude", None), context_fn=lambda turn=None: Context())
+-        self.assertEqual(cc.account(Path(d), fresh=True)["account"]["email"], "/profiles/a@x")
+-        Context.profile = "/profiles/b"     # another profile is another login, not the cached one
+-        self.assertEqual(cc.account(Path(d))["account"]["email"], "/profiles/b@x")
+-        plain = ClaudeCode("claude", {"bin": str(fake)})   # outside a proof map: this process's own environment
+-        agent.AgentManager(lambda: Path(d), lambda: [], backends=({"claude": plain}, "claude", None))
+-        self.assertIsNone(plain.env())
+-        self.assertIs(m.backends["claude"], cc)
+-
+-
+ class AgentEnvironment(unittest.TestCase):
+     """Upstream 624bff0: an agent's turn reaches no git remote and has no GitHub login, so it can never push over,
+     rewrite or delete the project's history there."""

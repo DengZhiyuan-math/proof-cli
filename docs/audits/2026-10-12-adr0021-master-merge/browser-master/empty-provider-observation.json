@@ -1,0 +1,10 @@
+{
+  "finding": "An empty configured providers list is misclassified as an old server by renderProviders.",
+  "scope": "preexisting configuration edge case; the affected source file is unchanged by ADR-0021 integration",
+  "source": "packages/latex-agent/src/latex_agent/static/app.js",
+  "line": 1469,
+  "status": "recorded; production code not changed",
+  "empty_list_browser_evidence": "browser-master-empty-providers/studio.png",
+  "final_smoke": "passed with two non-model CLI stand-ins; no legacy-server warning",
+  "model_calls": 0
+}

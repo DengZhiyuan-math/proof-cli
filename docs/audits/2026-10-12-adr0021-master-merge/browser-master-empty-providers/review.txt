@@ -1,0 +1,119 @@
+- banner
+  - button "Show or hide the sidebar" [ref=e2]
+  - link "ADR0021-master-smoke" [ref=e3]
+  - StaticText "2 nodes · 0 on the frontier"
+  - generic
+    - StaticText "0"
+    - StaticText "Frontier"
+  - link "1 Awaiting you" [ref=e4]
+    - StaticText "1"
+    - StaticText "Awaiting you"
+  - link "0 Fog" [ref=e5]
+    - StaticText "0"
+    - StaticText "Fog"
+  - generic
+    - StaticText "Y"
+    - StaticText "Yomathnotcool <125728853+DengZhiyuan-math@users.noreply.github.com>"
+- navigation "Sections" [ref=e1]
+  - paragraph
+    - StaticText "Proof map"
+  - link "Map" [ref=e6]
+    - StaticText "Map"
+  - link "Review 1" [ref=e7]
+    - StaticText "Review"
+    - StaticText "1"
+  - link "Warnings" [ref=e8]
+    - StaticText "Warnings"
+  - link "Discuss" [ref=e9]
+    - StaticText "Discuss"
+- main
+  - status
+  - generic
+    - heading "Awaiting review 1" [level=1, ref=e10]
+      - StaticText "Awaiting review"
+      - StaticText "1"
+    - paragraph
+      - StaticText "Tick the decisions to make, choose each outcome and rationale, then record them. Each decision is committed to git with its snapshot, as the identity shown above."
+    - table
+      - rowgroup
+        - row
+          - columnheader
+          - columnheader "Node" [ref=e19]
+          - columnheader "Statement and key ideas" [ref=e20]
+          - columnheader "Decision" [ref=e21]
+          - columnheader "Rationale" [ref=e22]
+      - row
+        - cell
+          - checkbox [checked=false, ref=e23]
+        - cell "C" [ref=e14]
+          - link "C" [ref=e24]
+            - StaticText "C"
+        - cell "Smoke fixture claim. Snapshot v1 · a5b9391f5694… 核心思路 The bound follows from compactness of . 难点 The subcover's size must not depend on . 作者撰写 · written by the author" [ref=e15]
+          - StaticText "Smoke fixture claim."
+          - paragraph
+            - StaticText "Snapshot v1 · a5b9391f5694…"
+          - StaticText "核心思路"
+          - paragraph
+            - StaticText "The bound follows from compactness of "
+            - MathMLMath
+              - MathMLRow
+                - MathMLRow
+                  - MathMLOperator
+                    - StaticText "["
+                  - MathMLNumber
+                    - StaticText "0"
+                  - MathMLOperator
+                    - StaticText ","
+                  - MathMLNumber
+                    - StaticText "1"
+                  - MathMLOperator
+                    - StaticText "]"
+            - StaticText "."
+          - StaticText "难点"
+          - paragraph
+            - StaticText "The subcover's size must not depend on "
+            - MathMLMath
+              - MathMLRow
+                - MathMLRow
+                  - MathMLIdentifier
+                    - StaticText "𝜀"
+            - StaticText "."
+          - paragraph
+            - StaticText "作者撰写 · written by the author"
+        - cell "accept" [ref=e16]
+          - combobox [expanded=false, ref=e25]: accept
+            - MenuListPopup
+              - option "accept" [selected, ref=e29]
+              - option "revision-requested" [ref=e30]
+              - option "reject" [ref=e31]
+        - cell "why" [ref=e17]
+          - textbox "why" [ref=e26]
+    - button "Record Selected Decisions" [ref=e11]
+    - region "Review queue 3 bottom-up: each Accept makes the next decision possible; nothing here holds the agents back" [ref=e12]
+      - heading "Review queue 3 bottom-up: each Accept makes the next decision possible; nothing here holds the agents back" [level=2, ref=e13]
+        - StaticText "Review queue"
+        - StaticText "3"
+        - StaticText "bottom-up: each Accept makes the next decision possible; nothing here holds the agents back"
+      - list
+        - listitem [level=1]
+          - StaticText "UNFIXED TEXT"
+          - generic
+            - StaticText "D · Smoke fixture UI fixture only. No mathematical Acceptance."
+          - StaticText "a Definition smoke-fixture wrote; named by C; editable until a decision relies on it"
+        - listitem [level=1]
+          - StaticText "UNFIXED TEXT"
+          - generic
+            - link "C" [ref=e27]
+            - StaticText " · Smoke fixture claim."
+          - StaticText "stated by smoke-fixture; editable until a Review decision relies on it"
+        - listitem [level=1]
+          - StaticText "UNFIXED TEXT"
+          - generic
+            - link "T" [ref=e28]
+            - StaticText " · Smoke fixture theorem."
+          - StaticText "stated by smoke-fixture; editable until a Review decision relies on it"
+    - group
+      - DisclosureTriangle "Trusted by rule imported results you haven't looked at, callable under a Trust rule Manage rules…" [expanded=false]
+        - StaticText "Trusted by rule"
+        - StaticText "imported results you haven't looked at, callable under a Trust rule"
+        - button "Manage rules…" [ref=e18]
