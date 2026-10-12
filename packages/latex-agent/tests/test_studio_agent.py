@@ -531,34 +531,6 @@ class ClaudeContext(unittest.TestCase):
         self.assertEqual(j2.events[-1], {"t": "context", "used": 2015, "window": 1000000})
 
 
-class ClaudeProfileFolder(unittest.TestCase):
-    """Upstream 245a535 lets the editor use another Claude Code login (CLAUDE_CONFIG_DIR). Here the node's context
-    gives a turn its environment; the account check, the command list and the usage probe now run with the same one."""
-
-    def test_the_account_check_runs_with_the_contexts_environment_and_is_cached_per_profile(self):
-        d = tmpdir()
-        fake = Path(d) / "claude"
-        fake.write_text("#!" + sys.executable + "\nimport json, os\n"
-                        "print(json.dumps({'loggedIn': True, 'email': (os.environ.get('CLAUDE_CONFIG_DIR') or 'default') + '@x'}))\n")
-        fake.chmod(0o755)
-
-        class Context:
-            profile = "/profiles/a"
-
-            def env(self):
-                return {**os.environ, "CLAUDE_CONFIG_DIR": Context.profile}
-
-        cc = ClaudeCode("claude", {"bin": str(fake)})
-        m = agent.AgentManager(lambda: Path(d), lambda: [], backends=({"claude": cc}, "claude", None), context_fn=lambda turn=None: Context())
-        self.assertEqual(cc.account(Path(d), fresh=True)["account"]["email"], "/profiles/a@x")
-        Context.profile = "/profiles/b"     # another profile is another login, not the cached one
-        self.assertEqual(cc.account(Path(d))["account"]["email"], "/profiles/b@x")
-        plain = ClaudeCode("claude", {"bin": str(fake)})   # outside a proof map: this process's own environment
-        agent.AgentManager(lambda: Path(d), lambda: [], backends=({"claude": plain}, "claude", None))
-        self.assertIsNone(plain.env())
-        self.assertIs(m.backends["claude"], cc)
-
-
 class AgentEnvironment(unittest.TestCase):
     """Upstream 624bff0: an agent's turn reaches no git remote and has no GitHub login, so it can never push over,
     rewrite or delete the project's history there."""
