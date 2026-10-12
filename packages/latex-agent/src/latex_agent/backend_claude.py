@@ -48,12 +48,10 @@ OVERRIDE_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_
 _account_cache: dict = {}
 
 
-def auth_overrides(root: Path | None, env: dict | None = None) -> list[str]:
-    """Settings that would take Claude Code away from the account login (`env`: the environment
-    the CLI is started with, when not this process's)."""
-    env = os.environ if env is None else env
-    found = [f"the environment variable {v}" for v in OVERRIDE_ENV if env.get(v)]
-    cfg = Path(env["CLAUDE_CONFIG_DIR"]) if env.get("CLAUDE_CONFIG_DIR") \
+def auth_overrides(root: Path | None) -> list[str]:
+    """Settings that would take Claude Code away from the account login."""
+    found = [f"the environment variable {v}" for v in OVERRIDE_ENV if os.environ.get(v)]
+    cfg = Path(os.environ["CLAUDE_CONFIG_DIR"]) if os.environ.get("CLAUDE_CONFIG_DIR") \
         else Path.home() / ".claude"
     files = [cfg / "settings.json"]
     if root:
@@ -70,10 +68,9 @@ def auth_overrides(root: Path | None, env: dict | None = None) -> list[str]:
     return found
 
 
-def claude_account(exe: str | None, root: Path | None = None, max_age: float = 30, env: dict | None = None) -> dict:
-    """Who Claude Code is logged in as, from `claude auth status` (local, about 0.2 s). `env` is the
-    environment its turns start with — another profile folder (CLAUDE_CONFIG_DIR) is another login."""
-    key = (exe, str(root), (os.environ if env is None else env).get("CLAUDE_CONFIG_DIR"))
+def claude_account(exe: str | None, root: Path | None = None, max_age: float = 30) -> dict:
+    """Who Claude Code is logged in as, from `claude auth status` (local, about 0.2 s)."""
+    key = (exe, str(root))
     hit = _account_cache.get(key)
     if hit and time.time() - hit[0] < max_age:
         return hit[1]
@@ -84,7 +81,7 @@ def claude_account(exe: str | None, root: Path | None = None, max_age: float = 3
         try:
             r = subprocess.run([exe, "auth", "status"], cwd=str(root) if root else None,
                                capture_output=True, text=True, encoding="utf-8",
-                               errors="replace", timeout=20, env=env, **NO_WINDOW)
+                               errors="replace", timeout=20, **NO_WINDOW)
             m = re.search(r"\{.*\}", r.stdout, re.S)
             d = json.loads(m.group(0)) if m else {}
             info = {"logged_in": bool(d.get("loggedIn")), "email": d.get("email"),
@@ -94,7 +91,7 @@ def claude_account(exe: str | None, root: Path | None = None, max_age: float = 3
                 info["error"] = (r.stderr or r.stdout).strip()[:300] or "no answer"
         except (OSError, subprocess.SubprocessError, ValueError) as e:
             info["error"] = str(e)
-    info["overrides"] = auth_overrides(root, env)
+    info["overrides"] = auth_overrides(root)
     _account_cache[key] = (time.time(), info)
     return info
 
@@ -291,7 +288,7 @@ class ClaudeCode(CliBackend):
         return {**super().info(), "bin": self.bin(), "rate": self.rate}
 
     def account(self, root: Path | None, fresh: bool = False) -> dict:
-        info = claude_account(self.bin(), root, max_age=0 if fresh else 30, env=self.env())
+        info = claude_account(self.bin(), root, max_age=0 if fresh else 30)
         allowed = allowed_account()
         return {"account": info, "allowed": allowed, "problem": account_problem(info, allowed)}
 
@@ -490,7 +487,7 @@ class ClaudeCode(CliBackend):
             cmd = [exe, "-p", "--model", "haiku", "--tools", "", "--no-session-persistence",
                    "--output-format", "stream-json", "--verbose"]
             try:
-                proc = subprocess.Popen(cmd, cwd=root, stdin=subprocess.PIPE, env=self.env(),
+                proc = subprocess.Popen(cmd, cwd=root, stdin=subprocess.PIPE,
                                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                         text=True, encoding="utf-8", errors="replace", **TREE)
             except OSError as e:
@@ -532,7 +529,7 @@ class ClaudeCode(CliBackend):
                    "--no-session-persistence", "--strict-mcp-config",
                    "--disable-slash-commands", "--output-format", "stream-json", "--verbose"]
             try:
-                out = subprocess.run(cmd, input="ok", capture_output=True, text=True, env=self.env(),
+                out = subprocess.run(cmd, input="ok", capture_output=True, text=True,
                                      encoding="utf-8", errors="replace", timeout=90,
                                      cwd=tempfile.gettempdir(), **NO_WINDOW).stdout
             except subprocess.TimeoutExpired:
