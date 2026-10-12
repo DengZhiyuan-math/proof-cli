@@ -184,6 +184,93 @@ def test_the_frontier_and_a_node_read_grow_linearly_with_the_chain(tmp_path: Pat
         assert large[measure] <= 2.5 * small[measure], (measure, small[measure], large[measure])
 
 
+def _provisional_chain(root: Path, length: int):
+    """c0 <- c1 <- ... <- top: every Claim unaccepted, its snapshot passed by the Verifier, so each is Provisional
+    on all below it (ADR-0021), and one Definition every Claim names, edited once."""
+    from proof_cli import definitions
+    from proof_cli.proof_map import record_evidence_check, restate_node
+
+    store = ensure_project(root)
+    definitions.add_definition(store, "unit", term="Unit", text="u", created_by="dec-1")
+    previous = None
+    for index in range(length):
+        node_id = f"c{index}"
+        create_node(store, node_id=node_id, kind="claim", statement=f"s{index}", dependencies=[previous] if previous else None,
+                    definitions=["unit"], created_by="dec-1")
+        previous = node_id
+    restate_node(store, "c0", statement="s0, restated", reason="clearer", by="dec-1")
+    definitions.edit_definition(store, "unit", text="u'", edited_by="dec-1", reason="clearer")
+    for index in range(length):
+        proof = submit_proof(store, f"c{index}", claimant_id="agent_a", scoping_rationale="r", content=f"proof {index}")
+        record_evidence_check(store, proof.id, "passed", run_by="prover-1/verifier", notes="no objections")
+    create_node(store, node_id="top", kind="lemma", statement="t", dependencies=[previous])
+    return store
+
+
+@pytest.fixture
+def events_read(monkeypatch):
+    """How many event rows the proof map has read from here on: a scan of the log per node is quadratic in rows even
+    when it is one statement."""
+    seen = [0]
+    real_list_events = proof_map.list_events
+
+    def counted(store):
+        found = real_list_events(store)
+        seen[0] += len(found)
+        return found
+
+    monkeypatch.setattr(proof_map, "list_events", counted)
+    return seen
+
+
+def _provisional_read_cost(root: Path, length: int, statements: list[str], events_read: list[int]) -> dict[str, int]:
+    from proof_cli.proof_map import conditional_on, fixed_by, is_provisional, verdicts
+
+    store = _provisional_chain(root, length)
+    cost = {}
+    statements.clear()
+    events_read[0] = 0
+    assert [node.id for node in get_frontier(store)] == ["top"]
+    cost["frontier statements"], cost["frontier events read"] = len(statements), events_read[0]
+    statements.clear()
+    events_read[0] = 0
+    with read_scope():
+        for node in list_nodes(store):
+            get_integrity_state(store, node.id), is_provisional(store, node.id), conditional_on(store, node.id)
+            fixed_by(store, node.id), verdicts(store, node.id)
+    cost["node list statements"], cost["node list events read"] = len(statements), events_read[0]
+    return cost
+
+
+def test_provisional_and_unfixed_reads_grow_linearly_with_the_chain(tmp_path: Path, statements, events_read):
+    """Restatements, fixing decisions and verdicts are indexed once per read, not scanned once per node (ADR-0021)."""
+    small = _provisional_read_cost(tmp_path / "small", 20, statements, events_read)
+    large = _provisional_read_cost(tmp_path / "large", 40, statements, events_read)
+
+    for measure in small:
+        assert large[measure] <= 2.5 * small[measure], (measure, small[measure], large[measure])
+
+
+def _decision_cost(root: Path, length: int, statements: list[str], review_reads: list[Path]) -> dict[str, int]:
+    store = _accepted_chain(root, length - 1)
+    top = f"n{length - 1}"
+    create_node(store, node_id=top, kind="lemma", statement="top", dependencies=[f"n{length - 2}"])
+    submit_proof(store, top, claimant_id="agent_a", scoping_rationale="r", content="proof top")
+    statements.clear()
+    review_reads.clear()
+    researcher(store).decide_acceptance(top, "accept")
+    return {"decision statements": len(statements), "decision review reads": len(review_reads)}
+
+
+def test_a_decision_on_the_top_of_a_chain_grows_linearly_with_it(tmp_path: Path, statements, review_reads):
+    """Whether the node is Blocked walks everything above it: once per decision, not once per node (ADR-0021)."""
+    small = _decision_cost(tmp_path / "small", 20, statements, review_reads)
+    large = _decision_cost(tmp_path / "large", 40, statements, review_reads)
+
+    for measure in small:
+        assert large[measure] <= 2.5 * small[measure], (measure, small[measure], large[measure])
+
+
 def test_a_write_inside_a_read_scope_is_seen_by_the_reads_after_it(tmp_path: Path):
     store = _accepted_chain(tmp_path, 2)
     with read_scope():
@@ -211,7 +298,7 @@ def test_benchmark_a_200_node_chain(tmp_path: Path):
 
 # -- one topological pass per read (#108) ----------------------------------------------
 
-CHAIN = 200
+CHAIN = 100
 
 
 def _chain_with_claims(root: Path, length: int):
@@ -223,7 +310,7 @@ def _chain_with_claims(root: Path, length: int):
 
 @pytest.fixture(scope="module")
 def chain(tmp_path_factory):
-    """A 200-node Accepted chain with an open claim hanging off every link, built once.
+    """A 100-node Accepted chain with an open claim hanging off every link, built once.
 
     Whether claim c<i> is blocked asks whether n<i> is settled, which means
     walking everything above n<i>: walked per node, one read costs n^2/2

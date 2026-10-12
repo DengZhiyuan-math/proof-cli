@@ -1,0 +1,2177 @@
+diff --git a/src/proof_agents/agent_run.py b/src/proof_agents/agent_run.py
+index fce77e7..9428969 100644
+--- a/src/proof_agents/agent_run.py
++++ b/src/proof_agents/agent_run.py
+@@ -12,7 +12,8 @@ Every turn is briefed by the run from the record — the node, the redirect, the
+ the shared notes (briefing.py, ADR-0019 point 9) — never left to reconstruct the history from the work log; an edit
+ of the working inputs between two turns is the researcher's, and its diff heads the next briefing (point 21). A Start may name the roles it
+ runs: one role is one turn; several are the same flow restricted to them, in the spec's order. The Decomposer is
+-started alone, on a Theorem not yet split: it proposes the split and the run stops for the researcher (point 20). It
++started alone, on a Theorem not yet split: it proposes the split and the run stops for the researcher (point 20) —
++unless a Coordinator's Pursue started it, when the split is the structure worked next (ADR-0021 point 7). It
+ stops on its own when review is requested, when a step reports stuck or names a decision only a
+ human can make, when its budget is spent, or when turns stop changing anything; it leaves a closing
+ progress note on every stop. The researcher pauses it (the turn finishes, the assignment stays, the
+@@ -37,7 +38,7 @@ from dataclasses import dataclass, field
+ from typing import Callable
+ 
+ from proof_cli.domain import AGENT_ROLES
+-from .briefing import BriefingParts, build_briefing, inputs_diff
++from .briefing import BriefingParts, build_briefing, inputs_diff, questions_from
+ from .patterns import suggested_redirects
+ from .proof_agent import CYCLE_ROLES, ROLES, is_a_run
+ 
+@@ -74,7 +75,8 @@ class RunHooks:
+     review_now: Callable[[], dict] = lambda: {}   # Review what it has: freeze a snapshot of the folder as it stands (as the researcher)
+     # ADR-0019 (optional: a host without them runs as before, with no gate and a briefing of the record alone)
+     inputs_digest: Callable[[], str | None] | None = None   # the working inputs' digest now, as a verdict's `inputs_sha256` and a snapshot's manifest hash it
+-    # {"node_id", "kind"?, "statement", "dependencies": [{"id", "statement", "accepted": bool, "key_ideas": str | None}]}
++    # {"node_id", "kind"?, "statement", "dependencies": [{"id", "statement", "accepted": bool, "key_ideas": str | None,
++    #  "provisional": bool?, "kind": str?}]}: `provisional` as proof-cli's is_provisional says (ADR-0021 point 2)
+     node_brief: Callable[[], dict] | None = None
+     # one read of the working inputs: {"digest": the same digest inputs_digest gives, "files": {path: text, or bytes for a
+     # file that is not text}} — the digest and the text of one and the same read, so what the run keeps at a turn's end is
+@@ -86,6 +88,9 @@ class RunHooks:
+     # the mechanical checks of the node's working folder (issue #180), as `proof node check` gives them: [{"code", "level", "message", "path"?}];
+     # an error-level finding sends the work back to the Typesetter (or the Prover) instead of the Verifier
+     check_inputs: Callable[[], list[dict]] | None = None
++    # ADR-0021 point 8 (optional): (role, name, text) records a Standing question on the node — `proof node progress <node>
++    # --question <text>` as the role would; without it the question is the run's closing note, said as one
++    record_question: Callable[[str, str, str], None] | None = None
+ 
+ 
+ @dataclass
+@@ -107,6 +112,7 @@ class RunState:
+     job: int | None = None                           # the turn running now: the agent manager's job id
+     turn: str | None = None                          # and its id in the work log
+     suggestion: str | None = None                    # the newest suggested redirect the record showed (ADR-0019 point 17), for the researcher
++    pursue: bool = False                             # started by a Coordinator's Pursue (ADR-0021 point 7): a Decomposer's split does not stop for the researcher
+ 
+ 
+ @dataclass
+@@ -237,7 +243,7 @@ class AgentRun:
+             "steps": len(plans[-1]["plan"]) if plans else None, "step": steps[-1]["step"] if steps else None,
+             "step_status": steps[-1]["status"] if steps else None,
+             "verdict": self._newest_verdict(log)["outcome"] if self._newest_verdict(log) else None,  # ADR-0019
+-            "suggestion": state.suggestion,
++            "suggestion": state.suggestion, "pursue": state.pursue,
+         }
+ 
+     @staticmethod
+@@ -268,9 +274,11 @@ class AgentRun:
+ 
+     # ------------------------------------------------------------ the researcher's actions
+     def start(self, provider: str, *, roles: list[str] | None = None, redirect: str | None = None, model=None, effort=None,
+-              turns: int | None = None) -> dict:
++              turns: int | None = None, pursue: bool = False) -> dict:
+         """Start a run. `turns` caps this Start's turn budget below `[studio] budget` — a Coordinator's retry gets the node
+-        budget's remainder, not a fresh budget (ADR-0019 point 18)."""
++        budget's remainder, not a fresh budget (ADR-0019 point 18). `pursue` is a Coordinator's Start (ADR-0021 point 7):
++        a Decomposer's split is the structure the Coordinator works next, not a stop for the researcher, and a Theorem
++        split already may be given one more Decomposer turn when a Claim of it is parked (point 9)."""
+         unknown = [role for role in (roles or []) if role not in ROLES]  # a role with no brief takes no turn
+         if unknown:
+             return {"error": f"no brief for the {', '.join(unknown)} role: it cannot take a turn", "code": "INVALID_ROLE"}
+@@ -280,7 +288,7 @@ class AgentRun:
+             return {"error": f"the {alone[0].capitalize()} is started on its own, for one turn: it proposes the split and stops for the researcher",
+                     "code": "ROLE_ALONE"}
+         if alone:
+-            refused = self._not_decomposable()
++            refused = self._not_decomposable(resplit=pursue)
+             if refused:
+                 return {"error": refused, "code": "NOT_DECOMPOSABLE"}
+         with self._lock:
+@@ -322,7 +330,7 @@ class AgentRun:
+                 give_back = False
+                 run.state = RunState(status="running", role=roles[0] if roles else "prover", turns_max=turns_max, started_at=time.time(),
+                                      deadline=time.time() + minutes * 60, name=name, provider=provider, roles=roles,
+-                                     redirect={"text": redirect, "role": None} if redirect else None)
++                                     redirect={"text": redirect, "role": None} if redirect else None, pursue=pursue)
+                 run.model, run.effort = model, effort
+                 run.thread = threading.Thread(target=self._loop, args=(run,), name=f"agent-run-{name}", daemon=True)
+         if give_back:
+@@ -494,7 +502,8 @@ class AgentRun:
+                     began.append(job)
+                     self._note_turn({**turn, "phase": "started", "job": job.id})
+ 
+-                started = self._start_turn(run, prompt, provider, {"role": role, "name": name, "redirect": redirect, "review_gate": gate.get("inputs_sha256") if gate else None}, begin)
++                started = self._start_turn(run, prompt, provider, {"role": role, "name": name, "redirect": redirect, "review_gate": gate.get("inputs_sha256") if gate else None,
++                                                                    "pursue": run.state.pursue}, begin)
+                 if started is None or "error" in started:
+                     if began:  # it began and was stopped at once: close its marker
+                         self._note_turn({**turn, "phase": "ended", "job": None})
+@@ -549,9 +558,19 @@ class AgentRun:
+                 # by whichever Start comes then — a Coordinator's too, which would not take over a claim it did not make
+                 split = [e for e in new if e.get("kind") == "split"] if role == "decomposer" else []
+                 asked = next((e for e in reversed(new) if e.get("kind") == "step" and e.get("status") == "needs-human"), None)
++                if asked is not None and split and run.state.pursue:
++                    # under Pursue a split is the structure worked next (ADR-0021 point 7): what the turn asked besides is a
++                    # choice the split already made, recorded as a Standing question (point 8), not a stop for the subtree
++                    self._question(role, name, f"the split stands and is worked; asked: {asked.get('note') or 'a decision only the researcher can make'}")
++                    asked = None
+                 if asked is not None:
+                     self._end(run, "needs-human", (asked.get("note") or "a decision only the researcher can make") + budget_note, give_back=bool(split))
+                     return
++                if split and run.state.pursue:  # ADR-0021 point 7: under Pursue the split is the structure worked next
++                    children = [child for e in split for child in (e.get("nodes") or [])]
++                    reason = f"split into {len(children)} Claim(s): {', '.join(children)}; the Coordinator works them" + budget_note
++                    self._end(run, "done", reason, give_back=True)
++                    return
+                 if split:  # ADR-0019 point 20: a split proposed is a decision for the researcher, whether or not the turn said so
+                     children = [child for e in split for child in (e.get("nodes") or [])]
+                     reason = f"structure proposed ({len(children)} Claim(s): {', '.join(children)}); the researcher decides" + budget_note
+@@ -661,9 +680,10 @@ class AgentRun:
+         started alone (ADR-0019 point 20); a `--handoff decomposer` in a whole run hands to nobody."""
+         return tuple(run.state.roles) or CYCLE_ROLES
+ 
+-    def _not_decomposable(self) -> str | None:
++    def _not_decomposable(self, *, resplit: bool = False) -> str | None:
+         """Why a Decomposer may not be started on this node (ADR-0019 point 20): it is not a Theorem or Lemma, or it is split
+-        already (it rests on something). None when it may; also without a node brief, when the host says nothing of the node."""
++        already (it rests on something) — unless `resplit`, a Coordinator's one more turn on a parent whose Claim is parked
++        (ADR-0021 point 9). None when it may; also without a node brief, when the host says nothing of the node."""
+         brief = self._node_brief()
+         kind = brief.get("kind")
+         if kind is not None and kind not in DECOMPOSABLE_KINDS:
+@@ -672,7 +692,7 @@ class AgentRun:
+         # not say which dependencies are children is read as if every one were. An ordinary premise is no child.
+         dependencies = list(brief.get("dependencies") or [])
+         children = [dep for dep in dependencies if dep.get("split_child")] if any("split_child" in dep for dep in dependencies) else dependencies
+-        if children:
++        if children and not resplit:
+             resting = ", ".join(str(dep.get("id")) for dep in children)
+             return f"the Decomposer works a Theorem not yet split; {brief.get('node_id') or 'this node'} is split already (it rests on {resting}) — start a Coordinator instead"
+         return None
+@@ -753,6 +773,7 @@ class AgentRun:
+         return build_briefing(BriefingParts(
+             role=role, node_id=brief.get("node_id") or "", statement=brief.get("statement"), dependencies=list(brief.get("dependencies") or []),
+             redirect=redirect, handoff=handoff, report=report,
++            questions=questions_from(log),  # the choices made instead of stopping, and the researcher's redirects of them (ADR-0021 point 8)
+             verdict={**verdict, "stale": bool(digest) and verdict.get("inputs_sha256") != digest} if verdict else None,
+             attempts=_attempts_from(log),  # the record, and what the run derives from it (ADR-0019 point 7)
+             inputs_changed=changed, inputs_diff=diff,
+@@ -839,6 +860,16 @@ class AgentRun:
+         if give_back:
+             self._give_back(run, name, reason)
+ 
++    def _question(self, role: str, name: str, text: str) -> None:
++        """A Standing question recorded on the node (ADR-0021 point 8), through the host; else said in a closing note."""
++        try:
++            if self.hooks.record_question is not None:
++                self.hooks.record_question(role, name, text)
++            else:
++                self.hooks.record_close(role, name, "done", f"standing question: {text}")
++        except Exception:  # noqa: BLE001 — the question is the record's; the run goes on without it
++            pass
++
+     def _close_note(self, role: str, name: str, status: str, reason: str) -> None:
+         try:
+             self.hooks.record_close(role, name, _CLOSING.get(status, "done"), f"run {status}: {reason}")
+diff --git a/src/proof_agents/briefing.py b/src/proof_agents/briefing.py
+index c1550a7..6d55b3d 100644
+--- a/src/proof_agents/briefing.py
++++ b/src/proof_agents/briefing.py
+@@ -4,7 +4,9 @@ Before a turn the run gathers what the turn needs to know and writes it down in
+ fixed size: the node's statement and its dependencies' statements (with their key ideas when Accepted); the
+ researcher's redirect, if any; the last hand-off or report; the open objections of the newest verdict; the
+ node's attempts, newest first; and the shared notes part C allows, each marked with the node and role it came
+-from and *unverified* unless it is an Accepted node's statement. When the working inputs changed since the last
++from and *unverified* unless it is an Accepted node's statement. A Provisional dependency (ADR-0021 point 3) is
++said so: its statement may be used, its proof never; and the node's Standing questions — the choices its roles
++made instead of stopping, and the researcher's answers that redirect them — follow the redirect (point 8). When the working inputs changed since the last
+ turn ended and no role's turn did it, the researcher did: their diff heads the briefing, whatever the role
+ (ADR-0019 point 21) — or, where the host gives the run only the digest, the fact alone. The role reads the
+ briefing and may read further.
+@@ -42,8 +44,13 @@ class BriefingParts:
+     role: str                                              # the role taking the turn
+     node_id: str
+     statement: str | None = None                          # the node's statement
+-    dependencies: list[dict] = field(default_factory=list)  # [{"id", "statement", "accepted": bool, "key_ideas": str | None}]
++    # [{"id", "statement", "accepted": bool, "key_ideas": str | None, "provisional": bool?, "kind": str?}]: `provisional` as
++    # proof-cli's is_provisional says (ADR-0021 point 2), `kind` "imported_result" for a citation
++    dependencies: list[dict] = field(default_factory=list)
+     redirect: str | None = None                            # the researcher's line for this turn
++    # the node's Standing questions, oldest first, as `questions_from` reads them off the work log: {"id", "question", "role"?,
++    # "state": "open"|"answered", "redirect": str | None}
++    questions: list[dict] = field(default_factory=list)
+     handoff: dict | None = None                            # the last hand-off: {"role", "to", "note"}
+     report: dict | None = None                             # the last step report of another role: {"role", "step", "status", "note"}
+     verdict: dict | None = None                            # the newest verdict: {"outcome", "note", "by", "stale": bool}
+@@ -67,7 +74,7 @@ def _node_section(parts: BriefingParts) -> str | None:
+     if parts.dependencies:
+         lines.append("It rests on:")
+         for dep in parts.dependencies:
+-            standing = "Accepted" if dep.get("accepted") else "not yet accepted — its statement may be used only as a dependency, its proof as nothing"
++            standing = _standing(dep)
+             line = f"- {dep.get('id')}: {dep.get('statement')} ({standing})"
+             if dep.get("accepted") and dep.get("key_ideas"):
+                 line += f"\n  key ideas: {str(dep['key_ideas']).strip()}"
+@@ -77,6 +84,50 @@ def _node_section(parts: BriefingParts) -> str | None:
+     return "\n".join(lines)
+ 
+ 
++# ADR-0021 point 3: a Provisional dependency's statement may be used as an Accepted one's is; its proof never
++PROVISIONAL_LOCAL = ("Provisional: the Verifier passed its proof, the researcher has not accepted it — its statement may be used, "
++                     "its proof never; what you prove on it stands only if it does")
++PROVISIONAL_IMPORTED = ("Provisional: an imported result not yet Reference-reviewed — its statement may be used; read the cited "
++                        "source for what it gives, or the appeal is \"unchecked against the source\"")
++UNACCEPTED = "not yet accepted — its statement may be used only as a dependency, its proof as nothing"
++
++
++def _standing(dep: dict) -> str:
++    if dep.get("accepted"):
++        return "Accepted"
++    if dep.get("provisional"):
++        return PROVISIONAL_IMPORTED if dep.get("kind") == "imported_result" else PROVISIONAL_LOCAL
++    return UNACCEPTED
++
++
++def questions_from(log: list[dict]) -> list[dict]:
++    """The node's Standing questions off its work log (ADR-0021 point 8), oldest first: each `question` event, `open` until
++    an `answer` event names it, with the answer's redirect when the researcher chose the other reading."""
++    answers = {e.get("question_id"): e for e in log if e.get("kind") == "answer"}
++    out = []
++    for e in log:
++        if e.get("kind") != "question":
++            continue
++        answer = answers.get(e.get("id"))
++        out.append({"id": e.get("id"), "question": e.get("question") or e.get("note"), "role": e.get("role"),
++                    "state": "open" if answer is None else "answered", "redirect": (answer or {}).get("redirect")})
++    return out
++
++
++def _questions_section(parts: BriefingParts) -> str | None:
++    """The researcher's redirects first — they replace a choice a role made — then the choices still open, which stand."""
++    redirected = [q for q in parts.questions if q.get("state") == "answered" and q.get("redirect")]
++    still_open = [q for q in parts.questions if q.get("state") == "open"]
++    lines = []
++    if redirected:
++        lines.append("The researcher answered choices made on this node with another reading; follow it, and redo what rested on the choice:")
++        lines += [f"- {q.get('id')}: instead of “{q.get('question')}”, {q.get('redirect')}" for q in redirected]
++    if still_open:
++        lines.append("Choices made on this node and not yet answered (they stand until the researcher answers; do not ask them again):")
++        lines += [f"- {q.get('id')}" + (f" ({q['role']})" if q.get("role") else "") + f": {q.get('question')}" for q in still_open]
++    return "\n".join(lines) if lines else None
++
++
+ def _redirect_section(parts: BriefingParts) -> str | None:
+     return f"The researcher says: {parts.redirect}" if parts.redirect else None
+ 
+@@ -217,7 +268,8 @@ def build_briefing(parts: BriefingParts) -> str:
+     attempts, shared = _attempt_lines(parts), _shared_lines(parts)
+ 
+     def assemble() -> str:
+-        node, redirect, last, verdict = _node_section(parts), _redirect_section(parts), _last_word_section(parts), _verdict_section(parts)
++        node, last, verdict = _node_section(parts), _last_word_section(parts), _verdict_section(parts)
++        redirect = "\n\n".join(section for section in (_redirect_section(parts), _questions_section(parts)) if section) or None
+         changed, tried, notes, checks = _changed_section(parts), _attempts_section(attempts), _shared_section(shared), _checks_section(parts)
+         # the researcher's edit heads the briefing, whatever the role (point 21): the strongest briefing there is; then the
+         # mechanical checks (issue #180): failed ones before any mathematics, passed ones as the Verifier's first line
+@@ -261,4 +313,5 @@ def _fit(text: str) -> str:
+     return text if len(text) <= BRIEFING_MAX_CHARS else text[:BRIEFING_MAX_CHARS - len(CUT_TAIL)].rstrip() + CUT_TAIL
+ 
+ 
+-__all__ = ["ATTEMPTS_SHOWN", "BRIEFING_MAX_CHARS", "DIFF_SHOWN", "FILES_SHOWN", "SHARED_SHOWN", "BriefingParts", "build_briefing", "inputs_diff"]
++__all__ = ["ATTEMPTS_SHOWN", "BRIEFING_MAX_CHARS", "DIFF_SHOWN", "FILES_SHOWN", "SHARED_SHOWN", "BriefingParts", "build_briefing", "inputs_diff",
++           "questions_from"]
+diff --git a/src/proof_agents/coordinator.py b/src/proof_agents/coordinator.py
+index cac166e..59436df 100644
+--- a/src/proof_agents/coordinator.py
++++ b/src/proof_agents/coordinator.py
+@@ -1,12 +1,19 @@
+-"""The Coordinator: a Theorem's or Lemma's subtree worked by node runs (ADR-0019 points 18 and 19).
+-
+-Started on a Theorem or Lemma from the map, it holds no node and takes no turn. It starts node runs on the frontier
+-within the subtree — the open nodes whose dependencies are all settled — up to `[studio] parallel` at a time; a
+-node's run briefs its own turns (point 9). After a run ends on a failed verdict it starts the node's run again, until
+-the node's budget (one Start's turns) is spent; when every child is Accepted the parent is on the frontier itself,
+-and its run is started for the proof that combines them. It never requests review, never Accepts, and stops when
+-the subtree's root is requested for review (or Accepted), when its budget — the sum of the node budgets it may
+-spend — is spent, or when every open node in the subtree is stuck or waiting for the researcher.
++"""The Coordinator: a Theorem's or Lemma's subtree worked by node runs (ADR-0019 points 18 and 19, ADR-0021 Pursue).
++
++Started on a Theorem or Lemma from the map, it holds no node and takes no turn — Pursue, the researcher's one action
++(ADR-0021 point 7). A Theorem with no Claims yet is given a Decomposer turn first, whose split is the structure worked
++next. It starts node runs on the frontier within the subtree — the nodes whose dependencies are each Accepted or
++Provisional — up to `[studio] parallel` at a time; a node's run briefs its own turns (point 9). A run that ends
++without a snapshot for review (stuck, out of its turns, sent back for revision) is started again, whatever its last
++verdict, until the node's budget (one Start's turns) is spent; then the node is **parked**, and the rest of the
++subtree goes on. A parked Claim gives its parent one more Decomposer turn, once per parent (ADR-0021 point 9). A
++parent starts once every child is Accepted or Provisional; the Coordinator never waits for a Review decision. It
++never requests review, never Accepts, and stops when the subtree's root is requested for review (or Accepted), when
++its budget — the sum of the node budgets it may spend — is spent, or when nothing open is left to work: every open
++node parked, or resting on what no run will settle.
++
++`ProjectPursuit` is Pursue on a project with no map yet: a Reader turn states the draft as a map, then each Theorem
++the Reader stated is pursued by a Coordinator, one after another.
+ 
+ When a node in its subtree is Accepted it redirects the runs of that node's dependents with one line naming the
+ node and its key ideas (point 19): the sole cross-node push, on the existing Redirect channel, read at the next turn.
+@@ -29,7 +36,10 @@ from typing import Callable
+ ACTIONS = ("start", "pause", "resume", "release")
+ ACTIVE = ("starting", "running", "paused")
+ RUN_ACTIVE = ("starting", "running", "pausing", "paused")   # a node run's statuses while it holds the node's slot
+-ENDED_RESTARTABLE = ("stuck", "budget")   # a node run that ended so, with a failed verdict as the newest, is started again
++ENDED_RESTARTABLE = ("stuck", "budget")   # a node run that ended so is started again while the node budget lasts, whatever its verdict (ADR-0021 point 9)
++ENDED_FOR_GOOD = ("needs-human", "refused")   # a node run that ended so is not: the node is parked at once (needs-human stops the node, not the subtree)
++SPLIT_REASON = "split into"                # how a pursued Decomposer's run that split the node ends (agent_run.py)
++DECOMPOSABLE = ("theorem", "lemma")        # what a Decomposer turn is given to (ADR-0019 point 20)
+ TICK = 0.5                                 # seconds between the Coordinator's looks at the subtree
+ 
+ 
+@@ -39,13 +49,19 @@ class CoordinatorHooks:
+ 
+     # the subtree as it stands: the root and every node it rests on, transitively, each
+     # {"id", "kind", "statement", "dependencies": [...], "accepted": bool, "workflow": open|claimed|review-needed|revision-requested|blocked,
+-    #  "claimed_by": str | None, "key_ideas": str | None, "has_run": bool (a local node a run can work)}
++    #  "claimed_by": str | None, "key_ideas": str | None, "has_run": bool (a local node a run can work),
++    #  ADR-0021 (optional; a host without them reads as before):
++    #  "provisional": bool (proof_map.is_provisional: rested on for work), "awaiting_review": bool (a snapshot awaits the
++    #  researcher, Blocked or not: the workflow axis hides it under `blocked`), "split_children": [ids] (the Claims a Split made)}
+     subtree: Callable[[], list[dict]]
+     run: Callable[[str], object]                       # the node's AgentRun (made on demand, no page needed); raises when it has none
+     budget: Callable[[], tuple[int, float]]            # one node run's (turns, minutes): the node budget
+     parallel: Callable[[], int]                        # how many node runs at once
+     agent_name: Callable[[str], str] = lambda provider: provider   # provider -> the name the runs work under
+     record: Callable[[str], None] = lambda note: None  # a `coordinator` note on the root's work log
++    # (node id, reason): the node is parked (ADR-0021 point 9) — the host records it on the node's work log, where the review
++    # queue reads it with the node's attempts
++    park: Callable[[str, str], None] = lambda node_id, reason: None
+ 
+ 
+ @dataclass
+@@ -58,12 +74,19 @@ class CoordinatorState:
+     turns: int = 0             # turns spent by the runs it started, all Starts counted
+     turns_max: int = 0         # the sum of the node budgets it may spend
+     started_at: float | None = None
+-    # node id -> {"starts", "turns" (over every Start), "last" (the last run's ending), "verdict", "started_at" (the run's, as its view
+-    # says it: what tells this Coordinator's Start of the run from a later owner's)}
++    # node id -> {"starts", "turns" (over every Start), "idle_starts" (Starts that ended before any turn counted), "last" (the last
++    # run's ending), "verdict", "started_at" (the run's, as its view says it: what tells this Coordinator's Start of the run from a
++    # later owner's)}
+     nodes: dict = field(default_factory=dict)
+     running: list = field(default_factory=list)  # node ids whose run is active now
+     accepted: list = field(default_factory=list)  # accepted nodes of the subtree, as last seen
+     redirected: list = field(default_factory=list)  # accepted nodes whose dependents' runs were redirected (point 19)
++    parked: dict = field(default_factory=dict)      # node id -> why it is parked (ADR-0021 point 9), as this Start parked it
++    decomposed: list = field(default_factory=list)  # nodes given a Decomposer turn by this Start: the root unsplit, a parent of a parked Claim
++    resplit: list = field(default_factory=list)     # parents given their one further Decomposer turn for a parked Claim (point 9)
++    # node id -> why it is the researcher's now: they stopped and released its run, or its run ended done without a review
++    # request. This Start never starts it again (it is not parked: the agents did not fail there; the researcher took it)
++    held: dict = field(default_factory=dict)
+ 
+ 
+ class Coordinator:
+@@ -80,6 +103,11 @@ class Coordinator:
+         self._releasing = False  # a Stop doing its releases outside the lock: a new Start must wait for it
+         self._spent: dict[str, int] = {}     # node id -> turns of its earlier Starts (the current run's turns are read live)
+         self._seen: dict[str, int] = {}      # node id -> the current run's turns as last read
++        self._counted: set[str] = set()      # the open nodes the Coordinator's budget is the sum over
++        self._resplits: dict[str, str] = {}  # parent id -> the redirect of its further Decomposer turn, due and not started yet
++        # non-root nodes to work again though a snapshot of theirs awaits review: a dependency they were worked on was sent
++        # back and is being worked again, so their proof is Potentially stale (ADR-0021 point 4)
++        self._redo: set[str] = set()
+ 
+     # ------------------------------------------------------------ what it is
+     def active(self) -> bool:
+@@ -88,32 +116,24 @@ class Coordinator:
+     def view(self) -> dict:
+         with self._lock:
+             state = CoordinatorState(**{**vars(self.state), "nodes": {node_id: dict(entry) for node_id, entry in self.state.nodes.items()}, "running": list(self.state.running),
+-                                        "accepted": list(self.state.accepted), "redirected": list(self.state.redirected)})
++                                        "accepted": list(self.state.accepted), "redirected": list(self.state.redirected),
++                                        "parked": dict(self.state.parked), "decomposed": list(self.state.decomposed),
++                                        "resplit": list(self.state.resplit), "held": dict(self.state.held)})
+             settling = self._releasing or (state.status not in ACTIVE and self._thread is not None and self._thread.is_alive())
+         can_release = state.status in (*ACTIVE, "release-failed") or (
+             state.status not in ("idle", "released") and any(self._owned_run(node_id, entry.get("started_at")) for node_id, entry in state.nodes.items()))
+         return {"status": state.status, "active": state.status in ACTIVE, "reason": state.reason, "root": state.root, "provider": state.provider,
+                 "name": state.name, "turns": state.turns, "turns_max": state.turns_max, "started_at": state.started_at,
+                 "running": state.running, "accepted": state.accepted, "nodes": state.nodes, "settling": settling, "can_release": can_release,
+-                "needs_you": self._needs_you(state)}
++                "parked": [{"node": node_id, "reason": reason} for node_id, reason in state.parked.items()],
++                "decomposed": state.decomposed, "resplit": state.resplit, "needs_you": self._needs_you(state),
++                "held": [{"node": node_id, "reason": reason} for node_id, reason in state.held.items()]}
+ 
+     def _needs_you(self, state: CoordinatorState) -> list[dict]:
+-        """The nodes whose run ended where this Coordinator will not start it again (#132 tier 3): stuck or out of budget with
+-        no failed verdict to work on, or the node budget spent, or waiting on a decision. Each holds up what rests on it until
+-        the researcher looks — and while a review is pending elsewhere, nothing else would say so."""
+-        try:
+-            node_turns, _ = self.hooks.budget()
+-        except Exception:  # noqa: BLE001 — no budget to read: the restart rule's own test is the one that matters
+-            node_turns = 0
+-        waiting = []
+-        for node_id, entry in state.nodes.items():
+-            last = entry.get("last")
+-            if node_id in state.running or node_id in state.accepted or last not in (*ENDED_RESTARTABLE, "needs-human"):
+-                continue
+-            restartable = last in ENDED_RESTARTABLE and entry.get("verdict") == "failed" and (not node_turns or int(entry.get("turns") or 0) < node_turns)
+-            if not restartable:
+-                waiting.append({"node": node_id, "last": last, "reason": entry.get("reason") or ""})
+-        return waiting
++        """The nodes this Coordinator parked (ADR-0021 point 9): stuck or out of budget once the node budget was spent, or
++        stopped on a decision only the researcher can make, or refused a run. The rest of the subtree went on without
++        them; each is where the agents could not go, for the researcher's review queue, with why."""
++        return [{"node": node_id, "last": (state.nodes.get(node_id) or {}).get("last"), "reason": reason} for node_id, reason in state.parked.items()]
+ 
+     # ------------------------------------------------------------ the researcher's actions
+     def start(self, provider: str) -> dict:
+@@ -138,7 +158,8 @@ class Coordinator:
+                                           turns_max=turns * len(open_nodes), started_at=time.time(),
+                                           accepted=[node["id"] for node in subtree if node.get("accepted")])
+             self._stop = self._pause = False
+-            self._spent, self._seen = {}, {}
++            self._spent, self._seen, self._resplits, self._redo = {}, {}, {}, set()
++            self._counted = {node["id"] for node in open_nodes}   # the open nodes the budget counts; a split adds its Claims
+             self._thread = threading.Thread(target=self._loop, name=f"coordinator-{self.root}", daemon=True)
+             self._thread.start()
+         self._record(f"started on {self.root}: {len(open_nodes)} open node(s), up to {self.hooks.parallel()} run(s) at a time, {turns * len(open_nodes)} turns in all")
+@@ -242,7 +263,8 @@ class Coordinator:
+             self._end("stuck", f"{type(exc).__name__}: {exc}")
+ 
+     def _step(self) -> tuple[str, str] | None:
+-        """One look at the subtree: the redirects an Acceptance calls for, the turns spent, the runs to start; or why to end."""
++        """One look at the subtree: the redirects an Acceptance calls for, the turns spent, the nodes to park, the runs to
++        start; or why to end."""
+         subtree = self.hooks.subtree()
+         by_id = {node["id"]: node for node in subtree}
+         root = by_id.get(self.root)
+@@ -251,60 +273,165 @@ class Coordinator:
+         self._redirect_dependents(subtree, by_id)
+         running = self._running()   # the runs that ended since are noted first, their turns counted
+         turns = self._turns(running)
++        node_turns, _ = self.hooks.budget()
+         with self._lock:
+             self.state.running, self.state.turns = running, turns
+             self.state.accepted = [node["id"] for node in subtree if node.get("accepted")]
++            # a split adds Claims: the budget grows with the open nodes there are to work (ADR-0021 point 7)
++            self._counted |= {node["id"] for node in subtree if node.get("has_run") and not node.get("accepted")}
++            self.state.turns_max = max(self.state.turns_max, node_turns * len(self._counted))
+             turns_max, provider = self.state.turns_max, self.state.provider
+         # the root's own run ends first (#187): a review request lands mid-turn, and the run records the verdict that
+         # gated it as the turn ends; done before that, and the host may close the run before it does
+-        settled = "Accepted" if root.get("accepted") else "requested for review" if root.get("workflow") == "review-needed" else None
++        settled = "Accepted" if root.get("accepted") else "requested for review" if _awaiting(root) else None
+         if settled:
+             return None if self.root in running else ("done", f"{self.root} is {settled}")
+         if turns >= turns_max:
+             return ("budget", f"the budget of this Start is spent ({turns} turns over {len(self.state.nodes)} node(s)); the running run(s) finish on their own")
+-        node_turns, _ = self.hooks.budget()
+-        startable = [node for node in subtree if self._startable(node, running, node_turns)]
++        starts = [(node, "decomposer", redirect) for node, redirect in self._park(subtree, by_id, running, node_turns)]
++        if self._unsplit(root) and self.root not in running:
++            starts.append((root, "decomposer", None))   # Pursue on a Theorem with no Claims: a Decomposer turn first (point 7)
++        starts += [(node, None, None) for node in subtree if self._startable(node, by_id, running, node_turns)]
+         room = max(0, self.hooks.parallel() - len(running))
+-        for node in startable[:room]:
++        started: list[str] = []
++        for node, role, redirect in starts:
++            if room <= 0 or node["id"] in started:
++                continue
+             with self._lock:  # Stop or Pause meanwhile: no new node run begins (point 18)
+                 if self._stop or self._pause:
+                     break
+                 self.state.running = [*self.state.running, node["id"]]   # reserved before the run starts: Pause and Stop see it
+-            self._start_run(node, provider, node_turns)
++                self._worked_again(node, subtree)
++                if role == "decomposer":
++                    self.state.decomposed = [*self.state.decomposed, node["id"]]
++                    if self._resplits.pop(node["id"], None) is not None:
++                        self.state.resplit = [*self.state.resplit, node["id"]]
++            self._start_run(node, provider, node_turns, role=role, redirect=redirect)
++            started.append(node["id"])
+             running = running + [node["id"]]
+-        if not running and not startable:
+-            if any(node.get("workflow") == "review-needed" for node in subtree):
+-                return None  # a node waits for the researcher's review: what it blocks is not stuck, and an Acceptance opens it
+-            open_nodes = [node["id"] for node in subtree if node.get("has_run") and not node.get("accepted")]
++            room -= 1
++        if not running and not starts:
++            open_nodes = [node["id"] for node in subtree if _open(node)]
+             if not open_nodes:
+                 return ("done", "nothing in the subtree is open")
+-            return ("stuck", f"every open node in the subtree is stuck or waiting for you: {', '.join(open_nodes)}")
++            with self._lock:
++                parked = [node_id for node_id in open_nodes if node_id in self.state.parked]
++                held = [node_id for node_id in open_nodes if node_id in self.state.held]
++            if len(parked) == len(open_nodes):
++                return ("parked", f"every open node in the subtree is parked: {', '.join(parked)}")
++            waiting = [node_id for node_id in open_nodes if node_id not in parked and node_id not in held]
++            aside = [f"parked: {', '.join(parked)}"] * bool(parked) + [f"the researcher's: {', '.join(held)}"] * bool(held)
++            what = f"{', '.join(waiting)} rest(s) on what no run will settle" if waiting else "every open node is parked or the researcher's"
++            return ("stuck", f"nothing left to work without the researcher: {what}" + (f" ({'; '.join(aside)})" if aside else ""))
+         return None
+ 
+-    def _startable(self, node: dict, running: list[str], node_turns: int) -> bool:
+-        """A node whose run may start now: a local node, open (unclaimed, every dependency settled: the frontier rule, which
+-        also makes the parent startable once every child is Accepted), with budget left — none spent yet, or its last run
+-        ended on a failed verdict and the node budget is not spent (point 18)."""
+-        if not node.get("has_run") or node.get("accepted") or node["id"] in running:
++    def _worked_again(self, node: dict, subtree: list[dict]) -> None:
++        """Under the lock, as `node`'s run is about to start: when it requested review in this Start and was sent back, or is
++        being worked again for that reason itself, the dependents this Start worked on it are to be worked again too, once
++        it is Accepted or Provisional again (ADR-0021 point 4) — the root aside, whose review request ends the Coordinator."""
++        entry = self.state.nodes.get(node["id"]) or {}
++        again = node["id"] in self._redo or (entry.get("last") == "done" and entry.get("reason") == "review-requested")
++        self._redo.discard(node["id"])
++        if again:
++            self._redo |= {other["id"] for other in subtree if node["id"] in (other.get("dependencies") or [])
++                           and other["id"] != self.root and other["id"] in self.state.nodes}
++
++    def _unsplit(self, node: dict) -> bool:
++        """The root is a Theorem or Lemma with no Claims a Split made, given no Decomposer turn by this Start yet."""
++        if node.get("kind") not in DECOMPOSABLE or not node.get("has_run") or node.get("accepted") or _awaiting(node):
++            return False
++        with self._lock:
++            if node["id"] in self.state.decomposed or node["id"] in self.state.nodes:
++                return False
++        children = node.get("split_children")
++        return not children if children is not None else not node.get("dependencies")
++
++    def _park(self, subtree: list[dict], by_id: dict, running: list[str], node_turns: int) -> list[tuple[dict, str]]:
++        """Park the nodes whose run will not be started again (ADR-0021 point 9): those that ended for good, and those whose
++        node budget is spent. Each parked Claim gives its parent one more Decomposer turn, once per parent — the first
++        decomposition of an unsplit root is not it. A turn due is kept until it starts (no free slot, a Pause, the parent's
++        own run still going): the parents whose turn may start now, each with the redirect that says why."""
++        newly: list[tuple[str, str]] = []
++        with self._lock:
++            for node in subtree:
++                entry = self.state.nodes.get(node["id"])
++                if entry is None or node["id"] in running or node["id"] in self.state.parked or not _open(node):
++                    continue
++                last = entry.get("last")
++                if last in ENDED_FOR_GOOD:
++                    reason = f"{last}: {entry.get('reason') or ''}".rstrip(": ")
++                elif last in ENDED_RESTARTABLE and _used(entry) >= node_turns:
++                    idle = int(entry.get("idle_starts") or 0)
++                    spent = f"{entry.get('turns')} turn(s)" + (f", {idle} Start(s) that took no turn" if idle else "")
++                    reason = f"its budget is spent ({spent}); the last run ended {last}: {entry.get('reason') or ''}".rstrip(": ")
++                else:
++                    continue
++                self.state.parked[node["id"]] = reason
++                newly.append((node["id"], reason))
++        for node_id, reason in newly:
++            self._record(f"parked {node_id}: {reason}")
++            try:
++                self.hooks.park(node_id, reason)
++            except Exception:  # noqa: BLE001 — the record is the host's; the Coordinator goes on either way
++                pass
++            if by_id[node_id].get("kind") != "claim":
++                continue
++            for parent in by_id.values():
++                if node_id in (parent.get("dependencies") or []) and _resplittable(parent):
++                    with self._lock:
++                        if parent["id"] not in self.state.resplit and parent["id"] not in self._resplits:
++                            self._resplits[parent["id"]] = (f"{node_id} is parked ({reason}); propose another structure for {parent['id']} "
++                                                            f"that does not need {node_id} as it stands")
++        with self._lock:
++            due = list(self._resplits.items())
++        out: list[tuple[dict, str]] = []
++        for parent_id, redirect in due:
++            parent = by_id.get(parent_id)
++            if parent is None or not _resplittable(parent):  # gone from the subtree, or Accepted meanwhile: nothing to restructure
++                with self._lock:
++                    self._resplits.pop(parent_id, None)
++            elif parent_id not in running:
++                out.append((parent, redirect))
++        return out
++
++    def _startable(self, node: dict, by_id: dict, running: list[str], node_turns: int) -> bool:
++        """A node whose run may start now (ADR-0021 point 4): a local node, open, nobody else's, every dependency Accepted or
++        Provisional — the frontier, which makes a parent startable once every child has passed the Verifier — with budget
++        left: none spent yet, or its last run ended short of a snapshot for review and the node budget is not spent."""
++        with self._lock:
++            again = node["id"] in self._redo and not node.get("accepted")
++        if not node.get("has_run") or not (_open(node) or again) or node["id"] in running:
+             return False
+         with self._lock:
+             done = self.state.nodes.get(node["id"])
+-            ours = done is not None and node.get("workflow") == "claimed" and node.get("claimed_by") == self.state.name
+-        if node.get("workflow") != "open" and not ours:  # another's claim, blocked, or under review: not startable
++            name = self.state.name
++            if node["id"] in self.state.parked or node["id"] in self.state.held:
++                return False
++        if node.get("claimed_by") not in (None, name) or (node.get("claimed_by") == name and done is None):
++            return False  # another's claim; or ours from before this Start, which a run of ours is not here to resume
++        if node.get("workflow") == "claimed" and node.get("claimed_by") is None:
+             return False
++        if self._unsplit(node) and node["id"] == self.root:
++            return False  # its Decomposer turn comes first
++        for dependency_id in node.get("dependencies") or []:
++            dependency = by_id.get(dependency_id)
++            if dependency is not None and not dependency.get("accepted") and not dependency.get("provisional"):
++                return False
+         if done is None:
+             return True
+-        return done.get("last") in ENDED_RESTARTABLE and done.get("verdict") == "failed" and done.get("turns", 0) < node_turns
++        return done.get("last") not in ENDED_FOR_GOOD and _used(done) < node_turns
+ 
+-    def _start_run(self, node: dict, provider: str, node_turns: int) -> None:
+-        """Start the node's run with what is left of the node budget (audit P4). The node was reserved in `running` before;
+-        a Stop or Pause that came while the run was starting reaches it here (audit P1)."""
++    def _start_run(self, node: dict, provider: str, node_turns: int, *, role: str | None = None, redirect: str | None = None) -> None:
++        """Start the node's run with what is left of the node budget (audit P4) — every role, or a Decomposer's one turn — as
++        a Pursue (ADR-0021 point 7). The node was reserved in `running` before; a Stop or Pause that came while the run was
++        starting reaches it here (audit P1)."""
+         with self._lock:
+             entry = self.state.nodes.setdefault(node["id"], {"starts": 0, "turns": 0, "last": None, "verdict": None, "started_at": None})
+-            left = max(1, node_turns - int(entry.get("turns") or 0))
++            entry["role"] = role
++            left = max(1, node_turns - _used(entry))
+         try:
+             run = self.hooks.run(node["id"])
+-            answer = run.start(provider, turns=left)
++            answer = run.start(provider, turns=left, pursue=True, **({"roles": [role]} if role else {}), **({"redirect": redirect} if redirect else {}))
+         except Exception as exc:  # noqa: BLE001
+             answer = {"error": f"{type(exc).__name__}: {exc}", "code": "RUN_REFUSED"}
+         with self._lock:
+@@ -322,7 +449,8 @@ class Coordinator:
+         if "error" in answer:
+             self._record(f"could not start a run on {node['id']}: {answer.get('error')}")
+             return
+-        self._record(f"started a run on {node['id']} (start {entry['starts']}, {left} turn(s) left of the node budget)")
++        what = "a Decomposer turn" if role == "decomposer" else "a run"
++        self._record(f"started {what} on {node['id']} (start {entry['starts']}, {left} turn(s) left of the node budget)")
+         if late_stop:  # Stop came while this run was starting: it is released as the others were
+             answer = self._answer_of(node["id"], lambda run: run.release("the Coordinator was stopped and released", expected_started_at=entry["started_at"]))
+             with self._lock:
+@@ -355,8 +483,20 @@ class Coordinator:
+         with self._lock:
+             for node_id, view in ended:
+                 entry = self.state.nodes.setdefault(node_id, {"starts": 0, "turns": 0, "last": None, "verdict": None})
+-                entry["turns"] = self._spent.get(node_id, 0) + int(view.get("turns") or 0)
+-                entry["last"], entry["verdict"], entry["reason"] = view.get("status"), view.get("verdict"), view.get("reason")
++                took = int(view.get("turns") or 0)
++                entry["turns"] = self._spent.get(node_id, 0) + took
++                if not took:  # it ended before any turn counted (its turn could not start, its loop raised): it spends the
++                    # node budget all the same, one turn's worth, or a node whose turns never start is started forever
++                    entry["idle_starts"] = int(entry.get("idle_starts") or 0) + 1
++                status, reason = view.get("status"), str(view.get("reason") or "")
++                entry["last"], entry["verdict"], entry["reason"] = status, view.get("verdict"), view.get("reason")
++                if entry.get("role") == "decomposer" and status == "done":
++                    # its turn is over and the node is worked next, like any open node: split, or one argument after all
++                    entry["last"] = "split" if reason.startswith(SPLIT_REASON) else "no-split"
++                    entry["role"] = None
++                elif status == "released" or (status == "done" and reason != "review-requested"):
++                    # the researcher's Stop and release, or a run that ended done short of review: theirs, not restarted
++                    self.state.held[node_id] = f"the run ended {status}: {reason}".rstrip(": ")
+                 self._seen.pop(node_id, None)
+         for node_id, view in ended:
+             self._record(f"the run on {node_id} ended: {view.get('status')} — {view.get('reason') or ''}".rstrip(" —"))
+@@ -441,4 +581,150 @@ class Coordinator:
+             pass
+ 
+ 
+-__all__ = ["ACTIONS", "ACTIVE", "Coordinator", "CoordinatorHooks", "CoordinatorState"]
++def _awaiting(node: dict) -> bool:
++    """A snapshot of the node awaits the researcher's decision (ADR-0021: Blocked hides it on the workflow axis)."""
++    return bool(node.get("awaiting_review")) or node.get("workflow") == "review-needed"
++
++
++def _resplittable(node: dict) -> bool:
++    """A parent a further Decomposer turn may be given to: a local Theorem or Lemma, not Accepted."""
++    return node.get("kind") in DECOMPOSABLE and bool(node.get("has_run")) and not node.get("accepted")
++
++
++def _used(entry: dict) -> int:
++    """What a node has spent of its node budget: its turns, and one for each Start that ended before any turn counted."""
++    return int(entry.get("turns") or 0) + int(entry.get("idle_starts") or 0)
++
++
++def _open(node: dict) -> bool:
++    """Still to be worked: a local node, not Accepted, not Provisional, no snapshot awaiting a decision."""
++    return bool(node.get("has_run")) and not node.get("accepted") and not node.get("provisional") and not _awaiting(node)
++
++
++@dataclass
++class PursuitHooks:
++    """Pursue on a project with no map (ADR-0021 point 7), as callables: the host runs the turns and makes the Coordinators."""
++
++    read: Callable[[str], dict]                  # provider -> the Reader's turn, run to its end: {} or {"error", "code"}
++    theorems: Callable[[], list[str]]            # the map's Theorems now, in the map's order
++    coordinator: Callable[[str], Coordinator]    # a Theorem's Coordinator, made on demand
++    record: Callable[[str], None] = lambda note: None
++    # Stop while the Reader's turn runs: the host stops that turn, so `read` returns (with an error, or with what was
++    # written so far); a no-op when no Reader turn is running
++    stop_read: Callable[[], None] = lambda: None
++
++
++class ProjectPursuit:
++    """Pursue started on a project: a Reader turn states the draft in the library as a map, then each Theorem it stated is
++    pursued by its own Coordinator, one after another, each to its own end. Stop stops the one working and starts no other."""
++
++    def __init__(self, hooks: PursuitHooks, *, tick: float = TICK) -> None:
++        self.hooks = hooks
++        self.tick = tick
++        self._lock = threading.Lock()
++        self._stop = False
++        self._thread: threading.Thread | None = None
++        self.state = {"status": "idle", "reason": "", "theorems": [], "current": None, "results": {}}
++
++    def view(self) -> dict:
++        with self._lock:
++            return self._view_locked()
++
++    def start(self, provider: str) -> dict:
++        with self._lock:
++            if self.state["status"] in ("reading", "pursuing"):
++                return {"error": "this project is being pursued already; stop it first", "code": "PURSUIT_ACTIVE"}
++            if self._thread is not None and self._thread.is_alive():
++                return {"error": "the stopped pursuit is still ending; Start again after it settles", "code": "PURSUIT_ACTIVE"}
++            self._stop = False
++            self.state = {"status": "reading", "reason": "", "theorems": [], "current": None, "results": {}}
++            self._thread = threading.Thread(target=self._loop, args=(provider,), name="pursuit", daemon=True)
++            self._thread.start()
++        return self.view()
++
++    def stop(self) -> dict:
++        """Stop: the Reader's turn is stopped (`stop_read`) or the working Theorem's Coordinator released, and no other
++        Theorem is started. A pursuit that already ended keeps its ending: there is nothing to stop."""
++        with self._lock:
++            status, current = self.state["status"], self.state["current"]
++            if status not in ("reading", "pursuing"):
++                return {"error": "no pursuit is running on this project", "code": "NO_PURSUIT", **self._view_locked()}
++            self._stop = True
++            self.state["status"], self.state["reason"] = "released", "stopped by the researcher"
++        if status == "reading":
++            self.hooks.stop_read()
++        if current is not None:
++            self.hooks.coordinator(current).release()
++        return self.view()
++
++    def _view_locked(self) -> dict:
++        return {**self.state, "theorems": list(self.state["theorems"]), "results": dict(self.state["results"])}
++
++    def active(self) -> bool:
++        """The pursuit's thread is alive: it is reading or pursuing, or it was stopped and its Reader's turn or its
++        Coordinator has not ended yet. A Start is refused (PURSUIT_ACTIVE) until it is False."""
++        thread = self._thread
++        return thread is not None and thread.is_alive()
++
++    def _stopped(self) -> bool:
++        with self._lock:
++            return self._stop
++
++    def _loop(self, provider: str) -> None:
++        try:
++            if not self.hooks.theorems():  # a map already there is pursued as it stands; the Reader only states one
++                answer = self.hooks.read(provider) or {}
++                if self._stopped():
++                    return
++                if "error" in answer:
++                    return self._end("stuck", f"the Reader's turn failed: {answer.get('error')}")
++            theorems = list(self.hooks.theorems())
++            with self._lock:
++                self.state["theorems"] = theorems
++            if not theorems:
++                return self._end("stuck", "the Reader stated no Theorem")
++            self._note(f"pursuing {len(theorems)} Theorem(s): {', '.join(theorems)}")
++            for theorem in theorems:
++                with self._lock:
++                    if self._stop:
++                        return
++                    self.state["status"], self.state["current"] = "pursuing", theorem
++                coordinator = self.hooks.coordinator(theorem)
++                if self._stopped():
++                    return
++                answer = coordinator.start(provider)
++                if "error" in answer:
++                    with self._lock:
++                        self.state["results"][theorem] = {"status": "refused", "reason": answer.get("error")}
++                    continue
++                if self._stopped():  # Stop came while it was starting, and may have found nothing started to release
++                    coordinator.release()
++                    return
++                while coordinator.active() or coordinator.view().get("settling"):
++                    time.sleep(self.tick)   # a Stop releases it; the pursuit is active until it has settled
++                if self._stopped():
++                    return
++                view = coordinator.view()
++                with self._lock:
++                    self.state["results"][theorem] = {"status": view.get("status"), "reason": view.get("reason")}
++                if view.get("status") == "budget":  # its runs go on by themselves: stopped before the next Theorem starts
++                    coordinator.release()
++            self._end("done", "every Theorem was pursued to its end")
++        except Exception as exc:  # noqa: BLE001 — the pursuit ends, and says why
++            self._end("stuck", f"{type(exc).__name__}: {exc}")
++
++    def _end(self, status: str, reason: str) -> None:
++        with self._lock:
++            if self._stop:
++                return
++            self.state["status"], self.state["reason"], self.state["current"] = status, reason, None
++        self._note(f"{status}: {reason}")
++
++    def _note(self, note: str) -> None:
++        try:
++            self.hooks.record(note)
++        except Exception:  # noqa: BLE001
++            pass
++
++
++__all__ = ["ACTIONS", "ACTIVE", "Coordinator", "CoordinatorHooks", "CoordinatorState", "ProjectPursuit", "PursuitHooks"]
+diff --git a/src/proof_agents/proof_agent.py b/src/proof_agents/proof_agent.py
+index 46a3a2f..caecc1e 100644
+--- a/src/proof_agents/proof_agent.py
++++ b/src/proof_agents/proof_agent.py
+@@ -197,15 +197,49 @@ class Role:
+         return [f"{tool}({pattern})" for pattern in self.writes for tool in ("Edit", "Write", "MultiEdit")]
+ 
+ 
+-# Every role's obligations when it stops (spec #145: 停下时写 progress … 说不清的方向 fog add --near), and how it
+-# says that only the researcher can decide what comes next.
++# A judgement call is made and recorded, not asked (ADR-0021 point 8): the researcher answers it later, from the review
++# queue, and nothing waits for them meanwhile.
++_CHOICES = """\
++A judgement call is not a reason to stop. Where the statement admits two readings, a constant is left unspecified or a
++case split is a matter of judgement, pick the reading the draft most likely means, record it as a Standing question —
++`proof node progress {node} --question "<the choice made; the alternative>"` — and go on. The researcher answers it later;
++an answer that differs comes back to this node as a redirect. Do not record the same choice twice.
++"""
++# Every role's obligations when it stops (spec #145: 停下时写 progress … 说不清的方向 fog add --near), and the one thing
++# that still stops a node for the researcher (ADR-0021 point 8).
+ _STOPPING = """\
+-When you stop — done, stuck, or waiting for the researcher — report it: `--step N --status done|stuck --note "<what
+-now stands>"`. When a decision only the researcher can make is in the way (a choice of definition, of norm, of which
+-case to drop), name it and stop: `proof node progress {node} --step N --status needs-human --note "<the decision>"`.
++When you stop — done or stuck — report it: `--step N --status done|stuck --note "<what now stands>"`.
++""" + _CHOICES + """\
++`needs-human` is only for what no reading settles: a contradiction in this node's own statement, or a fact only the
++researcher can know. Then name it and stop: `proof node progress {node} --step N --status needs-human --note "<it>"`.
++It stops this node, not the rest of the map.
+ A direction you can't state yet goes in the fog before you stop: `proof fog add "<text>" --near {node} --created-by {name}`.
+ """
+ 
++# The Decomposer's brief: what it is for and how it splits, then how its turn ends — started alone, for the researcher
++# (ADR-0019 point 20); under Pursue, PURSUE_DECOMPOSER instead (ADR-0021 point 7), never both.
++_DECOMPOSER = """\
++This turn you are the **Decomposer** of node {node} (ADR-0019 point 20): a Theorem not yet split, whose proof is
++a research effort rather than one argument. You do not prove it. Read the library and the literature first —
++`proof search`, `proof retrieve`, `proof reference list`, `proof memory list`, the library folders, the web —
++then write the key theorems the course of the proof needs as a split into Claims, each a statement a run could
++prove on its own, in one call (a split is all or nothing):
++`proof node split {node} --child <id>=<statement> --child <id>=<statement> … --created-by {name}`.
++Keep your reading notes and the reasons for the structure in scratch/decomposer/. A split makes {node} rest
++on every Claim, and each Claim on nothing. What you cannot yet state as a Claim goes in the fog near the Theorem:
++`proof fog add "<text>" --near {node} --created-by {name}`. Report your plan first (`proof node progress {node} --plan "…"`).
++If you find the Theorem is one argument after all, say so instead (`--step 1 --status done --note "no split: …"`) and
++split nothing.
++"""
++_DECOMPOSER_ALONE = """\
++When one Claim uses another, say so for the researcher, who adds the edge — in scratch/decomposer/ and in your closing
++note, as the command to copy: `proof node depend <claim> --add <claim it uses> --by human`. You never write proof.tex,
++never request review, never add or remove a dependency edge, and never start anything. The shape of a whole research
++effort is a decision only the researcher can make: end your turn with
++`proof node progress {node} --step 1 --status needs-human --note "structure proposed; the researcher decides; edges: proof node depend <claim> --add <claim it uses> --by human; …"`
++(with no edge to name, the note ends after decides) — they read the Claims on the map, edit them, and start a Coordinator if they agree.
++"""
++
+ _ROLE_BRIEFS = {
+     "prover": """\
+ This turn you are the **Prover** of node {node}. You find the proof: retrieval first, then your own
+@@ -233,6 +267,9 @@ runs are briefed from these, and you from theirs (the briefing's shared notes; `
+ depend on (`proof node depend`), never a sentence copied from its proof, and you write no other
+ node's memory. When you split out a Claim a sibling could use, leave a memory entry saying so; its
+ Prover adds the edge, or does not.
++A dependency the briefing marks Provisional (ADR-0021 point 3) may be used by its statement, as an Accepted one's is; its
++proof never — read none of it as a fact. For an imported result not yet Reference-reviewed, use what the cited source
++actually gives, and say in your draft where you rely on it.
+ When a dependency this proof rests on may no longer hold, open a Challenge on it (ADR-0005):
+ `proof challenge open <dependency-id> --rationale "<why>" --opened-by {name}`. Dismissing or resolving a
+ Challenge is the researcher's alone: you never do either.
+@@ -266,7 +303,10 @@ it attacks: why> 2. …"`, the objections numbered, each naming the step or the
+ with your objections; a passing one is the Prover's gate to request review. An objection you cannot settle
+ because it concerns an Accepted dependency's own proof is a Challenge: `proof challenge open <dependency-id>
+ --rationale "<why>" --opened-by {name}`. A sibling's or a dependency's unaccepted proof justifies nothing: an
+-appeal to it is an appeal to nothing (ADR-0019 point 11). An obstruction you find that would mislead another
++appeal to it is an appeal to nothing (ADR-0019 point 11). A dependency the briefing marks Provisional may be
++appealed to by its statement, as an Accepted one's (ADR-0021 point 3); its proof never. For an imported result not yet
++Reference-reviewed, read the cited source and check the appeal against it; if you cannot read it, say so in your verdict's
++note — the appeal is "unchecked against the source" — which the researcher sees at its Reference review. An obstruction you find that would mislead another
+ node — a step the proof keeps failing on, a cited result that does not give what is claimed — goes to memory
+ under this node and your name: `{memory} --layer episodic --status failed --source {name}/verifier "<it>"`
+ (this project and node first, once: that is the form you are allowed); you write no other node's memory. You never split the node, never request review, and never make a
+@@ -283,25 +323,7 @@ Before a snapshot exists, what a run showed goes in your step's note; once one d
+ You never edit the LaTeX. Report your steps with `proof node progress {node}`, and hand back with
+ `--handoff prover --note "<what the numbers showed>"` when you are done.
+ """ + _STOPPING,
+-    "decomposer": """\
+-This turn you are the **Decomposer** of node {node} (ADR-0019 point 20): a Theorem not yet split, whose proof is
+-a research effort rather than one argument. You do not prove it. Read the library and the literature first —
+-`proof search`, `proof retrieve`, `proof reference list`, `proof memory list`, the library folders, the web —
+-then write the key theorems the course of the proof needs as a split into Claims, each a statement a run could
+-prove on its own, in one call (a split is all or nothing):
+-`proof node split {node} --child <id>=<statement> --child <id>=<statement> … --created-by {name}`.
+-Keep your reading notes and the reasons for the structure in scratch/decomposer/. A split makes {node} rest
+-on every Claim, and each Claim on nothing; when one Claim uses another, say so for the researcher, who adds the edge — in
+-scratch/decomposer/ and in your closing note, as the command to copy: `proof node depend <claim> --add <claim it uses>
+---by human`. What you cannot yet state as a
+-Claim goes in the fog near the Theorem: `proof fog add "<text>" --near {node} --created-by {name}`. You never
+-write proof.tex, never request review, never add or remove a dependency edge, and never start anything. Report
+-your plan first (`proof node progress {node} --plan "…"`). The shape of a whole research effort is a decision only
+-the researcher can make: end your turn with
+-`proof node progress {node} --step 1 --status needs-human --note "structure proposed; the researcher decides; edges: proof node depend <claim> --add <claim it uses> --by human; …"`
+-(with no edge to name, the note ends after decides) — they read the Claims on the map, edit them, and start a Coordinator if they agree. If you find the Theorem is
+-one argument after all, say so instead (`--step 1 --status done --note "no split: …"`) and split nothing.
+-""",
++    "decomposer": _DECOMPOSER + _DECOMPOSER_ALONE + _CHOICES,
+ }
+ # every role may put an unclear direction in the fog near the node (the stopping duty above)
+ _EVERY_ROLE = ("Bash(proof fog add *)",)
+@@ -309,6 +331,7 @@ _EVERY_ROLE = ("Bash(proof fog add *)",)
+ _COMMON_COMMANDS = (
+     'proof node progress {node} --plan "<step 1>" --plan "<step 2>" …',
+     'proof node progress {node} --step <N> --status started|done|stuck|needs-human --note "<what now stands>"',
++    'proof node progress {node} --question "<the choice made; the alternative>"   (a judgement call: record it and go on)',
+     'proof fog add "<the difficulty>" --near {node} --created-by {name}',
+ )
+ COMMANDS: dict[str, tuple[str, ...]] = {
+@@ -369,6 +392,31 @@ ROLES: dict[str, Role] = {
+         (), alone=True,
+     ),
+ }
++# A Decomposer started by a Coordinator's Pursue (ADR-0021 point 7): its split is the structure worked next, so it adds the
++# edges between its own Claims itself and does not stop for the researcher. Appended to its brief; it overrides the ending.
++PURSUE_DECOMPOSER = """\
++**Under Pursue** (this turn was started by a Coordinator): the researcher reads the structure later, so you do not
++stop for them. You never write proof.tex, never request review and never start anything, and the only dependency edges
++you change are these, each one call:
++- when one of your Claims uses another, add the edge yourself: `proof node depend <claim> --add <claim it uses> --by {name}`
++  (between Claims your own split of {node} created, while both are unaccepted);
++- when this turn was started because a Claim of {node} is parked (the redirect names it), split {node} again with the
++  Claims that replace it, then drop {node}'s edge to the parked Claim: `proof node depend {node} --remove <the parked Claim> --by {name}`
++  (only a Claim your own split created, still unaccepted). The parked Claim stays on the map, with its attempts, for
++  the researcher; nothing is deleted.
++Where the structure is a judgement call, pick the likeliest and record it as a standing question:
++`proof node progress {node} --question "<the structure chosen; the alternative>"`. End your turn with
++`proof node progress {node} --step 1 --status done --note "split into <the Claims>; edges: <the edges you added or dropped>"`.
++`needs-human` is only for a contradiction in {node}'s own statement or a fact only the researcher knows.
++"""
++PURSUE_DECOMPOSER_COMMANDS = (
++    'proof node depend <claim> --add <claim it uses> --by {name}',
++    'proof node depend {node} --remove <the parked Claim> --by {name}   (a further turn, for a parked Claim of your own split)',
++    'proof node progress {node} --question "<the structure chosen; the alternative>"',
++    'proof node progress {node} --step 1 --status done --note "split into <the Claims>; edges: <the edges you added or dropped>"',
++)
++_DECOMPOSER_ENDING = 'proof node progress {node} --step 1 --status needs-human'   # the sheet's line for the ending only the alone Decomposer has
++
+ # the roles a whole run cycles through, in the spec's order: every role with a brief but one started alone (the Decomposer)
+ CYCLE_ROLES = tuple(role.value for role in AgentRole if role.value in ROLES and not ROLES[role.value].alone)
+ 
+@@ -437,6 +485,8 @@ class ProofAgentContext:
+     # the project's instance id (proof_cli.storage.read_project_instance_id), from the host: what binds a role's memory
+     # writes to this project, so `--root <another project>` after the allowed prefix is refused by `proof` itself
+     project_id: str | None = None
++    # a Coordinator's Pursue started this turn (ADR-0021 point 7): a Decomposer adds its own Claims' edges and does not stop
++    pursue: bool = False
+ 
+     @property
+     def compiles(self) -> bool:
+@@ -510,16 +560,25 @@ class ProofAgentContext:
+     def brief(self) -> str:
+         library = "".join(f", {folder}" for folder in self.library)
+         work = ROLES[self.role].brief if self.role in ROLES else SOLO_BRIEF
++        if self._pursued_decomposer:  # its own ending, in place of the one that stops for the researcher (ADR-0021 point 7)
++            work = _DECOMPOSER + PURSUE_DECOMPOSER + _CHOICES
+         text = BRIEF.format(node=self.node_id, name=self.name, library=f", and the library ({library[2:]})" if library else "",
+                             work=work.format(node=self.node_id, name=self.name, key_ideas=self.key_ideas_guide(), gate=self.gate_text(), memory=self.memory_command()))
+         return text + self.commands_sheet()
+ 
++    @property
++    def _pursued_decomposer(self) -> bool:
++        return self.pursue and self.role == AgentRole.decomposer.value
++
+     def commands_sheet(self) -> str:
+         """The exact `proof` commands this role uses, filled in for this node and name, to copy rather than to look up with
+         `--help` (issue #180: a turn spent on `proof node progress --help` is a turn not spent on the proof)."""
+         if self.role not in COMMANDS:
+             return ""
+-        lines = [line.format(node=self.node_id, name=self.name, memory=self.memory_command()) for line in COMMANDS[self.role]]
++        own = COMMANDS[self.role]
++        if self._pursued_decomposer:
++            own = (*(line for line in own if not line.startswith(_DECOMPOSER_ENDING)), *PURSUE_DECOMPOSER_COMMANDS)
++        lines = [line.format(node=self.node_id, name=self.name, memory=self.memory_command()) for line in own]
+         return ("\nCommands you will use, exactly (no need for --help). Run each as its own Bash call: one joined with &&, ;, | or a "
+                 "loop is refused, whatever its parts (#132 tier 3):\n" + "\n".join(f"  {line}" for line in lines) + "\n")
+ 
+@@ -541,6 +600,9 @@ class ProofAgentContext:
+             allowed = ["Read", "Glob", "Grep", "WebSearch", "WebFetch", *proof_rules, *(f"Bash({command} *)" for command in role.programs), *role.commands]
+             if self.role == AgentRole.prover.value and self.may_request_review:  # the gate (ADR-0019 point 3): this node, this verdict, nothing else
+                 allowed.append(f"Bash({self.request_review_command()} *)")
++            if self._pursued_decomposer:  # its own Claims' edges, under its own name (ADR-0021 point 7), and on a further turn the
++                # parent's edge to its own parked Claim (point 9); `proof` refuses any other pair. Its --question is `progress {node} *`'s
++                allowed += [f"Bash(proof node depend * --add * --by {self.name})", f"Bash(proof node depend {self.node_id} --remove * --by {self.name})"]
+             inline = inline_code_rules(role.programs)  # a named program, never a shell by another name
+             if edit:
+                 allowed += [anchored(rule, folder) for rule in role.write_rules()]
+@@ -554,6 +616,8 @@ class ProofAgentContext:
+         denied = [anchored(f"{tool}(./{path})", folder) for tool in ("Edit", "Write", "MultiEdit") for path in PROTECTED] + inline
+         if self.role in ROLES:  # PROOF_ROOT names the project: no role sends a `proof` command to another one (audit P1)
+             denied += list(NO_OTHER_PROJECT)
++        if self._pursued_decomposer:  # an edge is added as itself, never by taking a node over
++            denied.append("Bash(proof node depend * --reassign*)")
+         return [*args, "--allowedTools", *allowed, "--disallowedTools", *denied]
+ 
+     def claude_md_excludes(self) -> list[str]:
+diff --git a/src/proof_agents/reader.py b/src/proof_agents/reader.py
+new file mode 100644
+index 0000000..4d2c9d8
+--- /dev/null
++++ b/src/proof_agents/reader.py
+@@ -0,0 +1,169 @@
++"""The Reader (ADR-0021 point 5): the researcher's draft in the library, stated as a proof map.
++
++A node's agent works one node (proof_agent.py); the map's agent discusses the whole map and changes nothing but the fog
++(map_agent.py). The Reader has no node either: it is started on a project, or on one library file, with nothing on the
++map or with the researcher's partial map. It reads the draft and the works it cites, then writes what the draft states:
++Definitions, the Theorems and Lemmas (or what the draft means to state where it leaves a statement empty), an imported
++result with its reference for each piece of literature the draft calls on, and fog for what the draft leaves open. It
++runs in the project root with `PROOF_ROOT` set, and every write is a `proof` command under its own name
++(`--created-by`). It never proves, never creates a Claim, never splits, claims, requests review or decides anything.
++Every place it departs from the draft — a definition corrected, a setting fixed — it records, with the reason, in
++`scratch/reader/` and in its closing note: the researcher reads those first (the Review queue, ADR-0021 point 10).
++Its turns are the same CLI turns as every agent's here, briefed and permitted by this context.
++"""
++
++from __future__ import annotations
++
++import json
++import os
++import shutil
++import sys
++from dataclasses import dataclass, field
++from pathlib import Path
++
++from .map_agent import MAP_PROOF_READS
++from .proof_agent import COMPUTATION, NO_OTHER_PROJECT, anchored, claude_md_excludes, inline_code_rules
++
++READER_NAME = "reader"   # the name its definitions, nodes and fog carry, unless `[studio] agent_name` says otherwise
++READER_SCRATCH = "scratch/reader"   # under the project root: its reading notes and the departures from the draft
++DEPARTURES_FILE = "departures.md"
++
++# what it reads besides the map agent's reads: the Definitions a statement is written in (ADR-0020)
++READER_READS = (*MAP_PROOF_READS, "Bash(proof definition list *)", "Bash(proof definition show *)")
++# what it writes, each a `proof` command: a Definition, a Theorem, a Lemma or an imported result (never a Claim: a
++# Claim is a Split's, the Decomposer's), a citation, fog, and corrections of its own unfixed text (ADR-0021 point 6:
++# proof-cli refuses any other). ADR-0010: a contract for a cooperative agent, not a sandbox. Claude Code's `*` matches
++# spaces too, so `create * theorem *` would match a Claim whose statement names a theorem (audit P2-2): the kind is
++# matched as the word right before the double-quoted statement, and the denials below catch a Claim written any other
++# way — at the cost of refusing a statement with `claim "` in it, which the Reader rewords.
++READER_KINDS = ("theorem", "lemma", "imported_result")
++READER_WRITES = (
++    "Bash(proof definition add *)",
++    *(f'Bash(proof node create * {kind} "*)' for kind in READER_KINDS),
++    "Bash(proof reference import *)",
++    "Bash(proof fog add *)",
++    "Bash(proof node restate *)",
++    "Bash(proof definition edit *)",
++)
++READER_DENIED = (
++    "Bash(proof node create * --reassign*)",   # taking a claim over with a new node
++    "Bash(proof node create * --parent*)",     # a node under a parent: an edge made at creation, a split by another name
++    # a Claim, however it is spelt: the kind before a quoted statement or an option, or quoted itself
++    'Bash(proof node create * claim "*)', "Bash(proof node create * claim '*)", "Bash(proof node create * claim -*)",
++    'Bash(proof node create * "claim" *)', "Bash(proof node create * 'claim' *)",
++    # the typed metadata a Trust rule reads (`identifier has DOI|arXiv`, `source_type in {…}`, ADR-0014): with it, a
++    # researcher's rule would make the Reader's paraphrase of a result callable with no Reference review of it (audit P2-7)
++    "Bash(proof reference import * --identifier*)", "Bash(proof reference import * --source-type*)",
++)
++
++READER_BRIEF = """\
++You are the **Reader** of a proof project (ADR-0021): you turn the researcher's draft into a proof map — a map of
++nodes (theorems, lemmas, claims and imported results), their dependencies and their proofs. You read; you never
++prove. {target}
++
++Work this way:
++1. Read before you write. What the map already holds: `proof node list`, `proof node show <id> --json`,
++   `proof definition list`, `proof reference list`, `proof fog list`. Leave what is there as it is and add only
++   what is missing: the researcher may have started the map. Then read the draft through, and the works it cites
++   (the library{library}, the web), far enough to state what the draft uses from each.
++2. Write the Definitions the statements are written in — a model's setting, a definition, notation — each once:
++   `proof definition add <def-id> "<text, Markdown with $…$>" --term "<the name>" --created-by {name}`.
++3. Write the Theorems and Lemmas the draft states, with their dependencies as the draft's proofs use them, and the
++   Definitions they are written in:
++   `proof node create <id> theorem|lemma "<statement>" --definition <def-id> --dependency <id> --created-by {name}`
++   (`--assumption "<text>"` for a standing assumption). Create a node before the nodes that rest on it. Where the
++   draft leaves a statement empty, write the statement it means — what its proof sketch or its use proves — and
++   record that as a departure (point 7).
++4. For each piece of literature the draft calls on, the citation, then the result itself as an imported result:
++   `proof reference import <ref-id> "<title>" <year> --author "<name>" --url <the DOI or arXiv link> --created-by {name}`
++   (`--author` repeatable). Leave out `--identifier` and `--source-type`: a Trust rule the researcher declares reads
++   them, and would make your statement of the result callable before anyone reviewed it; they are the researcher's to
++   give. Then
++   `proof node create <id> imported_result "<the statement used, as the work states it>" --source-locator "<theorem
++   number, page>" --source-version "<edition, arXiv version>" --reference-id <ref-id> --created-by {name}`.
++   State what the work proves, read from the work itself where you can reach it; where you cannot, say so in the
++   departures.
++5. What the draft leaves open and you cannot yet state precisely goes in the fog, near the node it is about:
++   `proof fog add "<text>" --near <id> --created-by {name}`.
++6. A later turn of yours may correct what you wrote while it is unfixed (no Review decision relied on it yet), with
++   why: `proof node restate <id> --statement "<the statement as it now reads>" --reason "<why>" --by {name}`,
++   `proof definition edit <def-id> --text "<the text as it now reads>" --reason "<why>" --by {name}`. `proof` refuses
++   the researcher's text and fixed text: that is a new Definition or a new node.
++7. Every departure from the draft — a definition corrected (one that is wrong as written: an infinite supremum, a
++   wrong group), a setting fixed, a statement written where the draft has none, a reading chosen where the text
++   admits two — goes in {scratch}/{departures} with where in the draft and why, and in your closing note. Where the
++   draft admits two readings, take the one it most likely means and record the other: nothing here waits for the
++   researcher, who reads your departures first.
++You never create a Claim (a Claim is a Split's), never split, claim, unassign or request review, never add an edge
++after creation, never write a proof, and never make a Review decision (accept, reject, …): those are the
++researcher's. You write no file but under {scratch}/. You run `proof` only as the commands above, always on this
++project ($PROOF_ROOT); computation (Python, SageMath, …) to check what a definition says is fine, with its files
++under {scratch}/.
++End with a closing note: the nodes, Definitions, imported results and fog you added, by id, and every departure.
++"""
++
++
++@dataclass
++class ReaderContext:
++    """The Reader of one project: where it runs, what it reads, how it is briefed and permitted."""
++
++    project_root: Path
++    library: list[Path] = field(default_factory=list)
++    name: str = READER_NAME
++    # the one library file it was started on, or None for the whole library (ADR-0021 point 5)
++    draft: Path | None = None
++    project_id: str | None = None   # the project's instance id, from the host (as ProofAgentContext carries it)
++    writes_files = True   # under scratch/reader/ only (latex-agent's manager reads this)
++
++    @property
++    def compiles(self) -> bool:
++        return False   # it has no node, so no studio build
++
++    @property
++    def scratch(self) -> Path:
++        return self.project_root / READER_SCRATCH
++
++    def turn_ended(self, root: Path, changed: list[str]) -> None:
++        """Nothing to record: what it changed on the map, `proof` recorded under its name already."""
++
++    def env(self) -> dict[str, str]:
++        env = {**os.environ, "PROOF_ROOT": str(self.project_root), "PROOF_AGENT_NAME": self.name}
++        env.pop("PROOF_AGENT_ROLE", None)   # no node role: `proof node progress` is not its record
++        env["CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR"] = "1"
++        if shutil.which("proof", path=env.get("PATH")) is None:  # the interpreter running proof-cli has it
++            env["PATH"] = os.pathsep.join(filter(None, [env.get("PATH"), str(Path(sys.executable).parent)]))
++        return env
++
++    def brief(self) -> str:
++        library = ", ".join(str(folder) for folder in self.library)
++        target = (f"You were started on one library file, {self.draft}: read it, and what it cites; state that draft as the map."
++                  if self.draft is not None else "You were started on the project: state every draft in its library as the map.")
++        return READER_BRIEF.format(name=self.name, target=target, library=f": {library}" if library else "",
++                                   scratch=READER_SCRATCH, departures=DEPARTURES_FILE)
++
++    def claude_args(self, edit: bool, scope_rules: list[str] | None = None, tools: list[str] | tuple[str, ...] = ()) -> list[str]:
++        """Claude Code's permissions: read the project, the library and the web; `proof` as the reads and the Reader's
++        writes; computation by name; files only under scratch/reader/, whatever `edit` and `scope_rules` say; no
++        other project."""
++        args = ["--setting-sources", "user", "--permission-prompts", "none",
++                "--settings", json.dumps({"claudeMdExcludes": claude_md_excludes(self.project_root)}),
++                "--add-dir", str(self.project_root), *(str(folder) for folder in self.library)]
++        if self.draft is not None and not any(self.draft.is_relative_to(folder) for folder in self.library):
++            args += ["--add-dir", str(self.draft.parent)]
++        scratch = self.scratch.resolve()
++        writes = [anchored(f"{tool}(./**)", scratch) for tool in ("Edit", "Write", "MultiEdit")]
++        allowed = ["Read", "Glob", "Grep", "WebSearch", "WebFetch", *READER_READS, *READER_WRITES,
++                   *(f"Bash({command} *)" for command in COMPUTATION), *writes, *tools]
++        denied = [*READER_DENIED, *inline_code_rules(COMPUTATION), *NO_OTHER_PROJECT]
++        return [*args, "--allowedTools", *allowed, "--disallowedTools", *denied]
++
++    def codex_args(self, sandbox: str) -> tuple[list[str], list[str]]:
++        """Codex's (before `exec`, after it): live web search, no project AGENTS.md, the project writable because
++        `proof` writes its database and new nodes' folders; the brief is the contract there (ADR-0010)."""
++        exec_args = ["--sandbox", sandbox, "-c", "project_doc_max_bytes=0"]
++        if sandbox == "workspace-write":
++            exec_args += ["--add-dir", str(self.project_root), "-c", "sandbox_workspace_write.network_access=true"]
++        return ["--search"], exec_args
++
++
++__all__ = ["DEPARTURES_FILE", "READER_NAME", "READER_READS", "READER_SCRATCH", "READER_WRITES", "ReaderContext"]
+diff --git a/tests/test_choices_and_provisional.py b/tests/test_choices_and_provisional.py
+new file mode 100644
+index 0000000..3d756cf
+--- /dev/null
++++ b/tests/test_choices_and_provisional.py
+@@ -0,0 +1,85 @@
++"""ADR-0021 points 3 and 8 in the briefs and the briefing: a judgement call is made and recorded as a Standing question,
++not asked; a Provisional dependency's statement may be used, its proof never."""
++
++from pathlib import Path
++
++from proof_agents.agent_run import AgentRun
++from proof_agents.briefing import PROVISIONAL_IMPORTED, PROVISIONAL_LOCAL, BriefingParts, build_briefing, questions_from
++from proof_agents.proof_agent import COMMANDS, ROLES, ProofAgentContext
++
++from test_prove_verify_loop import _hooks, _ScriptedAgent, _until
++
++QUESTION = "proof node progress N --question"
++
++
++def _brief(role):
++    return ProofAgentContext("N", Path("."), role=role, name="claude-code").brief()
++
++
++def _allowed(role):
++    args = ProofAgentContext("N", Path("."), role=role, name="claude-code").claude_args(True)
++    return args[args.index("--allowedTools") + 1:args.index("--disallowedTools")]
++
++
++def test_every_role_records_a_judgement_call_and_goes_on_instead_of_asking():
++    for role in ROLES:
++        brief = _brief(role)
++        assert QUESTION in brief and "A judgement call is not a reason to stop" in brief, role
++        assert any("--question" in command for command in COMMANDS[role]), role
++        assert "Bash(proof node progress N *)" in _allowed(role), role  # the command the brief gives is one the role may run
++    for role in ("prover", "verifier", "typesetter", "numerics"):
++        brief = _brief(role)
++        # needs-human is kept for what no reading settles, and it stops the node, not the subtree
++        assert "a contradiction in this node's own statement" in brief and "It stops this node, not the rest of the map" in brief, role
++        assert "a choice of definition, of norm" not in brief, role
++
++
++def test_the_verifier_may_appeal_to_a_provisional_statement_and_marks_an_unread_source():
++    brief = _brief("verifier")
++    assert "marks Provisional may be\nappealed to by its statement" in brief and "its proof never" in brief
++    assert '"unchecked against the source"' in brief
++    assert "may be used by its statement" in _brief("prover")
++
++
++def _parts(dependencies, questions=()):
++    return BriefingParts(role="prover", node_id="N", statement="S", dependencies=dependencies, questions=list(questions))
++
++
++def test_a_provisional_dependency_is_briefed_by_its_statement_and_never_its_proof():
++    text = build_briefing(_parts([
++        {"id": "A", "statement": "A holds", "accepted": True, "key_ideas": "by compactness"},
++        {"id": "C", "statement": "C holds", "accepted": False, "provisional": True, "key_ideas": "never shown"},
++        {"id": "R", "statement": "R holds", "accepted": False, "provisional": True, "kind": "imported_result"},
++        {"id": "U", "statement": "U holds", "accepted": False, "key_ideas": None},
++    ]))
++    assert "- A: A holds (Accepted)\n  key ideas: by compactness" in text
++    assert f"- C: C holds ({PROVISIONAL_LOCAL})" in text and "never shown" not in text
++    assert f"- R: R holds ({PROVISIONAL_IMPORTED})" in text
++    assert "- U: U holds (not yet accepted" in text
++
++
++def test_standing_questions_are_read_off_the_work_log_and_the_researchers_redirects_come_first():
++    log = [
++        {"kind": "question", "id": "q_1", "role": "prover", "question": "read |x| as the sup norm; or the l2 norm"},
++        {"kind": "question", "id": "q_2", "role": "verifier", "question": "Gamma is SL2(Z[1/p]); or a finite-index subgroup"},
++        {"kind": "question", "id": "q_3", "role": "prover", "question": "drop the case p = 2; or treat it"},
++        {"kind": "answer", "question_id": "q_1", "keep": False, "redirect": "use the l2 norm"},
++        {"kind": "answer", "question_id": "q_3", "keep": True, "redirect": None},
++        {"kind": "attempt", "goal": "g", "failed_on": "f"},
++    ]
++    found = questions_from(log)
++    assert [(q["id"], q["state"], q["redirect"]) for q in found] == [("q_1", "answered", "use the l2 norm"), ("q_2", "open", None), ("q_3", "answered", None)]
++    text = build_briefing(_parts([], found))
++    assert text.index("q_1: instead of “read |x| as the sup norm; or the l2 norm”, use the l2 norm") < text.index("q_2 (verifier): Gamma is SL2(Z[1/p])")
++    assert "q_3" not in text  # a choice the researcher kept says nothing new
++    assert "do not ask them again" in text
++
++
++def test_the_run_briefs_each_turn_with_the_node_s_standing_questions():
++    log = [{"kind": "question", "id": "q_1", "role": "prover", "by": "claude-code", "question": "take N = 3; or leave it general"},
++           {"kind": "answer", "question_id": "q_1", "keep": False, "redirect": "leave N general", "by": "human"}]
++    agent = _ScriptedAgent(log, [])
++    run = AgentRun(agent, _hooks(work_log=lambda: list(log)))
++    run.start("claude")
++    _until(lambda: not run.active(), "still active")
++    assert "q_1: instead of “take N = 3; or leave it general”, leave N general" in agent.started[0]["prompt"]
+diff --git a/tests/test_coordinator.py b/tests/test_coordinator.py
+index 2fec2a4..4cdc629 100644
+--- a/tests/test_coordinator.py
++++ b/tests/test_coordinator.py
+@@ -1,8 +1,8 @@
+-"""The Coordinator over a subtree (ADR-0019 points 18 and 19), driven with fake node runs and a subtree the test moves
+-along: it starts runs on the frontier up to `parallel` at a time, starts the parent once every child is Accepted,
+-restarts a node after a failed verdict until the node budget is spent, redirects dependents when a node is Accepted,
+-stops when the root is requested for review, its budget is spent, or every open node is stuck; and Pause, Resume and
+-Stop and release reach the runs it started."""
++"""The Coordinator over a subtree (ADR-0019 points 18 and 19, ADR-0021 Pursue), driven with fake node runs and a subtree
++the test moves along: it starts runs on the frontier up to `parallel` at a time, starts the parent once every child is
++Accepted or Provisional, restarts a node whatever its last verdict until the node budget is spent and then parks it,
++redirects dependents when a node is Accepted, stops when the root is requested for review, its budget is spent, or
++nothing open is left to work; and Pause, Resume and Stop and release reach the runs it started."""
+ 
+ import time
+ 
+@@ -29,7 +29,7 @@ class FakeRun:
+ 
+     def __init__(self):
+         self.status, self.turns, self.verdict, self.reason = "idle", 0, None, ""
+-        self.calls, self.redirects, self.starts, self.caps = [], [], 0, []
++        self.calls, self.redirects, self.starts, self.caps, self.kw = [], [], 0, [], []
+         self.claim, self.started_at, self.gate, self.fail_release = None, None, None, False
+ 
+     def start(self, provider, turns=None, **kw):
+@@ -38,6 +38,7 @@ class FakeRun:
+         self.calls.append("start")
+         self.starts += 1
+         self.caps.append(turns)
++        self.kw.append(kw)
+         self.status, self.turns, self.verdict, self.reason = "running", 0, None, ""
+         self.claim, self.started_at = "claude-code", self.starts * 1000.0
+         return self.view()
+@@ -79,11 +80,12 @@ class FakeRun:
+ class World:
+     """A subtree: T rests on A and B; C rests on A. The test accepts nodes and requests review; the hooks read it."""
+ 
+-    def __init__(self, edges=None, parallel=2, budget=(5, 60.0)):
++    def __init__(self, edges=None, parallel=2, budget=(5, 60.0), kinds=None):
+         self.edges = edges or {"T": ["A", "B"], "A": [], "B": [], "C": ["A"]}
++        self.kinds = kinds or {}
+         self.accepted, self.requested, self.ideas = set(), set(), {}
+         self.runs = {node: FakeRun() for node in self.edges}
+-        self.notes = []
++        self.notes, self.parked = [], []
+         self._parallel, self._budget = parallel, budget
+ 
+     def subtree(self):
+@@ -98,20 +100,25 @@ class World:
+                 workflow = "claimed"
+             else:
+                 workflow = "open"
+-            out.append({"id": node, "kind": "theorem" if node == "T" else "claim", "statement": f"{node} holds", "dependencies": list(deps),
++            kind = self.kinds.get(node, "theorem" if node == "T" else "claim")
++            out.append({"id": node, "kind": kind, "statement": f"{node} holds", "dependencies": list(deps),
+                         "accepted": node in self.accepted, "workflow": workflow, "claimed_by": run.claim,
+-                        "key_ideas": self.ideas.get(node), "has_run": True})
++                        "key_ideas": self.ideas.get(node), "has_run": True,
++                        # ADR-0021: a snapshot the Verifier passed is Provisional; every dependency of a Theorem here is a split's Claim
++                        "awaiting_review": node in self.requested, "provisional": node in self.requested and run.verdict == "passed",
++                        "split_children": [d for d in deps if self.kinds.get(d, "claim") == "claim"] if kind in ("theorem", "lemma") else []})
+         return out
+ 
+     def hooks(self):
+         return CoordinatorHooks(subtree=self.subtree, run=lambda node: self.runs[node], budget=lambda: self._budget, parallel=lambda: self._parallel,
+-                                agent_name=lambda provider: "claude-code", record=self.notes.append)
++                                agent_name=lambda provider: "claude-code", record=self.notes.append,
++                                park=lambda node, reason: self.parked.append((node, reason)))
+ 
+     def coordinator(self, root="T"):
+         return Coordinator(self.hooks(), root, tick=0.01)
+ 
+ 
+-def test_start_runs_the_frontier_up_to_parallel_then_the_parent_once_every_child_is_accepted_and_stops_at_the_roots_review():
++def test_start_runs_the_frontier_up_to_parallel_then_the_parent_once_every_child_is_provisional_and_stops_at_the_roots_review():
+     world = World(edges={"T": ["A", "B", "C"], "A": [], "B": [], "C": []})
+     c = world.coordinator()
+     assert c.start("claude")["status"] in ("starting", "running")
+@@ -120,25 +127,37 @@ def test_start_runs_the_frontier_up_to_parallel_then_the_parent_once_every_child
+     assert world.runs["C"].starts == 0 and sorted(c.view()["running"]) == ["A", "B"]  # parallel 2
+     world.runs["A"].end("done", verdict="passed", turns=3, reason="review-requested"); world.requested.add("A")
+     _until(lambda: world.runs["C"].starts == 1, "C started once A's run ended")
+-    world.requested.discard("A"); world.accepted.add("A")
+     world.runs["B"].end("done", verdict="passed", turns=2, reason="review-requested"); world.requested.add("B")
+-    world.runs["C"].end("done", verdict="passed", turns=2, reason="review-requested"); world.requested.add("C")
+     time.sleep(0.05)
+-    assert world.runs["T"].starts == 0  # T is blocked until every child is Accepted
+-    world.requested.clear(); world.accepted.update({"B", "C"})
+-    _until(lambda: world.runs["T"].starts == 1, "T started once every child is Accepted")
++    assert world.runs["T"].starts == 0  # C is still being worked: T waits for every child to be Accepted or Provisional
++    world.runs["C"].end("done", verdict="passed", turns=2, reason="review-requested"); world.requested.add("C")
++    # nobody Accepted anything: every child passed the Verifier, and that is enough to work the parent (ADR-0021 point 4)
++    _until(lambda: world.runs["T"].starts == 1, "T started once every child is Provisional")
++    assert world.accepted == set()
+     world.runs["T"].end("done", verdict="passed", turns=4, reason="review-requested"); world.requested.add("T")
+     _until(lambda: not c.active(), "the Coordinator ended")
+     view = c.view()
+     assert (view["status"], view["reason"]) == ("done", "T is requested for review") and view["turns"] == 11
+     assert view["nodes"]["A"]["starts"] == 1 and view["nodes"]["T"]["turns"] == 4
++    assert all(kw == {"pursue": True} for kw in world.runs["T"].kw + world.runs["A"].kw)
+     assert any(n.startswith("started on T: 4 open node(s)") for n in world.notes) and "done: T is requested for review" in world.notes
+ 
+ 
++def test_a_child_awaiting_review_without_the_verifiers_pass_holds_its_parent_and_the_coordinator_does_not_wait_for_it():
++    world = World(edges={"T": ["A"], "A": []}, parallel=1)
++    c = world.coordinator()
++    c.start("claude")
++    _until(lambda: world.runs["A"].starts == 1, "A started")
++    world.runs["A"].end("done", verdict=None, turns=1, reason="review-requested"); world.requested.add("A")  # no passing verdict
++    _until(lambda: not c.active(), "the Coordinator ended")
++    assert world.runs["T"].starts == 0
++    assert c.view()["status"] == "stuck" and "nothing left to work without the researcher: T" in c.view()["reason"]
++
++
+ def test_the_coordinator_is_done_only_once_the_roots_run_has_ended_too():
+     """#187: the root is requested for review in the middle of its run's turn; the run still records the verdict that gated
+     the request (an Evidence check) as the turn ends. Done before that, and the host may close the run first."""
+-    world = World(edges={"T": []}, parallel=1)
++    world = World(edges={"T": []}, parallel=1, kinds={"T": "claim"})
+     c = world.coordinator()
+     c.start("claude")
+     _until(lambda: world.runs["T"].starts == 1, "T started")
+@@ -150,26 +169,39 @@ def test_the_coordinator_is_done_only_once_the_roots_run_has_ended_too():
+     assert (c.view()["status"], c.view()["reason"]) == ("done", "T is requested for review")
+ 
+ 
+-def test_a_run_that_ended_on_a_failed_verdict_is_started_again_until_the_node_budget_is_spent_and_a_stuck_one_is_not():
+-    world = World(edges={"T": ["A"], "A": []}, parallel=1, budget=(4, 60.0))
++def test_a_run_that_ended_short_of_review_is_started_again_whatever_its_verdict_until_the_node_budget_is_spent_then_parked():
++    # A is a Lemma here: a parked Claim would give T another Decomposer turn (see below)
++    world = World(edges={"T": ["A", "B"], "A": [], "B": []}, parallel=2, budget=(4, 60.0), kinds={"A": "lemma"})
+     c = world.coordinator()
+     c.start("claude")
+-    _until(lambda: world.runs["A"].starts == 1, "A started")
++    _until(lambda: world.runs["A"].starts == 1 and world.runs["B"].starts == 1, "A and B started")
+     world.runs["A"].end("stuck", verdict="failed", turns=2, reason="no change in 5 turn(s)")
+     assert world.runs["A"].claim == "claude-code"  # the ended run keeps the claim (as AgentRun does): this Coordinator's own, no bar to the retry
+     _until(lambda: world.runs["A"].starts == 2, "A started again after a failed verdict")
+     assert world.runs["A"].caps == [4, 2]  # the retry gets what is left of the node budget, not a fresh one (audit P4)
+-    world.runs["A"].end("stuck", verdict="failed", turns=2, reason="still")  # 4 turns spent of 4: the node budget is spent
++    world.runs["A"].end("stuck", verdict=None, turns=1, reason="the agent reported it is stuck")  # no verdict: started again all the same
++    _until(lambda: world.runs["A"].starts == 3, "A started again after a stuck run with no verdict")
++    world.runs["A"].end("budget", verdict=None, turns=1, reason="out of turns")  # 4 turns spent of 4: the node budget is spent
++    _until(lambda: c.view()["parked"], "A parked")
++    # A is parked, and the rest of the subtree goes on: B is still worked, and passes
++    assert c.active() and world.runs["A"].starts == 3 and world.parked[0][0] == "A" and "its budget is spent" in world.parked[0][1]
++    world.runs["B"].end("done", verdict="passed", turns=1, reason="review-requested"); world.requested.add("B")
+     _until(lambda: not c.active(), "the Coordinator ended")
+-    assert world.runs["A"].starts == 2
+-    assert c.view()["status"] == "budget" or c.view()["status"] == "stuck", c.view()
+-    world2 = World(edges={"T": ["A"], "A": []}, parallel=1)
+-    c2 = world2.coordinator()
+-    c2.start("claude")
+-    _until(lambda: world2.runs["A"].starts == 1, "A started")
+-    world2.runs["A"].end("stuck", verdict=None, turns=1, reason="the agent reported it is stuck")
+-    _until(lambda: not c2.active(), "the Coordinator ended")
+-    assert world2.runs["A"].starts == 1 and c2.view()["status"] == "stuck" and "every open node in the subtree is stuck" in c2.view()["reason"]
++    view = c.view()
++    assert view["status"] == "stuck" and "T rest(s) on what no run will settle (parked: A)" in view["reason"]
++    assert view["needs_you"] == [{"node": "A", "last": "budget", "reason": view["parked"][0]["reason"]}]
++
++
++def test_a_node_whose_run_stops_for_a_decision_is_parked_at_once_and_when_every_open_node_is_parked_the_coordinator_ends():
++    world = World(edges={"T": [], "A": []}, parallel=2, kinds={"T": "claim"})
++    c = world.coordinator()
++    c.start("claude")
++    _until(lambda: world.runs["A"].starts == 1 and world.runs["T"].starts == 1, "A and T started")
++    world.runs["A"].end("needs-human", turns=1, reason="the statement contradicts itself")
++    world.runs["T"].end("needs-human", turns=1, reason="a constant only you know")
++    _until(lambda: not c.active(), "the Coordinator ended")
++    assert world.runs["A"].starts == 1 and c.view()["status"] == "parked"
++    assert c.view()["reason"].startswith("every open node in the subtree is parked")
+ 
+ 
+ def test_the_budget_is_the_sum_of_the_node_budgets_and_ends_the_coordinator_not_the_runs():
+@@ -196,7 +228,8 @@ def test_an_acceptance_redirects_the_running_dependents_once_with_the_statement_
+     c2 = world2.coordinator()
+     c2.start("claude")
+     _until(lambda: world2.runs["A"].starts and world2.runs["B"].starts, "A and B started")
+-    world2.runs["A"].end("done", verdict="passed", turns=1, reason="review-requested"); world2.requested.add("A")
++    # the researcher's own request, with no passing verdict: A is not Provisional, so D waits for its Acceptance
++    world2.runs["A"].end("done", verdict=None, turns=1, reason="review-requested"); world2.requested.add("A")
+     time.sleep(0.05)
+     world2.requested.discard("A"); world2.accepted.add("A"); world2.ideas["A"] = "## 核心思路\nby compactness\n## 主要步骤\n1. x\n"
+     _until(lambda: world2.runs["D"].starts == 1, "D started once A is Accepted")
+@@ -208,13 +241,13 @@ def test_an_acceptance_redirects_the_running_dependents_once_with_the_statement_
+     world3.accepted.discard("A")  # start with A open and B blocked; then let B run while A is reviewed
+     c3.start("claude")
+     _until(lambda: world3.runs["A"].starts == 1, "A started")
+-    world3.runs["A"].end("done", verdict="passed", turns=1, reason="review-requested"); world3.requested.add("A")
++    world3.runs["A"].end("done", verdict=None, turns=1, reason="review-requested"); world3.requested.add("A")
+     world3.requested.discard("A"); world3.accepted.add("A"); world3.ideas["A"] = "## 核心思路\nby compactness\n"
+     _until(lambda: world3.runs["B"].starts == 1, "B started")
+     world3.runs["B"].turns = 1  # B is running now; T is blocked on B
+     time.sleep(0.05)
+     assert world3.runs["B"].redirects == []  # A was Accepted before B's run began
+-    world3.runs["B"].end("done", verdict="passed", turns=1, reason="review-requested"); world3.requested.add("B")
++    world3.runs["B"].end("done", verdict=None, turns=1, reason="review-requested"); world3.requested.add("B")
+     world3.requested.discard("B"); world3.accepted.add("B"); world3.ideas["B"] = "## 核心思路\ntelescoping\n"
+     _until(lambda: world3.runs["T"].starts == 1, "T started")
+     assert world3.runs["T"].redirects == []
+@@ -302,13 +335,13 @@ def test_a_start_that_returns_after_stop_or_pause_is_released_or_paused_and_no_f
+ 
+ def test_stop_releases_the_ended_runs_that_kept_their_claim_but_not_a_later_owners_run():
+     """Audit P3: a run that ended stuck keeps the node; Stop gives it back too — unless the researcher started the node again since."""
+-    world = World(edges={"T": ["A", "B", "C"], "A": [], "B": [], "C": []}, parallel=3)
++    world = World(edges={"T": ["A", "B", "C"], "A": [], "B": [], "C": []}, parallel=3, kinds={"A": "lemma", "C": "lemma"})
+     c = world.coordinator()
+     c.start("claude")
+     _until(lambda: all(world.runs[n].starts == 1 for n in "ABC"), "A, B and C started")
+-    world.runs["A"].end("stuck", verdict=None, turns=1, reason="the agent reported it is stuck")   # keeps the claim; not restartable
++    world.runs["A"].end("needs-human", verdict=None, turns=1, reason="a decision only you can make")   # keeps the claim; parked
+     world.runs["B"].end("done", verdict="passed", turns=1, reason="review-requested"); world.requested.add("B")
+-    world.runs["C"].end("stuck", verdict=None, turns=1, reason="stuck too")
++    world.runs["C"].end("needs-human", verdict=None, turns=1, reason="another")
+     _until(lambda: c.view()["running"] == [], "the ended runs noted")
+     world.runs["C"].start("claude")   # the researcher starts C again: a later owner
+     assert c.release()["status"] == "released"
+@@ -400,28 +433,353 @@ def test_a_stop_or_pause_right_after_start_is_not_undone_by_the_loops_first_brea
+     c2.release()
+ 
+ 
+-def test_a_node_stuck_with_no_failed_verdict_is_named_as_needing_you_while_another_waits_for_review():
+-    """#132 tier 3: MEAN's run ended stuck with no verdict while PAIR and SITES waited for review. The Coordinator kept running
+-    ("waiting on your review") and nothing said MEAN would not be started again. The view now names it, with why."""
+-    world = World(edges={"T": ["A", "B"], "A": [], "B": []})
++def test_the_nodes_it_parked_are_named_as_needing_you_and_a_restartable_one_is_not():
++    """#132 tier 3: MEAN's run ended stuck with no verdict while PAIR and SITES waited for review, and nothing said MEAN would
++    not be started again. Under ADR-0021 it is started again while its budget lasts; what is parked is named, with why."""
++    world = World(edges={"T": ["A", "B"], "A": [], "B": []}, budget=(5, 60.0), kinds={"A": "lemma"})
+     c = world.coordinator()
+     c.start("claude")
+     _until(lambda: world.runs["A"].starts and world.runs["B"].starts, "A and B started")
+-    world.runs["A"].end("stuck", verdict=None, turns=1, reason="writing scratch/ was denied")
+     world.runs["B"].end("done", verdict="passed", turns=3, reason="review-requested"); world.requested.add("B")
++    world.runs["A"].end("stuck", verdict=None, turns=1, reason="writing scratch/ was denied")
++    _until(lambda: world.runs["A"].starts == 2, "A started again")
++    assert c.view()["needs_you"] == []
++    world.runs["A"].end("needs-human", verdict=None, turns=1, reason="which Γ is meant")
+     _until(lambda: c.view()["needs_you"], "A named")
+-    view = c.view()
+-    assert c.active() and view["running"] == []  # still waiting on B's review
+-    assert view["needs_you"] == [{"node": "A", "last": "stuck", "reason": "writing scratch/ was denied"}]
++    assert c.view()["needs_you"] == [{"node": "A", "last": "needs-human", "reason": "needs-human: which Γ is meant"}]
+     c.release()
+     _until(lambda: not c.active(), "the Coordinator released")
+-    world2 = World(edges={"T": ["A", "B"], "A": [], "B": []}, budget=(5, 60.0))
+-    c2 = world2.coordinator()
+-    c2.start("claude")
+-    _until(lambda: world2.runs["A"].starts and world2.runs["B"].starts, "A and B started")
+-    world2.runs["B"].end("done", verdict="passed", turns=3, reason="review-requested"); world2.requested.add("B")
+-    world2.runs["A"].end("stuck", verdict="failed", turns=1, reason="objections")  # a failed verdict with budget left: started again, not named
+-    _until(lambda: world2.runs["A"].starts == 2, "A started again")
+-    assert c2.view()["needs_you"] == []
+-    c2.release()
+-    _until(lambda: not c2.active(), "the Coordinator released")
++
++
++# -- Pursue (ADR-0021 point 7): the Decomposer first, its split worked, a parked Claim's parent split again ----------------
++
++
++def test_pursue_on_a_theorem_with_no_claims_starts_with_a_decomposer_turn_and_works_its_split():
++    world = World(edges={"T": []}, parallel=2, budget=(3, 60.0))
++    c = world.coordinator()
++    c.start("claude")
++    _until(lambda: world.runs["T"].starts == 1, "the Decomposer started on T")
++    assert world.runs["T"].kw[0] == {"pursue": True, "roles": ["decomposer"]} and c.view()["decomposed"] == ["T"]
++    assert c.view()["turns_max"] == 3
++    # its split: T rests on two Claims, and the run ends done (it gave T back)
++    world.edges.update({"T": ["A", "B"], "A": [], "B": []})
++    world.runs.update({"A": FakeRun(), "B": FakeRun()})
++    world.runs["T"].end("done", turns=1, reason="split into 2 Claim(s): A, B; the Coordinator works them")
++    world.runs["T"].claim = None
++    _until(lambda: world.runs["A"].starts == 1 and world.runs["B"].starts == 1, "the Claims are worked")
++    assert c.view()["turns_max"] == 9  # the budget grew with the Claims
++    for claim in "AB":
++        world.runs[claim].end("done", verdict="passed", turns=1, reason="review-requested"); world.requested.add(claim)
++    _until(lambda: world.runs["T"].starts == 2, "T's own proof once its Claims are Provisional")
++    assert world.runs["T"].kw[1] == {"pursue": True} and world.runs["T"].caps[1] == 2
++    world.runs["T"].end("done", verdict="passed", turns=1, reason="review-requested"); world.requested.add("T")
++    _until(lambda: not c.active(), "the Coordinator ended")
++    assert c.view()["status"] == "done"
++
++
++def test_a_parked_claim_gives_its_parent_one_more_decomposer_turn_once():
++    world = World(edges={"T": ["A", "B"], "A": [], "B": []}, parallel=2, budget=(2, 60.0))
++    c = world.coordinator()
++    c.start("claude")
++    _until(lambda: world.runs["A"].starts == 1 and world.runs["B"].starts == 1, "A and B started")
++    world.runs["A"].end("needs-human", turns=1, reason="cannot be stated as is")
++    _until(lambda: world.runs["T"].starts == 1, "T given a Decomposer turn")
++    kw = world.runs["T"].kw[0]
++    assert kw["roles"] == ["decomposer"] and kw["pursue"] and kw["redirect"].startswith("A is parked (needs-human: cannot be stated as is)")
++    world.runs["T"].end("done", turns=1, reason="split into 1 Claim(s): A2; the Coordinator works them"); world.runs["T"].claim = None
++    world.runs["B"].end("needs-human", turns=1, reason="also stuck")
++    _until(lambda: not c.active(), "the Coordinator ended")
++    assert world.runs["T"].starts == 1  # once per parent
++    assert sorted(node for node, _ in world.parked) == ["A", "B"]
++
++
++def test_a_project_with_no_map_is_read_first_and_each_theorem_pursued_in_turn():
++    from proof_agents.coordinator import ProjectPursuit, PursuitHooks
++
++    stated: list[str] = []
++    worlds = {"T1": World(edges={"T1": []}, kinds={"T1": "claim"}), "T2": World(edges={"T2": []}, kinds={"T2": "claim"})}
++    coordinators = {name: Coordinator(CoordinatorHooks(subtree=w.subtree, run=lambda node, w=w: w.runs[node], budget=lambda: (2, 60.0),
++                                                       parallel=lambda: 1), name, tick=0.01) for name, w in worlds.items()}
++    reads = []
++
++    def read(provider):
++        reads.append(provider)
++        stated.extend(["T1", "T2"])
++        return {}
++
++    pursuit = ProjectPursuit(PursuitHooks(read=read, theorems=lambda: list(stated), coordinator=coordinators.__getitem__), tick=0.01)
++    pursuit.start("claude")
++    _until(lambda: worlds["T1"].runs["T1"].starts == 1, "T1 pursued")
++    assert reads == ["claude"] and worlds["T2"].runs["T2"].starts == 0  # one Theorem after another
++    worlds["T1"].runs["T1"].end("done", verdict="passed", turns=1, reason="review-requested"); worlds["T1"].requested.add("T1")
++    _until(lambda: worlds["T2"].runs["T2"].starts == 1, "T2 pursued next")
++    worlds["T2"].runs["T2"].end("needs-human", turns=1, reason="?")
++    _until(lambda: pursuit.view()["status"] == "done", "the pursuit ended")
++    assert pursuit.view()["results"] == {"T1": {"status": "done", "reason": "T1 is requested for review"},
++                                         "T2": {"status": "parked", "reason": "every open node in the subtree is parked: T2"}}
++
++
++def test_a_dependent_started_on_a_provisional_node_is_redirected_when_the_researcher_accepts_it():
++    world = World(edges={"T": ["A", "D"], "A": [], "D": ["A"]})
++    c = world.coordinator()
++    c.start("claude")
++    _until(lambda: world.runs["A"].starts == 1, "A started")
++    world.runs["A"].end("done", verdict="passed", turns=1, reason="review-requested"); world.requested.add("A")
++    _until(lambda: world.runs["D"].starts == 1, "D started on A's Provisional statement")
++    world.requested.discard("A"); world.accepted.add("A")
++    _until(lambda: world.runs["D"].redirects, "D told that A is Accepted")
++    assert world.runs["D"].redirects[0].startswith("A is Accepted: A holds")
++    c.release()
++
++
++# -- the audit of ADR-0021's Pursue ----------------------------------------------------------------------------------------
++
++
++def test_a_start_that_took_no_turn_counts_toward_the_node_budget_and_the_node_is_parked_in_the_end():
++    """P1-1: a run that ends before any turn counts — its turn could not start, or its loop raised — was started again
++    forever. Each such Start spends one of the node budget's turns, so the node is parked once they are spent."""
++    world = World(edges={"T": ["A"], "A": []}, parallel=1, budget=(3, 60.0), kinds={"T": "claim"})
++    c = world.coordinator()
++    c.start("claude")
++    for start in (1, 2, 3):
++        _until(lambda start=start: world.runs["A"].starts == start, f"A's start {start}")
++        world.runs["A"].end("stuck", verdict=None, turns=0, reason="the turn could not start: no such provider")
++    _until(lambda: c.view()["parked"], "A parked")
++    time.sleep(0.05)
++    assert world.runs["A"].starts == 3 and world.runs["A"].caps == [3, 2, 1]
++    assert "its budget is spent" in c.view()["parked"][0]["reason"]
++    _until(lambda: not c.active(), "the Coordinator ended")
++    assert c.view()["status"] == "stuck" and "(parked: A)" in c.view()["reason"]
++
++
++def test_a_node_whose_run_the_researcher_released_or_that_ended_done_short_of_review_is_left_to_the_researcher():
++    """P1-5: the researcher's Stop and release of a node's run, or a run that ended done without a review request, is not
++    undone by the Coordinator's restart: the node is the researcher's now, named as such, and the rest goes on."""
++    for ending in ("released", "turn-finished"):
++        world = World(edges={"T": ["A", "B"], "A": [], "B": []}, parallel=2, budget=(5, 60.0))
++        c = world.coordinator()
++        c.start("claude")
++        _until(lambda: world.runs["A"].starts == 1 and world.runs["B"].starts == 1, "A and B started")
++        world.runs["A"].turns = 1
++        if ending == "released":
++            world.runs["A"].release("stopped and released by the researcher")
++        else:
++            world.runs["A"].end("done", verdict=None, turns=1, reason="turn-finished")
++        _until(lambda: c.view()["held"], "A left to the researcher")
++        world.runs["B"].end("done", verdict="passed", turns=1, reason="review-requested"); world.requested.add("B")
++        _until(lambda: not c.active(), "the Coordinator ended")
++        assert world.runs["A"].starts == 1 and world.runs["T"].starts == 0, ending
++        assert [h["node"] for h in c.view()["held"]] == ["A"] and c.view()["parked"] == []
++        assert c.view()["status"] == "stuck" and "the researcher's: A" in c.view()["reason"], c.view()["reason"]
++
++
++def test_a_decomposer_turn_that_split_nothing_is_not_noted_as_a_split_and_the_theorem_is_worked_as_one_argument():
++    for budget, split in ((1, False), (3, False), (3, True)):
++        world = World(edges={"T": []}, parallel=1, budget=(budget, 60.0))
++        c = world.coordinator()
++        c.start("claude")
++        _until(lambda: world.runs["T"].starts == 1, "the Decomposer started on T")
++        if split:
++            world.edges.update({"T": ["A"], "A": []}); world.runs["A"] = FakeRun()
++        world.runs["T"].end("done", turns=1, reason="split into 1 Claim(s): A; the Coordinator works them" if split else "turn-finished")
++        world.runs["T"].claim = None
++        if budget == 1:   # no turn left to work it: what the Decomposer's turn ended as stays on the record
++            _until(lambda: not c.active(), "the Coordinator ended")
++            assert c.view()["nodes"]["T"]["last"] == "no-split" and c.view()["held"] == []
++            continue
++        if split:
++            _until(lambda: world.runs["A"].starts == 1, "the Claim worked")
++            assert c.view()["nodes"]["T"]["last"] == "split"
++        else:
++            _until(lambda: world.runs["T"].starts == 2, "T worked as one argument")
++            assert world.runs["T"].kw[1] == {"pursue": True} and c.view()["held"] == []
++        c.release()
++
++
++def test_a_root_decomposed_by_this_start_still_gets_its_one_further_decomposer_turn_when_a_claim_parks():
++    """P1-2: the first decomposition is not the further structure ADR-0021 point 9 gives a parent once per parent."""
++    world = World(edges={"T": []}, parallel=2, budget=(5, 60.0))
++    c = world.coordinator()
++    c.start("claude")
++    _until(lambda: world.runs["T"].starts == 1, "the Decomposer started on T")
++    world.edges.update({"T": ["A", "B"], "A": [], "B": []}); world.runs.update({"A": FakeRun(), "B": FakeRun()})
++    world.runs["T"].end("done", turns=1, reason="split into 2 Claim(s): A, B; the Coordinator works them"); world.runs["T"].claim = None
++    _until(lambda: world.runs["A"].starts == 1 and world.runs["B"].starts == 1, "the Claims are worked")
++    world.runs["A"].end("needs-human", turns=1, reason="cannot be stated as is")
++    _until(lambda: world.runs["T"].starts == 2, "T given its further Decomposer turn")
++    kw = world.runs["T"].kw[1]
++    assert kw["roles"] == ["decomposer"] and kw["redirect"].startswith("A is parked") and c.view()["resplit"] == ["T"]
++    world.runs["T"].end("done", turns=1, reason="split into 1 Claim(s): A2; the Coordinator works them"); world.runs["T"].claim = None
++    world.runs["B"].end("needs-human", turns=1, reason="also stuck")
++    _until(lambda: not c.active(), "the Coordinator ended")
++    assert world.runs["T"].starts == 2 and c.view()["decomposed"] == ["T", "T"]  # exactly one further turn
++
++
++def test_a_further_decomposer_turn_that_cannot_start_yet_is_kept_until_it_can():
++    """P2-4: a parent's further structure computed when no run slot is free is not lost."""
++    world = World(edges={"T": ["A", "B"], "A": [], "B": []}, parallel=2, budget=(5, 60.0))
++    hooks = world.hooks()
++    hooks.parallel = lambda: world._parallel
++    c = Coordinator(hooks, "T", tick=0.01)
++    c.start("claude")
++    _until(lambda: world.runs["A"].starts == 1 and world.runs["B"].starts == 1, "A and B started")
++    world._parallel = 1   # the researcher lowers `parallel`: B's run holds the one slot
++    world.runs["A"].end("needs-human", turns=1, reason="cannot be stated as is")
++    _until(lambda: c.view()["parked"], "A parked")
++    time.sleep(0.05)
++    assert world.runs["T"].starts == 0
++    world._parallel = 2
++    _until(lambda: world.runs["T"].starts == 1, "T's further Decomposer turn, once a slot is free")
++    assert world.runs["T"].kw[0]["roles"] == ["decomposer"] and world.runs["T"].kw[0]["redirect"].startswith("A is parked")
++    c.release()
++
++
++def test_after_the_further_split_drops_the_parked_claim_the_parent_is_worked_once_its_new_claims_pass():
++    """P1-3: the further Decomposer turn replaces the parked Claim — a new split, and the parent's edge to the parked Claim
++    dropped (`proof node depend T --remove A`) — and the parent is started once its Claims are Accepted or Provisional."""
++    world = World(edges={"T": ["A", "B"], "A": [], "B": []}, parallel=2, budget=(5, 60.0))
++    c = world.coordinator()
++    c.start("claude")
++    _until(lambda: world.runs["A"].starts == 1 and world.runs["B"].starts == 1, "A and B started")
++    world.runs["B"].end("done", verdict="passed", turns=1, reason="review-requested"); world.requested.add("B")
++    world.runs["A"].end("needs-human", turns=1, reason="false as stated")
++    _until(lambda: world.runs["T"].starts == 1, "T's further Decomposer turn")
++    time.sleep(0.05)
++    assert world.runs["T"].kw[0]["roles"] == ["decomposer"]
++    world.runs["A2"] = FakeRun()
++    world.edges.update({"T": ["B", "A2"], "A2": []})   # split again, and T's edge to A removed; A stays on the map, parked
++    world.runs["T"].end("done", turns=1, reason="split into 1 Claim(s): A2; the Coordinator works them"); world.runs["T"].claim = None
++    _until(lambda: world.runs["A2"].starts == 1, "the new Claim worked")
++    world.runs["A2"].end("done", verdict="passed", turns=1, reason="review-requested"); world.requested.add("A2")
++    _until(lambda: world.runs["T"].starts == 2, "T's own proof once its new Claims are Provisional")
++    assert world.runs["T"].kw[1] == {"pursue": True} and "A" in c.view()["parked"][0]["node"]
++    c.release()
++
++
++def test_a_child_sent_back_and_worked_again_has_its_parents_awaiting_snapshot_worked_again_too():
++    """P2-5, ADR-0021 point 4: a child the researcher sends back makes its parent's proof Potentially stale; the Coordinator
++    restarts the child, then — once the child is Provisional again — the parent, though its old snapshot still awaits review."""
++    world = World(edges={"T": ["P"], "P": ["C"], "C": []}, parallel=2, budget=(5, 60.0))
++    stale: set = set()   # the snapshots made Potentially stale: not Provisional, though they still await review
++    world.subtree = (lambda subtree: lambda: [{**n, "provisional": n["provisional"] and n["id"] not in stale} for n in subtree()])(world.subtree)
++    c = world.coordinator()
++    c.start("claude")
++    _until(lambda: world.runs["C"].starts == 1, "C started")
++    world.runs["C"].end("done", verdict="passed", turns=1, reason="review-requested"); world.requested.add("C")
++    _until(lambda: world.runs["P"].starts == 1, "P started on C's Provisional statement")
++    stale.add("P"); world.requested.discard("C")   # the researcher sends C back while P's run is still going
++    _until(lambda: world.runs["C"].starts == 2, "C worked again")
++    world.runs["P"].end("done", verdict="passed", turns=1, reason="review-requested"); world.requested.add("P")   # on the old C
++    time.sleep(0.05)
++    assert world.runs["P"].starts == 1 and world.runs["T"].starts == 0   # C is not Provisional yet; P's snapshot is stale
++    world.runs["C"].end("done", verdict="passed", turns=1, reason="review-requested"); world.requested.add("C")
++    _until(lambda: world.runs["P"].starts == 2, "P worked again once C is Provisional again")
++    c.release()
++
++
++# -- ProjectPursuit's Stop (audit P2-6) -------------------------------------------------------------------------------------
++
++
++def _pursuit(worlds, *, read=None, stated=None, coordinator=None, stop_read=None):
++    from proof_agents.coordinator import ProjectPursuit, PursuitHooks
++
++    stated = stated if stated is not None else list(worlds)
++    made = {name: Coordinator(CoordinatorHooks(subtree=w.subtree, run=lambda node, w=w: w.runs[node], budget=lambda w=w: w._budget,
++                                               parallel=lambda: 1), name, tick=0.01) for name, w in worlds.items()}
++    hooks = PursuitHooks(read=read or (lambda provider: {}), theorems=lambda: list(stated), coordinator=coordinator or made.__getitem__,
++                         **({"stop_read": stop_read} if stop_read else {}))
++    return ProjectPursuit(hooks, tick=0.01), made
++
++
++def test_stop_while_the_reader_reads_stops_its_turn_and_pursues_nothing():
++    import threading
++
++    reading, stopped = threading.Event(), threading.Event()
++    stated: list[str] = []
++
++    def read(provider):
++        reading.set()
++        stopped.wait(5)
++        stated.append("T1")   # what it wrote before its turn was stopped stays on the map
++        return {"error": "the turn was stopped", "code": "READER_FAILED"}
++
++    worlds = {"T1": World(edges={"T1": []}, kinds={"T1": "claim"})}
++    pursuit, _ = _pursuit(worlds, read=read, stated=stated, stop_read=stopped.set)
++    pursuit.start("claude")
++    _until(reading.is_set, "the Reader reading")
++    assert pursuit.view()["status"] == "reading"
++    assert pursuit.stop()["status"] == "released" and stopped.is_set()   # C4: stop_read is called
++    time.sleep(0.1)
++    assert worlds["T1"].runs["T1"].starts == 0 and pursuit.view()["status"] == "released"
++
++
++def test_a_stop_before_the_theorems_coordinator_started_leaves_no_coordinator_running():
++    import threading
++
++    worlds = {"T1": World(edges={"T1": []}, kinds={"T1": "claim"})}
++    gate, asked = threading.Event(), threading.Event()
++    made: dict = {}
++
++    def coordinator(theorem):   # the loop's call is held until the test lets it go; Stop's own call is not
++        if not asked.is_set():
++            asked.set()
++            gate.wait(5)
++        return made[theorem]
++
++    pursuit, made_ = _pursuit(worlds, coordinator=coordinator)
++    made.update(made_)
++    pursuit.start("claude")
++    _until(asked.is_set, "the loop about to start T1's Coordinator")
++    assert pursuit.stop()["status"] == "released"
++    gate.set()
++    time.sleep(0.15)
++    assert not made["T1"].active() and worlds["T1"].runs["T1"].status != "running"
++    assert pursuit.view()["status"] == "released"
++
++
++def test_a_coordinator_that_spent_its_budget_has_its_runs_stopped_before_the_next_theorem():
++    worlds = {"T1": World(edges={"T1": []}, kinds={"T1": "claim"}, budget=(1, 60.0)), "T2": World(edges={"T2": []}, kinds={"T2": "claim"})}
++    pursuit, made = _pursuit(worlds)
++    pursuit.start("claude")
++    _until(lambda: worlds["T1"].runs["T1"].starts == 1, "T1 pursued")
++    worlds["T1"].runs["T1"].turns = 1   # still running, the Coordinator's budget spent
++    _until(lambda: worlds["T2"].runs["T2"].starts == 1, "T2 pursued next")
++    assert worlds["T1"].runs["T1"].status == "released" and pursuit.view()["results"]["T1"]["status"] == "budget"
++    pursuit.stop()
++
++
++def test_stop_on_a_finished_pursuit_leaves_its_ending_as_it_was():
++    worlds = {"T1": World(edges={"T1": []}, kinds={"T1": "claim"})}
++    pursuit, _ = _pursuit(worlds)
++    pursuit.start("claude")
++    _until(lambda: worlds["T1"].runs["T1"].starts == 1, "T1 pursued")
++    worlds["T1"].runs["T1"].end("done", verdict="passed", turns=1, reason="review-requested"); worlds["T1"].requested.add("T1")
++    _until(lambda: pursuit.view()["status"] == "done", "the pursuit ended")
++    answer = pursuit.stop()
++    assert answer["code"] == "NO_PURSUIT" and answer["status"] == "done" and pursuit.view()["reason"] == "every Theorem was pursued to its end"
++
++
++def test_a_pursuit_is_active_while_its_thread_lives_a_stopped_one_until_its_reader_has_ended():
++    import threading
++
++    reading, stopped, let_go = threading.Event(), threading.Event(), threading.Event()
++
++    def read(provider):
++        reading.set()
++        stopped.wait(5)
++        let_go.wait(5)   # the Reader's turn takes a moment to end after Stop
++        return {"error": "the turn was stopped", "code": "READER_FAILED"}
++
++    worlds = {"T1": World(edges={"T1": []}, kinds={"T1": "claim"})}
++    pursuit, _ = _pursuit(worlds, read=read, stated=[], stop_read=stopped.set)
++    assert not pursuit.active()
++    pursuit.start("claude")
++    _until(reading.is_set, "the Reader reading")
++    assert pursuit.active()
++    pursuit.stop()
++    time.sleep(0.05)
++    assert pursuit.view()["status"] == "released" and pursuit.active()   # stopped, its Reader not ended yet
++    assert pursuit.start("claude")["code"] == "PURSUIT_ACTIVE"
++    let_go.set()
++    _until(lambda: not pursuit.active(), "the pursuit's thread ended")
++    assert pursuit.view()["status"] == "released"
+diff --git a/tests/test_coordinator_lifecycle.py b/tests/test_coordinator_lifecycle.py
+index 31a62d6..c0a64c4 100644
+--- a/tests/test_coordinator_lifecycle.py
++++ b/tests/test_coordinator_lifecycle.py
+@@ -154,7 +154,7 @@ def test_an_ended_coordinator_keeps_stop_available_until_cleanup(held_run, statu
+     c.tick = 0.01
+     c.start("claude")
+     first = _started(c)
+-    run._end(run._run, "stuck", "a dead end retains its claim")
++    run._end(run._run, "needs-human", "a decision only the researcher can make; the claim stays")  # parked: not started again
+     c._thread.join(2)
+     assert not c._thread.is_alive() and c.view()["status"] == "stuck"
+     with c._lock:
+diff --git a/tests/test_prove_verify_loop.py b/tests/test_prove_verify_loop.py
+index b8c0f7b..d6e3045 100644
+--- a/tests/test_prove_verify_loop.py
++++ b/tests/test_prove_verify_loop.py
+@@ -53,7 +53,8 @@ class _ScriptedAgent:
+ 
+     def start(self, prompt, session, mode, model, effort, scope, provider, unless=None, turn=None, begin=None):
+         step = self.script.pop(0) if self.script else {"entries": [{"kind": "step", "step": 1, "status": "stuck", "note": "script over"}]}
+-        self.started.append({"role": turn["role"], "prompt": prompt, "may_request_review": bool(turn.get("review_gate")), "name": turn["name"]})
++        self.started.append({"role": turn["role"], "prompt": prompt, "may_request_review": bool(turn.get("review_gate")), "name": turn["name"],
++                             "pursue": turn.get("pursue")})
+         for entry in step.get("entries", []):
+             self.log.append({"role": turn["role"], "by": turn["name"], **entry})
+         job = _Job(len(self.jobs) + 1, {"exit": 0, "changed": step.get("changed", [])})
+@@ -520,6 +521,51 @@ def test_the_decomposer_reads_splits_fogs_and_writes_only_its_scratch_folder():
+     assert not any("{node}" in rule or rule == "Bash(proof node split *)" for rule in allowed)  # the node filled in, the unbound form never given
+ 
+ 
++def test_under_pursue_the_decomposers_split_is_worked_next_and_gives_the_theorem_back_without_stopping():
++    """ADR-0021 point 7: a Coordinator's Decomposer turn does not stop for the researcher; started alone, it still does."""
++    notes, released = [], []
++    log: list[dict] = []
++    agent = _ScriptedAgent(log, [{"entries": [{"kind": "split", "nodes": ["T1", "T2"]}, {"kind": "dependencies", "op": "add"}]}])
++    run = AgentRun(agent, _hooks(work_log=lambda: list(log), node_brief=_theorem_brief(), record_close=lambda *a: notes.append(a),
++                                 release=lambda name, reason: released.append(name)))
++    run.start("claude", roles=["decomposer"], pursue=True)
++    _until(lambda: not run.active() and released, "not given back")
++    view = run.view()
++    assert (view["status"], view["reason"]) == ("done", "split into 2 Claim(s): T1, T2; the Coordinator works them") and view["pursue"]
++    assert view["decision"] is None and agent.started[0]["pursue"] is True and released == ["claude-code"]
++    assert notes == [("decomposer", "claude-code", "done", "run done: split into 2 Claim(s): T1, T2; the Coordinator works them")]
++
++
++def test_under_pursue_a_theorem_split_already_may_be_given_one_more_decomposer_turn():
++    """ADR-0021 point 9: a parked Claim gives its parent another Decomposer turn; started alone, a split node is refused."""
++    brief = _theorem_brief(dependencies=[{"id": "T1", "statement": "part", "accepted": False, "key_ideas": None, "split_child": True}])
++    assert AgentRun(_ScriptedAgent([], []), _hooks(node_brief=brief)).start("claude", roles=["decomposer"])["code"] == "NOT_DECOMPOSABLE"
++    log: list[dict] = []
++    agent = _ScriptedAgent(log, [{"entries": [{"kind": "split", "nodes": ["T3"]}]}])
++    run = AgentRun(agent, _hooks(work_log=lambda: list(log), node_brief=brief))
++    assert run.start("claude", roles=["decomposer"], pursue=True, redirect="T1 is parked; propose another structure")["status"] in ("starting", "running", "done")
++    _until(lambda: not run.active(), "still active")
++    assert run.view()["status"] == "done" and "T1 is parked; propose another structure" in agent.started[0]["prompt"]
++
++
++def test_a_pursued_decomposer_is_told_to_add_its_own_edges_and_may_add_them_under_its_own_name_only():
++    from proof_agents.proof_agent import PURSUE_DECOMPOSER
++
++    alone = ProofAgentContext("T", Path("."), role="decomposer", name="probe")
++    pursued = ProofAgentContext("T", Path("."), role="decomposer", name="probe", pursue=True)
++    assert "Under Pursue" not in alone.brief() and "Under Pursue" in pursued.brief()
++    assert "`proof node depend <claim> --add <claim it uses> --by probe`" in pursued.brief() and "--question" in pursued.brief()
++    assert "proof node depend <claim> --add <claim it uses> --by probe" in pursued.commands_sheet()
++    args = pursued.claude_args(True)
++    allowed = args[args.index("--allowedTools") + 1:args.index("--disallowedTools")]
++    denied = args[args.index("--disallowedTools") + 1:]
++    assert "Bash(proof node depend * --add * --by probe)" in allowed and "Bash(proof node depend * --reassign*)" in denied
++    alone_args = alone.claude_args(True)
++    assert not any("node depend" in rule for rule in alone_args[alone_args.index("--allowedTools") + 1:alone_args.index("--disallowedTools")])
++    # a Prover under Pursue is told nothing new: the section is the Decomposer's
++    assert "Under Pursue" not in ProofAgentContext("T", Path("."), role="prover", pursue=True).brief() and "{name}" not in PURSUE_DECOMPOSER.format(node="T", name="x")
++
++
+ # -- the phase 4 audit: the node bound into the rules, the decision before the budget, one read of the inputs, binary files --
+ 
+ 
+@@ -977,3 +1023,62 @@ def test_the_decomposers_closing_note_has_room_for_the_edges_it_names():
+     assert "with no edge to name, the note ends after decides" in brief
+     sheet = "\n".join(COMMANDS["decomposer"])
+     assert '--note "structure proposed; the researcher decides; edges: proof node depend <claim> --add <claim it uses> --by human; …"' in sheet
++
++
++# -- the audit of ADR-0021's Pursue: the pursued Decomposer's brief, its edges, a split that asks ---------------------------
++
++
++def _allowed(ctx):
++    args = ctx.claude_args(True)
++    return args[args.index("--allowedTools") + 1:args.index("--disallowedTools")]
++
++
++def test_under_pursue_the_decomposers_brief_has_no_stop_for_the_researcher_and_may_replace_a_parked_claim():
++    """P2-3 and P1-3: the base ending (needs-human "structure proposed", edges for the researcher, "never add or remove a
++    dependency edge") is the Decomposer started alone's; under Pursue it adds its own edges, and on a further turn it may drop
++    the parent's edge to its own parked Claim, which stays on the map."""
++    import fnmatch
++
++    pursued = ProofAgentContext("T", Path("."), role="decomposer", name="probe", pursue=True)
++    brief = " ".join(pursued.brief().split())
++    for gone in ("structure proposed", "the researcher decides", "--by human", "never add or remove a dependency edge", "overrides the ending"):
++        assert gone not in brief, gone
++    assert "`proof node depend T --remove <the parked Claim> --by probe`" in brief and "stays on the map" in brief
++    assert "proof node depend T --remove <the parked Claim> --by probe" in pursued.commands_sheet()
++    assert "structure proposed" not in pursued.commands_sheet()
++    rules = [rule[5:-1] for rule in _allowed(pursued) if rule.startswith("Bash(")]
++    for command in ("proof node depend T --remove A --by probe", "proof node depend A2 --add B --by probe"):
++        assert any(fnmatch.fnmatchcase(command, rule) for rule in rules), command
++    for command in ("proof node depend B --remove A --by probe", "proof node depend T --remove A --by human"):
++        assert not any(fnmatch.fnmatchcase(command, rule) for rule in rules), command
++    alone = " ".join(ProofAgentContext("T", Path("."), role="decomposer", name="probe").brief().split())
++    assert "structure proposed" in alone and "never add or remove a dependency edge" in alone and "--remove" not in alone
++
++
++def test_the_pursued_decomposer_gets_no_rule_twice():
++    allowed = _allowed(ProofAgentContext("T", Path("."), role="decomposer", name="probe", pursue=True))
++    assert len(allowed) == len(set(allowed)) and "Bash(proof node progress T --question *)" not in allowed  # `progress T *` covers it
++
++
++def test_under_pursue_a_split_that_also_asks_the_researcher_is_worked_and_the_ask_is_a_standing_question():
++    """P2-3: a pursued Decomposer that split and still ended needs-human does not stop the subtree: the split is worked, and
++    what it asked is recorded as a Standing question for the review queue."""
++    questions, released = [], []
++    log: list[dict] = []
++    agent = _ScriptedAgent(log, [{"entries": [{"kind": "split", "nodes": ["T1", "T2"]},
++                                              {"kind": "step", "step": 1, "status": "needs-human", "note": "structure proposed; the researcher decides"}]}])
++    run = AgentRun(agent, _hooks(work_log=lambda: list(log), node_brief=_theorem_brief(), release=lambda name, reason: released.append(name),
++                                 record_question=lambda role, name, text: questions.append((role, name, text))))
++    run.start("claude", roles=["decomposer"], pursue=True)
++    _until(lambda: not run.active() and released, "not given back")
++    view = run.view()
++    assert (view["status"], view["reason"]) == ("done", "split into 2 Claim(s): T1, T2; the Coordinator works them") and view["decision"] is None
++    assert questions == [("decomposer", "claude-code", "the split stands and is worked; asked: structure proposed; the researcher decides")]
++    # without the hook, the question is the run's closing note, said as such
++    notes = []
++    log2: list[dict] = []
++    agent2 = _ScriptedAgent(log2, [{"entries": [{"kind": "split", "nodes": ["T1"]}, {"kind": "step", "step": 1, "status": "needs-human", "note": "which p?"}]}])
++    run2 = AgentRun(agent2, _hooks(work_log=lambda: list(log2), node_brief=_theorem_brief(), record_close=lambda *a: notes.append(a)))
++    run2.start("claude", roles=["decomposer"], pursue=True)
++    _until(lambda: not run2.active(), "still active")
++    assert run2.view()["status"] == "done" and ("decomposer", "claude-code", "done", "standing question: the split stands and is worked; asked: which p?") in notes
+diff --git a/tests/test_reader.py b/tests/test_reader.py
+new file mode 100644
+index 0000000..dca0f31
+--- /dev/null
++++ b/tests/test_reader.py
+@@ -0,0 +1,155 @@
++"""The Reader (ADR-0021 point 5): briefed to state the draft as a map, permitted to write Definitions, Theorems,
++Lemmas, imported results, citations and fog under its own name, files only under scratch/reader/, and never a proof."""
++
++from pathlib import Path
++
++from proof_agents.reader import READER_READS, READER_WRITES, ReaderContext
++from proof_agents.proof_agent import NO_OTHER_PROJECT, ProofAgentContext
++
++
++def _allowed_denied(args):
++    return args[args.index("--allowedTools") + 1:args.index("--disallowedTools")], args[args.index("--disallowedTools") + 1:]
++
++
++def test_the_reader_writes_the_map_through_proof_and_files_only_under_scratch_reader(tmp_path: Path):
++    ctx = ReaderContext(tmp_path, [Path("/lib")], name="reader-1")
++    for edit, scope in ((False, None), (True, ["Edit(./x.tex)"])):
++        allowed, denied = _allowed_denied(ctx.claude_args(edit, scope))
++        assert set(READER_READS) <= set(allowed) and set(READER_WRITES) <= set(allowed)
++        for write in ("proof definition add", "proof node create * theorem", "proof node create * lemma",
++                      "proof node create * imported_result", "proof reference import", "proof fog add"):
++            assert any(write in rule for rule in allowed), write
++        files = [rule for rule in allowed if rule.startswith(("Edit", "Write", "MultiEdit"))]
++        scratch = (tmp_path / "scratch" / "reader").resolve().as_posix()
++        assert len(files) == 3 and all(rule.endswith(f"/{scratch}/**)") for rule in files), files
++        assert "Edit(./x.tex)" not in allowed  # its write scope is its own, whatever the turn's scope says
++        assert all(rule in denied for rule in NO_OTHER_PROJECT) and "Bash(python3 -c *)" in denied
++        assert any("--reassign" in rule for rule in denied)
++
++
++def test_the_reader_never_proves_splits_claims_or_decides(tmp_path: Path):
++    allowed, _ = _allowed_denied(ReaderContext(tmp_path).claude_args(True))
++    for forbidden in ("proof node split", "proof node depend", "proof node request-review", "proof node claim", "proof node unassign",
++                      "proof node progress", "proof review", "proof challenge open", "* claim *", "Bash(proof *)", "Bash(proof node create *)"):
++        assert not any(forbidden in rule for rule in allowed), forbidden
++
++
++def test_the_brief_names_its_commands_its_departures_and_what_it_never_does(tmp_path: Path):
++    brief = ReaderContext(tmp_path, [Path("/lib")], name="reader-1").brief()
++    for said in ("**Reader**", "you never\nprove", "--created-by reader-1", "proof definition add <def-id>", "--term",
++                 "proof node create <id> theorem|lemma", "--definition <def-id> --dependency <id>",
++                 "proof reference import <ref-id> \"<title>\" <year>", "imported_result", "--reference-id <ref-id>",
++                 "--source-locator", "--source-version", "proof fog add", "scratch/reader/departures.md", "closing note",
++                 "never create a Claim", "the library: /lib", "state every draft in its library"):
++        assert said in brief, said
++    assert "{" not in brief.replace("$…$", "")  # every placeholder filled
++
++
++def test_started_on_one_library_file_it_reads_that_draft_and_may_reach_its_folder(tmp_path: Path):
++    draft = Path("/elsewhere/library-horo/main.tex")
++    ctx = ReaderContext(tmp_path, [Path("/lib")], draft=draft)
++    assert "one library file, /elsewhere/library-horo/main.tex" in ctx.brief()
++    args = ctx.claude_args(False)
++    assert args[args.index("/lib") + 1:args.index("/lib") + 3] == ["--add-dir", "/elsewhere/library-horo"]
++    inside = ReaderContext(tmp_path, [Path("/lib")], draft=Path("/lib/main.tex")).claude_args(False)
++    assert inside.count("--add-dir") == 1
++
++
++def test_env_roots_it_at_the_project_with_no_node_role(monkeypatch, tmp_path: Path):
++    monkeypatch.setenv("PROOF_AGENT_ROLE", "prover")
++    ctx = ReaderContext(tmp_path, name="r")
++    env = ctx.env()
++    assert env["PROOF_ROOT"] == str(tmp_path) and env["PROOF_AGENT_NAME"] == "r" and "PROOF_AGENT_ROLE" not in env
++    assert not ctx.compiles and ctx.writes_files is True
++    before, after = ctx.codex_args("workspace-write")
++    assert before == ["--search"] and "--add-dir" in after and str(tmp_path) in after
++    assert ctx.claude_args(False)[5] == ProofAgentContext("N", tmp_path).claude_args(False)[5]  # the same memory-file excludes
++
++
++def test_every_command_it_is_briefed_to_run_is_one_its_permissions_allow(tmp_path: Path):
++    """The brief's command forms, filled in as a turn would, each match an allowed Bash rule (Claude Code's `*` matches
++    anything, spaces included)."""
++    import fnmatch
++
++    allowed, denied = _allowed_denied(ReaderContext(tmp_path, name="reader-1").claude_args(True))
++    rules = [rule[5:-1] for rule in allowed if rule.startswith("Bash(")]
++    for command in (
++        'proof definition add def_height "The height $h(x)$ …" --term "Height" --created-by reader-1',
++        'proof node create thm_main theorem "Horocycle orbits equidistribute" --definition def_height --dependency lem_height --created-by reader-1',
++        'proof node create lem_height lemma "The height is proper" --created-by reader-1',
++        'proof reference import ref_ratner "On Raghunathan\'s measure conjecture" 1991 --author "M. Ratner" --url https://doi.org/10.2307/2944357 --created-by reader-1',
++        'proof node create imp_ratner imported_result "Every ergodic measure is homogeneous" --source-locator "Thm 1" --source-version "Ann. 1991" --reference-id ref_ratner --created-by reader-1',
++        'proof fog add "Uniformity in p of the rate" --near thm_main --created-by reader-1',
++    ):
++        assert any(fnmatch.fnmatchcase(command, rule) for rule in rules), command
++    claim = 'proof node create clm_1 claim "Something" --created-by reader-1'
++    assert not any(fnmatch.fnmatchcase(claim, rule) for rule in rules)
++
++
++def _permitted(command, allowed, denied):
++    """As Claude Code decides a Bash call: a deny rule that matches wins; else an allow rule must match."""
++    import fnmatch
++
++    def matches(rules):
++        return any(fnmatch.fnmatchcase(command, rule[5:-1]) for rule in rules if rule.startswith("Bash("))
++
++    return matches(allowed) and not matches(denied)
++
++
++def test_every_agent_runs_with_its_own_name_as_proof_agent_name_whatever_the_environment_says(monkeypatch, tmp_path: Path):
++    """P1-4: `proof` attributes a write with no --created-by / --by to PROOF_AGENT_NAME (C3); every agent's turn, the
++    Reader's included, runs with its own name there, never one inherited from the server's environment."""
++    from proof_agents.map_agent import MapAgentContext
++
++    monkeypatch.setenv("PROOF_AGENT_NAME", "someone-else")
++    assert ReaderContext(tmp_path).env()["PROOF_AGENT_NAME"] == "reader"
++    assert ReaderContext(tmp_path, name="reader-1").env()["PROOF_AGENT_NAME"] == "reader-1"
++    assert ProofAgentContext("N", tmp_path, name="claude-code", role="prover").env()["PROOF_AGENT_NAME"] == "claude-code"
++    assert MapAgentContext(tmp_path, name="map-1").env()["PROOF_AGENT_NAME"] == "map-1"
++    brief = ReaderContext(tmp_path, name="reader-1").brief()
++    import re
++
++    assert re.search(r"`proof reference import <ref-id>[^`]*--created-by reader-1`", brief), brief
++
++
++def test_the_reader_creates_no_claim_and_no_child_whatever_its_statement_says(tmp_path: Path):
++    """P2-2: `*` matches spaces, so `create * theorem *` let a Claim through whose statement names a theorem; the kind is
++    matched where it stands, before the quoted statement, and a create under a parent is refused."""
++    allowed, denied = _allowed_denied(ReaderContext(tmp_path, name="reader-1").claude_args(True))
++    for command in ('proof node create c1 claim "By the theorem of Ratner, every orbit closure is homogeneous" --created-by reader-1',
++                    'proof node create c1 claim "A lemma" --created-by reader-1',
++                    "proof node create c1 claim 'By the theorem \"x\"' --created-by reader-1",
++                    'proof node create c1 claim --created-by reader-1 "By the theorem "',
++                    'proof node create c1 "claim" "By the theorem of Ratner"',
++                    'proof node create c1 lemma "Height bound" --parent thm_main --created-by reader-1',
++                    'proof node create c1 lemma "Height bound" --created-by reader-1 --parent=thm_main'):
++        assert not _permitted(command, allowed, denied), command
++    for command in ('proof node create thm_main theorem "Horocycle orbits equidistribute" --created-by reader-1',
++                    'proof node create lem_h lemma "By the theorem of Ratner, the height is proper" --dependency imp_r --created-by reader-1',
++                    'proof node create imp_r imported_result "Every ergodic measure is homogeneous" --source-locator "Thm 1" --source-version "1991" --reference-id ref_r --created-by reader-1'):
++        assert _permitted(command, allowed, denied), command
++
++
++def test_a_second_reader_turn_may_correct_its_own_unfixed_text(tmp_path: Path):
++    """P2-2: ADR-0021 point 6 — an agent may restate the unfixed text an agent wrote (proof-cli checks whose it is)."""
++    ctx = ReaderContext(tmp_path, name="reader-1")
++    allowed, denied = _allowed_denied(ctx.claude_args(True))
++    for command in ('proof node restate thm_main --statement "Horocycle orbits equidistribute effectively" --reason "the draft means the rate" --by reader-1',
++                    'proof definition edit def_height --text "$h(x) = \\sup 1/\\operatorname{Im}$ over a fundamental domain" --reason "finite" --by reader-1'):
++        assert _permitted(command, allowed, denied), command
++    brief = " ".join(ctx.brief().split())
++    assert "proof node restate <id>" in brief and "proof definition edit <def-id>" in brief and "--by reader-1" in brief
++
++
++def test_the_reader_leaves_out_the_typed_metadata_a_trust_rule_reads(tmp_path: Path):
++    """P2-7: a Trust rule (`identifier has DOI`, `source_type in {…}`) would make the Reader's paraphrase of a result callable
++    with no Reference review of it; the Reader gives the link as --url and leaves the typed metadata to the researcher."""
++    ctx = ReaderContext(tmp_path, name="reader-1")
++    allowed, denied = _allowed_denied(ctx.claude_args(True))
++    brief = " ".join(ctx.brief().split())
++    assert "--identifier" in brief and "--source-type" in brief and "Leave out `--identifier`" in brief and "Trust rule" in brief
++    for command in ('proof reference import ref_r "Title" 1991 --author "M. Ratner" --identifier 10.2307/2944357 --created-by reader-1',
++                    'proof reference import ref_r "Title" 1991 --identifier=arXiv:1234.5678 --created-by reader-1',
++                    'proof reference import ref_r "Title" 1991 --source-type journal --created-by reader-1'):
++        assert not _permitted(command, allowed, denied), command
++    assert _permitted('proof reference import ref_r "Title" 1991 --author "M. Ratner" --url https://doi.org/10.2307/2944357 --created-by reader-1', allowed, denied)

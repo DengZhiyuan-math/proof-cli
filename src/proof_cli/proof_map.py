@@ -52,6 +52,7 @@ from .domain import (
 )
 from .reviews import TRUST_RULES_FILE, DecisionKind, DecisionPayload, PinnedDependency, git_identity
 from .storage import (
+    get_definition,
     append_event,
     delete_dependency_pin,
     get_active_claim,
@@ -265,6 +266,7 @@ def create_node(
     derived_from: str | None = None,
     reference_id: str | None = None,
     medium: Medium | str | None = None,
+    definitions: list[str] | None = None,
 ) -> ProofMapNode:
     problem = node_id_problem(node_id)
     if problem is not None:
@@ -336,6 +338,7 @@ def create_node(
         display_label=display_label,
         statement=statement,
         assumptions=assumptions or [],
+        definitions=list(dict.fromkeys(definitions or [])),   # each once, in the order named
         dependencies=dependencies or [],
         source_locator=source_locator,
         source_version=source_version,
@@ -348,6 +351,11 @@ def create_node(
     )
     try:
         with store.transaction() as conn:
+            for definition_id in node.definitions:  # in the write: a definition can't be removed between the check and the node (ADR-0020)
+                if get_definition(store, definition_id, conn=conn) is None:
+                    raise ProofMapError(
+                        "DEFINITION_NOT_FOUND", f"definition {definition_id} does not exist; add it with `proof definition add` before a statement names it"
+                    )
             insert_proof_map_node(store, node, conn=conn)
             append_event(
                 store,
@@ -365,7 +373,7 @@ def create_node(
             ) from exc
         raise ProofMapError("NODE_ALREADY_EXISTS", f"proof map node {node_id} already exists") from exc
     if resolved_kind != ProofMapNodeKind.imported_result:
-        _write_working_files(store.root, node)
+        _write_working_files(store, node)
     elif reference_id is not None:
         # a citation may meet a Trust rule the moment it is linked (ADR-0014): on record from then
         note_trust_rule_matches(store, [node.id])
@@ -407,6 +415,7 @@ def record_progress(
     method: str | None = None,
     failed_on: str | None = None,
     coordinator: str | None = None,
+    question: str | None = None,
 ) -> dict:
     """Report a plan (the steps the run means to take), one step's status, a handoff to another role, the
     Verifier's verdict on the working proof, an attempt the role abandoned (ADR-0019), or — on a Theorem or Lemma
@@ -417,7 +426,11 @@ def record_progress(
     A verdict is `passed` or `failed` with the objections as its note, and carries the inputs digest of the node
     folder as it stands — what a Review snapshot's manifest would hash — so a later edit makes it stale by
     construction; only the Verifier records one. An attempt is what the role tried to establish, how, and what it
-    failed on; any role records one. Both are insert-only events like the rest of the work log."""
+    failed on; any role records one. Both are insert-only events like the rest of the work log.
+
+    A question is a Standing question (ADR-0021 point 8): a judgement call the role made itself instead of stopping,
+    worded as the choice made and the alternative. It gets an id and stays open until the researcher answers it
+    (`answer_question`)."""
     node = require_node(store, node_id)
     if coordinator is not None:
         if not coordinator.strip():
@@ -431,7 +444,12 @@ def record_progress(
     if role not in AGENT_ROLES:
         raise ProofMapError("INVALID_ROLE", f"'{role}' is not a Proof agent role; expected one of: {', '.join(AGENT_ROLES)}")
     steps = [str(item).strip() for item in (plan or []) if str(item).strip()]
-    if verdict is not None:
+    if question is not None:
+        if not question.strip():
+            raise ProofMapError("PROGRESS_EMPTY", "say what was chosen and the alternative: --question \"<the choice made; the alternative>\"")
+        payload = {"kind": "question", "id": f"q_{uuid.uuid4().hex[:10]}", "role": role, "by": by, "question": question.strip()}
+        message = f"{role} on {node_id}: chose {question.strip()}"
+    elif verdict is not None:
         if role != "verifier":
             raise ProofMapError("VERDICT_ROLE_REQUIRED", f"only the verifier records a verdict; {role} reports steps, attempts and handoffs")
         if verdict not in VERDICT_OUTCOMES:
@@ -467,7 +485,7 @@ def record_progress(
         payload = {"kind": "step", "role": role, "by": by, "step": int(step), "status": status, "note": note.strip()}
         message = f"{role} on {node_id}: step {step} {status}" + (f" — {note.strip()}" if note.strip() else "")
     else:
-        raise ProofMapError("PROGRESS_EMPTY", "report a plan (--plan, repeatable), a step (--step N --status …), a handoff (--handoff <role>), a verdict (--verdict passed|failed) or an attempt (--attempt … --failed-on …)")
+        raise ProofMapError("PROGRESS_EMPTY", "report a plan (--plan, repeatable), a step (--step N --status …), a handoff (--handoff <role>), a verdict (--verdict passed|failed), an attempt (--attempt … --failed-on …) or a choice made (--question …)")
     with store.transaction() as conn:
         append_event(store, PROGRESS_EVENT, message, entity_id=node_id, payload=payload, conn=conn)
     return {**payload, "node_id": node_id, "at": utc_now().isoformat()}
@@ -488,17 +506,30 @@ def _working_digest_or_none(store: ProjectStore, node: ProofMapNode) -> str | No
 def _progress_entries(store: ProjectStore, node_id: str, kind: str) -> list[dict]:
     """The node's `agent_progress` events of one kind, oldest first, each with its time."""
     require_node(store, node_id)
-    return [
-        {"at": event.created_at.isoformat(), **(event.payload or {})}
-        for event in list_events(store)
-        if event.kind == PROGRESS_EVENT and event.entity_id == node_id and (event.payload or {}).get("kind") == kind
-    ]
+    return [dict(entry) for entry in _progress_index(store).get((node_id, kind), [])]
+
+
+@memoized_read
+def _progress_index(store: ProjectStore) -> dict[tuple[str, str], list[dict]]:
+    """Every `agent_progress` entry by node and kind, from one pass over the log: a read asks for every node's."""
+    found: dict[tuple[str, str], list[dict]] = {}
+    for event in list_events(store):
+        if event.kind == PROGRESS_EVENT and event.entity_id is not None:
+            payload = event.payload or {}
+            found.setdefault((event.entity_id, str(payload.get("kind"))), []).append({"at": event.created_at.isoformat(), **payload})
+    return found
 
 
 def verdicts(store: ProjectStore, node_id: str) -> list[dict]:
     """The Verifier's verdicts on the node, newest last (ADR-0019 point 2): each its outcome, its objections (`note`),
-    the role and agent that made it, and the inputs digest it was about (`inputs_sha256`, None if unreadable then)."""
-    return _progress_entries(store, node_id, "verdict")
+    the role and agent that made it, the inputs digest it was about (`inputs_sha256`, None if unreadable then), and
+    whether it is `stale`: the text it read the proof against — the node's or anything it rests on — was restated
+    after it (ADR-0021 point 6). A stale verdict opens no gate, whatever its digest."""
+    restated = restated_at(store, node_id)
+    return [
+        {**entry, "stale": restated is not None and datetime.fromisoformat(entry["at"]) < restated}
+        for entry in _progress_entries(store, node_id, "verdict")
+    ]
 
 
 def latest_verdict(store: ProjectStore, node_id: str) -> dict | None:
@@ -506,6 +537,65 @@ def latest_verdict(store: ProjectStore, node_id: str) -> dict | None:
     whether the Prover may request review (ADR-0019 point 3). A verdict whose hash is not the folder's is stale."""
     found = verdicts(store, node_id)
     return found[-1] if found else None
+
+
+def questions(store: ProjectStore, node_id: str) -> list[dict]:
+    """The node's Standing questions, oldest first (ADR-0021 point 8): each its id, the choice made and the
+    alternative (`question`), the role and agent that made it, `state` (`open` or `answered`) and the researcher's
+    `answer` (who, whether the choice was kept, the other reading, and the redirect it made), or None while open."""
+    answers = {entry.get("question_id"): entry for entry in _progress_entries(store, node_id, "answer")}
+    found = []
+    for entry in _progress_entries(store, node_id, "question"):
+        answer = answers.get(entry.get("id"))
+        found.append({
+            **entry,
+            "state": "open" if answer is None else "answered",
+            "answer": None if answer is None else {key: answer.get(key) for key in ("at", "by", "keep", "answer", "redirect")},
+        })
+    return found
+
+
+def answer_question(
+    store: ProjectStore, node_id: str, question_id: str, *, keep: bool = False, answer: str | None = None, by: str = "human"
+) -> dict:
+    """The researcher's answer to a Standing question (ADR-0021 point 8): `keep` the choice the role made, or give the
+    other reading as `answer`. An answer that differs from the choice is a redirect: recorded as the answer's
+    `redirect`, the line the node's next run is briefed with; one that repeats the choice keeps it. Only the researcher
+    answers (`by` is RESEARCHER; ANSWER_IS_THE_RESEARCHERS otherwise). Each question is answered once. Never a Review
+    decision: it fixes nothing and decides no trust."""
+    text = (answer or "").strip()
+    if keep == bool(text):
+        raise ProofMapError("ANSWER_REQUIRED", "keep the choice (--keep) or give the other reading (--answer \"<the reading to follow>\"), not both")
+    if by != RESEARCHER:
+        raise ProofMapError("ANSWER_IS_THE_RESEARCHERS", f"a Standing question is answered by the researcher, not by {by}", details={"by": by})
+    with store.transaction() as conn:
+        asked = next((entry for entry in questions(store, node_id) if entry.get("id") == question_id), None)
+        if asked is None:
+            raise ProofMapError("QUESTION_NOT_FOUND", f"{node_id} has no standing question {question_id}", details={"node_id": node_id, "question_id": question_id})
+        if asked["state"] == "answered":
+            raise ProofMapError(
+                "QUESTION_ANSWERED",
+                f"{question_id} on {node_id} was already answered by {asked['answer']['by']}; a further redirect goes to the node's run",
+                details={"answer": asked["answer"]},
+            )
+        if text and _same_reading(text, asked.get("question") or ""):
+            keep, text = True, ""  # the choice, said again: it stands
+        payload = {
+            "kind": "answer", "role": None, "by": by, "question_id": question_id,
+            "keep": keep, "answer": text or None, "redirect": text or None,
+        }
+        message = f"{by} answered {question_id} on {node_id}: " + ("the choice stands" if keep else f"redirect — {text}")
+        append_event(store, PROGRESS_EVENT, message, entity_id=node_id, payload=payload, conn=conn)
+    return {**payload, "node_id": node_id, "at": utc_now().isoformat()}
+
+
+def _same_reading(answer: str, question: str) -> bool:
+    """Whether an answer only repeats the recorded choice: the question as a whole, or its choice before the
+    alternative ("<the choice made>; <the alternative>"), up to spacing and case."""
+    def plain(value: str) -> str:
+        return " ".join(value.split()).casefold()
+
+    return plain(answer) in (plain(question), plain(question.split(";", 1)[0]))
 
 
 def attempts(store: ProjectStore, node_id: str) -> list[dict]:
@@ -645,7 +735,7 @@ def work_log(store: ProjectStore, node_id: str) -> list[dict]:
     """The node's work log: the agent's reports merged, in time order, with what it did through `proof` and its turns.
     What the run's agent did during one of its turns carries that turn's role; anything else — outside a turn, or by
     someone else while a turn runs (the researcher's own split, a fog item from the map) — keeps its own actor and has none."""
-    require_node(store, node_id)
+    named = set(require_node(store, node_id).definitions)
     proof_ids = {proof.id for proof in list_candidate_proofs(store, node_id)}
     fog = {item.id: item for item in list_fog_items(store)}
     near_fog = {fog_id for fog_id, item in fog.items() if node_id in item.near}  # the fog about this node: its Experiments belong here
@@ -677,7 +767,14 @@ def work_log(store: ProjectStore, node_id: str) -> list[dict]:
         elif event.kind == "proof_fog_experiment_recorded" and event.entity_id in near_fog:
             entries.append({"at": at, "kind": "experiment", "by": payload.get("run_by"), "fog_id": event.entity_id, "outcome": payload.get("outcome"), "seq": payload.get("seq")})
         elif event.kind in ("proof_map_dependency_added", "proof_map_dependency_removed", "proof_map_dependency_moved") and event.entity_id == node_id:
-            entries.append({"at": at, "kind": "dependencies", "by": payload.get("edited_by") or payload.get("by"), "change": event.kind.rsplit("_", 1)[1], "dependency": payload.get("dependency_id") or payload.get("dependency")})
+            entries.append({"at": at, "kind": "dependencies", "by": payload.get("edited_by") or payload.get("by"), "change": event.kind.rsplit("_", 1)[1], "dependency": payload.get("dependency_id") or payload.get("dependency"),
+                            "resplit": bool(payload.get("resplit"))})
+        elif event.kind == RESTATED_EVENT and event.entity_id == node_id:  # ADR-0021 point 6: who, why, and old → new
+            entries.append({"at": at, "kind": "restated", "by": payload.get("by"), "reason": payload.get("reason"), "from": payload.get("from"), "to": payload.get("to")})
+        elif event.kind == DEFINITION_EDITED_EVENT and event.entity_id in named:  # a restatement of every node naming it
+            changed = {key: payload[key] for key in ("term", "text") if key in payload}
+            entries.append({"at": at, "kind": "definition-edited", "by": payload.get("by"), "definition_id": event.entity_id,
+                            "reason": payload.get("reason"), "from": payload.get("from"), "to": payload.get("to") or changed})
         elif event.kind in ("proof_map_node_claimed", "proof_map_claim_reassigned") and event.entity_id == node_id:
             entries.append({"at": at, "kind": "claimed", "by": payload.get("claimant_id") or payload.get("assignee")})
         for entry in entries[before:]:  # an automatic entry: the role of the turn it happened in, when the run's agent did it
@@ -700,12 +797,15 @@ def _resolve_medium(kind: ProofMapNodeKind, medium: Medium | str | None) -> Medi
         raise ProofMapError("INVALID_MEDIUM", f"'{medium}' is not a medium; expected one of: {valid}") from exc
 
 
-def _write_working_files(root: Path, node: ProofMapNode) -> None:
-    """The node folder its Medium asks for: a LaTeX document, or a computation's run.sh (spec #145)."""
+def _write_working_files(store: ProjectStore, node: ProofMapNode) -> None:
+    """The node folder its Medium asks for: a LaTeX document, or a computation's run.sh (spec #145). The LaTeX document
+    opens with the definitions the statement is written in (ADR-0020), so it reads on its own."""
     if is_computation(node):
-        write_working_computation(root, node_id=node.id, kind=node.kind.value, statement=node.statement)
+        write_working_computation(store.root, node_id=node.id, kind=node.kind.value, statement=node.statement)
     else:
-        write_working_proof(root, node_id=node.id, kind=node.kind.value, statement=node.statement)
+        named = [get_definition(store, definition_id) for definition_id in node.definitions]
+        write_working_proof(store.root, node_id=node.id, kind=node.kind.value, statement=node.statement,
+                            definitions=[(d.term, d.text) for d in named if d is not None])
 
 
 def set_medium(store: ProjectStore, node_id: str, medium: Medium | str, *, edited_by: str = "human") -> ProofMapNode:
@@ -721,11 +821,242 @@ def set_medium(store: ProjectStore, node_id: str, medium: Medium | str, *, edite
     with store.transaction() as conn:
         # the scaffold first, undone if the transaction rolls back: an event is never left without its entry file
         _scaffold_on_rollback(store, node_id)
-        _write_working_files(store.root, changed)
+        _write_working_files(store, changed)
         update_proof_map_node(store, changed, conn=conn)
         append_event(
             store, "proof_map_node_medium_set", f"{node_id}: medium {node.medium.value} → {resolved.value}",
             entity_id=node_id, payload={"from": node.medium.value, "to": resolved.value, "by": edited_by}, conn=conn,
+        )
+    return changed
+
+
+# -- Unfixed text (ADR-0021 point 6) -------------------------------------------------------------------------------
+
+RESTATED_EVENT = "proof_map_node_restated"
+DEFINITION_EDITED_EVENT = "definition_edited"
+RESEARCHER = "human"  # the `--by` / `created_by` of the researcher's own writes; anything else is an agent
+
+
+def _resting_on(store: ProjectStore, node_id: str) -> set[str]:
+    """`node_id` and every node that rests on it, directly or through others."""
+    dependents_of: dict[str, list[str]] = {}
+    for node in list_nodes(store):
+        for dependency_id in node.dependencies:
+            dependents_of.setdefault(dependency_id, []).append(node.id)
+    found = {node_id}
+    pending = [node_id]
+    while pending:
+        for dependent_id in dependents_of.get(pending.pop(), []):
+            if dependent_id not in found:
+                found.add(dependent_id)
+                pending.append(dependent_id)
+    return found
+
+
+def _rests_on(store: ProjectStore, node_id: str) -> set[str]:
+    """`node_id` and every node it rests on, directly or through others."""
+    found = {node_id}
+    pending = [node_id]
+    while pending:
+        node = get_node(store, pending.pop())
+        for dependency_id in node.dependencies if node is not None else []:
+            if dependency_id not in found:
+                found.add(dependency_id)
+                pending.append(dependency_id)
+    return found
+
+
+def fixed_by(store: ProjectStore, node_id: str) -> dict | None:
+    """The Review decision that fixed a node's statement, assumptions and named definitions, or None while they are
+    Unfixed (ADR-0021 point 6): the first Acceptance decision of any outcome, or Reference review, on the node or on
+    a node that rested on it when decided. A decision relied on the text, so no restatement may change it under that
+    decision; a node that came to rest under it later (a Claim split from a parent sent back) is no part of it."""
+    return _fixed_index(store).get(node_id)
+
+
+@memoized_read
+def _fixed_index(store: ProjectStore) -> dict[str, dict]:
+    """Every fixed node's first fixing decision, by node id: one pass over the decisions for a whole read."""
+    first: dict[str, dict] = {}
+    kinds = (ReviewRecordKind.acceptance.value, ReviewRecordKind.reference_review.value)
+    for row in list_decisions(store):
+        if row["object_type"] != _ACCEPTANCE_OBJECT_TYPE or row["kind"] not in kinds or row["decision"] == ReviewGovernanceState.proposed_for_review.value:
+            continue
+        decided = {"node_id": row["object_id"], "review_id": row["review_id"], "kind": row["kind"], "decision": row["decision"], "decided_at": row["created_at"]}
+        for relied_id in _relied_on(store, row):
+            if relied_id not in first or decided["decided_at"] < first[relied_id]["decided_at"]:
+                first[relied_id] = decided
+    return first
+
+
+def _relied_on(store: ProjectStore, row: dict) -> set[str]:
+    """The nodes whose text a decision relied on: the decided node, what its decided snapshot rested on, and below
+    each of those what its own newest snapshot by then rested on (a proof cites statements). A decision with no record
+    of what it was made on reads the node's dependencies as they stand now."""
+    at = datetime.fromisoformat(row["created_at"])
+    payload = row.get("payload")
+    node = get_node(store, row["object_id"])
+    if node is None:
+        return {row["object_id"]}
+    proof = _get_candidate_proof(store, payload.candidate_proof_id) if payload is not None and payload.candidate_proof_id else None
+    if proof is not None and proof.dependencies is not None:
+        below = list(proof.dependencies)
+    elif proof is not None:  # a snapshot from before its dependencies were recorded: the pins it was decided against
+        below = [pin.target_node_id for pin in payload.dependency_pins]
+    else:
+        below = list(node.dependencies)
+    found = {node.id}
+    while below:
+        current_id = below.pop()
+        if current_id in found:
+            continue
+        found.add(current_id)
+        then = [proof for proof in list_candidate_proofs_for_node(store, current_id) if proof.created_at <= at]
+        if then:
+            newest = max(then, key=lambda proof: proof.created_at)
+            current = get_node(store, current_id)
+            below.extend(newest.dependencies if newest.dependencies is not None else (current.dependencies if current is not None else []))
+    return found
+
+
+def restated_at(store: ProjectStore, node_id: str) -> datetime | None:
+    """When the text a node's proof is read against last changed, or None if it never did since its creation: the
+    newest restatement of the node or of a node it rests on, or edit of a Definition any of them names."""
+    change = newest_text_change(store, node_id)
+    return change.created_at if change is not None else None
+
+
+def newest_text_change(store: ProjectStore, node_id: str) -> EventRecord | None:
+    """The event behind `restated_at`: the newest restatement or Definition edit under the node, or None.
+
+    One pass per read, like `_unsettled_support`: the event log is indexed once (`_text_changes`), and each node's
+    answer goes in the read scope's memo as the walk leaves it, with an explicit stack for deep chains."""
+    memo: dict[str, EventRecord | None] = scoped_memo(store, _RESTATED_AT)
+    if node_id in memo:
+        return memo[node_id]
+    restated, edited = _text_changes(store)
+
+    def own(current_id: str) -> tuple[EventRecord | None, list[str]]:
+        node = get_node(store, current_id)
+        if node is None:
+            return restated.get(current_id), []
+        newest = restated.get(current_id)
+        for definition_id in node.definitions:
+            newest = _later(newest, edited.get(definition_id))
+        return newest, list(node.dependencies)
+
+    newest, dependencies = own(node_id)
+    stack: list[list] = [[node_id, iter(dependencies), newest]]
+    on_path = {node_id}
+    while stack:
+        top = stack[-1]
+        dependency_id = next(top[1], None)
+        if dependency_id is None:
+            stack.pop()
+            on_path.discard(top[0])
+            memo[top[0]] = top[2]
+            if stack:
+                stack[-1][2] = _later(stack[-1][2], top[2])
+            continue
+        if dependency_id in memo:
+            top[2] = _later(top[2], memo[dependency_id])
+        elif dependency_id in on_path:  # a cycle, which no service creates: plain reachability, remembering nothing
+            for path_id, _, _ in stack:
+                memo.pop(path_id, None)
+            return _reachable_text_change(store, node_id)
+        else:
+            newest, dependencies = own(dependency_id)
+            stack.append([dependency_id, iter(dependencies), newest])
+            on_path.add(dependency_id)
+    return memo[node_id]
+
+
+_RESTATED_AT = "restated_at"
+
+
+def _later(a: EventRecord | None, b: EventRecord | None) -> EventRecord | None:
+    """The newer of two events; on a tie, `a`."""
+    return b if a is None or (b is not None and b.created_at > a.created_at) else a
+
+
+@memoized_read
+def _text_changes(store: ProjectStore) -> tuple[dict[str, EventRecord], dict[str, EventRecord]]:
+    """The newest restatement event of each node, and the newest edit event of each Definition, from one pass over
+    the log; of two at the same instant, the later written."""
+    restated: dict[str, EventRecord] = {}
+    edited: dict[str, EventRecord] = {}
+    for event in list_events(store):
+        found = restated if event.kind == RESTATED_EVENT else edited if event.kind == DEFINITION_EDITED_EVENT else None
+        if found is not None and event.entity_id is not None:
+            found[event.entity_id] = _later(event, found.get(event.entity_id))
+    return restated, edited
+
+
+def _reachable_text_change(store: ProjectStore, node_id: str) -> EventRecord | None:
+    """`newest_text_change` by plain reachability: for a map with a cycle."""
+    restated, edited = _text_changes(store)
+    nodes = _rests_on(store, node_id)
+    named = {definition_id for current_id in nodes for definition_id in (getattr(get_node(store, current_id), "definitions", None) or [])}
+    newest: EventRecord | None = None
+    for change in [*(restated.get(n) for n in nodes), *(edited.get(d) for d in named)]:
+        newest = _later(newest, change)
+    return newest
+
+
+def require_restatable(store: ProjectStore, *, what: str, created_by: str, by: str, fixed: dict | None, fixed_code: str) -> None:
+    """Refuse a change to fixed text (`fixed_code`, naming the decision), or an agent's change to the researcher's."""
+    if fixed is not None:
+        raise ProofMapError(
+            fixed_code,
+            f"{what} is fixed: the {fixed['kind'].replace('_', ' ')} decision {fixed['review_id']} on {fixed['node_id']} relied on it; "
+            "state a corrected version as a new node or definition",
+            details={"fixed_by": fixed},
+        )
+    if by != RESEARCHER and created_by == RESEARCHER:
+        raise ProofMapError("RESEARCHER_TEXT", f"{what} was written by the researcher: only the researcher restates it")
+
+
+def restate_node(
+    store: ProjectStore,
+    node_id: str,
+    *,
+    statement: str | None = None,
+    assumptions: list[str] | None = None,
+    definitions: list[str] | None = None,
+    reason: str,
+    by: str = RESEARCHER,
+) -> ProofMapNode:
+    """Change a node's statement, assumptions or named definitions while they are Unfixed (ADR-0021 point 6).
+
+    The researcher may restate any unfixed text, an agent only a node an agent created (RESEARCHER_TEXT). Fixed text
+    is refused (TEXT_FIXED, naming the decision that fixed it). Recorded in the work log with the reason; every
+    verdict on the node and on what rests on it goes stale (`verdicts`), and the snapshots there awaiting a decision
+    read Potentially stale. The working proof is the role's, and is left as it is."""
+    if not (reason or "").strip():
+        raise ProofMapError("RESTATE_REASON_REQUIRED", "a restatement says why: --reason \"<what was wrong or unclear>\"")
+    update: dict[str, Any] = {}
+    with store.transaction() as conn:
+        node = require_node(store, node_id)
+        if statement is not None and statement.strip() and statement.strip() != node.statement:
+            update["statement"] = statement.strip()
+        if assumptions is not None and [a.strip() for a in assumptions if a.strip()] != node.assumptions:
+            update["assumptions"] = [a.strip() for a in assumptions if a.strip()]
+        if definitions is not None:
+            named = list(dict.fromkeys(definitions))
+            for definition_id in named:
+                if get_definition(store, definition_id, conn=conn) is None:
+                    raise ProofMapError("DEFINITION_NOT_FOUND", f"definition {definition_id} does not exist; add it with `proof definition add` before a statement names it")
+            if named != node.definitions:
+                update["definitions"] = named
+        if not update:
+            raise ProofMapError("RESTATE_EMPTY", f"nothing to restate: give {node_id} a different --statement, --assumption or --definition")
+        require_restatable(store, what=f"{node_id}'s statement", created_by=node.created_by, by=by, fixed=fixed_by(store, node_id), fixed_code="TEXT_FIXED")
+        changed = node.model_copy(update={**update, "updated_by": by, "updated_at": utc_now()})
+        update_proof_map_node(store, changed, conn=conn)
+        append_event(
+            store, RESTATED_EVENT, f"{node_id} restated by {by}: {reason.strip()}", entity_id=node_id,
+            payload={"by": by, "reason": reason.strip(), "from": {key: getattr(node, key) for key in update}, "to": update},
+            conn=conn,
         )
     return changed
 
@@ -831,8 +1162,8 @@ def split_node(
 
     A node someone else has claimed is theirs to split (NOT_CLAIMANT), unless
     `reassign` takes the claim over for `created_by`, recorded as `claim --reassign`
-    records it — but without claim's frontier check: a split parent is usually
-    Blocked on its earlier children, and splitting it again is still fine.
+    records it — but without claim's checks: a split parent is usually Blocked
+    on its earlier children, and splitting it again is still fine.
     All or nothing (#26): the checks, every child and the parent's new
     dependencies are one write transaction, and a failed split leaves no
     child, no child folder, and the parent as it was.
@@ -865,6 +1196,8 @@ def create_node_under_parent(
     """
     with store.transaction() as conn:
         remove_new_node_folders_on_rollback(store, [fields["node_id"]])
+        # a node hung under a parent is written in the parent's definitions too (ADR-0020)
+        fields = {**fields, "definitions": [*require_node(store, parent_id).definitions, *(fields.get("definitions") or [])]}
         node = create_node(store, created_by=created_by, **fields)
         # add_dependency's checks, in its order; the new node is not yet visible outside this
         # transaction, so the cycle is looked for from its own dependencies down to the parent
@@ -951,6 +1284,8 @@ def _split(
             created_by=created_by,
             derived_from=parent_id,
             medium=spec.get("medium"),
+            # a Claim of a node is about that node's objects: it is written in the parent's definitions (ADR-0020)
+            definitions=[*parent.definitions, *(spec.get("definitions") or [])],
         )
         children.append(child)
 
@@ -985,11 +1320,13 @@ def _not_claimant(node_id: str, claim: ClaimRecord) -> ProofMapError:
 
 
 def _not_pickable(store: ProjectStore, node: ProofMapNode) -> ProofMapError | None:
-    """Why `node` isn't on the frontier for anyone to claim, or None if it is.
+    """Why nobody may claim `node`, or None if anyone may.
 
-    The frontier and `claim_node` share this, so what the frontier offers is
-    exactly what can be claimed. Accepted nodes are off it unless an open
-    Challenge invites a revision (ADR-0005 Rule 4); Rejected ones for good.
+    The frontier and `claim_node` share this, so nothing the frontier offers is
+    refused. Accepted nodes are off it unless an open Challenge invites a
+    revision (ADR-0005 Rule 4); Rejected ones for good. A Blocked node may be
+    claimed and worked: Blocked holds back its Review decision, not work
+    (ADR-0021 point 1), and only the frontier asks more of its dependencies.
     """
     if node.kind == ProofMapNodeKind.imported_result:
         return ProofMapError("IMMUTABLE_NODE", f"imported_result node {node.id} has no proof to work on; use Reference review instead")
@@ -1003,8 +1340,6 @@ def _not_pickable(store: ProjectStore, node: ProofMapNode) -> ProofMapError | No
             "NODE_UNVERIFIABLE",
             f"node {node.id}'s latest Human Review decision doesn't count; the researcher must decide it afresh before anyone picks it up",
         )
-    if _has_unresolved_dependency(store, node):
-        return ProofMapError("NODE_BLOCKED", f"node {node.id} is Blocked: a dependency isn't Accepted (or Reference-reviewed) yet")
     return None
 
 
@@ -1131,6 +1466,9 @@ def add_dependency(
 
     Structural, like Split: no researcher approval, agent-reachable. The
     target must exist and not already rest on the node (DEPENDENCY_CYCLE).
+    A node someone else holds is theirs (NOT_CLAIMANT) unless `reassign`,
+    except an edge between two unaccepted Claims `edited_by`'s own Split
+    created: the Decomposer adds those itself (ADR-0021 point 7).
     No pin is taken here: the next request-review pins what the edge offers.
     """
     with store.transaction() as conn:
@@ -1141,11 +1479,27 @@ def add_dependency(
         if dependency_id in node.dependencies:
             raise ProofMapError("ALREADY_A_DEPENDENCY", f"{node_id} already rests on {dependency_id}")
         _refuse_cycle(store, node_id, dependency_id)
-        claim = _held_by_another(store, conn, node_id, edited_by, reassign=reassign)
-        if claim is not None:
-            _take_over(store, conn, claim, edited_by)
+        if not _own_split_edge(store, node, dependency_id, edited_by):
+            claim = _held_by_another(store, conn, node_id, edited_by, reassign=reassign)
+            if claim is not None:
+                _take_over(store, conn, claim, edited_by)
         _gain_dependency(store, conn, node, dependency_id, edited_by)
     return DependencyEdit("add", dependency_id, get_node(store, node_id))
+
+
+def _own_split_edge(store: ProjectStore, node: ProofMapNode, dependency_id: str, edited_by: str) -> bool:
+    """Whether agent `edited_by` is adding an edge between two Claims its own Split of one parent created, both
+    unaccepted (ADR-0021 point 7). An edge between unaccepted siblings decides nothing, so the Decomposer adds it
+    without holding either Claim and without taking over the run that holds one. The researcher edits as anyone does."""
+    dependency = get_node(store, dependency_id)
+    if edited_by == RESEARCHER or dependency is None or node.derived_from is None or dependency.derived_from != node.derived_from:
+        return False
+    return all(
+        claim.kind == ProofMapNodeKind.claim
+        and claim.created_by == edited_by
+        and get_acceptance_state(store, claim.id) not in ("accepted", "unverifiable", "rejected")
+        for claim in (node, dependency)
+    )
 
 
 def _gain_dependency(store: ProjectStore, conn: sqlite3.Connection, node: ProofMapNode, dependency_id: str, edited_by: str) -> None:
@@ -1165,15 +1519,21 @@ def _gain_dependency(store: ProjectStore, conn: sqlite3.Connection, node: ProofM
 def remove_dependency(
     store: ProjectStore, node_id: str, dependency_id: str, *, edited_by: str = "human", reassign: bool = False
 ) -> DependencyEdit:
-    """Stop `node_id` resting on `dependency_id` (#96). The edge's pin goes with it."""
+    """Stop `node_id` resting on `dependency_id` (#96). The edge's pin goes with it.
+
+    A node someone else holds is theirs (NOT_CLAIMANT) unless `reassign`, except a resplit: an agent taking a Claim
+    its own Split of `node_id` created back off it, while the Claim is unaccepted and no decision has fixed
+    `node_id` (ADR-0021 points 7 and 9). Recorded in `node_id`'s work log, naming the Claim and the agent."""
     with store.transaction() as conn:
         node = require_node(store, node_id)
         _structure_editable(store, node)
         if dependency_id not in node.dependencies:
             raise ProofMapError("NOT_A_DEPENDENCY", f"{dependency_id} is not a dependency of {node_id}")
-        claim = _held_by_another(store, conn, node_id, edited_by, reassign=reassign)
-        if claim is not None:
-            _take_over(store, conn, claim, edited_by)
+        resplit = _own_split_removal(store, node, dependency_id, edited_by)
+        if not resplit:
+            claim = _held_by_another(store, conn, node_id, edited_by, reassign=reassign)
+            if claim is not None:
+                _take_over(store, conn, claim, edited_by)
         updated = _with_dependencies(node, [d for d in node.dependencies if d != dependency_id], edited_by)
         update_proof_map_node(store, updated, conn=conn)
         delete_dependency_pin(store, node_id, dependency_id, conn=conn)
@@ -1182,10 +1542,29 @@ def remove_dependency(
             "proof_map_dependency_removed",
             f"{node_id} no longer rests on {dependency_id}",
             entity_id=node_id,
-            payload={"dependency_id": dependency_id, "edited_by": edited_by, "dependencies": {"before": node.dependencies, "after": updated.dependencies}},
+            payload={
+                "dependency_id": dependency_id, "edited_by": edited_by, "dependencies": {"before": node.dependencies, "after": updated.dependencies},
+                **({"resplit": True} if resplit else {}),
+            },
             conn=conn,
         )
     return DependencyEdit("remove", dependency_id, get_node(store, node_id))
+
+
+def _own_split_removal(store: ProjectStore, parent: ProofMapNode, claim_id: str, edited_by: str) -> bool:
+    """Whether agent `edited_by` is taking back off `parent` an unaccepted Claim its own Split of `parent` created,
+    while no decision has fixed `parent` (ADR-0021 point 9: one further Decomposer turn tries another structure).
+    Nothing relied on that edge, so the Decomposer removes it without holding `parent`."""
+    claim = get_node(store, claim_id)
+    return (
+        edited_by != RESEARCHER
+        and claim is not None
+        and claim.kind == ProofMapNodeKind.claim
+        and claim.derived_from == parent.id
+        and claim.created_by == edited_by
+        and get_acceptance_state(store, claim_id) not in ("accepted", "unverifiable")
+        and fixed_by(store, parent.id) is None
+    )
 
 
 def move_dependency(
@@ -1261,10 +1640,10 @@ def claim_node(
     Idempotent for the same assignee. A node someone else holds is refused
     with CLAIM_CONFLICT naming the assignee, unless `reassign` takes it
     over — a claim is a planning signal, not a lock, so a stale one is simply
-    reassigned. Only a node on the frontier can be claimed (see
-    `_not_pickable`). The one-active-claim-per-node rule is the `claims`
-    table's partial unique index, so a race between two claimants still
-    resolves to one.
+    reassigned. Any node that may still be worked can be claimed, a Blocked
+    one included (see `_not_pickable`). The one-active-claim-per-node rule is
+    the `claims` table's partial unique index, so a race between two
+    claimants still resolves to one.
     """
     node = require_node(store, node_id)
     existing = get_active_claim(store, node_id)
@@ -1414,11 +1793,12 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
         # this request is — BEGIN IMMEDIATE holds the lock from here to the commit.
         if gated_by is not None:
             newest = latest_verdict(store, node_id)
-            if newest is None or newest.get("outcome") != "passed" or newest.get("inputs_sha256") != sha256:
+            if newest is None or newest.get("outcome") != "passed" or newest.get("inputs_sha256") != sha256 or newest.get("stale"):
                 raise ProofMapError(
                     "VERDICT_STALE",
                     f"the newest verdict on {node_id} is not a passing one on these files"
-                    + (f" (it {newest.get('outcome')} {str(newest.get('inputs_sha256') or '')[:12]}…)" if newest else " (there is none)")
+                    + (f" (it {newest.get('outcome')} {str(newest.get('inputs_sha256') or '')[:12]}…"
+                       + (", before a restatement of what it read the proof against)" if newest.get("stale") else ")") if newest else " (there is none)")
                     + "; have the Verifier read them again before requesting review",
                     details={"gated_by": gated_by, "working_sha256": sha256, "newest_verdict": newest},
                 )
@@ -1769,7 +2149,7 @@ def _normalize_whitespace(text: str) -> str:
     return " ".join(text.split())
 
 
-def compute_interface_fingerprint(statement: str, assumptions: list[str]) -> str:
+def compute_interface_fingerprint(statement: str, assumptions: list[str], definitions: list[str] | tuple[str, ...] = ()) -> str:
     """SHA-256 hex digest over the canonical JSON pair `(statement, assumptions)`.
 
     That pair is the node's mathematical interface — what a dependent
@@ -1780,8 +2160,14 @@ def compute_interface_fingerprint(statement: str, assumptions: list[str]) -> str
     first, so two statements differing only by whitespace produce the same
     fingerprint. "Mathematical scope" is treated as already captured within
     statement + assumptions for v1.
+
+    A node written in Definitions (ADR-0020) has them in its interface too, by id: a decision fixes the definitions
+    it relied on (ADR-0021 point 6), so under it an id stands for its text. A node that names none is spelled exactly as before.
     """
-    return _digest([_normalize_whitespace(statement), [_normalize_whitespace(a) for a in assumptions]])
+    parts: list = [_normalize_whitespace(statement), [_normalize_whitespace(a) for a in assumptions]]
+    if definitions:
+        parts.append(list(definitions))
+    return _digest(parts)
 
 
 def _digest(parts: list) -> str:
@@ -1812,7 +2198,7 @@ def _same_interface(store: ProjectStore, node_id: str, left: str | None, right: 
     node = get_node(store, node_id)
     if node is None:
         return False
-    spellings = {compute_interface_fingerprint(node.statement, node.assumptions)} | {
+    spellings = {compute_interface_fingerprint(node.statement, node.assumptions, node.definitions)} | {
         _legacy_with_kind_fingerprint(kind.value, node.statement, node.assumptions) for kind in _FINGERPRINTED_KINDS
     }
     return left in spellings and right in spellings
@@ -1829,7 +2215,7 @@ def _interface_of(node: ProofMapNode) -> str:
     if node.kind == ProofMapNodeKind.imported_result:
         fields = ["imported_result", _normalize_whitespace(node.statement), node.source_locator or "", node.source_version or ""]
         return _digest(fields + ([node.reference_id] if node.reference_id is not None else []))
-    return compute_interface_fingerprint(node.statement, node.assumptions)
+    return compute_interface_fingerprint(node.statement, node.assumptions, node.definitions)
 
 
 @memoized_read
@@ -1843,7 +2229,7 @@ def get_accepted_interface_fingerprint(store: ProjectStore, node_id: str) -> str
     node = get_node(store, node_id)
     if node is None or get_acceptance_state(store, node_id) != "accepted":
         return None
-    return compute_interface_fingerprint(node.statement, node.assumptions)
+    return compute_interface_fingerprint(node.statement, node.assumptions, node.definitions)
 
 
 def pin_dependencies(store: ProjectStore, node: ProofMapNode) -> list[DependencyPin]:
@@ -2014,18 +2400,30 @@ def dependency_details(store: ProjectStore, node_id: str) -> list[dict]:
     return details
 
 
+@read_scoped  # whether the node is Blocked walks everything above it: once per decision, not once per node
 def _require_awaiting_acceptance_review(store: ProjectStore, node_id: str) -> None:
     """A decision only ever answers a Candidate proof awaiting review.
 
-    `rejected` is terminal (story 24). Otherwise the node must read
-    `review-needed`: that one state already excludes a node with no
-    Candidate proof (`open`), one under an active claim (`claimed`), one
-    whose dependencies aren't settled (`blocked`), and a second decision on
-    a submission that was already decided (`open`/`revision-requested`).
+    `rejected` is terminal (story 24), and a Blocked node's decision waits
+    for its dependencies (NODE_BLOCKED, ADR-0021 point 1). Otherwise the node
+    must read `review-needed`: that one state already excludes a node with no
+    Candidate proof (`open`), one under an active claim (`claimed`), and a
+    second decision on a submission that was already decided
+    (`open`/`revision-requested`).
     """
     if get_acceptance_state(store, node_id) == "rejected":
         raise ProofMapError(
             "NODE_REJECTED", f"node {node_id} was Rejected; that decision is permanent and can't be revisited"
+        )
+    node = require_node(store, node_id)
+    if not _already_accepted(store, node) and _has_unresolved_dependency(store, node):
+        # Blocked holds back the decision, never the work: the snapshot waits for its dependencies (ADR-0021 point 1)
+        unsettled = [dependency_id for dependency_id in node.dependencies if not _dependency_satisfied(store, dependency_id)]
+        raise ProofMapError(
+            "NODE_BLOCKED",
+            f"node {node_id} is Blocked: {', '.join(unsettled)} isn't Accepted (or Reference-reviewed) yet; "
+            "decide what it rests on first",
+            details={"unsettled": unsettled, "awaiting_decision": _awaiting_decision(store, node) is not None},
         )
     workflow_state = get_workflow_state(store, node_id)
     if workflow_state != "review-needed":
@@ -2138,7 +2536,7 @@ def decide_acceptance(
         if current_proof is not None:
             set_candidate_proof_review_record_id(store, current_proof.id, record.id, conn=conn)
             if resolved_decision == AcceptanceDecision.accept:
-                fingerprint = compute_interface_fingerprint(node.statement, node.assumptions)
+                fingerprint = compute_interface_fingerprint(node.statement, node.assumptions, node.definitions)
                 set_candidate_proof_interface_fingerprint(store, current_proof.id, fingerprint, conn=conn)
 
         _resolve_open_challenges(
@@ -2716,8 +3114,30 @@ def trust_rules_of(store: ProjectStore, node_id: str, *, rules: list[TrustRule] 
     A pure function of the rules in force (or `rules`, to preview a change),
     the node, its citation as it stands, and the *explicit* Reference review
     state of the other citations of the same reference. Empty for a local
-    node, a node with no citation, and a node found no longer callable.
+    node, a node with no citation, a node found no longer callable, and an
+    imported result an agent created: a rule vouches for the source, not for
+    an agent's statement of it (ADR-0022).
     """
+    if require_node(store, node_id).created_by != RESEARCHER:
+        return []
+    return _rules_the_citation_meets(store, node_id, rules=rules)
+
+
+@memoized_read
+@read_scoped
+def would_meet_trust_rules(store: ProjectStore, node_id: str) -> list[str]:
+    """The Trust rules an imported result an agent created would meet had the researcher created it (ADR-0022 point 3).
+
+    Shown beside it in the review queue to make its own Reference review
+    cheap; it gives the node no standing. Empty for the researcher's imports,
+    whose rules `trust_rules_of` reads.
+    """
+    if require_node(store, node_id).created_by == RESEARCHER:
+        return []
+    return _rules_the_citation_meets(store, node_id)
+
+
+def _rules_the_citation_meets(store: ProjectStore, node_id: str, *, rules: list[TrustRule] | None = None) -> list[str]:
     node = require_node(store, node_id)
     if node.kind != ProofMapNodeKind.imported_result or node.reference_id is None:
         return []
@@ -3349,6 +3769,35 @@ def _already_accepted(store: ProjectStore, node: ProofMapNode) -> bool:
     return node.kind != ProofMapNodeKind.imported_result and get_acceptance_state(store, node.id) == "accepted"
 
 
+def _awaiting_decision(store: ProjectStore, node: ProofMapNode) -> CandidateProofRecord | None:
+    """The node's current snapshot if no counting Human Review decision covers it yet, else None.
+
+    Covered means the newest decision's *recorded payload* names the current
+    Candidate proof. Never the `review_record_id` column (advisory, and a
+    direct edit could point it anywhere), never timestamps. A decision that
+    doesn't count covers nothing, so the proof awaits the researcher afresh.
+    A Rejected node awaits nothing. Read apart from Blocked, which hides it on
+    the workflow axis but no longer holds the work back (ADR-0021 point 1).
+    """
+    if node.kind == ProofMapNodeKind.imported_result:
+        return None
+    current_proof = get_current_candidate_proof(store, node.id)
+    if current_proof is None:
+        return None
+    state, latest, _ = _acceptance(store, node)
+    if state == "rejected":
+        return None
+    covered = latest is not None and state != "unverifiable" and latest.verdict.payload.candidate_proof_id == current_proof.id
+    return None if covered else current_proof
+
+
+@read_scoped
+def awaiting_decision(store: ProjectStore, node_id: str) -> CandidateProofRecord | None:
+    """The node's snapshot awaiting a Human Review decision, Blocked or not, or None (ADR-0021 point 1): what the
+    review queue and the Coordinator read where the workflow axis shows `blocked`."""
+    return _awaiting_decision(store, require_node(store, node_id))
+
+
 @memoized_read
 @read_scoped
 def get_workflow_state(store: ProjectStore, node_id: str) -> str:
@@ -3377,28 +3826,13 @@ def get_workflow_state(store: ProjectStore, node_id: str) -> str:
         # review governs it independently and doesn't move this axis.
         return "open"
 
-    current_proof = get_current_candidate_proof(store, node_id)
     state, latest, _ = _acceptance(store, node)
     if state == "rejected":
         return "open"  # terminal: nothing further happens on a Rejected node
-
-    # Whether the newest Human Review decision already covers the current
-    # submission: the Candidate proof its *recorded payload* names is the
-    # current one. Never the `review_record_id` column (advisory, and a
-    # direct edit could point it anywhere), never timestamps. A decision
-    # that doesn't count covers nothing, so the proof reads review-needed
-    # again, for the researcher to decide afresh.
-    review_is_current = (
-        latest is not None
-        and state != "unverifiable"
-        and (current_proof is None or latest.verdict.payload.candidate_proof_id == current_proof.id)
-    )
-
-    if review_is_current and latest.decision == ReviewGovernanceState.revision_requested:
-        return "revision-requested"
-
-    if current_proof is not None and not review_is_current:
+    if _awaiting_decision(store, node) is not None:
         return "review-needed"
+    if latest is not None and state != "unverifiable" and latest.decision == ReviewGovernanceState.revision_requested:
+        return "revision-requested"
 
     return "open"
 
@@ -3432,6 +3866,158 @@ def get_blocked_reason(store: ProjectStore, node_id: str) -> str | None:
     return "dependency-stale" if stale else "not-accepted"
 
 
+# The run's Evidence check for a passing verdict is recorded as `<agent name>/verifier` (ADR-0019 point 4)
+VERIFIER_CHECK_SUFFIX = "/verifier"
+
+
+def _verifier_passed(store: ProjectStore, proof: CandidateProofRecord) -> bool:
+    """Whether the Verifier's newest check on this very snapshot passed, and the researcher hasn't found that check
+    unusable (an evidence review decision, ADR-0004 point 5). A later failed reading of the same snapshot ends it."""
+    checks = [
+        check
+        for check in list_evidence_checks_for_candidate_proof(store, proof.id)
+        if check.run_by.endswith(VERIFIER_CHECK_SUFFIX) and check.candidate_proof_sha256 is not None and check.candidate_proof_sha256 == proof.sha256
+    ]
+    if not checks or checks[-1].outcome != EvidenceOutcome.passed:  # oldest first: the newest decides
+        return False
+    reviews = decision_rows(store, _EVIDENCE_CHECK_OBJECT_TYPE, checks[-1].id, ReviewRecordKind.evidence_review.value)
+    return not (reviews and reviews[-1]["decision"] == ReviewGovernanceState.unusable.value)
+
+
+@memoized_read
+@read_scoped
+def is_provisional(store: ProjectStore, node_id: str) -> bool:
+    """Whether an unaccepted node may be rested on for work, never for trust (ADR-0021 point 2).
+
+    A Theorem, Lemma or Claim whose current snapshot awaits a decision, on the
+    dependencies it was made on, with the Verifier's pass recorded on it; or an
+    imported result no Reference review has decided (not found no longer
+    callable, nor reviewed on what no longer stands). A node under an open Challenge, or resting on a node the researcher sent
+    back, is not: the support it was worked on is gone. And each thing it rests
+    on is settled or Provisional itself: a pass on a proof that cites nothing
+    yet worked on is no support (ADR-0021 point 3). Read without recursion: the
+    node's unsettled support is walked once, and each node in it judged on its
+    own standing, as Provisional is closed under that support.
+    """
+    if not _provisional_itself(store, node_id):
+        return False
+    return all(_provisional_itself(store, support_id) for support_id in _unsettled_support(store, node_id))
+
+
+@memoized_read
+def _provisional_itself(store: ProjectStore, node_id: str) -> bool:
+    """`is_provisional` on the node's own standing, without asking whether what it rests on is Provisional."""
+    node = get_node(store, node_id)
+    if node is None:
+        return False
+    if node.kind == ProofMapNodeKind.imported_result:
+        # unverifiable is a Reference review the researcher made that no longer counts: theirs to settle again
+        return get_reference_review_state(store, node_id) == "unreviewed"
+    if get_acceptance_state(store, node_id) == "accepted" or has_open_challenge(store, node_id):
+        return False
+    proof = _awaiting_decision(store, node)
+    if proof is None or not _snapshot_dependencies_stand(store, node, proof) or not _verifier_passed(store, proof):
+        return False
+    # a restatement since the snapshot leaves the Verifier's pass about other text (ADR-0021 point 6)
+    return not _support_withdrawn(store, node_id) and not _snapshot_restated_under(store, node_id)
+
+
+_UNSETTLED_SUPPORT = "unsettled_support"
+
+
+def _unsettled_support(store: ProjectStore, node_id: str) -> frozenset[str]:
+    """Every node `node_id` rests on, directly or through others, that hasn't reached the standing that unblocks
+    (`_dependency_satisfied`). The walk stops at a settled node: what that rests on was settled before it was.
+
+    One pass per read, like `_upstream_cause`: each node's answer goes in the read scope's memo as the walk leaves
+    it, with an explicit stack for deep chains, and a cycle (which no service creates) answered by plain reachability.
+    """
+    memo: dict[str, frozenset[str]] = scoped_memo(store, _UNSETTLED_SUPPORT)
+    if node_id in memo:
+        return memo[node_id]
+
+    def dependencies_of(current_id: str) -> list[str]:
+        node = get_node(store, current_id)
+        return node.dependencies if node is not None else []
+
+    stack: list[tuple[str, Iterator[str], set[str]]] = [(node_id, iter(dependencies_of(node_id)), set())]
+    on_path = {node_id}
+    while stack:
+        current_id, dependencies, found = stack[-1]
+        dependency_id = next(dependencies, None)
+        if dependency_id is None:
+            stack.pop()
+            on_path.discard(current_id)
+            memo[current_id] = frozenset(found)
+            if stack:
+                stack[-1][2].update(found)
+            continue
+        if _dependency_satisfied(store, dependency_id):
+            continue
+        found.add(dependency_id)
+        if dependency_id in memo:
+            found.update(memo[dependency_id])
+        elif dependency_id in on_path:
+            for path_id, _, _ in stack:
+                memo.pop(path_id, None)
+            return _reachable_unsettled(store, node_id)
+        else:
+            stack.append((dependency_id, iter(dependencies_of(dependency_id)), set()))
+            on_path.add(dependency_id)
+    return memo[node_id]
+
+
+def _reachable_unsettled(store: ProjectStore, node_id: str) -> frozenset[str]:
+    """`_unsettled_support` by plain reachability, remembering nothing: for a map with a cycle."""
+    found: set[str] = set()
+    pending = list(get_node(store, node_id).dependencies)
+    while pending:
+        current_id = pending.pop()
+        if current_id in found or _dependency_satisfied(store, current_id):
+            continue
+        found.add(current_id)
+        node = get_node(store, current_id)
+        if node is not None:
+            pending.extend(node.dependencies)
+    found.discard(node_id)
+    return frozenset(found)
+
+
+@read_scoped
+def conditional_on(store: ProjectStore, node_id: str) -> frozenset[str]:
+    """The Provisional nodes `node_id` rests on, directly or through others: its proof stands only if they do
+    (ADR-0021 point 2). Empty for a node that isn't Conditional, an Accepted one included; derived, and cleared
+    node by node as the researcher Accepts bottom-up."""
+    node = require_node(store, node_id)
+    if _already_accepted(store, node):
+        return frozenset()
+    return frozenset(dependency_id for dependency_id in _unsettled_support(store, node_id) if is_provisional(store, dependency_id))
+
+
+def _sent_back(store: ProjectStore, node_id: str) -> bool:
+    """Whether the researcher's newest decision on a node withdrew it as support: a Reject, or a Revision requested
+    that no new snapshot has answered yet; on an imported result, its Reference review found it no longer callable."""
+    node = get_node(store, node_id)
+    if node is None:
+        return False
+    if node.kind == ProofMapNodeKind.imported_result:
+        return _no_longer_callable(store, node_id)
+    state, latest, _ = _acceptance(store, node)
+    if state == "rejected":
+        return True
+    return (
+        latest is not None
+        and state != "unverifiable"
+        and latest.decision == ReviewGovernanceState.revision_requested
+        and _awaiting_decision(store, node) is None
+    )
+
+
+def _support_withdrawn(store: ProjectStore, node_id: str) -> bool:
+    """Whether anything `node_id` rests on unsettled was sent back by the researcher (ADR-0021 point 4)."""
+    return any(_sent_back(store, dependency_id) for dependency_id in _unsettled_support(store, node_id))
+
+
 @memoized_read
 @read_scoped
 def get_integrity_state(store: ProjectStore, node_id: str) -> str:
@@ -3441,7 +4027,11 @@ def get_integrity_state(store: ProjectStore, node_id: str) -> str:
     `potentially-stale` if the node is Accepted and reachable (via
     dependency edges) from an open Challenge's target or a stale dependency
     pin — computed by graph reachability, nothing set directly (ADR-0004
-    point 4). `current` otherwise.
+    point 4); or if its snapshot awaits a decision and rests on a node the
+    researcher has since rejected or sent back for revision (ADR-0021 point
+    4); or if its current snapshot, relied on by no decision yet, was frozen
+    before the text it proves was restated (ADR-0021 point 6). `current`
+    otherwise.
     """
     require_node(store, node_id)
     if has_open_challenge(store, node_id):
@@ -3450,23 +4040,63 @@ def get_integrity_state(store: ProjectStore, node_id: str) -> str:
         store, node_id
     ):
         return "potentially-stale"
+    node = require_node(store, node_id)
+    if _awaiting_decision(store, node) is not None and _support_withdrawn(store, node_id):
+        return "potentially-stale"
+    if _snapshot_restated_under(store, node_id):
+        return "potentially-stale"
     return "current"
 
 
 @read_scoped
-def get_frontier(store: ProjectStore) -> list[ProofMapNode]:
-    """The open, unblocked, unclaimed nodes: what an agent could claim right now (ADR-0010).
+def get_stale_cause(store: ProjectStore, node_id: str) -> dict | None:
+    """Why the node reads `potentially-stale`, in `get_integrity_state`'s order, or None when it doesn't (T8, #197):
+    `{"cause": "upstream-challenged" | "upstream-stale"}` for an Accepted node; `{"cause": "support-withdrawn",
+    "nodes": [...]}`, the support the researcher sent back; or the newest change to the text it is read against,
+    `{"cause": "restated", "node_id", "by", "reason", "at"}` or `{"cause": "definition-edited", "definition_id", …}`."""
+    if get_integrity_state(store, node_id) != "potentially-stale":
+        return None
+    node = require_node(store, node_id)
+    if get_acceptance_state(store, node_id) == "accepted":
+        upstream = _upstream_cause(store, node_id)
+        if upstream is not None:
+            return {"cause": f"upstream-{upstream}"}
+    if _awaiting_decision(store, node) is not None and _support_withdrawn(store, node_id):
+        return {"cause": "support-withdrawn", "nodes": sorted(d for d in _unsettled_support(store, node_id) if _sent_back(store, d))}
+    newest = newest_text_change(store, node_id)  # what `restated_at` read, from the same one-pass index
+    if newest is None:  # pragma: no cover — potentially-stale under a restatement always has one
+        return None
+    payload = newest.payload or {}
+    what = {"cause": "restated", "node_id": newest.entity_id} if newest.kind == RESTATED_EVENT else {"cause": "definition-edited", "definition_id": newest.entity_id}
+    return {**what, "by": payload.get("by"), "reason": payload.get("reason"), "at": newest.created_at.isoformat()}
 
-    The nodes `claim_node` would accept from anyone — the same check,
-    `_not_pickable` — that nobody has claimed yet and that aren't already
-    awaiting the researcher's review.
+
+def _snapshot_restated_under(store: ProjectStore, node_id: str) -> bool:
+    """Whether the node's current snapshot, not yet relied on by any decision, was frozen before the text it proves —
+    its own or what it rests on — was restated (ADR-0021 point 6). A new snapshot answers it."""
+    current = get_current_candidate_proof(store, node_id)
+    if current is None:
+        return False
+    restated = restated_at(store, node_id)
+    return restated is not None and current.created_at < restated and fixed_by(store, node_id) is None
+
+
+@read_scoped
+def get_frontier(store: ProjectStore) -> list[ProofMapNode]:
+    """The nodes ready to be worked right now: what an agent should claim next (ADR-0010, ADR-0021).
+
+    Every dependency Accepted (or Reference-reviewed) or Provisional, nobody
+    holding it, and no snapshot of it already awaiting the researcher; among
+    the nodes `claim_node` would accept from anyone (the same check,
+    `_not_pickable`).
     """
     return [
         node
         for node in list_nodes(store)
         if get_active_claim(store, node.id) is None
         and _not_pickable(store, node) is None
-        and get_workflow_state(store, node.id) != "review-needed"
+        and _awaiting_decision(store, node) is None
+        and all(_dependency_satisfied(store, d) or is_provisional(store, d) for d in node.dependencies)
     ]
 
 

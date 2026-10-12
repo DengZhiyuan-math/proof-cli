@@ -29,6 +29,7 @@ from proof_cli.proof_map import (
     trust_rule_events,
     trust_rule_impact,
     trust_rules_of,
+    would_meet_trust_rules,
 )
 from proof_cli.references import ReferenceRecord, ReferenceSourceType
 from proof_cli.storage import ensure_project, import_reference, store_reference
@@ -521,3 +522,59 @@ def test_a_project_where_a_node_already_took_the_files_place_refuses_rules_inste
         researcher(store).declare_trust_rule("textbooks", conditions=TEXTBOOKS, rationale="standard textbooks")
     assert refused.value.code == "TRUST_RULES_FILE_BLOCKED"
     assert "REVIEWS_NOT_COMMITTED" not in _codes(store)
+
+
+# -- an agent's import meets no rule (ADR-0022) -------------------------------------------------
+
+
+def _agent_imported(store, node_id, reference_id, *, by="reader", version="3rd edition"):
+    return create_node(store, node_id=node_id, kind="imported_result", statement=f"the reader's paraphrase of {node_id}",
+                       source_locator="Theorem 3.6", source_version=version, reference_id=reference_id, created_by=by)
+
+
+def test_an_imported_result_an_agent_created_meets_no_rule_but_shows_the_rules_it_would_meet(tmp_path: Path):
+    store = _project(tmp_path)
+    researcher(store).declare_trust_rule("textbooks", conditions=TEXTBOOKS, rationale="standard textbooks")
+    _agent_imported(store, "ref_agent", "rudin")
+    _imported(store, "ref_human", "rudin")
+
+    assert get_reference_review_state(store, "ref_agent") == "unreviewed"
+    assert trust_rules_of(store, "ref_agent") == []
+    assert would_meet_trust_rules(store, "ref_agent") == ["textbooks"]
+    assert trust_rule_events(store, "ref_agent") == []
+    # the researcher's own import is unchanged (ADR-0022 point 4)
+    assert get_reference_review_state(store, "ref_human") == "trusted-by-rule"
+    assert would_meet_trust_rules(store, "ref_human") == []
+
+
+def test_the_nodes_author_decides_not_the_citations(tmp_path: Path):
+    """A Reader import of a citation the researcher imported with a DOI, or of a source the researcher already
+    reviewed, still needs its own Reference review (ADR-0022 point 2; the audit's two paths)."""
+    store = _project(tmp_path)
+    store_reference(store, ReferenceRecord(id="doi", title="A paper", year=2020, source_type=ReferenceSourceType.research_paper,
+                                           identifier="10.1000/example", created_by="human"))
+    researcher(store).declare_trust_rule("dois", conditions=[{"kind": "identifier_has_doi"}], rationale="published papers")
+    researcher(store).declare_trust_rule("same-source", conditions=SAME_SOURCE, rationale="a source read once")
+    researcher(store).declare_trust_rule("other", conditions=[{"kind": "source_type_in", "values": ["other"]}], rationale="anything")
+    _imported(store, "ref_read", "paper", version="v1")
+    researcher(store).decide_reference_review("ref_read", rationale="read it")
+    _agent_imported(store, "ref_doi", "doi")
+    _agent_imported(store, "ref_same", "paper", version="v1")
+
+    assert get_reference_review_state(store, "ref_doi") == "unreviewed"
+    assert get_reference_review_state(store, "ref_same") == "unreviewed"
+    assert would_meet_trust_rules(store, "ref_same") == ["same-source"]
+
+
+def test_an_agents_import_gains_standing_only_by_its_own_reference_review(tmp_path: Path):
+    store = _project(tmp_path)
+    researcher(store).declare_trust_rule("textbooks", conditions=TEXTBOOKS, rationale="standard textbooks")
+    _agent_imported(store, "ref_agent", "rudin")
+    create_node(store, node_id="clm_1", kind="claim", statement="uses it", dependencies=["ref_agent"])
+    assert get_blocked_reason(store, "clm_1") == "not-accepted"
+    assert trust_rule_impact(store, "textbooks") == {"losing": [], "depended_on_by_accepted": [], "gaining": []}
+
+    researcher(store).decide_reference_review("ref_agent", rationale="read against Rudin 3.6")
+
+    assert get_reference_review_state(store, "ref_agent") == "reviewed"
+    assert get_workflow_state(store, "clm_1") == "open"

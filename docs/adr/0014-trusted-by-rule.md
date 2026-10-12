@@ -1,6 +1,6 @@
 # Trusted by rule: a standing Reference review the researcher declares in advance
 
-**Status**: accepted (decided in #129, #130, #131; specified in #134). Amends ADR-0004 (a second way an Imported result gains standing, still only by the researcher's decision) and ADR-0012 point 5 (conditional auto-trust, deferred there, is decided here).
+**Status**: accepted (decided in #129, #130, #131; specified in #134). Amends ADR-0004 (a second way an Imported result gains standing, still only by the researcher's decision) and ADR-0012 point 5 (conditional auto-trust, deferred there, is decided here). Amended by ADR-0022: a rule is met only by an imported result the researcher created; an agent's imported result needs its own Reference review.
 
 ## Context
 
