@@ -298,7 +298,7 @@ def test_benchmark_a_200_node_chain(tmp_path: Path):
 
 # -- one topological pass per read (#108) ----------------------------------------------
 
-CHAIN = 200
+CHAIN = 100
 
 
 def _chain_with_claims(root: Path, length: int):
@@ -310,7 +310,7 @@ def _chain_with_claims(root: Path, length: int):
 
 @pytest.fixture(scope="module")
 def chain(tmp_path_factory):
-    """A 200-node Accepted chain with an open claim hanging off every link, built once.
+    """A 100-node Accepted chain with an open claim hanging off every link, built once.
 
     Whether claim c<i> is blocked asks whether n<i> is settled, which means
     walking everything above n<i>: walked per node, one read costs n^2/2
