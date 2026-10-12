@@ -2390,6 +2390,7 @@ def dependency_details(store: ProjectStore, node_id: str) -> list[dict]:
     return details
 
 
+@read_scoped  # whether the node is Blocked walks everything above it: once per decision, not once per node
 def _require_awaiting_acceptance_review(store: ProjectStore, node_id: str) -> None:
     """A decision only ever answers a Candidate proof awaiting review.
 
