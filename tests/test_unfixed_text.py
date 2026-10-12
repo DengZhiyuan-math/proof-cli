@@ -282,3 +282,75 @@ def test_an_agent_may_not_edit_its_own_definition_once_the_researcher_s_text_nam
     assert caught.value.details["nodes"] == ["MAIN"]
     # the researcher may, while it is unfixed
     assert D.edit_definition(store, "weight", text="mean", edited_by="human", reason="the sum diverges").text == "mean"
+
+
+def test_a_snapshot_stale_under_a_definition_edit_says_which_definition_who_and_why(tmp_path: Path):
+    """T8 (#197): the map's Warnings and `node show` say why a node reads potentially-stale, not only that it does."""
+    from proof_cli.proof_map import get_stale_cause
+
+    store = ensure_project(tmp_path)
+    D.add_definition(store, "D", term="Positive parameter", text="$n \\ge 1$", created_by="reader-1")
+    create_node(store, node_id="C", kind="claim", statement="C holds for n.", definitions=["D"], created_by="reader-1")
+    create_node(store, node_id="L", kind="lemma", statement="L follows from C.", dependencies=["C"], created_by="reader-1")
+    submit_proof(store, "C", claimant_id="prover-1", scoping_rationale="scoped", content="proof of C")
+    submit_proof(store, "L", claimant_id="prover-1", scoping_rationale="scoped", content="proof of L")
+    assert get_stale_cause(store, "C") is None and get_stale_cause(store, "L") is None
+
+    D.edit_definition(store, "D", text="$n \\ge 2$", edited_by="reader-1", reason="n = 1 is degenerate")
+
+    for node_id in ("C", "L"):  # the node naming it, and the node resting on that one
+        assert get_integrity_state(store, node_id) == "potentially-stale"
+        cause = get_stale_cause(store, node_id)
+        assert {key: cause[key] for key in ("cause", "definition_id", "by", "reason")} == {
+            "cause": "definition-edited", "definition_id": "D", "by": "reader-1", "reason": "n = 1 is degenerate"}
+    result = runner.invoke(app, ["node", "show", "L", "--root", str(tmp_path), "--json"])
+    assert json.loads(result.output)["data"]["stale_cause"]["definition_id"] == "D"
+
+
+def test_a_snapshot_stale_under_a_restatement_upstream_names_the_node_restated(tmp_path: Path):
+    from proof_cli.proof_map import get_stale_cause
+
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="C", kind="claim", statement="c", created_by="reader-1")
+    create_node(store, node_id="L", kind="lemma", statement="l", dependencies=["C"], created_by="reader-1")
+    submit_proof(store, "L", claimant_id="prover-1", scoping_rationale="scoped", content="proof")
+    restate_node(store, "C", statement="c'", reason="c was too strong", by="reader-1")
+
+    cause = get_stale_cause(store, "L")
+    assert {key: cause[key] for key in ("cause", "node_id", "by", "reason")} == {
+        "cause": "restated", "node_id": "C", "by": "reader-1", "reason": "c was too strong"}
+    submit_proof(store, "L", claimant_id="prover-1", scoping_rationale="scoped", content="proof, reread")
+    assert get_stale_cause(store, "L") is None
+
+
+def test_a_snapshot_resting_on_support_sent_back_names_that_support(tmp_path: Path):
+    from proof_cli.proof_map import get_stale_cause
+
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="C", kind="claim", statement="c", created_by="reader-1")
+    create_node(store, node_id="L", kind="lemma", statement="l", dependencies=["C"], created_by="reader-1")
+    submit_proof(store, "C", claimant_id="prover-1", scoping_rationale="scoped", content="proof of C")
+    submit_proof(store, "L", claimant_id="prover-1", scoping_rationale="scoped", content="proof of L")
+    researcher(store).decide_acceptance("C", "reject")
+
+    assert get_integrity_state(store, "L") == "potentially-stale"
+    assert get_stale_cause(store, "L") == {"cause": "support-withdrawn", "nodes": ["C"]}
+
+
+def test_the_stale_causes_of_a_whole_map_read_the_event_log_once(tmp_path: Path, monkeypatch):
+    """Audit P2 (2026-10-12): a cause comes from the index `restated_at` already built, not a fresh pass per node."""
+    from proof_cli import proof_map
+    from proof_cli.storage import read_scope
+
+    store = ensure_project(tmp_path)
+    D.add_definition(store, "D", term="Positive parameter", text="$n \\ge 1$", created_by="reader-1")
+    for index in range(5):
+        create_node(store, node_id=f"C{index}", kind="claim", statement=f"c{index}", definitions=["D"], created_by="reader-1")
+        submit_proof(store, f"C{index}", claimant_id="prover-1", scoping_rationale="scoped", content="proof")
+    D.edit_definition(store, "D", text="$n \\ge 2$", edited_by="reader-1", reason="n = 1 is degenerate")
+    calls = []
+    monkeypatch.setattr(proof_map, "list_events", lambda store: calls.append(1) or list_events(store))
+
+    with read_scope():
+        causes = [proof_map.get_stale_cause(store, f"C{index}") for index in range(5)]
+    assert {cause["definition_id"] for cause in causes} == {"D"} and len(calls) == 1
