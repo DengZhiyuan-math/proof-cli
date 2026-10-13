@@ -279,8 +279,15 @@ def _root(path: str | None) -> Path:
 def _author(flag: str | None) -> str:
     """Who writes or edits (ADR-0021 points 5–6): the explicit flag, else the agent whose runtime this is
     (PROOF_AGENT_NAME), else the researcher. Agent-written text is restatable by agents; the researcher's is not, so
-    an agent's write must never fall back to "human"."""
-    return (flag or "").strip() or os.environ.get("PROOF_AGENT_NAME") or "human"
+    an agent's write must never fall back to "human".
+
+    In an agent's runtime the flag may only repeat the agent's own name: an agent writing as "human" would meet the
+    researcher's Trust rules and skip Reference review (ADR-0022, ADR-0023 point 2)."""
+    flag = (flag or "").strip()
+    agent = os.environ.get("PROOF_AGENT_NAME") or os.environ.get("PROOF_AGENT_ROLE")
+    if agent and flag and flag != agent:
+        raise ProofMapError("AGENT_AUTHOR_REFUSED", f"this agent's runtime writes as {agent!r}, not as {flag!r}")
+    return flag or agent or "human"
 
 
 CREATED_BY_HELP = "Who writes it (default: PROOF_AGENT_NAME from an agent's runtime, else human)"
@@ -1283,8 +1290,8 @@ def node_depend(
     if bool(to) != bool(move):
         raise click.UsageError("--move and --to go together: --move <dependency> --to <child>")
     store = get_store(_root(root))
-    by = _author(by)
     try:
+        by = _author(by)
         if os.environ.get("PROOF_AGENT_ROLE") == "decomposer" and node_id == os.environ.get("PROOF_AGENT_NODE") and add:
             target = get_node(store, add)
             if target is None or target.kind != ProofMapNodeKind.imported_result or reassign:
