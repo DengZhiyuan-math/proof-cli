@@ -281,13 +281,26 @@ def _author(flag: str | None) -> str:
     (PROOF_AGENT_NAME), else the researcher. Agent-written text is restatable by agents; the researcher's is not, so
     an agent's write must never fall back to "human".
 
-    In an agent's runtime the flag may only repeat the agent's own name: an agent writing as "human" would meet the
-    researcher's Trust rules and skip Reference review (ADR-0022, ADR-0023 point 2)."""
+    In an agent's runtime the flag may only repeat the agent's own name, and that name may not be one the researcher
+    writes under ("human", the CLI's, or the project's git identity, the page's): an agent written as the researcher
+    would meet the researcher's Trust rules and skip Reference review (ADR-0022, ADR-0023 point 2), and its unwired
+    node would pass as the researcher's standalone work in Pursue's coverage (point 4)."""
     flag = (flag or "").strip()
     agent = os.environ.get("PROOF_AGENT_NAME") or os.environ.get("PROOF_AGENT_ROLE")
-    if agent and flag and flag != agent:
+    if not agent:
+        return flag or "human"
+    if flag and flag != agent:
         raise ProofMapError("AGENT_AUTHOR_REFUSED", f"this agent's runtime writes as {agent!r}, not as {flag!r}")
-    return flag or agent or "human"
+    if agent in _researcher_names():
+        raise ProofMapError("AGENT_AUTHOR_REFUSED", f"an agent may not be named {agent!r}: that is the researcher's name; set another `[studio] agent_name`")
+    return agent
+
+
+def _researcher_names() -> set[str]:
+    """The names the researcher's own writes carry: the CLI's "human", and the page's git identity (proof-web)."""
+    from .reviews import git_identity
+
+    return {"human", git_identity(Path(os.environ.get("PROOF_ROOT") or "."))}
 
 
 CREATED_BY_HELP = "Who writes it (default: PROOF_AGENT_NAME from an agent's runtime, else human)"
@@ -1194,7 +1207,7 @@ def node_progress(
     coordinator: str = typer.Option("", "--coordinator", help="What a Coordinator did on this Theorem or Lemma's subtree: a run it started, a redirect, a stop (ADR-0019 point 18); no role"),
     question: str = typer.Option("", "--question", help="A judgement call made instead of stopping: \"<the choice made; the alternative>\", a Standing question the researcher answers later (ADR-0021)"),
     role: str = typer.Option("", "--role", help=f"{_ROLES_HELP} (default: PROOF_AGENT_ROLE, set in the agent's runtime)"),
-    by: str = typer.Option("", "--by", help="Who reports; empty means PROOF_AGENT_NAME from the agent's runtime, else human"),
+    by: str = typer.Option("", "--by", help="Who reports (default: PROOF_AGENT_NAME from an agent's runtime, else human; an agent reports only as itself)"),
     root: str = ROOT_OPTION,
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
@@ -1211,7 +1224,7 @@ def node_progress(
                 typer.echo(render_work_log(node_id, log))
             return
         entry = record_progress(
-            store, node_id, role=role or os.environ.get("PROOF_AGENT_ROLE") or None, by=by or os.environ.get("PROOF_AGENT_NAME") or "human",
+            store, node_id, role=role or os.environ.get("PROOF_AGENT_ROLE") or None, by=_author(by),
             plan=plan or None, step=step, status=status or None, note=note, handoff=handoff or None,
             verdict=verdict or None, attempt=attempt or None, method=method or None, failed_on=failed_on or None, coordinator=coordinator or None,
             question=question or None,
