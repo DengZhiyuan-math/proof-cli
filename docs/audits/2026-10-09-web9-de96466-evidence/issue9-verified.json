@@ -1,0 +1,7 @@
+{
+  "body": "Blocked by: DengZhiyuan-math/proof-cli#199\n\n## What\n\nADR-0022 point 3 and ADR-0021 point 3. The Reference review card (`server.py` around line 684 in the audited snapshot) shows only the statement and the citation. The Verifier's \"unchecked against the source\" marks stay on the dependents' verdicts and appear neither in the queue nor on the imported result's page.\n\nFor an agent's imported result in the review queue, and on its node page, show:\n\n- each rule it would meet had the researcher imported it (`would_meet_trust_rule`);\n- every \"unchecked against the source\" mark on a dependent's Evidence check, naming the dependent, its snapshot and whether that snapshot is current.\n\nThe Reference review's rationale is prefilled from those rules. The decision is the ordinary Reference review.\n\n## Acceptance\n\n- [ ] A page test: a Reader import under a DOI rule is listed unreviewed, with the rule named and a dependent's unchecked mark.\n- [ ] A researcher's rule-trusted import stays in the collapsed rule-trusted section.\n\n---\nPart of DengZhiyuan-math/proof-cli#193. Source: `docs/audits/2026-10-08-adr0021-design-audit.md` on `integ/0021` (proof-cli), probes in its evidence directory. Fix on the rebuilt integration Head (DengZhiyuan-math/proof-cli#198), not on the audited snapshot.",
+  "number": 9,
+  "state": "OPEN",
+  "title": "Review queue: an agent import's would-be rules and its unchecked-against-source marks",
+  "url": "https://github.com/zeqome/proof-web/issues/9"
+}

@@ -1,0 +1,35 @@
+{
+  "core": {
+    "skipped": 15,
+    "failure": 0,
+    "error": 0,
+    "passed": 1175,
+    "testcases": 1190,
+    "head": "ec9f5aacb18805ad88b0b3923d17f773fa38cd7c",
+    "base": "d433159214156239e31094d1eaea3b7b991b927f"
+  },
+  "agents": {
+    "skipped": 0,
+    "failure": 0,
+    "error": 0,
+    "passed": 230,
+    "testcases": 230,
+    "head": "c6ddf0a3d22e80f0190349064343cc79945c81d3",
+    "base": "7d3f312269b9868415e06302b97637db1a490220"
+  },
+  "web": {
+    "skipped": 1,
+    "failure": 0,
+    "error": 0,
+    "passed": 839,
+    "testcases": 840,
+    "head": "5667befee615dfdbd7336affd6c069b799e84ebc",
+    "base": "af687b02b7d03dbf5bd2b60062284d8421dfa5c0"
+  },
+  "totals": {
+    "passed": 2244,
+    "skipped": 16,
+    "failure": 0,
+    "error": 0
+  }
+}

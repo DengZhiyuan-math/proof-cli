@@ -1,0 +1,92 @@
+t8-queue
+4 nodes · 0 on the frontier
+0
+Frontier
+2
+Awaiting you
+0
+Fog
+Y
+Yomathnotcool <125728853+DengZhiyuan-math@users.noreply.github.com>
+
+Proof map
+
+Map
+Review
+2
+Warnings
+2
+Discuss
+Map
+Cclaim
+Status
+Dependency changed
+Workflow
+review-needed
+Acceptance
+unreviewed
+Integrity
+potentially-stale
+Start agent
+The agent works the node on its own, as Prover, Typesetter and Numerics, until it requests review or needs you.
+Statement
+Definitions
+Positive parameter. 
+𝑛
+≥
+2
+n≥2.
+C holds for n.
+Open the node's studio · proof folder /Volumes/Codex-Workspace/live/home/zhdeng/proof-cli/docs/audits/2026-10-11-integration-published-t8/projects/queue/proofs/C
+
+Used by: L
+
+Warnings for this node
+None.
+Dependencies and pins
+Dependency	Pinned version	Accepted version now	Pinned interface	Current?
+Challenges
+Review snapshot
+
+snapshot v1 · 14fe1f7a-0beb-4f4f-813a-010a91755491 · SHA-256 2cbb29345addec9d2deca126a5846e96a884810df2feb272fcaec3ca4a4a26cd
+
+Exactly the files being decided on — the LaTeX, or a computation's program and outputs; their manifest's SHA-256 is recorded with the decision. The node's studio shows the compiled PDF or runs the program.
+
+%%%%% ../preamble.tex
+% Shared by every node's proof.tex (\input{../preamble}): packages, macros, theorem environments.
+\usepackage{amsmath,amssymb,amsthm}
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{claim}[theorem]{Claim}
+
+%%%%% key-ideas.md
+## 核心思路
+
+The bound follows from compactness of $[0, 1]$.
+
+## 主要步骤
+
+1. Cover the interval (uses lem_cover).
+2. Take a finite subcover.
+3. Bound each piece.
+
+## 难点
+
+The subcover's size must not depend on $\varepsilon$.
+
+## 未覆盖
+
+无
+
+%%%%% proof.tex
+A controlled fixture proof.
+Evidence checks
+passed — controlled fixture, not mathematics (run by prover-fixture/verifier) · snapshot v1 · 2cbb29345add…
+Decisions you can make here
+Decision	On	Rationale	
+Accept this Candidate proof	C		Record
+Request a revision	C		Record
+Reject (final)	C		Record
+Trust this Evidence check	d3977eca-5f26-4513-9c01-3bef4c169c10		Record
+Mark this Evidence check unusable	d3977eca-5f26-4513-9c01-3bef4c169c10		Record
+Review history

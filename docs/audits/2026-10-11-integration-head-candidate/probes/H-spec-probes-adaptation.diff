@@ -1,0 +1,6 @@
+64c64,66
+<         _until(lambda: not coordinator.active(), "Coordinator finished")
+---
+>         # adapted: under proof-agents#19 structure turns are apart from the proof budget, so the total (3) is not spent
+>         # here and T's re-split starts (ADR-0021 point 9); the Coordinator goes on. A is parked all the same
+>         _until(lambda: any(entry["node"] == "A" for entry in coordinator.view()["parked"]), "A parked")

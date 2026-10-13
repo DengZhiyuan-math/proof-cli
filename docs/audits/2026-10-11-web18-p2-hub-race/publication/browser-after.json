@@ -1,0 +1,40 @@
+{
+  "http_status": 200,
+  "panel": "Turns 1/5 (1 structure) · failed launches 0 · 9.9 of 10 min left",
+  "payload": {
+    "data": {
+      "budget": {
+        "deadline": 1791711213.0453482,
+        "failed_launches": 0,
+        "minutes_max": 10,
+        "spent": 1,
+        "structure_spent": 1,
+        "turns_max": 5
+      },
+      "can_pursue": true,
+      "current": null,
+      "limits": {
+        "minutes": 10,
+        "node_minutes": 4,
+        "node_turns": 2,
+        "open_nodes": 0,
+        "structure_allowance": 3,
+        "turns": 5
+      },
+      "reason": "the Reader stated no Theorem",
+      "results": {},
+      "spend": {
+        "failed_launches": 0,
+        "minutes_left": 9.7,
+        "minutes_max": 10,
+        "structure_turns": 1,
+        "turns": 1,
+        "turns_max": 5
+      },
+      "status": "stuck",
+      "stopping": false,
+      "theorems": []
+    },
+    "ok": true
+  }
+}

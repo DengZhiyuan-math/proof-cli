@@ -1,0 +1,9 @@
+{
+  "at": "2026-10-11T21:45:28.464636+00:00",
+  "controlledServers": "stopped after their checks",
+  "primaryServer": 75607,
+  "restartServer": 22233,
+  "restartServerStop": "SIGINT after verification; no provider active",
+  "trialState": "retained",
+  "sourceCheckouts": "retained"
+}

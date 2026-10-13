@@ -1,0 +1,36 @@
+{
+  "date": "2026-10-09",
+  "pr": "https://github.com/zeqome/proof-web/pull/13",
+  "head": "de964662146afccca83ac88c6f5ae263c78d6360",
+  "base": "feat/0021-pursue-review-queue",
+  "merge_base": "864a2c29bd4f41a5344ae7be960b842a1d4aed62",
+  "dependencies": {
+    "core": {
+      "path": "/private/tmp/proof-web9-dependencies-l3osbhij/core/DengZhiyuan-math-proof-cli-ad479f6",
+      "head": "ad479f6d69186105a934d9765a553c48f859ceca"
+    },
+    "agents": {
+      "path": "/private/tmp/proof-web9-dependencies-l3osbhij/agents/zeqome-proof-agents-9558fd0caf6eef2f80401c503a0a4549f4bbaa6f",
+      "head": "9558fd0caf6eef2f80401c503a0a4549f4bbaa6f"
+    }
+  },
+  "targeted_tests": "3 passed in 2.23s",
+  "original_probe": "1 passed in 1.14s",
+  "attribution_probes": "3 failed in 1.25s",
+  "findings": [
+    "P2: explicit other-import and mixed checked/unchecked note wrongly attributed",
+    "P2: frozen snapshot import set replaced with current dependency set; historical warning lost"
+  ],
+  "review_queue_sha256": "9c53575cc60f2b75ad03a58f5d21547be1ed9e7130a2fdc0c1dd3bae97dbb1cd",
+  "scope": "Synthetic SQLite and page harness. No live browser or agent provider. PR created and attached; no comment, review, merge, issue edit or automation change.",
+  "baseline_new_tests": "3 failed in 3.14s at 864a2c2, with the new test file copied into baseline tests and its own page harness loaded",
+  "closing_note_isolated_rerun": "1 passed in 4.80s; full suite failed at missing step entry",
+  "web_archive": "/private/tmp/proof-web9-de96466-0qvkwakt/zeqome-proof-web-de964662146afccca83ac88c6f5ae263c78d6360",
+  "full_suite": "742 passed, 2 failed, 1 skipped in 593.10s; no PermissionError port-bind failures in this run",
+  "coordinator_isolated_rerun": "1 failed in 60.76s; waiting for stuck timed out",
+  "coordinator_old_web_control": "1 passed in 55.17s; this does not confirm an inherited baseline failure",
+  "ci": {
+    "package": "SUCCESS"
+  },
+  "integration_tests": "Two non-port failures remain unresolved. Existing test and studios files are byte-identical to web base; cause not established."
+}

@@ -1,0 +1,483 @@
+From 07bb06e67dbd767a8390593b464fee4dba2d07a4 Mon Sep 17 00:00:00 2001
+From: Yomathnotcool <zy@zeqome.com>
+Date: Sat, 10 Oct 2026 12:19:09 +0200
+Subject: [PATCH] feat: a project Pursue's history is recorded and a new hub
+ reads it back (#10)
+
+The hub records each step of the pursuit it runs as core's pursuit events
+(proof-cli#201): its start, the Reader's end, each Theorem it moves to (with
+what that Theorem's Coordinator has spent), a Stop, a release that failed, and
+its end. No provider starts unless the start is recorded: that refusal is
+PURSUIT_RECORD_FAILED. A later step that cannot be recorded is kept and shown
+with the pursuit (`record_error`), not passed over.
+
+A release that failed is no end. Within the hub Stop retries it (#12), and the
+end is recorded once the runs are given back. A hub that has not pursued
+reads the last pursuit from its events: its end, or `interrupted` with the
+last step it recorded. Nothing retries a release after a restart; a new Start
+rechecks claims, snapshots and node states.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/proof_web/static/app.js     |   2 +
+ src/proof_web/studios.py        | 122 ++++++++++++++++-
+ tests/test_pursuit_history.py   | 226 ++++++++++++++++++++++++++++++++
+ tests/test_review_queue_page.py |  21 +++
+ 4 files changed, 366 insertions(+), 5 deletions(-)
+ create mode 100644 tests/test_pursuit_history.py
+
+diff --git a/src/proof_web/static/app.js b/src/proof_web/static/app.js
+index c1d55fe..9c70f51 100644
+--- a/src/proof_web/static/app.js
++++ b/src/proof_web/static/app.js
+@@ -341,6 +341,8 @@ function showPursuit(view) {
+     view.status === "idle" ? "" :
+     view.status === "reading" ? "The Reader is stating the draft…" :
+     view.status === "pursuing" ? `Pursuing ${view.current} (${(view.theorems || []).join(", ")})` : `${view.status}${view.reason ? ` — ${view.reason}` : ""}`;
++  // a step of the pursuit that could not be recorded (proof-cli#201): said, not passed over
++  if (view.record_error) $("pursue-status").textContent += ` · History not saved: ${view.record_error}`;
+   clearTimeout(pursuitTimer);
+   if (running || view.stopping) pursuitTimer = setTimeout(() => refresh().catch(showError), 5000);
+ }
+diff --git a/src/proof_web/studios.py b/src/proof_web/studios.py
+index bea9827..0b6d27b 100644
+--- a/src/proof_web/studios.py
++++ b/src/proof_web/studios.py
+@@ -32,6 +32,10 @@ from proof_cli.errors import ERROR_CODES
+ from proof_cli.key_ideas import KEY_IDEAS_FILE
+ from .definitions_view import node_definitions
+ from proof_cli.storage import ProjectStore, get_active_claim, get_current_candidate_proof, read_project_instance_id
++try:  # proof-cli#201: a project Pursue's history as pursuit events; an older proof-cli keeps none
++    from proof_cli.pursuit import project_progress, record_pursuit
++except ImportError:  # pragma: no cover — the pursuit then reads idle in a new hub, as before
++    project_progress = record_pursuit = None
+ from proof_agents.agent_run import ACTIVE, AgentRun, RunHooks
+ from proof_agents.coordinator import Coordinator, CoordinatorHooks
+ try:  # ADR-0021: Pursue on a project with no map; an older proof-agents has no Reader and no project pursuit
+@@ -152,6 +156,13 @@ class StudioHub:
+         self._detached = False
+         self._coordinators: dict[str, Coordinator] = {}   # one per subtree root it was started on (ADR-0019 point 18)
+         self._pursuit = None  # Pursue on a project with no map (ADR-0021 point 7): a Reader turn, then each Theorem's Coordinator
++        # its history (proof-cli#201): the pursuit this hub started, the Theorem last recorded, whether its end is recorded,
++        # and a recording that failed, shown with the pursuit rather than passed over
++        self._record_lock = threading.Lock()
++        self._pursuit_id: str | None = None
++        self._pursuit_theorem: str | None = None
++        self._pursuit_ended = False
++        self._record_error: str | None = None
+         self._discussion: AgentManager | None = None   # the map's agent (issue #177), made on first use; one turn at a time
+         self._reader: AgentManager | None = None       # the Reader's (ADR-0021 point 5), for Pursue on a project with no map
+         self._read_job: int | None = None              # the Reader's turn while one runs: what Stop stops
+@@ -544,14 +555,99 @@ class StudioHub:
+                 raise NoStudio("STUDIO_CLOSED", "the proof map's server is shutting down")
+             if self._pursuit is None:
+                 self._pursuit = ProjectPursuit(PursuitHooks(
+-                    read=lambda provider: self._read_turn(provider),
++                    read=self._read_recorded,
+                     theorems=lambda: [n.id for n in proof_map.list_nodes(self.store) if n.kind == ProofMapNodeKind.theorem] if self._attached() else [],
+-                    coordinator=lambda theorem: self.coordinator(theorem),
+-                    record=lambda note: None,
++                    coordinator=self._pursued_coordinator,
++                    record=lambda note: self._record_ending(),
+                     **({"stop_read": self._stop_read} if _PURSUIT_STOPS_READ else {}),
+                 ))
+             return self._pursuit
+ 
++    # -- its history (proof-cli#201): each step a pursuit event; a new hub reads the last pursuit back ------------------
++
++    def _record(self, phase: str, **details) -> None:
++        """Record one step of the pursuit this hub started. A step after its end is not recorded. A recording that fails
++        is kept and shown with the pursuit (`record_error`), never taken for success."""
++        if record_pursuit is None:
++            return
++        with self._record_lock:
++            if self._pursuit_id is None or self._pursuit_ended:
++                return
++            try:
++                record_pursuit(self.store, phase, pursuit_id=self._pursuit_id, budget=self._budget(details.get("theorem")), **details)
++            except Exception as exc:  # noqa: BLE001 — shown with the pursuit
++                self._record_error = f"its {phase} was not recorded: {getattr(exc, 'message', exc)}"
++                return
++            self._pursuit_ended = phase == "end"
++
++    def _budget(self, theorem: str | None) -> dict | None:
++        """What a Theorem's Coordinator has spent so far, when this hub has one; nothing is made to ask."""
++        coordinator = self._coordinators.get(theorem) if theorem else None
++        if coordinator is None:
++            return None
++        view = coordinator.view()
++        return {"turns": view.get("turns"), "turns_max": view.get("turns_max")}
++
++    def _read_recorded(self, provider: str) -> dict:
++        """The Reader's turn (`_read_turn`), its end recorded."""
++        answer = self._read_turn(provider)
++        self._record("reader_end", outcome="failed" if "error" in answer else "ok", reason=str(answer.get("error") or ""))
++        return answer
++
++    def _pursued_coordinator(self, theorem: str) -> Coordinator:
++        """A Theorem's Coordinator, as the pursuit asks for it: a Theorem it moves to is recorded once."""
++        with self._record_lock:
++            moved = theorem != self._pursuit_theorem
++            self._pursuit_theorem = theorem
++        if moved:
++            self._record("theorem", theorem=theorem)
++        return self.coordinator(theorem)
++
++    def _record_ending(self) -> None:
++        """The pursuit's own notes (its `record` hook): a release that failed is recorded as that, and is no end — Stop may
++        still give the runs back; an end it reached by itself (done, stuck) is its end."""
++        pursuit = self._pursuit
++        if pursuit is None:
++            return
++        view = pursuit.view()
++        if view["status"] == "release-failed":
++            self._record("release_failed", theorem=view["current"], reason=view["reason"])
++        elif view["status"] in ("done", "stuck"):
++            self._record("end", outcome=view["status"], reason=view["reason"])
++
++    def _stop_pursuit(self, pursuit) -> dict:
++        """Stop the pursuit, its Stop recorded, and its end once its runs are given back."""
++        before = pursuit.view()
++        if before["status"] in (*_PURSUIT_AT_WORK, "release-failed"):
++            self._record("stop", theorem=before["current"], reason="stopped by the researcher")
++        answer = pursuit.stop()
++        after = pursuit.view()
++        if after["status"] == "released":
++            self._record("end", outcome="released", reason=after["reason"])
++        return answer
++
++    def _recorded_pursuit(self) -> dict | None:
++        """The project's last pursuit as its events tell it, for a hub that has not pursued: its end, or `interrupted`
++        with the last step it recorded. Nothing resumes it; a new Start rechecks claims, snapshots and node states."""
++        if project_progress is None:
++            return None
++        try:
++            pursuits = project_progress(self.store)
++        except Exception as exc:  # noqa: BLE001 — shown with the pursuit
++            self._record_error = f"its history could not be read: {exc}"
++            return None
++        if not pursuits:
++            return None
++        last = pursuits[-1]
++        reason = last["reason"]
++        if last["status"] == "interrupted":
++            step = last["events"][-1]
++            said = f": {step['reason']}" if step["reason"] else ""
++            reason = f"stopped with the server after its {last['last_phase'].replace('_', ' ')}{said}. {reason}"
++        theorems = list(dict.fromkeys(e["theorem"] for e in last["events"] if e["theorem"]))
++        return {"status": last["status"], "reason": reason, "theorems": theorems, "current": last["theorem"], "results": {},
++                "recorded": True, "pursuit_id": last["pursuit_id"], "last_phase": last["last_phase"]}
++
+     def _reader_agent(self) -> AgentManager:
+         """The Reader's agent manager: one for the project, rooted at it, made on first use, closed with the hub."""
+         with self._lock:
+@@ -631,12 +727,24 @@ class StudioHub:
+             if not provider:
+                 backend = self._reader_agent().backend(None)
+                 provider = backend.id if backend is not None else ""
++            if record_pursuit is not None:  # proof-cli#201: no provider starts unless the start is recorded
++                try:
++                    started = record_pursuit(self.store, "start", provider=provider)
++                except Exception as exc:  # noqa: BLE001
++                    return int(HTTPStatus.INTERNAL_SERVER_ERROR), {
++                        "error": f"Pursue was not started: its start could not be recorded: {getattr(exc, 'message', exc)}",
++                        "code": "PURSUIT_RECORD_FAILED"}
++                with self._record_lock:
++                    self._pursuit_id, self._pursuit_theorem = started.payload["pursuit_id"], None
++                    self._pursuit_ended, self._record_error = False, None
+             with self._lock:
+                 self._read_stopped = False  # a new pursuit's Reader: the last Stop is over
+             answer = pursuit.start(provider)
++            if "error" in answer:  # refused after all: the recorded start ends here
++                self._record("end", outcome="refused", reason=str(answer["error"]))
+         elif action == "stop":
+             reading = pursuit.view()["status"] == "reading"
+-            answer = pursuit.stop()
++            answer = self._stop_pursuit(pursuit)
+             if reading and not _PURSUIT_STOPS_READ:  # an older pursuit does not stop its Reader: the host does
+                 self._stop_read()
+             if answer.get("code") == "NO_PURSUIT":  # it had ended already: nothing to stop, its ending stands
+@@ -647,6 +755,10 @@ class StudioHub:
+ 
+     def pursuit_view(self) -> dict:
+         view = self._pursuit.view() if self._pursuit is not None else {"status": "idle", "reason": "", "theorems": [], "current": None, "results": {}}
++        if view["status"] == "idle":  # this hub has not pursued: the last pursuit's ending, as recorded (proof-cli#201)
++            view = self._recorded_pursuit() or view
++        if self._record_error:
++            view = {**view, "record_error": self._record_error}
+         # stopped, but its Reader's turn (or its thread) not ended yet, or its runs being given back: no Pursue until it
+         # has. A release that failed is not stopping: it holds its runs until the researcher's Stop gives them back
+         stopping = view["status"] == "stopping" or (view["status"] not in (*_PURSUIT_AT_WORK, "release-failed") and self._pursuit_busy())
+@@ -1050,7 +1162,7 @@ class StudioHub:
+     def close(self) -> None:
+         pursuit = self._pursuit
+         if pursuit is not None and pursuit.view()["status"] in ("reading", "pursuing"):
+-            pursuit.stop()  # before the hub closes: its Stop releases the Coordinator it is on through the hub
++            self._stop_pursuit(pursuit)  # before the hub closes: its Stop releases the Coordinator it is on through the hub
+         with self._lock:
+             self._closed = True
+             studios, self._studios = list(self._studios.values()), {}
+diff --git a/tests/test_pursuit_history.py b/tests/test_pursuit_history.py
+new file mode 100644
+index 0000000..66f9679
+--- /dev/null
++++ b/tests/test_pursuit_history.py
+@@ -0,0 +1,226 @@
++"""proof-web#10: a project Pursue's history, recorded as core's pursuit events (proof-cli#201).
++
++The hub records each step of the pursuit it runs: its start (no provider starts unless that is recorded), the Reader's
++end, each Theorem it moves to, a Stop, a release that failed, and its end. A new hub reads the last pursuit back: its
++end, or `interrupted` with the last step it recorded. A release that failed is no end; after a restart it reads
++`interrupted` with that failure, and nothing offers to retry it there: a new Start rechecks claims.
++"""
++
++import time
++from pathlib import Path
++
++import pytest
++
++from _review_client import DirectClient
++from proof_cli.proof_map import ProofMapError, create_node, list_nodes
++from proof_cli.storage import ensure_project
++
++pursuit = pytest.importorskip("proof_cli.pursuit")
++
++
++def _until(condition, timeout=10.0):
++    deadline = time.monotonic() + timeout
++    while not condition():
++        assert time.monotonic() < deadline, "timed out"
++        time.sleep(0.02)
++
++
++@pytest.fixture
++def drafted(tmp_path: Path):
++    """A project with a draft in its library and no map; a test stands in for the Reader's turn."""
++    root = tmp_path / "project"
++    store = ensure_project(root)
++    (root / "library").mkdir()
++    (root / "library" / "main.tex").write_text("\\begin{theorem}T\\end{theorem}\n")
++    (root / "proof.toml").write_text('[studio]\nlibrary = ["library"]\n')
++    from proof_web import studios
++
++    if studios.ProjectPursuit is None:
++        pytest.skip("this proof-agents has no project pursuit")
++    clients = [DirectClient(store)]
++    yield store, clients
++    for client in clients:
++        client.app.close()
++
++
++def _view(client) -> dict:
++    return client.get("/api/pursue")[1]["data"]
++
++
++def _settled(client) -> bool:
++    return not client.app.studios._pursuit_busy()
++
++
++def _phases(store) -> list[tuple]:
++    [last] = pursuit.project_progress(store)[-1:]
++    return [(e["phase"], e["outcome"], e["theorem"]) for e in last["events"]]
++
++
++def _restart(store, clients) -> DirectClient:
++    """The server started again on the same project: a new hub, the old one left as it was."""
++    client = DirectClient(store)
++    clients.append(client)
++    return client
++
++
++class _Coordinator:
++    """A Theorem's Coordinator, standing in: it ends with `status` at once, or releases only after `fails` failures."""
++
++    def __init__(self, status="done", fails=0) -> None:
++        self.status, self.fails, self.released = status, fails, False
++
++    def start(self, provider):
++        return {"status": "running"}
++
++    def active(self):
++        return self.status == "running" and not self.released
++
++    def view(self):
++        return {"status": "released" if self.released else self.status, "reason": "", "settling": False, "turns": 3, "turns_max": 40}
++
++    def release(self):
++        if self.fails:
++            self.fails -= 1
++            return {"error": "L1 is still claimed by claude-code", "code": "RELEASE_FAILED"}
++        self.released = True
++        return {"status": "released"}
++
++
++def _needs_17():
++    from proof_web import studios
++
++    if not hasattr(studios.ProjectPursuit, "_release_failed"):
++        pytest.skip("needs proof-agents#17")
++
++
++def test_project_pursuit_ending_survives_a_new_hub(drafted):
++    """The audit probe: a Reader that stated no Theorem reads stuck, and still stuck in a new hub, never idle."""
++    store, clients = drafted
++    first = clients[0]
++    first.app.studios._read_turn = lambda provider: {}
++    assert first.post("/api/pursue/start", {"provider": "stub"})[0] == 200
++    _until(lambda: _view(first)["status"] == "stuck" and _settled(first))
++    second = _restart(store, clients)
++    view = _view(second)
++    assert (view["status"], view["reason"], view["recorded"]) == ("stuck", "the Reader stated no Theorem", True)
++    assert _phases(store) == [("start", "", None), ("reader_end", "ok", None), ("end", "stuck", None)]
++
++
++def test_a_reader_failure_is_recorded_as_the_pursuit_s_not_on_a_node(drafted):
++    store, clients = drafted
++    client = clients[0]
++    client.app.studios._read_turn = lambda provider: {"error": "no backend", "code": "READER_FAILED"}
++    client.post("/api/pursue/start", {"provider": "stub"})
++    _until(lambda: _view(client)["status"] == "stuck" and _settled(client))
++    assert _phases(store) == [("start", "", None), ("reader_end", "failed", None), ("end", "stuck", None)]
++    [last] = pursuit.project_progress(store)
++    assert last["events"][1]["reason"] == "no backend" and last["provider"] == "stub"
++    assert list_nodes(store) == []
++    assert "the Reader's turn failed: no backend" in _view(_restart(store, clients))["reason"]
++
++
++def test_each_theorem_and_its_end_are_recorded_with_what_it_spent(drafted):
++    store, clients = drafted
++    client = clients[0]
++    create_node(store, node_id="T1", kind="theorem", statement="T1 holds")  # a map already: no Reader turn
++    hub = client.app.studios
++    done = _Coordinator("done")
++    hub._coordinators["T1"] = done  # the hub's own: what it spent is read from it
++    hub.coordinator = lambda theorem: done
++    client.post("/api/pursue/start", {"provider": "stub"})
++    _until(lambda: _view(client)["status"] == "done" and _settled(client))
++    assert _phases(store) == [("start", "", None), ("theorem", "", "T1"), ("end", "done", None)]
++    [last] = pursuit.project_progress(store)
++    assert last["events"][1]["budget"] == {"turns": 3, "turns_max": 40}
++    assert _view(_restart(store, clients))["status"] == "done"
++
++
++def test_a_failed_release_is_recorded_and_its_retry_ends_the_pursuit(drafted):
++    _needs_17()
++    store, clients = drafted
++    client = clients[0]
++    create_node(store, node_id="T1", kind="theorem", statement="T1 holds")
++    held = _Coordinator("running", fails=1)
++    client.app.studios.coordinator = lambda theorem: held
++    client.post("/api/pursue/start", {"provider": "stub"})
++    _until(lambda: _view(client)["status"] == "pursuing")
++    assert client.post("/api/pursue/stop", {})[1]["error"]["code"] == "RELEASE_FAILED"
++    assert pursuit.project_progress(store)[-1]["status"] == "interrupted"  # a release that failed is no end
++    assert client.post("/api/pursue/stop", {})[0] == 200
++    assert _phases(store) == [("start", "", None), ("theorem", "", "T1"), ("stop", "", "T1"), ("release_failed", "", "T1"),
++                              ("stop", "", "T1"), ("end", "released", None)]
++    assert _view(_restart(store, clients))["status"] == "released"
++
++
++def test_after_a_restart_a_failed_release_reads_interrupted_with_its_reason_and_no_retry(drafted):
++    _needs_17()
++    store, clients = drafted
++    client = clients[0]
++    create_node(store, node_id="T1", kind="theorem", statement="T1 holds")
++    held = _Coordinator("running", fails=5)
++    client.app.studios.coordinator = lambda theorem: held
++    client.post("/api/pursue/start", {"provider": "stub"})
++    _until(lambda: _view(client)["status"] == "pursuing")
++    client.post("/api/pursue/stop", {})
++    assert _view(client)["status"] == "release-failed"  # this hub: Stop retries (proof-web#12)
++
++    second = _restart(store, clients)
++    view = _view(second)
++    assert (view["status"], view["last_phase"], view["current"]) == ("interrupted", "release_failed", "T1")
++    assert "L1 is still claimed by claude-code" in view["reason"] and "a new Start rechecks claims" in view["reason"]
++    status, answer = second.post("/api/pursue/stop", {})  # nothing to retry here: the old process is gone
++    assert status == 200 and answer["data"]["status"] == "interrupted"
++    assert held.fails == 4  # the new hub asked no release
++
++
++def test_a_start_that_cannot_be_recorded_starts_no_provider(drafted, monkeypatch):
++    from proof_web import studios
++
++    store, clients = drafted
++    client = clients[0]
++    read = []
++    client.app.studios._read_turn = lambda provider: read.append(provider) or {}
++
++    def refuses(*args, **kwargs):
++        raise ProofMapError("PURSUIT_RECORD_FAILED", "the pursuit's start could not be recorded: database is locked")
++
++    monkeypatch.setattr(studios, "record_pursuit", refuses)
++    status, answer = client.post("/api/pursue/start", {"provider": "stub"})
++    assert status == 500 and answer["error"]["code"] == "PURSUIT_RECORD_FAILED", answer
++    assert "database is locked" in answer["error"]["message"]
++    assert read == [] and client.app.studios._pursuit.view()["status"] == "idle"
++    assert pursuit.project_progress(store) == []
++
++
++def test_a_later_step_that_cannot_be_recorded_is_shown_not_passed_over(drafted, monkeypatch):
++    from proof_web import studios
++
++    store, clients = drafted
++    client = clients[0]
++    client.app.studios._read_turn = lambda provider: {}
++    record = studios.record_pursuit
++
++    def only_the_start(store, phase, **kwargs):
++        if phase != "start":
++            raise ProofMapError("PURSUIT_RECORD_FAILED", f"the pursuit's {phase} could not be recorded: disk full")
++        return record(store, phase, **kwargs)
++
++    monkeypatch.setattr(studios, "record_pursuit", only_the_start)
++    client.post("/api/pursue/start", {"provider": "stub"})
++    _until(lambda: _view(client)["status"] == "stuck" and _settled(client))
++    view = _view(client)
++    assert "was not recorded" in view["record_error"] and "disk full" in view["record_error"]
++
++
++def test_a_pursuit_stopped_with_the_server_records_its_end(drafted):
++    store, clients = drafted
++    client = clients[0]
++    create_node(store, node_id="T1", kind="theorem", statement="T1 holds")
++    running = _Coordinator("running")
++    client.app.studios.coordinator = lambda theorem: running
++    client.post("/api/pursue/start", {"provider": "stub"})
++    _until(lambda: _view(client)["status"] == "pursuing")
++    client.app.close()
++    clients.remove(client)
++    view = _view(_restart(store, clients))
++    assert view["status"] == "released" and _phases(store)[-1] == ("end", "released", None)
+diff --git a/tests/test_review_queue_page.py b/tests/test_review_queue_page.py
+index 2a544fb..754aa59 100644
+--- a/tests/test_review_queue_page.py
++++ b/tests/test_review_queue_page.py
+@@ -124,3 +124,24 @@ def test_the_other_statuses_keep_their_controls(status, stop, start):
+             "can_pursue": status not in ("reading", "pursuing"), "stopping": False}
+     (shown,) = _page(map_nodes=[], pursue=view)
+     assert (shown["pursue"]["stop"], shown["pursue"]["start"]) == (stop, start)
++
++
++# -- the last pursuit, as a new server reads it back from its events (proof-web#10, proof-cli#201) ---------------------
++
++INTERRUPTED_REASON = ("stopped with the server after its release failed: the runs of T1 are still assigned: L1 is still claimed. "
++                      "no end was recorded: the process that ran it stopped; a new Start rechecks claims, snapshots and node states")
++
++
++def test_an_interrupted_pursuit_says_so_with_its_last_step_and_offers_pursue_not_stop():
++    view = {"status": "interrupted", "reason": INTERRUPTED_REASON, "theorems": ["T1"], "current": "T1", "results": {},
++            "recorded": True, "last_phase": "release_failed", "can_pursue": True, "stopping": False}
++    (shown,) = _page(map_nodes=[], pursue=view)
++    assert shown["pursue"]["shown"] and shown["pursue"]["start"] and not shown["pursue"]["stop"]
++    assert shown["pursue"]["status"] == f"interrupted — {INTERRUPTED_REASON}"
++
++
++def test_a_step_that_could_not_be_recorded_is_said_beside_the_pursuit():
++    view = {"status": "stuck", "reason": "the Reader stated no Theorem", "theorems": [], "current": None, "results": {},
++            "can_pursue": True, "stopping": False, "record_error": "its end was not recorded: disk full"}
++    (shown,) = _page(map_nodes=[], pursue=view)
++    assert shown["pursue"]["status"] == ("stuck — the Reader stated no Theorem · History not saved: its end was not recorded: disk full")
+-- 
+2.54.0
+

@@ -1,0 +1,11 @@
+{
+  "repo": "DengZhiyuan-math/proof-cli",
+  "branch": "fix/201-pursuit-events",
+  "head": "09e64a365153650cade0579afca52a56028b0f07",
+  "base": "integ/0021",
+  "merge_base": "b7f394374ce73e9a23754e12506e87e97326efd9",
+  "approved_body_source": "/private/tmp/claude-502/-Volumes-Codex-Workspace-live-home-zhdeng-proof-cli/a1dcf6b7-5a7e-4737-9c30-60241cd19074/scratchpad/pr201.md",
+  "approved_body_sha256": "7fa0cd24e5a26630f5f5148da8639e5531de5f71e8b8d80213542c9964bb0ac0",
+  "pr_url": "https://github.com/DengZhiyuan-math/proof-cli/pull/206",
+  "tests_rerun": false
+}

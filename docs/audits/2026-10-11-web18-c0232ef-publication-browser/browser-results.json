@@ -1,0 +1,40 @@
+{
+  "web_head": "c0232effb7f130368a4053d5491fabdfc7cd6c73",
+  "browser": "Chrome 155.0.8059.39 via agent-browser on isolated CDP profile",
+  "backend": "deterministic Backend, real AgentManager, AgentRun, Coordinator, ProjectPursuit, StudioHub, HTTP server and SQLite",
+  "real_model_calls": 0,
+  "checks": {
+    "project default and formula before Start": "passed",
+    "project edits survive in-page data refresh": "passed",
+    "project invalid Start leaves no backend turn or pursuit event": "passed",
+    "project edited limits submitted and fixed": "passed",
+    "project spend shown after Reader": "passed",
+    "subtree default and formula before Start": "passed",
+    "subtree edits survive in-page data refresh": "passed",
+    "subtree invalid time limit refused": "passed",
+    "subtree edited limits enforced at total": "passed",
+    "subtree structure spend and Interrupted re-split reason": "passed",
+    "three failed launches spend zero turns and release claim": "passed",
+    "screenshots visually inspected": "passed",
+    "project cumulative structure turns after completion": "failed"
+  },
+  "refresh_scope": "in-page data refresh and polls; no claim of persistence through a full document reload",
+  "tests": {
+    "combined_agents": "181 passed in 16.53s",
+    "selected_web": "111 passed, 1 failed in 108.51s",
+    "previously_blocked_port_tests": "19 passed in 11.25s",
+    "isolated_hub_rerun": "1 failed in 63.19s"
+  },
+  "unresolved": "The hub test times out waiting for T review request, both in the selected group and in isolation. Root cause and regression status are not established.",
+  "agents_merge_caveat": "Runtime source and tests match the supplied #23 plus #26 resolution. This temporary merge was not published.",
+  "findings": [
+    {
+      "priority": "P2",
+      "title": "Project structure turns are not cumulative and reset after completion",
+      "observed": "After a completed Reader turn, the browser API returned spend.turns=1 and spend.structure_turns=0.",
+      "source": "proof_web/studios.py:804-818 at c0232ef initializes structure=0 and reads only the current Coordinator while status is reading or pursuing. Completed Coordinators and the Reader are omitted.",
+      "scope": "Confirmed Reader-only browser observation and source inspection. No completed multi-Theorem browser scenario was run.",
+      "impact": "The project budget panel omits structure spending after the Pursue ends and undercounts past structure work while the next Theorem runs. Total turn enforcement is unaffected."
+    }
+  ]
+}

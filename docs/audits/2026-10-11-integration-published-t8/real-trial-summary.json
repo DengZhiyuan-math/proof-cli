@@ -1,0 +1,145 @@
+{
+  "status": "completed",
+  "observedEnd": "2026-10-11T21:25:19.665659+00:00",
+  "uiStatus": "done",
+  "theoremResults": {
+    "main-theorem": {
+      "status": "stuck",
+      "reason": "nothing left to work without the researcher: sobolev-embedding-general, sobolev-embedding-cuspidal, sobolev-embedding-residual rest(s) on what no run will settle (parked: main-theorem, height-vs-distance)"
+    }
+  },
+  "elapsedMinutes": 87.60330196666668,
+  "budget": {
+    "turns_max": 60,
+    "minutes_max": 120.0,
+    "deadline": 1791755863.506443,
+    "spent": 40,
+    "structure_spent": 3,
+    "failed_launches": 0
+  },
+  "completedProviderTurns": 40,
+  "structureTurns": 3,
+  "roles": {
+    "reader": 1,
+    "decomposer": 2,
+    "prover": 19,
+    "typesetter": 9,
+    "verifier": 9
+  },
+  "models": [
+    "claude-opus-5-5"
+  ],
+  "providerExits": {
+    "0": 40
+  },
+  "usageIncludingBackendCacheCounts": {
+    "in": 21472006,
+    "out": 569653
+  },
+  "inputHashUnchanged": true,
+  "researcherInputAfterStart": false,
+  "finalNodes": 24,
+  "nodeKinds": {
+    "imported_result": 10,
+    "claim": 6,
+    "lemma": 7,
+    "theorem": 1
+  },
+  "definitions": 15,
+  "fog": {
+    "open": 12
+  },
+  "provisionalProofNodes": [
+    "complementary-series-model",
+    "exceptional-cuspidal-finite-per-level",
+    "matrix-coefficient-decay-p",
+    "matrix-coefficient-decay-product",
+    "real-complementary-decay",
+    "real-unitary-dual-ktypes",
+    "smooth-vector-exceptional-support-finite"
+  ],
+  "parked": [
+    {
+      "node": "cuspidal-exceptional-finite",
+      "reason": "needs-human: The claim cannot be proved with known mathematics. For irreducible Gamma (the only reading the setting allows) it is equivalent to finiteness of exceptional Maass cusp forms across the p-power level tower, which is open; Selberg's conjecture would imply it. For reducible Gamma it is false. The researcher must choose what this node states: (a) the provable uniform gap sup_{Z^0_+} s <= 1/2+7/64 (Kim-Sarnak), (b) an explicit hypothesis on Gamma, or (c) conditional on Selberg's conjecture. Details are in scratch/proof-draft.md."
+    },
+    {
+      "node": "height-vs-distance",
+      "reason": "needs-human: The node statement is false as written, not ambiguous (scratch/proof-draft.md). (1) Gamma=SL_2(Z[1/p]), g_p=1, admissible bounded p-adic metric min(d_p,1): d_X((diag(p^k,p^-k),1),x_0) stays bounded while ht>=p^{2k}. (2) Doubling both metrics doubles d_X, so at most one metric scaling can satisfy it. (3) Conjugating Gamma by (h_inf,1) makes ht identically +inf. The researcher needs to choose a corrected statement. Proposal R2, proved in the draft: Gamma=SL_2(Z[1/p]), K_p=SL_2(Z_p); ht(Gamma(g_inf,g_p)) = y(delta_inf g_inf i) \u224d exp(hyperbolic distance in SL_2(Z)\\H), i.e. d_X replaced by the fibre distance with g_p frozen. This is also what the Sobolev-embedding use and fog-2 need. Alternatively, restrict Gamma and fix specific metrics, but then the exponent only matches for one tuned normalisation."
+    },
+    {
+      "node": "main-theorem",
+      "reason": "needs-human: No split. The statement is false as written: its p-adic factor nu_p(B_p(p^n))^{-1/2} Xi_p(a_n)^{kappa_p} is beaten by an L^2 lower bound (fog-10). For Gamma=SL_2(Z[1/p]), W=K_p, f a lifted Hecke-Maass form and T fixed, ||A_B f||_2 >> nu_p^{-1/2} infinitely often in n, while the claim forces an extra Xi_p(a_n)^{kappa_p}. The researcher must choose the intended p-adic factor. Likely intended: B_p(p^{2n}) with factor Xi_p(a_n)^{kappa_p}, proved by thickening. A split for that reading is drafted in scratch/decomposer/notes.md."
+    }
+  ],
+  "blockedNonProvisionalProofNodes": [
+    "hilbert-space-decomposition",
+    "sobolev-embedding-cuspidal",
+    "sobolev-embedding-general",
+    "sobolev-embedding-residual"
+  ],
+  "questions": {
+    "open": 9
+  },
+  "referenceReview": {
+    "unreviewed": 10
+  },
+  "acceptance": {
+    "unreviewed": 24
+  },
+  "verifierVerdicts": {
+    "failed": 1,
+    "passed": 8
+  },
+  "queueEntries": 68,
+  "queueKinds": {
+    "unfixed": 39,
+    "parked": 3,
+    "imported": 10,
+    "provisional": 7,
+    "question": 9
+  },
+  "refresh": {
+    "status": "passed",
+    "queueExact": true,
+    "departuresExact": true,
+    "entries": 68,
+    "parkedFirst": true,
+    "parkedBottomUp": true,
+    "restBottomUp": true,
+    "note": "Unfixed Definitions may precede the first node that names them, as specified."
+  },
+  "restart": {
+    "status": "passed",
+    "checkedAt": "2026-10-11T21:36:20.286004+00:00",
+    "scenario": "server restart after automatic trial completion; no new Pursue or Start action",
+    "storedProofStateExact": true,
+    "queueAndDeparturesExact": true,
+    "mapMarksAndNodeStatusExact": true,
+    "enabledNodeResumeControls": [
+      {
+        "disabled": false,
+        "text": "Start agent"
+      },
+      {
+        "disabled": false,
+        "text": "Start"
+      }
+    ],
+    "additionalProviderCalls": 0,
+    "globalCanPursueBefore": false,
+    "globalCanPursueAfter": false,
+    "liveViewChanges": {
+      "cuspidal-exceptional-finite": [
+        "run"
+      ],
+      "height-vs-distance": [
+        "run"
+      ],
+      "main-theorem": [
+        "run"
+      ]
+    },
+    "note": "Live run/coordinator overlays and counters reset to idle. Completed project-view fields differ from the live terminal response; the full trial is retained in the primary snapshots and work log."
+  }
+}

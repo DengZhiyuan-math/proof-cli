@@ -1,0 +1,54 @@
+diff --git a/src/proof_web/studios.py b/src/proof_web/studios.py
+index 29680de..bc539f4 100644
+--- a/src/proof_web/studios.py
++++ b/src/proof_web/studios.py
+@@ -38,6 +38,10 @@ try:  # proof-cli#201: a project Pursue's history as pursuit events; an older pr
+ except ImportError:  # pragma: no cover — the pursuit then reads idle in a new hub, as before
+     project_progress = record_pursuit = None
+ from proof_agents.agent_run import ACTIVE, AgentRun, RunHooks
++try:  # proof-agents: why a turn failed, from what the CLI last said (#179); an older proof-agents reads the subtype
++    from proof_agents.agent_run import failure_reason
++except ImportError:  # pragma: no cover
++    failure_reason = None
+ from proof_agents.coordinator import Coordinator, CoordinatorHooks
+ try:  # ADR-0021: Pursue on a project with no map; an older proof-agents has no Reader and no project pursuit
+     from proof_agents.coordinator import ProjectPursuit, PursuitHooks
+@@ -705,7 +709,8 @@ class StudioHub:
+                 self._read_job = None
+         done = next((e for e in reversed(job.events) if e.get("t") == "done"), {})
+         if done.get("is_error") or done.get("exit") not in (None, 0):
+-            return {"error": str(done.get("stderr") or done.get("subtype") or "the Reader's turn failed").strip(), "code": "READER_FAILED"}
++            why = failure_reason(done, job.events) if failure_reason else str(done.get("stderr") or done.get("subtype") or "").strip()
++            return {"error": why or "the Reader's turn failed", "code": "READER_FAILED"}
+         return {}
+ 
+     def _reading(self, job) -> None:
+diff --git a/tests/test_pursue_review_queue.py b/tests/test_pursue_review_queue.py
+index af65d41..8e73df5 100644
+--- a/tests/test_pursue_review_queue.py
++++ b/tests/test_pursue_review_queue.py
+@@ -510,3 +510,24 @@ def test_a_run_s_standing_question_is_recorded_on_the_node(project):
+     (asked,) = questions(store, "C")
+     assert asked["question"] == "took n ≥ 2; the alternative: n ≥ 1" and asked["state"] == "open"
+     assert any(item["kind"] == "question" and item["node_id"] == "C" for item in client.get("/api/review-queue")[1]["data"]["items"])
++
++
++class _ReaderNotLoggedIn(_ReaderStandIn):
++    """A Reader whose turn ends at once the way Claude Code ends one for a lapsed login: is_error, subtype "success",
++    exit 1, no stderr, and the reason only in the text."""
++
++    def start(self, *args, begin=None, unless=None, **kwargs):
++        answer = super().start(*args, begin=begin, unless=unless, **kwargs)
++        with self.job.cond:
++            self.job.events += [{"t": "init", "model": "claude-opus-5-5"}, {"t": "text", "text": "Not logged in · Please run /login"},
++                                {"t": "done", "exit": 1, "is_error": True, "subtype": "success", "stderr": ""}]
++            self.job.done = True
++            self.job.cond.notify_all()
++        return answer
++
++
++def test_a_reader_turn_that_failed_names_why_not_its_subtype(drafted):
++    """T8 (proof-cli#197): a lapsed login read "the Reader's turn failed: success"; it reads as the run's turns do (#179)."""
++    store, client, reader = drafted
++    client.app.studios._reader = _ReaderNotLoggedIn()
++    assert client.app.studios._read_turn("claude") == {"error": "Not logged in · Please run /login", "code": "READER_FAILED"}

@@ -1,0 +1,39 @@
+____ test_a_failed_release_holds_the_pursuit_until_stop_gives_its_runs_back ____
+drafted = (ProjectStore(root=PosixPath('/private/tmp/claude-502/pytest-of-zhdeng/pytest-40/test_a_failed_release_holds_th0/proje..., <_review_client.DirectClient object at 0x122394910>, <test_pursue_review_queue._ReaderStandIn object at 0x121e78f90>)
+    def test_a_failed_release_holds_the_pursuit_until_stop_gives_its_runs_back(drafted):
+        release-failed on its Theorem, neither stopping nor offering Pursue, Pursue is refused, and Stop again retries."""
+        if not hasattr(studios.ProjectPursuit, "_release_failed"):
+        if not hasattr(studios.ProjectPursuit, "_release_failed"):
+_______ test_a_failed_release_is_recorded_and_its_retry_ends_the_pursuit _______
+drafted = (ProjectStore(root=PosixPath('/private/tmp/claude-502/pytest-of-zhdeng/pytest-40/test_a_failed_release_is_recor0/project')), [<_review_client.DirectClient object at 0x1248d4bd0>])
+    def test_a_failed_release_is_recorded_and_its_retry_ends_the_pursuit(drafted):
+_ test_after_a_restart_a_failed_release_reads_interrupted_with_its_reason_and_no_retry _
+drafted = (ProjectStore(root=PosixPath('/private/tmp/claude-502/pytest-of-zhdeng/pytest-40/test_after_a_restart_a_failed_0/project')), [<_review_client.DirectClient object at 0x12278ac90>])
+    def test_after_a_restart_a_failed_release_reads_interrupted_with_its_reason_and_no_retry(drafted):
+FAILED tests/test_coordinator_hub.py::test_the_coordinator_works_the_children_then_the_root_and_the_page_and_the_map_read_it
+FAILED tests/test_home.py::test_open_serves_the_project_on_its_own_origin_and_the_page_links_back_home
+FAILED tests/test_home.py::test_a_project_started_again_at_the_same_path_gets_its_own_page_and_the_old_one_closes
+FAILED tests/test_home.py::test_opening_a_deleted_project_from_the_home_closes_its_old_page_and_says_so
+FAILED tests/test_home.py::test_a_page_already_served_elsewhere_is_used_as_it_is
+FAILED tests/test_pursue_review_queue.py::test_a_failed_release_holds_the_pursuit_until_stop_gives_its_runs_back
+FAILED tests/test_pursue_review_queue.py::test_while_a_stop_gives_the_runs_back_the_pursuit_reads_stopping_and_pursue_waits
+FAILED tests/test_pursuit_history.py::test_each_theorem_and_its_end_are_recorded_with_what_it_spent
+FAILED tests/test_pursuit_history.py::test_a_failed_release_is_recorded_and_its_retry_ends_the_pursuit
+FAILED tests/test_pursuit_history.py::test_after_a_restart_a_failed_release_reads_interrupted_with_its_reason_and_no_retry
+FAILED tests/test_pursuit_history.py::test_a_pursuit_stopped_with_the_server_records_its_end
+FAILED tests/test_review_app.py::test_a_page_whose_project_was_replaced_answers_gone_except_its_health
+ERROR tests/test_home.py::test_the_home_page_and_its_api_answer_on_the_home_origin
+ERROR tests/test_home.py::test_the_home_refuses_another_host_and_a_foreign_origin
+ERROR tests/test_home.py::test_opening_over_http_starts_the_page_and_says_where
+ERROR tests/test_review_app.py::test_host_origin_and_content_type_are_checked
+ERROR tests/test_review_app.py::test_a_decision_over_http_counts
+ERROR tests/test_review_app.py::test_the_page_and_its_script_are_served_with_a_strict_policy
+ERROR tests/test_review_app.py::test_malformed_requests_get_an_error_response_not_a_dropped_connection[headers0--400]
+ERROR tests/test_review_app.py::test_malformed_requests_get_an_error_response_not_a_dropped_connection[headers1--413]
+ERROR tests/test_review_app.py::test_malformed_requests_get_an_error_response_not_a_dropped_connection[headers2-[1, 2]-400]
+ERROR tests/test_review_app.py::test_malformed_requests_get_an_error_response_not_a_dropped_connection[headers3-{"decisions": [42]}-400]
+ERROR tests/test_review_app.py::test_a_pdf_is_served_as_a_pdf_for_the_browsers_own_viewer
+ERROR tests/test_review_app.py::test_the_node_panel_and_node_creation_are_refused_from_another_origin
+ERROR tests/test_review_app.py::test_a_node_studio_is_behind_the_pages_host_and_origin_checks
+ERROR tests/test_review_app.py::test_a_node_studio_page_is_served_with_its_policy
+12 failed, 737 passed, 1 skipped, 14 errors in 276.73s (0:04:36)

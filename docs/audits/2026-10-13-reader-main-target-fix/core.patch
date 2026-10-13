@@ -1,0 +1,44 @@
+diff --git a/CONTEXT.md b/CONTEXT.md
+index 0dd54ff..8b3582a 100644
+--- a/CONTEXT.md
++++ b/CONTEXT.md
+@@ -164,10 +164,12 @@ Starts alone on a Theorem or Lemma with no children created by Split; ordinary d
+ 
+ **Reader** (a Proof agent role):
+ States a draft in the library as a map: Definitions, Theorems and Lemmas, imported results with their references, and fog. It records where it departed from the draft and why, and proves nothing (ADR-0021). Its runtime sets the reader role (`PROOF_AGENT_ROLE=reader`, no node role), under which `proof node create` refuses, on the parsed arguments, a Claim, `--parent` and `--reassign` (READER_ROLE_REFUSED); a statement's text is never searched (#203).
++Before creating nodes, it records the draft's main result in `scratch/reader/main-target.json`, with `node_id` and `source` (draft path and label or line range). The main result gets the project's only theorem-kind node. Supporting results are lemma-kind nodes even when the draft calls them Theorems. A missing or conflicting main target is reported, never worked around by downgrading the main result to a Lemma.
+ _Avoid_: importer, parser, formalizer
+ 
+ **Pursue**:
+ The researcher's one action that sets the agents working to the end: a Coordinator on a Theorem, preceded by a Decomposer turn when it has no Claims, or by a Reader turn when started on a project with no map (ADR-0021). A project Pursue's steps are recorded as `pursuit` events, read by `proof project progress`; one with no recorded end reads interrupted, and nothing resumes it (issue #201).
++After a Reader turn, project Pursue checks that the declared main target is its sole scheduled Theorem before starting any node run. A missing, unreadable or mismatched target report ends the Reader phase as failed and Pursue as stuck. An existing Reader map is checked again before Start, also after restart; a failure refuses Start before any provider or new pursuit event. This is a target consistency check, not Human Review. Fog, Unfixed text and unreviewed imports remain ungated. A researcher's existing map with no Reader scratch folder needs no Reader report.
+ _Avoid_: autopilot, auto mode
+ 
+ **Standing question**:
+diff --git a/docs/adr/0021-progress-is-not-gated-by-trust.md b/docs/adr/0021-progress-is-not-gated-by-trust.md
+index 17bc526..bf90216 100644
+--- a/docs/adr/0021-progress-is-not-gated-by-trust.md
++++ b/docs/adr/0021-progress-is-not-gated-by-trust.md
+@@ -53,7 +53,8 @@ The guarantee that has to survive is narrower than the gates. An Accepted node r
+ 
+ 7. **Pursue** is the researcher's one action on a Theorem: a Coordinator that runs everything below.
+    - **No Claims yet.** It starts with a Decomposer turn.
+-   - **No map yet.** Started on a project, it starts with a Reader turn and pursues each Theorem the Reader states.
++   - **No map yet.** Started on a project, it starts with a Reader turn and pursues the draft's main result as the project's single Theorem. The Reader identifies this result before creating nodes and records `node_id` and `source` (draft path and label or line range) in `scratch/reader/main-target.json`. Supporting results use lemma kind even when the draft labels them Theorems. Dependency-first creation does not allocate theorem kind to a supporting result.
++   - **Check the target before node runs.** The Reader's declared target must match the sole Theorem selected for project Pursue. A missing, unreadable or mismatched target report ends the Reader phase as failed and Pursue as stuck, with the reason recorded. An existing Reader map is checked again before Start, including after restart; a failure starts no provider and records no new pursuit. A researcher's existing map with no Reader scratch folder needs no Reader report. This checks scheduling consistency; Fog, Unfixed text, imported results and mathematical Acceptance do not gate progress.
+ 
+    The Decomposer's turn no longer stops for the researcher. Its split is the structure the Coordinator works. It adds the edges between its own Claims itself (`proof node depend <claim> --add <claim> --by <agent>`), since an edge between unaccepted Claims decides nothing. The researcher may edit the structure at any time, and the Coordinator rereads it at every turn boundary. Starting the Decomposer alone, without a Coordinator, still stops after the split, for a researcher who wants to read first.
+ 8. **A choice is made and recorded, not asked.** Where a role would end with `needs-human` because the statement admits two readings, a constant is unspecified or a case split is a judgement call, it instead does the following:
+diff --git a/src/proof_cli/errors.py b/src/proof_cli/errors.py
+index 4ef0537..2be002a 100644
+--- a/src/proof_cli/errors.py
++++ b/src/proof_cli/errors.py
+@@ -248,6 +248,8 @@ ERROR_CODES: dict[str, str] = {
+     "PURSUIT_ACTIVE": "the project is being pursued already, or a stopped pursuit is still ending: stop it, or Start again once it settles",
+     "NO_PURSUIT": "no pursuit is running on this project to stop; the answer carries how the last one ended",
+     "READER_FAILED": "the Reader's turn failed or was stopped before it ended; the message says why, and what it stated stays on the map",
++    "READER_TARGET_INVALID": "the Reader's main-target.json is missing, unreadable, or has no node_id and source; no node run is started",
++    "READER_TARGET_MISMATCH": "the Reader's declared main target is not the sole Theorem selected for project Pursue; no node run is started",
+     # -- a Pursue's total turns and time limit, fixed at its Start (zeqome/proof-agents#19, zeqome/proof-web#18) --
+     "INVALID_LIMITS": "a Pursue's limits are a whole number of turns (at least one) and a number of minutes (more than none)",
+     "BUDGET_SPENT": "the Pursue's total turns or its time limit is spent; no new part of it starts",

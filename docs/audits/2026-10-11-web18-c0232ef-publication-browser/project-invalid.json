@@ -1,0 +1,34 @@
+{
+  "requests": [
+    {
+      "body": "{\"limits\":{\"turns\":0,\"minutes\":3.5}}",
+      "reply": {
+        "error": {
+          "code": "INVALID_LIMITS",
+          "message": "a Pursue's limits are at least one turn and more than no minutes: {'turns': 0, 'minutes': 3.5}"
+        },
+        "ok": false
+      },
+      "status": 400,
+      "url": "/api/pursue/start"
+    }
+  ],
+  "view": {
+    "budget": null,
+    "can_pursue": true,
+    "current": null,
+    "limits": {
+      "minutes": 10,
+      "node_minutes": 4,
+      "node_turns": 2,
+      "open_nodes": 0,
+      "structure_allowance": 3,
+      "turns": 5
+    },
+    "reason": "",
+    "results": {},
+    "status": "idle",
+    "stopping": false,
+    "theorems": []
+  }
+}

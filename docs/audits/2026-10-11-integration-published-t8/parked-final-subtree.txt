@@ -1,0 +1,84 @@
+Map
+T
+Agent
+t8-controlled
+Node
+
+T holds
+
+Blocked
+blocked
+unreviewed
+current
+unclaimed
+Depends on
+A · not pinned yet
+
+No key-ideas.md yet: a review request needs one (核心思路, 主要步骤, 难点, 未覆盖). The Typesetter drafts it: "+" → Ask the agent to… → Typesetter · draft key ideas.
+
+Files
+proof.tex
+??
+Outline
+Thmline 6
+Work log
+Files
+Compile
+Draft
+Subtree
+budget — the Pursue's total is spent (1 of 1 turns)
+Stop subtree
+turns 1/1 · failed launches 0 · 4.8 of 5 min left
+A parked — its budget is spent (1 turn(s)); the last run ended budget: the budget of this Start is spent (1 turn(s))
+T interrupted — the Pursue's total is spent (1 of 1 turns), which prevented its re-split: A is parked (its budget is spent (1 turn(s)); the last run ended budget: the budget of this Start is spent (1 turn(s))); propose another structure for T that does not need A as it stands
+No Agent Is Working On This Node.
+
+Start it once: it works the node on its own — the Prover finds the proof, the Typesetter writes it, Numerics computes, the Verifier reads it against them — and stops when it requests review or needs you.
+
+Start agent
+all roles
+Prover only
+Typesetter only
+Numerics only
+Verifier only
+Decomposer only
+Start
+
+Pursue started: the agents work everything under this node to the end, and what they leave you is the review queue.
+
+WORK LOG
+19:53
+decomposer-fixture
+split into A
+19:54
+t8-controlled/coordinator
+coordinator: started on T: 2 open node(s), up to 1 run(s) at a time; the Pursue's total 1 turns (0 spent before) and 5 minutes, a node's proof budget 1 turns
+19:54
+t8-controlled/coordinator
+coordinator: started a run on A (start 1, up to 1 turn(s) and 4.99927 minute(s))
+19:54
+t8-controlled/coordinator
+coordinator: the run on A ended: budget — the budget of this Start is spent (1 turn(s))
+19:54
+t8-controlled/coordinator
+coordinator: parked A: its budget is spent (1 turn(s)); the last run ended budget: the budget of this Start is spent (1 turn(s))
+19:54
+t8-controlled/coordinator
+coordinator: interrupted T: the Pursue's total is spent (1 of 1 turns), which prevented its re-split: A is parked (its budget is spent (1 turn(s)); the last run ended budget: the budget of this Start is spent (1 turn(s))); propose another structure for T that does not need A as it stands
+19:54
+t8-controlled/coordinator
+coordinator: budget: the Pursue's total is spent (1 of 1 turns)
+19:54
+t8-controlled/coordinator
+coordinator: budget: 1 real turn(s) in this Start (0 structure, 1 proof), 1 of the Pursue's 1; 0 failed launch(es)
+New chat
+This is the node's proof agent: it reads the project, its library and the web, runs
+proof and computations, and writes this node's proof. Pick Claude Code or Codex CLI above.
+Here you only Ask: read-only questions about the node — the agent works it from its run, in the centre.
+Type @ to point it at a file or the selection (or select text and press ⌘L).
+Type / for commands.
+Commits, pushes and non-allowlisted shell commands are not permitted from here.
+Send
+Problems
+Output
+Diff

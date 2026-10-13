@@ -1,0 +1,171 @@
+{
+  "recorded_at": "2026-10-13T07:49:44.343466+00:00",
+  "prs": [
+    {
+      "name": "core",
+      "repo": "DengZhiyuan-math/proof-cli",
+      "title": "Register Reader main-target validation errors and document the contract",
+      "body_file": "/private/tmp/proof-reader-contract-3jv0f8lb/core-pr-body.md",
+      "head": "86f9f2e6a7f04498f8365e62e7e5adfff59d133c",
+      "url": "https://github.com/DengZhiyuan-math/proof-cli/pull/220",
+      "state": "OPEN",
+      "draft": true,
+      "base": "d433159214156239e31094d1eaea3b7b991b927f",
+      "merged_at": null,
+      "auto_merge": null,
+      "files": [
+        "CONTEXT.md",
+        "docs/adr/0021-progress-is-not-gated-by-trust.md",
+        "docs/audits/2026-10-13-reader-main-target-fix/offline-verification.json",
+        "docs/audits/2026-10-13-reader-main-target-fix/pytest.xml",
+        "docs/audits/2026-10-13-reader-main-target-fix/trial-preservation.json",
+        "src/proof_cli/errors.py"
+      ],
+      "evidence_readback": [
+        {
+          "path": "docs/audits/2026-10-13-reader-main-target-fix/offline-verification.json",
+          "sha256": "b8e686e17f34ff9ee3563bbe683be5ecb1a0f32ce66d6632ed7bb48839150133",
+          "github_url": "https://github.com/DengZhiyuan-math/proof-cli/blob/86f9f2e6a7f04498f8365e62e7e5adfff59d133c/docs/audits/2026-10-13-reader-main-target-fix/offline-verification.json"
+        },
+        {
+          "path": "docs/audits/2026-10-13-reader-main-target-fix/pytest.xml",
+          "sha256": "17fcf52cd0761fb1cab4367192677e2ffaeb6939e1c48e5c966aa980ea0ccd0c",
+          "github_url": "https://github.com/DengZhiyuan-math/proof-cli/blob/86f9f2e6a7f04498f8365e62e7e5adfff59d133c/docs/audits/2026-10-13-reader-main-target-fix/pytest.xml"
+        },
+        {
+          "path": "docs/audits/2026-10-13-reader-main-target-fix/trial-preservation.json",
+          "sha256": "931a72e491683d5707bb96b431aa2e0094601faa2759a5dd97cb5310727b058e",
+          "github_url": "https://github.com/DengZhiyuan-math/proof-cli/blob/86f9f2e6a7f04498f8365e62e7e5adfff59d133c/docs/audits/2026-10-13-reader-main-target-fix/trial-preservation.json"
+        }
+      ],
+      "checks": [
+        {
+          "name": "core-and-studio (ubuntu-24.04, 3.11)",
+          "status": "IN_PROGRESS",
+          "conclusion": ""
+        },
+        {
+          "name": "core-and-studio (ubuntu-24.04, 3.12)",
+          "status": "IN_PROGRESS",
+          "conclusion": ""
+        },
+        {
+          "name": "core-and-studio (windows-latest, 3.11)",
+          "status": "IN_PROGRESS",
+          "conclusion": ""
+        },
+        {
+          "name": "core-and-studio (windows-latest, 3.12)",
+          "status": "IN_PROGRESS",
+          "conclusion": ""
+        }
+      ]
+    },
+    {
+      "name": "agents",
+      "repo": "zeqome/proof-agents",
+      "title": "Reserve the Reader's sole Theorem for the draft's main result",
+      "body_file": "/private/tmp/proof-reader-contract-3jv0f8lb/agents-pr-body.md",
+      "head": "ae9ba15d414bf5175a726cdb6aec85c295de5802",
+      "url": "https://github.com/zeqome/proof-agents/pull/30",
+      "state": "OPEN",
+      "draft": true,
+      "base": "7d3f312269b9868415e06302b97637db1a490220",
+      "merged_at": null,
+      "auto_merge": null,
+      "files": [
+        "docs/audits/2026-10-13-reader-main-target-fix/offline-verification.json",
+        "docs/audits/2026-10-13-reader-main-target-fix/pytest.xml",
+        "src/proof_agents/coordinator.py",
+        "src/proof_agents/reader.py",
+        "tests/test_coordinator.py",
+        "tests/test_reader.py"
+      ],
+      "evidence_readback": [
+        {
+          "path": "docs/audits/2026-10-13-reader-main-target-fix/offline-verification.json",
+          "sha256": "1b7a4889c78ba5c3463c9c26b546e764889fa7e82f6afac4db82186bf05e9f4b",
+          "github_url": "https://github.com/zeqome/proof-agents/blob/ae9ba15d414bf5175a726cdb6aec85c295de5802/docs/audits/2026-10-13-reader-main-target-fix/offline-verification.json"
+        },
+        {
+          "path": "docs/audits/2026-10-13-reader-main-target-fix/pytest.xml",
+          "sha256": "7ca6f079b8c776b6647889684928e2e36dd5ba24704793f976d45e8ddeb53763",
+          "github_url": "https://github.com/zeqome/proof-agents/blob/ae9ba15d414bf5175a726cdb6aec85c295de5802/docs/audits/2026-10-13-reader-main-target-fix/pytest.xml"
+        }
+      ],
+      "checks": [
+        {
+          "name": "agents (3.11)",
+          "status": "COMPLETED",
+          "conclusion": "SUCCESS"
+        },
+        {
+          "name": "agents (3.12)",
+          "status": "COMPLETED",
+          "conclusion": "SUCCESS"
+        }
+      ]
+    },
+    {
+      "name": "web",
+      "repo": "zeqome/proof-web",
+      "title": "Reject Pursue dispatch for missing or mismatched Reader main targets",
+      "body_file": "/private/tmp/proof-reader-contract-3jv0f8lb/web-pr-body.md",
+      "head": "bb94ae9510bd79a422c69b67d27390e7eeb6d083",
+      "url": "https://github.com/zeqome/proof-web/pull/25",
+      "state": "OPEN",
+      "draft": true,
+      "base": "af687b02b7d03dbf5bd2b60062284d8421dfa5c0",
+      "merged_at": null,
+      "auto_merge": null,
+      "files": [
+        "docs/audits/2026-10-13-reader-main-target-fix/offline-verification.json",
+        "docs/audits/2026-10-13-reader-main-target-fix/pytest.xml",
+        "src/proof_web/studios.py",
+        "tests/test_reader_main_target.py"
+      ],
+      "evidence_readback": [
+        {
+          "path": "docs/audits/2026-10-13-reader-main-target-fix/offline-verification.json",
+          "sha256": "0a19a5be50103f5a02077a0f04d90350e8c476c6b01dee717b54421a96d6a235",
+          "github_url": "https://github.com/zeqome/proof-web/blob/bb94ae9510bd79a422c69b67d27390e7eeb6d083/docs/audits/2026-10-13-reader-main-target-fix/offline-verification.json"
+        },
+        {
+          "path": "docs/audits/2026-10-13-reader-main-target-fix/pytest.xml",
+          "sha256": "5eff26d2e2a2970cc74b48a56b27ac595ae25bb9cebf658ea26722c0425f908c",
+          "github_url": "https://github.com/zeqome/proof-web/blob/bb94ae9510bd79a422c69b67d27390e7eeb6d083/docs/audits/2026-10-13-reader-main-target-fix/pytest.xml"
+        }
+      ],
+      "checks": [
+        {
+          "name": "package",
+          "status": "COMPLETED",
+          "conclusion": "SUCCESS"
+        }
+      ]
+    }
+  ],
+  "reader_original_record_checks": [
+    {
+      "record": "aaf07e94-7256-4582-aa76-c1c92f0bfec0.jsonl",
+      "sha256": "46ad7eca3b6f4c9358456812811f2991ba8ab1ea8182c50c799eb01e38d1876d",
+      "unchanged": true
+    },
+    {
+      "record": "agent-ad1f29f426d6c7872.jsonl",
+      "sha256": "494f1b70669c9d1d29dde8e0ef89039fd38f56ac92a5138cdeb9158ec44f9883",
+      "unchanged": true
+    }
+  ],
+  "trial_sealed_files_unchanged": 134,
+  "home_http_status": 200,
+  "project_http_status": 200,
+  "issues": {
+    "197": "OPEN",
+    "132": "OPEN"
+  },
+  "trial_environment_preserved": true,
+  "trial_service_updated": false,
+  "new_model_calls": 0,
+  "merged": false
+}

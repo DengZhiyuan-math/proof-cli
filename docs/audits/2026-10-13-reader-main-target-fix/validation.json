@@ -1,0 +1,199 @@
+{
+  "status": "implemented and offline verified in isolated development checkouts",
+  "repos": {
+    "core": {
+      "path": "/private/tmp/proof-reader-contract-3jv0f8lb/core",
+      "base": "d433159214156239e31094d1eaea3b7b991b927f",
+      "branch": "D_m/reader-main-target",
+      "patch": "/Volumes/Codex-Workspace/live/home/zhdeng/proof-cli/docs/audits/2026-10-13-reader-main-target-fix/core.patch",
+      "patch_sha256": "50ceb5b2f4a82467677785d59d51867a84d502c5e6ebc29b1e2b71cdb208ae13",
+      "changed_files": [
+        "CONTEXT.md",
+        "docs/adr/0021-progress-is-not-gated-by-trust.md",
+        "src/proof_cli/errors.py"
+      ],
+      "committed": false
+    },
+    "agents": {
+      "path": "/private/tmp/proof-reader-contract-3jv0f8lb/agents",
+      "base": "7d3f312269b9868415e06302b97637db1a490220",
+      "branch": "D_m/reader-main-target",
+      "patch": "/Volumes/Codex-Workspace/live/home/zhdeng/proof-cli/docs/audits/2026-10-13-reader-main-target-fix/agents.patch",
+      "patch_sha256": "b135a745ad452e7b1367dbef1ef171026d9c727b0945a9d4fad8d5d4f76aa328",
+      "changed_files": [
+        "src/proof_agents/coordinator.py",
+        "src/proof_agents/reader.py",
+        "tests/test_coordinator.py",
+        "tests/test_reader.py"
+      ],
+      "committed": false
+    },
+    "web": {
+      "path": "/private/tmp/proof-reader-contract-3jv0f8lb/web",
+      "base": "af687b02b7d03dbf5bd2b60062284d8421dfa5c0",
+      "branch": "D_m/reader-main-target",
+      "patch": "/Volumes/Codex-Workspace/live/home/zhdeng/proof-cli/docs/audits/2026-10-13-reader-main-target-fix/web.patch",
+      "patch_sha256": "caad065783d7bf3e62b3256164d004154b0f3dd61d344fd64d4e0c92b12cbae2",
+      "changed_files": [
+        "src/proof_web/studios.py",
+        "tests/test_reader_main_target.py"
+      ],
+      "committed": false
+    }
+  },
+  "contract": {
+    "file": "scratch/reader/main-target.json",
+    "required_fields": [
+      "node_id",
+      "source"
+    ],
+    "reader": "Declare the main result before node creation. Give only it theorem kind; supporting results use lemma kind even when labelled Theorem. Never downgrade the main result after DUPLICATE_THEOREM.",
+    "pursue": "Read the report after the Reader process exits and compare its node_id to the actual sole scheduled Theorem. Stop before any node run on a missing, invalid or mismatched report. Check persisted Reader reports again before Start after restart.",
+    "human_map_compatibility": "An existing map without Reader scratch needs no Reader report.",
+    "trust": "Fog, Unfixed text and unreviewed imported results remain ungated; no Acceptance is made."
+  },
+  "tests": {
+    "agents": {
+      "tests": 202,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 202
+    },
+    "web": {
+      "tests": 833,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1,
+      "passed": 832
+    },
+    "core_and_latex": {
+      "tests": 1173,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 15,
+      "passed": 1158
+    }
+  },
+  "total_passed": 2192,
+  "total_skipped": 16,
+  "new_regressions": [
+    {
+      "repo": "agents",
+      "test": "test_project_pursuit_checks_the_readers_declared_main_target_before_starting_nodes",
+      "passed": true
+    },
+    {
+      "repo": "agents",
+      "test": "test_reader_reserves_the_only_theorem_for_the_declared_main_result",
+      "passed": true
+    },
+    {
+      "repo": "web",
+      "test": "test_reader_main_result_as_lemma_starts_no_coordinator",
+      "passed": true
+    },
+    {
+      "repo": "web",
+      "test": "test_restart_refuses_wrong_reader_target_before_starting_any_provider",
+      "passed": true
+    },
+    {
+      "repo": "web",
+      "test": "test_main_target_is_scheduled_despite_supporting_theorem_labels_and_fog",
+      "passed": true
+    },
+    {
+      "repo": "web",
+      "test": "test_missing_or_invalid_reader_report_cannot_start_nodes[None]",
+      "passed": true
+    },
+    {
+      "repo": "web",
+      "test": "test_missing_or_invalid_reader_report_cannot_start_nodes[{]",
+      "passed": true
+    },
+    {
+      "repo": "web",
+      "test": "test_missing_or_invalid_reader_report_cannot_start_nodes[[]]",
+      "passed": true
+    },
+    {
+      "repo": "web",
+      "test": "test_missing_or_invalid_reader_report_cannot_start_nodes[{}]",
+      "passed": true
+    },
+    {
+      "repo": "web",
+      "test": "test_missing_or_invalid_reader_report_cannot_start_nodes[{\"node_id\": \"thm-main\"}]",
+      "passed": true
+    },
+    {
+      "repo": "web",
+      "test": "test_missing_or_invalid_reader_report_cannot_start_nodes[{\"node_id\": 7, \"source\": \"draft:442\"}]",
+      "passed": true
+    },
+    {
+      "repo": "web",
+      "test": "test_missing_or_invalid_reader_report_cannot_start_nodes[{\"node_id\": \"thm-main\", \"source\": \" \"}]",
+      "passed": true
+    },
+    {
+      "repo": "web",
+      "test": "test_target_id_that_names_no_node_cannot_start_the_auxiliary_theorem",
+      "passed": true
+    }
+  ],
+  "red_before_fix": [
+    "Reader main target as lemma returned done instead of stuck",
+    "Restart Start returned 200 instead of refusing target mismatch",
+    "Reader brief did not reserve the only theorem-kind node",
+    "ProjectPursuit invoked the auxiliary Coordinator despite the Reader main_target"
+  ],
+  "initial_core_failure": {
+    "reason": "New READER_TARGET_INVALID and READER_TARGET_MISMATCH codes were not registered",
+    "resolution": "Registered both in core/src/proof_cli/errors.py; 33 contract tests and the final full core/LaTeX suite passed"
+  },
+  "packaging": {
+    "core_wheel": "passed",
+    "agents_wheel": "passed",
+    "web_wheel": "passed",
+    "python_compileall": "passed",
+    "javascript_syntax": {
+      "files": 9,
+      "result": "passed"
+    }
+  },
+  "lint": {
+    "agents": {
+      "baseline_count": 20,
+      "candidate_count": 20,
+      "new": []
+    },
+    "web": {
+      "baseline_count": 8,
+      "candidate_count": 8,
+      "new": []
+    }
+  },
+  "preservation": {
+    "sealed_files": 134,
+    "changed_files": [],
+    "new_provider_calls": 0,
+    "trial_service_reloaded": false,
+    "trial_map_modified": false
+  },
+  "limits": "No real Reader/provider rerun. The consistency check does not assess mathematical correctness. The retained trial service still loads its original pinned sources.",
+  "published": false,
+  "wheels": {
+    "proof_web-0.1.0-py3-none-any.whl": "5cdd7513b2093f7988bbd3d1bc1e54f9ed2ed5bb0165b903b17a0889b7344314",
+    "mathematical_proof_cli-0.1.0-py3-none-any.whl": "2eeb05cd1d62a5a8c0776bba473210e29c27ad3ddb8cbbf75dee77a666b83e95",
+    "proof_agents-0.1.0-py3-none-any.whl": "ffdb50dd2475f18a4707b84cc55ab5d558645ea083390013606245865034dd85"
+  },
+  "test_loaded_sources": {
+    "proof_cli": "/private/tmp/proof-reader-contract-3jv0f8lb/core/src/proof_cli/__init__.py",
+    "proof_agents": "/private/tmp/proof-reader-contract-3jv0f8lb/agents/src/proof_agents/__init__.py",
+    "proof_web": "/private/tmp/proof-reader-contract-3jv0f8lb/web/src/proof_web/__init__.py",
+    "latex_agent": "/private/tmp/proof-reader-contract-3jv0f8lb/core/packages/latex-agent/src/latex_agent/__init__.py"
+  }
+}

@@ -1,0 +1,23 @@
+[
+  {
+    "repo": "DengZhiyuan-math/proof-cli",
+    "branch": "integ/0021",
+    "head": "3dd0a7bde3ad1ea9e040c02b1bff6589a9cf378c",
+    "pushedAt": "2026-10-11T19:41:49.873910+00:00",
+    "verifiedRemoteHead": "3dd0a7bde3ad1ea9e040c02b1bff6589a9cf378c"
+  },
+  {
+    "repo": "zeqome/proof-agents",
+    "branch": "integ/0021",
+    "head": "3ff0a7121e82b3c8eb1153c7bc1e296c96a36c69",
+    "pushedAt": "2026-10-11T19:41:53.268003+00:00",
+    "verifiedRemoteHead": "3ff0a7121e82b3c8eb1153c7bc1e296c96a36c69"
+  },
+  {
+    "repo": "zeqome/proof-web",
+    "branch": "feat/0021-pursue-review-queue",
+    "head": "b8157191d26834c570a0edbc310599a632b355b8",
+    "pushedAt": "2026-10-11T19:41:56.951356+00:00",
+    "verifiedRemoteHead": "b8157191d26834c570a0edbc310599a632b355b8"
+  }
+]

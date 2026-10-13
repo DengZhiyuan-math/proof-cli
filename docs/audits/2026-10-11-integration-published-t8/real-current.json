@@ -1,0 +1,32 @@
+{
+  "status": "done",
+  "reason": "every Theorem was pursued to its end",
+  "theorems": [
+    "main-theorem"
+  ],
+  "current": null,
+  "results": {
+    "main-theorem": {
+      "status": "stuck",
+      "reason": "nothing left to work without the researcher: sobolev-embedding-general, sobolev-embedding-cuspidal, sobolev-embedding-residual rest(s) on what no run will settle (parked: main-theorem, height-vs-distance)"
+    }
+  },
+  "budget": {
+    "turns_max": 60,
+    "minutes_max": 120.0,
+    "deadline": 1791755863.506443,
+    "spent": 40,
+    "structure_spent": 3,
+    "failed_launches": 0
+  },
+  "spend": {
+    "turns": 40,
+    "turns_max": 60,
+    "structure_turns": 3,
+    "failed_launches": 0,
+    "minutes_max": 120.0,
+    "minutes_left": 32.4
+  },
+  "can_pursue": false,
+  "stopping": false
+}

@@ -1,0 +1,73 @@
+[
+  {
+    "name": "core-affected",
+    "command": [
+      "/opt/anaconda3/bin/python",
+      "-m",
+      "pytest",
+      "-q",
+      "-p",
+      "no:cacheprovider",
+      "-c",
+      "/private/tmp/proof-t8-audit-px7msjct/core/pyproject.toml",
+      "tests/test_unfixed_text.py",
+      "tests/test_cli_contract.py",
+      "tests/test_cli_node.py",
+      "tests/test_definitions.py",
+      "tests/test_performance.py",
+      "tests/test_agent_attribution.py",
+      "--junitxml=/Volumes/Codex-Workspace/live/home/zhdeng/proof-cli/docs/audits/2026-10-12-t8-fixes-review/core-affected.xml"
+    ],
+    "cwd": "/private/tmp/proof-t8-audit-px7msjct/core",
+    "exit": 0,
+    "seconds": 308.9982080000045,
+    "tests": 159,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 2
+  },
+  {
+    "name": "agents-full",
+    "command": [
+      "/opt/anaconda3/bin/python",
+      "-m",
+      "pytest",
+      "-q",
+      "-p",
+      "no:cacheprovider",
+      "-c",
+      "/private/tmp/proof-t8-audit-px7msjct/agents/pyproject.toml",
+      "tests",
+      "--junitxml=/Volumes/Codex-Workspace/live/home/zhdeng/proof-cli/docs/audits/2026-10-12-t8-fixes-review/agents-full.xml"
+    ],
+    "cwd": "/private/tmp/proof-t8-audit-px7msjct/agents",
+    "exit": 0,
+    "seconds": 17.93866587500088,
+    "tests": 202,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  {
+    "name": "web-full",
+    "command": [
+      "/opt/anaconda3/bin/python",
+      "-m",
+      "pytest",
+      "-q",
+      "-p",
+      "no:cacheprovider",
+      "-c",
+      "/private/tmp/proof-t8-audit-px7msjct/web/pyproject.toml",
+      "tests",
+      "--junitxml=/Volumes/Codex-Workspace/live/home/zhdeng/proof-cli/docs/audits/2026-10-12-t8-fixes-review/web-full.xml"
+    ],
+    "cwd": "/private/tmp/proof-t8-audit-px7msjct/web",
+    "exit": 0,
+    "seconds": 258.58295958300005,
+    "tests": 823,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 1
+  }
+]

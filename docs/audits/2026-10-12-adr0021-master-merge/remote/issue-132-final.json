@@ -1,0 +1,100 @@
+{
+  "body": "## Question\n\n（HITL task）这是一个自动证明系统，重点是**自动化**：验证的核心问题是，给它一个课题，它能不能不靠人把证明做出来并经 Verifier 通过。所以先用简单课题（第一、二层）验证自动化本身，人只做 Start 和设计规定给人的决定；更复杂的问题（第三层）才是人机协作的场景。研究者在真实浏览器里跑 ADR-0019 的系统（Prover → Typesetter → Verifier 的 prove–verify 循环、Decomposer、Coordinator、跨节点的 memory 与 briefing）。完成后在本票留言记录；bug 按普通 issue 开，不进地图。\n\n此前 2026-10-04 的试用（见评论）覆盖的是页面与 CLI 的基本操作，以合成用例为主；本轮改为以数学内容为主线，三个层次各跑一遍完整流程。\n\n## 通过标准（研究者 2026-10-06 的决定）\n\n第一、二层是对系统设计的检验：设计没有问题，系统就应当在**没有人工介入**的情况下独立完成。两层都通过之后才进入第三层；第三层是更复杂的问题，才可能需要人介入。\n\n\"没有人工介入\"指：研究者只做设计本身规定给人的动作，不做别的。\n\n- 允许：Start（节点的 Start agent、Theorem 上的 Propose a split、Start subtree）；对 Decomposer 提出的结构做出决定；Accept 到达审阅的 Claim 和最终结果（Acceptance 只能由人做，ADR-0004）。\n- 不允许：Redirect；直接编辑 proof.tex、key-ideas.md 或 scratch；Stop 再 Start 以绕过卡住；Review what it has 或自己 request-review；修改 Decomposer 的拆分。\n- 任何一次不得不做\"不允许\"的动作，或者 run 以 stuck / budget 结束，或者到达审阅的证明你不愿 Accept，都算这一层**未通过**：开 issue，修，重跑该层。\n\n第一层通过：五个节点各 Start 一次，每个 run 以 review-requested 结束、最新 verdict 为 passed、快照上有 `<agent>/verifier` 的 Evidence check，审阅后你都 Accept。\n第二层通过：三个结果各自 Propose a split 后结构你照单接受（需要改动的，记下改了什么，算发现而不算失败，除非改动后系统仍做不下去）；Start subtree 后 Coordinator 把每个 Claim 推到 review-requested，你 Accept 后它继续到父节点并同样到达审阅；全程没有 Redirect 和手工编辑。\n通过后再做鲁棒性检查（Stop 再 Start 看 briefing 是否带 attempts；手改一处 LaTeX 看 diff 是否置首），这些不计入通过标准。\n\n## 夹具\n\n脚本在 `.claude/worktrees/trial-132/`（不进仓库），每个层次一个独立项目；项目路径含空格也可以。一个项目只允许一个 theorem 节点，其余题目是 lemma，Decomposer 与 Coordinator 对 lemma 同样适用。运行前确认本机 `proof` 用的是三个仓库的 master：`~/proof-cli` 已在 master；`~/proof-web`、`~/proof-agents` 两个 checkout 还停在 0019 之前的 feature 分支，需要切到 master。\n\n<details><summary>setup-tier1.sh</summary>\n\n```sh\n#!/bin/sh\n# Trial #132, tier 1: undergraduate homework — five independent results, each proved directly (one Theorem; a project allows one, the rest are Lemmas). Usage: setup-tier1.sh <project-folder>\nset -e\nROOT=\"${1:?project folder}\"\nproof init --root \"$ROOT\"\ncat > \"$ROOT/proof.toml\" <<'TOML'\n[studio]\nbudget_turns = 40\nbudget_minutes = 60\nparallel = 2\nTOML\nnode() { proof node create --root \"$ROOT\" \"$@\"; }   # the project path may hold spaces: quoted, never split\nnode T1 theorem 'If a real sequence $(a_n)$ converges to $a$ and to $b$, then $a = b$.'\nnode T2 lemma 'A continuous function $f\\colon [a,b] \\to \\mathbb{R}$ on a closed bounded interval is bounded.'\nnode T3 lemma 'For a linear map $T\\colon V \\to W$ between finite-dimensional vector spaces, $\\dim \\ker T + \\dim \\operatorname{im} T = \\dim V$.'\nnode T4 lemma 'For every integer $n$, $30$ divides $n^5 - n$.'\nnode T5 lemma 'If $f\\colon [0,1] \\to [0,1]$ is continuous, then $f$ has a fixed point.'\nproof node list --root \"$ROOT\"\n```\n</details>\n\n<details><summary>setup-tier2.sh</summary>\n\n```sh\n#!/bin/sh\n# Trial #132, tier 2: a graduate-course project — three results with no children (one Theorem, two Lemmas: a project allows one theorem); the Decomposer proposes each split, the Coordinator works it.\nset -e\nROOT=\"${1:?project folder}\"\nproof init --root \"$ROOT\"\ncat > \"$ROOT/proof.toml\" <<'TOML'\n[studio]\nbudget_turns = 40\nbudget_minutes = 60\nparallel = 2\nTOML\nnode() { proof node create --root \"$ROOT\" \"$@\"; }   # the project path may hold spaces: quoted, never split\nnode AA theorem 'Let $(f_n)$ be a sequence of functions $[0,1] \\to \\mathbb{R}$ that is uniformly bounded and equicontinuous. Then $(f_n)$ has a uniformly convergent subsequence.' --display-label 'Arzelà–Ascoli (one direction)'\nnode PP lemma 'Every group of order $p^2$, with $p$ prime, is abelian.' --display-label 'Groups of order $p^2$'\nnode CC lemma 'For every $n \\ge 1$, the number of partitions of $n$ into distinct parts equals the number of partitions of $n$ into odd parts.' --display-label \"Euler's partition identity\"\nproof node list --root \"$ROOT\"\n```\n</details>\n\n<details><summary>setup-tier3-template.sh（按所选论文填空）</summary>\n\n```sh\n#!/bin/sh\n# Trial #132, tier 3: reproduce a theorem of a paper. A template: fill in the paper, its cited results and the theorem.\nset -e\nROOT=\"${1:?project folder}\"\nproof init --root \"$ROOT\"\ncat > \"$ROOT/proof.toml\" <<'TOML'\n[studio]\nbudget_turns = 60\nbudget_minutes = 120\nparallel = 2\nlibrary = [\"~/papers\"]      # the folder holding the paper and what it cites, read-only for the agent\nTOML\n# each result the paper cites: a reference, then an imported_result node citing it (Reference-review it on the page before the Coordinator starts)\nproof reference import --root \"$ROOT\" --help    # see the options; one `reference import` per cited work\nproof node create --root \"$ROOT\" R1 imported_result '<the cited theorem, stated exactly as the paper uses it>' \\\n  --source-locator '<DOI or arXiv id, theorem number>' --source-version '<version / year>' --reference-id '<reference id from `proof reference list`>'\n# the theorem to reproduce, resting on the imported results; no children yet: start with the Decomposer\nproof node create --root \"$ROOT\" MAIN theorem '<the paper'\"'\"'s theorem, stated precisely>' --dependency R1\nproof node list --root \"$ROOT\"\n```\n</details>\n\n## 三个层次\n\n每个层次新建一个独立项目，用真实 Claude Code 或 Codex；不用私有研究内容时可以公开记录。\n\n### 第一层：本科作业级别\n\n一道题一个节点，直接证明，不需要拆分。夹具给了五个互不依赖的节点：极限唯一（T1）、闭区间上连续函数有界（T2）、秩–零化度（T3）、$30 \\mid n^5-n$（T4）、$[0,1]$ 上的不动点（T5）。\n\n要看的：\n- [ ] Start 一次，整条循环是否自己走完：Prover 起草 → Typesetter 写 LaTeX 并编译通过 → Verifier 给 verdict → 通过后 Prover 请求审阅；任何人工介入即未通过\n- [ ] Verifier 的 verdict：failed 的 objections 是否指到具体步骤、是否有道理；passed 时证明是否真的完整\n- [ ] 到达审阅时 Evidence check 是否带 `<agent>/verifier`；key-ideas.md 的四节是否反映 proof.tex 的实际内容\n- [ ] （通过后的鲁棒性检查）一次 Stop 再 Start：新 Prover 的 briefing 是否列出之前的 attempts，有没有重走死路\n- [ ] 每题花了几轮、多少分钟、几次 verdict\n\n### 第二层：高级研究课程的小课题\n\n需要 3–6 个引理的结果，一开始没有 children。夹具给了三个：Arzelà–Ascoli 的一个方向（theorem AA）、$p^2$ 阶群交换（lemma PP）、Euler 的分拆恒等式（lemma CC）。\n\n要看的：\n- [ ] 对 Theorem 用 \"Propose a split\"：Decomposer 读完文献后提出的 Claims 是否是你会拆的样子；多余、缺失、陈述不精确的各有几个；fog 里放了什么\n- [ ] 你编辑地图后 Start subtree：Coordinator 是否按前沿一次推进 `[studio] parallel` 个节点，子节点 Accepted 后是否 redirect 依赖它的运行，所有 children Accepted 后是否启动父节点\n- [ ] 两个兄弟 Claim 之间：一个节点学到的 `failed` / `tactic` 是否出现在另一个的 briefing 里，是否有帮助，有没有把兄弟未 Accepted 的证明当事实用（Verifier 应当拒绝）\n- [ ] （通过后的鲁棒性检查）你在 LaTeX 里直接改一处步骤：下一轮 briefing 是否以你的 diff 开头，Prover 是否保留了你的改动，Verifier 是否读了它\n- [ ] 审阅一个 Claim 并 Accept / Reject：Reject 后 Coordinator 的处理是否合理\n- [ ] 整个子树花了多少轮、多少预算，哪里卡住（stuck / needs-human）以及卡住的理由是否成立\n\n### 第三层：复现一篇论文的证明\n\n选一篇你熟悉领域的论文，复现其中一个主要定理（或一节）。论文引用的结果作为 imported result 录入并做 Reference review；先 Decomposer，再 Coordinator。\n\n要看的：\n- [ ] 对文献的调用：Verifier 是否真的核对了被引结果的陈述给出的东西，有没有\"引文不给这个结论\"的 objection\n- [ ] 哪些步骤系统能独立完成，哪些需要你补 Claim、补 key ideas 或直接写；人与机器各做了多少\n- [ ] 需要 Challenge 一个依赖、或 fog 里积累了什么说不清的难点\n- [ ] memory 跨节点共享在这个规模下是帮助还是噪音；briefing 的长度上限是否够\n- [ ] 最终到达审阅的证明你是否愿意 Accept；和论文原证明相比缺了什么\n- [ ] 全程时长、总轮数、总 verdict 数、人为 redirect 次数\n\n## 每层记录\n\n- heads（proof-cli / proof-web / proof-agents）、provider 与模型、`[studio]` 配置（budget、parallel）\n- 上面的勾选项，各自一两句结论\n- 时间与轮数统计\n- 发现的 bug：开 issue 并链接；对流程设计的意见直接写在本票\n\n## 解决时记录\n\n三个层次各自的可用性结论（能用 / 勉强 / 不能用，原因），对下一步设计最有分量的两三条观察。\n",
+  "closedAt": null,
+  "comments": [
+    {
+      "id": "IC_kwDOTZw3DM8AAAABYXNnDw",
+      "author": {
+        "login": "DengZhiyuan-math"
+      },
+      "authorAssociation": "OWNER",
+      "body": "## 检查清单补充（2026-10-01）\n\n这轮之后 master 上（或等 PR #146–#149 合并后）新增的东西，顺手一起试：\n\n**Proof fog 与 Experiment（已在 master）**\n- [ ] 工具栏「Fog n」徽章与抽屉：新增、丢弃（要写原因）、reopen、「show dropped and crystallized」\n- [ ] 悬停一条 fog，图上 near 的节点高亮、其余变暗；tree 视图同样\n- [ ] 行内「Record experiment…」：结论 / 摘要 / run_by / 路径；记错了再记一条 error\n- [ ] 节点页「Crystallized from fog-N」和「Fog near this node」的链接能打开抽屉并定位\n- [ ] CLI：`proof fog crystallize fog-N <id> \"<statement>\"`（父节点默认取唯一 near；多个时拒绝）\n\n**Trust rules（已在 master）**\n- [ ] review 页「Trusted by rule」一节（折叠）、Manage rules… sheet、影响预览、`website` / `other` 的提醒\n- [ ] 一个按规则可信的 imported result 在地图、节点页、tree、studio 节点面板上的 chip\n- [ ] 「Review explicitly」预填的 rationale\n\n**Medium、Run、Open in VS Code（PR #146、#147）**\n- [ ] `proof node create C3 claim \"…\" --medium computation`：文件夹里只有 `run.sh` 和 `key-ideas.md`\n- [ ] 该节点的 studio：Run 按钮（而不是 Compile）、Output 面板、状态栏的 Evidence check 字样；Open in VS Code 真的打开 VS Code\n- [ ] 请求审阅后节点页「Frozen outputs」列出 `out/` 产物，图片预览，HTML 以下载返回\n- [ ] 文件树能列出并编辑 `run.sh`、`.py`、`.csv`\n\n**agent 运行与 agent-first studio（PR #148、#149）**\n- [ ] 地图卡片上的「▶ Start」、节点页的 Start / Pause / Redirect / Stop and release\n- [ ] studio 打开即是 Work log：运行卡片（状态、角色、步骤、计划）、每条日志的角色与链接、每一轮的折叠对话\n- [ ] 「+」菜单：Start / Pause / Redirect… / Review what it has / Stop and release，再下面是按角色的一次性任务；运行中一次性任务应是灰的\n- [ ] Review what it has：冻结快照、审阅表自动打开、运行结束（这是服务层「请求审阅即交出节点」的结果，看是否可接受）\n- [ ] 聊天框只剩 Ask；Files 标签里编辑器、PDF、Run / Compile 仍可用；⌘↵ 在 computation 节点上是 Run\n- [ ] 一次真实的 Start（Claude Code 或 Codex）：三个角色是否真的轮流、`proof node progress` 的日志是否出现、卡住 / 预算时的停止与说明\n\n记下让你不顺手的地方，尤其是「这里我以为应该看到 agent 在做什么、结果看到的是编辑器」之类。\n",
+      "createdAt": "2026-10-01T10:56:40Z",
+      "includesCreatedEdit": false,
+      "isMinimized": false,
+      "minimizedReason": "",
+      "reactionGroups": [],
+      "url": "https://github.com/DengZhiyuan-math/proof-cli/issues/132#issuecomment-5929920271",
+      "viewerDidAuthor": true
+    },
+    {
+      "id": "IC_kwDOTZw3DM8AAAABZJ5ERA",
+      "author": {
+        "login": "DengZhiyuan-math"
+      },
+      "authorAssociation": "OWNER",
+      "body": "2026-10-04 实际使用记录：约 20 分钟，macOS 27.2 arm64、真实 headed Chrome、真实本地服务和 CLI，隔离合成项目。heads：proof-cli 7ed8e4b、proof-web c53ea8e、proof-agents 9c5daca。没有使用私有研究内容。\n\n实际检查：Home Open / New / Forget（确认后卡片移除且数据库保留）/ Add existing；map Graph/Tree、搜索、Zoom/Fit/Tidy、Fog 抽屉；三种 near 的 Crystallize 表单和实际提交；节点 Work log/Files、provider、Typesetter 任务、Compile、Problems/Output、PDF 和 Theme。\n\n真实 Codex compile MCP 已通过，见 #152。失败初始编译经 Typesetter 修正后，Problems 清空、PDF 实际绘制。\n\n发现并登记：\n- https://github.com/DengZhiyuan-math/proof-cli/issues/170：Start 忽略选定 provider。\n- https://github.com/DengZhiyuan-math/proof-cli/issues/171：失败的单角色 CLI 被标记 Done。\n- https://github.com/DengZhiyuan-math/proof-cli/issues/172：节点 statement/assumptions 缺数学渲染。\n- #155：Crystallize 提交后新 studio 缺 fog 来源回链。\n- https://github.com/DengZhiyuan-math/proof-cli/issues/173：沙箱外全套唯一失败为旧静态地址断言。\n\n三条原有待办已登记：README 迁移后链接 https://github.com/DengZhiyuan-math/proof-cli/issues/167；干净 CI 安装/Windows 锁验证 https://github.com/DengZhiyuan-math/proof-cli/issues/168；detach 偶发超时 https://github.com/DengZhiyuan-math/proof-cli/issues/169。全套与 Chrome/Codex 负载并行 642 passed / 1 skipped / 1 failed in 152.87s，此次未复现 detach 超时。\n\n本票保持开放。本次是代理操作真实浏览器的合成用例，尚未覆盖全部状态组合、真实研究者的长期数学工作、Review/snapshot、Trust rule/computation 和 SyncTeX 全流程。服务及隔离 Chrome 已关闭；本机报告、原始日志和截图已保留。\n",
+      "createdAt": "2026-10-04T18:28:14Z",
+      "includesCreatedEdit": false,
+      "isMinimized": false,
+      "minimizedReason": "",
+      "reactionGroups": [],
+      "url": "https://github.com/DengZhiyuan-math/proof-cli/issues/132#issuecomment-5983061060",
+      "viewerDidAuthor": true
+    },
+    {
+      "id": "IC_kwDOTZw3DM8AAAABZnBTng",
+      "author": {
+        "login": "DengZhiyuan-math"
+      },
+      "authorAssociation": "OWNER",
+      "body": "2026-10-06 按研究者要求改写本票：从 PR #121 之后的 UI 检查清单，改为以数学内容为主线、三个难度层次（本科作业、研究课程小课题、论文证明复现）试用 ADR-0019 的自动化证明系统。原清单与 10-04 的试用记录保留在上面的评论中。",
+      "createdAt": "2026-10-06T09:43:37Z",
+      "includesCreatedEdit": false,
+      "isMinimized": false,
+      "minimizedReason": "",
+      "reactionGroups": [],
+      "url": "https://github.com/DengZhiyuan-math/proof-cli/issues/132#issuecomment-6013604766",
+      "viewerDidAuthor": true
+    },
+    {
+      "id": "IC_kwDOTZw3DM8AAAABZnSu-g",
+      "author": {
+        "login": "DengZhiyuan-math"
+      },
+      "authorAssociation": "OWNER",
+      "body": "2026-10-06 补充通过标准与夹具：第一、二层必须在无人工介入下独立完成（只允许设计规定给人的 Start、结构决定与 Accept），两层通过后才进入第三层。三份夹具脚本见正文（也在本机 .claude/worktrees/trial-132/）。注意本机 ~/proof-web、~/proof-agents 的 checkout 仍在 0019 之前的分支，试用前需切到 master。",
+      "createdAt": "2026-10-06T10:01:07Z",
+      "includesCreatedEdit": false,
+      "isMinimized": false,
+      "minimizedReason": "",
+      "reactionGroups": [],
+      "url": "https://github.com/DengZhiyuan-math/proof-cli/issues/132#issuecomment-6013890298",
+      "viewerDidAuthor": true
+    },
+    {
+      "id": "IC_kwDOTZw3DM8AAAABZp47IQ",
+      "author": {
+        "login": "DengZhiyuan-math"
+      },
+      "authorAssociation": "OWNER",
+      "body": "## 第一层运行记录（2026-10-06）\n\nheads：core master `8c65c55`、proof-agents master `6006872`、proof-web master `42044f1`；provider Claude Code（`/opt/homebrew/bin/claude`，模型 claude-opus-5-5，`CLAUDE_CONFIG_DIR=$HOME/.claude-Zeqome`）；`[studio]` budget 40 轮 / 60 分钟。驱动：`.claude/worktrees/trial-132/run-tier1.py`，起地图页服务后对五个节点依次 Start，全程无 Redirect、无手工编辑、无重启。\n\n**自动化这一半：5 / 5 PASS。** 每个节点都是 Prover → Typesetter → Verifier → Prover 四轮，以 review-requested 结束，最新 verdict passed，快照上有 `claude-code/verifier` 的 Evidence check。\n\n| 节点 | 分钟 | 轮 | verdict | Verifier 读了什么 |\n|---|---|---|---|---|\n| T1 极限唯一 | 4.4 | 4 | passed（有说明） | proof.tex、key-ideas.md、preamble |\n| T2 闭区间连续有界 | 5.0 | 4 | passed（无说明） | proof.tex、key-ideas.md |\n| T3 秩–零化度 | 5.2 | 4 | passed（有说明，点名 F1–F3 为教材背景事实） | proof.tex、key-ideas.md、build log |\n| T4 30 ∣ n⁵−n | 5.7 | 4 | passed（有说明） | proof.tex、build log，并写 scratch/verifier/check.py 做数值核对 |\n| T5 不动点 | 6.5 | 4 | passed（无说明） | proof.tex、preamble、build log |\n\n每节点约 0.8–1.2M 输入 token（含缓存读取）、13–30K 输出 token。\n\n**我对五份证明的预读**：数学上都成立、自洽，适合直接证明的本科水平。T2 与 T5 都用最小上界性质做 sup 论证，T5 把 IVT 也顺带证了；T3 把三条线性代数背景事实（有限维子空间、无关组可扩充为基、核与像是子空间）作为陈述的事实使用，Verifier 在 verdict 里点明\"是否该成为独立节点由研究者定\"。key-ideas.md 的 难点 / 未覆盖 四节内容都对得上 proof.tex。**Accept 与否由研究者在页面上决定**，那是通过标准的另一半。\n\n**发现**\n\n1. 环境：backend 直接调 `claude` 二进制，用的是进程环境里的 `CLAUDE_CONFIG_DIR`。第一次运行没带该变量，五个节点两秒内全部 \"Not logged in\"。这不是系统缺陷，但需要写进 README：启动地图页服务的 shell 要带对应 profile 的 `CLAUDE_CONFIG_DIR`，否则页面上的 Start 也会失败。\n2. #179：CLI 失败时 run 的原因写成 \"the prover turn failed: success\"，应取 CLI 的 text 事件。\n3. 两个 passed verdict 没有 `--note`（T2、T5）。允许的，但对审阅者少了依据；可考虑让 Verifier 的 brief 要求 passed 也写一句核对了什么。先记录，不急改。\n4. 鲁棒性检查（Stop 再 Start 的 attempts 回放、手改 LaTeX 后 diff 置首）本轮未做，按票内说明属通过后的附加项。\n\n项目在 `.claude/worktrees/trial-132/projects/tier1`，报告 `report-tier1.md` 同目录。\n",
+      "createdAt": "2026-10-06T12:49:11Z",
+      "includesCreatedEdit": false,
+      "isMinimized": false,
+      "minimizedReason": "",
+      "reactionGroups": [],
+      "url": "https://github.com/DengZhiyuan-math/proof-cli/issues/132#issuecomment-6016613153",
+      "viewerDidAuthor": true
+    },
+    {
+      "id": "IC_kwDOTZw3DM8AAAABbUPHYA",
+      "author": {
+        "login": "DengZhiyuan-math"
+      },
+      "authorAssociation": "OWNER",
+      "body": "整理：本票原是已关闭地图「下一里程碑：Proof fog、imported result 的自动可信、首页建节点」（#124）的子票，地图关闭后不再挂在任何 open 地图下。[macOS 成熟度与后续平台开发地图](https://github.com/DengZhiyuan-math/proof-cli/issues/215) 明确不启动模型试验，因此不把本票挂到该地图。改为普通 HITL 工作：去掉 `wayfinder:task`，加 `ready-for-human`。试验仍由研究者执行，ADR-0021 的验收试验见 #197。",
+      "createdAt": "2026-10-12T16:14:52Z",
+      "includesCreatedEdit": false,
+      "isMinimized": false,
+      "minimizedReason": "",
+      "reactionGroups": [],
+      "url": "https://github.com/DengZhiyuan-math/proof-cli/issues/132#issuecomment-6128125792",
+      "viewerDidAuthor": true
+    }
+  ],
+  "number": 132,
+  "state": "OPEN",
+  "title": "三个层次试用自动化证明系统：本科作业、研究课程小课题、论文证明复现",
+  "url": "https://github.com/DengZhiyuan-math/proof-cli/issues/132"
+}

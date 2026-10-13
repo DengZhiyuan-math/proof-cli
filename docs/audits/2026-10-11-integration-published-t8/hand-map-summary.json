@@ -1,0 +1,37 @@
+{
+  "nodes": [
+    {
+      "id": "STROM",
+      "kind": "imported_result"
+    },
+    {
+      "id": "DECAY",
+      "kind": "imported_result"
+    },
+    {
+      "id": "SURJ",
+      "kind": "imported_result"
+    },
+    {
+      "id": "MAIN",
+      "kind": "theorem"
+    },
+    {
+      "id": "HT",
+      "kind": "lemma"
+    },
+    {
+      "id": "FIB",
+      "kind": "lemma"
+    }
+  ],
+  "definitions": [
+    "sadic-space",
+    "level",
+    "height",
+    "averages",
+    "spectral",
+    "harish-chandra"
+  ],
+  "fogCount": 5
+}

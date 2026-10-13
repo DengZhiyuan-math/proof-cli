@@ -1,0 +1,689 @@
+[
+  {
+    "repo": "DengZhiyuan-math/proof-cli",
+    "prs": [
+      {
+        "baseRefName": "integ/0021",
+        "baseRefOid": "b7f394374ce73e9a23754e12506e87e97326efd9",
+        "body": "Found when the three repos were run together on the integration candidate (docs/audits/2026-10-11-integration-head-candidate). Neither problem shows in a single repo's suite.\n\n- Registers INVALID_LIMITS, BUDGET_SPENT and NO_BUDGET in ERROR_CODES. proof-agents#19 and proof-web#18 raise them.\n- The contract test's scanner now treats a dict that spreads another dict (`{**answer, \"code\": CODE}`, as in proof-agents#17's RELEASE_FAILED) as a refusal, not a notice. Adds a planted test case for it.\n\ntests/test_cli_contract.py: 33 passed.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)",
+        "headRefName": "fix/0021-pursue-budget-codes",
+        "headRefOid": "24d3a296d9995774c01df755df904c769d6598da",
+        "isDraft": false,
+        "number": 209,
+        "state": "OPEN",
+        "statusCheckRollup": [
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-11T13:55:36Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38144445188/job/114484747021",
+            "name": "core-and-studio (ubuntu-24.04, 3.11)",
+            "startedAt": "2026-10-11T13:45:28Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          },
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-11T14:03:44Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38144445188/job/114484746775",
+            "name": "core-and-studio (ubuntu-24.04, 3.12)",
+            "startedAt": "2026-10-11T13:45:28Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          },
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-11T14:30:31Z",
+            "conclusion": "CANCELLED",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38144445188/job/114484747022",
+            "name": "core-and-studio (windows-latest, 3.11)",
+            "startedAt": "2026-10-11T13:45:27Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          },
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-11T14:30:33Z",
+            "conclusion": "CANCELLED",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38144445188/job/114484746970",
+            "name": "core-and-studio (windows-latest, 3.12)",
+            "startedAt": "2026-10-11T13:45:28Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          }
+        ],
+        "title": "fix: register the Pursue limit codes; the error-code scan reads a relabelled answer as a refusal",
+        "url": "https://github.com/DengZhiyuan-math/proof-cli/pull/209"
+      },
+      {
+        "baseRefName": "integ/0021",
+        "baseRefOid": "b7f394374ce73e9a23754e12506e87e97326efd9",
+        "body": "Closes #203.\n\nThe Reader's limit on Claims was a match on the raw command (`claim \"` in proof-agents' disallowed tools). This PR checks it in core instead, on the parsed arguments, under an explicit reader role (the audit's third trade-off).\n\n- **Role:** `PROOF_AGENT_ROLE=reader` (`domain.READER_ROLE`), the same variable each Proof agent role's runtime already sets (ADR-0016). It is not a node role and is not in `AGENT_ROLES`, so `proof node progress` refuses it with `INVALID_ROLE`. This is a cooperative agent's contract (ADR-0010), not authentication.\n- **Check:** under the role, `proof node create` refuses three things after Typer has parsed the arguments, with `READER_ROLE_REFUSED`. The error names the option (`kind=claim`, `--parent` or `--reassign`) and the role. The three:\n  - kind `claim`, in any letter case\n  - `--parent`\n  - `--reassign`, checked before the existing usage error for `--reassign` without `--parent`\n- The statement's text is never searched.\n- Without the role, nothing changes.\n\n## Acceptance\n\n- [x] Under the reader role, each of the three is refused after parsing, and nothing is written (no node, no edge on the parent). Covered by 5 cases.\n- [x] A statement containing `claim \"` (also `claim '` and a whole quoted `proof node create … claim \"…\"`) is accepted under the role.\n- [x] Without the role, nothing changes: a Claim, `--parent` and `--parent --reassign` succeed with no role and with `prover`, and `--reassign` alone is still a usage error.\n\n## Tests\n\n- `tests/test_reader_role.py`: 17 tests. On the base `b7f3943`, the 5 refusal cases fail and the other 12 pass, as expected: core never searched the raw text.\n- With `test_cli_contract.py`: 50 passed.\n- Full suite at `d17b484`: 1124 passed, 15 skipped, 3 failed. The same 3 fail on `b7f3943`: there is no local pdflatex, and the Tectonic fallback needs the network.\n\n## Follow-up (agents #20)\n\n- The Reader's environment sets `PROOF_AGENT_ROLE=reader`. Today `reader.py` pops the variable.\n- Drop the `claim \"…\"`, `--parent` and `--reassign` patterns from `READER_DENIED`, along with the prompt line asking the Reader to reword such statements.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n",
+        "headRefName": "fix/203-reader-role",
+        "headRefOid": "502f074aa50c328871b331f6ba355defd6869428",
+        "isDraft": false,
+        "number": 208,
+        "state": "OPEN",
+        "statusCheckRollup": [
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-11T14:00:05Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38144835088/job/114485901563",
+            "name": "core-and-studio (ubuntu-24.04, 3.11)",
+            "startedAt": "2026-10-11T13:51:23Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          },
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-11T14:06:34Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38144835088/job/114485901644",
+            "name": "core-and-studio (ubuntu-24.04, 3.12)",
+            "startedAt": "2026-10-11T13:51:23Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          },
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-11T14:31:41Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38144835088/job/114485901601",
+            "name": "core-and-studio (windows-latest, 3.11)",
+            "startedAt": "2026-10-11T13:51:23Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          },
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-11T14:36:28Z",
+            "conclusion": "CANCELLED",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38144835088/job/114485901454",
+            "name": "core-and-studio (windows-latest, 3.12)",
+            "startedAt": "2026-10-11T13:51:23Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          }
+        ],
+        "title": "The Reader's Claim limits check the parsed arguments, under an explicit reader role (#203)",
+        "url": "https://github.com/DengZhiyuan-math/proof-cli/pull/208"
+      },
+      {
+        "baseRefName": "integ/0021",
+        "baseRefOid": "b7f394374ce73e9a23754e12506e87e97326efd9",
+        "body": "Closes #202.\n\n`proof reference edit <id> … --reason …` fixes a citation's bibliography in place (audit section 2).\n\n- `edit_reference` (new `src/proof_cli/reference_edit.py`): a partial update of the `ReferenceRecord` under the same id, written with `store_reference` in one transaction. A field not given keeps its value. `id`, `created_by` and `created_at` never change.\n- Editable: title, authors, year, source type, origin, bibliographic source, identifier, URL and notes.\n- Each change is one `reference_edited` event naming the editor (`--by`, default `PROOF_AGENT_NAME`, else human), the reason and the old and new value of each changed field. An edit that changes nothing records nothing. A real change with no reason is refused with `REFERENCE_EDIT_REASON_REQUIRED`.\n- Refused with `REFERENCE_FIELD_NOT_EDITABLE`:\n  - An imported result's statement, `source_locator`, `source_version` and `reference_id`, since they are its mathematical interface (ADR-0005). The message says to cite another work or version as a new imported result. The CLI accepts these as hidden options only so that it can refuse them with the code.\n  - Any field outside the bibliography (`id`, `created_by`, the legacy review fields).\n- Also new: `REFERENCE_TITLE_REQUIRED`. `INVALID_SOURCE_TYPE` is reused.\n- `get_reference` takes an optional `conn`.\n\n## Acceptance\n\n- [x] Partial edits keep the other fields, and the event records the old and new values and the reason: `test_a_partial_edit_keeps_the_other_fields…` and `test_the_cli_edits_in_place…`.\n- [x] Editing a field of the mathematical interface is refused with an error code. Tested for each of the four fields through the CLI; neither the citation nor the node changes and no event is written.\n- [x] A researcher's import meets a DOI rule once its identifier is added (its dependent goes from blocked to open) and stops meeting the rule when the DOI is removed: `test_a_researchers_import_meets_a_doi_rule…`.\n\nADR-0022's restriction to the researcher's own imports is not implemented on this branch (`trust_rules_of` does not check the node's `created_by`), so this PR adds no agent-import test. It belongs with the ADR-0022 change.\n\n## Tests\n\n- `tests/test_reference_edit.py`: 16 tests, all passing.\n- With references, trust rules and the CLI contract: 108 passed.\n- Full suite at `2f7c246`: 1123 passed, 15 skipped, 3 failed. The same 3 also fail on the base `b7f3943`: there is no local pdflatex, so the build uses Tectonic, which needs the network.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n",
+        "headRefName": "fix/202-reference-edit",
+        "headRefOid": "2f7c2460bca05bc2d823403f17b05ed28766412b",
+        "isDraft": false,
+        "number": 207,
+        "state": "OPEN",
+        "statusCheckRollup": [
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-10T13:57:24Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38056968538/job/114227320981",
+            "name": "core-and-studio (ubuntu-24.04, 3.11)",
+            "startedAt": "2026-10-10T13:45:46Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          },
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-10T13:56:18Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38056968538/job/114227320912",
+            "name": "core-and-studio (ubuntu-24.04, 3.12)",
+            "startedAt": "2026-10-10T13:45:46Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          },
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-10T14:30:54Z",
+            "conclusion": "CANCELLED",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38056968538/job/114227320953",
+            "name": "core-and-studio (windows-latest, 3.11)",
+            "startedAt": "2026-10-10T13:45:47Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          },
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-10T14:30:54Z",
+            "conclusion": "CANCELLED",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38056968538/job/114227320770",
+            "name": "core-and-studio (windows-latest, 3.12)",
+            "startedAt": "2026-10-10T13:45:47Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          }
+        ],
+        "title": "proof reference edit: fix a citation's bibliography in place, with a reason (#202)",
+        "url": "https://github.com/DengZhiyuan-math/proof-cli/pull/207"
+      },
+      {
+        "baseRefName": "integ/0021",
+        "baseRefOid": "b7f394374ce73e9a23754e12506e87e97326efd9",
+        "body": "Closes #201.\n\n## What\n\nA project Pursue now leaves a history in the project's own SQLite events (audit section 1). This adds no new log and uses no node.\n\n- `proof_cli.pursuit.record_pursuit(store, phase, ...)` is the one service function that writes. It appends a `pursuit` event with `entity_id=None`. Phases: `start`, `reader_end`, `theorem`, `stop`, `release_failed`, `end`. Payload: `pursuit_id`, `phase`, `outcome`, `reason`, `provider`, `theorem`, `budget`.\n- A `start` makes the pursuit's id. Any other phase must name a started pursuit that has not ended (`PURSUIT_NOT_FOUND`, `PURSUIT_ENDED`). An `end` must name its outcome (`PURSUIT_OUTCOME_REQUIRED`).\n- A write that fails raises `PURSUIT_RECORD_FAILED`. On a failed `start` nothing is recorded, and the host must not start a provider.\n- `project_progress(store, live=None)` and `proof project progress [--json]` read the pursuits back, oldest first, with their events. A pursuit with no end reads `interrupted`. The host can name its own live pursuit to have it read `running`. Nothing is resumed and no provider budget is spent.\n- The five new codes are registered in `ERROR_CODES`. `CONTEXT.md`'s Pursue entry names the history.\n\n## Acceptance\n\n- [x] Each event kind round-trips through the service and `proof project progress --json` (`test_each_phase_round_trips_through_the_service_and_the_cli`)\n- [x] A pursuit with no end event reads `interrupted` (`test_a_pursuit_with_no_end_reads_interrupted_and_the_live_one_running`)\n- [x] A failing write at start refuses the start with an error code (`test_a_failing_write_at_start_is_refused_with_a_code_and_records_nothing`)\n- [x] No fake node holds a Reader failure (`test_a_reader_failure_is_a_pursuit_event_not_a_node`)\n\n## Tests\n\nCore suite on this branch: 1037 passed, 2 skipped, 2 failed. The two failures are `tests/test_latex_snapshots.py` real `tectonic` builds, which panic fetching network resources inside the local sandbox. They don't touch this change.\n\nWiring the page (replacing the no-op `record` hook, restart reads) is proof-web #10.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n",
+        "headRefName": "fix/201-pursuit-events",
+        "headRefOid": "09e64a365153650cade0579afca52a56028b0f07",
+        "isDraft": false,
+        "number": 206,
+        "state": "OPEN",
+        "statusCheckRollup": [
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-09T22:22:34Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/37997653474/job/114047684293",
+            "name": "core-and-studio (ubuntu-24.04, 3.11)",
+            "startedAt": "2026-10-09T22:09:34Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          },
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-09T22:20:56Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/37997653474/job/114047684441",
+            "name": "core-and-studio (ubuntu-24.04, 3.12)",
+            "startedAt": "2026-10-09T22:09:34Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          },
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-09T22:54:42Z",
+            "conclusion": "CANCELLED",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/37997653474/job/114047684423",
+            "name": "core-and-studio (windows-latest, 3.11)",
+            "startedAt": "2026-10-09T22:09:34Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          },
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-09T22:54:41Z",
+            "conclusion": "CANCELLED",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/37997653474/job/114047684411",
+            "name": "core-and-studio (windows-latest, 3.12)",
+            "startedAt": "2026-10-09T22:09:34Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          }
+        ],
+        "title": "feat: a project Pursue's history as pursuit events, read by proof project progress (#201)",
+        "url": "https://github.com/DengZhiyuan-math/proof-cli/pull/206"
+      },
+      {
+        "baseRefName": "integ/0021",
+        "baseRefOid": "b7f394374ce73e9a23754e12506e87e97326efd9",
+        "body": "Closes #200\n",
+        "headRefName": "fix/200-pursuit-error-codes",
+        "headRefOid": "13370808a605a31632b9883606330183fd0fd8a3",
+        "isDraft": false,
+        "number": 205,
+        "state": "OPEN",
+        "statusCheckRollup": [
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-08T21:49:27Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/37849011724/job/113556984558",
+            "name": "core-and-studio (ubuntu-24.04, 3.11)",
+            "startedAt": "2026-10-08T21:45:46Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          },
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-08T21:52:08Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/37849011724/job/113556984490",
+            "name": "core-and-studio (ubuntu-24.04, 3.12)",
+            "startedAt": "2026-10-08T21:45:46Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          },
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-08T22:20:29Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/37849011724/job/113556984109",
+            "name": "core-and-studio (windows-latest, 3.11)",
+            "startedAt": "2026-10-08T21:45:45Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          },
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-08T22:16:06Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/37849011724/job/113556985036",
+            "name": "core-and-studio (windows-latest, 3.12)",
+            "startedAt": "2026-10-08T21:45:46Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          }
+        ],
+        "title": "fix: register NO_PURSUIT, PURSUIT_ACTIVE, READER_FAILED (#200)",
+        "url": "https://github.com/DengZhiyuan-math/proof-cli/pull/205"
+      },
+      {
+        "baseRefName": "integ/0021",
+        "baseRefOid": "b7f394374ce73e9a23754e12506e87e97326efd9",
+        "body": "Closes #199. ADR-0022 points 1–2, 4–5; --json would_meet_trust_rule for point 3.\n",
+        "headRefName": "fix/199-trust-rule-researcher-imports",
+        "headRefOid": "ad479f6d69186105a934d9765a553c48f859ceca",
+        "isDraft": false,
+        "number": 204,
+        "state": "OPEN",
+        "statusCheckRollup": [
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-08T21:50:59Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/37848152761/job/113554114913",
+            "name": "core-and-studio (ubuntu-24.04, 3.11)",
+            "startedAt": "2026-10-08T21:38:07Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          },
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-08T21:48:40Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/37848152761/job/113554114852",
+            "name": "core-and-studio (ubuntu-24.04, 3.12)",
+            "startedAt": "2026-10-08T21:38:07Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          },
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-08T22:23:14Z",
+            "conclusion": "CANCELLED",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/37848152761/job/113554114200",
+            "name": "core-and-studio (windows-latest, 3.11)",
+            "startedAt": "2026-10-08T21:38:07Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          },
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-08T22:23:14Z",
+            "conclusion": "CANCELLED",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/37848152761/job/113554114857",
+            "name": "core-and-studio (windows-latest, 3.12)",
+            "startedAt": "2026-10-08T21:38:07Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          }
+        ],
+        "title": "fix: a Trust rule is met only by an imported result the researcher created (ADR-0022, #199)",
+        "url": "https://github.com/DengZhiyuan-math/proof-cli/pull/204"
+      }
+    ]
+  },
+  {
+    "repo": "zeqome/proof-agents",
+    "prs": [
+      {
+        "baseRefName": "integ/0021",
+        "baseRefOid": "36c291f6ff26bebc0720b36dcb5708c98d9b8736",
+        "body": "Closes #19.\n\nStacked on #24 (#18) at `7e742b5`: retarget to `integ/0021` once #24 merges. The page that shows the total before Start is a separate proof-web issue that depends on this PR.\n\n## What\n\n- **Proof budget:** a node's proof budget (`[studio] budget` turns) covers Prover, Verifier, Typesetter and Numerics turns. It is a ceiling, not an allocation.\n- **Structure allowance:** Decomposer turns are structure, counted as `structure_turns` on the node's entry and not in its proof turns. Per parent, there is one first split (an unsplit root) and one re-split after a parked Claim. A second re-split is refused (`resplit_refused`, noted once).\n- **One Pursue total:**\n  - `PursueBudget` holds the turns and the time limit, fixed at Start and shared by a project Pursue's Reader and each Theorem's Coordinator.\n  - The default is `pursue_limits`: node budget × max(1, open nodes at Start) + 2 per open Theorem or Lemma (+1 for the Reader when a turn is due).\n  - The researcher can pass their own `limits={\"turns\", \"minutes\"}`.\n  - The total is never raised. A split's Claims, retries and re-splits spend what is left of it.\n  - A run's cap is what is left of its node budget and of the total, once the running runs' caps are set aside. `AgentRun.start(minutes=)` caps the run's time by what is left of the time limit.\n- **Failed launches:**\n  - A run that ends `stuck` or `budget` before any turn spends no turn.\n  - Three in a Start (the first attempt counted, not reset by a success) and the node is not tried again; its claim is given back and the reason is recorded in `launch_failed`.\n  - A first split or a re-split whose launch failed is tried again as a split.\n  - Each Start's end notes real turns (structure and proof) and failed launches separately.\n- **At the end of the total or the time limit:** as in #18, nothing new starts, running runs end, and nodes are Parked or Interrupted. A parent whose re-split was due is Interrupted, with a reason saying the total prevented it. A project Pursue starts no further Theorem (`not-started`) and ends `budget`.\n\n## Acceptance\n\n- [x] A parent that split still has its full proof budget.\n- [x] A second re-split on the same parent is refused.\n- [x] The total never rises after Start.\n- [x] Failed launches are counted apart from turns.\n\nAll four are in `tests/test_pursue_budget.py`.\n\n## Tests\n\n| Run | Result |\n| --- | --- |\n| full suite (proof-cli `integ/0021`), 3 repeats | 177 passed each time |\n| new `tests/test_pursue_budget.py` | 17 passed |\n| proof-web `feat/0021-pursue-review-queue` with this branch | one new failure: `test_coordinator_hub.py` pins the old default `turns_max == 120`; the new one is 122 |\n\nThe web follow-up updates that assertion.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n",
+        "headRefName": "fix/19-structure-budget",
+        "headRefOid": "ead54fe8d3480f1d4ba45a5b7b1bfb97b0f796ee",
+        "isDraft": false,
+        "number": 26,
+        "state": "OPEN",
+        "statusCheckRollup": [
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-11T09:25:16Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/zeqome/proof-agents/actions/runs/38128269682/job/114437068354",
+            "name": "agents (3.11)",
+            "startedAt": "2026-10-11T09:24:44Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          },
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-11T09:25:17Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/zeqome/proof-agents/actions/runs/38128269682/job/114437068145",
+            "name": "agents (3.12)",
+            "startedAt": "2026-10-11T09:24:44Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          }
+        ],
+        "title": "Structure turns apart from the proof budget, under one Pursue total fixed at Start (#19)",
+        "url": "https://github.com/zeqome/proof-agents/pull/26"
+      },
+      {
+        "baseRefName": "integ/0021",
+        "baseRefOid": "36c291f6ff26bebc0720b36dcb5708c98d9b8736",
+        "body": "Closes #20.\n\nBlocked by DengZhiyuan-math/proof-cli#204 (#199) and DengZhiyuan-math/proof-cli#208 (#203); merge after both.\n\n- **Reader role** (audit, the third trade-off):\n  - `ReaderContext.env()` sets `PROOF_AGENT_ROLE=reader`, proof-cli's reader role. Before, it removed the variable.\n  - Its permissions allow `proof node create *`. Under the role, proof-cli refuses kind=claim, `--parent` and `--reassign` on the parsed arguments (`READER_ROLE_REFUSED`).\n  - The raw `claim \"` patterns, `READER_KINDS` and `READER_DENIED` are removed, so a statement quoting `claim \"` is written.\n  - `--root` (another project) is still denied.\n- **Full bibliography** (ADR-0022):\n  - The ban on `reference import --identifier/--source-type` is removed, along with the brief's \"leave out\" line.\n  - The brief now asks for both fields and says they give the Reader's import no trust.\n\n## Acceptance\n\n- [x] The Reader may import with `--identifier` and `--source-type`, and its import still reads `unreviewed` under a matching rule (`would_meet_trust_rules` names the rule).\n- [x] A statement quoting `claim \"` is not refused.\n- [x] `kind=claim`, `--parent` and `--reassign` are still refused, now by proof-cli, with the option named.\n\n`tests/test_reader_cli.py` runs each command through the Reader's permissions and then through the `proof` CLI in the Reader's environment.\n\n## Tests\n\nRun against a local merge of proof-cli `integ/0021` with #204 and #208:\n\n| Run | Result |\n| --- | --- |\n| `test_reader.py` + `test_reader_cli.py` | 21 passed |\n| the whole agents suite | 165 passed |\n| proof-web `feat/0021-pursue-review-queue` Reader tests | 34 passed |\n| the new integration tests on the old Reader (control) | 11 failed |\n\nCI installs proof-cli `master`, which has neither dependency, so `test_reader_cli.py` skips there (with that reason).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n",
+        "headRefName": "fix/20-reader-role-bibliography",
+        "headRefOid": "754313462607b6e1a90d9ba484794fce1a283008",
+        "isDraft": false,
+        "number": 25,
+        "state": "OPEN",
+        "statusCheckRollup": [
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-10T14:27:07Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/zeqome/proof-agents/actions/runs/38059622701/job/114235045219",
+            "name": "agents (3.11)",
+            "startedAt": "2026-10-10T14:26:42Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          },
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-10T14:27:08Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/zeqome/proof-agents/actions/runs/38059622701/job/114235045068",
+            "name": "agents (3.12)",
+            "startedAt": "2026-10-10T14:26:42Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          }
+        ],
+        "title": "The Reader runs under proof-cli's reader role and writes the full bibliography (#20)",
+        "url": "https://github.com/zeqome/proof-agents/pull/25"
+      },
+      {
+        "baseRefName": "integ/0021",
+        "baseRefOid": "36c291f6ff26bebc0720b36dcb5708c98d9b8736",
+        "body": "Closes #18. Stacked on #21 (9558fd0); independent of #22 and #23.\n",
+        "headRefName": "fix/18-park-at-budget",
+        "headRefOid": "7e742b5823ad72ee37f429aa4983e8d632102796",
+        "isDraft": false,
+        "number": 24,
+        "state": "OPEN",
+        "statusCheckRollup": [
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-09T12:03:51Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/zeqome/proof-agents/actions/runs/37927557766/job/113810044002",
+            "name": "agents (3.11)",
+            "startedAt": "2026-10-09T12:03:23Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          },
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-09T12:03:48Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/zeqome/proof-agents/actions/runs/37927557766/job/113810043579",
+            "name": "agents (3.12)",
+            "startedAt": "2026-10-09T12:03:22Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          }
+        ],
+        "title": "fix: at its budget's end the Coordinator still parks the nodes that spent theirs (#18)",
+        "url": "https://github.com/zeqome/proof-agents/pull/24"
+      },
+      {
+        "baseRefName": "integ/0021",
+        "baseRefOid": "36c291f6ff26bebc0720b36dcb5708c98d9b8736",
+        "body": "Closes #17. Stacked on #21 (9558fd0); independent of #22. proof-web needs Stop shown in release-failed to retry from the page (separate issue).\n",
+        "headRefName": "fix/17-pursuit-release-failed",
+        "headRefOid": "e2d6f9ee570f81e99ccaf69a40315ad46bb9cc96",
+        "isDraft": false,
+        "number": 23,
+        "state": "OPEN",
+        "statusCheckRollup": [
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-09T12:03:49Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/zeqome/proof-agents/actions/runs/37927554733/job/113810032924",
+            "name": "agents (3.11)",
+            "startedAt": "2026-10-09T12:03:21Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          },
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-09T12:03:47Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/zeqome/proof-agents/actions/runs/37927554733/job/113810033358",
+            "name": "agents (3.12)",
+            "startedAt": "2026-10-09T12:03:21Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          }
+        ],
+        "title": "fix: a project pursuit whose release fails says so, keeps its Theorem and starts no other (#17)",
+        "url": "https://github.com/zeqome/proof-agents/pull/23"
+      },
+      {
+        "baseRefName": "integ/0021",
+        "baseRefOid": "36c291f6ff26bebc0720b36dcb5708c98d9b8736",
+        "body": "Closes #16. Stacked on #21 (needs 9558fd0). Scope per the replacement body: visibility only, no retry. Page display is the separate proof-web task.\n",
+        "headRefName": "fix/16-record-failed",
+        "headRefOid": "8340de98507a9ed38ce72276ca4b9c9791dcfa53",
+        "isDraft": false,
+        "number": 22,
+        "state": "OPEN",
+        "statusCheckRollup": [
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-09T08:39:46Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/zeqome/proof-agents/actions/runs/37906294155/job/113740455071",
+            "name": "agents (3.11)",
+            "startedAt": "2026-10-09T08:39:24Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          },
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-09T08:39:53Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/zeqome/proof-agents/actions/runs/37906294155/job/113740454798",
+            "name": "agents (3.12)",
+            "startedAt": "2026-10-09T08:39:24Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          }
+        ],
+        "title": "fix: the run's own work-log writes that fail are shown in its state, not swallowed (#16)",
+        "url": "https://github.com/zeqome/proof-agents/pull/22"
+      },
+      {
+        "baseRefName": "integ/0021",
+        "baseRefOid": "36c291f6ff26bebc0720b36dcb5708c98d9b8736",
+        "body": "Closes #15\n",
+        "headRefName": "fix/15-needs-human-kept",
+        "headRefOid": "9558fd0caf6eef2f80401c503a0a4549f4bbaa6f",
+        "isDraft": false,
+        "number": 21,
+        "state": "OPEN",
+        "statusCheckRollup": [
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-08T22:40:05Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/zeqome/proof-agents/actions/runs/37854850783/job/113576456592",
+            "name": "agents (3.11)",
+            "startedAt": "2026-10-08T22:39:39Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          },
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-08T22:40:05Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/zeqome/proof-agents/actions/runs/37854850783/job/113576456929",
+            "name": "agents (3.12)",
+            "startedAt": "2026-10-08T22:39:39Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          }
+        ],
+        "title": "fix: under Pursue a needs-human step stops the run even when the turn split (#15)",
+        "url": "https://github.com/zeqome/proof-agents/pull/21"
+      }
+    ]
+  },
+  {
+    "repo": "zeqome/proof-web",
+    "prs": [
+      {
+        "baseRefName": "feat/0021-pursue-review-queue",
+        "baseRefOid": "864a2c29bd4f41a5344ae7be960b842a1d4aed62",
+        "body": "## What\n\n`discussion_view()` now reads the running turn and the pending records *before* the turn records. A turn frees its slot only once its ended record is written (or kept pending), so a turn that ends between the reads shows as still running instead of settled with an empty reply.\n\nThe start's failure paths now write the ended record before they free the slot. A start that raises after its started record was written is now ended on record with the error as its reply, instead of staying started for good.\n\n## Tests\n\nThere are three new tests in `tests/test_discussion_web.py`, gated with Events and no sleeps. All three fail at `864a2c2`:\n\n- `test_a_view_read_while_the_turn_ends_never_settles_on_an_empty_reply`: the reported race. The view reads the records, and then the turn ends.\n- `test_a_refused_start_is_on_record_before_its_slot_is_free`: views taken while the refusal is written all show the turn running.\n- `test_a_start_that_fails_after_its_record_is_on_record_as_failed`: the turn ends with the error as its reply.\n\nResults:\n- `test_discussion_web.py`: 14 passed in each of 5 runs.\n- Full suite: 724 passed and 1 skipped. Separately, 19 local-port tests can't run in the sandbox, and there is one known `test_coordinator_hub` race, whose test fix is in #19.\n\nCloses #20\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n",
+        "headRefName": "fix/discussion-empty-reply",
+        "headRefOid": "bb9ac2960e2e9d6f2607bffd5affa96f0151d1d1",
+        "isDraft": false,
+        "number": 21,
+        "state": "OPEN",
+        "statusCheckRollup": [
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-11T11:23:06Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/zeqome/proof-web/actions/runs/38135343890/job/114457956233",
+            "name": "package",
+            "startedAt": "2026-10-11T11:22:57Z",
+            "status": "COMPLETED",
+            "workflowName": "package"
+          }
+        ],
+        "title": "fix: a discussion view never reads an ending turn as settled with an empty reply",
+        "url": "https://github.com/zeqome/proof-web/pull/21"
+      },
+      {
+        "baseRefName": "feat/0021-pursue-review-queue",
+        "baseRefOid": "864a2c29bd4f41a5344ae7be960b842a1d4aed62",
+        "body": "Closes #18.\n\nStacked on #16 (#10), which is stacked on #15 (#12): both Pursue panels were changed there.\n\nDepends on:\n- zeqome/proof-agents#26 (#19), which computes and enforces the limits;\n- proof-agents#23 (#17) and DengZhiyuan-math/proof-cli#206, as #16 does.\n\n## What\n\n- **Hub:**\n  - `PursuitHooks(budget=…)` gets the node budget.\n  - Before Start, `/api/pursue` (while Pursue is offered) and `/api/node/<id>/coordinator` (while idle) carry `limits`, proof-agents' `default_limits()`.\n  - Start takes the researcher's `{\"limits\": {\"turns\", \"minutes\"}}`. It is checked with proof-agents' own rule before anything is recorded or started (400 `INVALID_LIMITS`), then passed to `ProjectPursuit.start` / `Coordinator.start`.\n  - `/api/pursue` adds `spend`: the Pursue's turns against the total, structure turns and failed launches apart, and minutes left.\n- **Page:**\n  - Before Start, the banner and the subtree card show editable total-turns and minutes fields, with how the default was computed. They say a node's budget is a ceiling, not a share, and that Claims a split adds spend what is left. A typed value survives a refresh.\n  - While running and after, the turns, structure turns, failed launches and time left are shown apart.\n  - The subtree card names the nodes the total interrupted (a parent whose re-split it prevented) and those whose launches failed.\n- **Recording fix:** a Theorem's Coordinator asked for while the pursuit is not on it (`default_limits` reads the subtree) records no Theorem step.\n- **Older proof-agents:** with a proof-agents from before #19, nothing changes. No limits are shown or sent.\n- **`test_coordinator_hub.py`:** the total is 122 with #19, 120 without.\n\n## Acceptance\n\n- [x] Before Start, the page shows the default total and time limit and how they were computed. Covered in the page harnesses and the hub tests; a browser check is still to do.\n- [x] A changed total is what the Pursue enforces; an invalid one is refused with its code.\n- [x] The budget panel shows real turns and failed launches separately.\n\n## Tests\n\n| Run | Result |\n| --- | --- |\n| full suite, twice, against proof-agents #26 merged with #23 | 759 passed, 1 skipped |\n| full suite against #23 alone (no #19) | 750 passed, 2 skipped (the new limits tests skip) |\n\nIn every run, the remaining 5 failed and 14 errors are the sandbox's local-port tests (`test_home.py`, `test_review_app.py`).\n\nNew tests:\n- `tests/test_pursue_limits.py`: 9 tests.\n- `test_review_queue_page.py`: 3 tests.\n- `test_run_pane.py`: 3 tests.\n\nNote: proof-agents #23 and #26 conflict in `ProjectPursuit`. The resolution and two #17 test changes needed under the shared total are in this PR's evidence.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n",
+        "headRefName": "fix/18-pursue-limits",
+        "headRefOid": "355837c333fd8189c105aa241d4e9fa8ffe50e6f",
+        "isDraft": false,
+        "number": 19,
+        "state": "OPEN",
+        "statusCheckRollup": [
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-11T09:27:11Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/zeqome/proof-web/actions/runs/38128403122/job/114437475210",
+            "name": "package",
+            "startedAt": "2026-10-11T09:27:00Z",
+            "status": "COMPLETED",
+            "workflowName": "package"
+          }
+        ],
+        "title": "A Pursue's total turns and time limit are shown before Start and submitted with it (#18)",
+        "url": "https://github.com/zeqome/proof-web/pull/19"
+      },
+      {
+        "baseRefName": "feat/0021-pursue-review-queue",
+        "baseRefOid": "864a2c29bd4f41a5344ae7be960b842a1d4aed62",
+        "body": "Refs #10. Depends on DengZhiyuan-math/proof-cli#206 (`09e64a3`) and zeqome/proof-agents#23 (`e2d6f9e`).\n\nThis PR is stacked on #15 (`f0ea4a7`), with base `fix/12-pursuit-release-retry`. After #15 merges, change this PR's base to `feat/0021-pursue-review-queue`.\n\nThe hub records a project Pursue's start, the Reader's end, each Theorem with its Coordinator's spent turns, Stop, release failure, and end through core's pursuit events. If the start cannot be recorded, it returns 500 `PURSUIT_RECORD_FAILED` before any Reader or provider starts. Later recording failures are kept as `record_error` and shown as `History not saved: …`.\n\nThe recovery contract differs from the original #10 body, as the researcher decided. A live hub keeps `release-failed` and Stop retries its release (#15). A release failure records only `release_failed`; a successful retry records `end released`. A new hub reads the last recorded end and its reason. Without an end, it shows `interrupted` and retains the last step's reason, including a release failure. It offers no Stop and performs no release retry after restart. A new Start rechecks claims, snapshots and node states.\n\nValidation reported by the implementer for exact commit `07bb06e67dbd767a8390593b464fee4dba2d07a4`: 8 new pursuit-history tests pass, including `test_project_pursuit_ending_survives_a_new_hub`; all 8 fail against #15's source. Two new page tests pass; the record-error test fails against the old page, and the interrupted display test is a regression guard. The full suite reports 744 passed and 1 skipped; 19 other cases were blocked by sandbox port-binding errors.\n\nIndependent verification on the same exact sources: 56 related tests pass, and a separate rerun of those 19 previously port-blocked cases passes. This is not a fresh full-suite run. Chrome acceptance passes with the actual HTTP server and deterministic Reader/Coordinator fixtures: Pursue, refresh, and server-process restart retain the recorded ending and reason; release failure becomes interrupted with its reason after restart and offers no Stop; a successful same-hub Stop retry records released; recording failures are visible. No real model/provider acceptance was performed.\n\nEvidence: `docs/audits/2026-10-10-web10-07bb06e-evidence/` in proof-cli.\nIndependent browser and rerun evidence: `docs/audits/2026-10-10-web10-07bb06e-publication-browser/` in proof-cli.\n",
+        "headRefName": "fix/10-pursuit-history",
+        "headRefOid": "07bb06e67dbd767a8390593b464fee4dba2d07a4",
+        "isDraft": false,
+        "number": 16,
+        "state": "OPEN",
+        "statusCheckRollup": [
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-10T12:30:11Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/zeqome/proof-web/actions/runs/38052173812/job/114213340486",
+            "name": "package",
+            "startedAt": "2026-10-10T12:30:04Z",
+            "status": "COMPLETED",
+            "workflowName": "package"
+          }
+        ],
+        "title": "feat: a project Pursue's history is recorded and a new hub reads it back (#10)",
+        "url": "https://github.com/zeqome/proof-web/pull/16"
+      },
+      {
+        "baseRefName": "feat/0021-pursue-review-queue",
+        "baseRefOid": "864a2c29bd4f41a5344ae7be960b842a1d4aed62",
+        "body": "Closes #12. Needs zeqome/proof-agents#17 (PR #23) for release-failed and stopping; without it the new server tests skip and the page is unchanged. Browser check not done in the sandbox (no port binding); covered by the page harness and a server test with a stand-in Coordinator whose release fails twice.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)",
+        "headRefName": "fix/12-pursuit-release-retry",
+        "headRefOid": "f0ea4a7d1d99716f06356479bceea0771cc2f7c7",
+        "isDraft": false,
+        "number": 15,
+        "state": "OPEN",
+        "statusCheckRollup": [
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-09T16:26:21Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/zeqome/proof-web/actions/runs/37959086658/job/113917014755",
+            "name": "package",
+            "startedAt": "2026-10-09T16:26:09Z",
+            "status": "COMPLETED",
+            "workflowName": "package"
+          }
+        ],
+        "title": "feat: a Pursue whose release failed offers Stop again until its runs are given back (#12)",
+        "url": "https://github.com/zeqome/proof-web/pull/15"
+      },
+      {
+        "baseRefName": "feat/0021-pursue-review-queue",
+        "baseRefOid": "864a2c29bd4f41a5344ae7be960b842a1d4aed62",
+        "body": "Closes #11. Shows AgentRun's record_failed (zeqome/proof-agents#16, PR #22) in the run card; display only. Without #22 the field is absent and the pane is unchanged.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n",
+        "headRefName": "fix/11-record-failed",
+        "headRefOid": "d5df6e98088bf13d073977d072293b5eea9e4cdf",
+        "isDraft": false,
+        "number": 14,
+        "state": "OPEN",
+        "statusCheckRollup": [
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-09T15:19:57Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/zeqome/proof-web/actions/runs/37950895710/job/113889079004",
+            "name": "package",
+            "startedAt": "2026-10-09T15:19:44Z",
+            "status": "COMPLETED",
+            "workflowName": "package"
+          }
+        ],
+        "title": "feat: the run pane shows the run's own work-log writes that failed (#11)",
+        "url": "https://github.com/zeqome/proof-web/pull/14"
+      },
+      {
+        "baseRefName": "feat/0021-pursue-review-queue",
+        "baseRefOid": "864a2c29bd4f41a5344ae7be960b842a1d4aed62",
+        "body": "Closes #9. Needs core #199 (would_meet_trust_rules, ad479f6).\n",
+        "headRefName": "fix/9-reference-review-marks",
+        "headRefOid": "90c0377ed083fe3dc11a3f825a4716ea75a0e494",
+        "isDraft": false,
+        "number": 13,
+        "state": "OPEN",
+        "statusCheckRollup": [
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-11T10:38:24Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/zeqome/proof-web/actions/runs/38132652608/job/114449993222",
+            "name": "package",
+            "startedAt": "2026-10-11T10:38:13Z",
+            "status": "COMPLETED",
+            "workflowName": "package"
+          }
+        ],
+        "title": "feat: an agent's import shows the rules it would meet and the Verifier's unchecked marks at its Reference review (#9)",
+        "url": "https://github.com/zeqome/proof-web/pull/13"
+      }
+    ]
+  }
+]

@@ -1,0 +1,111 @@
+{
+  "head": "95bce91824d424f7224cc0d4e8f1e04d78b2d6a0",
+  "base": "3dd0a7bde3ad1ea9e040c02b1bff6589a9cf378c",
+  "pr": "https://github.com/DengZhiyuan-math/proof-cli/pull/212",
+  "platform": "macOS-27.2-arm64-arm-64bit",
+  "standards": {
+    "actionableFindings": 0
+  },
+  "spec": {
+    "codeFindings": 0
+  },
+  "documentationFindings": [
+    {
+      "priority": "P3",
+      "location": "PR body Validation",
+      "problem": "The body still says Windows CI is pending and does not describe final CHAIN, timeout and durations changes.",
+      "status": "reported; PR metadata left unchanged by this audit"
+    }
+  ],
+  "nativeMacOS": {
+    "packages": [
+      "proof-cli",
+      "latex-agent"
+    ],
+    "passed": 1143,
+    "skipped": 26,
+    "failed": 0,
+    "seconds": 179.25,
+    "skipReasons": {
+      "optional proof-web/proof-agents not installed": 11,
+      "pdflatex unavailable": 11,
+      "Windows-only": 2,
+      "opt-in benchmark": 2
+    },
+    "environment": "isolated temporary venv; same direct dependency versions as existing local environment",
+    "fullFourPackageAcceptance": false
+  },
+  "regression": [
+    {
+      "variant": "fixed",
+      "cost": {
+        "20": {
+          "decision statements": 268,
+          "decision review reads": 38
+        },
+        "40": {
+          "decision statements": 508,
+          "decision review reads": 78
+        }
+      },
+      "ratios": {
+        "decision statements": 1.8955223880597014,
+        "decision review reads": 2.0526315789473686
+      },
+      "growthAssertionPasses": true
+    },
+    {
+      "variant": "decorator_removed",
+      "cost": {
+        "20": {
+          "decision statements": 1165,
+          "decision review reads": 2166
+        },
+        "40": {
+          "decision statements": 2365,
+          "decision review reads": 9126
+        }
+      },
+      "ratios": {
+        "decision statements": 2.0300429184549356,
+        "decision review reads": 4.213296398891967
+      },
+      "growthAssertionPasses": false
+    }
+  ],
+  "ci": {
+    "run": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38252674087",
+    "allFourMatrices": "SUCCESS",
+    "windows311PytestSeconds": 1986.87,
+    "windows312PytestSeconds": 2614.18,
+    "top25PhaseSeconds": {
+      "3.11": 554.18,
+      "3.12": 681.02
+    },
+    "top25PhaseFraction": {
+      "3.11": 0.2789211171339846,
+      "3.12": 0.26050998783557366
+    },
+    "conclusion": "Costs are distributed. SQLite/filesystem attribution and #213 speedup remain hypotheses until directly measured."
+  },
+  "platformPlan": {
+    "map": "https://github.com/DengZhiyuan-math/proof-cli/issues/215",
+    "decision": "https://github.com/DengZhiyuan-math/proof-cli/issues/214#issuecomment-6126656472",
+    "mainline": "macOS maturity",
+    "fog": [
+      "Windows development: low priority",
+      "Linux development: low priority"
+    ],
+    "retained": "existing cross-platform code and CI; branch protection unchanged",
+    "localFiles": [
+      "AGENTS.md",
+      "docs/plans/0021-audit-fix-order.md"
+    ],
+    "existingMapUpdated": "https://github.com/DengZhiyuan-math/proof-cli/issues/193"
+  },
+  "limits": [
+    "This audit did not merge any PR or start a real-provider/model trial.",
+    "The latest native run tests core and studio, not a pinned four-package browser/provider acceptance.",
+    "The priority update is planning; it does not claim macOS system maturity is complete."
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "date": "2026-10-09",
+  "pr": "https://github.com/zeqome/proof-agents/pull/21",
+  "head": "cb623269bbef89331f467b457f043090b2cf8d6c",
+  "core_head": "b7f394374ce73e9a23754e12506e87e97326efd9",
+  "interpreter": "/opt/anaconda3/bin/python (3.11.14)",
+  "full_agents_suite": "157 passed in 9.62s",
+  "acceptance": "4 scenarios pass: first/further split, needs-human/done",
+  "snapshot_race": "fails: T parked, C1 and C2 started, held empty",
+  "candidate_scope": "Scratch copy only; move _running before subtree; acceptance and race probes pass",
+  "evidence_scope": "Synthetic map and runs; no real provider or browser. No merge or PR comment.",
+  "candidate_coordinator_tests": "37 passed in 2.99s"
+}

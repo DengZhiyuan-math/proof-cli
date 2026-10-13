@@ -1,0 +1,20 @@
+{
+  "date": "2026-10-09",
+  "pr": "https://github.com/zeqome/proof-agents/pull/21",
+  "head": "9558fd0caf6eef2f80401c503a0a4549f4bbaa6f",
+  "base": "integ/0021",
+  "pr_state": "OPEN",
+  "core_head": "b7f394374ce73e9a23754e12506e87e97326efd9",
+  "interpreter": "/opt/anaconda3/bin/python (3.11.14)",
+  "full_agents_suite": "158 passed in 9.36s",
+  "acceptance_probe": "4 passed: first/further split, needs-human/done",
+  "snapshot_race_probe": "passed: started S only; T parked; C1 and C2 held",
+  "ci": {
+    "agents (3.11)": "SUCCESS",
+    "agents (3.12)": "SUCCESS",
+    "run_url": "https://github.com/zeqome/proof-agents/actions/runs/37854850783"
+  },
+  "local_audit": "The #15 findings reproduced in this chat are resolved at this head",
+  "coordinator_source_sha256": "08fca802d8e910352886b9933c7e47921edc6d8c53b5c05371d06f809793d30c",
+  "scope": "Synthetic runs and maps. No real provider or browser acceptance; no merge, issue closure, or PR comment."
+}

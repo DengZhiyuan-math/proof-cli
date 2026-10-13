@@ -1,0 +1,21 @@
+{
+  "status": "passed",
+  "phase": "after matrix-coefficient-decay-p snapshot v1",
+  "checks": {
+    "chhMarked": true,
+    "unitaryDualMarked": true,
+    "unusedTreeUnmarked": true,
+    "browserShowsLiteralWarning": true
+  },
+  "evidence": [
+    "real-unchecked-marks-midtrial.json",
+    "real-queue-unchecked-during-pursuit.txt"
+  ],
+  "afterRefresh": {
+    "status": "passed",
+    "chhMarked": true,
+    "unitaryDualMarked": true,
+    "unusedTreeUnmarked": true,
+    "browserLiteralWarning": true
+  }
+}

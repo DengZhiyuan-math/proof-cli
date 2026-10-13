@@ -1,0 +1,120 @@
+FFF                                                                      [100%]
+=================================== FAILURES ===================================
+_____ test_a_view_read_while_the_turn_ends_never_settles_on_an_empty_reply _____
+
+page = (ProjectStore(root=PosixPath('/private/var/folders/13/jgb8c061583ggg622pgv9l0c0000gp/T/pytest-of-zhdeng/pytest-182/tes...r/folders/13/jgb8c061583ggg622pgv9l0c0000gp/T/pytest-of-zhdeng/pytest-182/test_a_view_read_while_the_tur0/queue.json'))
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x107e86b90>
+
+    def test_a_view_read_while_the_turn_ends_never_settles_on_an_empty_reply(page, monkeypatch):
+        """The view read the records, then the live turn: a turn that ended in between read as settled (running None) with
+        its started record's empty reply, and the drawer kept that. Gated, no sleep: the ended record waits until the view
+        has read the records, the view's read waits until the turn has ended."""
+        import threading
+    
+        from proof_web import studios as hub_module
+    
+        store, client, log, queue = page
+        hub = client.app.studios
+        ready, go, finished = threading.Event(), threading.Event(), threading.Event()
+        real_record, real_read, real_finish = hub_module.proof_map.record_discussion_turn, hub_module.proof_map.discussion_turns, hub._discussion_finish
+        reply = "Claim " * 1500
+    
+        def record(store_, **kw):
+            if kw.get("phase") == "ended":
+                ready.set()
+                assert go.wait(10), "the ending was not let through"
+            return real_record(store_, **kw)
+    
+        def finish(*args, **kwargs):
+            try:
+                return real_finish(*args, **kwargs)
+            finally:
+                finished.set()
+    
+        monkeypatch.setattr(hub_module.proof_map, "record_discussion_turn", record)
+        monkeypatch.setattr(hub, "_discussion_finish", finish)
+        _queue(queue, [["say", reply]])
+        try:
+            assert client.post("/api/discussion", {"prompt": "all of it", "provider": "claude"})[0] == 200
+            assert ready.wait(10), "the backend did not finish"
+    
+            def read_then_end(store_):
+                turns = real_read(store_)
+                go.set()
+                assert finished.wait(10), "the turn did not end"
+                return turns
+    
+            monkeypatch.setattr(hub_module.proof_map, "discussion_turns", read_then_end)
+            view = client.get("/api/discussion")[1]["data"]
+            monkeypatch.setattr(hub_module.proof_map, "discussion_turns", real_read)
+            # read before the turn ended: still running, for the drawer to ask again — never settled without its reply
+>           assert view["running"] is not None or view["turns"][0]["reply"] == reply, view
+E           AssertionError: {'default': 'claude', 'name': 'map-agent', 'providers': [{'available': True, 'bin': '/private/var/folders/13/jgb8c0615...S/codex', 'default_model': None, 'efforts': ['minimal', 'low', 'medium', 'high', 'xhigh'], ...}], 'running': None, ...}
+E           assert (None is not None or '' == 'Claim Claim ... Claim Claim '
+E             
+E             - Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Claim Cl...
+E             
+E             ...Full output truncated (1 line hidden), use '-vv' to show)
+
+tests/test_discussion_web.py:321: AssertionError
+__________ test_a_refused_start_is_on_record_before_its_slot_is_free ___________
+
+page = (ProjectStore(root=PosixPath('/private/var/folders/13/jgb8c061583ggg622pgv9l0c0000gp/T/pytest-of-zhdeng/pytest-182/tes...r/folders/13/jgb8c061583ggg622pgv9l0c0000gp/T/pytest-of-zhdeng/pytest-182/test_a_refused_start_is_on_rec0/queue.json'))
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x107df0090>
+
+    def test_a_refused_start_is_on_record_before_its_slot_is_free(page, monkeypatch):
+        """A start the manager refused freed the slot, then wrote the ended record: a view in between read no turn running
+        and the started record's empty reply."""
+        import threading
+    
+        from proof_web import studios as hub_module
+    
+        store, client, log, queue = page
+        agent = client.app.studios._discussion_agent()
+        real_record = hub_module.proof_map.record_discussion_turn
+        seen = []
+    
+        def record(store_, **kw):
+            if kw.get("phase") == "ended":   # the view, as the drawer polls it while the refusal is written
+                seen.append(client.get("/api/discussion")[1]["data"])
+            return real_record(store_, **kw)
+    
+        monkeypatch.setattr(agent, "start", lambda *args, **kwargs: {"error": "the studio is closed", "code": "STUDIO_CLOSED"})
+        monkeypatch.setattr(hub_module.proof_map, "record_discussion_turn", record)
+        assert client.post("/api/discussion", {"prompt": "hello", "provider": "claude"})[0] == 409
+>       assert seen and all(view["running"] is not None for view in seen), seen
+E       AssertionError: [{'default': 'claude', 'name': 'map-agent', 'providers': [{'available': True, 'bin': '/private/var/folders/13/jgb8c061.../codex', 'default_model': None, 'efforts': ['minimal', 'low', 'medium', 'high', 'xhigh'], ...}], 'running': None, ...}]
+E       assert ([{'default': 'claude', 'name': 'map-agent', 'providers': [{'available': True, 'bin': '/private/var/folders/13/jgb8c061.../codex', 'default_model': None, 'efforts': ['minimal', 'low', 'medium', 'high', 'xhigh'], ...}], 'running': None, ...}] and False)
+E        +  where False = all(<generator object test_a_refused_start_is_on_record_before_its_slot_is_free.<locals>.<genexpr> at 0x10513bd30>)
+
+tests/test_discussion_web.py:348: AssertionError
+_______ test_a_start_that_fails_after_its_record_is_on_record_as_failed ________
+
+page = (ProjectStore(root=PosixPath('/private/var/folders/13/jgb8c061583ggg622pgv9l0c0000gp/T/pytest-of-zhdeng/pytest-182/tes...r/folders/13/jgb8c061583ggg622pgv9l0c0000gp/T/pytest-of-zhdeng/pytest-182/test_a_start_that_fails_after_0/queue.json'))
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x107e30610>
+
+    def test_a_start_that_fails_after_its_record_is_on_record_as_failed(page, monkeypatch):
+        """A start that raised after its started record was written left that turn started for good: never running, never
+        ended, its reply empty. It is now ended with the error as its reply."""
+        store, client, log, queue = page
+        agent = client.app.studios._discussion_agent()
+    
+        def broken(*args, **kwargs):
+            raise RuntimeError("library folder not found")
+    
+        monkeypatch.setattr(agent, "start", broken)
+        status, refused = client.post("/api/discussion", {"prompt": "hello", "provider": "claude"})
+        assert status == 500
+        view = client.get("/api/discussion")[1]["data"]
+        assert view["running"] is None
+        turn = view["turns"][-1]
+>       assert turn["ended"] and turn["is_error"] and "library folder not found" in turn["reply"]
+E       assert (False)
+
+tests/test_discussion_web.py:368: AssertionError
+- generated xml file: /private/tmp/proof-discussion-publish.DwF9hD/logs/baseline-regressions.xml -
+=========================== short test summary info ============================
+FAILED tests/test_discussion_web.py::test_a_view_read_while_the_turn_ends_never_settles_on_an_empty_reply
+FAILED tests/test_discussion_web.py::test_a_refused_start_is_on_record_before_its_slot_is_free
+FAILED tests/test_discussion_web.py::test_a_start_that_fails_after_its_record_is_on_record_as_failed
+3 failed in 1.06s

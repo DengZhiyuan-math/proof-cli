@@ -1,0 +1,25 @@
+{
+  "root": "/private/tmp/proof-p2-publication-kd8u79bb",
+  "repos": {
+    "agents": {
+      "path": "/private/tmp/proof-p2-publication-kd8u79bb/agents",
+      "repo": "zeqome/proof-agents",
+      "branch": "fix/19-structure-budget",
+      "base": "d9f98faf76a64bc5609ea134183dc8096041257f",
+      "head": "ead54fe8d3480f1d4ba45a5b7b1bfb97b0f796ee"
+    },
+    "web": {
+      "path": "/private/tmp/proof-p2-publication-kd8u79bb/web",
+      "repo": "zeqome/proof-web",
+      "branch": "fix/18-pursue-limits",
+      "base": "c0232effb7f130368a4053d5491fabdfc7cd6c73",
+      "head": "355837c333fd8189c105aa241d4e9fa8ffe50e6f"
+    }
+  },
+  "test_sources": {
+    "core": "/private/tmp/proof-web18-acceptance-0noofz6p/core",
+    "core_head": "09e64a365153650cade0579afca52a56028b0f07",
+    "agents_combined": "/private/tmp/proof-p2-publication-kd8u79bb/agents-combined",
+    "agents_combined_source": "d9f98fa + saved #23/#26 resolution and adapted tests + agents patches 0001/0002"
+  }
+}

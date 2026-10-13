@@ -1,0 +1,121 @@
+diff --git a/src/proof_cli/cli.py b/src/proof_cli/cli.py
+index 787dcd5..9257782 100644
+--- a/src/proof_cli/cli.py
++++ b/src/proof_cli/cli.py
+@@ -162,6 +162,7 @@ from .proof_map import (
+     fixed_by,
+     restate_node,
+     get_integrity_state,
++    get_stale_cause,
+     get_reference_review_state,
+     get_workflow_state,
+     evidence_binding,
+@@ -624,6 +625,7 @@ def node_show(
+         payload["workflow_state"] = workflow_state
+         payload["acceptance_state"] = acceptance_state
+         payload["integrity_state"] = integrity_state
++        payload["stale_cause"] = get_stale_cause(store, node_id)  # why it may no longer hold (#197)
+         # the Trust rules an imported result meets, and when it first met each (ADR-0014)
+         payload["trust_rule"] = trust_rule
+         # an agent's import meets no rule; the rules it would meet, for its own Reference review (ADR-0022)
+diff --git a/src/proof_cli/proof_map.py b/src/proof_cli/proof_map.py
+index 0731887..f74a0e1 100644
+--- a/src/proof_cli/proof_map.py
++++ b/src/proof_cli/proof_map.py
+@@ -4037,6 +4037,35 @@ def get_integrity_state(store: ProjectStore, node_id: str) -> str:
+     return "current"
+ 
+ 
++@read_scoped
++def get_stale_cause(store: ProjectStore, node_id: str) -> dict | None:
++    """Why the node reads `potentially-stale`, in `get_integrity_state`'s order, or None when it doesn't (T8, #197):
++    `{"cause": "upstream-challenged" | "upstream-stale"}` for an Accepted node; `{"cause": "support-withdrawn",
++    "nodes": [...]}`, the support the researcher sent back; or the newest change to the text it is read against,
++    `{"cause": "restated", "node_id", "by", "reason", "at"}` or `{"cause": "definition-edited", "definition_id", …}`."""
++    if get_integrity_state(store, node_id) != "potentially-stale":
++        return None
++    node = require_node(store, node_id)
++    if get_acceptance_state(store, node_id) == "accepted":
++        upstream = _upstream_cause(store, node_id)
++        if upstream is not None:
++            return {"cause": f"upstream-{upstream}"}
++    if _awaiting_decision(store, node) is not None and _support_withdrawn(store, node_id):
++        return {"cause": "support-withdrawn", "nodes": sorted(d for d in _unsettled_support(store, node_id) if _sent_back(store, d))}
++    nodes = _rests_on(store, node_id)
++    named = {definition_id for current_id in nodes for definition_id in (getattr(get_node(store, current_id), "definitions", None) or [])}
++    newest = None
++    for event in list_events(store):
++        if (event.kind == RESTATED_EVENT and event.entity_id in nodes) or (event.kind == DEFINITION_EDITED_EVENT and event.entity_id in named):
++            if newest is None or event.created_at >= newest.created_at:
++                newest = event
++    if newest is None:  # pragma: no cover — potentially-stale under a restatement always has one
++        return None
++    payload = newest.payload or {}
++    what = {"cause": "restated", "node_id": newest.entity_id} if newest.kind == RESTATED_EVENT else {"cause": "definition-edited", "definition_id": newest.entity_id}
++    return {**what, "by": payload.get("by"), "reason": payload.get("reason"), "at": newest.created_at.isoformat()}
++
++
+ def _snapshot_restated_under(store: ProjectStore, node_id: str) -> bool:
+     """Whether the node's current snapshot, not yet relied on by any decision, was frozen before the text it proves —
+     its own or what it rests on — was restated (ADR-0021 point 6). A new snapshot answers it."""
+diff --git a/tests/test_unfixed_text.py b/tests/test_unfixed_text.py
+index 059cabb..74a4baa 100644
+--- a/tests/test_unfixed_text.py
++++ b/tests/test_unfixed_text.py
+@@ -282,3 +282,56 @@ def test_an_agent_may_not_edit_its_own_definition_once_the_researcher_s_text_nam
+     assert caught.value.details["nodes"] == ["MAIN"]
+     # the researcher may, while it is unfixed
+     assert D.edit_definition(store, "height", text="max", edited_by="human", reason="the sup is infinite").text == "max"
++
++
++def test_a_snapshot_stale_under_a_definition_edit_says_which_definition_who_and_why(tmp_path: Path):
++    """T8 (#197): the map's Warnings and `node show` say why a node reads potentially-stale, not only that it does."""
++    from proof_cli.proof_map import get_stale_cause
++
++    store = ensure_project(tmp_path)
++    D.add_definition(store, "D", term="Positive parameter", text="$n \\ge 1$", created_by="reader-1")
++    create_node(store, node_id="C", kind="claim", statement="C holds for n.", definitions=["D"], created_by="reader-1")
++    create_node(store, node_id="L", kind="lemma", statement="L follows from C.", dependencies=["C"], created_by="reader-1")
++    submit_proof(store, "C", claimant_id="prover-1", scoping_rationale="scoped", content="proof of C")
++    submit_proof(store, "L", claimant_id="prover-1", scoping_rationale="scoped", content="proof of L")
++    assert get_stale_cause(store, "C") is None and get_stale_cause(store, "L") is None
++
++    D.edit_definition(store, "D", text="$n \\ge 2$", edited_by="reader-1", reason="n = 1 is degenerate")
++
++    for node_id in ("C", "L"):  # the node naming it, and the node resting on that one
++        assert get_integrity_state(store, node_id) == "potentially-stale"
++        cause = get_stale_cause(store, node_id)
++        assert {key: cause[key] for key in ("cause", "definition_id", "by", "reason")} == {
++            "cause": "definition-edited", "definition_id": "D", "by": "reader-1", "reason": "n = 1 is degenerate"}
++    result = runner.invoke(app, ["node", "show", "L", "--root", str(tmp_path), "--json"])
++    assert json.loads(result.output)["data"]["stale_cause"]["definition_id"] == "D"
++
++
++def test_a_snapshot_stale_under_a_restatement_upstream_names_the_node_restated(tmp_path: Path):
++    from proof_cli.proof_map import get_stale_cause
++
++    store = ensure_project(tmp_path)
++    create_node(store, node_id="C", kind="claim", statement="c", created_by="reader-1")
++    create_node(store, node_id="L", kind="lemma", statement="l", dependencies=["C"], created_by="reader-1")
++    submit_proof(store, "L", claimant_id="prover-1", scoping_rationale="scoped", content="proof")
++    restate_node(store, "C", statement="c'", reason="c was too strong", by="reader-1")
++
++    cause = get_stale_cause(store, "L")
++    assert {key: cause[key] for key in ("cause", "node_id", "by", "reason")} == {
++        "cause": "restated", "node_id": "C", "by": "reader-1", "reason": "c was too strong"}
++    submit_proof(store, "L", claimant_id="prover-1", scoping_rationale="scoped", content="proof, reread")
++    assert get_stale_cause(store, "L") is None
++
++
++def test_a_snapshot_resting_on_support_sent_back_names_that_support(tmp_path: Path):
++    from proof_cli.proof_map import get_stale_cause
++
++    store = ensure_project(tmp_path)
++    create_node(store, node_id="C", kind="claim", statement="c", created_by="reader-1")
++    create_node(store, node_id="L", kind="lemma", statement="l", dependencies=["C"], created_by="reader-1")
++    submit_proof(store, "C", claimant_id="prover-1", scoping_rationale="scoped", content="proof of C")
++    submit_proof(store, "L", claimant_id="prover-1", scoping_rationale="scoped", content="proof of L")
++    researcher(store).decide_acceptance("C", "reject")
++
++    assert get_integrity_state(store, "L") == "potentially-stale"
++    assert get_stale_cause(store, "L") == {"cause": "support-withdrawn", "nodes": ["C"]}

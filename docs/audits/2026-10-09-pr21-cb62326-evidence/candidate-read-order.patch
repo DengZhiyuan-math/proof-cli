@@ -1,0 +1,17 @@
+--- a/src/proof_agents/coordinator.py
++++ b/src/proof_agents/coordinator.py
+@@ -265,13 +265,13 @@
+     def _step(self) -> tuple[str, str] | None:
+         """One look at the subtree: the redirects an Acceptance calls for, the turns spent, the nodes to park, the runs to
+         start; or why to end."""
++        running = self._running()   # completed run commands precede the map read
+         subtree = self.hooks.subtree()
+         by_id = {node["id"]: node for node in subtree}
+         root = by_id.get(self.root)
+         if root is None:
+             return ("stuck", f"{self.root} is no longer on the map")
+         self._redirect_dependents(subtree, by_id)
+-        running = self._running()   # the runs that ended since are noted first, their turns counted
+         turns = self._turns(running)
+         node_turns, _ = self.hooks.budget()
+         with self._lock:

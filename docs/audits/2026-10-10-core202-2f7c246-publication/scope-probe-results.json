@@ -1,0 +1,17 @@
+{
+  "project": "/private/tmp/proof-core202-probe-larofudk",
+  "cases": [
+    {
+      "case": "origin and bibliographic source",
+      "result": "editable; provenance unchanged; actor and field diff recorded"
+    },
+    {
+      "case": "agent edits researcher's citation",
+      "result": "DOI add enables rule; DOI removal removes rule; editor is reader-probe"
+    },
+    {
+      "case": "event write fails",
+      "result": "bibliographic update rolled back"
+    }
+  ]
+}

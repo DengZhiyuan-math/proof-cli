@@ -1,0 +1,264 @@
+diff --git a/src/proof_web/studios.py b/src/proof_web/studios.py
+index bc539f4..5b932bc 100644
+--- a/src/proof_web/studios.py
++++ b/src/proof_web/studios.py
+@@ -15,6 +15,7 @@ from __future__ import annotations
+ 
+ import dataclasses
+ import hashlib
++import json
+ import threading
+ import time
+ import uuid
+@@ -711,7 +712,35 @@ class StudioHub:
+         if done.get("is_error") or done.get("exit") not in (None, 0):
+             why = failure_reason(done, job.events) if failure_reason else str(done.get("stderr") or done.get("subtype") or "").strip()
+             return {"error": why or "the Reader's turn failed", "code": "READER_FAILED"}
+-        return {}
++        return self._check_reader_target(required=True)
++
++    def _check_reader_target(self, *, required: bool = False) -> dict:
++        """The Reader's declared main result must be the one Theorem project Pursue schedules.
++
++        A researcher's existing map needs no Reader report. Once a Reader has
++        left its scratch folder, a missing report is a refusal, also after restart.
++        """
++        path = self.store.root / "scratch" / "reader" / "main-target.json"
++        try:
++            target = json.loads(path.read_text(encoding="utf-8"))
++        except FileNotFoundError:
++            if not required and not path.parent.exists():
++                return {}
++            return {"error": "the Reader did not record its main target in scratch/reader/main-target.json; no node run was started",
++                    "code": "READER_TARGET_INVALID"}
++        except (OSError, UnicodeError, ValueError):
++            return {"error": "the Reader's scratch/reader/main-target.json could not be read as JSON; no node run was started",
++                    "code": "READER_TARGET_INVALID"}
++        if (not isinstance(target, dict) or not isinstance(target.get("node_id"), str) or not target["node_id"].strip()
++                or not isinstance(target.get("source"), str) or not target["source"].strip()):
++            return {"error": "the Reader's main target needs a node_id and a source location; no node run was started",
++                    "code": "READER_TARGET_INVALID"}
++        theorems = self.pursuit().hooks.theorems()
++        if theorems != [target["node_id"]]:
++            return {"error": f"the Reader's main target {target['node_id']} is not the sole Theorem scheduled by Pursue "
++                             f"({', '.join(theorems) or 'none'}); no node run was started",
++                    "code": "READER_TARGET_MISMATCH"}
++        return {"main_target": target["node_id"]}
+ 
+     def _reading(self, job) -> None:
+         """The Reader's turn exists: Stop now stops it; a Stop that came first stops it at once."""
+@@ -758,6 +787,10 @@ class StudioHub:
+             limits, refused = _limits(body)
+             if refused:
+                 return refused
++            if pursuit.hooks.theorems():  # an existing Reader map is checked again, including after restart
++                checked = self._check_reader_target()
++                if "error" in checked:
++                    return int(HTTPStatus.CONFLICT), checked
+             if not provider:
+                 backend = self._reader_agent().backend(None)
+                 provider = backend.id if backend is not None else ""
+diff --git a/tests/test_reader_main_target.py b/tests/test_reader_main_target.py
+new file mode 100644
+index 0000000..baccb1f
+--- /dev/null
++++ b/tests/test_reader_main_target.py
+@@ -0,0 +1,198 @@
++"""Offline #197 regression: a draft's main result must be the Pursue root.
++
++Only the provider boundary is replaced. Nodes, history and project Pursue use
++the production APIs. Each test owns a new project, never the trial's database.
++"""
++import json
++import threading
++import time
++from types import SimpleNamespace
++
++import pytest
++from _review_client import DirectClient
++from proof_cli.pursuit import project_progress
++
++from proof_cli.proof_map import create_node
++from proof_cli.storage import ensure_project
++
++
++class CompletedReader:
++    def __init__(self, store, write_map):
++        self.store, self.write_map = store, write_map
++        self.job = SimpleNamespace(id=1, cond=threading.Condition(), done=True,
++                                   events=[{"t": "done", "exit": 0}])
++        self.jobs = {1: self.job}
++        self.starts = 0
++
++    def start(self, *args, begin=None, **kwargs):
++        self.starts += 1
++        self.write_map(self.store)
++        if begin:
++            begin(self.job)
++        return {"job": 1}
++
++    def shutdown(self):
++        pass
++
++
++class CompletedCoordinator:
++    def __init__(self, node_id, starts):
++        self.node_id, self.starts = node_id, starts
++
++    def open_nodes(self):
++        return []
++
++    def start(self, provider, **kwargs):
++        self.starts.append(self.node_id)
++        return {}
++
++    def active(self):
++        return False
++
++    def view(self):
++        return {"status": "done", "reason": "offline stand-in", "turns": 0}
++
++
++def write_target(store, node_id="lem-main"):
++    path = store.root / "scratch/reader/main-target.json"
++    path.parent.mkdir(parents=True, exist_ok=True)
++    path.write_text(json.dumps({"node_id": node_id, "source": "library/main.tex:442-636"}))
++
++
++def wrong_map(store):
++    create_node(store, node_id="thm-matrix-coeff-p", kind="theorem", statement="Matrix coefficient bound", created_by="reader")
++    create_node(store, node_id="lem-main", kind="lemma", statement="Effective equidistribution",
++                display_label="Main theorem", dependencies=["thm-matrix-coeff-p"], created_by="reader")
++    write_target(store)
++
++
++def wait_for_end(client):
++    deadline = time.monotonic() + 5
++    while client.get("/api/pursue")[1]["data"]["status"] in ("idle", "reading", "pursuing"):
++        assert time.monotonic() < deadline, "offline Pursue did not end"
++        time.sleep(0.01)
++    return client.get("/api/pursue")[1]["data"]
++
++
++def test_reader_main_result_as_lemma_starts_no_coordinator(tmp_path):
++    store = ensure_project(tmp_path / "project")
++    client = DirectClient(store)
++    reader = CompletedReader(store, wrong_map)
++    starts = []
++    client.app.studios._reader = reader
++    client.app.studios.coordinator = lambda node_id: CompletedCoordinator(node_id, starts)
++    try:
++        assert client.post("/api/pursue/start", {"provider": "offline", "limits": {"turns": 60, "minutes": 120}})[0] == 200
++        view = wait_for_end(client)
++        assert view["status"] == "stuck"
++        assert "lem-main" in view["reason"] and "thm-matrix-coeff-p" in view["reason"]
++        assert starts == []
++        events = project_progress(store)[-1]["events"]
++        assert [(e["phase"], e["outcome"]) for e in events] == [("start", ""), ("reader_end", "failed"), ("end", "stuck")]
++    finally:
++        client.app.close()
++
++
++def test_restart_refuses_wrong_reader_target_before_starting_any_provider(tmp_path):
++    store = ensure_project(tmp_path / "project")
++    wrong_map(store)
++    client = DirectClient(store)  # fresh hub reads the persisted target report
++    reader = CompletedReader(store, lambda store: None)
++    starts = []
++    client.app.studios._reader = reader
++    client.app.studios.coordinator = lambda node_id: CompletedCoordinator(node_id, starts)
++    before = client.get("/api/map")[1]["data"]["nodes"]
++    try:
++        status, answer = client.post("/api/pursue/start", {"provider": "offline", "limits": {"turns": 60, "minutes": 120}})
++        assert status == 409
++        assert answer["error"]["code"] == "READER_TARGET_MISMATCH"
++        assert reader.starts == 0 and starts == []
++        assert project_progress(store) == []
++        assert client.get("/api/map")[1]["data"]["nodes"] == before
++    finally:
++        client.app.close()
++
++
++def correct_map(store):
++    from proof_cli.fog import add_fog
++
++    create_node(store, node_id="lem-matrix-coeff-p", kind="lemma", statement="Matrix coefficient bound",
++                display_label="Theorem matrixcoefficient", created_by="reader")
++    create_node(store, node_id="lem-avg", kind="lemma", statement="Average bound",
++                dependencies=["lem-matrix-coeff-p"], created_by="reader")
++    create_node(store, node_id="thm-main", kind="theorem", statement="Effective equidistribution",
++                dependencies=["lem-avg"], created_by="reader")
++    write_target(store, "thm-main")
++    add_fog(store, "Starting-point conditions still need review", near=["thm-main"], created_by="reader")
++
++
++def test_main_target_is_scheduled_despite_supporting_theorem_labels_and_fog(tmp_path):
++    store = ensure_project(tmp_path / "project")
++    client = DirectClient(store)
++    client.app.studios._reader = CompletedReader(store, correct_map)
++    starts = []
++    client.app.studios.coordinator = lambda node_id: CompletedCoordinator(node_id, starts)
++    try:
++        client.post("/api/pursue/start", {"provider": "offline", "limits": {"turns": 60, "minutes": 120}})
++        assert wait_for_end(client)["status"] == "done"
++        assert starts == ["thm-main"]
++        events = project_progress(store)[-1]["events"]
++        assert [(e["phase"], e["outcome"], e["theorem"]) for e in events] == [
++            ("start", "", None), ("reader_end", "ok", None), ("theorem", "", "thm-main"), ("end", "done", None),
++        ]
++    finally:
++        client.app.close()
++
++
++@pytest.mark.parametrize("report", [None, "{", "[]", '{}', '{"node_id": "thm-main"}',
++                                  '{"node_id": 7, "source": "draft:442"}',
++                                  '{"node_id": "thm-main", "source": " "}'])
++def test_missing_or_invalid_reader_report_cannot_start_nodes(tmp_path, report):
++    store = ensure_project(tmp_path / "project")
++
++    def write_map(store):
++        correct_map(store)
++        path = store.root / "scratch/reader/main-target.json"
++        if report is None:
++            path.unlink()
++        else:
++            path.write_text(report)
++
++    client = DirectClient(store)
++    client.app.studios._reader = CompletedReader(store, write_map)
++    starts = []
++    client.app.studios.coordinator = lambda node_id: CompletedCoordinator(node_id, starts)
++    try:
++        client.post("/api/pursue/start", {"provider": "offline", "limits": {"turns": 60, "minutes": 120}})
++        assert wait_for_end(client)["status"] == "stuck"
++        assert starts == []
++        assert project_progress(store)[-1]["events"][1]["outcome"] == "failed"
++        # A new hub must refuse the same persisted invalid Reader report, with no new Reader turn.
++        fresh = DirectClient(store)
++        try:
++            assert fresh.post("/api/pursue/start", {"provider": "offline"})[1]["error"]["code"] == "READER_TARGET_INVALID"
++            assert len(project_progress(store)) == 1
++        finally:
++            fresh.app.close()
++    finally:
++        client.app.close()
++
++
++def test_target_id_that_names_no_node_cannot_start_the_auxiliary_theorem(tmp_path):
++    store = ensure_project(tmp_path / "project")
++
++    def write_map(store):
++        wrong_map(store)
++        write_target(store, "missing-main")
++
++    client = DirectClient(store)
++    client.app.studios._reader = CompletedReader(store, write_map)
++    starts = []
++    client.app.studios.coordinator = lambda node_id: CompletedCoordinator(node_id, starts)
++    try:
++        client.post("/api/pursue/start", {"provider": "offline", "limits": {"turns": 60, "minutes": 120}})
++        view = wait_for_end(client)
++        assert view["status"] == "stuck" and "missing-main" in view["reason"]
++        assert starts == []
++    finally:
++        client.app.close()

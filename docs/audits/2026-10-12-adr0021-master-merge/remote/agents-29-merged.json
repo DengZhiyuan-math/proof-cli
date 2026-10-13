@@ -1,0 +1,11 @@
+{
+  "baseRefName": "master",
+  "headRefOid": "8599fcc6f1695b47ccb7a01acee49c3f319ef28e",
+  "mergeCommit": {
+    "oid": "7d3f312269b9868415e06302b97637db1a490220"
+  },
+  "mergedAt": "2026-10-12T16:41:08Z",
+  "number": 29,
+  "state": "MERGED",
+  "url": "https://github.com/zeqome/proof-agents/pull/29"
+}

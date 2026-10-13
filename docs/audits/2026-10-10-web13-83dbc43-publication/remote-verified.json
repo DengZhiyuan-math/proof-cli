@@ -1,0 +1,33 @@
+{
+  "verified_at_utc": "2026-10-10T09:34:04.413574+00:00",
+  "authorized_by": "User confirmation in this chat",
+  "before": "e4a123abf8f557521fb1eb2a199a97d568c85648",
+  "after": "83dbc43f33e0dfdb5c9fb27bca0b39422283aac4",
+  "push_mode": "ordinary fast-forward; no force",
+  "remote_branch": "83dbc43f33e0dfdb5c9fb27bca0b39422283aac4\trefs/heads/fix/9-reference-review-marks",
+  "pull_request": {
+    "baseRefName": "feat/0021-pursue-review-queue",
+    "headRefName": "fix/9-reference-review-marks",
+    "headRefOid": "83dbc43f33e0dfdb5c9fb27bca0b39422283aac4",
+    "number": 13,
+    "state": "OPEN",
+    "statusCheckRollup": [
+      {
+        "__typename": "CheckRun",
+        "completedAt": "2026-10-10T09:33:39Z",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/zeqome/proof-web/actions/runs/38041807943/job/114183375284",
+        "name": "package",
+        "startedAt": "2026-10-10T09:33:29Z",
+        "status": "COMPLETED",
+        "workflowName": "package"
+      }
+    ],
+    "url": "https://github.com/zeqome/proof-web/pull/13"
+  },
+  "test_evidence": "../2026-10-10-web13-83dbc43-review/README.md",
+  "tests_rerun_during_publication": false,
+  "worktree_clean": true,
+  "comments_posted": false,
+  "merged": false
+}

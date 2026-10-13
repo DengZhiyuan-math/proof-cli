@@ -1,0 +1,703 @@
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	﻿2026-10-10T14:03:06.7609328Z Current runner version: '2.337.0'
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:06.7637879Z ##[group]Runner Image Provisioner
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:06.7639029Z Hosted Compute Agent
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:06.7639794Z Version: 20261002.596
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:06.7640470Z Commit: c3d12f3313a95f25162a1503be624f3b0617f8c0
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:06.7641299Z Build Date: 2026-10-02T22:28:27Z
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:06.7642077Z Worker ID: {6c59c0a1-4a31-4ecb-9334-4c9616e55ef3}
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:06.7642823Z Region: centralus
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:06.7643478Z Cloud: Azure
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:06.7644054Z ##[endgroup]
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:06.7645841Z ##[group]Operating System
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:06.7646510Z Ubuntu
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:06.7647048Z 24.04.5
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:06.7647653Z LTS
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:06.7648471Z ##[endgroup]
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:06.7649087Z ##[group]Runner Image
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:06.7649811Z Image: ubuntu-24.04
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:06.7650531Z Version: 20261004.327.1
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:06.7651882Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20261004.327/images/ubuntu/Ubuntu2404-Readme.md
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:06.7653564Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20261004.327
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:06.7654589Z ##[endgroup]
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:06.7655932Z ##[group]GITHUB_TOKEN Permissions
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:06.7658748Z Contents: read
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:06.7659859Z Metadata: read
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:06.7660547Z Packages: read
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:06.7661152Z ##[endgroup]
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:06.7663596Z Secret source: Actions
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:06.7664610Z Cache mode: write
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:06.7665579Z Prepare workflow directory
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:06.8073975Z Prepare all required actions
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:06.8131322Z Getting action download info
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.0177859Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.1024494Z Download action repository 'actions/setup-python@v5' (SHA:a26af69be951a213d495a4c3e4e4022e16d87065)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.2786777Z Complete job name: core-and-studio (ubuntu-24.04, 3.12)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.3327512Z ##[group]Run actions/checkout@v4
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.3328436Z with:
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.3328957Z   repository: DengZhiyuan-math/proof-cli
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.3332202Z   token: ***
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.3332635Z   ssh-strict: true
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.3333058Z   ssh-user: git
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.3333480Z   persist-credentials: true
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.3333944Z   clean: true
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.3334441Z   sparse-checkout-cone-mode: true
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.3334910Z   fetch-depth: 1
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.3335431Z   fetch-tags: false
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.3335864Z   show-progress: true
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.3336295Z   lfs: false
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.3336718Z   submodules: false
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.3337152Z   set-safe-directory: true
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.3337663Z   allow-unsafe-pr-checkout: false
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.3338583Z env:
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.3338975Z   PYTHONUTF8: 1
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.3339408Z ##[endgroup]
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.4190774Z Syncing repository: DengZhiyuan-math/proof-cli
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.4193455Z ##[group]Getting Git version info
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.4194382Z Working directory is '/home/runner/work/proof-cli/proof-cli'
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.4195734Z [command]/usr/bin/git version
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.4233421Z git version 2.55.0
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.4247243Z ##[endgroup]
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.4256025Z Temporarily overriding HOME='/home/runner/work/_temp/e81be0b4-da37-4bd7-96e1-59f718987e7d' before making global git config changes
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.4258428Z Adding repository directory to the temporary git global config as a safe directory
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.4260122Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/proof-cli/proof-cli
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.4316392Z Deleting the contents of '/home/runner/work/proof-cli/proof-cli'
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.4321709Z ##[group]Initializing the repository
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.4324953Z [command]/usr/bin/git init /home/runner/work/proof-cli/proof-cli
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.4419925Z hint: Using 'master' as the name for the initial branch. This default branch name
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.4422689Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.4425124Z hint: to use in all of your new repositories, which will suppress this warning,
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.4427236Z hint: call:
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.4428391Z hint:
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.4429449Z hint: 	git config --global init.defaultBranch <name>
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.4430376Z hint:
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.4431393Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.4432846Z hint: 'development'. The just-created branch can be renamed via this command:
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.4434293Z hint:
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.4435542Z hint: 	git branch -m <name>
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.4436387Z hint:
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.4437361Z hint: Disable this message with "git config set advice.defaultBranchName false"
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.4439251Z Initialized empty Git repository in /home/runner/work/proof-cli/proof-cli/.git/
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.4442146Z [command]/usr/bin/git remote add origin https://github.com/DengZhiyuan-math/proof-cli
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.4514961Z ##[endgroup]
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.4516082Z ##[group]Disabling automatic garbage collection
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.4517108Z [command]/usr/bin/git config --local gc.auto 0
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.4544237Z ##[endgroup]
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.4545194Z ##[group]Setting up auth
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.4548922Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.4583576Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.4882193Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.4910993Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.5063224Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.5088428Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.5248586Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.5279153Z ##[endgroup]
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.5279915Z ##[group]Fetching the repository
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:07.5286747Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +cfc6c43cdaaa8e2f318dc1738b6a7ade9dd3ce4e:refs/remotes/pull/208/merge
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.3422387Z From https://github.com/DengZhiyuan-math/proof-cli
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.3424569Z  * [new ref]         cfc6c43cdaaa8e2f318dc1738b6a7ade9dd3ce4e -> pull/208/merge
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.3429030Z ##[endgroup]
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.3430718Z ##[group]Determining the checkout info
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.3432430Z ##[endgroup]
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.3434867Z [command]/usr/bin/git sparse-checkout disable
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.3486141Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.3513115Z ##[group]Checking out the ref
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.3515434Z [command]/usr/bin/git checkout --progress --force refs/remotes/pull/208/merge
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.3864201Z Note: switching to 'refs/remotes/pull/208/merge'.
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.3865290Z 
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.3865979Z You are in 'detached HEAD' state. You can look around, make experimental
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.3867892Z changes and commit them, and you can discard any commits you make in this
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.3869821Z state without impacting any branches by switching back to a branch.
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.3870861Z 
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.3871752Z If you want to create a new branch to retain commits you create, you may
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.3873310Z do so (now or later) by using -c with the switch command. Example:
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.3874526Z 
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.3875005Z   git switch -c <new-branch-name>
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.3875741Z 
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.3876180Z Or undo this operation with:
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.3876907Z 
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.3877438Z   git switch -
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.3878184Z 
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.3879152Z Turn off this advice by setting config variable advice.detachedHead to false
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.3880669Z 
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.3882026Z HEAD is now at cfc6c43 Merge d17b48426540d6ab5fce0f3009450ff8a4a53f75 into b7f394374ce73e9a23754e12506e87e97326efd9
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.3886589Z ##[endgroup]
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.3905490Z [command]/usr/bin/git log -1 --format=%H
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.3925517Z cfc6c43cdaaa8e2f318dc1738b6a7ade9dd3ce4e
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.4262166Z ##[group]Run actions/setup-python@v5
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.4263272Z with:
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.4264083Z   python-version: 3.12
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.4265031Z   check-latest: false
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.4273155Z   token: ***
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.4274048Z   update-environment: true
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.4275117Z   allow-prereleases: false
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.4276108Z   freethreaded: false
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.4277047Z env:
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.4277827Z   PYTHONUTF8: 1
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.4279239Z ##[endgroup]
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.5415503Z ##[group]Installed versions
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.5507299Z (node:2081) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.5510406Z (Use `node --trace-deprecation ...` to show where the warning was created)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.5512291Z Successfully set up CPython (3.12.15)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.5514476Z ##[endgroup]
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.5733013Z ##[group]Run python -m pip install -U pip setuptools wheel
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.5734980Z ^[[36;1mpython -m pip install -U pip setuptools wheel^[[0m
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.6106012Z shell: /usr/bin/bash -e {0}
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.6106968Z env:
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.6107743Z   PYTHONUTF8: 1
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.6109075Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.15/x64
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.6110566Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib/pkgconfig
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.6111996Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.6113329Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.6114592Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.6115937Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:08.6117072Z ##[endgroup]
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:11.0767435Z Requirement already satisfied: pip in /opt/hostedtoolcache/Python/3.12.15/x64/lib/python3.12/site-packages (26.2.1)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:11.3150224Z Collecting setuptools
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:11.3855381Z   Downloading setuptools-84.0.0-py3-none-any.whl.metadata (6.6 kB)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:11.4291481Z Collecting wheel
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:11.4393924Z   Downloading wheel-0.48.0-py3-none-any.whl.metadata (2.3 kB)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:11.4697593Z Collecting packaging>=24.0 (from wheel)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:11.4799656Z   Downloading packaging-26.3-py3-none-any.whl.metadata (3.5 kB)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:11.4938592Z Downloading setuptools-84.0.0-py3-none-any.whl (818 kB)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:11.5557039Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 818.2/818.2 kB 19.4 MB/s  0:00:00
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:11.5659752Z Downloading wheel-0.48.0-py3-none-any.whl (33 kB)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:11.5785044Z Downloading packaging-26.3-py3-none-any.whl (129 kB)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:11.7260672Z Installing collected packages: setuptools, packaging, wheel
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:12.1387198Z 
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:12.1396652Z Successfully installed packaging-26.3 setuptools-84.0.0 wheel-0.48.0
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:12.1991994Z ##[group]Run python -m pip install -e ".[dev]" -e packages/latex-agent
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:12.1992843Z ^[[36;1mpython -m pip install -e ".[dev]" -e packages/latex-agent^[[0m
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:12.2038259Z shell: /usr/bin/bash -e {0}
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:12.2038824Z env:
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:12.2039067Z   PYTHONUTF8: 1
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:12.2039362Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.15/x64
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:12.2039854Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib/pkgconfig
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:12.2040341Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:12.2040758Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:12.2041123Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:12.2041484Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:12.2041839Z ##[endgroup]
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:12.4696209Z Obtaining file:///home/runner/work/proof-cli/proof-cli
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:12.4709185Z   Installing build dependencies: started
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:12.9236355Z   Installing build dependencies: finished with status 'done'
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:12.9242142Z   Checking if build backend supports build_editable: started
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:13.2145494Z   Checking if build backend supports build_editable: finished with status 'done'
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:13.2152095Z   Getting requirements to build editable: started
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:13.4848192Z   Getting requirements to build editable: finished with status 'done'
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:13.4855111Z   Preparing editable metadata (pyproject.toml): started
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:13.6353155Z   Preparing editable metadata (pyproject.toml): finished with status 'done'
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:13.6375615Z Obtaining file:///home/runner/work/proof-cli/proof-cli/packages/latex-agent
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:13.6387511Z   Installing build dependencies: started
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:14.0779134Z   Installing build dependencies: finished with status 'done'
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:14.0783948Z   Checking if build backend supports build_editable: started
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:14.2994672Z   Checking if build backend supports build_editable: finished with status 'done'
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:14.3000914Z   Getting requirements to build editable: started
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:14.5485534Z   Getting requirements to build editable: finished with status 'done'
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:14.5493943Z   Preparing editable metadata (pyproject.toml): started
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:14.6992069Z   Preparing editable metadata (pyproject.toml): finished with status 'done'
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:14.8941122Z Collecting pydantic>=2.7 (from mathematical-proof-cli==0.1.0)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:14.9702952Z   Downloading pydantic-2.14.0-py3-none-any.whl.metadata (131 kB)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:15.0316506Z Collecting typer<0.26,>=0.12 (from mathematical-proof-cli==0.1.0)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:15.0470869Z   Downloading typer-0.25.1-py3-none-any.whl.metadata (15 kB)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:15.0894982Z Collecting click>=8.0 (from mathematical-proof-cli==0.1.0)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:15.1048756Z   Downloading click-8.5.0-py3-none-any.whl.metadata (2.6 kB)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:15.1376527Z Collecting rich>=13.7 (from mathematical-proof-cli==0.1.0)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:15.1532138Z   Downloading rich-15.0.0-py3-none-any.whl.metadata (18 kB)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:15.1885542Z Collecting pytest>=8.0 (from mathematical-proof-cli==0.1.0)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:15.2042085Z   Downloading pytest-9.1.1-py3-none-any.whl.metadata (7.6 kB)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:15.4743734Z Collecting ruff>=0.4 (from mathematical-proof-cli==0.1.0)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:15.4900737Z   Downloading ruff-0.17.0-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (20 kB)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:15.5154262Z Collecting shellingham>=1.3.0 (from typer<0.26,>=0.12->mathematical-proof-cli==0.1.0)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:15.5306632Z   Downloading shellingham-1.5.4-py2.py3-none-any.whl.metadata (3.5 kB)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:15.5543029Z Collecting annotated-doc>=0.0.2 (from typer<0.26,>=0.12->mathematical-proof-cli==0.1.0)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:15.5695979Z   Downloading annotated_doc-0.0.5-py3-none-any.whl.metadata (6.5 kB)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:15.5918706Z Collecting annotated-types>=0.6.0 (from pydantic>=2.7->mathematical-proof-cli==0.1.0)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:15.6069395Z   Downloading annotated_types-0.8.0-py3-none-any.whl.metadata (15 kB)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:16.0877066Z Collecting pydantic-core==2.50.0 (from pydantic>=2.7->mathematical-proof-cli==0.1.0)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:16.1031348Z   Downloading pydantic_core-2.50.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (6.5 kB)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:16.1278553Z Collecting typing-extensions>=4.16.0 (from pydantic>=2.7->mathematical-proof-cli==0.1.0)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:16.1429498Z   Downloading typing_extensions-4.16.0-py3-none-any.whl.metadata (3.3 kB)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:16.1648332Z Collecting typing-inspection>=0.4.4 (from pydantic>=2.7->mathematical-proof-cli==0.1.0)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:16.1801735Z   Downloading typing_inspection-0.4.4-py3-none-any.whl.metadata (2.6 kB)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:16.2088471Z Collecting iniconfig>=1.0.1 (from pytest>=8.0->mathematical-proof-cli==0.1.0)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:16.2266313Z   Downloading iniconfig-2.3.1-py3-none-any.whl.metadata (2.8 kB)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:16.2300313Z Requirement already satisfied: packaging>=22 in /opt/hostedtoolcache/Python/3.12.15/x64/lib/python3.12/site-packages (from pytest>=8.0->mathematical-proof-cli==0.1.0) (26.3)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:16.2509907Z Collecting pluggy<2,>=1.5 (from pytest>=8.0->mathematical-proof-cli==0.1.0)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:16.2661058Z   Downloading pluggy-1.6.0-py3-none-any.whl.metadata (4.8 kB)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:16.2958190Z Collecting pygments>=2.7.2 (from pytest>=8.0->mathematical-proof-cli==0.1.0)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:16.3110240Z   Downloading pygments-2.21.0-py3-none-any.whl.metadata (2.5 kB)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:16.3360361Z Collecting markdown-it-py>=2.2.0 (from rich>=13.7->mathematical-proof-cli==0.1.0)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:16.3509427Z   Downloading markdown_it_py-4.2.0-py3-none-any.whl.metadata (7.4 kB)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:16.3770333Z Collecting mdurl~=0.1 (from markdown-it-py>=2.2.0->rich>=13.7->mathematical-proof-cli==0.1.0)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:16.3920027Z   Downloading mdurl-0.1.2-py3-none-any.whl.metadata (1.6 kB)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:16.4121368Z Downloading typer-0.25.1-py3-none-any.whl (58 kB)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:16.4308348Z Downloading annotated_doc-0.0.5-py3-none-any.whl (5.3 kB)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:16.4693157Z Downloading click-8.5.0-py3-none-any.whl (125 kB)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:16.4918774Z Downloading pydantic-2.14.0-py3-none-any.whl (487 kB)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:16.5489017Z Downloading pydantic_core-2.50.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (2.2 MB)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:16.8594026Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.2/2.2 MB 6.2 MB/s  0:00:00
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:16.8747947Z Downloading annotated_types-0.8.0-py3-none-any.whl (13 kB)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:16.9501651Z Downloading pytest-9.1.1-py3-none-any.whl (386 kB)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:16.9710903Z Downloading pluggy-1.6.0-py3-none-any.whl (20 kB)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:16.9886579Z Downloading iniconfig-2.3.1-py3-none-any.whl (7.6 kB)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:17.0062899Z Downloading pygments-2.21.0-py3-none-any.whl (1.3 MB)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:17.0190122Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.3/1.3 MB 95.4 MB/s  0:00:00
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:17.0342057Z Downloading rich-15.0.0-py3-none-any.whl (310 kB)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:17.0535510Z Downloading markdown_it_py-4.2.0-py3-none-any.whl (91 kB)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:17.0782135Z Downloading mdurl-0.1.2-py3-none-any.whl (10.0 kB)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:17.0957491Z Downloading ruff-0.17.0-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (10.4 MB)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:17.1985835Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 10.4/10.4 MB 100.6 MB/s  0:00:00
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:17.2137594Z Downloading shellingham-1.5.4-py2.py3-none-any.whl (9.8 kB)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:17.2314197Z Downloading typing_extensions-4.16.0-py3-none-any.whl (45 kB)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:17.2489536Z Downloading typing_inspection-0.4.4-py3-none-any.whl (14 kB)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:17.2968641Z Building wheels for collected packages: mathematical-proof-cli, latex-ai-agent
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:17.2975081Z   Building editable for mathematical-proof-cli (pyproject.toml): started
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:17.4634123Z   Building editable for mathematical-proof-cli (pyproject.toml): finished with status 'done'
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:17.4638841Z   Created wheel for mathematical-proof-cli: filename=mathematical_proof_cli-0.1.0-0.editable-py3-none-any.whl size=1795 sha256=5a9d214854c8cc6b1777d4713784d7bfb8e07dd2ab2cdd524f976cf24836ebb5
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:17.4640862Z   Stored in directory: /tmp/pip-ephem-wheel-cache-gpp3gfom/wheels/6f/40/6b/e6e4626e6534ba21ecf78aa6ee702b8302e7e4541302745871
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:17.4656716Z   Building editable for latex-ai-agent (pyproject.toml): started
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:17.6440620Z   Building editable for latex-ai-agent (pyproject.toml): finished with status 'done'
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:17.6445251Z   Created wheel for latex-ai-agent: filename=latex_ai_agent-0.1.0-0.editable-py3-none-any.whl size=1440 sha256=047911ec2f1176b0cf2403d009af7f8fa66aa930228fd72fb282fdc5fd339fc8
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:17.6446700Z   Stored in directory: /tmp/pip-ephem-wheel-cache-gpp3gfom/wheels/57/cf/5a/4194a8093872e90752ec9beaabbb3876d749c21e85cf16f058
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:17.6458565Z Successfully built mathematical-proof-cli latex-ai-agent
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:17.6803978Z Installing collected packages: typing-extensions, shellingham, ruff, pygments, pluggy, mdurl, latex-ai-agent, iniconfig, click, annotated-types, annotated-doc, typing-inspection, pytest, pydantic-core, markdown-it-py, rich, pydantic, typer, mathematical-proof-cli
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:19.1376630Z 
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:19.1401685Z Successfully installed annotated-doc-0.0.5 annotated-types-0.8.0 click-8.5.0 iniconfig-2.3.1 latex-ai-agent-0.1.0 markdown-it-py-4.2.0 mathematical-proof-cli-0.1.0 mdurl-0.1.2 pluggy-1.6.0 pydantic-2.14.0 pydantic-core-2.50.0 pygments-2.21.0 pytest-9.1.1 rich-15.0.0 ruff-0.17.0 shellingham-1.5.4 typer-0.25.1 typing-extensions-4.16.0 typing-inspection-0.4.4
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:19.2448603Z ##[group]Run python -c "import click, typer, pydantic, rich, proof_cli.cli, latex_agent.server; print('imports ok')"
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:19.2449708Z ^[[36;1mpython -c "import click, typer, pydantic, rich, proof_cli.cli, latex_agent.server; print('imports ok')"^[[0m
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:19.2492251Z shell: /usr/bin/bash -e {0}
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:19.2492658Z env:
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:19.2492943Z   PYTHONUTF8: 1
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:19.2493275Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.15/x64
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:19.2493736Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib/pkgconfig
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:19.2494142Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:19.2494515Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:19.2494927Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:19.2495659Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:19.2496017Z ##[endgroup]
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:19.9246767Z imports ok
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:19.9703176Z ##[group]Run python -m pytest -q -x
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:19.9703530Z ^[[36;1mpython -m pytest -q -x^[[0m
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:19.9740264Z shell: /usr/bin/bash -e {0}
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:19.9740649Z env:
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:19.9740901Z   PYTHONUTF8: 1
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:19.9741219Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.15/x64
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:19.9741722Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib/pkgconfig
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:19.9742115Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:19.9742510Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:19.9742887Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:19.9743271Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:19.9743604Z ##[endgroup]
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:03:42.5634485Z ........................................................................ [  6%]
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:04:00.0559810Z ...s...........................................s........................ [ 12%]
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:04:14.3634111Z ........................................................................ [ 18%]
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:04:26.1175241Z .................................................................s...... [ 25%]
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:04:40.8550634Z ........................................................................ [ 31%]
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:04:51.9639666Z ........................s........................ss..................... [ 37%]
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:05:03.6742236Z ........................................................................ [ 44%]
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:14:09.6205051Z .................................................s...ss..ss............. [ 50%]
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:14:19.1782337Z ........................................................................ [ 56%]
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:14:49.6900150Z ........................................................................ [ 63%]
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:14:57.9412211Z ........................................................................ [ 69%]
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.5084738Z ............................F
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.5087622Z =================================== FAILURES ===================================
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.5088856Z ______ test_reassign_without_parent_stays_a_usage_error_without_the_role _______
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.5089223Z 
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.5089653Z tmp_path = PosixPath('/tmp/pytest-of-runner/pytest-0/test_reassign_without_parent_s0')
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.5090069Z 
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.5090454Z     def test_reassign_without_parent_stays_a_usage_error_without_the_role(tmp_path: Path):
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.5091015Z         _project(tmp_path)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.5091730Z         result = runner.invoke(app, ["node", "create", "lem_1", "lemma", "x", "--reassign", "--root", str(tmp_path)], env={"PROOF_AGENT_ROLE": ""})
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.5092556Z >       assert result.exit_code == 2 and "--reassign goes with --parent" in result.output
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.5094162Z E       assert (2 == 2 and '--reassign goes with --parent' in "\x1b[33mUsage: \x1b[0mroot node create [OPTIONS] NODE_ID KIND STATEMENT\n\x1b[2mTry \x1b[0m\x1b[2;34m'root node creat...   \x1b[31m│\x1b[0m\n\x1b[31m╰──────────────────────────────────────────────────────────────────────────────╯\x1b[0m\n")
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.5095039Z E        +  where 2 = <Result SystemExit(2)>.exit_code
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.5096082Z E        +  and   "\x1b[33mUsage: \x1b[0mroot node create [OPTIONS] NODE_ID KIND STATEMENT\n\x1b[2mTry \x1b[0m\x1b[2;34m'root node creat...   \x1b[31m│\x1b[0m\n\x1b[31m╰──────────────────────────────────────────────────────────────────────────────╯\x1b[0m\n" = <Result SystemExit(2)>.output
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.5096757Z 
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.5096882Z tests/test_reader_role.py:86: AssertionError
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.5097251Z =============================== warnings summary ===============================
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.5097758Z ../../../../../opt/hostedtoolcache/Python/3.12.15/x64/lib/python3.12/site-packages/typer/__init__.py:24
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.5099069Z   /opt/hostedtoolcache/Python/3.12.15/x64/lib/python3.12/site-packages/typer/__init__.py:24: DeprecationWarning: 'click.utils.get_binary_stream' is deprecated and will be removed in Click 9.0.
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.5099798Z     from click.utils import get_binary_stream as get_binary_stream
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.5100085Z 
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.5100327Z ../../../../../opt/hostedtoolcache/Python/3.12.15/x64/lib/python3.12/site-packages/typer/__init__.py:25
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.5101113Z   /opt/hostedtoolcache/Python/3.12.15/x64/lib/python3.12/site-packages/typer/__init__.py:25: DeprecationWarning: 'click.utils.get_text_stream' is deprecated and will be removed in Click 9.0.
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.5101826Z     from click.utils import get_text_stream as get_text_stream
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.5102039Z 
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.5102277Z -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.5102718Z =========================== short test summary info ============================
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.5104228Z FAILED tests/test_reader_role.py::test_reassign_without_parent_stays_a_usage_error_without_the_role - assert (2 == 2 and '--reassign goes with --parent' in "\x1b[33mUsage: \x1b[0mroot node create [OPTIONS] NODE_ID KIND STATEMENT\n\x1b[2mTry \x1b[0m\x1b[2;34m'root node creat...   \x1b[31m│\x1b[0m\n\x1b[31m╰──────────────────────────────────────────────────────────────────────────────╯\x1b[0m\n")
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.5105397Z  +  where 2 = <Result SystemExit(2)>.exit_code
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.5106331Z  +  and   "\x1b[33mUsage: \x1b[0mroot node create [OPTIONS] NODE_ID KIND STATEMENT\n\x1b[2mTry \x1b[0m\x1b[2;34m'root node creat...   \x1b[31m│\x1b[0m\n\x1b[31m╰──────────────────────────────────────────────────────────────────────────────╯\x1b[0m\n" = <Result SystemExit(2)>.output
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.5107139Z !!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.5107548Z 1 failed, 809 passed, 11 skipped, 2 warnings in 704.07s (0:11:44)
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.6362314Z ##[error]Process completed with exit code 1.
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.6512525Z Post job cleanup.
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.7259371Z [command]/usr/bin/git version
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.7285857Z git version 2.55.0
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.7311829Z Temporarily overriding HOME='/home/runner/work/_temp/8a9d623a-ebec-4e70-9a11-290b38293d70' before making global git config changes
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.7313241Z Adding repository directory to the temporary git global config as a safe directory
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.7315638Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/proof-cli/proof-cli
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.7345872Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.7378325Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.7562782Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.7580339Z http.https://github.com/.extraheader
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.7588542Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.7620475Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.7812894Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.7843044Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.8165611Z Cleaning up orphan processes
+core-and-studio (ubuntu-24.04, 3.12)	UNKNOWN STEP	2026-10-10T14:15:04.8411229Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/setup-python@v5. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	﻿2026-10-10T14:03:07.2633240Z Current runner version: '2.337.0'
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:07.2660552Z ##[group]Runner Image Provisioner
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:07.2661474Z Hosted Compute Agent
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:07.2662235Z Version: 20261002.596
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:07.2662886Z Commit: c3d12f3313a95f25162a1503be624f3b0617f8c0
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:07.2663672Z Build Date: 2026-10-02T22:28:27Z
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:07.2664389Z Worker ID: {cc7dc13c-1491-48ec-bf26-700bad9fb9af}
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:07.2665146Z Region: westcentralus
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:07.2665837Z Cloud: Azure
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:07.2666403Z ##[endgroup]
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:07.2668227Z ##[group]Operating System
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:07.2668921Z Ubuntu
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:07.2669477Z 24.04.5
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:07.2670093Z LTS
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:07.2670636Z ##[endgroup]
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:07.2671188Z ##[group]Runner Image
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:07.2671905Z Image: ubuntu-24.04
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:07.2672507Z Version: 20261004.327.1
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:07.2673954Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20261004.327/images/ubuntu/Ubuntu2404-Readme.md
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:07.2675516Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20261004.327
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:07.2676874Z ##[endgroup]
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:07.2678142Z ##[group]GITHUB_TOKEN Permissions
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:07.2680234Z Contents: read
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:07.2680861Z Metadata: read
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:07.2681539Z Packages: read
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:07.2682117Z ##[endgroup]
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:07.2684347Z Secret source: Actions
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:07.2685456Z Cache mode: write
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:07.2686162Z Prepare workflow directory
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:07.3165974Z Prepare all required actions
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:07.3217518Z Getting action download info
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:07.6277428Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:07.7402011Z Download action repository 'actions/setup-python@v5' (SHA:a26af69be951a213d495a4c3e4e4022e16d87065)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:07.9244111Z Complete job name: core-and-studio (ubuntu-24.04, 3.11)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.0068642Z ##[group]Run actions/checkout@v4
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.0069566Z with:
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.0070069Z   repository: DengZhiyuan-math/proof-cli
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.0073861Z   token: ***
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.0074321Z   ssh-strict: true
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.0074790Z   ssh-user: git
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.0075265Z   persist-credentials: true
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.0075776Z   clean: true
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.0076239Z   sparse-checkout-cone-mode: true
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.0077000Z   fetch-depth: 1
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.0077460Z   fetch-tags: false
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.0077924Z   show-progress: true
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.0078393Z   lfs: false
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.0078821Z   submodules: false
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.0079350Z   set-safe-directory: true
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.0079879Z   allow-unsafe-pr-checkout: false
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.0080671Z env:
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.0081108Z   PYTHONUTF8: 1
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.0081555Z ##[endgroup]
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.1152220Z Syncing repository: DengZhiyuan-math/proof-cli
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.1155074Z ##[group]Getting Git version info
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.1156320Z Working directory is '/home/runner/work/proof-cli/proof-cli'
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.1158377Z [command]/usr/bin/git version
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.1239148Z git version 2.55.0
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.1274999Z ##[endgroup]
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.1284516Z Temporarily overriding HOME='/home/runner/work/_temp/6b729c09-0edd-4213-b11f-fce7d080b678' before making global git config changes
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.1287897Z Adding repository directory to the temporary git global config as a safe directory
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.1290237Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/proof-cli/proof-cli
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.1345581Z Deleting the contents of '/home/runner/work/proof-cli/proof-cli'
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.1350793Z ##[group]Initializing the repository
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.1355193Z [command]/usr/bin/git init /home/runner/work/proof-cli/proof-cli
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.1487657Z hint: Using 'master' as the name for the initial branch. This default branch name
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.1489849Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.1492276Z hint: to use in all of your new repositories, which will suppress this warning,
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.1493474Z hint: call:
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.1494111Z hint:
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.1494913Z hint: 	git config --global init.defaultBranch <name>
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.1495955Z hint:
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.1497221Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.1498745Z hint: 'development'. The just-created branch can be renamed via this command:
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.1499951Z hint:
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.1500664Z hint: 	git branch -m <name>
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.1501451Z hint:
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.1502450Z hint: Disable this message with "git config set advice.defaultBranchName false"
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.1504183Z Initialized empty Git repository in /home/runner/work/proof-cli/proof-cli/.git/
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.1507276Z [command]/usr/bin/git remote add origin https://github.com/DengZhiyuan-math/proof-cli
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.1565837Z ##[endgroup]
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.1567422Z ##[group]Disabling automatic garbage collection
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.1570122Z [command]/usr/bin/git config --local gc.auto 0
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.1607287Z ##[endgroup]
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.1608571Z ##[group]Setting up auth
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.1616308Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.1660863Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.2087418Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.2127852Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.2374078Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.2420008Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.2656141Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.2700769Z ##[endgroup]
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.2701956Z ##[group]Fetching the repository
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:08.2711240Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +cfc6c43cdaaa8e2f318dc1738b6a7ade9dd3ce4e:refs/remotes/pull/208/merge
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.1783813Z From https://github.com/DengZhiyuan-math/proof-cli
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.1787339Z  * [new ref]         cfc6c43cdaaa8e2f318dc1738b6a7ade9dd3ce4e -> pull/208/merge
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.1794181Z ##[endgroup]
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.1796914Z ##[group]Determining the checkout info
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.1799158Z ##[endgroup]
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.1800681Z [command]/usr/bin/git sparse-checkout disable
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.1863215Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.1898285Z ##[group]Checking out the ref
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.1901685Z [command]/usr/bin/git checkout --progress --force refs/remotes/pull/208/merge
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.2365702Z Note: switching to 'refs/remotes/pull/208/merge'.
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.2366934Z 
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.2367761Z You are in 'detached HEAD' state. You can look around, make experimental
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.2369611Z changes and commit them, and you can discard any commits you make in this
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.2371769Z state without impacting any branches by switching back to a branch.
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.2373703Z 
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.2374861Z If you want to create a new branch to retain commits you create, you may
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.2378027Z do so (now or later) by using -c with the switch command. Example:
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.2379506Z 
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.2380143Z   git switch -c <new-branch-name>
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.2381141Z 
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.2381879Z Or undo this operation with:
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.2383159Z 
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.2383946Z   git switch -
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.2384954Z 
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.2386257Z Turn off this advice by setting config variable advice.detachedHead to false
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.2388526Z 
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.2390769Z HEAD is now at cfc6c43 Merge d17b48426540d6ab5fce0f3009450ff8a4a53f75 into b7f394374ce73e9a23754e12506e87e97326efd9
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.2397254Z ##[endgroup]
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.2430464Z [command]/usr/bin/git log -1 --format=%H
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.2458906Z cfc6c43cdaaa8e2f318dc1738b6a7ade9dd3ce4e
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.2847450Z ##[group]Run actions/setup-python@v5
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.2848729Z with:
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.2849624Z   python-version: 3.11
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.2850659Z   check-latest: false
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.2860682Z   token: ***
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.2861650Z   update-environment: true
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.2927840Z   allow-prereleases: false
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.2929225Z   freethreaded: false
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.2930285Z env:
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.2931179Z   PYTHONUTF8: 1
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.2932109Z ##[endgroup]
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.4253115Z ##[group]Installed versions
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.4409139Z (node:2380) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.4413321Z (Use `node --trace-deprecation ...` to show where the warning was created)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.4416401Z Successfully set up CPython (3.11.17)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.4419925Z ##[endgroup]
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.4574474Z ##[group]Run python -m pip install -U pip setuptools wheel
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.4576328Z ^[[36;1mpython -m pip install -U pip setuptools wheel^[[0m
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.4957935Z shell: /usr/bin/bash -e {0}
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.4959100Z env:
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.4960035Z   PYTHONUTF8: 1
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.4961267Z   pythonLocation: /opt/hostedtoolcache/Python/3.11.17/x64
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.4963207Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.11.17/x64/lib/pkgconfig
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.4965168Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.17/x64
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.4967036Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.17/x64
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.4968791Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.17/x64
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.4970534Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.11.17/x64/lib
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:09.4971992Z ##[endgroup]
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:10.2525521Z Requirement already satisfied: pip in /opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/site-packages (26.2.1)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:10.3891717Z Requirement already satisfied: setuptools in /opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/site-packages (79.0.1)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:10.5352479Z Collecting setuptools
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:10.6307454Z   Downloading setuptools-84.0.0-py3-none-any.whl.metadata (6.6 kB)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:10.6696164Z Collecting wheel
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:10.6890282Z   Downloading wheel-0.48.0-py3-none-any.whl.metadata (2.3 kB)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:10.7218153Z Collecting packaging>=24.0 (from wheel)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:10.7424960Z   Downloading packaging-26.3-py3-none-any.whl.metadata (3.5 kB)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:10.7664095Z Downloading setuptools-84.0.0-py3-none-any.whl (818 kB)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:10.8611467Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 818.2/818.2 kB 13.9 MB/s  0:00:00
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:10.8807633Z Downloading wheel-0.48.0-py3-none-any.whl (33 kB)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:10.9022146Z Downloading packaging-26.3-py3-none-any.whl (129 kB)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:10.9553455Z Installing collected packages: setuptools, packaging, wheel
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:10.9558503Z   Attempting uninstall: setuptools
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:10.9573343Z     Found existing installation: setuptools 79.0.1
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:11.2182877Z     Uninstalling setuptools-79.0.1:
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:11.2735330Z       Successfully uninstalled setuptools-79.0.1
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:11.8723914Z 
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:11.8734631Z Successfully installed packaging-26.3 setuptools-84.0.0 wheel-0.48.0
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:11.9311574Z ##[group]Run python -m pip install -e ".[dev]" -e packages/latex-agent
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:11.9312143Z ^[[36;1mpython -m pip install -e ".[dev]" -e packages/latex-agent^[[0m
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:11.9377883Z shell: /usr/bin/bash -e {0}
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:11.9378139Z env:
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:11.9378341Z   PYTHONUTF8: 1
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:11.9378635Z   pythonLocation: /opt/hostedtoolcache/Python/3.11.17/x64
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:11.9379081Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.11.17/x64/lib/pkgconfig
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:11.9379528Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.17/x64
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:11.9379935Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.17/x64
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:11.9380338Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.17/x64
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:11.9380772Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.11.17/x64/lib
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:11.9381129Z ##[endgroup]
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:12.2579095Z Obtaining file:///home/runner/work/proof-cli/proof-cli
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:12.2596280Z   Installing build dependencies: started
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:12.8360266Z   Installing build dependencies: finished with status 'done'
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:12.8366774Z   Checking if build backend supports build_editable: started
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:13.1592479Z   Checking if build backend supports build_editable: finished with status 'done'
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:13.1599602Z   Getting requirements to build editable: started
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:13.4657915Z   Getting requirements to build editable: finished with status 'done'
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:13.4667092Z   Preparing editable metadata (pyproject.toml): started
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:13.6434131Z   Preparing editable metadata (pyproject.toml): finished with status 'done'
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:13.6459377Z Obtaining file:///home/runner/work/proof-cli/proof-cli/packages/latex-agent
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:13.6474055Z   Installing build dependencies: started
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:14.1995278Z   Installing build dependencies: finished with status 'done'
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:14.2000254Z   Checking if build backend supports build_editable: started
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:14.4755260Z   Checking if build backend supports build_editable: finished with status 'done'
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:14.4762976Z   Getting requirements to build editable: started
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:14.7895101Z   Getting requirements to build editable: finished with status 'done'
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:14.7907825Z   Preparing editable metadata (pyproject.toml): started
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:14.9709324Z   Preparing editable metadata (pyproject.toml): finished with status 'done'
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:15.2203242Z Collecting pydantic>=2.7 (from mathematical-proof-cli==0.1.0)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:15.3124107Z   Downloading pydantic-2.14.0-py3-none-any.whl.metadata (131 kB)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:15.3894451Z Collecting typer<0.26,>=0.12 (from mathematical-proof-cli==0.1.0)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:15.4100243Z   Downloading typer-0.25.1-py3-none-any.whl.metadata (15 kB)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:15.4436445Z Collecting click>=8.0 (from mathematical-proof-cli==0.1.0)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:15.4631639Z   Downloading click-8.5.0-py3-none-any.whl.metadata (2.6 kB)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:15.5074900Z Collecting rich>=13.7 (from mathematical-proof-cli==0.1.0)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:15.5275078Z   Downloading rich-15.0.0-py3-none-any.whl.metadata (18 kB)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:15.5719185Z Collecting pytest>=8.0 (from mathematical-proof-cli==0.1.0)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:15.5919756Z   Downloading pytest-9.1.1-py3-none-any.whl.metadata (7.6 kB)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:15.9812953Z Collecting ruff>=0.4 (from mathematical-proof-cli==0.1.0)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:16.0024482Z   Downloading ruff-0.17.0-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (20 kB)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:16.0345271Z Collecting shellingham>=1.3.0 (from typer<0.26,>=0.12->mathematical-proof-cli==0.1.0)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:16.0547203Z   Downloading shellingham-1.5.4-py2.py3-none-any.whl.metadata (3.5 kB)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:16.0832992Z Collecting annotated-doc>=0.0.2 (from typer<0.26,>=0.12->mathematical-proof-cli==0.1.0)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:16.1038002Z   Downloading annotated_doc-0.0.5-py3-none-any.whl.metadata (6.5 kB)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:16.1326251Z Collecting annotated-types>=0.6.0 (from pydantic>=2.7->mathematical-proof-cli==0.1.0)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:16.1520110Z   Downloading annotated_types-0.8.0-py3-none-any.whl.metadata (15 kB)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:16.8174459Z Collecting pydantic-core==2.50.0 (from pydantic>=2.7->mathematical-proof-cli==0.1.0)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:16.8372208Z   Downloading pydantic_core-2.50.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (6.5 kB)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:16.8692920Z Collecting typing-extensions>=4.16.0 (from pydantic>=2.7->mathematical-proof-cli==0.1.0)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:16.8890620Z   Downloading typing_extensions-4.16.0-py3-none-any.whl.metadata (3.3 kB)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:16.9166147Z Collecting typing-inspection>=0.4.4 (from pydantic>=2.7->mathematical-proof-cli==0.1.0)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:16.9359913Z   Downloading typing_inspection-0.4.4-py3-none-any.whl.metadata (2.6 kB)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:16.9656797Z Collecting iniconfig>=1.0.1 (from pytest>=8.0->mathematical-proof-cli==0.1.0)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:16.9851688Z   Downloading iniconfig-2.3.1-py3-none-any.whl.metadata (2.8 kB)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:16.9892644Z Requirement already satisfied: packaging>=22 in /opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/site-packages (from pytest>=8.0->mathematical-proof-cli==0.1.0) (26.3)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:17.0142989Z Collecting pluggy<2,>=1.5 (from pytest>=8.0->mathematical-proof-cli==0.1.0)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:17.0336668Z   Downloading pluggy-1.6.0-py3-none-any.whl.metadata (4.8 kB)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:17.0689846Z Collecting pygments>=2.7.2 (from pytest>=8.0->mathematical-proof-cli==0.1.0)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:17.0883771Z   Downloading pygments-2.21.0-py3-none-any.whl.metadata (2.5 kB)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:17.1207441Z Collecting markdown-it-py>=2.2.0 (from rich>=13.7->mathematical-proof-cli==0.1.0)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:17.1401189Z   Downloading markdown_it_py-4.2.0-py3-none-any.whl.metadata (7.4 kB)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:17.1721350Z Collecting mdurl~=0.1 (from markdown-it-py>=2.2.0->rich>=13.7->mathematical-proof-cli==0.1.0)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:17.1914883Z   Downloading mdurl-0.1.2-py3-none-any.whl.metadata (1.6 kB)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:17.2171462Z Downloading typer-0.25.1-py3-none-any.whl (58 kB)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:17.2421527Z Downloading annotated_doc-0.0.5-py3-none-any.whl (5.3 kB)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:17.2635069Z Downloading click-8.5.0-py3-none-any.whl (125 kB)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:17.2931565Z Downloading pydantic-2.14.0-py3-none-any.whl (487 kB)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:17.3493925Z Downloading pydantic_core-2.50.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (2.2 MB)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:17.4099972Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.2/2.2 MB 34.0 MB/s  0:00:00
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:17.4291163Z Downloading annotated_types-0.8.0-py3-none-any.whl (13 kB)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:17.4507684Z Downloading pytest-9.1.1-py3-none-any.whl (386 kB)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:17.4730749Z Downloading pluggy-1.6.0-py3-none-any.whl (20 kB)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:17.4945244Z Downloading iniconfig-2.3.1-py3-none-any.whl (7.6 kB)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:17.5161595Z Downloading pygments-2.21.0-py3-none-any.whl (1.3 MB)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:17.5268254Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.3/1.3 MB 137.0 MB/s  0:00:00
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:17.5459043Z Downloading rich-15.0.0-py3-none-any.whl (310 kB)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:17.5685326Z Downloading markdown_it_py-4.2.0-py3-none-any.whl (91 kB)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:17.5921894Z Downloading mdurl-0.1.2-py3-none-any.whl (10.0 kB)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:17.6146140Z Downloading ruff-0.17.0-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (10.4 MB)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:17.6829315Z    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 10.4/10.4 MB 157.6 MB/s  0:00:00
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:17.7023755Z Downloading shellingham-1.5.4-py2.py3-none-any.whl (9.8 kB)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:17.7240749Z Downloading typing_extensions-4.16.0-py3-none-any.whl (45 kB)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:17.7456828Z Downloading typing_inspection-0.4.4-py3-none-any.whl (14 kB)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:17.7983789Z Building wheels for collected packages: mathematical-proof-cli, latex-ai-agent
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:17.7992554Z   Building editable for mathematical-proof-cli (pyproject.toml): started
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:18.0058069Z   Building editable for mathematical-proof-cli (pyproject.toml): finished with status 'done'
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:18.0064990Z   Created wheel for mathematical-proof-cli: filename=mathematical_proof_cli-0.1.0-0.editable-py3-none-any.whl size=1795 sha256=5a9d214854c8cc6b1777d4713784d7bfb8e07dd2ab2cdd524f976cf24836ebb5
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:18.0067489Z   Stored in directory: /tmp/pip-ephem-wheel-cache-oy8kl3od/wheels/35/23/57/b14d1ee1bb9df13494a7b9c7f4081cb00748a80f5b75523fb7
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:18.0086821Z   Building editable for latex-ai-agent (pyproject.toml): started
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:18.2170559Z   Building editable for latex-ai-agent (pyproject.toml): finished with status 'done'
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:18.2175492Z   Created wheel for latex-ai-agent: filename=latex_ai_agent-0.1.0-0.editable-py3-none-any.whl size=1440 sha256=f83b2eee51de492fc1a3a87bf569e89d2b45c6665ca2be6eb2706aa96d6697ce
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:18.2177227Z   Stored in directory: /tmp/pip-ephem-wheel-cache-oy8kl3od/wheels/42/5b/3f/d11359437463e98ae798f65b587d7dd038e4aa6a3f830598dd
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:18.2189643Z Successfully built mathematical-proof-cli latex-ai-agent
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:18.2589172Z Installing collected packages: typing-extensions, shellingham, ruff, pygments, pluggy, mdurl, latex-ai-agent, iniconfig, click, annotated-types, annotated-doc, typing-inspection, pytest, pydantic-core, markdown-it-py, rich, pydantic, typer, mathematical-proof-cli
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:20.0705438Z 
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:20.0721215Z Successfully installed annotated-doc-0.0.5 annotated-types-0.8.0 click-8.5.0 iniconfig-2.3.1 latex-ai-agent-0.1.0 markdown-it-py-4.2.0 mathematical-proof-cli-0.1.0 mdurl-0.1.2 pluggy-1.6.0 pydantic-2.14.0 pydantic-core-2.50.0 pygments-2.21.0 pytest-9.1.1 rich-15.0.0 ruff-0.17.0 shellingham-1.5.4 typer-0.25.1 typing-extensions-4.16.0 typing-inspection-0.4.4
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:20.1941755Z ##[group]Run python -c "import click, typer, pydantic, rich, proof_cli.cli, latex_agent.server; print('imports ok')"
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:20.1942605Z ^[[36;1mpython -c "import click, typer, pydantic, rich, proof_cli.cli, latex_agent.server; print('imports ok')"^[[0m
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:20.2007511Z shell: /usr/bin/bash -e {0}
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:20.2007766Z env:
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:20.2007960Z   PYTHONUTF8: 1
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:20.2008246Z   pythonLocation: /opt/hostedtoolcache/Python/3.11.17/x64
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:20.2008711Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.11.17/x64/lib/pkgconfig
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:20.2009147Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.17/x64
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:20.2009554Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.17/x64
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:20.2009951Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.17/x64
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:20.2010358Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.11.17/x64/lib
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:20.2010706Z ##[endgroup]
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:21.1940840Z imports ok
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:21.2417902Z ##[group]Run python -m pytest -q -x
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:21.2418264Z ^[[36;1mpython -m pytest -q -x^[[0m
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:21.2483209Z shell: /usr/bin/bash -e {0}
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:21.2483463Z env:
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:21.2483656Z   PYTHONUTF8: 1
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:21.2483943Z   pythonLocation: /opt/hostedtoolcache/Python/3.11.17/x64
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:21.2484388Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.11.17/x64/lib/pkgconfig
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:21.2484822Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.17/x64
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:21.2485214Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.17/x64
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:21.2485597Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.17/x64
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:21.2485986Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.11.17/x64/lib
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:21.2486309Z ##[endgroup]
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:40.5379686Z ........................................................................ [  6%]
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:03:58.1557758Z ...s...........................................s........................ [ 12%]
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:04:12.0842222Z ........................................................................ [ 18%]
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:04:22.3446520Z .................................................................s...... [ 25%]
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:04:33.7696017Z ........................................................................ [ 31%]
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:04:42.3853764Z ........................s........................ss..................... [ 37%]
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:04:51.1690023Z ........................................................................ [ 44%]
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:14:24.0323768Z .................................................s...ss..ss............. [ 50%]
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:14:31.9581080Z ........................................................................ [ 56%]
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:14:59.9952749Z ........................................................................ [ 63%]
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:06.8440553Z ........................................................................ [ 69%]
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.5115071Z ............................F
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.5115773Z =================================== FAILURES ===================================
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.5116435Z ______ test_reassign_without_parent_stays_a_usage_error_without_the_role _______
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.5117697Z 
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.5118067Z tmp_path = PosixPath('/tmp/pytest-of-runner/pytest-0/test_reassign_without_parent_s0')
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.5118572Z 
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.5118928Z     def test_reassign_without_parent_stays_a_usage_error_without_the_role(tmp_path: Path):
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.5119557Z         _project(tmp_path)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.5120303Z         result = runner.invoke(app, ["node", "create", "lem_1", "lemma", "x", "--reassign", "--root", str(tmp_path)], env={"PROOF_AGENT_ROLE": ""})
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.5121315Z >       assert result.exit_code == 2 and "--reassign goes with --parent" in result.output
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.5123505Z E       assert (2 == 2 and '--reassign goes with --parent' in "\x1b[33mUsage: \x1b[0mroot node create [OPTIONS] NODE_ID KIND STATEMENT\n\x1b[2mTry \x1b[0m\x1b[2;34m'root node creat...   \x1b[31m│\x1b[0m\n\x1b[31m╰──────────────────────────────────────────────────────────────────────────────╯\x1b[0m\n")
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.5124710Z E        +  where 2 = <Result SystemExit(2)>.exit_code
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.5126037Z E        +  and   "\x1b[33mUsage: \x1b[0mroot node create [OPTIONS] NODE_ID KIND STATEMENT\n\x1b[2mTry \x1b[0m\x1b[2;34m'root node creat...   \x1b[31m│\x1b[0m\n\x1b[31m╰──────────────────────────────────────────────────────────────────────────────╯\x1b[0m\n" = <Result SystemExit(2)>.output
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.5127293Z 
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.5127432Z tests/test_reader_role.py:86: AssertionError
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.5127820Z =============================== warnings summary ===============================
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.5128416Z ../../../../../opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/site-packages/typer/__init__.py:24
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.5129953Z   /opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/site-packages/typer/__init__.py:24: DeprecationWarning: 'click.utils.get_binary_stream' is deprecated and will be removed in Click 9.0.
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.5130952Z     from click.utils import get_binary_stream as get_binary_stream
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.5131253Z 
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.5131557Z ../../../../../opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/site-packages/typer/__init__.py:25
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.5132663Z   /opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/site-packages/typer/__init__.py:25: DeprecationWarning: 'click.utils.get_text_stream' is deprecated and will be removed in Click 9.0.
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.5133644Z     from click.utils import get_text_stream as get_text_stream
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.5133914Z 
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.5134161Z -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.5134791Z =========================== short test summary info ============================
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.5136777Z FAILED tests/test_reader_role.py::test_reassign_without_parent_stays_a_usage_error_without_the_role - assert (2 == 2 and '--reassign goes with --parent' in "\x1b[33mUsage: \x1b[0mroot node create [OPTIONS] NODE_ID KIND STATEMENT\n\x1b[2mTry \x1b[0m\x1b[2;34m'root node creat...   \x1b[31m│\x1b[0m\n\x1b[31m╰──────────────────────────────────────────────────────────────────────────────╯\x1b[0m\n")
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.5138142Z  +  where 2 = <Result SystemExit(2)>.exit_code
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.5139262Z  +  and   "\x1b[33mUsage: \x1b[0mroot node create [OPTIONS] NODE_ID KIND STATEMENT\n\x1b[2mTry \x1b[0m\x1b[2;34m'root node creat...   \x1b[31m│\x1b[0m\n\x1b[31m╰──────────────────────────────────────────────────────────────────────────────╯\x1b[0m\n" = <Result SystemExit(2)>.output
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.5140199Z !!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.5140619Z 1 failed, 809 passed, 11 skipped, 2 warnings in 711.78s (0:11:51)
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.6421948Z ##[error]Process completed with exit code 1.
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.6571012Z Post job cleanup.
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.7437181Z [command]/usr/bin/git version
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.7473793Z git version 2.55.0
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.7520463Z Temporarily overriding HOME='/home/runner/work/_temp/368360be-fc39-4604-9cad-492a86b03238' before making global git config changes
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.7521842Z Adding repository directory to the temporary git global config as a safe directory
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.7529569Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/proof-cli/proof-cli
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.7571523Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.7609074Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.7871530Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.7899672Z http.https://github.com/.extraheader
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.7911846Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.7947582Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.8227619Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.8258971Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.8700870Z Cleaning up orphan processes
+core-and-studio (ubuntu-24.04, 3.11)	UNKNOWN STEP	2026-10-10T14:15:13.8977795Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/setup-python@v5. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

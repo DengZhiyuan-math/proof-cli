@@ -1,0 +1,50 @@
+{
+  "baseRefOid": "d433159214156239e31094d1eaea3b7b991b927f",
+  "headRefOid": "ec9f5aacb18805ad88b0b3923d17f773fa38cd7c",
+  "isDraft": true,
+  "state": "OPEN",
+  "statusCheckRollup": [
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-13T14:40:31Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38414062199/job/115353650972",
+      "name": "core-and-studio (ubuntu-24.04, 3.11)",
+      "startedAt": "2026-10-13T14:31:18Z",
+      "status": "COMPLETED",
+      "workflowName": "tests"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-13T14:37:35Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38414062199/job/115353650987",
+      "name": "core-and-studio (ubuntu-24.04, 3.12)",
+      "startedAt": "2026-10-13T14:31:18Z",
+      "status": "COMPLETED",
+      "workflowName": "tests"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-13T15:13:23Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38414062199/job/115353650428",
+      "name": "core-and-studio (windows-latest, 3.11)",
+      "startedAt": "2026-10-13T14:31:17Z",
+      "status": "COMPLETED",
+      "workflowName": "tests"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-13T15:18:22Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38414062199/job/115353651030",
+      "name": "core-and-studio (windows-latest, 3.12)",
+      "startedAt": "2026-10-13T14:31:17Z",
+      "status": "COMPLETED",
+      "workflowName": "tests"
+    }
+  ],
+  "title": "Keep Ask review provenance unconfirmed and scope literature imports",
+  "url": "https://github.com/DengZhiyuan-math/proof-cli/pull/220"
+}

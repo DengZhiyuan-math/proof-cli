@@ -1,0 +1,93 @@
+{
+  "new_real_provider_calls": 0,
+  "cases": [
+    {
+      "case": "normal",
+      "exit": 0,
+      "response": {
+        "schema_version": 1,
+        "ok": true,
+        "command": "node.create",
+        "data": {
+          "id": "orphan",
+          "kind": "lemma",
+          "display_label": "",
+          "statement": "Agent work",
+          "assumptions": [],
+          "definitions": [],
+          "dependencies": [],
+          "source_locator": null,
+          "source_version": null,
+          "trust_level": null,
+          "reference_id": null,
+          "derived_from": null,
+          "medium": "latex",
+          "created_by": "reader",
+          "updated_by": "reader",
+          "created_at": "2026-10-13T15:25:40.434877Z",
+          "updated_at": "2026-10-13T15:25:40.434884Z"
+        }
+      }
+    },
+    {
+      "case": "human",
+      "exit": 1,
+      "response": {
+        "schema_version": 1,
+        "ok": false,
+        "command": "node.create",
+        "error": {
+          "code": "AGENT_AUTHOR_REFUSED",
+          "message": "an agent may not be named 'human': that is the researcher's name; set another `[studio] agent_name`"
+        }
+      }
+    },
+    {
+      "case": "git-identity",
+      "exit": 1,
+      "response": {
+        "schema_version": 1,
+        "ok": false,
+        "command": "node.create",
+        "error": {
+          "code": "AGENT_AUTHOR_REFUSED",
+          "message": "an agent may not be named 'Yomathnotcool <125728853+DengZhiyuan-math@users.noreply.github.com>': that is the researcher's name; set another `[studio] agent_name`"
+        }
+      }
+    },
+    {
+      "case": "trust-reserved-name",
+      "command": [
+        "reference",
+        "import"
+      ],
+      "exit": 1,
+      "response": {
+        "schema_version": 1,
+        "ok": false,
+        "command": "reference.import",
+        "error": {
+          "code": "AGENT_AUTHOR_REFUSED",
+          "message": "an agent may not be named 'human': that is the researcher's name; set another `[studio] agent_name`"
+        }
+      }
+    },
+    {
+      "case": "trust-reserved-name",
+      "command": [
+        "node",
+        "create"
+      ],
+      "exit": 1,
+      "response": {
+        "schema_version": 1,
+        "ok": false,
+        "command": "node.create",
+        "error": {
+          "code": "AGENT_AUTHOR_REFUSED",
+          "message": "an agent may not be named 'human': that is the researcher's name; set another `[studio] agent_name`"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,3 @@
+ src/proof_agents/coordinator.py |  52 +++++++++++++++---
+ tests/test_coordinator.py       | 113 ++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 158 insertions(+), 7 deletions(-)

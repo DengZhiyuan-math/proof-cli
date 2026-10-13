@@ -1,0 +1,285 @@
+t8-real
+19 nodes · 3 on the frontier
+3
+Frontier
+10
+Awaiting you
+10
+Fog
+Y
+Yomathnotcool <125728853+DengZhiyuan-math@users.noreply.github.com>
+
+Proof map
+
+Map
+Review
+10
+Warnings
+Discuss
+Awaiting review
+10
+
+Tick the decisions to make, choose each outcome and rationale, then record them. Each decision is committed to git with its snapshot, as the identity shown above.
+
+	Node	Statement and key ideas	Decision	Rationale
+	
+burger-integral-formula
+	
+Let $(\pi,\mathcal{H})$ be a unitary representation of $SL_2(\mathbb{R})$ (no nonzero invariant vectors), $f\in\mathcal{H}^\infty$, $\mathcal{Y}\ge1$, $T>0$, $h(t)=h_\infty(t)$, $a(y)=\mathrm{diag}(y^{1/2},y^{-1/2})$. Then $\frac1T\int_0^T\pi(h(t))f\,dt=\frac1T\int_0^T\pi(h(t)a(\mathcal{Y}))F_{\mathcal{Y}}f\,dt-\frac{1}{2T}\int_0^T\pi(h(t)a(\mathcal{Y}))S_{\mathcal{Y}}\,d\pi(Y)f\,dt+\frac1T\int_0^{\mathcal{Y}}[1-\pi(h(T))]\pi(a(y))T_y\,d\pi(X_-)f\,dy$, the last integral converging in $\mathcal{H}$.
+
+cites burgerhorocycle: Horocycle flow on geometrically finite surfaces — Marc Burger (1990) · key lemma (number not read); the form with F_Y, S_Y, T_y is the draft display (equationfromburger) · Duke Math. J. 61 (1990)
+
+	
+reference-review
+no-longer-callable
+	
+	
+burger-operator-bounds
+	
+With $s=s(\xi)$ and $f_y,s_y,t_y$ as in the Burger operators: $\sup_{\xi\in Z^0_-\cup Z^{ct}}|f_y(\xi)|\le\frac{2+\log y}{2\sqrt y}$ and $\sup_{\xi\in Z^0_-\cup Z^{ct}}|s_y(\xi)|\le\frac{\log y}{\sqrt y}$ for $y\ge1$; $\sup_{\xi\in Z^0_-\cup Z^{ct}}|t_y(\xi)|\le\frac{2\log(y+10)}{\sqrt{y+1}}$ for $y\in(0,\mathcal{Y}]$. Consequently $F_y,S_y,T_y$ are bounded on $\mathcal{H}$ and on each $W_k(\mathcal{H})$, continuous on $\mathcal{H}^\infty$, and $y\mapsto T_y$ is continuous in operator norm on $W_k(\mathcal{H})$.
+
+cites burgerhorocycle: Horocycle flow on geometrically finite surfaces — Marc Burger (1990) · bounds on f_y, s_y, t_y (number not read); the draft displays (fsboundofintertwiningoperator), (tboundofintertwiningoperator) · Duke Math. J. 61 (1990)
+
+	
+reference-review
+no-longer-callable
+	
+	
+chh-tempered-bound
+	
+Let $L$ be $G_\infty$ or $G_p$ with maximal compact subgroup $K$ ($K_\infty$, resp. $K_p$). If $\pi$ is a tempered unitary representation of $L$ and $v,w$ are $K$-finite, then $|\langle\pi(g)v,w\rangle|\le(d_K(v)d_K(w))^{1/2}\|v\|\|w\|\,\Xi_L(g)$ for all $g\in L$.
+
+cites cowling-haagerup-howe1988: Almost L2 matrix coefficients — Michael Cowling, Uffe Haagerup, Roger Howe (1988) · Theorem 2 (as recalled by the reader; not read) · J. Reine Angew. Math. 387 (1988)
+
+	
+reference-review
+no-longer-callable
+	
+	
+emmv-uniform-decay
+	
+Let $\mathbf{G}$ be a simply connected semisimple group over a number field $F$ as in Theorem 4.1. There is $\kappa_2>0$ such that for every place $v$, all $K_v$-finite $f_1,f_2\in L^2(\mathbf{G}(F)\backslash\mathbf{G}(\mathbb{A}))$ with $\int f_1=\int f_2=0$ and all $g_v\in\mathbf{G}(F_v)$: $|\langle\pi_{g_v}f_1,f_2\rangle|\le\dim\langle K_v f_1\rangle^{1/2}\dim\langle K_v f_2\rangle^{1/2}\|f_1\|_2\|f_2\|_2\,\Xi_{G_v}(g_v)^{\kappa_2}$, where $K_v$ is a good maximal compact open subgroup of $\mathbf{G}(F_v)$ and $\Xi_{G_v}$ a Harish-Chandra spherical function; $\kappa_2$ is independent of $v$.
+
+cites emmv2020propertytau: Effective equidistribution and property (tau) — Manfred Einsiedler, Grigory Margulis, Amir Mohammadi, Akshay Venkatesh (2020) · Section 4.3, display (4.1), p. 12 · arXiv:1503.05884v3 (25 Jun 2019)
+
+	
+reference-review
+no-longer-callable
+	
+	
+local-sobolev-inequality
+	
+Let $M$ be the unit tangent bundle of a finite-area hyperbolic surface (a 3-manifold, locally $SL_2(\mathbb{R})$). For $0<\epsilon$ below the injectivity radius at $y\in M$ there is $C(\epsilon)$ with $|u(y)|^2\le C(\epsilon)\int_{B(y,\epsilon)}|u|^2+|du|^2+|\Delta u|^2$ for all $u\in W^{2,2}$; in particular $W^{2,2}$ functions are continuous.
+
+cites flaminio-forni2003: Invariant distributions and time averages for horocycle flows — Livio Flaminio, Giovanni Forni (2003) · classical local Sobolev embedding; locator not read · Duke Math. J. 119 (2003)
+
+	
+reference-review
+no-longer-callable
+	
+	
+sobolev-cuspidal-real
+	
+For a non-cocompact lattice $\Gamma^\prime<SL_2(\mathbb{R})$ and $F$ in the cuspidal subspace with $\|F\|_{W_3}<\infty$: $|F(p)|\ll_{\Gamma^\prime}\|F\|_{W_3}\,Y_{\Gamma^\prime}(p)^{-1/2}$ for all $p\in\Gamma^\prime\backslash SL_2(\mathbb{R})$, $Y_{\Gamma^\prime}$ the invariant height.
+
+cites strombergsson2013deviation: On the deviation of ergodic averages for horocycle flows — Andreas Strömbergsson (2013) · Sobolev embedding for cuspidal functions; locator not read (stated as the draft uses it) · J. Mod. Dyn. 7 (2013), published version
+
+	
+reference-review
+no-longer-callable
+	
+	
+sobolev-residual-real
+	
+For a non-cocompact lattice $\Gamma^\prime<SL_2(\mathbb{R})$, $\xi\in Z^{rs}$ with $s=s(\xi)$, and $F\in\mathcal{H}_\xi$ with $\|F\|_{W_3}<\infty$: $|F(p)|\ll_{\Gamma^\prime}\|F\|_{W_3}\,Y_{\Gamma^\prime}(p)^{1-s}$ for all $p$.
+
+cites strombergsson2013deviation: On the deviation of ergodic averages for horocycle flows — Andreas Strömbergsson (2013) · Sobolev embedding for residual eigenfunctions; locator not read (stated as the draft uses it) · J. Mod. Dyn. 7 (2013), published version
+
+	
+reference-review
+no-longer-callable
+	
+	
+spectral-structure-real
+	
+For a non-cocompact lattice $\Gamma^\prime<SL_2(\mathbb{R})$, $L^2(\Gamma^\prime\backslash SL_2(\mathbb{R}))=\int^\oplus_Z\mathcal{H}_\xi\,d\mu_Z(\xi)$ with $Z=Z^0\sqcup Z^{rs}\sqcup Z^{ct}$, where $Z^0\cup Z^{rs}$ is discrete with counting measure, $Z^{rs}$ is finite and contains exactly one $\xi$ with $\pi_\xi$ trivial, $s(\xi)\in(\frac12,1)$ for the other $\xi\in Z^{rs}$, $\pi_\xi$ is principal series with $s(\xi)\in\frac12+i\mathbb{R}_{\ge0}$ for $\xi\in Z^{ct}$, and $Z^0_+=\{\xi\in Z^0: s(\xi)\in(\frac12,1)\}$ is finite.
+
+cites strombergsson2013deviation: On the deviation of ergodic averages for horocycle flows — Andreas Strömbergsson (2013) · section on the spectral decomposition; locator not read · J. Mod. Dyn. 7 (2013), published version
+
+	
+reference-review
+no-longer-callable
+	
+	
+tree-spherical-asymptotics
+	
+On $G_p$: (a) the Harish-Chandra function satisfies $\Xi_p(a_n)=\frac{p^{-n}}{p+1}\big((2n+1)(p-1)+2\big)$ for $n\ge0$; (b) the spherical function of the complementary series $\gamma^s$, $s\in(0,1)$, satisfies $\varpi_{\gamma^s}(a_n)\ll\frac{p^{n(s-1)}}{1-p^{-s}}$.
+
+cites figa-talamanca-nebbia1991: Harmonic analysis and representation theory for groups acting on homogeneous trees — Alessandro Figà-Talamanca, Claudio Nebbia (1991) · chapter on spherical functions on homogeneous trees; locator not read · LMS Lecture Note Series 162, 1991
+
+	
+reference-review
+no-longer-callable
+	
+	
+unitary-dual-sl2-qp
+	
+Every irreducible unitary representation of $G_p=SL_2(\mathbb{Q}_p)$ is the trivial representation, a tempered representation, or a complementary series representation $\gamma^s$, $s\in(0,1)$: $\widehat{G_p}=\{1\}\cup\{\pi \text{ tempered}\}\cup\{\gamma^s: s\in(0,1)\}$.
+
+cites gelfand-graev-piatetski1969: Representation theory and automorphic functions — I. M. Gelfand, M. I. Graev, I. I. Piatetski-Shapiro (1969) · chapter on irreducible unitary representations of SL(2) over a p-adic field; locator not read · English translation, W. B. Saunders 1969
+
+	
+reference-review
+no-longer-callable
+	
+Record Selected Decisions
+Review queue
+46
+bottom-up: each Accept makes the next decision possible; nothing here holds the agents back
+Where the Reader departed from your draft
+UNFIXED TEXT
+setting · Setting: the S-adic homogeneous space X Let $G_p=SL_2(\mathbb{Q}_p)$, $G_\infty=SL_2(\mathbb{R})$ ($\mathbb{R}=\mathbb{Q}_\infty$), $G=G_\infty\times G_p$, and let $\Gamma<G$ be a lattice. $X=\Gamma\backslash G$, on which $G$ acts by right translation: $\Gamma(g^z_\infty,g^z_p)\cdot(g_\infty,g_p)=\Gamma(g^z_\infty g_\infty,g^z_p g_p)$. $\mu_\infty,\mu_p$ are Haar measures on $G_\infty,G_p$, $\mu=\mu_\infty\otimes\mu_p$, and $\bar\mu$ is the $G$-invariant probability measure on $X$ induced by $\mu$. $\mathcal{H}=L^2(X,\bar\mu)$ with the right regular representation $\pi$ of $G$.
+a Definition reader wrote; named by cuspidal-exceptional-finite, height-vs-distance, hilbert-space-decomposition, main-theorem, sobolev-embedding-general, unitary-dual-sl2-qp; editable until a decision relies on it
+UNFIXED TEXT
+subgroups-p · p-adic subgroups K_p, A_p, H_p, H_p^- $K_p=SL_2(\mathbb{Z}_p)$. $A_p=\{a_p(\omega,n)=\mathrm{diag}(\omega p^n,\omega^{-1}p^{-n}) : n\in\mathbb{Z}_{\ge0},\ \omega\in\mathbb{Z}_p^\times\}$ (a subset of the diagonal group, not a subgroup, since $n\ge0$), $a_n=a_p(1,n)$. $H_p=\{h_p(t)=\begin{pmatrix}1&t\\0&1\end{pmatrix}: t\in\mathbb{Q}_p\}$, $H_p^-=\{h_p^-(t)=\begin{pmatrix}1&0\\t&1\end{pmatrix}: t\in\mathbb{Q}_p\}$.
+a Definition reader wrote; named by main-theorem, matrix-coefficient-decay-p, matrix-coefficient-decay-product, tree-spherical-asymptotics; editable until a decision relies on it
+UNFIXED TEXT
+subgroups-real · Real subgroups, Lie algebra basis, Casimir $K_\infty=SO(2)=\{r(\theta)=\begin{pmatrix}\cos\theta&\sin\theta\\-\sin\theta&\cos\theta\end{pmatrix}\}$, $A_\infty=\{a_\infty(x)=\mathrm{diag}(e^{x/2},e^{-x/2}): x\ge0\}$ (a subset, not a subgroup, since $x\ge0$), $H_\infty=\{h_\infty(t)=\begin{pmatrix}1&t\\0&1\end{pmatrix}: t\in\mathbb{R}\}$, $H_\infty^-=\{h^-_\infty(t)=\begin{pmatrix}1&0\\t&1\end{pmatrix}\}$. Basis of $\mathfrak{g}_\infty=\mathfrak{sl}_2(\mathbb{R})$: $Y=\mathrm{diag}(1,-1)$, $X_-=\begin{pmatrix}0&0\\1&0\end{pmatrix}$, $X_+=\begin{pmatrix}0&1\\0&0\end{pmatrix}$. For a unitary representation $\pi$ of $G$ and $Z\in\mathfrak{g}_\infty$, $d\pi(Z)f=\lim_{t\to0}(\pi(\exp tZ,1)f-f)/t$. Casimir: $\Omega_\infty=-\frac14(Y^2+2X_+X_-+2X_-X_+)$; $\Delta=-\sum_i X_i^2$ for a fixed basis $\{X_i\}$ of $\mathfrak{g}_\infty$. Burger notation: $a(y)=\mathrm{diag}(y^{1/2},y^{-1/2})=a_\infty(\log y)$ for $y>0$.
+a Definition reader wrote; named by burger-integral-formula, main-theorem, matrix-coefficient-decay-product, spectral-structure-real; editable until a decision relies on it
+UNFIXED TEXT
+horocycle-average · Horocycle balls and ergodic average A_B $H=H_\infty\times H_p$ with Haar measure $\nu=\nu_\infty\otimes\nu_p$, $\nu_\infty=dt$ and $\nu_p$ normalised by $\nu_p(h_p(\mathbb{Z}_p))=1$. $B_\infty(R)=\{h_\infty(t): |t|\le R\}$, $B_p(R)=\{h_p(t): |t|_p\le R\}$, $B=B_\infty(R_\infty)\times B_p(R_p)$. For $f$ on $X$ and $x\in X$: $A_B(f)(x)=\frac{1}{\nu(B)}\int_B f(x\cdot(h_\infty,h_p))\,d\nu(h_\infty,h_p)$. A point $x$ lies on a periodic $H$-orbit if $xH$ is compact.
+a Definition reader wrote; named by main-theorem; editable until a decision relies on it
+UNFIXED TEXT
+harish-chandra-function · Harish-Chandra functions Xi_infty, Xi_p Harish-Chandra functions. Real: $\Xi_\infty(g)=\frac{1}{2\pi}\int_0^{2\pi}\|g^{T}(\cos\theta,\sin\theta)^{T}\|^{-1}\,d\theta$ for $g\in G_\infty$ (bi-$K_\infty$-invariant, $\Xi_\infty(1)=1$, $\Xi_\infty(a_\infty(x))\asymp(1+x)e^{-x/2}$). $p$-adic: $\Xi_p$ is the bi-$K_p$-invariant function on $G_p$ given on the Bruhat-Tits tree ($(p+1)$-regular, base vertex $o$ fixed by $K_p$) by $\Xi_p(g)=p^{-m/2}\big(1+m\frac{p-1}{p+1}\big)$, $m=d(o,g o)$; since $d(o,a_n o)=2n$, $\Xi_p(a_n)=\frac{p^{-n}}{p+1}\big((2n+1)(p-1)+2\big)$.
+a Definition reader wrote; named by chh-tempered-bound, emmv-uniform-decay, main-theorem, matrix-coefficient-decay-product, tree-spherical-asymptotics; editable until a decision relies on it
+UNFIXED TEXT
+decay-exponent · Decay exponents kappa Decay exponent of an irreducible unitary representation (of $G_\infty$ or $G_p$): $\kappa=1-s$ for the complementary series of parameter $s$ (real: $\lambda=s(1-s)$ the Casimir eigenvalue, $s\in(\frac12,1)$; $p$-adic: $\gamma^s$, $s\in(0,1)$ as in the spherical function definition), and $\kappa=1$ for tempered representations. For $\pi=\int^\oplus_Z\pi_{\infty,\xi}\otimes\pi_{p,\xi}\,d\mu_Z(\xi)$: $\kappa_{\infty,\xi}=1-s_\infty(\xi)$, $\kappa_{p,\xi}=1-s_p(\xi)$, and $\kappa_\infty=\operatorname{ess\,inf}_\xi\kappa_{\infty,\xi}$, $\kappa_p=\operatorname{ess\,inf}_\xi\kappa_{p,\xi}$ over the nontrivial components.
+a Definition reader wrote; named by main-theorem, matrix-coefficient-decay-product; editable until a decision relies on it
+UNFIXED TEXT
+spectral-decomposition · Spectral decomposition of L^2(X) $\mathcal{H}=L^2(X)=\int^\oplus_Z\mathcal{H}_{\infty,\xi}\otimes\mathcal{H}_{p,\xi}\,d\mu_Z(\xi)$, $\pi=\int^\oplus_Z\pi_{\infty,\xi}\otimes\pi_{p,\xi}\,d\mu_Z$, each $\pi_{\infty,\xi}$ irreducible unitary of $G_\infty$, with $K_\infty$-eigenbasis $\phi^{(n)}_{\infty,\xi}$, $\pi_{\infty,\xi}(r(\theta))\phi^{(n)}=e^{in\theta}\phi^{(n)}$, $n\in\Sigma(\xi)\subseteq2\mathbb{Z}$ (Bargmann). $\pi_{\infty,\xi}(\Omega_\infty)=\lambda(\xi)\,\mathrm{id}$, $\lambda=s(1-s)$ with $\mathrm{Re}\,s\ge\frac12$, $\mathrm{Im}\,s\ge0$: $s\in\frac12+i\mathbb{R}$ if $\lambda\ge\frac14$, $s\in(\frac12,1]$ if $0\le\lambda<\frac14$, $s\in\mathbb{Z}^+$ if $\lambda<0$. $Z=Z^0\sqcup Z^{rs}\sqcup Z^{ct}$ (cuspidal, residual, continuous spectrum, as in Strömbergsson 2013): $Z^0\cup Z^{rs}$ discrete with counting measure; $Z^{rs}$ finite, containing exactly one $\xi$ with $\pi_{\infty,\xi}$ trivial and $s(\xi)\in(\frac12,1)$ for the others; $s(\xi)\in\frac12+i\mathbb{R}_{\ge0}$ (principal series) on $Z^{ct}$. $Z^0_+=\{\xi\in Z^0: s(\xi)\in(\frac12,1)\}$, $Z^0_-=Z^0\setminus Z^0_+$. $\mathcal{H}^0_+,\mathcal{H}^0_-,\mathcal{H}^{rs},\mathcal{H}^{ct}$ are the closed subspaces over $Z^0_+,Z^0_-,Z^{rs},Z^{ct}$, $\mathcal{H}^0=\mathcal{H}^0_+\oplus\mathcal{H}^0_-$ (cuspidal functions), $\mathcal{H}_\xi=\mathcal{H}_{\infty,\xi}\otimes\mathcal{H}_{p,\xi}$. $\lambda_1=s_1(1-s_1)$ is the smallest Casimir eigenvalue over the nontrivial $\xi\in Z^0_+\cup Z^{rs}$ (assumed to exist, $s_1\in(\frac12,1)$).
+a Definition reader wrote; named by burger-integral-formula, burger-operator-bounds, cuspidal-exceptional-finite, hilbert-space-decomposition, main-theorem, sobolev-cuspidal-real, sobolev-embedding-cuspidal, sobolev-embedding-residual, sobolev-residual-real, spectral-structure-real; editable until a decision relies on it
+UNFIXED TEXT
+sobolev-norm · Sobolev norm W_k For $f\in\mathcal{H}$ (smooth vectors $\mathcal{H}^\infty$ dense), $\|f\|_{W_k}=\|(I+\overline{d\pi(\Delta)})^{k/2}f\|_2$, $\Delta=-\sum_iX_i^2\in U(\mathfrak{g}_\infty)$ acting through $G_\infty\times\{1\}$ ($\overline{d\pi(\Delta)}$ is self-adjoint by Nelson); for a pure tensor this is $\|(I+\overline{\pi_\infty(\Delta)})^{k/2}f_\infty\|\cdot\|f_p\|_2$. $W_k(\mathcal{H})$ is the space of $f$ with $\|f\|_{W_k}<\infty$. Up to constants, $\|f\|^2_{W_k}\asymp\int_Z\sum_{n\in\Sigma(\xi)}(1+n^2+|s(\xi)|^2)^k|\langle f_{\xi},\phi^{(n)}_{\infty,\xi}\rangle|^2\,d\mu_Z(\xi)$. Only real derivatives enter: $W_k$ measures smoothness in the $G_\infty$ direction.
+a Definition reader wrote; named by burger-operator-bounds, cuspidal-exceptional-finite, hilbert-space-decomposition, main-theorem, sobolev-cuspidal-real, sobolev-embedding-cuspidal, sobolev-embedding-general, sobolev-embedding-residual, sobolev-residual-real; editable until a decision relies on it
+UNFIXED TEXT
+height-function · Height function ht For $x=\Gamma(g_\infty,g_p)\in X$, let $\Gamma_{g_p}=\{\gamma=(\gamma_\infty,\gamma_p)\in\Gamma: \gamma_p g_p\in K_p\}$ and $ht(x)=\sup_{\gamma\in\Gamma_{g_p}}\mathrm{Im}(\gamma_\infty g_\infty\cdot i)$, where $G_\infty$ acts on the upper half-plane $\mathbb{H}$ by Möbius transformations. (Independent of the representative: replacing $(g_\infty,g_p)$ by $\delta(g_\infty,g_p)$, $\delta\in\Gamma$, replaces $\Gamma_{g_p}$ by $\Gamma_{g_p}\delta^{-1}$.) Large height means deep in a cusp.
+a Definition reader wrote; named by height-vs-distance, main-theorem, sobolev-embedding-cuspidal, sobolev-embedding-general, sobolev-embedding-residual; editable until a decision relies on it
+UNFIXED TEXT
+smooth-w-invariant · W-invariant functions and d_W For an open compact subgroup $W\le K_p$, a function $f\in L^2(X)$ is $W$-invariant if $f(x\cdot(1,w))=f(x)$ for all $w\in W$; then $f$ is $K_p$-finite with $d_{K_p}(f)\le d_W$, where $d_W=[K_p:W]$.
+a Definition reader wrote; named by main-theorem, sobolev-embedding-cuspidal, sobolev-embedding-general, sobolev-embedding-residual; editable until a decision relies on it
+UNFIXED TEXT
+burger-operators · Burger operators F_y, S_y, T_y Fix $\mathcal{Y}\ge1$. For $y\ge1$, $F_y,S_y:\mathcal{H}\to\mathcal{H}$ are the intertwining operators acting on $\mathcal{H}_\xi$ by the scalars $f_y(\xi)=\frac{sy^{s-1}-(1-s)y^{-s}}{2s-1}$ if $\mathrm{Re}\,s<1,s\ne\frac12$; $\frac{2+\log y}{2\sqrt y}$ if $s=\frac12$; $y^{-s}$ if $s\in\mathbb{Z}^+$; and $s_y(\xi)=\frac{y^{s-1}-y^{-s}}{2s-1}$ if $\mathrm{Re}\,s<1,s\ne\frac12$; $\frac{\log y}{2\sqrt y}$ if $s=\frac12$; $0$ if $s\in\mathbb{Z}^+$ ($s=s(\xi)$). For $y>0$, $T_y$ acts by $t_y(\xi)=s_y(\xi)$ if $\mathrm{Re}\,s<1,y\ge1$; $0$ if $\mathrm{Re}\,s<1,y<1$; $y^{s-1}\frac{\max(1,y)^{1-2s}-\mathcal{Y}^{1-2s}}{1-2s}$ if $s\in\mathbb{Z}^+$.
+a Definition reader wrote; named by burger-integral-formula, burger-operator-bounds, main-theorem; editable until a decision relies on it
+PARKED
+main-theorem · Let $\Gamma<G$ be an irreducible non-cocompact lattice, with $\lambda_1=s_1(1-s_1)$ and $p$-adic decay exponent $\kappa_p$ of $L^2_0(X)$. Let $W\le K_p$ be open compact and $f\in L^2(X)$ smooth, $W$-invariant, with $\int_Xf\,d\bar\mu=0$ and $\|f\|_{W_4}<\infty$. Let $x\in X$ not lie on a periodic $H$-orbit, $T\ge2$, $n\ge0$, $B=B_\infty(T)\times B_p(p^n)$ and $r=T/ht\big(x\cdot(a_\infty(\log T),1)\big)$. Then $|A_B(f)(x)|\ll_\Gamma\Big(r^{-1/2}(\log T)^2+T^{s_1-1}+T^{-1/2}\log(T+1)\Big)\,\mu_p(W)^{-1/2}\,d_W\,\nu_p(B_p(p^n))^{-1/2}\,\Xi_p(a_n)^{\kappa_p}\,\|f\|_{W_4}$.
+the agents could not go on: needs-human: No split. The statement is false as written: its p-adic factor nu_p(B_p(p^n))^{-1/2} Xi_p(a_n)^{kappa_p} is beaten by an L^2 lower bound (fog-10). For Gamma=SL_2(Z[1/p]), W=K_p, f a lifted Hecke-Maass form and T fixed, ||A_B f||_2 >> nu_p^{-1/2} infinitely often in n, while the claim forces an extra Xi_p(a_n)^{kappa_p}. The researcher must choose the intended p-adic factor. Likely intended: B_p(p^{2n}) with factor Xi_p(a_n)^{kappa_p}, proved by thickening. A split for that reading is drafted in scratch/decomposer/notes.md.
+UNFIXED TEXT
+burger-integral-formula · Let $(\pi,\mathcal{H})$ be a unitary representation of $SL_2(\mathbb{R})$ (no nonzero invariant vectors), $f\in\mathcal{H}^\infty$, $\mathcal{Y}\ge1$, $T>0$, $h(t)=h_\infty(t)$, $a(y)=\mathrm{diag}(y^{1/2},y^{-1/2})$. Then $\frac1T\int_0^T\pi(h(t))f\,dt=\frac1T\int_0^T\pi(h(t)a(\mathcal{Y}))F_{\mathcal{Y}}f\,dt-\frac{1}{2T}\int_0^T\pi(h(t)a(\mathcal{Y}))S_{\mathcal{Y}}\,d\pi(Y)f\,dt+\frac1T\int_0^{\mathcal{Y}}[1-\pi(h(T))]\pi(a(y))T_y\,d\pi(X_-)f\,dy$, the last integral converging in $\mathcal{H}$.
+stated by reader; editable until a Review decision relies on it
+CITATION
+burger-integral-formula · Let $(\pi,\mathcal{H})$ be a unitary representation of $SL_2(\mathbb{R})$ (no nonzero invariant vectors), $f\in\mathcal{H}^\infty$, $\mathcal{Y}\ge1$, $T>0$, $h(t)=h_\infty(t)$, $a(y)=\mathrm{diag}(y^{1/2},y^{-1/2})$. Then $\frac1T\int_0^T\pi(h(t))f\,dt=\frac1T\int_0^T\pi(h(t)a(\mathcal{Y}))F_{\mathcal{Y}}f\,dt-\frac{1}{2T}\int_0^T\pi(h(t)a(\mathcal{Y}))S_{\mathcal{Y}}\,d\pi(Y)f\,dt+\frac1T\int_0^{\mathcal{Y}}[1-\pi(h(T))]\pi(a(y))T_y\,d\pi(X_-)f\,dy$, the last integral converging in $\mathcal{H}$.
+an imported result no one has Reference-reviewed: the runs rely on its statement
+UNFIXED TEXT
+burger-operator-bounds · With $s=s(\xi)$ and $f_y,s_y,t_y$ as in the Burger operators: $\sup_{\xi\in Z^0_-\cup Z^{ct}}|f_y(\xi)|\le\frac{2+\log y}{2\sqrt y}$ and $\sup_{\xi\in Z^0_-\cup Z^{ct}}|s_y(\xi)|\le\frac{\log y}{\sqrt y}$ for $y\ge1$; $\sup_{\xi\in Z^0_-\cup Z^{ct}}|t_y(\xi)|\le\frac{2\log(y+10)}{\sqrt{y+1}}$ for $y\in(0,\mathcal{Y}]$. Consequently $F_y,S_y,T_y$ are bounded on $\mathcal{H}$ and on each $W_k(\mathcal{H})$, continuous on $\mathcal{H}^\infty$, and $y\mapsto T_y$ is continuous in operator norm on $W_k(\mathcal{H})$.
+stated by reader; editable until a Review decision relies on it
+CITATION
+burger-operator-bounds · With $s=s(\xi)$ and $f_y,s_y,t_y$ as in the Burger operators: $\sup_{\xi\in Z^0_-\cup Z^{ct}}|f_y(\xi)|\le\frac{2+\log y}{2\sqrt y}$ and $\sup_{\xi\in Z^0_-\cup Z^{ct}}|s_y(\xi)|\le\frac{\log y}{\sqrt y}$ for $y\ge1$; $\sup_{\xi\in Z^0_-\cup Z^{ct}}|t_y(\xi)|\le\frac{2\log(y+10)}{\sqrt{y+1}}$ for $y\in(0,\mathcal{Y}]$. Consequently $F_y,S_y,T_y$ are bounded on $\mathcal{H}$ and on each $W_k(\mathcal{H})$, continuous on $\mathcal{H}^\infty$, and $y\mapsto T_y$ is continuous in operator norm on $W_k(\mathcal{H})$.
+an imported result no one has Reference-reviewed: the runs rely on its statement
+UNFIXED TEXT
+tempered-representation · Tempered representation A unitary representation $(\pi,\mathcal{H})$ of a locally compact group $L$ is tempered if there is a dense subspace $\mathcal{V}\subset\mathcal{H}$ such that for all $v\in\mathcal{V}$ and $\epsilon>0$, $g\mapsto\langle\pi(g)v,v\rangle$ lies in $L^{2+\epsilon}(L)$.
+a Definition reader wrote; named by chh-tempered-bound, unitary-dual-sl2-qp; editable until a decision relies on it
+UNFIXED TEXT
+k-finite-dimension · d_K(v): dimension of the K-span For a unitary representation of a group with compact subgroup $K$ and a vector $v$, $d_K(v)=\dim\langle K\cdot v\rangle$, the dimension of the linear span of $\pi(K)v$; $v$ is $K$-finite if $d_K(v)<\infty$.
+a Definition reader wrote; named by chh-tempered-bound, emmv-uniform-decay, matrix-coefficient-decay-p, matrix-coefficient-decay-product; editable until a decision relies on it
+UNFIXED TEXT
+chh-tempered-bound · Let $L$ be $G_\infty$ or $G_p$ with maximal compact subgroup $K$ ($K_\infty$, resp. $K_p$). If $\pi$ is a tempered unitary representation of $L$ and $v,w$ are $K$-finite, then $|\langle\pi(g)v,w\rangle|\le(d_K(v)d_K(w))^{1/2}\|v\|\|w\|\,\Xi_L(g)$ for all $g\in L$.
+stated by reader; editable until a Review decision relies on it
+CITATION
+chh-tempered-bound · Let $L$ be $G_\infty$ or $G_p$ with maximal compact subgroup $K$ ($K_\infty$, resp. $K_p$). If $\pi$ is a tempered unitary representation of $L$ and $v,w$ are $K$-finite, then $|\langle\pi(g)v,w\rangle|\le(d_K(v)d_K(w))^{1/2}\|v\|\|w\|\,\Xi_L(g)$ for all $g\in L$.
+an imported result no one has Reference-reviewed: the runs rely on its statement
+UNFIXED TEXT
+emmv-uniform-decay · Let $\mathbf{G}$ be a simply connected semisimple group over a number field $F$ as in Theorem 4.1. There is $\kappa_2>0$ such that for every place $v$, all $K_v$-finite $f_1,f_2\in L^2(\mathbf{G}(F)\backslash\mathbf{G}(\mathbb{A}))$ with $\int f_1=\int f_2=0$ and all $g_v\in\mathbf{G}(F_v)$: $|\langle\pi_{g_v}f_1,f_2\rangle|\le\dim\langle K_v f_1\rangle^{1/2}\dim\langle K_v f_2\rangle^{1/2}\|f_1\|_2\|f_2\|_2\,\Xi_{G_v}(g_v)^{\kappa_2}$, where $K_v$ is a good maximal compact open subgroup of $\mathbf{G}(F_v)$ and $\Xi_{G_v}$ a Harish-Chandra spherical function; $\kappa_2$ is independent of $v$.
+stated by reader; editable until a Review decision relies on it
+CITATION
+emmv-uniform-decay · Let $\mathbf{G}$ be a simply connected semisimple group over a number field $F$ as in Theorem 4.1. There is $\kappa_2>0$ such that for every place $v$, all $K_v$-finite $f_1,f_2\in L^2(\mathbf{G}(F)\backslash\mathbf{G}(\mathbb{A}))$ with $\int f_1=\int f_2=0$ and all $g_v\in\mathbf{G}(F_v)$: $|\langle\pi_{g_v}f_1,f_2\rangle|\le\dim\langle K_v f_1\rangle^{1/2}\dim\langle K_v f_2\rangle^{1/2}\|f_1\|_2\|f_2\|_2\,\Xi_{G_v}(g_v)^{\kappa_2}$, where $K_v$ is a good maximal compact open subgroup of $\mathbf{G}(F_v)$ and $\Xi_{G_v}$ a Harish-Chandra spherical function; $\kappa_2$ is independent of $v$.
+an imported result no one has Reference-reviewed: the runs rely on its statement
+UNFIXED TEXT
+injectivity-radius · Metrics on G, X and injectivity radius Fix a left-invariant Riemannian metric $d_{G_\infty}$ on $G_\infty$ and a left-invariant metric $d_{G_p}$ inducing the topology of $G_p$; $d_G((g_\infty,g_p),(g_\infty^\prime,g_p^\prime))=\max\{d_{G_\infty}(g_\infty,g_\infty^\prime),d_{G_p}(g_p,g_p^\prime)\}$, and $d_X(\Gamma g,\Gamma g^\prime)=\inf_{\gamma\in\Gamma}d_G(g,\gamma g^\prime)$. $B^G_r=\{g\in G: d_G(g,1)<r\}$, $B^X_r(x)=\{y: d_X(x,y)<r\}$. The injectivity radius at $x\in X$ is $\rho(x)=\sup\{r>0: g\mapsto x g \text{ is injective on } B^G_r\}$; for $r<\rho(x)$ the map $B^G_r\to B^X_r(x)$, $g\mapsto xg$, is an isometry onto its image.
+a Definition reader wrote; named by height-vs-distance, local-sobolev-inequality, sobolev-embedding-general; editable until a decision relies on it
+UNFIXED TEXT
+height-vs-distance · Fix $x_0\in X$. For every $g_p\in G_p$ there is $C=C(\Gamma,x_0,g_p)\ge1$ such that for all $g_\infty\in G_\infty$: $C^{-1}e^{d_X(\Gamma(g_\infty,g_p),x_0)}\le ht(\Gamma(g_\infty,g_p))\le C\,e^{d_X(\Gamma(g_\infty,g_p),x_0)}$.
+stated by reader; editable until a Review decision relies on it
+UNFIXED TEXT
+local-sobolev-inequality · Let $M$ be the unit tangent bundle of a finite-area hyperbolic surface (a 3-manifold, locally $SL_2(\mathbb{R})$). For $0<\epsilon$ below the injectivity radius at $y\in M$ there is $C(\epsilon)$ with $|u(y)|^2\le C(\epsilon)\int_{B(y,\epsilon)}|u|^2+|du|^2+|\Delta u|^2$ for all $u\in W^{2,2}$; in particular $W^{2,2}$ functions are continuous.
+stated by reader; editable until a Review decision relies on it
+CITATION
+local-sobolev-inequality · Let $M$ be the unit tangent bundle of a finite-area hyperbolic surface (a 3-manifold, locally $SL_2(\mathbb{R})$). For $0<\epsilon$ below the injectivity radius at $y\in M$ there is $C(\epsilon)$ with $|u(y)|^2\le C(\epsilon)\int_{B(y,\epsilon)}|u|^2+|du|^2+|\Delta u|^2$ for all $u\in W^{2,2}$; in particular $W^{2,2}$ functions are continuous.
+an imported result no one has Reference-reviewed: the runs rely on its statement
+UNFIXED TEXT
+sobolev-cuspidal-real · For a non-cocompact lattice $\Gamma^\prime<SL_2(\mathbb{R})$ and $F$ in the cuspidal subspace with $\|F\|_{W_3}<\infty$: $|F(p)|\ll_{\Gamma^\prime}\|F\|_{W_3}\,Y_{\Gamma^\prime}(p)^{-1/2}$ for all $p\in\Gamma^\prime\backslash SL_2(\mathbb{R})$, $Y_{\Gamma^\prime}$ the invariant height.
+stated by reader; editable until a Review decision relies on it
+CITATION
+sobolev-cuspidal-real · For a non-cocompact lattice $\Gamma^\prime<SL_2(\mathbb{R})$ and $F$ in the cuspidal subspace with $\|F\|_{W_3}<\infty$: $|F(p)|\ll_{\Gamma^\prime}\|F\|_{W_3}\,Y_{\Gamma^\prime}(p)^{-1/2}$ for all $p\in\Gamma^\prime\backslash SL_2(\mathbb{R})$, $Y_{\Gamma^\prime}$ the invariant height.
+an imported result no one has Reference-reviewed: the runs rely on its statement
+UNFIXED TEXT
+sobolev-residual-real · For a non-cocompact lattice $\Gamma^\prime<SL_2(\mathbb{R})$, $\xi\in Z^{rs}$ with $s=s(\xi)$, and $F\in\mathcal{H}_\xi$ with $\|F\|_{W_3}<\infty$: $|F(p)|\ll_{\Gamma^\prime}\|F\|_{W_3}\,Y_{\Gamma^\prime}(p)^{1-s}$ for all $p$.
+stated by reader; editable until a Review decision relies on it
+CITATION
+sobolev-residual-real · For a non-cocompact lattice $\Gamma^\prime<SL_2(\mathbb{R})$, $\xi\in Z^{rs}$ with $s=s(\xi)$, and $F\in\mathcal{H}_\xi$ with $\|F\|_{W_3}<\infty$: $|F(p)|\ll_{\Gamma^\prime}\|F\|_{W_3}\,Y_{\Gamma^\prime}(p)^{1-s}$ for all $p$.
+an imported result no one has Reference-reviewed: the runs rely on its statement
+UNFIXED TEXT
+spectral-structure-real · For a non-cocompact lattice $\Gamma^\prime<SL_2(\mathbb{R})$, $L^2(\Gamma^\prime\backslash SL_2(\mathbb{R}))=\int^\oplus_Z\mathcal{H}_\xi\,d\mu_Z(\xi)$ with $Z=Z^0\sqcup Z^{rs}\sqcup Z^{ct}$, where $Z^0\cup Z^{rs}$ is discrete with counting measure, $Z^{rs}$ is finite and contains exactly one $\xi$ with $\pi_\xi$ trivial, $s(\xi)\in(\frac12,1)$ for the other $\xi\in Z^{rs}$, $\pi_\xi$ is principal series with $s(\xi)\in\frac12+i\mathbb{R}_{\ge0}$ for $\xi\in Z^{ct}$, and $Z^0_+=\{\xi\in Z^0: s(\xi)\in(\frac12,1)\}$ is finite.
+stated by reader; editable until a Review decision relies on it
+CITATION
+spectral-structure-real · For a non-cocompact lattice $\Gamma^\prime<SL_2(\mathbb{R})$, $L^2(\Gamma^\prime\backslash SL_2(\mathbb{R}))=\int^\oplus_Z\mathcal{H}_\xi\,d\mu_Z(\xi)$ with $Z=Z^0\sqcup Z^{rs}\sqcup Z^{ct}$, where $Z^0\cup Z^{rs}$ is discrete with counting measure, $Z^{rs}$ is finite and contains exactly one $\xi$ with $\pi_\xi$ trivial, $s(\xi)\in(\frac12,1)$ for the other $\xi\in Z^{rs}$, $\pi_\xi$ is principal series with $s(\xi)\in\frac12+i\mathbb{R}_{\ge0}$ for $\xi\in Z^{ct}$, and $Z^0_+=\{\xi\in Z^0: s(\xi)\in(\frac12,1)\}$ is finite.
+an imported result no one has Reference-reviewed: the runs rely on its statement
+UNFIXED TEXT
+spherical-function · Spherical function varpi_pi For an irreducible unitary representation $\pi$ of $G_p$: if $\pi$ has a nonzero $K_p$-fixed unit vector $v$, its spherical function is $\varpi_\pi(g)=\langle\pi(g)v,v\rangle$. In the bounds below $\varpi_\pi$ means: $\varpi_\pi=1$ for $\pi$ trivial, $\varpi_\pi=\Xi_p$ for $\pi$ tempered, and $\varpi_\pi=\varpi_{\gamma^s}$, the spherical function of the complementary series representation $\gamma^s$ ($s\in(0,1)$), for $\pi=\gamma^s$. The complementary series are parametrised so that $\varpi_{\gamma^s}(a_n)$ decays like $p^{-n(1-s)}$.
+a Definition reader wrote; named by matrix-coefficient-decay-p, tree-spherical-asymptotics, unitary-dual-sl2-qp; editable until a decision relies on it
+UNFIXED TEXT
+tree-spherical-asymptotics · On $G_p$: (a) the Harish-Chandra function satisfies $\Xi_p(a_n)=\frac{p^{-n}}{p+1}\big((2n+1)(p-1)+2\big)$ for $n\ge0$; (b) the spherical function of the complementary series $\gamma^s$, $s\in(0,1)$, satisfies $\varpi_{\gamma^s}(a_n)\ll\frac{p^{n(s-1)}}{1-p^{-s}}$.
+stated by reader; editable until a Review decision relies on it
+CITATION
+tree-spherical-asymptotics · On $G_p$: (a) the Harish-Chandra function satisfies $\Xi_p(a_n)=\frac{p^{-n}}{p+1}\big((2n+1)(p-1)+2\big)$ for $n\ge0$; (b) the spherical function of the complementary series $\gamma^s$, $s\in(0,1)$, satisfies $\varpi_{\gamma^s}(a_n)\ll\frac{p^{n(s-1)}}{1-p^{-s}}$.
+an imported result no one has Reference-reviewed: the runs rely on its statement
+UNFIXED TEXT
+unitary-dual-sl2-qp · Every irreducible unitary representation of $G_p=SL_2(\mathbb{Q}_p)$ is the trivial representation, a tempered representation, or a complementary series representation $\gamma^s$, $s\in(0,1)$: $\widehat{G_p}=\{1\}\cup\{\pi \text{ tempered}\}\cup\{\gamma^s: s\in(0,1)\}$.
+stated by reader; editable until a Review decision relies on it
+CITATION
+unitary-dual-sl2-qp · Every irreducible unitary representation of $G_p=SL_2(\mathbb{Q}_p)$ is the trivial representation, a tempered representation, or a complementary series representation $\gamma^s$, $s\in(0,1)$: $\widehat{G_p}=\{1\}\cup\{\pi \text{ tempered}\}\cup\{\gamma^s: s\in(0,1)\}$.
+an imported result no one has Reference-reviewed: the runs rely on its statement
+UNFIXED TEXT
+cuspidal-exceptional-finite · In the setting of the S-adic homogeneous space X, with the spectral decomposition of L^2(X), the set ^0_+=\{\xi\in Z^0: s(\xi)\in(\frac12,1)\}$ is finite.
+stated by claude-code; editable until a Review decision relies on it
+UNFIXED TEXT
+matrix-coefficient-decay-p · For an irreducible unitary representation $(\pi,\mathcal{H})$ of $G_p$ and $K_p$-finite $\phi,\psi\in\mathcal{H}$: $|\langle\pi(a_n)\phi,\psi\rangle|\le\sqrt{d_{K_p}(\phi)d_{K_p}(\psi)}\,\|\phi\|_2\|\psi\|_2\,\varpi_\pi(a_n)$ for all $n\ge0$.
+stated by reader; editable until a Review decision relies on it
+UNFIXED TEXT
+sobolev-embedding-general · Let $W\le K_p$ be open compact and $F\in L^2(X)$ $W$-invariant with $\|F\|_{W_3}<\infty$. Then $F$ is continuous and for every $x\in X$: $|F(x)|\ll_\Gamma ht(x)^{1/2}\,\mu_p(W)^{-1/2}\,\|F\|_{W_3}$.
+stated by reader; editable until a Review decision relies on it
+QUESTION
+hilbert-space-decomposition · $\mathcal{H}=L^2(X)=\mathcal{H}^0_+\oplus\mathcal{H}^0_-\oplus\mathcal{H}^{rs}\oplus\mathcal{H}^{ct}$, an orthogonal sum of closed $G$-invariant subspaces, with $Z^0_+$ and $Z^{rs}$ finite; for $f\in\mathcal{H}^\infty$ with components $f_0\in\mathcal{H}^0$, $f_{rs}$, $f_{ct}$: $\|f\|^2_{W_k}=\|f_0\|^2_{W_k}+\|f_{ct}\|^2_{W_k}+\|f_{rs}\|^2_{W_k}$.
+
+Finiteness of Z^0_+ is not derivable from spectral-structure-real (that is for lattices in SL_2(R); here Gamma is a lattice in SL_2(R)xSL_2(Q_p), and the per-level finiteness over K_p(p^n)-invariants does not bound the union over n). I split it off as the Claim cuspidal-exceptional-finite and prove the rest directly. Alternative: make finiteness of Z^0_+ a standing hypothesis of the setup (like the assumed existence of lambda_1) and drop it from this statement. Note: the child's statement text lost '$Z' to shell expansion ('^0_+=...'); restating it needed approval this session could not get.
+
+the choice claude-code made instead of stopping
+Keep the choice
+Redirect
+UNFIXED TEXT
+hilbert-space-decomposition · $\mathcal{H}=L^2(X)=\mathcal{H}^0_+\oplus\mathcal{H}^0_-\oplus\mathcal{H}^{rs}\oplus\mathcal{H}^{ct}$, an orthogonal sum of closed $G$-invariant subspaces, with $Z^0_+$ and $Z^{rs}$ finite; for $f\in\mathcal{H}^\infty$ with components $f_0\in\mathcal{H}^0$, $f_{rs}$, $f_{ct}$: $\|f\|^2_{W_k}=\|f_0\|^2_{W_k}+\|f_{ct}\|^2_{W_k}+\|f_{rs}\|^2_{W_k}$.
+stated by reader; editable until a Review decision relies on it
+UNFIXED TEXT
+matrix-coefficient-decay-product · Let $(\pi,\mathcal{H})=\int^\oplus_Z\pi_{\infty,\xi}\otimes\pi_{p,\xi}\,d\mu_Z$ be a unitary representation of $G=G_\infty\times G_p$ with no nonzero $G_\infty$- or $G_p$-invariant vectors, with decay exponents $\kappa_\infty,\kappa_p$. Then for $K_\infty\times K_p$-finite $v,w$, $t\ge0$, $n\ge0$: $|\langle\pi(a_\infty(t),a_n)v,w\rangle|\le\sqrt{d_{K_\infty}(v)d_{K_\infty}(w)d_{K_p}(v)d_{K_p}(w)}\,\|v\|\|w\|\,\Xi_\infty(a_\infty(t))^{\kappa_\infty}\,\Xi_p(a_n)^{\kappa_p}$.
+stated by reader; editable until a Review decision relies on it
+UNFIXED TEXT
+sobolev-embedding-cuspidal · Let $W\le K_p$ be open compact and $F\in\mathcal{H}^0$ (cuspidal) $W$-invariant with $\|F\|_{W_3}<\infty$. Then for every $x\in X$: $|F(x)|\ll_\Gamma\|F\|_{W_3}\,ht(x)^{-1/2}\,\mu_p(W)^{-1/2}$.
+stated by reader; editable until a Review decision relies on it
+UNFIXED TEXT
+sobolev-embedding-residual · Let $W\le K_p$ be open compact, $\xi\in Z^{rs}$, $s=s(\xi)$, and $F\in\mathcal{H}_\xi$ $W$-invariant with $\|F\|_{W_3}<\infty$. Then for every $x\in X$: $|F(x)|\ll_\Gamma\|F\|_{W_3}\,ht(x)^{1-s}\,\mu_p(W)^{-1/2}$.
+stated by reader; editable until a Review decision relies on it
+UNFIXED TEXT
+main-theorem · Let $\Gamma<G$ be an irreducible non-cocompact lattice, with $\lambda_1=s_1(1-s_1)$ and $p$-adic decay exponent $\kappa_p$ of $L^2_0(X)$. Let $W\le K_p$ be open compact and $f\in L^2(X)$ smooth, $W$-invariant, with $\int_Xf\,d\bar\mu=0$ and $\|f\|_{W_4}<\infty$. Let $x\in X$ not lie on a periodic $H$-orbit, $T\ge2$, $n\ge0$, $B=B_\infty(T)\times B_p(p^n)$ and $r=T/ht\big(x\cdot(a_\infty(\log T),1)\big)$. Then $|A_B(f)(x)|\ll_\Gamma\Big(r^{-1/2}(\log T)^2+T^{s_1-1}+T^{-1/2}\log(T+1)\Big)\,\mu_p(W)^{-1/2}\,d_W\,\nu_p(B_p(p^n))^{-1/2}\,\Xi_p(a_n)^{\kappa_p}\,\|f\|_{W_4}$.
+stated by reader; editable until a Review decision relies on it
+Trusted by rule
+imported results you haven't looked at, callable under a Trust rule
+Manage rules…

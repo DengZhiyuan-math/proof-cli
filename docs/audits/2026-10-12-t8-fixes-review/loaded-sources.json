@@ -1,0 +1,11 @@
+{
+  "sources": {
+    "proof_cli.proof_map": "/private/tmp/proof-t8-audit-px7msjct/core/src/proof_cli/proof_map.py",
+    "proof_agents.agent_run": "/private/tmp/proof-t8-audit-px7msjct/agents/src/proof_agents/agent_run.py",
+    "proof_agents.proof_agent": "/private/tmp/proof-t8-audit-px7msjct/agents/src/proof_agents/proof_agent.py",
+    "proof_web.server": "/private/tmp/proof-t8-audit-px7msjct/web/src/proof_web/server.py",
+    "proof_web.studios": "/private/tmp/proof-t8-audit-px7msjct/web/src/proof_web/studios.py"
+  },
+  "host": "macOS-27.2-arm64-arm-64bit",
+  "python": "3.11.14 (main, Oct 21 2025, 18:27:30) [Clang 20.1.8 ]"
+}

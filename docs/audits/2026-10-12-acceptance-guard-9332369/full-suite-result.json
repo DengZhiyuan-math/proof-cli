@@ -1,0 +1,102 @@
+{
+  "tests": 1169,
+  "failed": 0,
+  "errors": 0,
+  "skipped": 15,
+  "seconds": 196.155,
+  "passed": 1154,
+  "skipped_cases": [
+    {
+      "name": "test_benchmark_a_200_node_chain",
+      "class": "tests.test_performance",
+      "reason": "wall-clock benchmark: set PROOF_BENCHMARK=1"
+    },
+    {
+      "name": "test_benchmark_the_frontier_of_a_1000_node_chain",
+      "class": "tests.test_performance",
+      "reason": "wall-clock benchmark: set PROOF_BENCHMARK=1"
+    },
+    {
+      "name": "test_ascii_alias_for_names_the_code_page_cannot_spell",
+      "class": "packages.latex-agent.tests.test_studio_build.Platform",
+      "reason": "Windows code pages"
+    },
+    {
+      "name": "test_a_broken_aux_from_an_earlier_build_is_repaired",
+      "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+      "reason": "needs a TeX distribution (pdflatex on PATH)"
+    },
+    {
+      "name": "test_biber_in_a_chinese_folder",
+      "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+      "reason": "needs a TeX distribution (pdflatex on PATH)"
+    },
+    {
+      "name": "test_biblatex_with_biber",
+      "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+      "reason": "needs a TeX distribution (pdflatex on PATH)"
+    },
+    {
+      "name": "test_bibtex_and_cross_references",
+      "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+      "reason": "needs a TeX distribution (pdflatex on PATH)"
+    },
+    {
+      "name": "test_bibtex_in_a_chinese_folder",
+      "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+      "reason": "needs a TeX distribution (pdflatex on PATH)"
+    },
+    {
+      "name": "test_ctex_in_a_chinese_folder",
+      "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+      "reason": "needs a TeX distribution (pdflatex on PATH)"
+    },
+    {
+      "name": "test_errors_draft_goes_on_and_strict_stops",
+      "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+      "reason": "needs a TeX distribution (pdflatex on PATH)"
+    },
+    {
+      "name": "test_fontspec_documents_are_built_with_xelatex",
+      "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+      "reason": "needs a TeX distribution (pdflatex on PATH)"
+    },
+    {
+      "name": "test_index_glossary_and_nomenclature",
+      "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+      "reason": "needs a TeX distribution (pdflatex on PATH)"
+    },
+    {
+      "name": "test_stop_and_time_limit",
+      "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+      "reason": "needs a TeX distribution (pdflatex on PATH)"
+    },
+    {
+      "name": "test_the_projects_own_bst_and_included_subfolders",
+      "class": "packages.latex-agent.tests.test_studio_build.RealBuilds",
+      "reason": "needs a TeX distribution (pdflatex on PATH)"
+    },
+    {
+      "name": "test_save_while_another_program_reads_the_file",
+      "class": "packages.latex-agent.tests.test_studio_server.Files",
+      "reason": "Windows file sharing"
+    }
+  ],
+  "latex_previous_failures": [
+    {
+      "name": "test_the_working_file_compiles_standalone",
+      "class": "tests.test_latex_snapshots",
+      "passed": true
+    },
+    {
+      "name": "test_a_real_build_is_archived_with_the_snapshot",
+      "class": "tests.test_latex_snapshots",
+      "passed": true
+    },
+    {
+      "name": "test_source_to_pdf_and_back",
+      "class": "packages.latex-agent.tests.test_studio_server.SyncTeX",
+      "passed": true
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+WARNING: The directory '/Users/zhdeng/Library/Caches/pip' or its parent directory is not owned or is not writable by the current user. The cache has been disabled. Check the permissions and owner of that directory. If executing pip with sudo, you should use sudo's -H flag.
+Processing ./.
+  Preparing metadata (pyproject.toml): started
+  Preparing metadata (pyproject.toml): finished with status 'done'
+Building wheels for collected packages: proof-web
+  Building wheel for proof-web (pyproject.toml): started
+  Building wheel for proof-web (pyproject.toml): finished with status 'done'
+  Created wheel for proof-web: filename=proof_web-0.1.0-py3-none-any.whl size=142929 sha256=266320cb477ea79d60bee65449922617097d7c2ea7a707f855293e051e782878
+  Stored in directory: /private/var/folders/13/jgb8c061583ggg622pgv9l0c0000gp/T/pip-ephem-wheel-cache-au2_8q50/wheels/07/af/cc/59f141343d2856b27a870e628dd4faf86644ac37ebcbe2829a
+Successfully built proof-web
+
+[notice] A new release of pip is available: 26.1 -> 26.2.1
+[notice] To update, run: pip install --upgrade pip

@@ -1,0 +1,42 @@
+t8-no-theorem
+0 nodes · 0 on the frontier
+Graph
+Tree
+/
+0
+Frontier
+0
+Awaiting you
+0
+Fog
+Y
+Yomathnotcool <125728853+DengZhiyuan-math@users.noreply.github.com>
+
+Proof map
+
+Map
+Review
+Warnings
+Discuss
+Pursue started: the Reader reads the draft, then each Theorem is worked.
+
+Your library has a draft and the map is empty. Pursue reads the draft, states it as a map, and works every Theorem as far as the agents can go. What it leaves you is the review queue; nothing it does is trust until you Accept it.
+
+stuck — the Reader stated no Theorem
+Total  turns
+and  minutes
+4 turns per node × 1 open node(s) + 3 structure turn(s) (splits and the Reader). A node's budget is a ceiling, not a share: Claims a split adds spend what is left of the total.
+Turns 1/7 (1 structure) · failed launches 0 · 8.7 of 8.8 min left
+Pursue
+Right-click anywhere to create the first node, or run `proof node create`.
+Ready to start
+In progress
+Blocked
+Awaiting review
+Accepted
+Rejected
+Needs attention
+Open
+100%
+Fit
+Tidy

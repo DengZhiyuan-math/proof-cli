@@ -1,0 +1,137 @@
+{
+  "requests": [
+    {
+      "body": "{\"limits\":{\"turns\":3,\"minutes\":0},\"provider\":\"browser18-fixture\"}",
+      "reply": {
+        "error": {
+          "code": "INVALID_LIMITS",
+          "message": "a Pursue's limits are at least one turn and more than no minutes: {'turns': 3, 'minutes': 0}"
+        },
+        "ok": false
+      },
+      "status": 400,
+      "url": "../../api/node/T/coordinator/start"
+    },
+    {
+      "body": "{\"limits\":{\"turns\":3,\"minutes\":5},\"provider\":\"browser18-fixture\"}",
+      "reply": {
+        "data": {
+          "accepted": [],
+          "active": true,
+          "can_release": true,
+          "deadline": 1791672536.1085591,
+          "decomposed": [],
+          "failed_launches": 0,
+          "held": [],
+          "interrupted": [],
+          "launch_failed": [],
+          "minutes_max": 5,
+          "name": "browser18-fixture",
+          "needs_you": [],
+          "nodes": {},
+          "parked": [],
+          "provider": "browser18-fixture",
+          "pursue_turns": 0,
+          "reason": "",
+          "resplit": [],
+          "resplit_refused": [],
+          "root": "T",
+          "running": [],
+          "settling": false,
+          "started_at": 1791672236.1086211,
+          "status": "running",
+          "structure_turns": 0,
+          "turns": 0,
+          "turns_before": 0,
+          "turns_max": 3
+        },
+        "ok": true
+      },
+      "status": 200,
+      "url": "../../api/node/T/coordinator/start"
+    }
+  ],
+  "text": "Subtree\nbudget — the Pursue's total is spent (3 of 3 turns)\nStop subtree\nturns 3/3 (1 structure) · failed launches 0 · 4.4 of 5 min left\nA parked — its budget is spent (2 turn(s)); the last run ended stuck: browser fixture: no proof found\nT interrupted — the Pursue's total is spent (3 of 3 turns), which prevented its re-split: A is parked (its budget is spent (2 turn(s)); the last run ended stuck: browser fixture: no proof found); propose another structure for T that does not need A as it stands",
+  "title": "T · proof studio",
+  "url": "http://localhost:23413/studio/T/",
+  "view": {
+    "accepted": [],
+    "active": false,
+    "can_release": true,
+    "deadline": 1791672536.1085591,
+    "decomposed": [
+      "T"
+    ],
+    "failed_launches": 0,
+    "held": [],
+    "interrupted": [
+      {
+        "node": "T",
+        "reason": "the Pursue's total is spent (3 of 3 turns), which prevented its re-split: A is parked (its budget is spent (2 turn(s)); the last run ended stuck: browser fixture: no proof found); propose another structure for T that does not need A as it stands"
+      }
+    ],
+    "launch_failed": [],
+    "minutes_max": 5,
+    "name": "browser18-fixture",
+    "needs_you": [
+      {
+        "last": "stuck",
+        "node": "A",
+        "reason": "its budget is spent (2 turn(s)); the last run ended stuck: browser fixture: no proof found"
+      }
+    ],
+    "nodes": {
+      "A": {
+        "cap": 0,
+        "last": "stuck",
+        "reason": "browser fixture: no proof found",
+        "redirect": null,
+        "role": null,
+        "started_at": 1791672240.3597171,
+        "starts": 2,
+        "turns": 2,
+        "verdict": null
+      },
+      "T": {
+        "cap": 0,
+        "last": "split",
+        "reason": "split into 1 Claim(s): A; the Coordinator works them",
+        "redirect": null,
+        "role": null,
+        "split_before": [],
+        "started_at": 1791672236.14759,
+        "starts": 1,
+        "structure_starts": 1,
+        "structure_turns": 1,
+        "turns": 0,
+        "verdict": null
+      }
+    },
+    "parallel": 1,
+    "parked": [
+      {
+        "node": "A",
+        "reason": "its budget is spent (2 turn(s)); the last run ended stuck: browser fixture: no proof found"
+      }
+    ],
+    "provider": "browser18-fixture",
+    "pursue_turns": 3,
+    "reason": "the Pursue's total is spent (3 of 3 turns)",
+    "resplit": [],
+    "resplit_refused": [],
+    "root": "T",
+    "running": [],
+    "settling": false,
+    "started_at": 1791672236.1086211,
+    "status": "budget",
+    "structure_turns": 1,
+    "subtree": {
+      "accepted": 0,
+      "nodes": 2,
+      "open": 2
+    },
+    "turns": 3,
+    "turns_before": 0,
+    "turns_max": 3
+  }
+}

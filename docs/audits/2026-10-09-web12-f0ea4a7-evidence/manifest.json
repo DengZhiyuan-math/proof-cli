@@ -1,0 +1,18 @@
+{
+  "web": {
+    "path": "/private/tmp/proof-web12-f0ea4a7-nbkfz7d2/web/zeqome-proof-web-f0ea4a7d1d99716f06356479bceea0771cc2f7c7",
+    "head": "f0ea4a7d1d99716f06356479bceea0771cc2f7c7"
+  },
+  "agents": {
+    "path": "/private/tmp/proof-web12-f0ea4a7-nbkfz7d2/agents/zeqome-proof-agents-e2d6f9ee570f81e99ccaf69a40315ad46bb9cc96",
+    "head": "e2d6f9ee570f81e99ccaf69a40315ad46bb9cc96"
+  },
+  "baseline": {
+    "path": "/private/tmp/proof-web12-f0ea4a7-nbkfz7d2/baseline/zeqome-proof-web-864a2c29bd4f41a5344ae7be960b842a1d4aed62",
+    "head": "864a2c29bd4f41a5344ae7be960b842a1d4aed62"
+  },
+  "core": {
+    "path": "/private/tmp/proof-web11-d5df6e9-g0mrv8rj/core/DengZhiyuan-math-proof-cli-b7f3943",
+    "head": "b7f394374ce73e9a23754e12506e87e97326efd9"
+  }
+}

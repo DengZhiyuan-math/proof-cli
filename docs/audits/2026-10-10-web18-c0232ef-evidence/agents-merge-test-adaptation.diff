@@ -1,0 +1,36 @@
+diff --git a/tests/test_coordinator.py b/tests/test_coordinator.py
+index a044fd4..515345e 100644
+--- a/tests/test_coordinator.py
++++ b/tests/test_coordinator.py
+@@ -909,7 +909,7 @@ def test_a_spent_coordinator_whose_release_fails_holds_the_next_theorem_until_st
+     worlds = {"T1": World(edges={"T1": []}, kinds={"T1": "claim"}, budget=(1, 60.0)), "T2": World(edges={"T2": []}, kinds={"T2": "claim"})}
+     pursuit, _ = _pursuit(worlds)
+     worlds["T1"].runs["T1"].fail_release = True
+-    pursuit.start("claude")
++    pursuit.start("claude", limits={"turns": 1, "minutes": 60})   # the total T1 spends (#19)
+     _until(lambda: worlds["T1"].runs["T1"].starts == 1, "T1 pursued")
+     worlds["T1"].runs["T1"].end("budget", turns=1, reason="out of turns")   # the Coordinator's budget spent; the run ended, keeping its claim
+     _until(lambda: pursuit.view()["status"] == "release-failed", "the failed release said")
+@@ -982,17 +982,19 @@ def test_a_spent_coordinator_already_being_released_by_another_stop_holds_the_ne
+         return answers[-1]
+ 
+     coordinator.release = overlapped
+-    pursuit.start("claude")
++    pursuit.start("claude", limits={"turns": 1, "minutes": 60})   # the total T1 spends (#19)
+     _until(lambda: run.starts == 1, "T1 pursued")
+     run.end("budget", turns=1, reason="out of turns")   # the Coordinator's budget spent; the run ended, keeping its claim
+     _until(lambda: answers, "the pursuit's release asked")
+     assert answers[0]["code"] == "COORDINATOR_ACTIVE"
+     time.sleep(0.1)
+     assert worlds["T2"].runs["T2"].starts == 0 and pursuit.view()["current"] == "T1"
++    assert pursuit.active()   # held on T1 until that release ends
+     finish.set()
+-    _until(lambda: worlds["T2"].runs["T2"].starts == 1, "T2 pursued once T1's runs were given back")
++    # under one Pursue total (#19), the Theorem that spent it is the last: the pursuit ends once T1's runs are given back
++    _until(lambda: not pursuit.active(), "the pursuit ended once T1's runs were given back")
+     assert run.status == "released" and answers[-1]["code"] == "NO_COORDINATOR"
+-    pursuit.stop()
++    assert pursuit.view()["results"]["T2"]["status"] == "not-started" and worlds["T2"].runs["T2"].starts == 0
+ 
+ 
+ def test_stop_on_a_finished_pursuit_leaves_its_ending_as_it_was():

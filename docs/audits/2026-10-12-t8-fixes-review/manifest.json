@@ -1,0 +1,327 @@
+{
+  "recordedAt": "2026-10-12T08:48:32.043391+00:00",
+  "host": "macOS-27.2-arm64-arm-64bit",
+  "python": "3.11.14 (main, Oct 21 2025, 18:27:30) [Clang 20.1.8 ]",
+  "heads": [
+    {
+      "repository": "DengZhiyuan-math/proof-cli",
+      "branch": "fix/197-stale-cause",
+      "head": "6d5cd700812f78b571693231bb629abefec53b65",
+      "pullRequests": [
+        {
+          "baseRefName": "integ/0021",
+          "headRefOid": "6d5cd700812f78b571693231bb629abefec53b65",
+          "number": 210,
+          "state": "OPEN",
+          "statusCheckRollup": [
+            {
+              "__typename": "CheckRun",
+              "completedAt": "2026-10-12T08:12:15Z",
+              "conclusion": "SUCCESS",
+              "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38220846977/job/114716464471",
+              "name": "core-and-studio (ubuntu-24.04, 3.11)",
+              "startedAt": "2026-10-12T07:59:15Z",
+              "status": "COMPLETED",
+              "workflowName": "tests"
+            },
+            {
+              "__typename": "CheckRun",
+              "completedAt": "2026-10-12T08:16:22Z",
+              "conclusion": "SUCCESS",
+              "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38220846977/job/114716464780",
+              "name": "core-and-studio (ubuntu-24.04, 3.12)",
+              "startedAt": "2026-10-12T07:59:15Z",
+              "status": "COMPLETED",
+              "workflowName": "tests"
+            },
+            {
+              "__typename": "CheckRun",
+              "completedAt": "2026-10-12T08:44:25Z",
+              "conclusion": "CANCELLED",
+              "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38220846977/job/114716464778",
+              "name": "core-and-studio (windows-latest, 3.11)",
+              "startedAt": "2026-10-12T07:59:16Z",
+              "status": "COMPLETED",
+              "workflowName": "tests"
+            },
+            {
+              "__typename": "CheckRun",
+              "completedAt": "2026-10-12T08:44:24Z",
+              "conclusion": "CANCELLED",
+              "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38220846977/job/114716464852",
+              "name": "core-and-studio (windows-latest, 3.12)",
+              "startedAt": "2026-10-12T07:59:15Z",
+              "status": "COMPLETED",
+              "workflowName": "tests"
+            }
+          ],
+          "url": "https://github.com/DengZhiyuan-math/proof-cli/pull/210"
+        }
+      ]
+    },
+    {
+      "repository": "zeqome/proof-agents",
+      "branch": "fix/reader-failure-reason",
+      "head": "544a95f0c27fcb71133a7f0ca421003e34a7ee9c",
+      "pullRequests": [
+        {
+          "baseRefName": "integ/0021",
+          "headRefOid": "544a95f0c27fcb71133a7f0ca421003e34a7ee9c",
+          "number": 27,
+          "state": "OPEN",
+          "statusCheckRollup": [
+            {
+              "__typename": "CheckRun",
+              "completedAt": "2026-10-12T07:59:57Z",
+              "conclusion": "SUCCESS",
+              "detailsUrl": "https://github.com/zeqome/proof-agents/actions/runs/38220850767/job/114716477773",
+              "name": "agents (3.11)",
+              "startedAt": "2026-10-12T07:59:17Z",
+              "status": "COMPLETED",
+              "workflowName": "tests"
+            },
+            {
+              "__typename": "CheckRun",
+              "completedAt": "2026-10-12T07:59:52Z",
+              "conclusion": "SUCCESS",
+              "detailsUrl": "https://github.com/zeqome/proof-agents/actions/runs/38220850767/job/114716478106",
+              "name": "agents (3.12)",
+              "startedAt": "2026-10-12T07:59:17Z",
+              "status": "COMPLETED",
+              "workflowName": "tests"
+            }
+          ],
+          "url": "https://github.com/zeqome/proof-agents/pull/27"
+        }
+      ]
+    },
+    {
+      "repository": "zeqome/proof-agents",
+      "branch": "fix/studio-unknown-keys",
+      "head": "f3735c3c20fe576be3fe650a5052e3618883937a",
+      "pullRequests": []
+    },
+    {
+      "repository": "zeqome/proof-web",
+      "branch": "fix/reader-failure-reason",
+      "head": "f1a58ceb576bfdaf615b77791da83ad649e16ba9",
+      "pullRequests": [
+        {
+          "baseRefName": "feat/0021-pursue-review-queue",
+          "headRefOid": "f1a58ceb576bfdaf615b77791da83ad649e16ba9",
+          "number": 22,
+          "state": "OPEN",
+          "statusCheckRollup": [
+            {
+              "__typename": "CheckRun",
+              "completedAt": "2026-10-12T07:59:31Z",
+              "conclusion": "SUCCESS",
+              "detailsUrl": "https://github.com/zeqome/proof-web/actions/runs/38220854405/job/114716489634",
+              "name": "package",
+              "startedAt": "2026-10-12T07:59:20Z",
+              "status": "COMPLETED",
+              "workflowName": "package"
+            }
+          ],
+          "url": "https://github.com/zeqome/proof-web/pull/22"
+        }
+      ]
+    },
+    {
+      "repository": "zeqome/proof-web",
+      "branch": "fix/stale-cause",
+      "head": "f3a51d5f609ab5166ef6bf975191daa8dd097cdd",
+      "pullRequests": [
+        {
+          "baseRefName": "feat/0021-pursue-review-queue",
+          "headRefOid": "f3a51d5f609ab5166ef6bf975191daa8dd097cdd",
+          "number": 23,
+          "state": "OPEN",
+          "statusCheckRollup": [
+            {
+              "__typename": "CheckRun",
+              "completedAt": "2026-10-12T07:59:33Z",
+              "conclusion": "SUCCESS",
+              "detailsUrl": "https://github.com/zeqome/proof-web/actions/runs/38220859186/job/114716506400",
+              "name": "package",
+              "startedAt": "2026-10-12T07:59:22Z",
+              "status": "COMPLETED",
+              "workflowName": "package"
+            }
+          ],
+          "url": "https://github.com/zeqome/proof-web/pull/23"
+        }
+      ]
+    },
+    {
+      "repository": "zeqome/proof-web",
+      "branch": "fix/studio-unknown-keys",
+      "head": "04f6cfe1f8f75646d319f214ee8303de802607a5",
+      "pullRequests": []
+    }
+  ],
+  "localCandidate": {
+    "temporaryRoot": "/private/tmp/proof-t8-audit-px7msjct",
+    "repositories": {
+      "core": {
+        "source": "/Volumes/Codex-Workspace/live/home/zhdeng/proof-cli",
+        "checkout": "/private/tmp/proof-t8-audit-px7msjct/core",
+        "head": "6d5cd700812f78b571693231bb629abefec53b65",
+        "applied": [],
+        "candidateTree": "486b213c9211a1a11d57011c8fe65cefc9252ff1"
+      },
+      "agents": {
+        "source": "/private/tmp/claude-502/-Volumes-Codex-Workspace-live-home-zhdeng-proof-cli/ece36e1b-cb9b-4860-9b1c-030026ba35d7/scratchpad/agents",
+        "checkout": "/private/tmp/proof-t8-audit-px7msjct/agents",
+        "head": "f3735c3c20fe576be3fe650a5052e3618883937a",
+        "applied": [
+          {
+            "commit": "544a95f",
+            "exit": 0,
+            "output": ""
+          }
+        ],
+        "candidateTree": "40d6eccc7f4f45157b66c8c7e45f0ae8d9bd923b"
+      },
+      "web": {
+        "source": "/private/tmp/claude-502/-Volumes-Codex-Workspace-live-home-zhdeng-proof-cli/ece36e1b-cb9b-4860-9b1c-030026ba35d7/scratchpad/web",
+        "checkout": "/private/tmp/proof-t8-audit-px7msjct/web",
+        "head": "04f6cfe1f8f75646d319f214ee8303de802607a5",
+        "applied": [
+          {
+            "commit": "f1a58ce",
+            "exit": 0,
+            "output": ""
+          },
+          {
+            "commit": "f3a51d5",
+            "exit": 1,
+            "output": "Auto-merging src/proof_web/server.py\nAuto-merging src/proof_web/static/app.js\nAuto-merging tests/test_map_home.py\nAuto-merging tests/test_pursue_review_queue.py\nCONFLICT (content): Merge conflict in tests/test_pursue_review_queue.py\nerror: could not apply f3a51d5... fix: Warnings and the work log say why a node may no longer hold\nhint: after resolving the conflicts, mark the corrected paths\nhint: with 'git add <paths>' or 'git rm <paths>'\nhint: Disable this message with \"git config set advice.mergeConflict false\"\n",
+            "resolution": "retained both complete appended tests; no production conflict"
+          }
+        ],
+        "candidateTree": "02c2204a5e3aa7482f29f5ba2524335845a9e621"
+      }
+    }
+  },
+  "nativeChecks": [
+    {
+      "name": "core-affected",
+      "command": [
+        "/opt/anaconda3/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "-c",
+        "/private/tmp/proof-t8-audit-px7msjct/core/pyproject.toml",
+        "tests/test_unfixed_text.py",
+        "tests/test_cli_contract.py",
+        "tests/test_cli_node.py",
+        "tests/test_definitions.py",
+        "tests/test_performance.py",
+        "tests/test_agent_attribution.py",
+        "--junitxml=/Volumes/Codex-Workspace/live/home/zhdeng/proof-cli/docs/audits/2026-10-12-t8-fixes-review/core-affected.xml"
+      ],
+      "cwd": "/private/tmp/proof-t8-audit-px7msjct/core",
+      "exit": 0,
+      "seconds": 308.9982080000045,
+      "tests": 159,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 2
+    },
+    {
+      "name": "agents-full",
+      "command": [
+        "/opt/anaconda3/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "-c",
+        "/private/tmp/proof-t8-audit-px7msjct/agents/pyproject.toml",
+        "tests",
+        "--junitxml=/Volumes/Codex-Workspace/live/home/zhdeng/proof-cli/docs/audits/2026-10-12-t8-fixes-review/agents-full.xml"
+      ],
+      "cwd": "/private/tmp/proof-t8-audit-px7msjct/agents",
+      "exit": 0,
+      "seconds": 17.93866587500088,
+      "tests": 202,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "web-full",
+      "command": [
+        "/opt/anaconda3/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "-c",
+        "/private/tmp/proof-t8-audit-px7msjct/web/pyproject.toml",
+        "tests",
+        "--junitxml=/Volumes/Codex-Workspace/live/home/zhdeng/proof-cli/docs/audits/2026-10-12-t8-fixes-review/web-full.xml"
+      ],
+      "cwd": "/private/tmp/proof-t8-audit-px7msjct/web",
+      "exit": 0,
+      "seconds": 258.58295958300005,
+      "tests": 823,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1
+    }
+  ],
+  "issue197": {
+    "state": "OPEN",
+    "url": "https://github.com/DengZhiyuan-math/proof-cli/issues/197"
+  },
+  "remoteWrites": false,
+  "findings": {
+    "Standards": 1,
+    "Spec": 1
+  },
+  "completedAt": "2026-10-12T08:52:49.106021+00:00",
+  "auditOutcome": "two P2 findings; no P1 found",
+  "browserChecks": {
+    "loggedOutReader": "passed (actual Claude; zero tokens; empty logged-out profile)",
+    "definitionWarnings": "passed (own and dependent nodes; entity/by/reason shown)",
+    "studioDefinitionOldNewAndReason": "passed",
+    "studioActorDuringTurn": "failed (stored reader-1; browser Decomposer only)",
+    "unknownTopLevelAndBudgetKeys": "passed",
+    "settingsSidebarCount": "passed (5 = 2 nodes + 3 settings)",
+    "hiddenWithoutUnknownKeys": "passed (sidebar 2)",
+    "olderDependencies": "152 passed, 2 skipped, 1 deliberately deselected; explicit old Reader success fallback verified"
+  },
+  "loadedSources": {
+    "sources": {
+      "proof_cli.proof_map": "/private/tmp/proof-t8-audit-px7msjct/core/src/proof_cli/proof_map.py",
+      "proof_agents.agent_run": "/private/tmp/proof-t8-audit-px7msjct/agents/src/proof_agents/agent_run.py",
+      "proof_agents.proof_agent": "/private/tmp/proof-t8-audit-px7msjct/agents/src/proof_agents/proof_agent.py",
+      "proof_web.server": "/private/tmp/proof-t8-audit-px7msjct/web/src/proof_web/server.py",
+      "proof_web.studios": "/private/tmp/proof-t8-audit-px7msjct/web/src/proof_web/studios.py"
+    },
+    "host": "macOS-27.2-arm64-arm-64bit",
+    "python": "3.11.14 (main, Oct 21 2025, 18:27:30) [Clang 20.1.8 ]"
+  },
+  "cleanup": {
+    "at": "2026-10-12T08:49:36.717272+00:00",
+    "serverStopped": 83270,
+    "ownChromeStopped": [
+      81128,
+      81142,
+      81143,
+      81144,
+      81154,
+      83107,
+      83643
+    ],
+    "fixtureState": "retained",
+    "sourceCheckouts": "retained"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "baseRefName": "feat/0021-pursue-review-queue",
+  "body": "Closes #11. Shows AgentRun's record_failed (zeqome/proof-agents#16, PR #22) in the run card; display only. Without #22 the field is absent and the pane is unchanged.\n\n\ud83e\udd16 Generated with [Claude Code](https://claude.com/claude-code)\n",
+  "headRefName": "fix/11-record-failed",
+  "headRefOid": "d5df6e98088bf13d073977d072293b5eea9e4cdf",
+  "number": 14,
+  "state": "OPEN",
+  "statusCheckRollup": [
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-09T15:19:57Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/zeqome/proof-web/actions/runs/37950895710/job/113889079004",
+      "name": "package",
+      "startedAt": "2026-10-09T15:19:44Z",
+      "status": "COMPLETED",
+      "workflowName": "package"
+    }
+  ],
+  "title": "feat: the run pane shows the run's own work-log writes that failed (#11)",
+  "url": "https://github.com/zeqome/proof-web/pull/14"
+}

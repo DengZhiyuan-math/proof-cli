@@ -1,0 +1,168 @@
+- banner
+  - button "Files sidebar" [ref=e1]
+  - link "Map" [ref=e2]
+  - StaticText "T"
+  - generic
+    - button "Agent" [ref=e4]
+    - combobox "Which CLI runs the node's proof agent: Claude Code or Codex" [expanded=false, ref=e5]: browser18-fixture
+      - MenuListPopup
+        - option "browser18-fixture" [selected, ref=e21]
+  - button "Theme" [ref=e3]
+- main
+  - complementary
+    - generic
+      - heading "Node" [level=3, ref=e10]
+      - generic
+        - paragraph
+          - StaticText "T holds"
+        - StaticText "Ready"
+        - StaticText "open"
+        - StaticText "unreviewed"
+        - StaticText "current"
+        - StaticText "unclaimed"
+        - heading "Depends on" [level=4, ref=e22]
+        - list
+          - listitem [level=1, ref=e29] clickable [cursor:pointer]
+            - StaticText "no dependencies"
+        - paragraph
+          - StaticText "No key-ideas.md yet: a review request needs one (核心思路, 主要步骤, 难点, 未覆盖). The Typesetter drafts it: \"+\" → Ask the agent to… → Typesetter · draft key ideas."
+    - generic
+      - heading "Files" [level=3, ref=e11]
+      - list
+        - listitem [level=1, ref=e23] clickable [cursor:pointer]
+          - StaticText "proof.tex"
+    - generic
+      - heading "Outline Refresh outline" [level=3, ref=e12]
+        - StaticText "Outline"
+        - button "Refresh outline" [ref=e24]
+      - list
+        - listitem "proof.tex:6" [level=1, ref=e25] clickable [cursor:pointer]
+          - StaticText "Thmline 6"
+  - generic
+    - tablist "Centre"
+      - tab "Work log" [selected, ref=e13]
+      - tab "Files" [ref=e14]
+      - generic
+        - button "Compile" [ref=e26]
+          - StaticText "Compile"
+        - button "Draft" [expanded=false, ref=e27]
+          - StaticText "Draft"
+    - generic
+      - region "The agent's run on this node" [ref=e15]
+        - StaticText "Subtree"
+        - StaticText "budget — the Pursue's total is spent (3 of 3 turns)"
+        - button "Stop subtree" [ref=e30]
+        - StaticText "turns 3/3 (1 structure) · failed launches 0 · 4.4 of 5 min left"
+        - StaticText "A parked — its budget is spent (2 turn(s)); the last run ended stuck: browser fixture: no proof found"
+        - StaticText "T interrupted — the Pursue's total is spent (3 of 3 turns), which prevented its re-split: A is parked (its budget is spent (2 turn(s)); the last run ended stuck: browser fixture: no proof found); propose another structure for T that does not need A as it stands"
+        - generic
+          - StaticText "Done"
+          - StaticText "Decomposer"
+          - StaticText "browser18-fixture · turn 1/1"
+          - StaticText "— "
+          - StaticText "split into 1 Claim(s): A; the Coordinator works them"
+          - button "Start agent" [ref=e31]
+          - combobox "Or one role alone, for one turn" [expanded=false, ref=e32]: all roles
+            - MenuListPopup
+              - option "all roles" [selected, ref=e35]
+              - option "Prover only" [ref=e36]
+              - option "Typesetter only" [ref=e37]
+              - option "Numerics only" [ref=e38]
+              - option "Verifier only" [ref=e39]
+              - option "Decomposer only" [ref=e40]
+          - button "Start" [ref=e33]
+          - status
+            - StaticText "Pursue started: the agents work everything under this node to the end, and what they leave you is the review queue."
+        - heading "WORK LOG" [level=3, ref=e28]
+        - list
+          - listitem [level=1]
+            - StaticText "22:43"
+            - StaticText "browser18-fixture/coordinator"
+            - StaticText "coordinator: started on T: 1 open node(s), up to 1 run(s) at a time; the Pursue's total 3 turns (0 spent before) and 5 minutes, a node's proof budget 2 turns"
+          - listitem [level=1]
+            - StaticText "22:43"
+            - StaticText "browser18-fixture"
+            - StaticText "took the node"
+          - listitem [level=1]
+            - StaticText "22:43"
+            - StaticText "browser18-fixture/coordinator"
+            - StaticText "coordinator: started a Decomposer turn on T (start 1, up to 1 turn(s) and 4 minute(s))"
+          - listitem [level=1]
+            - StaticText "22:43"
+            - StaticText "Decomposer"
+            - StaticText "split into "
+            - link "A" [ref=e34]
+          - listitem [level=1]
+            - StaticText "22:43"
+            - StaticText "Decomposer"
+            - group
+              - DisclosureTriangle "Decomposer's turn — its conversation" [expanded=false]
+                - StaticText "Decomposer's turn — its conversation"
+          - listitem [level=1]
+            - StaticText "22:43"
+            - StaticText "Decomposer"
+            - StaticText "step 1 done — run done: split into 1 Claim(s): A; the Coordinator works them"
+          - listitem [level=1]
+            - StaticText "22:43"
+            - StaticText "browser18-fixture/coordinator"
+            - StaticText "coordinator: the run on T ended: done — split into 1 Claim(s): A; the Coordinator works them"
+          - listitem [level=1]
+            - StaticText "22:43"
+            - StaticText "browser18-fixture/coordinator"
+            - StaticText "coordinator: started a run on A (start 1, up to 2 turn(s) and 4 minute(s))"
+          - listitem [level=1]
+            - StaticText "22:44"
+            - StaticText "browser18-fixture/coordinator"
+            - StaticText "coordinator: the run on A ended: stuck — browser fixture: no proof found"
+          - listitem [level=1]
+            - StaticText "22:44"
+            - StaticText "browser18-fixture/coordinator"
+            - StaticText "coordinator: started a run on A (start 2, up to 1 turn(s) and 4 minute(s))"
+          - listitem [level=1]
+            - StaticText "22:44"
+            - StaticText "browser18-fixture/coordinator"
+            - StaticText "coordinator: the run on A ended: stuck — browser fixture: no proof found"
+          - listitem [level=1]
+            - StaticText "22:44"
+            - StaticText "browser18-fixture/coordinator"
+            - StaticText "coordinator: parked A: its budget is spent (2 turn(s)); the last run ended stuck: browser fixture: no proof found"
+          - listitem [level=1]
+            - StaticText "22:44"
+            - StaticText "browser18-fixture/coordinator"
+            - StaticText "coordinator: interrupted T: the Pursue's total is spent (3 of 3 turns), which prevented its re-split: A is parked (its budget is spent (2 turn(s)); the last run ended stuck: browser fixture: no proof found); propose another structure for T that does not need A as it stands"
+          - listitem [level=1]
+            - StaticText "22:44"
+            - StaticText "browser18-fixture/coordinator"
+            - StaticText "coordinator: budget: the Pursue's total is spent (3 of 3 turns)"
+          - listitem [level=1]
+            - StaticText "22:44"
+            - StaticText "browser18-fixture/coordinator"
+            - StaticText "coordinator: budget: 3 real turn(s) in this Start (1 structure, 2 proof), 3 of the Pursue's 3; 0 failed launch(es)"
+  - complementary
+    - generic
+      - button "Account and usage limits" [expanded=false, ref=e16]
+      - button "New chat" [ref=e17]
+    - generic
+      - StaticText "This is the node's proof agent: it reads the project, its library and the web, runs\n"
+      - code
+        - StaticText "proof"
+      - StaticText " and computations, and writes this node's proof. Pick Claude Code or Codex CLI above.\nHere you only Ask: read-only questions about the node — the agent works it from its run, in the centre.\nType "
+      - code
+        - StaticText "@"
+      - StaticText " to point it at a file or the selection (or select text and press "
+      - code
+        - StaticText "⌘L"
+      - StaticText ").\nType "
+      - code
+        - StaticText "/"
+      - StaticText " for commands.\nCommits, pushes and non-allowlisted shell commands are not permitted from here."
+    - generic
+      - textbox "A read-only question; the agent is driven from its run above · ↵ send, ⇧↵ newline" [ref=e18]
+      - button "Actions and review" [expanded=false, ref=e19]
+      - button "Send" [ref=e20]
+- contentinfo
+  - generic
+    - button "Problems" [ref=e6]
+    - button "Output" [ref=e7]
+    - button "Diff" [ref=e8]
+    - button "Show/hide panel" [ref=e9]

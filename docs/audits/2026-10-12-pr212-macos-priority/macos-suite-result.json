@@ -1,0 +1,14 @@
+{
+  "command": [
+    "/private/tmp/proof-macos-pr212-z7s91tjx/venv/bin/python",
+    "-m",
+    "pytest",
+    "-q",
+    "-ra",
+    "--durations=25",
+    "--junitxml=/private/tmp/proof-macos-pr212-z7s91tjx/macos-core-studio.xml"
+  ],
+  "cwd": "/private/tmp/claude-502/-Volumes-Codex-Workspace-live-home-zhdeng-proof-cli/c2d437ea-0c89-477b-8c37-3743b7f1f048/scratchpad/wtfix",
+  "exit": 0,
+  "seconds": 179.74781945897848
+}

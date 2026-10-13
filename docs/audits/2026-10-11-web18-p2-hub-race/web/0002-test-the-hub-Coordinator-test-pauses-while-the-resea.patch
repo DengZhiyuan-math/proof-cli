@@ -1,0 +1,63 @@
+From 355837c333fd8189c105aa241d4e9fa8ffe50e6f Mon Sep 17 00:00:00 2001
+From: Yomathnotcool <125728853+DengZhiyuan-math@users.noreply.github.com>
+Date: Sun, 11 Oct 2026 10:22:28 +0200
+Subject: [PATCH 2/2] test: the hub Coordinator test pauses while the
+ researcher decides, and reads the notes once settled
+
+The Coordinator never waits for a Review decision (ADR-0021): once A and B awaited the researcher it could end
+stuck before the test's Acceptances, under load (60-second timeout). The test now pauses it while B's turn runs
+and resumes after accepting both. It also waits for the Coordinator to settle before reading the work log: the
+ending and budget notes are written after its status says done.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ tests/test_coordinator_hub.py | 13 +++++++++++--
+ 1 file changed, 11 insertions(+), 2 deletions(-)
+
+diff --git a/tests/test_coordinator_hub.py b/tests/test_coordinator_hub.py
+index 9e9a2ae..4e52822 100644
+--- a/tests/test_coordinator_hub.py
++++ b/tests/test_coordinator_hub.py
+@@ -15,6 +15,7 @@ from _researcher import researcher
+ from _review_client import DirectClient
+ from proof_cli.proof_map import create_node, get_active_claim, get_workflow_state, split_node, work_log
+ from proof_cli.storage import ensure_project
++from proof_cli.vault import node_folder
+ from proof_web.studios import PursueBudget, StudioHub
+ from test_agent_run import FAKE_CLAUDE, SRC, _executable, _queue, _turns, _until
+ 
+@@ -57,7 +58,8 @@ def test_the_coordinator_works_the_children_then_the_root_and_the_page_and_the_m
+     store, hub, log, queue = subtree
+     for node in ("A", "B", "T"):
+         write_key_ideas(store, node)
+-    _queue(queue, [_tex("A"), _review("A")], [_tex("B"), _review("B")], [_tex("T"), _review("T")])
++    # B's turn takes a moment, for the Pause below to come while it runs
++    _queue(queue, [_tex("A"), _review("A")], [_tex("B"), ["sleep", "2"], _review("B")], [_tex("T"), _review("T")])
+     client = DirectClient(store)
+     client.app.studios = hub
+     assert client.get("/api/node/A/coordinator")[0] == 404  # a node that rests on nothing has no subtree to coordinate
+@@ -71,13 +73,20 @@ def test_the_coordinator_works_the_children_then_the_root_and_the_page_and_the_m
+     shown = next(n for n in client.get("/api/map")[1]["data"]["nodes"] if n["id"] == "T")
+     # proof-agents#19: one Pursue total, 40 × 3 open nodes + T's two structure turns; before it, the sum of the node budgets
+     assert shown["coordinator"]["status"] == "running" and shown["coordinator"]["turns_max"] == (122 if PursueBudget else 120)
++    # the Coordinator never waits for a Review decision (ADR-0021): once A and B await the researcher it ends, T resting on
++    # what no run settles. Paused while B's turn runs, it takes no look until resumed, after the researcher's Acceptances
++    tex = node_folder(store.root, "B") / "proof.tex"
++    _until(lambda: tex.exists() and tex.read_text() == _tex("B")[2], "B's turn under way", timeout=60)
++    assert client.post("/api/node/T/coordinator/pause", {})[0] == 200
+     _until(lambda: get_workflow_state(store, "B") == "review-needed", "B requested for review", timeout=60)
+     time.sleep(0.5)
+     assert get_workflow_state(store, "T") == "blocked" and _turns(log).__len__() == 2  # the root waits for the children's Acceptance
+     researcher(store).decide_acceptance("A", "accept")
+     researcher(store).decide_acceptance("B", "accept")
++    assert client.post("/api/node/T/coordinator/resume", {})[0] == 200
+     _until(lambda: get_workflow_state(store, "T") == "review-needed", "T requested for review once every child was Accepted", timeout=60)
+-    _until(lambda: not hub.coordinator("T").active(), "the Coordinator ended")
++    # ended, and settled: its ending and budget notes are written after its status says so
++    _until(lambda: not hub.coordinator("T").active() and not hub.coordinator("T").view()["settling"], "the Coordinator ended and settled")
+     view = client.get("/api/node/T/coordinator")[1]["data"]
+     assert (view["status"], view["reason"]) == ("done", "T is requested for review") and view["subtree"]["accepted"] == 2
+     assert [t["role"] for t in _turns(log)] == ["prover", "prover", "prover"]
+-- 
+2.54.0
+

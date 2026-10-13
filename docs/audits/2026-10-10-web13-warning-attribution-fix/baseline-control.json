@@ -1,0 +1,6 @@
+{
+  "path": "/var/folders/13/jgb8c061583ggg622pgv9l0c0000gp/T/proof-web13-e4a123a-control-2_1ltsht",
+  "production": "e4a123abf8f557521fb1eb2a199a97d568c85648",
+  "test_source": "/Volumes/Codex-Workspace/live/home/zhdeng/proof-cli/.claude/worktrees/codex-web13-clause-e03ye4jt/proof-web/tests/test_import_review.py",
+  "exit_code": 1
+}

@@ -1,0 +1,20 @@
+{
+  "date": "2026-10-09",
+  "pr": "https://github.com/zeqome/proof-agents/pull/24",
+  "head": "ef7db6227406e6a39b287856df242db406ccdb07",
+  "base": "fix/15-needs-human-kept",
+  "merge_base": "9558fd0caf6eef2f80401c503a0a4549f4bbaa6f",
+  "core_head": "b7f394374ce73e9a23754e12506e87e97326efd9",
+  "full_suite": "159 passed in 12.66s",
+  "original_probe": "1 passed in 0.07s",
+  "baseline_probe": "1 failed as expected at 9558fd0",
+  "scope_probes": "3 passed in 0.69s; third check confirms the stated uncollected late-ending limit",
+  "coordinator_sha256": "890643b4cb5409b6f6917e189ceaa467eb1a800bb10904187e06cbfb567b3c1b",
+  "audit": "Narrow fix passes; full live issue requires final results after budget exit",
+  "automation": "PAUSED; retarget scope includes PRs 22, 23 and 24",
+  "scope": "Synthetic runs; no real provider or browser; no merge or issue update",
+  "ci": {
+    "agents (3.11)": "SUCCESS",
+    "agents (3.12)": "SUCCESS"
+  }
+}

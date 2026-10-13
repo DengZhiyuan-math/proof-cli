@@ -1,0 +1,6 @@
+{
+  "issue": 197,
+  "automatic_closer_pr": 217,
+  "cause": "The original PR sentence Does not close #197 or #132 contained GitHub closing keyword close #197.",
+  "correction": "PR body rewritten without closing keyword; #197 reopened to preserve Q2/Q4 deferred provider acceptance."
+}

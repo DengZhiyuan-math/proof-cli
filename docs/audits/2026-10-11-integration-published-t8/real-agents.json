@@ -1,0 +1,8 @@
+{
+  "default": "claude",
+  "providers": {
+    "claude": {
+      "default_model": "opus"
+    }
+  }
+}

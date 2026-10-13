@@ -1,0 +1,12 @@
+{
+  "date": "2026-10-09",
+  "agents_head": "15ce077519f881c28d73ec8390dcb831697716e5",
+  "core_head": "b7f394374ce73e9a23754e12506e87e97326efd9",
+  "web_source_checked": "864a2c29bd4f41a5344ae7be960b842a1d4aed62",
+  "interpreter": "/opt/anaconda3/bin/python (3.11.14)",
+  "pytest": "8.4.2",
+  "full_agents_suite": "155 passed in 9.82s",
+  "ended_turn_probe": "passed: only S started",
+  "mid_turn_probe": "failed: A2 started before T ended needs-human; A2 remains running while held",
+  "scope": "Synthetic runs and map; no real provider or browser; no merge or PR comment"
+}

@@ -1,0 +1,3 @@
+bffebde test build: #17's spent-Coordinator tests under #19's shared total
+36d295f Merge remote-tracking branch 'origin/fix/17-pursuit-release-failed' into HEAD
+d9f98fa fix: structure turns apart from the proof budget, under one Pursue total fixed at Start (#19)

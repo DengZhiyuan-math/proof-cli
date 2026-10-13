@@ -1,0 +1,23 @@
+{
+  "runs": [
+    {
+      "files": [
+        "tests/test_reference_edit.py",
+        "tests/test_references.py",
+        "tests/test_trust_rules.py",
+        "tests/test_cli_contract.py"
+      ],
+      "passed": 102,
+      "seconds": 9.73
+    },
+    {
+      "files": [
+        "tests/test_trust_rules_cli.py"
+      ],
+      "passed": 6,
+      "seconds": 0.9
+    }
+  ],
+  "total_passed": 108,
+  "full_suite_rerun": false
+}

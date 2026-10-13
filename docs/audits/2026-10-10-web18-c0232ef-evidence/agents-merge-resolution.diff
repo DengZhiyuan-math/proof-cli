@@ -1,0 +1,103 @@
+diff --git a/src/proof_agents/coordinator.py b/src/proof_agents/coordinator.py
+index adac046..9c8ba7d 100644
+--- a/src/proof_agents/coordinator.py
++++ b/src/proof_agents/coordinator.py
+@@ -913,8 +913,12 @@ class ProjectPursuit:
+         with self._lock:
+             if self.state["status"] in ("reading", "pursuing"):
+                 return {"error": "this project is being pursued already; stop it first", "code": "PURSUIT_ACTIVE"}
++            if self.state["status"] == "stopping":
++                return {"error": f"the runs of {self.state['current']} are still being given back; Start again after the Stop ends", "code": "PURSUIT_ACTIVE"}
+             if self._thread is not None and self._thread.is_alive():
+                 return {"error": "the stopped pursuit is still ending; Start again after it settles", "code": "PURSUIT_ACTIVE"}
++            if self.state["status"] == "release-failed":
++                return {"error": f"the runs of {self.state['current']} are still assigned; Stop again to give them back first", "code": "PURSUIT_ACTIVE"}
+         try:
+             defaults = None if limits is not None else self.default_limits()
+             if defaults is not None and defaults.get("code") == "NO_BUDGET":
+@@ -926,7 +930,7 @@ class ProjectPursuit:
+         except ValueError as exc:
+             return {"error": str(exc), "code": "INVALID_LIMITS"}
+         with self._lock:
+-            if self.state["status"] in ("reading", "pursuing") or (self._thread is not None and self._thread.is_alive()):
++            if self.state["status"] in ("reading", "pursuing", "stopping", "release-failed") or (self._thread is not None and self._thread.is_alive()):
+                 return {"error": "this project is being pursued already; stop it first", "code": "PURSUIT_ACTIVE"}
+             self._stop = False
+             self.budget, self._started_at = budget, time.time()
+@@ -937,19 +941,50 @@ class ProjectPursuit:
+ 
+     def stop(self) -> dict:
+         """Stop: the Reader's turn is stopped (`stop_read`) or the working Theorem's Coordinator released, and no other
+-        Theorem is started. A pursuit that already ended keeps its ending: there is nothing to stop."""
++        Theorem is started. A pursuit that already ended keeps its ending: there is nothing to stop. A release that fails
++        is not a release (proof-agents#17): the answer is RELEASE_FAILED, the pursuit `release-failed` with its Theorem
++        kept, and Stop again tries that release again. Until the release returns the pursuit is `stopping`: not released
++        yet, and no Start begins."""
+         with self._lock:
+             status, current = self.state["status"], self.state["current"]
+-            if status not in ("reading", "pursuing"):
++            if status == "stopping":  # another Stop is giving the runs back: its ending is this one's
++                return self._view_locked()
++            if status not in ("reading", "pursuing", "release-failed"):
+                 return {"error": "no pursuit is running on this project", "code": "NO_PURSUIT", **self._view_locked()}
+             self._stop = True
+-            self.state["status"], self.state["reason"] = "released", "stopped by the researcher"
++            self.state["status"], self.state["reason"] = "stopping", "stopped by the researcher; giving the runs back"
+         if status == "reading":
+             self.hooks.stop_read()
+         if current is not None:
+-            self.hooks.coordinator(current).release()
++            answer = self._release(current, self.hooks.coordinator(current))
++            if answer.get("code") == "RELEASE_FAILED":
++                return {"error": answer.get("error"), "code": "RELEASE_FAILED", **self.view()}
++        with self._lock:
++            if self.state["status"] == "stopping":
++                self.state["status"], self.state["reason"] = "released", "stopped by the researcher"
+         return self.view()
+ 
++    def _release(self, theorem: str, coordinator: Coordinator) -> dict:
++        """Release the Theorem's Coordinator. One that fails leaves the pursuit `release-failed`, the Theorem its current
++        one, for Stop to try again; nothing is started meanwhile. A release already under way (COORDINATOR_ACTIVE) is
++        waited for, then asked again: nothing left to release (NO_COORDINATOR) once it gave the runs back, or this one's
++        own try once it failed. Only NO_COORDINATOR is no failure."""
++        answer = coordinator.release()
++        while answer.get("code") == "COORDINATOR_ACTIVE":
++            while coordinator.view().get("settling"):
++                time.sleep(self.tick)
++            answer = coordinator.release()
++        if "error" in answer and answer.get("code") != "NO_COORDINATOR":
++            self._release_failed(theorem, answer.get("error"))
++            return {**answer, "code": "RELEASE_FAILED"}
++        return answer
++
++    def _release_failed(self, theorem: str, error) -> None:
++        reason = f"the runs of {theorem} are still assigned: {error}; Stop again to give them back"
++        with self._lock:
++            self.state["status"], self.state["reason"], self.state["current"] = "release-failed", reason, theorem
++        self._note(f"release-failed: {reason}")
++
+     def _view_locked(self) -> dict:
+         return {**self.state, "theorems": list(self.state["theorems"]), "results": dict(self.state["results"]),
+                 "budget": self.budget.view() if self.budget is not None else None}
+@@ -1011,7 +1046,7 @@ class ProjectPursuit:
+                         self.state["results"][theorem] = {"status": "refused", "reason": answer.get("error")}
+                     continue
+                 if self._stopped():  # Stop came while it was starting, and may have found nothing started to release
+-                    coordinator.release()
++                    self._release(theorem, coordinator)
+                     return
+                 while coordinator.active() or coordinator.view().get("settling"):
+                     time.sleep(self.tick)   # a Stop releases it; the pursuit is active until it has settled
+@@ -1022,8 +1057,11 @@ class ProjectPursuit:
+                     return
+                 with self._lock:
+                     self.state["results"][theorem] = {"status": view.get("status"), "reason": view.get("reason")}
++                if view.get("status") == "release-failed":  # its own release failed: nothing else starts while it holds nodes
++                    return self._release_failed(theorem, view.get("reason"))
+                 if view.get("status") == "budget":  # its ended runs keep their claims: given back before the next Theorem starts
+-                    coordinator.release()
++                    if self._release(theorem, coordinator).get("code") == "RELEASE_FAILED":
++                        return
+             if unstarted:
+                 return self._end("budget", f"{_pursue_spent(self.budget)}: {', '.join(unstarted)} not started")
+             self._end("done", "every Theorem was pursued to its end")

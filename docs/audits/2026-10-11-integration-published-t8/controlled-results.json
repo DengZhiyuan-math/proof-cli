@@ -1,0 +1,64 @@
+{
+  "pursueStopRetryRefreshRestart": {
+    "status": "passed",
+    "evidence": [
+      "lifecycle-running.txt",
+      "lifecycle-stopped-refresh.png",
+      "lifecycle-retry-refresh.txt",
+      "lifecycle-after-restart.json"
+    ]
+  },
+  "readerNoTheorem": {
+    "status": "passed",
+    "evidence": [
+      "no-theorem.json",
+      "no-theorem.txt"
+    ]
+  },
+  "releaseFailureRetry": {
+    "status": "passed",
+    "evidence": [
+      "release-failed.json",
+      "release-retried.json"
+    ]
+  },
+  "smallBudgetParked": {
+    "status": "passed",
+    "evidence": [
+      "parked-final-coordinator.json",
+      "parked-final-queue.png"
+    ]
+  },
+  "standingQuestion": {
+    "status": "passed",
+    "evidence": [
+      "queue-answer-refresh.txt",
+      "queue-after-restart.json",
+      "controlled-decisions-and-stale-cause.json"
+    ]
+  },
+  "provisionalConditionalUnchecked": {
+    "status": "passed",
+    "evidence": [
+      "queue-unchecked-source.json",
+      "queue-unchecked-source.txt",
+      "queue-unchecked-source.png"
+    ]
+  },
+  "definitionEditStaleCause": {
+    "stateAndRecordedCause": "passed",
+    "browserDetail": "partial",
+    "detail": "Warnings says an accepted dependency version moved; Work log shows definition-edited but does not show Definition ID or edit reason. The official work_log API records D and the reason.",
+    "evidence": [
+      "definition-stale-warnings.txt",
+      "definition-stale-worklog-expanded.txt",
+      "controlled-decisions-and-stale-cause.json"
+    ]
+  },
+  "harnessCorrections": [
+    "Initial server explicitly used port 0, which differed from its advertised pinned origin; corrected before usable browser checks.",
+    "Default agent-browser session was replaced with a dedicated T8 session after empty initial loads.",
+    "Initial budget fixture used invalid progress status budget; corrected to done. A total below the node ceiling correctly yields Interrupted; node ceiling 1 and total 1 yields Parked.",
+    "Studio text is lowercase parked; the capitalized wait timed out. The browser queue PARKED check passed."
+  ]
+}

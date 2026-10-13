@@ -1,0 +1,409 @@
+{
+  "recorded_at": "2026-10-13T09:36:24.793399+00:00",
+  "heads": {
+    "core": {
+      "head": "ae4356deb904f5de91bc25e5e51336c2c291d405",
+      "base": "d433159214156239e31094d1eaea3b7b991b927f",
+      "source_checksums_match": true
+    },
+    "agents": {
+      "head": "93cc9a0b9645f52cdeeab3f50b653cef99476a6e",
+      "base": "7d3f312269b9868415e06302b97637db1a490220",
+      "source_checksums_match": true
+    },
+    "web": {
+      "head": "636d04813cc3b17ff6e045c998b59805129cd423",
+      "base": "af687b02b7d03dbf5bd2b60062284d8421dfa5c0",
+      "source_checksums_match": true
+    }
+  },
+  "pull_requests": {
+    "core": {
+      "baseRefOid": "d433159214156239e31094d1eaea3b7b991b927f",
+      "body": "An agent requesting review during Pursue previously produced a key-ideas label claiming author confirmation, even though no researcher acted. New snapshots from an agent role or agent-gated request now record the summary as unconfirmed by the author. Human requests retain the existing provenance rules, and old snapshot records are not rewritten.\n\nThe dated ADR-0021 amendment and CONTEXT clarify one main Theorem, supporting local Lemmas versus discovered literature imports, autonomous statement-based retrieval, actual map coverage, and project `done` only after every Coordinator ends `done`. The unreleased target-file error codes are removed with that self-check.\n\nRelated to #221, [agents #31](https://github.com/zeqome/proof-agents/issues/31) and [agents #32](https://github.com/zeqome/proof-agents/issues/32). Companion Draft PRs: [agents #30](https://github.com/zeqome/proof-agents/pull/30), [web #25](https://github.com/zeqome/proof-web/pull/25).\n\nValidation: **1,161 passed, 15 skipped** across core/LaTeX; skips are 11 missing-TeX cases, 2 opt-in benchmarks, and 2 Windows-only cases. The new regressions exercise CLI agent identity, human confirmation, edited agent summaries and unchanged older snapshots. Wheel build and `git diff --check` pass. Ruff adds no diagnostics relative to the source base; existing lint debt remains. [Verification](https://github.com/DengZhiyuan-math/proof-cli/blob/ae4356deb904f5de91bc25e5e51336c2c291d405/docs/audits/2026-10-13-reader-main-target-fix/revision-2/offline-verification.json).\n\nThe coupled offline checkouts were core `ae4356deb904f5de91bc25e5e51336c2c291d405`, agents `93cc9a0b9645f52cdeeab3f50b653cef99476a6e`, and web `636d04813cc3b17ff6e045c998b59805129cd423`. Committed source bytes match each repository's verification manifest. Source bases remain `d433159`, `7d3f312`, and `af687b0` respectively.\n\n[Trial preservation manifest](https://github.com/DengZhiyuan-math/proof-cli/blob/ae4356deb904f5de91bc25e5e51336c2c291d405/docs/audits/2026-10-13-reader-main-target-fix/revision-2/trial-preservation.json): all 134 captured files unchanged from the first publication snapshot (130 run-related files, 4 later diagnostic files). The digest algorithm and standalone verifier are published alongside it. This does not claim that all 134 files were produced during the run or describe the entire run-start environment.\n\nThe first #197 run remains failed evidence. No new real provider call, trial service update, pin change, merge, issue closure or Acceptance occurred. #197 and #132 stay open. Offline instruction/launch tests do not establish real-model compliance, autonomous source discovery or mathematical correctness. A fresh trial is still required.\n",
+      "files": [
+        {
+          "path": "CONTEXT.md",
+          "additions": 2,
+          "deletions": 0,
+          "changeType": "MODIFIED"
+        },
+        {
+          "path": "docs/adr/0021-progress-is-not-gated-by-trust.md",
+          "additions": 8,
+          "deletions": 4,
+          "changeType": "MODIFIED"
+        },
+        {
+          "path": "docs/audits/2026-10-13-reader-main-target-fix/offline-verification.json",
+          "additions": 37,
+          "deletions": 0,
+          "changeType": "ADDED"
+        },
+        {
+          "path": "docs/audits/2026-10-13-reader-main-target-fix/pytest.xml",
+          "additions": 2,
+          "deletions": 0,
+          "changeType": "ADDED"
+        },
+        {
+          "path": "docs/audits/2026-10-13-reader-main-target-fix/revision-2/README.md",
+          "additions": 23,
+          "deletions": 0,
+          "changeType": "ADDED"
+        },
+        {
+          "path": "docs/audits/2026-10-13-reader-main-target-fix/revision-2/offline-verification.json",
+          "additions": 62,
+          "deletions": 0,
+          "changeType": "ADDED"
+        },
+        {
+          "path": "docs/audits/2026-10-13-reader-main-target-fix/revision-2/pytest.xml",
+          "additions": 1,
+          "deletions": 0,
+          "changeType": "ADDED"
+        },
+        {
+          "path": "docs/audits/2026-10-13-reader-main-target-fix/revision-2/supplemental-pytest.xml",
+          "additions": 1,
+          "deletions": 0,
+          "changeType": "ADDED"
+        },
+        {
+          "path": "docs/audits/2026-10-13-reader-main-target-fix/revision-2/trial-preservation.json",
+          "additions": 823,
+          "deletions": 0,
+          "changeType": "ADDED"
+        },
+        {
+          "path": "docs/audits/2026-10-13-reader-main-target-fix/revision-2/verify_preservation.py",
+          "additions": 43,
+          "deletions": 0,
+          "changeType": "ADDED"
+        },
+        {
+          "path": "docs/audits/2026-10-13-reader-main-target-fix/trial-preservation.json",
+          "additions": 690,
+          "deletions": 0,
+          "changeType": "ADDED"
+        },
+        {
+          "path": "src/proof_cli/cli.py",
+          "additions": 2,
+          "deletions": 1,
+          "changeType": "MODIFIED"
+        },
+        {
+          "path": "src/proof_cli/key_ideas.py",
+          "additions": 7,
+          "deletions": 3,
+          "changeType": "MODIFIED"
+        },
+        {
+          "path": "src/proof_cli/proof_map.py",
+          "additions": 5,
+          "deletions": 3,
+          "changeType": "MODIFIED"
+        },
+        {
+          "path": "tests/test_key_ideas_provenance.py",
+          "additions": 53,
+          "deletions": 0,
+          "changeType": "ADDED"
+        }
+      ],
+      "headRefOid": "ae4356deb904f5de91bc25e5e51336c2c291d405",
+      "isDraft": true,
+      "state": "OPEN",
+      "statusCheckRollup": [
+        {
+          "__typename": "CheckRun",
+          "completedAt": "0001-01-01T00:00:00Z",
+          "conclusion": "",
+          "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38376958235/job/115227634665",
+          "name": "core-and-studio (ubuntu-24.04, 3.11)",
+          "startedAt": "2026-10-13T09:31:46Z",
+          "status": "IN_PROGRESS",
+          "workflowName": "tests"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "0001-01-01T00:00:00Z",
+          "conclusion": "",
+          "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38376958235/job/115227634334",
+          "name": "core-and-studio (ubuntu-24.04, 3.12)",
+          "startedAt": "2026-10-13T09:31:46Z",
+          "status": "IN_PROGRESS",
+          "workflowName": "tests"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "0001-01-01T00:00:00Z",
+          "conclusion": "",
+          "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38376958235/job/115227634644",
+          "name": "core-and-studio (windows-latest, 3.11)",
+          "startedAt": "2026-10-13T09:31:45Z",
+          "status": "IN_PROGRESS",
+          "workflowName": "tests"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "0001-01-01T00:00:00Z",
+          "conclusion": "",
+          "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38376958235/job/115227634860",
+          "name": "core-and-studio (windows-latest, 3.12)",
+          "startedAt": "2026-10-13T09:31:46Z",
+          "status": "IN_PROGRESS",
+          "workflowName": "tests"
+        }
+      ],
+      "title": "Keep agent-requested summaries unconfirmed and clarify ADR-0021",
+      "url": "https://github.com/DengZhiyuan-math/proof-cli/pull/220"
+    },
+    "agents": {
+      "baseRefOid": "7d3f312269b9868415e06302b97637db1a490220",
+      "body": "In the failed #197 run, Reader gave the project's only Theorem to a supporting bound and downgraded the main result. Pursue worked the wrong subtree, left local nodes unscheduled, and reported project `done` without requiring each Coordinator to finish `done`.\n\nReader now identifies the main result before any node, records any supplied statement as a departure, reserves theorem kind for that result, and stops/report on DUPLICATE_THEOREM. Single-file and multiple-draft target rules are explicit. Applicable literature is imported; unrelated draft material is retained in notes rather than unused local nodes.\n\nReader, Prover, Decomposer and map discussion share one autonomous retrieval procedure: uncited supporting statements trigger content-based queries, not only author/title lookup. Existing unrelated references do not suppress web search. The agent reads original theorems, compares assumptions/quantifiers/constants/losses/normalisation, and records actual queries, source locators, mismatches and access failures. No paper, author, URL, identifier or mathematical result is inserted into production instructions. Native Claude WebSearch/WebFetch and Codex live search are reused; permissions and dependencies do not expand.\n\nProject Pursue reads actual map nodes/dependencies before any node run and before reporting `done`. Orphan local nodes cause `stuck` with their IDs. Each Coordinator must finish `done`; refused, parked, stuck and budget results remain explicit. A host without the map-read hook starts no provider. The Reader self-report file check is removed.\n\nRelated to #31 and #32. Companion Draft PRs: [core #220](https://github.com/DengZhiyuan-math/proof-cli/pull/220), [web #25](https://github.com/zeqome/proof-web/pull/25).\n\nValidation: **217 passed**. Coverage includes wrong-root/orphan maps, transitive closure, unused imports, a late orphan, Coordinator refusal/endings, release/budget behavior, and an uncited draft's retrieval contract/tool access. Web's real host/manager/CLI launch is also checked using the existing stub CLI, without a scripted source or search answer. Wheel build and `git diff --check` pass; no new Ruff diagnostics relative to the base. [Verification](https://github.com/zeqome/proof-agents/blob/93cc9a0b9645f52cdeeab3f50b653cef99476a6e/docs/audits/2026-10-13-reader-main-target-fix/revision-2/offline-verification.json), [retrieval contract and limits](https://github.com/zeqome/proof-agents/blob/93cc9a0b9645f52cdeeab3f50b653cef99476a6e/docs/audits/2026-10-13-reader-main-target-fix/revision-2/autonomous-literature-retrieval.md).\n\nThe coupled offline checkouts were core `ae4356deb904f5de91bc25e5e51336c2c291d405`, agents `93cc9a0b9645f52cdeeab3f50b653cef99476a6e`, and web `636d04813cc3b17ff6e045c998b59805129cd423`. Committed source bytes match each repository's verification manifest. Source bases remain `d433159`, `7d3f312`, and `af687b0` respectively.\n\n[Trial preservation manifest](https://github.com/DengZhiyuan-math/proof-cli/blob/ae4356deb904f5de91bc25e5e51336c2c291d405/docs/audits/2026-10-13-reader-main-target-fix/revision-2/trial-preservation.json): all 134 captured files unchanged from the first publication snapshot (130 run-related files, 4 later diagnostic files). The digest algorithm and standalone verifier are published alongside it. This does not claim that all 134 files were produced during the run or describe the entire run-start environment.\n\nThe first #197 run remains failed evidence. No new real provider call, trial service update, pin change, merge, issue closure or Acceptance occurred. #197 and #132 stay open. Offline instruction/launch tests do not establish real-model compliance, autonomous source discovery or mathematical correctness. A fresh trial is still required.\n",
+      "files": [
+        {
+          "path": "docs/audits/2026-10-13-reader-main-target-fix/offline-verification.json",
+          "additions": 45,
+          "deletions": 0,
+          "changeType": "ADDED"
+        },
+        {
+          "path": "docs/audits/2026-10-13-reader-main-target-fix/pytest.xml",
+          "additions": 2,
+          "deletions": 0,
+          "changeType": "ADDED"
+        },
+        {
+          "path": "docs/audits/2026-10-13-reader-main-target-fix/revision-2/README.md",
+          "additions": 15,
+          "deletions": 0,
+          "changeType": "ADDED"
+        },
+        {
+          "path": "docs/audits/2026-10-13-reader-main-target-fix/revision-2/autonomous-literature-retrieval.md",
+          "additions": 30,
+          "deletions": 0,
+          "changeType": "ADDED"
+        },
+        {
+          "path": "docs/audits/2026-10-13-reader-main-target-fix/revision-2/offline-verification.json",
+          "additions": 59,
+          "deletions": 0,
+          "changeType": "ADDED"
+        },
+        {
+          "path": "docs/audits/2026-10-13-reader-main-target-fix/revision-2/pytest.xml",
+          "additions": 1,
+          "deletions": 0,
+          "changeType": "ADDED"
+        },
+        {
+          "path": "docs/audits/2026-10-13-reader-main-target-fix/revision-2/supplemental-pytest.xml",
+          "additions": 1,
+          "deletions": 0,
+          "changeType": "ADDED"
+        },
+        {
+          "path": "src/proof_agents/coordinator.py",
+          "additions": 38,
+          "deletions": 4,
+          "changeType": "MODIFIED"
+        },
+        {
+          "path": "src/proof_agents/map_agent.py",
+          "additions": 4,
+          "deletions": 3,
+          "changeType": "MODIFIED"
+        },
+        {
+          "path": "src/proof_agents/proof_agent.py",
+          "additions": 25,
+          "deletions": 2,
+          "changeType": "MODIFIED"
+        },
+        {
+          "path": "src/proof_agents/reader.py",
+          "additions": 29,
+          "deletions": 8,
+          "changeType": "MODIFIED"
+        },
+        {
+          "path": "tests/test_coordinator.py",
+          "additions": 116,
+          "deletions": 3,
+          "changeType": "MODIFIED"
+        },
+        {
+          "path": "tests/test_literature_retrieval.py",
+          "additions": 63,
+          "deletions": 0,
+          "changeType": "ADDED"
+        },
+        {
+          "path": "tests/test_pursue_budget.py",
+          "additions": 5,
+          "deletions": 3,
+          "changeType": "MODIFIED"
+        },
+        {
+          "path": "tests/test_reader.py",
+          "additions": 20,
+          "deletions": 0,
+          "changeType": "MODIFIED"
+        }
+      ],
+      "headRefOid": "93cc9a0b9645f52cdeeab3f50b653cef99476a6e",
+      "isDraft": true,
+      "state": "OPEN",
+      "statusCheckRollup": [
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-13T09:32:23Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/zeqome/proof-agents/actions/runs/38376960976/job/115227643754",
+          "name": "agents (3.11)",
+          "startedAt": "2026-10-13T09:31:47Z",
+          "status": "COMPLETED",
+          "workflowName": "tests"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-13T09:32:26Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/zeqome/proof-agents/actions/runs/38376960976/job/115227643469",
+          "name": "agents (3.12)",
+          "startedAt": "2026-10-13T09:31:47Z",
+          "status": "COMPLETED",
+          "workflowName": "tests"
+        }
+      ],
+      "title": "Retrieve uncited supporting results and require complete Pursue progress",
+      "url": "https://github.com/zeqome/proof-agents/pull/30"
+    },
+    "web": {
+      "baseRefOid": "af687b02b7d03dbf5bd2b60062284d8421dfa5c0",
+      "body": "The Reader target-file check could only compare the agent with its own selection. Its Start-time recheck also blocked a researcher's corrected map on a missing or stale scratch report. Both checks are removed. The project host now supplies actual node kinds and dependencies to agents #30's map-coverage check; older agents without that hook cannot start project Pursue. Individual Theorem pursuits remain available.\n\nNew core #221 snapshot provenance is displayed as an agent summary not confirmed by the author on the review page and queue. Existing provenance labels and stored snapshots remain intact. Web #26's header-count discrepancy is outside this change.\n\nCompanion Draft PRs: [agents #30](https://github.com/zeqome/proof-agents/pull/30) (required for project coverage), [core #220](https://github.com/DengZhiyuan-math/proof-cli/pull/220). Web CI checks packaging and Python/JavaScript syntax only. Full integration checks use the coupled candidate checkouts below; CI packaging success does not establish that integration result.\n\nValidation: **831 passed, 1 skipped** (missing pdflatex). Offline API tests verify wrong-root maps stop without starting a Coordinator, correct main roots are scheduled, and missing/malformed/stale legacy target files cannot gate a corrected map. The real project API/manager/CLI launch, with the existing stub CLI, receives the generic uncited-result retrieval instructions and native search permissions; it does not script source discovery. DOM harnesses verify the unconfirmed-author label in both review surfaces. Wheel build, JavaScript syntax and `git diff --check` pass; no new Ruff diagnostics relative to the base. [Verification](https://github.com/zeqome/proof-web/blob/636d04813cc3b17ff6e045c998b59805129cd423/docs/audits/2026-10-13-reader-main-target-fix/revision-2/offline-verification.json).\n\nThe coupled offline checkouts were core `ae4356deb904f5de91bc25e5e51336c2c291d405`, agents `93cc9a0b9645f52cdeeab3f50b653cef99476a6e`, and web `636d04813cc3b17ff6e045c998b59805129cd423`. Committed source bytes match each repository's verification manifest. Source bases remain `d433159`, `7d3f312`, and `af687b0` respectively.\n\n[Trial preservation manifest](https://github.com/DengZhiyuan-math/proof-cli/blob/ae4356deb904f5de91bc25e5e51336c2c291d405/docs/audits/2026-10-13-reader-main-target-fix/revision-2/trial-preservation.json): all 134 captured files unchanged from the first publication snapshot (130 run-related files, 4 later diagnostic files). The digest algorithm and standalone verifier are published alongside it. This does not claim that all 134 files were produced during the run or describe the entire run-start environment.\n\nThe first #197 run remains failed evidence. No new real provider call, trial service update, pin change, merge, issue closure or Acceptance occurred. #197 and #132 stay open. Offline instruction/launch tests do not establish real-model compliance, autonomous source discovery or mathematical correctness. A fresh trial is still required.\n",
+      "files": [
+        {
+          "path": "docs/audits/2026-10-13-reader-main-target-fix/offline-verification.json",
+          "additions": 57,
+          "deletions": 0,
+          "changeType": "ADDED"
+        },
+        {
+          "path": "docs/audits/2026-10-13-reader-main-target-fix/pytest.xml",
+          "additions": 2,
+          "deletions": 0,
+          "changeType": "ADDED"
+        },
+        {
+          "path": "docs/audits/2026-10-13-reader-main-target-fix/revision-2/README.md",
+          "additions": 15,
+          "deletions": 0,
+          "changeType": "ADDED"
+        },
+        {
+          "path": "docs/audits/2026-10-13-reader-main-target-fix/revision-2/literature-pytest.xml",
+          "additions": 1,
+          "deletions": 0,
+          "changeType": "ADDED"
+        },
+        {
+          "path": "docs/audits/2026-10-13-reader-main-target-fix/revision-2/offline-verification.json",
+          "additions": 68,
+          "deletions": 0,
+          "changeType": "ADDED"
+        },
+        {
+          "path": "docs/audits/2026-10-13-reader-main-target-fix/revision-2/pytest.xml",
+          "additions": 1,
+          "deletions": 0,
+          "changeType": "ADDED"
+        },
+        {
+          "path": "docs/audits/2026-10-13-reader-main-target-fix/revision-2/supplemental-pytest.xml",
+          "additions": 1,
+          "deletions": 0,
+          "changeType": "ADDED"
+        },
+        {
+          "path": "src/proof_web/static/app.js",
+          "additions": 1,
+          "deletions": 0,
+          "changeType": "MODIFIED"
+        },
+        {
+          "path": "src/proof_web/static/studio/node.js",
+          "additions": 1,
+          "deletions": 0,
+          "changeType": "MODIFIED"
+        },
+        {
+          "path": "src/proof_web/studios.py",
+          "additions": 6,
+          "deletions": 3,
+          "changeType": "MODIFIED"
+        },
+        {
+          "path": "tests/test_agent_run.py",
+          "additions": 25,
+          "deletions": 0,
+          "changeType": "MODIFIED"
+        },
+        {
+          "path": "tests/test_map_home.py",
+          "additions": 8,
+          "deletions": 0,
+          "changeType": "MODIFIED"
+        },
+        {
+          "path": "tests/test_node_page.py",
+          "additions": 1,
+          "deletions": 0,
+          "changeType": "MODIFIED"
+        },
+        {
+          "path": "tests/test_reader_main_target.py",
+          "additions": 183,
+          "deletions": 0,
+          "changeType": "ADDED"
+        }
+      ],
+      "headRefOid": "636d04813cc3b17ff6e045c998b59805129cd423",
+      "isDraft": true,
+      "state": "OPEN",
+      "statusCheckRollup": [
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-13T09:32:05Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/zeqome/proof-web/actions/runs/38376963528/job/115227651738",
+          "name": "package",
+          "startedAt": "2026-10-13T09:31:48Z",
+          "status": "COMPLETED",
+          "workflowName": "package"
+        }
+      ],
+      "title": "Check the Pursue map and display unconfirmed agent summaries",
+      "url": "https://github.com/zeqome/proof-web/pull/25"
+    }
+  },
+  "offline_passed": 2209,
+  "offline_skipped": 16,
+  "real_provider_calls_added": 0,
+  "trial_files_checked": 134,
+  "trial_files_changed": 0,
+  "trial_map_modified": false,
+  "trial_service_updated": false,
+  "trial_pins_updated": false,
+  "merged": false,
+  "retrieval_evidence_limit": "Instruction/permission/real launch wiring with an existing stub CLI, not real autonomous source discovery or mathematical acceptance.",
+  "issues_remaining_open": [
+    197,
+    132
+  ]
+}

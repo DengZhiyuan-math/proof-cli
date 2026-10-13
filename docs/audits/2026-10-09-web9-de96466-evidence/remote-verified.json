@@ -1,0 +1,22 @@
+{
+  "baseRefName": "feat/0021-pursue-review-queue",
+  "body": "Closes #9. Needs core #199 (would_meet_trust_rules, ad479f6).\n",
+  "headRefName": "fix/9-reference-review-marks",
+  "headRefOid": "de964662146afccca83ac88c6f5ae263c78d6360",
+  "number": 13,
+  "state": "OPEN",
+  "statusCheckRollup": [
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-09T14:37:00Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/zeqome/proof-web/actions/runs/37945468003/job/113870464843",
+      "name": "package",
+      "startedAt": "2026-10-09T14:36:47Z",
+      "status": "COMPLETED",
+      "workflowName": "package"
+    }
+  ],
+  "title": "feat: an agent's import shows the rules it would meet and the Verifier's unchecked marks at its Reference review (#9)",
+  "url": "https://github.com/zeqome/proof-web/pull/13"
+}

@@ -1,0 +1,9 @@
+[studio]
+library=["library"]
+parallel=1
+budget_turns=1
+budget_minutes=5
+claude_config_dir="ignored"
+budget_turn=4
+[studio.budget]
+minute=5

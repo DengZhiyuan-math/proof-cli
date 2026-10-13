@@ -1,0 +1,15 @@
+804:     def _pursuit_spend(self, view: dict) -> dict:
+805:         """The Pursue's total as it is being spent (proof-agents#19): the turns of the parts that ended and the live ones of
+806:         the Theorem being worked, structure turns and failed launches apart, and the time left."""
+807:         fixed = view.get("budget")
+808:         if not fixed:
+809:             return {}
+810:         spent, structure, failed = int(fixed.get("spent") or 0), 0, int(fixed.get("failed_launches") or 0)
+811:         coordinator = self._coordinators.get(view.get("current") or "")
+812:         if coordinator is not None and view.get("status") in _PURSUIT_AT_WORK:
+813:             live = coordinator.view()
+814:             spent = int(live.get("pursue_turns", spent))
+815:             structure = int(live.get("structure_turns") or 0)
+816:         left = max(0.0, (float(fixed["deadline"]) - time.time()) / 60) if fixed.get("deadline") else None
+817:         return {"spend": {"turns": spent, "turns_max": fixed.get("turns_max"), "structure_turns": structure, "failed_launches": failed,
+818:                           "minutes_max": fixed.get("minutes_max"), "minutes_left": None if left is None else round(left, 1)}}

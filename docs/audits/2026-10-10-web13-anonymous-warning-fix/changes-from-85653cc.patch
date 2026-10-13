@@ -1,0 +1,119 @@
+diff --git a/src/proof_web/review_queue.py b/src/proof_web/review_queue.py
+index 760d1d2..1864b88 100644
+--- a/src/proof_web/review_queue.py
++++ b/src/proof_web/review_queue.py
+@@ -103,8 +103,8 @@ def source_marks(store: ProjectStore, node_id: str) -> list[dict]:
+     Evidence check on a dependent's snapshot that recorded it: the dependent, the snapshot, whether that snapshot is
+     the dependent's current one, and the note. The snapshot's own frozen dependencies say what it rested on (the
+     node's current ones for a snapshot from before they were frozen). A mark is read clause by clause: a clause
+-    saying "unchecked against the source" is this import's when it names it, or when it names no imported result and
+-    the snapshot rests on no other."""
++    saying "unchecked against the source" uses its own import names first, then those of its sentence. Only when
++    neither names an imported result does it fall back to the snapshot's sole import."""
+     nodes = proof_map.list_nodes(store)
+     imported = [node.id for node in nodes if node.kind == ProofMapNodeKind.imported_result]
+     names = {i: re.compile(rf"(?<![\w.-]){re.escape(i)}(?![\w.-])") for i in imported}
+@@ -117,7 +117,8 @@ def source_marks(store: ProjectStore, node_id: str) -> list[dict]:
+                 continue
+             alone = [d for d in rests_on if d in names] == [node_id]
+             for check in list_evidence_checks_for_candidate_proof(store, proof.id):
+-                if any(_marks(clause, node_id, names, alone) for clause in _clauses(check.notes)):
++                if any(_marks(clause, sentence, node_id, names, alone)
++                       for sentence in _SENTENCE_BOUNDARY.split(check.notes) for clause in _clauses(sentence)):
+                     current = current or get_current_candidate_proof(store, dependent.id)
+                     marks.append({"dependent": dependent.id, "snapshot": proof.version, "current": current is not None and current.id == proof.id,
+                                   "evidence_check": check.id, "outcome": check.outcome.value, "note": check.notes})
+@@ -125,20 +126,20 @@ def source_marks(store: ProjectStore, node_id: str) -> list[dict]:
+ 
+ 
+ # Keep common abbreviations with the import named after them.
+-_CLAUSE_BOUNDARY = re.compile(r"\n+|;|(?<=[.!?])(?<!\be\.g\.)(?<!\bi\.e\.)\s+", re.IGNORECASE)
++_SENTENCE_BOUNDARY = re.compile(r"\n+|(?<=[.!?])(?<!\be\.g\.)(?<!\bi\.e\.)\s+", re.IGNORECASE)
+ _CHECK_COMMA = re.compile(
+-    r",\s*(?=(?:\w+\s+)?[\w.-]+(?:\s*:\s*|\s+)(?:un)?checked against the source\b)",
++    r",\s*(?=(?:\w+\s+)?[\w.-]+(?:\s*:\s*|\s+)(?:un)?checked\b)",
+     re.IGNORECASE,
+ )
+ 
+ 
+-def _clauses(note: str) -> Iterator[str]:
++def _clauses(sentence: str) -> Iterator[str]:
+     """Split separate source checks, preserving commas in import lists and explanations."""
+-    for segment in _CLAUSE_BOUNDARY.split(note):
++    for segment in sentence.split(";"):
+         parts = iter(_CHECK_COMMA.split(segment))
+         clause = next(parts)
+         for part in parts:
+-            if "checked against the source" in clause.lower():
++            if re.search(r"\b(?:un)?checked\b", clause, re.IGNORECASE):
+                 yield clause
+                 clause = part
+             else:
+@@ -147,11 +148,12 @@ def _clauses(note: str) -> Iterator[str]:
+         yield clause
+ 
+ 
+-def _marks(clause: str, node_id: str, names: dict, alone: bool) -> bool:
+-    """Whether one clause of a Verifier's note marks `node_id` unchecked against the source."""
++def _marks(clause: str, sentence: str, node_id: str, names: dict, alone: bool) -> bool:
++    """Read an unchecked clause's own names, its sentence's names, then the single-import fallback."""
+     if UNCHECKED not in clause.lower():
+         return False
+-    named = [i for i, name in names.items() if name.search(clause)]
++    named = ([i for i, name in names.items() if name.search(clause)]
++             or [i for i, name in names.items() if name.search(sentence)])
+     return node_id in named if named else alone
+ 
+ 
+diff --git a/tests/test_import_review.py b/tests/test_import_review.py
+index fbb8eec..819f84c 100644
+--- a/tests/test_import_review.py
++++ b/tests/test_import_review.py
+@@ -111,6 +111,8 @@ def test_a_semicolon_keeps_each_imports_source_check_separate(store, note):
+     "R2: unchecked against the source, while R checked against the source.",
+     "R: checked against the source, R2: unchecked against the source.",
+     "R2: unchecked against the source, R checked against the source.",
++    "R: checked, R2: unchecked against the source.",
++    "R2: unchecked against the source, R: checked.",
+ ])
+ def test_a_comma_keeps_each_imports_source_check_separate(store, note):
+     _two_imports(store)
+@@ -139,6 +141,38 @@ def test_a_comma_between_import_names_keeps_the_joint_mark(store):
+     assert _marked(store, "R2") == [("L", 1, True)]
+ 
+ 
++@pytest.mark.parametrize("note", [
++    "Unchecked against the source; R2's paper could not be opened.",
++    "R2's statement differs from the cited version; unchecked against the source.",
++])
++def test_an_unnamed_unchecked_clause_uses_the_import_named_in_its_sentence(store, note):
++    _two_imports(store)
++    create_node(store, node_id="L", kind="lemma", statement="L", dependencies=["R", "R2"], created_by="reader-1")
++    _checked(store, "L", note)
++    assert _marked(store, "R") == []
++    assert _marked(store, "R2") == [("L", 1, True)]
++    client = DirectClient(store)
++    try:
++        pending = client.get("/api/state")[1]["data"]["pending"]
++        queue = client.get("/api/review-queue")[1]["data"]["items"]
++        for node_id, expected in (("R", []), ("R2", [("L", 1, True, note)])):
++            reviews = [client.get(f"/api/node/{node_id}")[1]["data"]["import_review"],
++                       next(item for item in pending if item["node_id"] == node_id),
++                       next(item for item in queue if item["kind"] == "imported" and item["node_id"] == node_id)]
++            for review in reviews:
++                assert [(m["dependent"], m["snapshot"], m["current"], m["note"]) for m in review["unchecked"]] == expected
++    finally:
++        client.app.close()
++
++
++def test_the_sentence_fallback_does_not_take_an_import_from_another_sentence(store):
++    _two_imports(store)
++    create_node(store, node_id="L", kind="lemma", statement="L", dependencies=["R", "R2"], created_by="reader-1")
++    _checked(store, "L", "R: checked against the source. Unchecked against the source; R2's paper could not be opened.")
++    assert _marked(store, "R") == []
++    assert _marked(store, "R2") == [("L", 1, True)]
++
++
+ def test_a_snapshot_is_read_against_the_dependencies_it_froze_not_the_maps_current_edges(store):
+     _two_imports(store)
+     create_node(store, node_id="L", kind="lemma", statement="L", dependencies=["R"], created_by="reader-1")

@@ -1,0 +1,1 @@
+{"default": "claude", "providers": {"claude": {"bin": "/usr/bin/false"}, "codex": {"bin": "/usr/bin/false"}}}

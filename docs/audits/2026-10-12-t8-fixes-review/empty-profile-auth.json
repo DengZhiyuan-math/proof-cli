@@ -1,0 +1,5 @@
+{
+  "exit": 1,
+  "stdout": "{\n  \"loggedIn\": false,\n  \"authMethod\": \"none\",\n  \"apiProvider\": \"firstParty\",\n  \"analyticsDisabled\": false,\n  \"projectsDirectory\": \"/Volumes/Codex-Workspace/live/home/zhdeng/proof-cli/docs/audits/2026-10-12-t8-fixes-review/empty-claude-profile/projects\",\n  \"configDirectory\": \"/Volumes/Codex-Workspace/live/home/zhdeng/proof-cli/docs/audits/2026-10-12-t8-fixes-review/empty-claude-profile\"\n}\n",
+  "stderr": ""
+}

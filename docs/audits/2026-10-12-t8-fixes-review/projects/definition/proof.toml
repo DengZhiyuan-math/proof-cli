@@ -1,0 +1,5 @@
+[studio]
+library=["library"]
+parallel=1
+budget_turns=1
+budget_minutes=5

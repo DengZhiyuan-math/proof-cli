@@ -1,0 +1,72 @@
+Map
+claim · C
+Agent
+t8-controlled
+Node
+Definitions
+Positive parameter. 
+𝑛
+≥
+2
+n≥2.
+
+C holds for n.
+
+Dependency changed
+review-needed
+unreviewed
+potentially-stale
+unclaimed
+Depends on
+no dependencies
+Files
+proof.tex
+??
+key-ideas.md
+??
+Outline
+No sections yet.
+Work log
+Files
+Compile
+Draft
+No Agent Is Working On This Node.
+
+Start it once: it works the node on its own — the Prover finds the proof, the Typesetter writes it, Numerics computes, the Verifier reads it against them — and stops when it requests review or needs you.
+
+Start agent
+all roles
+Prover only
+Typesetter only
+Numerics only
+Verifier only
+Decomposer only
+Start
+
+WORK LOG
+19:45
+prover-fixture
+requested review of snapshot v1
+19:45
+prover-fixture/verifier
+Evidence check passed
+19:45
+Prover
+question
+19:45
+human
+answer
+19:47
+human
+definition-edited
+New chat
+This is the node's proof agent: it reads the project, its library and the web, runs
+proof and computations, and writes this node's proof. Pick Claude Code or Codex CLI above.
+Here you only Ask: read-only questions about the node — the agent works it from its run, in the centre.
+Type @ to point it at a file or the selection (or select text and press ⌘L).
+Type / for commands.
+Commits, pushes and non-allowlisted shell commands are not permitted from here.
+Send
+Problems
+Output
+Diff

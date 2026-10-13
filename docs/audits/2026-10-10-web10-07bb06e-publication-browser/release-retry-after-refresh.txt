@@ -1,0 +1,74 @@
+- banner
+  - button "Show or hide the sidebar" [ref=e2]
+  - link "browser10-release-retry" [ref=e3]
+  - StaticText "1 node · 1 on the frontier"
+  - group "View"
+    - button "Graph" [ref=e10]
+    - button "Tree" [ref=e11]
+  - LabelText "Find a node by id, label or statement (/)"
+    - searchbox "Find a node by id, label or statement" [ref=e12]
+    - StaticText "/"
+  - status
+  - generic
+    - StaticText "1"
+    - StaticText "Frontier"
+  - link "0 Awaiting you" [ref=e4]
+    - StaticText "0"
+    - StaticText "Awaiting you"
+  - link "0 Fog" [ref=e5]
+    - StaticText "0"
+    - StaticText "Fog"
+  - generic
+    - StaticText "Y"
+    - StaticText "Yomathnotcool <125728853+DengZhiyuan-math@users.noreply.github.com>"
+- navigation "Sections" [ref=e1]
+  - paragraph
+    - StaticText "Proof map"
+  - link "Map" [ref=e6]
+    - StaticText "Map"
+  - link "Review" [ref=e7]
+    - StaticText "Review"
+  - link "Warnings" [ref=e8]
+    - StaticText "Warnings"
+  - link "Discuss" [ref=e9]
+    - StaticText "Discuss"
+- main
+  - status
+  - generic
+    - generic
+      - paragraph
+        - StaticText "Your library has a draft and the map is empty. Pursue reads the draft, states it as a map, and works every Theorem as far as the agents can go. What it leaves you is the review queue; nothing it does is trust until you Accept it."
+      - status
+        - StaticText "released — stopped by the researcher"
+    - generic
+      - image "Dependency graph of the proof map"
+        - link "theorem T1: unreviewed, open, current, on the frontier" [ref=e17]
+          - generic
+            - StaticText "Theorem T1"
+          - StaticText "T1 holds"
+          - StaticText "Ready"
+          - button "Start the agent on T1" [ref=e18]
+            - StaticText "▶ Start"
+      - list "What the icons mean"
+        - listitem [level=1]
+          - StaticText "Ready to start"
+        - listitem [level=1]
+          - StaticText "In progress"
+        - listitem [level=1]
+          - StaticText "Blocked"
+        - listitem [level=1]
+          - StaticText "Awaiting review"
+        - listitem [level=1]
+          - StaticText "Accepted"
+        - listitem [level=1]
+          - StaticText "Rejected"
+        - listitem [level=1]
+          - StaticText "Needs attention"
+        - listitem [level=1]
+          - StaticText "Open"
+      - group "Zoom"
+        - button "Zoom out" [ref=e13]
+        - StaticText "110%"
+        - button "Zoom in" [ref=e14]
+        - button "Fit" [ref=e15]
+        - button "Tidy" [ref=e16]

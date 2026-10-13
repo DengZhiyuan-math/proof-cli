@@ -1,0 +1,8 @@
+{
+  "status": "deferred_by_user",
+  "attempt": "open -na Google Chrome failed: Unable to find application named Google Chrome; CDP 9223 unavailable after bounded poll",
+  "skill": "/Volumes/Codex-Workspace/live/home/zhdeng/.codex/skills/agent-browser/SKILL.md",
+  "rule": "If CDP is still unavailable after polling, stop and ask the user to launch Chrome manually from Terminal.",
+  "user_choice": "先完成审计和 PR，保留浏览器验收待办",
+  "provider": "none; no real browser or model-provider acceptance performed"
+}

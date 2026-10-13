@@ -1,0 +1,30 @@
+{
+  "baseRefOid": "7d3f312269b9868415e06302b97637db1a490220",
+  "headRefOid": "528f2235771320241bcb2e171d2a293404fce45b",
+  "isDraft": true,
+  "state": "OPEN",
+  "statusCheckRollup": [
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-13T14:04:07Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/zeqome/proof-agents/actions/runs/38410111995/job/115339879584",
+      "name": "agents (3.11)",
+      "startedAt": "2026-10-13T14:03:33Z",
+      "status": "COMPLETED",
+      "workflowName": "tests"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-13T14:04:15Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/zeqome/proof-agents/actions/runs/38410111995/job/115339879911",
+      "name": "agents (3.12)",
+      "startedAt": "2026-10-13T14:03:33Z",
+      "status": "COMPLETED",
+      "workflowName": "tests"
+    }
+  ],
+  "title": "Reserve Reader main target and correct active Pursue progress",
+  "url": "https://github.com/zeqome/proof-agents/pull/30"
+}

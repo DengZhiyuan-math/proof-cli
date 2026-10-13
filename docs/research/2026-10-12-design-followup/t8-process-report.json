@@ -1,0 +1,357 @@
+{
+  "source_sha256": {
+    "audits/2026-10-11-integration-published-t8/real-trial-preflight.json": "a17d6207251a6e64864cbf0549d2a325de2ba47d56306be864225f4cb940746d",
+    "audits/2026-10-11-integration-published-t8/real-trial-summary.json": "c5078783bb1aec0513f6bbf57dcf2496bfaa3fb21a910c2b59114699a292f7ba",
+    "audits/2026-10-11-integration-published-t8/real-project-details-before-restart.json": "81e21cbea49aae1e7b37eb7f17da933c52381e2b0f236f4e07aa819bbf8a9f2a",
+    "audits/2026-10-11-integration-published-t8/real-queue.json": "f58fa951035da04c6561ac7ffd27e45f8426d73863f1a452a0f8e8b2a7a551e3",
+    "audits/2026-10-11-integration-published-t8/real-provider-events.jsonl": "d36278c00b5ec90ea8fa3931d6cb1cd9fb9cfe687fc74936e01767b1c760d0a8",
+    "audits/2026-10-11-integration-published-t8/real-first-attempt-provider-events.jsonl": "e76e6e458737f7cec64fe3fc1cfcdad5a57eb78655ec6e024dc512f92b9f8dca",
+    "audits/2026-10-12-t8-fixes-review/logged-out-reader-events.jsonl": "6df8db8ad3a9cfff174971699d95f9e0512a84db58f3255a3dca6dc506351b11",
+    "audits/2026-10-12-t8-fixes-review/logged-out-reader-result.json": "2468f197ae73948693375f55c6e220ba0faf96d9f0b737c114c40048948c0b8f",
+    "audits/2026-10-12-t8-fixes-review/definition-work-log.json": "9b2cb01ce4aacd601803d2d35c389838766fa34a897b8fdff8b36f6417f72649"
+  },
+  "start_europe_zurich": "2026-10-11T21:57:43.467541+02:00",
+  "main_trial": {
+    "completed": 40,
+    "execution_failures": 0,
+    "roles": {
+      "reader": 1,
+      "decomposer": 2,
+      "prover": 19,
+      "typesetter": 9,
+      "verifier": 9
+    },
+    "usage_including_backend_cache_counts": {
+      "in": 21472006,
+      "out": 569653
+    },
+    "elapsed_minutes": 87.60330196666668,
+    "budget": {
+      "turns_max": 60,
+      "minutes_max": 120.0,
+      "deadline": 1791755863.506443,
+      "spent": 40,
+      "structure_spent": 3,
+      "failed_launches": 0
+    },
+    "theorem_results": {
+      "main-theorem": {
+        "status": "stuck",
+        "reason": "nothing left to work without the researcher: sobolev-embedding-general, sobolev-embedding-cuspidal, sobolev-embedding-residual rest(s) on what no run will settle (parked: main-theorem, height-vs-distance)"
+      }
+    },
+    "verdicts": {
+      "failed": 1,
+      "passed": 8
+    },
+    "explicit_abandoned_attempts": 2,
+    "exact_repeated_failed_verdict_notes": 0,
+    "failed_then_passed": [
+      {
+        "node": "complementary-series-model",
+        "failed_at": "2026-10-11T20:40:48.154925+00:00",
+        "passed_at": "2026-10-11T20:43:29.420057+00:00"
+      }
+    ]
+  },
+  "first_review_request": {
+    "node": "hilbert-space-decomposition",
+    "minutes": 15.25,
+    "final_provisional": false
+  },
+  "earliest_review_request_for_final_provisional_node": {
+    "node": "matrix-coefficient-decay-p",
+    "minutes": 26.05
+  },
+  "final_queue": {
+    "entries": 68,
+    "kinds": {
+      "unfixed": 39,
+      "parked": 3,
+      "imported": 10,
+      "provisional": 7,
+      "question": 9
+    },
+    "unfixed": {
+      "Definition": 15,
+      "statement": 24
+    }
+  },
+  "final_nodes": 24,
+  "final_provisional_nodes": [
+    "complementary-series-model",
+    "exceptional-cuspidal-finite-per-level",
+    "matrix-coefficient-decay-p",
+    "matrix-coefficient-decay-product",
+    "real-complementary-decay",
+    "real-unitary-dual-ktypes",
+    "smooth-vector-exceptional-support-finite"
+  ],
+  "unchecked_import_marks": [
+    {
+      "node": "chh-tempered-bound",
+      "marks": 2
+    },
+    {
+      "node": "unitary-dual-sl2-qp",
+      "marks": 1
+    }
+  ],
+  "per_node": [
+    {
+      "node": "complementary-series-model",
+      "provider_turns_in_work_log": 7,
+      "verdicts": {
+        "failed": 1,
+        "passed": 1
+      },
+      "review_requests_minutes": [
+        46.07
+      ],
+      "final_provisional": true,
+      "final_conditional_on": [
+        "chh-tempered-bound",
+        "unitary-dual-sl2-qp"
+      ],
+      "parked": false
+    },
+    {
+      "node": "cuspidal-exceptional-finite",
+      "provider_turns_in_work_log": 1,
+      "verdicts": {},
+      "review_requests_minutes": [],
+      "final_provisional": false,
+      "final_conditional_on": [
+        "spectral-structure-real"
+      ],
+      "parked": true
+    },
+    {
+      "node": "exceptional-cuspidal-finite-per-level",
+      "provider_turns_in_work_log": 4,
+      "verdicts": {
+        "passed": 1
+      },
+      "review_requests_minutes": [
+        63.72
+      ],
+      "final_provisional": true,
+      "final_conditional_on": [],
+      "parked": false
+    },
+    {
+      "node": "height-vs-distance",
+      "provider_turns_in_work_log": 1,
+      "verdicts": {},
+      "review_requests_minutes": [],
+      "final_provisional": false,
+      "final_conditional_on": [],
+      "parked": true
+    },
+    {
+      "node": "hilbert-space-decomposition",
+      "provider_turns_in_work_log": 5,
+      "verdicts": {
+        "passed": 1
+      },
+      "review_requests_minutes": [
+        15.25
+      ],
+      "final_provisional": false,
+      "final_conditional_on": [
+        "exceptional-cuspidal-finite-per-level",
+        "smooth-vector-exceptional-support-finite"
+      ],
+      "parked": false
+    },
+    {
+      "node": "main-theorem",
+      "provider_turns_in_work_log": 1,
+      "verdicts": {},
+      "review_requests_minutes": [],
+      "final_provisional": false,
+      "final_conditional_on": [
+        "burger-integral-formula",
+        "burger-operator-bounds",
+        "chh-tempered-bound",
+        "complementary-series-model",
+        "exceptional-cuspidal-finite-per-level",
+        "local-sobolev-inequality",
+        "matrix-coefficient-decay-p",
+        "matrix-coefficient-decay-product",
+        "real-complementary-decay",
+        "real-unitary-dual-ktypes",
+        "smooth-vector-exceptional-support-finite",
+        "sobolev-cuspidal-real",
+        "sobolev-residual-real",
+        "tree-spherical-asymptotics",
+        "unitary-dual-sl2-qp"
+      ],
+      "parked": true
+    },
+    {
+      "node": "matrix-coefficient-decay-p",
+      "provider_turns_in_work_log": 4,
+      "verdicts": {
+        "passed": 1
+      },
+      "review_requests_minutes": [
+        26.05
+      ],
+      "final_provisional": true,
+      "final_conditional_on": [
+        "chh-tempered-bound",
+        "complementary-series-model",
+        "tree-spherical-asymptotics",
+        "unitary-dual-sl2-qp"
+      ],
+      "parked": false
+    },
+    {
+      "node": "matrix-coefficient-decay-product",
+      "provider_turns_in_work_log": 4,
+      "verdicts": {
+        "passed": 1
+      },
+      "review_requests_minutes": [
+        55.12
+      ],
+      "final_provisional": true,
+      "final_conditional_on": [
+        "chh-tempered-bound",
+        "complementary-series-model",
+        "matrix-coefficient-decay-p",
+        "real-complementary-decay",
+        "real-unitary-dual-ktypes",
+        "tree-spherical-asymptotics",
+        "unitary-dual-sl2-qp"
+      ],
+      "parked": false
+    },
+    {
+      "node": "real-complementary-decay",
+      "provider_turns_in_work_log": 4,
+      "verdicts": {
+        "passed": 1
+      },
+      "review_requests_minutes": [
+        87.33
+      ],
+      "final_provisional": true,
+      "final_conditional_on": [],
+      "parked": false
+    },
+    {
+      "node": "real-unitary-dual-ktypes",
+      "provider_turns_in_work_log": 4,
+      "verdicts": {
+        "passed": 1
+      },
+      "review_requests_minutes": [
+        78.89
+      ],
+      "final_provisional": true,
+      "final_conditional_on": [],
+      "parked": false
+    },
+    {
+      "node": "smooth-vector-exceptional-support-finite",
+      "provider_turns_in_work_log": 4,
+      "verdicts": {
+        "passed": 1
+      },
+      "review_requests_minutes": [
+        66.79
+      ],
+      "final_provisional": true,
+      "final_conditional_on": [
+        "exceptional-cuspidal-finite-per-level"
+      ],
+      "parked": false
+    },
+    {
+      "node": "sobolev-embedding-cuspidal",
+      "provider_turns_in_work_log": 0,
+      "verdicts": {},
+      "review_requests_minutes": [],
+      "final_provisional": false,
+      "final_conditional_on": [
+        "local-sobolev-inequality",
+        "sobolev-cuspidal-real"
+      ],
+      "parked": false
+    },
+    {
+      "node": "sobolev-embedding-general",
+      "provider_turns_in_work_log": 0,
+      "verdicts": {},
+      "review_requests_minutes": [],
+      "final_provisional": false,
+      "final_conditional_on": [
+        "local-sobolev-inequality"
+      ],
+      "parked": false
+    },
+    {
+      "node": "sobolev-embedding-residual",
+      "provider_turns_in_work_log": 0,
+      "verdicts": {},
+      "review_requests_minutes": [],
+      "final_provisional": false,
+      "final_conditional_on": [
+        "local-sobolev-inequality",
+        "sobolev-residual-real"
+      ],
+      "parked": false
+    }
+  ],
+  "original_failed_reader_separate_from_main_trial": {
+    "completed": 1,
+    "execution_failures": 1,
+    "roles": {
+      "reader": 1
+    },
+    "usage_including_backend_cache_counts": {
+      "in": 0,
+      "out": 0
+    }
+  },
+  "controlled_auth_failure": {
+    "completed": 1,
+    "execution_failures": 1,
+    "roles": {
+      "reader": 1
+    },
+    "usage_including_backend_cache_counts": {
+      "in": 0,
+      "out": 0
+    },
+    "reason": "the Reader's turn failed: Not logged in · Please run /login",
+    "reported_status": "stuck",
+    "budget_spent": 1
+  },
+  "definition_edit_evidence": [
+    {
+      "at": "2026-10-12T08:41:54.083891+00:00",
+      "kind": "definition-edited",
+      "by": "reader-1",
+      "definition_id": "D",
+      "reason": "n = 1 is degenerate",
+      "from": {
+        "text": "$n \\ge 1$"
+      },
+      "to": {
+        "text": "$n \\ge 2$"
+      },
+      "role": "decomposer"
+    }
+  ],
+  "unknown": [
+    "human_reading_minutes",
+    "independent_mathematical_attempt_count",
+    "semantic_stagnation_count",
+    "causal_effect_of_route_switching",
+    "independent_mathematical_correctness",
+    "provider_cost"
+  ]
+}

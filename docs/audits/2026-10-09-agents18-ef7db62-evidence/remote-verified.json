@@ -1,0 +1,32 @@
+{
+  "baseRefName": "fix/15-needs-human-kept",
+  "body": "Closes #18. Stacked on #21 (9558fd0); independent of #22 and #23.\n",
+  "headRefName": "fix/18-park-at-budget",
+  "headRefOid": "ef7db6227406e6a39b287856df242db406ccdb07",
+  "number": 24,
+  "state": "OPEN",
+  "statusCheckRollup": [
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-09T11:52:03Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/zeqome/proof-agents/actions/runs/37926319594/job/113806015540",
+      "name": "agents (3.11)",
+      "startedAt": "2026-10-09T11:51:36Z",
+      "status": "COMPLETED",
+      "workflowName": "tests"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-09T11:52:03Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/zeqome/proof-agents/actions/runs/37926319594/job/113806015793",
+      "name": "agents (3.12)",
+      "startedAt": "2026-10-09T11:51:36Z",
+      "status": "COMPLETED",
+      "workflowName": "tests"
+    }
+  ],
+  "title": "fix: at its budget's end the Coordinator still parks the nodes that spent theirs (#18)",
+  "url": "https://github.com/zeqome/proof-agents/pull/24"
+}

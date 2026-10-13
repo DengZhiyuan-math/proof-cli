@@ -1,0 +1,82 @@
+[
+  {
+    "suite": "core",
+    "test": "test_benchmark_a_200_node_chain",
+    "reason": "wall-clock benchmark: set PROOF_BENCHMARK=1"
+  },
+  {
+    "suite": "core",
+    "test": "test_benchmark_the_frontier_of_a_1000_node_chain",
+    "reason": "wall-clock benchmark: set PROOF_BENCHMARK=1"
+  },
+  {
+    "suite": "core",
+    "test": "test_ascii_alias_for_names_the_code_page_cannot_spell",
+    "reason": "Windows code pages"
+  },
+  {
+    "suite": "core",
+    "test": "test_a_broken_aux_from_an_earlier_build_is_repaired",
+    "reason": "needs a TeX distribution (pdflatex on PATH)"
+  },
+  {
+    "suite": "core",
+    "test": "test_biber_in_a_chinese_folder",
+    "reason": "needs a TeX distribution (pdflatex on PATH)"
+  },
+  {
+    "suite": "core",
+    "test": "test_biblatex_with_biber",
+    "reason": "needs a TeX distribution (pdflatex on PATH)"
+  },
+  {
+    "suite": "core",
+    "test": "test_bibtex_and_cross_references",
+    "reason": "needs a TeX distribution (pdflatex on PATH)"
+  },
+  {
+    "suite": "core",
+    "test": "test_bibtex_in_a_chinese_folder",
+    "reason": "needs a TeX distribution (pdflatex on PATH)"
+  },
+  {
+    "suite": "core",
+    "test": "test_ctex_in_a_chinese_folder",
+    "reason": "needs a TeX distribution (pdflatex on PATH)"
+  },
+  {
+    "suite": "core",
+    "test": "test_errors_draft_goes_on_and_strict_stops",
+    "reason": "needs a TeX distribution (pdflatex on PATH)"
+  },
+  {
+    "suite": "core",
+    "test": "test_fontspec_documents_are_built_with_xelatex",
+    "reason": "needs a TeX distribution (pdflatex on PATH)"
+  },
+  {
+    "suite": "core",
+    "test": "test_index_glossary_and_nomenclature",
+    "reason": "needs a TeX distribution (pdflatex on PATH)"
+  },
+  {
+    "suite": "core",
+    "test": "test_stop_and_time_limit",
+    "reason": "needs a TeX distribution (pdflatex on PATH)"
+  },
+  {
+    "suite": "core",
+    "test": "test_the_projects_own_bst_and_included_subfolders",
+    "reason": "needs a TeX distribution (pdflatex on PATH)"
+  },
+  {
+    "suite": "core",
+    "test": "test_save_while_another_program_reads_the_file",
+    "reason": "Windows file sharing"
+  },
+  {
+    "suite": "web",
+    "test": "test_a_studio_build_is_the_pdf_review_archives_and_a_failed_one_leaves_it_stale",
+    "reason": "needs pdflatex"
+  }
+]

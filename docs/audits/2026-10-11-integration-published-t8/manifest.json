@@ -1,0 +1,720 @@
+{
+  "recordedAt": "2026-10-11T19:42:08.866544+00:00",
+  "issue": "DengZhiyuan-math/proof-cli#197",
+  "host": {
+    "system": "macOS-27.2-arm64-arm-64bit",
+    "machine": "arm64",
+    "python": "3.11.14",
+    "interpreter": "/opt/anaconda3/bin/python"
+  },
+  "repositories": {
+    "core": {
+      "repo": "https://github.com/DengZhiyuan-math/proof-cli.git",
+      "branch": "integ/0021",
+      "head": "3dd0a7bde3ad1ea9e040c02b1bff6589a9cf378c",
+      "tree": "c75db303041dabb2a3f2c838e02d6bdf281cd75d",
+      "previousIntegrationHead": "b7f394374ce73e9a23754e12506e87e97326efd9",
+      "mergeBase": "b7f394374ce73e9a23754e12506e87e97326efd9",
+      "sourcePath": "/Volumes/Codex-Workspace/live/home/zhdeng/proof-cli/.claude/worktrees/0021-merge",
+      "mergedPRs": [
+        {
+          "baseRefName": "integ/0021",
+          "headRefName": "fix/0021-pursue-budget-codes",
+          "headRefOid": "24d3a296d9995774c01df755df904c769d6598da",
+          "mergeCommit": {
+            "oid": "3dd0a7bde3ad1ea9e040c02b1bff6589a9cf378c"
+          },
+          "mergedAt": "2026-10-11T19:41:50Z",
+          "number": 209,
+          "state": "MERGED",
+          "url": "https://github.com/DengZhiyuan-math/proof-cli/pull/209"
+        },
+        {
+          "baseRefName": "integ/0021",
+          "headRefName": "fix/203-reader-role",
+          "headRefOid": "502f074aa50c328871b331f6ba355defd6869428",
+          "mergeCommit": {
+            "oid": "4b61302aabc93913d425ec1ccc62e0f5ab7b52d1"
+          },
+          "mergedAt": "2026-10-11T19:41:50Z",
+          "number": 208,
+          "state": "MERGED",
+          "url": "https://github.com/DengZhiyuan-math/proof-cli/pull/208"
+        },
+        {
+          "baseRefName": "integ/0021",
+          "headRefName": "fix/202-reference-edit",
+          "headRefOid": "2f7c2460bca05bc2d823403f17b05ed28766412b",
+          "mergeCommit": {
+            "oid": "d4e3aeb60913e01aedf5c6250226609e5fdcb1d4"
+          },
+          "mergedAt": "2026-10-11T19:41:50Z",
+          "number": 207,
+          "state": "MERGED",
+          "url": "https://github.com/DengZhiyuan-math/proof-cli/pull/207"
+        },
+        {
+          "baseRefName": "integ/0021",
+          "headRefName": "fix/201-pursuit-events",
+          "headRefOid": "09e64a365153650cade0579afca52a56028b0f07",
+          "mergeCommit": {
+            "oid": "0edf3a5adfa4dc91ce9f805de9d79b8c3dd449be"
+          },
+          "mergedAt": "2026-10-11T19:41:50Z",
+          "number": 206,
+          "state": "MERGED",
+          "url": "https://github.com/DengZhiyuan-math/proof-cli/pull/206"
+        },
+        {
+          "baseRefName": "integ/0021",
+          "headRefName": "fix/200-pursuit-error-codes",
+          "headRefOid": "13370808a605a31632b9883606330183fd0fd8a3",
+          "mergeCommit": {
+            "oid": "feab010e9779b8af38d0fb3d13f28ae158784aff"
+          },
+          "mergedAt": "2026-10-11T19:41:50Z",
+          "number": 205,
+          "state": "MERGED",
+          "url": "https://github.com/DengZhiyuan-math/proof-cli/pull/205"
+        },
+        {
+          "baseRefName": "integ/0021",
+          "headRefName": "fix/199-trust-rule-researcher-imports",
+          "headRefOid": "ad479f6d69186105a934d9765a553c48f859ceca",
+          "mergeCommit": {
+            "oid": "10ec5bda85bf84675d193fdc46a003d39df09c2e"
+          },
+          "mergedAt": "2026-10-11T19:41:50Z",
+          "number": 204,
+          "state": "MERGED",
+          "url": "https://github.com/DengZhiyuan-math/proof-cli/pull/204"
+        }
+      ],
+      "firstParentCommits": [
+        "3dd0a7bde3ad1ea9e040c02b1bff6589a9cf378c Merge pull request #209 from DengZhiyuan-math/fix/0021-pursue-budget-codes",
+        "feab010e9779b8af38d0fb3d13f28ae158784aff Merge pull request #205 from DengZhiyuan-math/fix/200-pursuit-error-codes",
+        "4b61302aabc93913d425ec1ccc62e0f5ab7b52d1 Merge pull request #208 from DengZhiyuan-math/fix/203-reader-role",
+        "d4e3aeb60913e01aedf5c6250226609e5fdcb1d4 Merge pull request #207 from DengZhiyuan-math/fix/202-reference-edit",
+        "0edf3a5adfa4dc91ce9f805de9d79b8c3dd449be Merge pull request #206 from DengZhiyuan-math/fix/201-pursuit-events",
+        "10ec5bda85bf84675d193fdc46a003d39df09c2e Merge pull request #204 from DengZhiyuan-math/fix/199-trust-rule-researcher-imports"
+      ]
+    },
+    "agents": {
+      "repo": "https://github.com/zeqome/proof-agents.git",
+      "branch": "integ/0021",
+      "head": "3ff0a7121e82b3c8eb1153c7bc1e296c96a36c69",
+      "tree": "8e50ad4ec9241b9591177bbb80630a20a1c85ae5",
+      "previousIntegrationHead": "36c291f6ff26bebc0720b36dcb5708c98d9b8736",
+      "mergeBase": "36c291f6ff26bebc0720b36dcb5708c98d9b8736",
+      "sourcePath": "/private/tmp/claude-502/-Volumes-Codex-Workspace-live-home-zhdeng-proof-cli/ece36e1b-cb9b-4860-9b1c-030026ba35d7/scratchpad/agents",
+      "mergedPRs": [
+        {
+          "baseRefName": "integ/0021",
+          "headRefName": "fix/19-structure-budget",
+          "headRefOid": "ead54fe8d3480f1d4ba45a5b7b1bfb97b0f796ee",
+          "mergeCommit": {
+            "oid": "a1218e5bd9de1d25127592c70e12c2bc4bfdf767"
+          },
+          "mergedAt": "2026-10-11T19:41:53Z",
+          "number": 26,
+          "state": "MERGED",
+          "url": "https://github.com/zeqome/proof-agents/pull/26"
+        },
+        {
+          "baseRefName": "integ/0021",
+          "headRefName": "fix/20-reader-role-bibliography",
+          "headRefOid": "754313462607b6e1a90d9ba484794fce1a283008",
+          "mergeCommit": {
+            "oid": "3ff0a7121e82b3c8eb1153c7bc1e296c96a36c69"
+          },
+          "mergedAt": "2026-10-11T19:41:53Z",
+          "number": 25,
+          "state": "MERGED",
+          "url": "https://github.com/zeqome/proof-agents/pull/25"
+        },
+        {
+          "baseRefName": "integ/0021",
+          "headRefName": "fix/18-park-at-budget",
+          "headRefOid": "7e742b5823ad72ee37f429aa4983e8d632102796",
+          "mergeCommit": {
+            "oid": "7e742b5823ad72ee37f429aa4983e8d632102796"
+          },
+          "mergedAt": "2026-10-11T19:41:53Z",
+          "number": 24,
+          "state": "MERGED",
+          "url": "https://github.com/zeqome/proof-agents/pull/24"
+        },
+        {
+          "baseRefName": "integ/0021",
+          "headRefName": "fix/17-pursuit-release-failed",
+          "headRefOid": "e2d6f9ee570f81e99ccaf69a40315ad46bb9cc96",
+          "mergeCommit": {
+            "oid": "85244a7d726dc3f97dd7d51034f5b10ad824efd4"
+          },
+          "mergedAt": "2026-10-11T19:41:53Z",
+          "number": 23,
+          "state": "MERGED",
+          "url": "https://github.com/zeqome/proof-agents/pull/23"
+        },
+        {
+          "baseRefName": "integ/0021",
+          "headRefName": "fix/16-record-failed",
+          "headRefOid": "8340de98507a9ed38ce72276ca4b9c9791dcfa53",
+          "mergeCommit": {
+            "oid": "0923c3acf21291f397d4a4855729f199e50b5809"
+          },
+          "mergedAt": "2026-10-11T19:41:53Z",
+          "number": 22,
+          "state": "MERGED",
+          "url": "https://github.com/zeqome/proof-agents/pull/22"
+        },
+        {
+          "baseRefName": "integ/0021",
+          "headRefName": "fix/15-needs-human-kept",
+          "headRefOid": "9558fd0caf6eef2f80401c503a0a4549f4bbaa6f",
+          "mergeCommit": {
+            "oid": "9558fd0caf6eef2f80401c503a0a4549f4bbaa6f"
+          },
+          "mergedAt": "2026-10-11T19:41:53Z",
+          "number": 21,
+          "state": "MERGED",
+          "url": "https://github.com/zeqome/proof-agents/pull/21"
+        }
+      ],
+      "firstParentCommits": [
+        "3ff0a7121e82b3c8eb1153c7bc1e296c96a36c69 Merge pull request #25 from zeqome/fix/20-reader-role-bibliography",
+        "0923c3acf21291f397d4a4855729f199e50b5809 Merge pull request #22 from zeqome/fix/16-record-failed",
+        "85244a7d726dc3f97dd7d51034f5b10ad824efd4 Merge pull request #23 from zeqome/fix/17-pursuit-release-failed",
+        "a1218e5bd9de1d25127592c70e12c2bc4bfdf767 Merge pull request #26 from zeqome/fix/19-structure-budget"
+      ]
+    },
+    "web": {
+      "repo": "https://github.com/zeqome/proof-web.git",
+      "branch": "feat/0021-pursue-review-queue",
+      "head": "b8157191d26834c570a0edbc310599a632b355b8",
+      "tree": "2ec24bf1afaa14d44650ccf5fbfff94885676e04",
+      "previousIntegrationHead": "864a2c29bd4f41a5344ae7be960b842a1d4aed62",
+      "mergeBase": "864a2c29bd4f41a5344ae7be960b842a1d4aed62",
+      "sourcePath": "/private/tmp/claude-502/-Volumes-Codex-Workspace-live-home-zhdeng-proof-cli/ece36e1b-cb9b-4860-9b1c-030026ba35d7/scratchpad/web",
+      "mergedPRs": [
+        {
+          "baseRefName": "feat/0021-pursue-review-queue",
+          "headRefName": "fix/discussion-empty-reply",
+          "headRefOid": "bb9ac2960e2e9d6f2607bffd5affa96f0151d1d1",
+          "mergeCommit": {
+            "oid": "b8157191d26834c570a0edbc310599a632b355b8"
+          },
+          "mergedAt": "2026-10-11T19:41:57Z",
+          "number": 21,
+          "state": "MERGED",
+          "url": "https://github.com/zeqome/proof-web/pull/21"
+        },
+        {
+          "baseRefName": "feat/0021-pursue-review-queue",
+          "headRefName": "fix/18-pursue-limits",
+          "headRefOid": "355837c333fd8189c105aa241d4e9fa8ffe50e6f",
+          "mergeCommit": {
+            "oid": "e93ed0a2c892e97aca00ae2e9b315fd18c1920ea"
+          },
+          "mergedAt": "2026-10-11T19:41:57Z",
+          "number": 19,
+          "state": "MERGED",
+          "url": "https://github.com/zeqome/proof-web/pull/19"
+        },
+        {
+          "baseRefName": "feat/0021-pursue-review-queue",
+          "headRefName": "fix/10-pursuit-history",
+          "headRefOid": "07bb06e67dbd767a8390593b464fee4dba2d07a4",
+          "mergeCommit": {
+            "oid": "07bb06e67dbd767a8390593b464fee4dba2d07a4"
+          },
+          "mergedAt": "2026-10-11T19:41:57Z",
+          "number": 16,
+          "state": "MERGED",
+          "url": "https://github.com/zeqome/proof-web/pull/16"
+        },
+        {
+          "baseRefName": "feat/0021-pursue-review-queue",
+          "headRefName": "fix/12-pursuit-release-retry",
+          "headRefOid": "f0ea4a7d1d99716f06356479bceea0771cc2f7c7",
+          "mergeCommit": {
+            "oid": "f0ea4a7d1d99716f06356479bceea0771cc2f7c7"
+          },
+          "mergedAt": "2026-10-11T19:41:57Z",
+          "number": 15,
+          "state": "MERGED",
+          "url": "https://github.com/zeqome/proof-web/pull/15"
+        },
+        {
+          "baseRefName": "feat/0021-pursue-review-queue",
+          "headRefName": "fix/11-record-failed",
+          "headRefOid": "d5df6e98088bf13d073977d072293b5eea9e4cdf",
+          "mergeCommit": {
+            "oid": "d0f6c3f761a7332451b0af28189a60ea26cb0917"
+          },
+          "mergedAt": "2026-10-11T19:41:57Z",
+          "number": 14,
+          "state": "MERGED",
+          "url": "https://github.com/zeqome/proof-web/pull/14"
+        },
+        {
+          "baseRefName": "feat/0021-pursue-review-queue",
+          "headRefName": "fix/9-reference-review-marks",
+          "headRefOid": "90c0377ed083fe3dc11a3f825a4716ea75a0e494",
+          "mergeCommit": {
+            "oid": "953e74e252b27e2670afcdbfbf83fa923b41f4ab"
+          },
+          "mergedAt": "2026-10-11T19:41:57Z",
+          "number": 13,
+          "state": "MERGED",
+          "url": "https://github.com/zeqome/proof-web/pull/13"
+        }
+      ],
+      "firstParentCommits": [
+        "b8157191d26834c570a0edbc310599a632b355b8 Merge pull request #21 from zeqome/fix/discussion-empty-reply",
+        "d0f6c3f761a7332451b0af28189a60ea26cb0917 Merge pull request #14 from zeqome/fix/11-record-failed",
+        "953e74e252b27e2670afcdbfbf83fa923b41f4ab Merge pull request #13 from zeqome/fix/9-reference-review-marks",
+        "e93ed0a2c892e97aca00ae2e9b315fd18c1920ea Merge pull request #19 from zeqome/fix/18-pursue-limits"
+      ]
+    }
+  },
+  "stages": {
+    "realTrial": {
+      "status": "completed",
+      "preflight": {
+        "root": "/Volumes/Codex-Workspace/live/home/zhdeng/proof-cli/docs/audits/2026-10-11-integration-published-t8/projects/real-trial-profile",
+        "input": {
+          "source": "/Volumes/Codex-Workspace/live/home/zhdeng/proof-cli/.claude/worktrees/trial-132/library-horo/main.tex",
+          "copy": "/Volumes/Codex-Workspace/live/home/zhdeng/proof-cli/docs/audits/2026-10-11-integration-published-t8/projects/real-trial-profile/library-horo/main.tex",
+          "sha256": "147afc8d0a3f69cddd4c35c768ade58c8e3719a0d8be35a01d6c4d7ee4c47333",
+          "bytes": 48974
+        },
+        "comparison": {
+          "source": "/Volumes/Codex-Workspace/live/home/zhdeng/proof-cli/.claude/worktrees/trial-132/setup-tier3-horo.sh",
+          "copy": "/Volumes/Codex-Workspace/live/home/zhdeng/proof-cli/docs/audits/2026-10-11-integration-published-t8/setup-tier3-horo.sh",
+          "sha256": "34f5be25ef8e2904aa876164207e865a15a6d5385b739fca92770a4a9ecdacfd"
+        },
+        "provider": "claude",
+        "modelAlias": "opus",
+        "profile": "~/.claude-Zeqome",
+        "totalTurns": 60,
+        "timeLimitMinutes": 120,
+        "parallel": 2,
+        "researcherInputAfterStart": false,
+        "serverEnvironmentProfile": "/Users/zhdeng/.claude-Zeqome",
+        "startingAt": "2026-10-11T19:57:43.467541+00:00"
+      },
+      "firstAttempt": {
+        "root": "/Volumes/Codex-Workspace/live/home/zhdeng/proof-cli/docs/audits/2026-10-11-integration-published-t8/projects/real-trial",
+        "outcome": "stuck",
+        "providerTokens": {
+          "in": 0,
+          "out": 0
+        },
+        "reason": "Reader ignored project profile; default profile is not logged in; UI reported the Reader's turn failed: success",
+        "events": "real-first-attempt-provider-events.jsonl"
+      },
+      "reader": {
+        "nodes": 18,
+        "kinds": {
+          "imported_result": 10,
+          "lemma": 7,
+          "theorem": 1
+        },
+        "definitions": 15,
+        "fog": 9,
+        "model": "claude-opus-5-5",
+        "seconds": 552.7043721675873,
+        "usage": {
+          "in": 2426998,
+          "out": 54253
+        },
+        "exit": 0,
+        "snapshot": "real-reader-map.json",
+        "comparison": "reader-comparison.md"
+      },
+      "summary": {
+        "status": "completed",
+        "observedEnd": "2026-10-11T21:25:19.665659+00:00",
+        "uiStatus": "done",
+        "theoremResults": {
+          "main-theorem": {
+            "status": "stuck",
+            "reason": "nothing left to work without the researcher: sobolev-embedding-general, sobolev-embedding-cuspidal, sobolev-embedding-residual rest(s) on what no run will settle (parked: main-theorem, height-vs-distance)"
+          }
+        },
+        "elapsedMinutes": 87.60330196666668,
+        "budget": {
+          "turns_max": 60,
+          "minutes_max": 120.0,
+          "deadline": 1791755863.506443,
+          "spent": 40,
+          "structure_spent": 3,
+          "failed_launches": 0
+        },
+        "completedProviderTurns": 40,
+        "structureTurns": 3,
+        "roles": {
+          "reader": 1,
+          "decomposer": 2,
+          "prover": 19,
+          "typesetter": 9,
+          "verifier": 9
+        },
+        "models": [
+          "claude-opus-5-5"
+        ],
+        "providerExits": {
+          "0": 40
+        },
+        "usageIncludingBackendCacheCounts": {
+          "in": 21472006,
+          "out": 569653
+        },
+        "inputHashUnchanged": true,
+        "researcherInputAfterStart": false,
+        "finalNodes": 24,
+        "nodeKinds": {
+          "imported_result": 10,
+          "claim": 6,
+          "lemma": 7,
+          "theorem": 1
+        },
+        "definitions": 15,
+        "fog": {
+          "open": 12
+        },
+        "provisionalProofNodes": [
+          "complementary-series-model",
+          "exceptional-cuspidal-finite-per-level",
+          "matrix-coefficient-decay-p",
+          "matrix-coefficient-decay-product",
+          "real-complementary-decay",
+          "real-unitary-dual-ktypes",
+          "smooth-vector-exceptional-support-finite"
+        ],
+        "parked": [
+          {
+            "node": "cuspidal-exceptional-finite",
+            "reason": "needs-human: The claim cannot be proved with known mathematics. For irreducible Gamma (the only reading the setting allows) it is equivalent to finiteness of exceptional Maass cusp forms across the p-power level tower, which is open; Selberg's conjecture would imply it. For reducible Gamma it is false. The researcher must choose what this node states: (a) the provable uniform gap sup_{Z^0_+} s <= 1/2+7/64 (Kim-Sarnak), (b) an explicit hypothesis on Gamma, or (c) conditional on Selberg's conjecture. Details are in scratch/proof-draft.md."
+          },
+          {
+            "node": "height-vs-distance",
+            "reason": "needs-human: The node statement is false as written, not ambiguous (scratch/proof-draft.md). (1) Gamma=SL_2(Z[1/p]), g_p=1, admissible bounded p-adic metric min(d_p,1): d_X((diag(p^k,p^-k),1),x_0) stays bounded while ht>=p^{2k}. (2) Doubling both metrics doubles d_X, so at most one metric scaling can satisfy it. (3) Conjugating Gamma by (h_inf,1) makes ht identically +inf. The researcher needs to choose a corrected statement. Proposal R2, proved in the draft: Gamma=SL_2(Z[1/p]), K_p=SL_2(Z_p); ht(Gamma(g_inf,g_p)) = y(delta_inf g_inf i) \u224d exp(hyperbolic distance in SL_2(Z)\\H), i.e. d_X replaced by the fibre distance with g_p frozen. This is also what the Sobolev-embedding use and fog-2 need. Alternatively, restrict Gamma and fix specific metrics, but then the exponent only matches for one tuned normalisation."
+          },
+          {
+            "node": "main-theorem",
+            "reason": "needs-human: No split. The statement is false as written: its p-adic factor nu_p(B_p(p^n))^{-1/2} Xi_p(a_n)^{kappa_p} is beaten by an L^2 lower bound (fog-10). For Gamma=SL_2(Z[1/p]), W=K_p, f a lifted Hecke-Maass form and T fixed, ||A_B f||_2 >> nu_p^{-1/2} infinitely often in n, while the claim forces an extra Xi_p(a_n)^{kappa_p}. The researcher must choose the intended p-adic factor. Likely intended: B_p(p^{2n}) with factor Xi_p(a_n)^{kappa_p}, proved by thickening. A split for that reading is drafted in scratch/decomposer/notes.md."
+          }
+        ],
+        "blockedNonProvisionalProofNodes": [
+          "hilbert-space-decomposition",
+          "sobolev-embedding-cuspidal",
+          "sobolev-embedding-general",
+          "sobolev-embedding-residual"
+        ],
+        "questions": {
+          "open": 9
+        },
+        "referenceReview": {
+          "unreviewed": 10
+        },
+        "acceptance": {
+          "unreviewed": 24
+        },
+        "verifierVerdicts": {
+          "failed": 1,
+          "passed": 8
+        },
+        "queueEntries": 68,
+        "queueKinds": {
+          "unfixed": 39,
+          "parked": 3,
+          "imported": 10,
+          "provisional": 7,
+          "question": 9
+        },
+        "refresh": {
+          "status": "passed",
+          "queueExact": true,
+          "departuresExact": true,
+          "entries": 68,
+          "parkedFirst": true,
+          "parkedBottomUp": true,
+          "restBottomUp": true,
+          "note": "Unfixed Definitions may precede the first node that names them, as specified."
+        },
+        "restart": {
+          "status": "passed",
+          "checkedAt": "2026-10-11T21:36:20.286004+00:00",
+          "scenario": "server restart after automatic trial completion; no new Pursue or Start action",
+          "storedProofStateExact": true,
+          "queueAndDeparturesExact": true,
+          "mapMarksAndNodeStatusExact": true,
+          "enabledNodeResumeControls": [
+            {
+              "disabled": false,
+              "text": "Start agent"
+            },
+            {
+              "disabled": false,
+              "text": "Start"
+            }
+          ],
+          "additionalProviderCalls": 0,
+          "globalCanPursueBefore": false,
+          "globalCanPursueAfter": false,
+          "liveViewChanges": {
+            "cuspidal-exceptional-finite": [
+              "run"
+            ],
+            "height-vs-distance": [
+              "run"
+            ],
+            "main-theorem": [
+              "run"
+            ]
+          },
+          "note": "Live run/coordinator overlays and counters reset to idle. Completed project-view fields differ from the live terminal response; the full trial is retained in the primary snapshots and work log."
+        }
+      },
+      "report": "real-trial-results.md"
+    },
+    "suites": {
+      "core": {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "0",
+        "skipped": "15",
+        "tests": "1168",
+        "time": "597.606",
+        "timestamp": "2026-10-11T21:42:36.678972+02:00",
+        "hostname": "PlayStation-6.local"
+      },
+      "agents": {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "0",
+        "skipped": "0",
+        "tests": "199",
+        "time": "17.342",
+        "timestamp": "2026-10-11T21:42:36.677146+02:00",
+        "hostname": "PlayStation-6.local"
+      },
+      "web": {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "0",
+        "skipped": "1",
+        "tests": "817",
+        "time": "330.545",
+        "timestamp": "2026-10-11T21:42:36.933117+02:00",
+        "hostname": "PlayStation-6.local"
+      },
+      "probes": {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "0",
+        "skipped": "0",
+        "tests": "9",
+        "time": "1.269",
+        "timestamp": "2026-10-11T21:50:45.253235+02:00",
+        "hostname": "PlayStation-6.local"
+      },
+      "nativePortCases": [
+        {
+          "test": "tests/test_home.py::test_a_page_already_served_elsewhere_is_used_as_it_is",
+          "status": "passed",
+          "seconds": "0.579"
+        },
+        {
+          "test": "tests/test_home.py::test_a_project_started_again_at_the_same_path_gets_its_own_page_and_the_old_one_closes",
+          "status": "passed",
+          "seconds": "1.164"
+        },
+        {
+          "test": "tests/test_home.py::test_open_serves_the_project_on_its_own_origin_and_the_page_links_back_home",
+          "status": "passed",
+          "seconds": "0.667"
+        },
+        {
+          "test": "tests/test_home.py::test_opening_a_deleted_project_from_the_home_closes_its_old_page_and_says_so",
+          "status": "passed",
+          "seconds": "0.580"
+        },
+        {
+          "test": "tests/test_home.py::test_opening_over_http_starts_the_page_and_says_where",
+          "status": "passed",
+          "seconds": "1.202"
+        },
+        {
+          "test": "tests/test_home.py::test_the_home_page_and_its_api_answer_on_the_home_origin",
+          "status": "passed",
+          "seconds": "0.588"
+        },
+        {
+          "test": "tests/test_home.py::test_the_home_refuses_another_host_and_a_foreign_origin",
+          "status": "passed",
+          "seconds": "0.515"
+        },
+        {
+          "test": "tests/test_review_app.py::test_a_decision_over_http_counts",
+          "status": "passed",
+          "seconds": "0.589"
+        },
+        {
+          "test": "tests/test_review_app.py::test_a_node_studio_is_behind_the_pages_host_and_origin_checks",
+          "status": "passed",
+          "seconds": "0.610"
+        },
+        {
+          "test": "tests/test_review_app.py::test_a_node_studio_page_is_served_with_its_policy",
+          "status": "passed",
+          "seconds": "0.567"
+        },
+        {
+          "test": "tests/test_review_app.py::test_a_page_whose_project_was_replaced_answers_gone_except_its_health",
+          "status": "passed",
+          "seconds": "0.644"
+        },
+        {
+          "test": "tests/test_review_app.py::test_a_pdf_is_served_as_a_pdf_for_the_browsers_own_viewer",
+          "status": "passed",
+          "seconds": "0.580"
+        },
+        {
+          "test": "tests/test_review_app.py::test_host_origin_and_content_type_are_checked",
+          "status": "passed",
+          "seconds": "0.601"
+        },
+        {
+          "test": "tests/test_review_app.py::test_malformed_requests_get_an_error_response_not_a_dropped_connection[headers0--400]",
+          "status": "passed",
+          "seconds": "0.570"
+        },
+        {
+          "test": "tests/test_review_app.py::test_malformed_requests_get_an_error_response_not_a_dropped_connection[headers1--413]",
+          "status": "passed",
+          "seconds": "0.586"
+        },
+        {
+          "test": "tests/test_review_app.py::test_malformed_requests_get_an_error_response_not_a_dropped_connection[headers2-[1, 2]-400]",
+          "status": "passed",
+          "seconds": "0.617"
+        },
+        {
+          "test": "tests/test_review_app.py::test_malformed_requests_get_an_error_response_not_a_dropped_connection[headers3-{\"decisions\": [42]}-400]",
+          "status": "passed",
+          "seconds": "0.577"
+        },
+        {
+          "test": "tests/test_review_app.py::test_the_node_panel_and_node_creation_are_refused_from_another_origin",
+          "status": "passed",
+          "seconds": "0.611"
+        },
+        {
+          "test": "tests/test_review_app.py::test_the_page_and_its_script_are_served_with_a_strict_policy",
+          "status": "passed",
+          "seconds": "1.274"
+        }
+      ],
+      "nativeTectonicCases": [
+        {
+          "class": "tests.test_latex_snapshots",
+          "name": "test_the_working_file_compiles_standalone",
+          "status": "passed",
+          "seconds": "3.189"
+        },
+        {
+          "class": "tests.test_latex_snapshots",
+          "name": "test_a_real_build_is_archived_with_the_snapshot",
+          "status": "passed",
+          "seconds": "2.268"
+        },
+        {
+          "class": "packages.latex-agent.tests.test_studio_server.SyncTeX",
+          "name": "test_source_to_pdf_and_back",
+          "status": "passed",
+          "seconds": "2.553"
+        }
+      ]
+    },
+    "controlledBrowser": {
+      "pursueStopRetryRefreshRestart": {
+        "status": "passed",
+        "evidence": [
+          "lifecycle-running.txt",
+          "lifecycle-stopped-refresh.png",
+          "lifecycle-retry-refresh.txt",
+          "lifecycle-after-restart.json"
+        ]
+      },
+      "readerNoTheorem": {
+        "status": "passed",
+        "evidence": [
+          "no-theorem.json",
+          "no-theorem.txt"
+        ]
+      },
+      "releaseFailureRetry": {
+        "status": "passed",
+        "evidence": [
+          "release-failed.json",
+          "release-retried.json"
+        ]
+      },
+      "smallBudgetParked": {
+        "status": "passed",
+        "evidence": [
+          "parked-final-coordinator.json",
+          "parked-final-queue.png"
+        ]
+      },
+      "standingQuestion": {
+        "status": "passed",
+        "evidence": [
+          "queue-answer-refresh.txt",
+          "queue-after-restart.json",
+          "controlled-decisions-and-stale-cause.json"
+        ]
+      },
+      "provisionalConditionalUnchecked": {
+        "status": "passed",
+        "evidence": [
+          "queue-unchecked-source.json",
+          "queue-unchecked-source.txt",
+          "queue-unchecked-source.png"
+        ]
+      },
+      "definitionEditStaleCause": {
+        "stateAndRecordedCause": "passed",
+        "browserDetail": "partial",
+        "detail": "Warnings says an accepted dependency version moved; Work log shows definition-edited but does not show Definition ID or edit reason. The official work_log API records D and the reason.",
+        "evidence": [
+          "definition-stale-warnings.txt",
+          "definition-stale-worklog-expanded.txt",
+          "controlled-decisions-and-stale-cause.json"
+        ]
+      },
+      "harnessCorrections": [
+        "Initial server explicitly used port 0, which differed from its advertised pinned origin; corrected before usable browser checks.",
+        "Default agent-browser session was replaced with a dedicated T8 session after empty initial loads.",
+        "Initial budget fixture used invalid progress status budget; corrected to done. A total below the node ceiling correctly yields Interrupted; node ceiling 1 and total 1 yields Parked.",
+        "Studio text is lowercase parked; the capitalized wait timed out. The browser queue PARKED check passed."
+      ]
+    },
+    "finalRemoteReadback": "final-remote-readback.json",
+    "t8Acceptance": {
+      "status": "partial",
+      "controlled": "controlled-results.json",
+      "realTrial": "real-trial-summary.json",
+      "gaps": [
+        "ReaderContext does not apply the configured claude_config_dir; unauthenticated first launch reported a misleading success failure reason.",
+        "Definition edit marks dependent nodes stale, but browser Warnings/Work log omit the Definition ID and edit reason."
+      ],
+      "researcherAcceptancePerformed": false,
+      "issue197State": "OPEN"
+    }
+  },
+  "completedAt": "2026-10-11T21:39:40.446778+00:00"
+}

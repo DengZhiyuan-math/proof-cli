@@ -1,0 +1,11 @@
+{
+  "baseRefName": "integ/0021",
+  "headRefOid": "81dc8c041f6c352cb3016a42f3f3ed9a4d014a87",
+  "mergeCommit": {
+    "oid": "8599fcc6f1695b47ccb7a01acee49c3f319ef28e"
+  },
+  "mergedAt": "2026-10-12T16:34:24Z",
+  "number": 28,
+  "state": "MERGED",
+  "url": "https://github.com/zeqome/proof-agents/pull/28"
+}

@@ -1,0 +1,62 @@
+[
+  {
+    "case": "normal",
+    "alias": "reader",
+    "created_by": "reader",
+    "orphan_hook": {
+      "id": "orphan",
+      "kind": "lemma",
+      "dependencies": [],
+      "derived_from": null,
+      "parked": null,
+      "acceptance_state": "unreviewed",
+      "by_agent": true
+    },
+    "status": "stuck",
+    "reason": "agent-made local nodes outside every Theorem's subtree; wire each under a Theorem, or park or delete it, then Start again: orphan",
+    "coordinator_starts": []
+  },
+  {
+    "case": "human",
+    "alias": "human",
+    "created_by": "human",
+    "orphan_hook": {
+      "id": "orphan",
+      "kind": "lemma",
+      "dependencies": [],
+      "derived_from": null,
+      "parked": null,
+      "acceptance_state": "unreviewed",
+      "by_agent": false
+    },
+    "status": "done",
+    "reason": "every Theorem's Coordinator ended done; not pursued, outside every Theorem's subtree (the researcher's own): orphan",
+    "coordinator_starts": [
+      "T"
+    ]
+  },
+  {
+    "case": "git_identity",
+    "alias": "Yomathnotcool <125728853+DengZhiyuan-math@users.noreply.github.com>",
+    "created_by": "Yomathnotcool <125728853+DengZhiyuan-math@users.noreply.github.com>",
+    "orphan_hook": {
+      "id": "orphan",
+      "kind": "lemma",
+      "dependencies": [],
+      "derived_from": null,
+      "parked": null,
+      "acceptance_state": "unreviewed",
+      "by_agent": false
+    },
+    "status": "done",
+    "reason": "every Theorem's Coordinator ended done; not pursued, outside every Theorem's subtree (the researcher's own): orphan",
+    "coordinator_starts": [
+      "T"
+    ]
+  },
+  {
+    "case": "human_alias_trust",
+    "created_by": "human",
+    "reference_state": "trusted-by-rule"
+  }
+]

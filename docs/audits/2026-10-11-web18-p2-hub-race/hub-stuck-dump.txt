@@ -1,0 +1,49 @@
+E               AssertionError: waited 60s for T open now=1791706043.299676
+E               COORD {
+E                "status": "stuck",
+E                "reason": "nothing left to work without the researcher: T rest(s) on what no run will settle",
+E                "turns": 2,
+E                "turns_max": 122,
+E                "pursue_turns": 2,
+E                "minutes_max": 183.0,
+E                "deadline": 1791716960.3303528,
+E                "running": [],
+E                "nodes": {
+E                 "A": {
+E                  "starts": 1,
+E                  "turns": 1,
+E                  "last": "done",
+E                  "verdict": null,
+E                  "started_at": 1791705980.366901,
+E                  "role": null,
+E                  "redirect": null,
+E                  "cap": 0,
+E                  "reason": "review-requested"
+E                 },
+E                 "B": {
+E                  "starts": 1,
+E                  "turns": 1,
+E                  "last": "done",
+E                  "verdict": null,
+E                  "started_at": 1791705982.048185,
+E                  "role": null,
+E                  "redirect": null,
+E                  "cap": 0,
+E                  "reason": "review-requested"
+E                 }
+E                },
+E                "parked": [],
+E                "held": [],
+E                "interrupted": [],
+E                "launch_failed": [],
+E                "decomposed": [],
+E                "resplit": []
+E               }
+E               RUN {"status": "idle", "reason": "", "turns": 0, "turns_max": 0, "roles": [], "verdict": null, "started_at": null}
+E               TURNS [{"argv": ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-mode", "default", "--append-system-prompt", "You are being driven from prism-local, a local LaTeX web editor, not the\nterminal. The author sees your text in a chat panel next to the LaTeX source\nand the compiled PDF.\n- The message may include a [Referenced] block listing files and line ranges\n  (with their text) that the author @-mentioned. Treat it as the author's\n  pointer to what they mean by \"this\", \"here\", \"the selection\".\n- In edit mode each message ends with a [Scope for this turn] line saying which\n  files you may change. It replaces the scope of every earlier message.\n- The author reviews every turn's file changes as a diff with an undo button,\n  so make focused, minimal edits and say which files you changed.\n- In .tex files, write display math with named LaTeX environments:\n  \\begin{equation} ... \\end{equation} (or equation*, align, align*, gather,\n  multline), never the shortcuts \\[ ... \\] or $$ ... $$. Use \\begin{...}\n  environments rather than shortcuts elsewhere in them too.\n- key-ideas.md is Markdown, not LaTeX: write its math as $...$ inline and\n  $$...$$ for display math, the only delimiters its review page typesets.\n- To compile, use the compile tool when you have it: it runs the editor's own\n  build (the author's Compile button) and returns the errors with file:line.\n  Compile after substantial edits and fix the errors your changes caused.\n  Never run pdflatex or latexmk yourself. Without the tool, do not compile:\n  the author compiles in the editor.\n- Never commit, push, or run git commands that modify the repository.\n- Keep replies concise.\n- Do not claim an argument is correct, or a step proved, unless you checked it.\n\nYou are the proof agent on node A of a proof map: an automated proof system. You research,\nreason and prove; the LaTeX in this folder is where the proof is written down. The researcher\ndecides every Human Review question (accept, reject, \u2026) on the proof map page; you never do.\n\nWork this way:\n1. Retrieval first. Before a new proof search, read what the project holds: `proof search`,\n   `proof retrieve`, `proof node show A --json`, this node's dependencies (their folders are\n   ../<id>/), `proof reference list`, `proof memory list`. Search the literature on the\n   web when the project has nothing.\nThis turn you are the **Prover** of node A. You find the proof: retrieval first, then your own\nreasoning. Write the proof's structure \u2014 its key ideas, its steps and which dependency each uses, the\nsubclaims it needs \u2014 as a Markdown draft in scratch/ (scratch/proof-draft.md); never write proof.tex\nor key-ideas.md yourself, the Typesetter writes both from your draft. You decide when to split the node (`proof node split`). Report your plan\nfirst (`proof node progress A --plan \"\u2026\" --plan \"\u2026\"`), then each step as you start and finish it\n(`
+E               NOTES [null, "started on T: 3 open node(s), up to 1 run(s) at a time; the Pursue's total 122 turns (0 spent before) and 183 minutes, a node's proof budget 40 turns", "started a run on A (start 1, up to 40 turn(s) and 60 minute(s))", "the run on A ended: done \u2014 review-requested", "started a run on B (start 1, up to 40 turn(s) and 60 minute(s))", "the run on B ended: done \u2014 review-requested", "stuck: nothing left to work without the researcher: T rest(s) on what no run will settle", "budget: 2 real turn(s) in this Start (0 structure, 2 proof), 2 of the Pursue's 122; 0 failed launch(es)"]
+
+tests/test_agent_run.py:144: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_zz_hub_diag.py::test_the_coordinator_works_the_children_then_the_root_and_the_page_and_the_map_read_it
+1 failed in 63.26s (0:01:03)

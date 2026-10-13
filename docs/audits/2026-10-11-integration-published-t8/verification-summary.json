@@ -1,0 +1,159 @@
+{
+  "core": {
+    "name": "pytest",
+    "errors": "0",
+    "failures": "0",
+    "skipped": "15",
+    "tests": "1168",
+    "time": "597.606",
+    "timestamp": "2026-10-11T21:42:36.678972+02:00",
+    "hostname": "PlayStation-6.local"
+  },
+  "agents": {
+    "name": "pytest",
+    "errors": "0",
+    "failures": "0",
+    "skipped": "0",
+    "tests": "199",
+    "time": "17.342",
+    "timestamp": "2026-10-11T21:42:36.677146+02:00",
+    "hostname": "PlayStation-6.local"
+  },
+  "web": {
+    "name": "pytest",
+    "errors": "0",
+    "failures": "0",
+    "skipped": "1",
+    "tests": "817",
+    "time": "330.545",
+    "timestamp": "2026-10-11T21:42:36.933117+02:00",
+    "hostname": "PlayStation-6.local"
+  },
+  "probes": {
+    "name": "pytest",
+    "errors": "0",
+    "failures": "0",
+    "skipped": "0",
+    "tests": "9",
+    "time": "1.269",
+    "timestamp": "2026-10-11T21:50:45.253235+02:00",
+    "hostname": "PlayStation-6.local"
+  },
+  "nativePortCases": [
+    {
+      "test": "tests/test_home.py::test_a_page_already_served_elsewhere_is_used_as_it_is",
+      "status": "passed",
+      "seconds": "0.579"
+    },
+    {
+      "test": "tests/test_home.py::test_a_project_started_again_at_the_same_path_gets_its_own_page_and_the_old_one_closes",
+      "status": "passed",
+      "seconds": "1.164"
+    },
+    {
+      "test": "tests/test_home.py::test_open_serves_the_project_on_its_own_origin_and_the_page_links_back_home",
+      "status": "passed",
+      "seconds": "0.667"
+    },
+    {
+      "test": "tests/test_home.py::test_opening_a_deleted_project_from_the_home_closes_its_old_page_and_says_so",
+      "status": "passed",
+      "seconds": "0.580"
+    },
+    {
+      "test": "tests/test_home.py::test_opening_over_http_starts_the_page_and_says_where",
+      "status": "passed",
+      "seconds": "1.202"
+    },
+    {
+      "test": "tests/test_home.py::test_the_home_page_and_its_api_answer_on_the_home_origin",
+      "status": "passed",
+      "seconds": "0.588"
+    },
+    {
+      "test": "tests/test_home.py::test_the_home_refuses_another_host_and_a_foreign_origin",
+      "status": "passed",
+      "seconds": "0.515"
+    },
+    {
+      "test": "tests/test_review_app.py::test_a_decision_over_http_counts",
+      "status": "passed",
+      "seconds": "0.589"
+    },
+    {
+      "test": "tests/test_review_app.py::test_a_node_studio_is_behind_the_pages_host_and_origin_checks",
+      "status": "passed",
+      "seconds": "0.610"
+    },
+    {
+      "test": "tests/test_review_app.py::test_a_node_studio_page_is_served_with_its_policy",
+      "status": "passed",
+      "seconds": "0.567"
+    },
+    {
+      "test": "tests/test_review_app.py::test_a_page_whose_project_was_replaced_answers_gone_except_its_health",
+      "status": "passed",
+      "seconds": "0.644"
+    },
+    {
+      "test": "tests/test_review_app.py::test_a_pdf_is_served_as_a_pdf_for_the_browsers_own_viewer",
+      "status": "passed",
+      "seconds": "0.580"
+    },
+    {
+      "test": "tests/test_review_app.py::test_host_origin_and_content_type_are_checked",
+      "status": "passed",
+      "seconds": "0.601"
+    },
+    {
+      "test": "tests/test_review_app.py::test_malformed_requests_get_an_error_response_not_a_dropped_connection[headers0--400]",
+      "status": "passed",
+      "seconds": "0.570"
+    },
+    {
+      "test": "tests/test_review_app.py::test_malformed_requests_get_an_error_response_not_a_dropped_connection[headers1--413]",
+      "status": "passed",
+      "seconds": "0.586"
+    },
+    {
+      "test": "tests/test_review_app.py::test_malformed_requests_get_an_error_response_not_a_dropped_connection[headers2-[1, 2]-400]",
+      "status": "passed",
+      "seconds": "0.617"
+    },
+    {
+      "test": "tests/test_review_app.py::test_malformed_requests_get_an_error_response_not_a_dropped_connection[headers3-{\"decisions\": [42]}-400]",
+      "status": "passed",
+      "seconds": "0.577"
+    },
+    {
+      "test": "tests/test_review_app.py::test_the_node_panel_and_node_creation_are_refused_from_another_origin",
+      "status": "passed",
+      "seconds": "0.611"
+    },
+    {
+      "test": "tests/test_review_app.py::test_the_page_and_its_script_are_served_with_a_strict_policy",
+      "status": "passed",
+      "seconds": "1.274"
+    }
+  ],
+  "nativeTectonicCases": [
+    {
+      "class": "tests.test_latex_snapshots",
+      "name": "test_the_working_file_compiles_standalone",
+      "status": "passed",
+      "seconds": "3.189"
+    },
+    {
+      "class": "tests.test_latex_snapshots",
+      "name": "test_a_real_build_is_archived_with_the_snapshot",
+      "status": "passed",
+      "seconds": "2.268"
+    },
+    {
+      "class": "packages.latex-agent.tests.test_studio_server.SyncTeX",
+      "name": "test_source_to_pdf_and_back",
+      "status": "passed",
+      "seconds": "2.553"
+    }
+  ]
+}

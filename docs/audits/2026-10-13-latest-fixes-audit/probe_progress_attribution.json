@@ -1,0 +1,103 @@
+{
+  "module": "/private/tmp/proof-latest-audit-20261013-01a13595/core/src/proof_cli/cli.py",
+  "project": "/private/tmp/proof-latest-audit-20261013-01a13595/standards-probes/progress-attribution-project-0n3sb94n",
+  "provider_calls": 0,
+  "cases": [
+    {
+      "case": "explicit-human-with-role-and-name",
+      "environment": {
+        "PROOF_AGENT_ROLE": "prover",
+        "PROOF_AGENT_NAME": "worker",
+        "PROOF_AGENT_NODE": "T"
+      },
+      "argv": [
+        "node",
+        "progress",
+        "T",
+        "--plan",
+        "explicit-human-with-role-and-name",
+        "--by",
+        "human",
+        "--root",
+        "/private/tmp/proof-latest-audit-20261013-01a13595/standards-probes/progress-attribution-project-0n3sb94n",
+        "--json"
+      ],
+      "exit": 0,
+      "output": "{\n  \"schema_version\": 1,\n  \"ok\": true,\n  \"command\": \"node.progress\",\n  \"data\": {\n    \"kind\": \"plan\",\n    \"role\": \"prover\",\n    \"by\": \"human\",\n    \"plan\": [\n      \"explicit-human-with-role-and-name\"\n    ],\n    \"note\": \"\",\n    \"node_id\": \"T\",\n    \"at\": \"2026-10-13T14:13:47.985478+00:00\"\n  }\n}\n",
+      "parsed_output": {
+        "schema_version": 1,
+        "ok": true,
+        "command": "node.progress",
+        "data": {
+          "kind": "plan",
+          "role": "prover",
+          "by": "human",
+          "plan": [
+            "explicit-human-with-role-and-name"
+          ],
+          "note": "",
+          "node_id": "T",
+          "at": "2026-10-13T14:13:47.985478+00:00"
+        }
+      }
+    },
+    {
+      "case": "role-only-defaults-to-human",
+      "environment": {
+        "PROOF_AGENT_ROLE": "prover",
+        "PROOF_AGENT_NAME": "",
+        "PROOF_AGENT_NODE": "T"
+      },
+      "argv": [
+        "node",
+        "progress",
+        "T",
+        "--plan",
+        "role-only-defaults-to-human",
+        "--root",
+        "/private/tmp/proof-latest-audit-20261013-01a13595/standards-probes/progress-attribution-project-0n3sb94n",
+        "--json"
+      ],
+      "exit": 0,
+      "output": "{\n  \"schema_version\": 1,\n  \"ok\": true,\n  \"command\": \"node.progress\",\n  \"data\": {\n    \"kind\": \"plan\",\n    \"role\": \"prover\",\n    \"by\": \"human\",\n    \"plan\": [\n      \"role-only-defaults-to-human\"\n    ],\n    \"note\": \"\",\n    \"node_id\": \"T\",\n    \"at\": \"2026-10-13T14:13:48.010049+00:00\"\n  }\n}\n",
+      "parsed_output": {
+        "schema_version": 1,
+        "ok": true,
+        "command": "node.progress",
+        "data": {
+          "kind": "plan",
+          "role": "prover",
+          "by": "human",
+          "plan": [
+            "role-only-defaults-to-human"
+          ],
+          "note": "",
+          "node_id": "T",
+          "at": "2026-10-13T14:13:48.010049+00:00"
+        }
+      }
+    }
+  ],
+  "recorded_work_log": [
+    {
+      "at": "2026-10-13T14:13:47.984941+00:00",
+      "kind": "plan",
+      "role": "prover",
+      "by": "human",
+      "plan": [
+        "explicit-human-with-role-and-name"
+      ],
+      "note": ""
+    },
+    {
+      "at": "2026-10-13T14:13:48.009131+00:00",
+      "kind": "plan",
+      "role": "prover",
+      "by": "human",
+      "plan": [
+        "role-only-defaults-to-human"
+      ],
+      "note": ""
+    }
+  ]
+}

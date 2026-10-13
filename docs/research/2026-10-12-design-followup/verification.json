@@ -1,0 +1,66 @@
+{
+  "core": {
+    "base": "0c3e1f1cf0bd9048d57ab207d76f60fc3a62e1aa",
+    "passed": 80,
+    "skipped": 2,
+    "failed": 0,
+    "seconds": 367.95,
+    "command": "PYTHONPATH=<core>/src python -m pytest -q tests/test_unfixed_text.py tests/test_performance.py tests/test_agent_attribution.py tests/test_progress.py",
+    "optional_dependency_paths": "core-test-import-paths.json",
+    "skipped_cases": [
+      "test_benchmark_a_200_node_chain",
+      "test_benchmark_the_frontier_of_a_1000_node_chain"
+    ],
+    "skip_reason": "PROOF_BENCHMARK is unset; wall-clock benchmarks are opt-in"
+  },
+  "agents": {
+    "base": "544a95f0c27fcb71133a7f0ca421003e34a7ee9c",
+    "passed": 200,
+    "skipped": 0,
+    "failed": 0,
+    "seconds": 17.22,
+    "command": "PYTHONPATH=<core>/src python -m pytest -q",
+    "scope": "full agents suite, with the local role prompt changes"
+  },
+  "web": {
+    "base": "deaa8a9b27ee3e355ae30422db56da6910c4983d",
+    "passed": 153,
+    "skipped": 0,
+    "failed": 0,
+    "seconds": 17.5,
+    "command": "PYTHONPATH=<core>/src:<agents>/src:<core>/packages/latex-agent/src python -m pytest -q tests/test_map_home.py tests/test_run_pane.py tests/test_pursue_review_queue.py",
+    "scope": "selected tests; not full web suite"
+  },
+  "role_scope_check": [
+    {
+      "role": "decomposer",
+      "pursue": false,
+      "permissions_equal": true
+    },
+    {
+      "role": "decomposer",
+      "pursue": true,
+      "permissions_equal": true
+    },
+    {
+      "role": "verifier",
+      "pursue": false,
+      "permissions_equal": true
+    }
+  ],
+  "totals": {
+    "passed": 433,
+    "skipped": 2,
+    "failed": 0
+  },
+  "provider_calls": 0,
+  "limitations": [
+    "No new real provider trial or mathematical acceptance",
+    "Core optional page tests used installed older web/agents; isolated latest web tests were run separately",
+    "No PR merge or #197 completion"
+  ],
+  "patch_sha256": {
+    "proof-agents-guidance.patch": "9d42942f34b49b719f78e607b0bd08e169afe68c1bd5038fdb5a4d9416b2a6a3",
+    "core-search-route.patch": "9688c615ba2eca9679d2d60166c9c47e835b313702676c0f1754f7e9eb2e6004"
+  }
+}

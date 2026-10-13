@@ -1,0 +1,6 @@
+remote: 
+remote: Create a pull request for 'fix/discussion-empty-reply' on GitHub by visiting:        
+remote:      https://github.com/zeqome/proof-web/pull/new/fix/discussion-empty-reply        
+remote: 
+To https://github.com/zeqome/proof-web.git
+ * [new branch]      bb9ac2960e2e9d6f2607bffd5affa96f0151d1d1 -> fix/discussion-empty-reply

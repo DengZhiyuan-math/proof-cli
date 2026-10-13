@@ -1,0 +1,45 @@
+diff --git a/src/proof_agents/agent_run.py b/src/proof_agents/agent_run.py
+index 343320d..384221d 100644
+--- a/src/proof_agents/agent_run.py
++++ b/src/proof_agents/agent_run.py
+@@ -199,10 +199,10 @@ def _attempts_from(log: list[dict]) -> list[dict]:
+ 
+ 
+ 
+-def _failure_reason(done: dict, events: list[dict]) -> str:
++def failure_reason(done: dict, events: list[dict]) -> str:
+     """Why a turn the CLI could not finish failed, by what says most (#179): the last line of stderr; else the last thing the
+     turn said, a text or an error event ("Not logged in · Please run /login" comes as text, with subtype "success"); else
+-    the subtype or the exit code."""
++    the subtype or the exit code. Public for a host's own turns, such as proof-web's Reader turn."""
+     said = (e.get("text") if e.get("t") == "text" else e.get("message") for e in reversed(events) if e.get("t") in ("text", "error"))
+     for why in (done.get("stderr"), *said, done.get("subtype"), f"exit {done.get('exit')}" if done.get("exit") not in (None, 0) else None):
+         lines = [line.strip() for line in str(why or "").splitlines() if line.strip()]
+@@ -597,7 +597,7 @@ class AgentRun:
+                 # a turn the CLI itself could not finish — it exited non-zero, or reported an error (a model the account
+                 # can't use, a login that lapsed) — is no work done: the run is stuck and says why, never "done" (#171)
+                 if done.get("is_error") or done.get("exit") not in (None, 0):
+-                    self._end(run, "stuck", f"the {role} turn failed: {_failure_reason(done, job.events)[:200]}")
++                    self._end(run, "stuck", f"the {role} turn failed: {failure_reason(done, job.events)[:200]}")
+                     return
+                 if len(roles) == 1:  # a single role was asked for: one turn
+                     self._end(run, "done", "turn-finished")
+diff --git a/tests/test_run_state_machine.py b/tests/test_run_state_machine.py
+index a343775..b3248cf 100644
+--- a/tests/test_run_state_machine.py
++++ b/tests/test_run_state_machine.py
+@@ -378,6 +378,14 @@ def test_a_failed_turn_with_no_stderr_says_what_the_cli_last_said_not_its_subtyp
+     assert (run.view()["status"], run.view()["reason"]) == ("stuck", f"the prover turn failed: {expected}")
+ 
+ 
++def test_a_host_reads_the_same_reason_for_its_own_turn():
++    """A host's own turn, such as proof-web's Reader, names the lapsed login too, not the subtype "success"."""
++    from proof_agents.agent_run import failure_reason
++    done = {"t": "done", "exit": 1, "is_error": True, "subtype": "success", "stderr": ""}
++    events = [{"t": "init", "model": "claude-opus-5-5"}, {"t": "text", "text": "Not logged in · Please run /login"}, done]
++    assert failure_reason(done, events) == "Not logged in · Please run /login"
++
++
+ def test_stderr_still_comes_before_what_the_cli_said():
+     agent = _AgentWhoseTurnsEnd({"exit": 1, "is_error": True, "subtype": "success", "stderr": "boom\nfatal: the real cause\n"},
+                                 [{"t": "text", "text": "Not logged in"}])

@@ -1,0 +1,61 @@
+{
+  "head": "6d5cd700812f78b571693231bb629abefec53b65",
+  "source": "/Volumes/Codex-Workspace/live/home/zhdeng/proof-cli/.claude/worktrees/0021-stale-cause",
+  "python": "3.11.14 (main, Oct 21 2025, 18:27:30) [Clang 20.1.8 ]",
+  "platform": "macOS-27.2-arm64-arm-64bit",
+  "stale_nodes": 100,
+  "unrelated_progress_events": 3000,
+  "repeats": 3,
+  "method": "Each sample uses a fresh read_scope; variants alternate. Official APIs create the temporary project. No browser, server, or provider call.",
+  "samples": [
+    {
+      "repeat": 1,
+      "variant": "integrity-only",
+      "seconds": 0.1104825000220444,
+      "list_events_calls": 1,
+      "event_records_read": 3203
+    },
+    {
+      "repeat": 1,
+      "variant": "integrity-and-cause",
+      "seconds": 1.581829833012307,
+      "list_events_calls": 101,
+      "event_records_read": 323503
+    },
+    {
+      "repeat": 2,
+      "variant": "integrity-and-cause",
+      "seconds": 1.5523218750022352,
+      "list_events_calls": 101,
+      "event_records_read": 323503
+    },
+    {
+      "repeat": 2,
+      "variant": "integrity-only",
+      "seconds": 0.11294116600765847,
+      "list_events_calls": 1,
+      "event_records_read": 3203
+    },
+    {
+      "repeat": 3,
+      "variant": "integrity-only",
+      "seconds": 0.10955612501129508,
+      "list_events_calls": 1,
+      "event_records_read": 3203
+    },
+    {
+      "repeat": 3,
+      "variant": "integrity-and-cause",
+      "seconds": 1.5731560830026865,
+      "list_events_calls": 101,
+      "event_records_read": 323503
+    }
+  ],
+  "seed_seconds": 2.6528169169905595,
+  "history_events": 3203,
+  "median_integrity_seconds": 0.1104825000220444,
+  "median_integrity_and_cause_seconds": 1.5731560830026865,
+  "median_added_seconds": 1.462673582980642,
+  "median_ratio": 14.23896166984633,
+  "qualification": "Synthetic bounded fixture of 100 independent stale snapshots and 3000 unrelated progress events. Measures domain reads, not full HTTP or browser latency; it demonstrates repeated history parsing, not a production SLA breach."
+}

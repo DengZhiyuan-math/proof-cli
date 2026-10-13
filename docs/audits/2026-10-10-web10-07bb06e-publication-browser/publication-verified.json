@@ -1,0 +1,30 @@
+{
+  "pr_url": "https://github.com/zeqome/proof-web/pull/16",
+  "issue_url": "https://github.com/zeqome/proof-web/issues/10",
+  "head": "07bb06e67dbd767a8390593b464fee4dba2d07a4",
+  "base": "fix/12-pursuit-release-retry",
+  "parent": "f0ea4a7d1d99716f06356479bceea0771cc2f7c7",
+  "approved_bodies_verified": true,
+  "pr_body_exact_including_terminal_newline": true,
+  "issue_body_exact_including_terminal_newline": true,
+  "changed_files": [
+    "src/proof_web/static/app.js",
+    "src/proof_web/studios.py",
+    "tests/test_pursuit_history.py",
+    "tests/test_review_queue_page.py"
+  ],
+  "dependencies_still_open_at_expected_heads": true,
+  "ci_at_publication": [
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-10T12:30:11Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/zeqome/proof-web/actions/runs/38052173812/job/114213340486",
+      "name": "package",
+      "startedAt": "2026-10-10T12:30:04Z",
+      "status": "COMPLETED",
+      "workflowName": "package"
+    }
+  ],
+  "new_test_runs_this_followup": 0
+}

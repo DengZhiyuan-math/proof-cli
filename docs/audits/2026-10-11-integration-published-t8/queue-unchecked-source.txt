@@ -1,0 +1,100 @@
+t8-queue
+4 nodes · 1 on the frontier
+1
+Frontier
+2
+Awaiting you
+0
+Fog
+Y
+Yomathnotcool <125728853+DengZhiyuan-math@users.noreply.github.com>
+
+Proof map
+
+Map
+Review
+2
+Warnings
+Discuss
+Awaiting review
+2
+
+Tick the decisions to make, choose each outcome and rationale, then record them. Each decision is committed to git with its snapshot, as the identity shown above.
+
+	Node	Statement and key ideas	Decision	Rationale
+	
+C
+	
+C holds for n.
+
+Snapshot v1 · 2cbb29345add…
+
+核心思路
+
+The bound follows from compactness of 
+[
+0
+,
+1
+]
+[0,1].
+
+难点
+
+The subcover's size must not depend on 
+𝜀
+ε.
+
+作者撰写 · written by the author
+
+passed · run by prover-fixture/verifier · 2026-10-11 19:45 · 2cbb29345add…
+	
+accept
+revision-requested
+reject
+	
+	
+R
+	
+A cited result
+
+unchecked against the source by the Verifier of:
+
+L, snapshot v1: R: unchecked against the source. Controlled fixture, not mathematics.
+	
+reference-review
+no-longer-callable
+	
+Record Selected Decisions
+Review queue
+7
+bottom-up: each Accept makes the next decision possible; nothing here holds the agents back
+Where the Reader departed from your draft
+UNFIXED TEXT
+D · Positive parameter $n \ge 1$.
+a Definition reader-fixture wrote; named by C; editable until a decision relies on it
+UNFIXED TEXT
+C · C holds for n.
+stated by decomposer-fixture; editable until a Review decision relies on it
+PROVISIONAL
+C · C holds for n.
+the Verifier passed snapshot v1; Accept it to make what rests on it decidable
+UNFIXED TEXT
+R · A cited result
+stated by reader-fixture; editable until a Review decision relies on it
+CITATION
+R · A cited result
+
+unchecked against the source by the Verifier of:
+
+L, snapshot v1: R: unchecked against the source. Controlled fixture, not mathematics.
+an imported result no one has Reference-reviewed: the runs rely on its statement
+UNFIXED TEXT
+L · L follows from C and R.
+stated by reader-fixture; editable until a Review decision relies on it
+PROVISIONAL
+L · L follows from C and R.
+the Verifier passed snapshot v1; Accept it to make what rests on it decidable · itself conditional on C, R
+Trusted by rule
+imported results you haven't looked at, callable under a Trust rule
+Manage rules…

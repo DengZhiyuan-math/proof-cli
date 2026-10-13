@@ -1,0 +1,844 @@
+{
+  "nodes": [
+    {
+      "id": "burger-integral-formula",
+      "kind": "imported_result",
+      "display_label": "",
+      "medium": null,
+      "run": null,
+      "coordinator": null,
+      "statement": "Let $(\\pi,\\mathcal{H})$ be a unitary representation of $SL_2(\\mathbb{R})$ (no nonzero invariant vectors), $f\\in\\mathcal{H}^\\infty$, $\\mathcal{Y}\\ge1$, $T>0$, $h(t)=h_\\infty(t)$, $a(y)=\\mathrm{diag}(y^{1/2},y^{-1/2})$. Then $\\frac1T\\int_0^T\\pi(h(t))f\\,dt=\\frac1T\\int_0^T\\pi(h(t)a(\\mathcal{Y}))F_{\\mathcal{Y}}f\\,dt-\\frac{1}{2T}\\int_0^T\\pi(h(t)a(\\mathcal{Y}))S_{\\mathcal{Y}}\\,d\\pi(Y)f\\,dt+\\frac1T\\int_0^{\\mathcal{Y}}[1-\\pi(h(T))]\\pi(a(y))T_y\\,d\\pi(X_-)f\\,dy$, the last integral converging in $\\mathcal{H}$.",
+      "definitions": [
+        "subgroups-real",
+        "burger-operators",
+        "spectral-decomposition"
+      ],
+      "dependencies": [],
+      "workflow_state": "open",
+      "blocked_reason": null,
+      "acceptance_state": "unreviewed",
+      "trust_rule": [],
+      "integrity_state": "current",
+      "assignee": null,
+      "frontier": false,
+      "provisional": true,
+      "conditional_on": [],
+      "parked": null,
+      "core_idea": null,
+      "status": {
+        "text": "Open",
+        "kind": "open"
+      }
+    },
+    {
+      "id": "burger-operator-bounds",
+      "kind": "imported_result",
+      "display_label": "",
+      "medium": null,
+      "run": null,
+      "coordinator": null,
+      "statement": "With $s=s(\\xi)$ and $f_y,s_y,t_y$ as in the Burger operators: $\\sup_{\\xi\\in Z^0_-\\cup Z^{ct}}|f_y(\\xi)|\\le\\frac{2+\\log y}{2\\sqrt y}$ and $\\sup_{\\xi\\in Z^0_-\\cup Z^{ct}}|s_y(\\xi)|\\le\\frac{\\log y}{\\sqrt y}$ for $y\\ge1$; $\\sup_{\\xi\\in Z^0_-\\cup Z^{ct}}|t_y(\\xi)|\\le\\frac{2\\log(y+10)}{\\sqrt{y+1}}$ for $y\\in(0,\\mathcal{Y}]$. Consequently $F_y,S_y,T_y$ are bounded on $\\mathcal{H}$ and on each $W_k(\\mathcal{H})$, continuous on $\\mathcal{H}^\\infty$, and $y\\mapsto T_y$ is continuous in operator norm on $W_k(\\mathcal{H})$.",
+      "definitions": [
+        "burger-operators",
+        "spectral-decomposition",
+        "sobolev-norm"
+      ],
+      "dependencies": [],
+      "workflow_state": "open",
+      "blocked_reason": null,
+      "acceptance_state": "unreviewed",
+      "trust_rule": [],
+      "integrity_state": "current",
+      "assignee": null,
+      "frontier": false,
+      "provisional": true,
+      "conditional_on": [],
+      "parked": null,
+      "core_idea": null,
+      "status": {
+        "text": "Open",
+        "kind": "open"
+      }
+    },
+    {
+      "id": "chh-tempered-bound",
+      "kind": "imported_result",
+      "display_label": "",
+      "medium": null,
+      "run": null,
+      "coordinator": null,
+      "statement": "Let $L$ be $G_\\infty$ or $G_p$ with maximal compact subgroup $K$ ($K_\\infty$, resp. $K_p$). If $\\pi$ is a tempered unitary representation of $L$ and $v,w$ are $K$-finite, then $|\\langle\\pi(g)v,w\\rangle|\\le(d_K(v)d_K(w))^{1/2}\\|v\\|\\|w\\|\\,\\Xi_L(g)$ for all $g\\in L$.",
+      "definitions": [
+        "tempered-representation",
+        "k-finite-dimension",
+        "harish-chandra-function"
+      ],
+      "dependencies": [],
+      "workflow_state": "open",
+      "blocked_reason": null,
+      "acceptance_state": "unreviewed",
+      "trust_rule": [],
+      "integrity_state": "current",
+      "assignee": null,
+      "frontier": false,
+      "provisional": true,
+      "conditional_on": [],
+      "parked": null,
+      "core_idea": null,
+      "status": {
+        "text": "Open",
+        "kind": "open"
+      }
+    },
+    {
+      "id": "complementary-series-model",
+      "kind": "claim",
+      "display_label": "",
+      "medium": "latex",
+      "run": null,
+      "coordinator": null,
+      "statement": "For $s\\in(0,1)$ let $I_s$ be the space of locally constant $f:G_p\\to\\mathbb{C}$ with $f(bg)=|b_{11}|_p^{1+s}f(g)$ for upper triangular $b\\in G_p$, with $G_p$ acting by right translation $\\pi_s$. The intertwining operator $(M_sf)(g)=c_s\\int_{\\mathbb{Q}_p}f(w\\,h_p(x)\\,g)\\,dx$, $w=\\begin{pmatrix}0&-1\\\\1&0\\end{pmatrix}$, converges absolutely on $I_s$, maps $I_s$ to $I_{-s}$ with $M_s\\pi_s(g)=\\pi_{-s}(g)M_s$, and for a constant $c_s>0$ satisfies $M_s\\mathbf{1}=\\mathbf{1}$ ($\\mathbf{1}$ the function in $I_{\\pm s}$ equal to 1 on $K_p$). The form $\\langle f_1,f_2\\rangle_s=\\int_{K_p}(M_sf_1)(k)\\overline{f_2(k)}\\,dk$ (probability Haar measure) is Hermitian and positive definite on $I_s$, and the completion of $(I_s,\\langle,\\rangle_s,\\pi_s)$ is unitarily equivalent to the complementary series $\\gamma^s$ of unitary-dual-sl2-qp and spherical-function.",
+      "definitions": [
+        "subgroups-p",
+        "k-finite-dimension",
+        "spherical-function"
+      ],
+      "dependencies": [
+        "unitary-dual-sl2-qp",
+        "chh-tempered-bound"
+      ],
+      "workflow_state": "blocked",
+      "blocked_reason": "not-accepted",
+      "acceptance_state": "unreviewed",
+      "trust_rule": [],
+      "integrity_state": "current",
+      "assignee": null,
+      "frontier": false,
+      "provisional": true,
+      "conditional_on": [
+        "chh-tempered-bound",
+        "unitary-dual-sl2-qp"
+      ],
+      "parked": null,
+      "core_idea": "\u628a $I_s$ \u9650\u5236\u5230 $K_p$ \u4e0a\uff0c\u5b83\u5c31\u7b49\u540c\u4e8e $\\mathbb P^1(\\mathbb Z_p)$ \u4e0a\u7684\u5c40\u90e8\u5e38\u503c\u51fd\u6570\uff0c$M_s$ \u5219\u662f\u6838\u4e3a $C_s\\,\\delta(\\xi,\\eta)^{s-1}$ \u7684\u79ef\u5206\u7b97\u5b50\uff08$\\delta$ \u4e3a $p$-adic \u5f26\u8ddd\u79bb\uff09\u3002\u628a\u8fd9\u4e2a\u6838\u6309\u5c42\u5206\u89e3\uff08layer cake\uff09\uff0c$M_s$ \u5c31\u5199\u6210\u5404\u5c42\u683c\u5b50\u6761\u4ef6\u671f\u671b $E_m$ \u7684\u6b63\u7cfb\u6570\u7ec4\u5408\uff1a$s<1$ \u4fdd\u8bc1\u7cfb\u6570\u4e3a\u6b63\uff0c\u4e8e\u662f $\\langle,\\rangle_s$ \u6b63\u5b9a\u3002$G_p$-\u4e0d\u53d8\u6027\u6765\u81ea\u4e00\u4e2a\u6b21\u6570 $-2$ \u9f50\u6b21\u51fd\u6570\u7684\u79ef\u5206\u5f15\u7406\u3002$\\mathbf 1$ \u662f\u5faa\u73af\u5411\u91cf\uff0c\u7531\u6b64\u5f97\u4e0d\u53ef\u7ea6\uff1b\u6700\u540e\u7531\u7403\u51fd\u6570\u7684\u8870\u51cf\u9636 $p^{-n(1-s)}$ \u5b9a\u51fa\u5bf9\u5e94\u7684 $\\gamma^s$\u3002",
+      "status": {
+        "text": "Blocked",
+        "kind": "blocked"
+      }
+    },
+    {
+      "id": "cuspidal-exceptional-finite",
+      "kind": "claim",
+      "display_label": "",
+      "medium": "latex",
+      "run": {
+        "status": "needs-human",
+        "role": "prover",
+        "step": 2,
+        "steps": 3,
+        "decision": "The claim cannot be proved with known mathematics. For irreducible Gamma (the only reading the setting allows) it is equivalent to finiteness of exceptional Maass cusp forms across the p-power level tower, which is open; Selberg's conjecture would imply it. For reducible Gamma it is false. The researcher must choose what this node states: (a) the provable uniform gap sup_{Z^0_+} s <= 1/2+7/64 (Kim-Sarnak), (b) an explicit hypothesis on Gamma, or (c) conditional on Selberg's conjecture. Details are in scratch/proof-draft.md."
+      },
+      "coordinator": null,
+      "statement": "In the setting of the S-adic homogeneous space X, with the spectral decomposition of L^2(X), the set ^0_+=\\{\\xi\\in Z^0: s(\\xi)\\in(\\frac12,1)\\}$ is finite.",
+      "definitions": [
+        "setting",
+        "spectral-decomposition",
+        "sobolev-norm"
+      ],
+      "dependencies": [
+        "spectral-structure-real"
+      ],
+      "workflow_state": "blocked",
+      "blocked_reason": "not-accepted",
+      "acceptance_state": "unreviewed",
+      "trust_rule": [],
+      "integrity_state": "current",
+      "assignee": "claude-code",
+      "frontier": false,
+      "provisional": false,
+      "conditional_on": [
+        "spectral-structure-real"
+      ],
+      "parked": "needs-human: The claim cannot be proved with known mathematics. For irreducible Gamma (the only reading the setting allows) it is equivalent to finiteness of exceptional Maass cusp forms across the p-power level tower, which is open; Selberg's conjecture would imply it. For reducible Gamma it is false. The researcher must choose what this node states: (a) the provable uniform gap sup_{Z^0_+} s <= 1/2+7/64 (Kim-Sarnak), (b) an explicit hypothesis on Gamma, or (c) conditional on Selberg's conjecture. Details are in scratch/proof-draft.md.",
+      "core_idea": null,
+      "status": {
+        "text": "Parked",
+        "kind": "attention"
+      }
+    },
+    {
+      "id": "emmv-uniform-decay",
+      "kind": "imported_result",
+      "display_label": "",
+      "medium": null,
+      "run": null,
+      "coordinator": null,
+      "statement": "Let $\\mathbf{G}$ be a simply connected semisimple group over a number field $F$ as in Theorem 4.1. There is $\\kappa_2>0$ such that for every place $v$, all $K_v$-finite $f_1,f_2\\in L^2(\\mathbf{G}(F)\\backslash\\mathbf{G}(\\mathbb{A}))$ with $\\int f_1=\\int f_2=0$ and all $g_v\\in\\mathbf{G}(F_v)$: $|\\langle\\pi_{g_v}f_1,f_2\\rangle|\\le\\dim\\langle K_v f_1\\rangle^{1/2}\\dim\\langle K_v f_2\\rangle^{1/2}\\|f_1\\|_2\\|f_2\\|_2\\,\\Xi_{G_v}(g_v)^{\\kappa_2}$, where $K_v$ is a good maximal compact open subgroup of $\\mathbf{G}(F_v)$ and $\\Xi_{G_v}$ a Harish-Chandra spherical function; $\\kappa_2$ is independent of $v$.",
+      "definitions": [
+        "k-finite-dimension",
+        "harish-chandra-function"
+      ],
+      "dependencies": [],
+      "workflow_state": "open",
+      "blocked_reason": null,
+      "acceptance_state": "unreviewed",
+      "trust_rule": [],
+      "integrity_state": "current",
+      "assignee": null,
+      "frontier": false,
+      "provisional": true,
+      "conditional_on": [],
+      "parked": null,
+      "core_idea": null,
+      "status": {
+        "text": "Open",
+        "kind": "open"
+      }
+    },
+    {
+      "id": "exceptional-cuspidal-finite-per-level",
+      "kind": "claim",
+      "display_label": "",
+      "medium": "latex",
+      "run": null,
+      "coordinator": null,
+      "statement": "Let $X=\\Gamma\\backslash G$ with $G=SL_2(\\mathbb{R})\\times SL_2(\\mathbb{Q}_p)$ and $\\Gamma<G$ a lattice, and let $L^2(X)=\\int^\\oplus_Z\\mathcal{H}_{\\infty,\\xi}\\otimes\\mathcal{H}_{p,\\xi}d\\mu_Z(\\xi)$ be its spectral decomposition, with $Z^0_+=\\{\\xi\\in Z^0: s(\\xi)\\in(\\frac12,1)\\}$. For every compact open subgroup $K<SL_2(\\mathbb{Q}_p)$, the set of $\\xi\\in Z^0_+$ with $\\mathcal{H}_{p,\\xi}^{K}\\neq0$ (exceptional cuspidal $\\xi$ whose $p$-adic factor has a nonzero $K$-fixed vector) is finite, and $\\sum_{\\xi\\in Z^0_+}\\dim\\mathcal{H}_{p,\\xi}^{K}<\\infty$.",
+      "definitions": [
+        "setting",
+        "spectral-decomposition",
+        "sobolev-norm"
+      ],
+      "dependencies": [],
+      "workflow_state": "review-needed",
+      "blocked_reason": null,
+      "acceptance_state": "unreviewed",
+      "trust_rule": [],
+      "integrity_state": "current",
+      "assignee": null,
+      "frontier": false,
+      "provisional": true,
+      "conditional_on": [],
+      "parked": null,
+      "core_idea": "\u56fa\u5b9a\u4e00\u4e2a\u65e0\u6320\u7684\u7d27\u5f00\u5b50\u7fa4 $K'\\subset K$ \u540e\uff0c$p$-\u8fdb\u65b9\u5411\u88ab\u538b\u7f29\uff1a$L^2(X)^{K'}$ \u540c\u6784\u4e8e\u6709\u9650\u591a\u4e2a $L^2(\\Lambda_i\\backslash SL_2(\\mathbb{R}))$ \u7684\u76f4\u548c\uff08$\\Lambda_i$ \u4e3a\u683c\uff09\u3002\u4e8e\u662f\u6bcf\u4e2a\u4f8b\u5916\u7684 $\\xi\\in Z^0_+$ \u4e0e\u6bcf\u4e2a $v\\in\\mathcal{H}^{K'}_{p,\\xi}$ \u90fd\u7ed9\u51fa $\\bigsqcup_i\\Lambda_i\\backslash\\mathbb{H}$ \u4e0a\u7279\u5f81\u503c\u843d\u5728 $(0,\\frac14)$ \u5185\u7684 $L^2$ Laplace \u7279\u5f81\u51fd\u6570\uff1b\u800c\u8fd9\u7c7b\u7279\u5f81\u51fd\u6570\uff08\u8ba1\u91cd\u6570\uff09\u53ea\u6709\u6709\u9650\u591a\u4e2a\u3002",
+      "status": {
+        "text": "Awaiting review",
+        "kind": "review"
+      }
+    },
+    {
+      "id": "height-vs-distance",
+      "kind": "lemma",
+      "display_label": "Lemma 2 (heightasypm)",
+      "medium": "latex",
+      "run": {
+        "status": "needs-human",
+        "role": "prover",
+        "step": 3,
+        "steps": 3,
+        "decision": "The node statement is false as written, not ambiguous (scratch/proof-draft.md). (1) Gamma=SL_2(Z[1/p]), g_p=1, admissible bounded p-adic metric min(d_p,1): d_X((diag(p^k,p^-k),1),x_0) stays bounded while ht>=p^{2k}. (2) Doubling both metrics doubles d_X, so at most one metric scaling can satisfy it. (3) Conjugating Gamma by (h_inf,1) makes ht identically +inf. The researcher needs to choose a corrected statement. Proposal R2, proved in the draft: Gamma=SL_2(Z[1/p]), K_p=SL_2(Z_p); ht(Gamma(g_inf,g_p)) = y(delta_inf g_inf i) \u224d exp(hyperbolic distance in SL_2(Z)\\H), i.e. d_X replaced by the fibre distance with g_p frozen. This is also what the Sobolev-embedding use and fog-2 need. Alternatively, restrict Gamma and fix specific metrics, but then the exponent only matches for one tuned normalisation."
+      },
+      "coordinator": null,
+      "statement": "Fix $x_0\\in X$. For every $g_p\\in G_p$ there is $C=C(\\Gamma,x_0,g_p)\\ge1$ such that for all $g_\\infty\\in G_\\infty$: $C^{-1}e^{d_X(\\Gamma(g_\\infty,g_p),x_0)}\\le ht(\\Gamma(g_\\infty,g_p))\\le C\\,e^{d_X(\\Gamma(g_\\infty,g_p),x_0)}$.",
+      "definitions": [
+        "setting",
+        "injectivity-radius",
+        "height-function"
+      ],
+      "dependencies": [],
+      "workflow_state": "claimed",
+      "blocked_reason": null,
+      "acceptance_state": "unreviewed",
+      "trust_rule": [],
+      "integrity_state": "current",
+      "assignee": "claude-code",
+      "frontier": false,
+      "provisional": false,
+      "conditional_on": [],
+      "parked": "needs-human: The node statement is false as written, not ambiguous (scratch/proof-draft.md). (1) Gamma=SL_2(Z[1/p]), g_p=1, admissible bounded p-adic metric min(d_p,1): d_X((diag(p^k,p^-k),1),x_0) stays bounded while ht>=p^{2k}. (2) Doubling both metrics doubles d_X, so at most one metric scaling can satisfy it. (3) Conjugating Gamma by (h_inf,1) makes ht identically +inf. The researcher needs to choose a corrected statement. Proposal R2, proved in the draft: Gamma=SL_2(Z[1/p]), K_p=SL_2(Z_p); ht(Gamma(g_inf,g_p)) = y(delta_inf g_inf i) \u224d exp(hyperbolic distance in SL_2(Z)\\H), i.e. d_X replaced by the fibre distance with g_p frozen. This is also what the Sobolev-embedding use and fog-2 need. Alternatively, restrict Gamma and fix specific metrics, but then the exponent only matches for one tuned normalisation.",
+      "core_idea": null,
+      "status": {
+        "text": "Parked",
+        "kind": "attention"
+      }
+    },
+    {
+      "id": "hilbert-space-decomposition",
+      "kind": "lemma",
+      "display_label": "Lemma 1 (decompositionofHilbertspace)",
+      "medium": "latex",
+      "run": null,
+      "coordinator": null,
+      "statement": "$\\mathcal{H}=L^2(X)=\\mathcal{H}^0_+\\oplus\\mathcal{H}^0_-\\oplus\\mathcal{H}^{rs}\\oplus\\mathcal{H}^{ct}$, an orthogonal sum of closed $G$-invariant subspaces, with $Z^0_+$ and $Z^{rs}$ finite; for $f\\in\\mathcal{H}^\\infty$ with components $f_0\\in\\mathcal{H}^0$, $f_{rs}$, $f_{ct}$: $\\|f\\|^2_{W_k}=\\|f_0\\|^2_{W_k}+\\|f_{ct}\\|^2_{W_k}+\\|f_{rs}\\|^2_{W_k}$.",
+      "definitions": [
+        "setting",
+        "spectral-decomposition",
+        "sobolev-norm"
+      ],
+      "dependencies": [
+        "exceptional-cuspidal-finite-per-level",
+        "smooth-vector-exceptional-support-finite"
+      ],
+      "workflow_state": "blocked",
+      "blocked_reason": "dependency-stale",
+      "acceptance_state": "unreviewed",
+      "trust_rule": [],
+      "integrity_state": "current",
+      "assignee": null,
+      "frontier": false,
+      "provisional": false,
+      "conditional_on": [
+        "exceptional-cuspidal-finite-per-level",
+        "smooth-vector-exceptional-support-finite"
+      ],
+      "parked": null,
+      "core_idea": "Each of the four subspaces is the range of an indicator projection $P_E$ (multiplication by $\\mathbf 1_E$ in the direct integral $\\mathcal{H}=\\int^\\oplus_Z\\mathcal{H}_\\xi\\,d\\mu_Z$). These projections commute with $\\pi(G)$, so they also commute with $A=\\overline{d\\pi(\\Delta)}$ and with $(I+A)^{k/2}$. That makes the decomposition orthogonal and $G$-invariant, and makes $\\|\\cdot\\|_{W_k}^2$ exactly additive over it, with no constants. The S-adic spectral decomposition itself is assumed (Definition spectral-decomposition), not proved.",
+      "status": {
+        "text": "Blocked",
+        "kind": "blocked"
+      }
+    },
+    {
+      "id": "local-sobolev-inequality",
+      "kind": "imported_result",
+      "display_label": "",
+      "medium": null,
+      "run": null,
+      "coordinator": null,
+      "statement": "Let $M$ be the unit tangent bundle of a finite-area hyperbolic surface (a 3-manifold, locally $SL_2(\\mathbb{R})$). For $0<\\epsilon$ below the injectivity radius at $y\\in M$ there is $C(\\epsilon)$ with $|u(y)|^2\\le C(\\epsilon)\\int_{B(y,\\epsilon)}|u|^2+|du|^2+|\\Delta u|^2$ for all $u\\in W^{2,2}$; in particular $W^{2,2}$ functions are continuous.",
+      "definitions": [
+        "injectivity-radius"
+      ],
+      "dependencies": [],
+      "workflow_state": "open",
+      "blocked_reason": null,
+      "acceptance_state": "unreviewed",
+      "trust_rule": [],
+      "integrity_state": "current",
+      "assignee": null,
+      "frontier": false,
+      "provisional": true,
+      "conditional_on": [],
+      "parked": null,
+      "core_idea": null,
+      "status": {
+        "text": "Open",
+        "kind": "open"
+      }
+    },
+    {
+      "id": "main-theorem",
+      "kind": "theorem",
+      "display_label": "Theorem 4.1 (mainthmbyburger)",
+      "medium": "latex",
+      "run": {
+        "status": "needs-human",
+        "role": "decomposer",
+        "step": 1,
+        "steps": 3,
+        "decision": "No split. The statement is false as written: its p-adic factor nu_p(B_p(p^n))^{-1/2} Xi_p(a_n)^{kappa_p} is beaten by an L^2 lower bound (fog-10). For Gamma=SL_2(Z[1/p]), W=K_p, f a lifted Hecke-Maass form and T fixed, ||A_B f||_2 >> nu_p^{-1/2} infinitely often in n, while the claim forces an extra Xi_p(a_n)^{kappa_p}. The researcher must choose the intended p-adic factor. Likely intended: B_p(p^{2n}) with factor Xi_p(a_n)^{kappa_p}, proved by thickening. A split for that reading is drafted in scratch/decomposer/notes.md."
+      },
+      "coordinator": null,
+      "statement": "Let $\\Gamma<G$ be an irreducible non-cocompact lattice, with $\\lambda_1=s_1(1-s_1)$ and $p$-adic decay exponent $\\kappa_p$ of $L^2_0(X)$. Let $W\\le K_p$ be open compact and $f\\in L^2(X)$ smooth, $W$-invariant, with $\\int_Xf\\,d\\bar\\mu=0$ and $\\|f\\|_{W_4}<\\infty$. Let $x\\in X$ not lie on a periodic $H$-orbit, $T\\ge2$, $n\\ge0$, $B=B_\\infty(T)\\times B_p(p^n)$ and $r=T/ht\\big(x\\cdot(a_\\infty(\\log T),1)\\big)$. Then $|A_B(f)(x)|\\ll_\\Gamma\\Big(r^{-1/2}(\\log T)^2+T^{s_1-1}+T^{-1/2}\\log(T+1)\\Big)\\,\\mu_p(W)^{-1/2}\\,d_W\\,\\nu_p(B_p(p^n))^{-1/2}\\,\\Xi_p(a_n)^{\\kappa_p}\\,\\|f\\|_{W_4}$.",
+      "definitions": [
+        "setting",
+        "subgroups-p",
+        "subgroups-real",
+        "horocycle-average",
+        "harish-chandra-function",
+        "decay-exponent",
+        "spectral-decomposition",
+        "sobolev-norm",
+        "height-function",
+        "smooth-w-invariant",
+        "burger-operators"
+      ],
+      "dependencies": [
+        "hilbert-space-decomposition",
+        "sobolev-embedding-general",
+        "sobolev-embedding-cuspidal",
+        "sobolev-embedding-residual",
+        "burger-integral-formula",
+        "burger-operator-bounds",
+        "matrix-coefficient-decay-product",
+        "matrix-coefficient-decay-p",
+        "height-vs-distance"
+      ],
+      "workflow_state": "blocked",
+      "blocked_reason": "dependency-stale",
+      "acceptance_state": "unreviewed",
+      "trust_rule": [],
+      "integrity_state": "current",
+      "assignee": "claude-code",
+      "frontier": false,
+      "provisional": false,
+      "conditional_on": [
+        "burger-integral-formula",
+        "burger-operator-bounds",
+        "chh-tempered-bound",
+        "complementary-series-model",
+        "exceptional-cuspidal-finite-per-level",
+        "local-sobolev-inequality",
+        "matrix-coefficient-decay-p",
+        "matrix-coefficient-decay-product",
+        "real-complementary-decay",
+        "real-unitary-dual-ktypes",
+        "smooth-vector-exceptional-support-finite",
+        "sobolev-cuspidal-real",
+        "sobolev-residual-real",
+        "tree-spherical-asymptotics",
+        "unitary-dual-sl2-qp"
+      ],
+      "parked": "needs-human: No split. The statement is false as written: its p-adic factor nu_p(B_p(p^n))^{-1/2} Xi_p(a_n)^{kappa_p} is beaten by an L^2 lower bound (fog-10). For Gamma=SL_2(Z[1/p]), W=K_p, f a lifted Hecke-Maass form and T fixed, ||A_B f||_2 >> nu_p^{-1/2} infinitely often in n, while the claim forces an extra Xi_p(a_n)^{kappa_p}. The researcher must choose the intended p-adic factor. Likely intended: B_p(p^{2n}) with factor Xi_p(a_n)^{kappa_p}, proved by thickening. A split for that reading is drafted in scratch/decomposer/notes.md.",
+      "core_idea": null,
+      "status": {
+        "text": "Parked",
+        "kind": "attention"
+      }
+    },
+    {
+      "id": "matrix-coefficient-decay-p",
+      "kind": "lemma",
+      "display_label": "Theorem 2.3 (matrixcoefficient)",
+      "medium": "latex",
+      "run": null,
+      "coordinator": null,
+      "statement": "For an irreducible unitary representation $(\\pi,\\mathcal{H})$ of $G_p$ and $K_p$-finite $\\phi,\\psi\\in\\mathcal{H}$: $|\\langle\\pi(a_n)\\phi,\\psi\\rangle|\\le\\sqrt{d_{K_p}(\\phi)d_{K_p}(\\psi)}\\,\\|\\phi\\|_2\\|\\psi\\|_2\\,\\varpi_\\pi(a_n)$ for all $n\\ge0$.",
+      "definitions": [
+        "subgroups-p",
+        "k-finite-dimension",
+        "spherical-function"
+      ],
+      "dependencies": [
+        "unitary-dual-sl2-qp",
+        "chh-tempered-bound",
+        "tree-spherical-asymptotics",
+        "complementary-series-model"
+      ],
+      "workflow_state": "blocked",
+      "blocked_reason": "not-accepted",
+      "acceptance_state": "unreviewed",
+      "trust_rule": [],
+      "integrity_state": "current",
+      "assignee": null,
+      "frontier": false,
+      "provisional": true,
+      "conditional_on": [
+        "chh-tempered-bound",
+        "complementary-series-model",
+        "tree-spherical-asymptotics",
+        "unitary-dual-sl2-qp"
+      ],
+      "parked": null,
+      "core_idea": "\u6309\u9149\u5bf9\u5076\u5206\u6210\u4e09\u79cd\u60c5\u5f62\uff1a\u5e73\u51e1\u8868\u793a\u7528 Cauchy\u2013Schwarz\uff0c\u7f13\u589e\u8868\u793a\u76f4\u63a5\u5957\u7528 Cowling\u2013Haagerup\u2013Howe \u754c\u3002\u5bf9\u8865\u7cfb\u5217 $\\gamma^s$\uff0c\u5728\u8bf1\u5bfc\u6a21\u578b\u4e2d\u7fa4\u4f5c\u7528\u7684\u4e58\u5b50\u4e3a\u6b63\uff0c\u4e14 $\\pi_{\\pm s}(g)\\mathbf 1$ \u7684 $K$-\u79ef\u5206\u7b49\u4e8e $\\varpi_{\\gamma^s}(g)$\uff0c\u6240\u4ee5\u77e9\u9635\u7cfb\u6570\u88ab $\\sup_K$-\u8303\u6570\u4e58\u4ee5 $\\varpi_{\\gamma^s}(g)$ \u63a7\u5236\u3002$\\sup$-\u8303\u6570\u518d\u7531 $\\sqrt{d_K}$ \u4e58 $L^2(K)$-\u8303\u6570\u63a7\u5236\uff1b$L^2(K)$-\u8303\u6570\u4e0e $\\|\\cdot\\|_s$ \u4e4b\u95f4\u7684\u5dee\u522b\uff0c\u5219\u5229\u7528 $M_s$ \u5728\u6bcf\u4e2a $K$-\u578b\u4e0a\u662f\u6b63\u6807\u91cf\u6765\u6d88\u53bb\u3002",
+      "status": {
+        "text": "Blocked",
+        "kind": "blocked"
+      }
+    },
+    {
+      "id": "matrix-coefficient-decay-product",
+      "kind": "lemma",
+      "display_label": "Theorem 2.4 (unnamed, attributed to EMMV)",
+      "medium": "latex",
+      "run": null,
+      "coordinator": null,
+      "statement": "Let $(\\pi,\\mathcal{H})=\\int^\\oplus_Z\\pi_{\\infty,\\xi}\\otimes\\pi_{p,\\xi}\\,d\\mu_Z$ be a unitary representation of $G=G_\\infty\\times G_p$ with no nonzero $G_\\infty$- or $G_p$-invariant vectors, with decay exponents $\\kappa_\\infty,\\kappa_p$. Then for $K_\\infty\\times K_p$-finite $v,w$, $t\\ge0$, $n\\ge0$: $|\\langle\\pi(a_\\infty(t),a_n)v,w\\rangle|\\le\\sqrt{d_{K_\\infty}(v)d_{K_\\infty}(w)d_{K_p}(v)d_{K_p}(w)}\\,\\|v\\|\\|w\\|\\,\\Xi_\\infty(a_\\infty(t))^{\\kappa_\\infty}\\,\\Xi_p(a_n)^{\\kappa_p}$.",
+      "definitions": [
+        "subgroups-p",
+        "subgroups-real",
+        "k-finite-dimension",
+        "harish-chandra-function",
+        "decay-exponent"
+      ],
+      "dependencies": [
+        "chh-tempered-bound",
+        "matrix-coefficient-decay-p",
+        "real-unitary-dual-ktypes",
+        "real-complementary-decay",
+        "complementary-series-model",
+        "unitary-dual-sl2-qp"
+      ],
+      "workflow_state": "blocked",
+      "blocked_reason": "dependency-stale",
+      "acceptance_state": "unreviewed",
+      "trust_rule": [],
+      "integrity_state": "current",
+      "assignee": null,
+      "frontier": false,
+      "provisional": true,
+      "conditional_on": [
+        "chh-tempered-bound",
+        "complementary-series-model",
+        "matrix-coefficient-decay-p",
+        "real-complementary-decay",
+        "real-unitary-dual-ktypes",
+        "tree-spherical-asymptotics",
+        "unitary-dual-sl2-qp"
+      ],
+      "parked": null,
+      "core_idea": "The proof works fibre by fibre: $\\langle\\pi(g)v,w\\rangle=\\int_Z\\langle\\pi_\\xi(g)v_\\xi,w_\\xi\\rangle\\,d\\mu_Z$ with $\\pi_\\xi=\\pi_{\\infty,\\xi}\\otimes\\pi_{p,\\xi}$. Because $K_\\infty$-types have multiplicity one, $v_\\xi$ splits into pure tensors (weight vector)$\\otimes$(p-adic vector). Each fibre coefficient is then a finite double sum of products (real coefficient)\u00b7(p-adic coefficient), and each factor is bounded at its own place by $\\Xi^{\\kappa_\\xi}\\le\\Xi^{\\kappa}$ (using $0<\\Xi\\le1$). Cauchy\u2013Schwarz over the weights and over $Z$ gives the constant $\\sqrt{d_{K_\\infty}(v)d_{K_\\infty}(w)d_{K_p}(v)d_{K_p}(w)}$. EMMV is not used (Standing question q_64afe03d4c).",
+      "status": {
+        "text": "Blocked",
+        "kind": "blocked"
+      }
+    },
+    {
+      "id": "real-complementary-decay",
+      "kind": "claim",
+      "display_label": "",
+      "medium": "latex",
+      "run": null,
+      "coordinator": null,
+      "statement": "Let $\\pi$ be a complementary series representation of $G_\\infty$ with Casimir eigenvalue $s(1-s)$, $s\\in(\\frac12,1)$. If $\\phi,\\psi$ are unit vectors with $\\pi(r(\\theta))\\phi=e^{in\\theta}\\phi$ and $\\pi(r(\\theta))\\psi=e^{im\\theta}\\psi$ for some $n,m\\in\\mathbb{Z}$, then $|\\langle\\pi(g)\\phi,\\psi\\rangle|\\le\\Xi_\\infty(g)^{1-s}$ for all $g\\in G_\\infty$.",
+      "definitions": [
+        "subgroups-p",
+        "subgroups-real",
+        "k-finite-dimension",
+        "harish-chandra-function",
+        "decay-exponent"
+      ],
+      "dependencies": [],
+      "workflow_state": "review-needed",
+      "blocked_reason": null,
+      "acceptance_state": "unreviewed",
+      "trust_rule": [],
+      "integrity_state": "current",
+      "assignee": null,
+      "frontier": false,
+      "provisional": true,
+      "conditional_on": [],
+      "parked": null,
+      "core_idea": "\u5728\u8bf1\u5bfc\u6a21\u578b\u4e2d\u6743\u5411\u91cf\u77e9\u9635\u7cfb\u6570\u6709\u6307\u6570\u8870\u51cf $e^{-(1-s)x}$\uff0c\u4f46\u5e38\u6570\u4e0d\u662f $1$\uff1b\u53d6\u5f20\u91cf\u5e42 $\\pi_s^{\\otimes k}$\uff08$k=\\lceil \\frac{1}{2(1-s)}\\rceil$\uff09\u4f7f\u7cfb\u6570\u51e0\u4e4e $L^2$\uff0c\u518d\u7528 Cowling\u2013Haagerup\u2013Howe \u5b9a\u7406\uff08\u6743\u5411\u91cf $d_K=1$\uff09\u5f97\u5230\u5e38\u6570\u4e3a $1$ \u7684\u754c $|\\langle\\pi(g)\\phi,\\psi\\rangle|^k\\le\\Xi_\\infty(g)$\uff0c\u7531 $\\frac1k\\ge 1-s$ \u4e0e $\\Xi_\\infty\\le1$ \u5f97\u7ed3\u8bba\u3002",
+      "status": {
+        "text": "Awaiting review",
+        "kind": "review"
+      }
+    },
+    {
+      "id": "real-unitary-dual-ktypes",
+      "kind": "claim",
+      "display_label": "",
+      "medium": "latex",
+      "run": null,
+      "coordinator": null,
+      "statement": "Every nontrivial irreducible unitary representation of $G_\\infty=SL_2(\\mathbb{R})$ is either tempered or a complementary series representation whose Casimir eigenvalue ($\\Omega_\\infty$ as in subgroups-real) is $\\lambda=s(1-s)$ with $s\\in(\\frac12,1)$ (Bargmann). In every irreducible unitary representation of $G_\\infty$ each character $r(\\theta)\\mapsto e^{in\\theta}$ of $K_\\infty$ occurs with multiplicity at most one.",
+      "definitions": [
+        "subgroups-p",
+        "subgroups-real",
+        "k-finite-dimension",
+        "harish-chandra-function",
+        "decay-exponent"
+      ],
+      "dependencies": [],
+      "workflow_state": "review-needed",
+      "blocked_reason": null,
+      "acceptance_state": "unreviewed",
+      "trust_rule": [],
+      "integrity_state": "current",
+      "assignee": null,
+      "frontier": false,
+      "provisional": true,
+      "conditional_on": [],
+      "parked": null,
+      "core_idea": "$K_\\infty$-\u7c7b\u578b\u91cd\u6570\u81f3\u591a\u4e3a\u4e00\u6765\u81ea Gelfand \u6280\u5de7\uff1a\u53cd\u81ea\u540c\u6784 $\\iota(g)=wg^Tw^{-1}$\uff08$w=\\mathrm{diag}(1,-1)$\uff09\u9010\u70b9\u56fa\u5b9a $K_\\infty$ \u548c\u6bcf\u4e2a Cartan \u53cc\u966a\u96c6\uff0c\u56e0\u6b64 Hecke \u4ee3\u6570 $\\mathcal A_n$ \u662f\u4ea4\u6362\u7684\u3002\u4e4b\u540e\u7528\u5347\u964d\u7b97\u5b50 $E_\\pm=Y\\pm iW$ \u8ba1\u7b97\u8303\u6570\uff0c\u6b63\u5b9a\u6027\u8feb\u4f7f $(S,\\lambda)$ \u53ea\u80fd\u53d6\u51e0\u79cd\u5f62\u5f0f\uff1a\u79bb\u6563\u5e8f\u5217\u578b\uff08\u6709\u6700\u4f4e\u6216\u6700\u9ad8\u6743\uff09\u548c $\\lambda\\ge\\frac14$ \u7684\u53cc\u8fb9\u578b\u90fd\u662f tempered\uff08\u77e9\u9635\u7cfb\u6570\u88ab $2\\,\\Xi_\\infty$ \u63a7\u5236\uff09\uff0c\u53ea\u5269\u4e0b $\\lambda=s(1-s)$\u3001$s\\in(\\frac12,1)$ \u7684\u5076\u6743\u53cc\u8fb9\u578b\uff0c\u5373\u8865\u7cfb\u5217\u3002",
+      "status": {
+        "text": "Awaiting review",
+        "kind": "review"
+      }
+    },
+    {
+      "id": "smooth-vector-exceptional-support-finite",
+      "kind": "claim",
+      "display_label": "",
+      "medium": "latex",
+      "run": null,
+      "coordinator": null,
+      "statement": "Let $X=\\Gamma\\backslash G$ with $G=SL_2(\\mathbb{R})\\times SL_2(\\mathbb{Q}_p)$ and $\\Gamma<G$ a lattice, $\\mathcal{H}=L^2(X)=\\int^\\oplus_Z\\mathcal{H}_\\xi d\\mu_Z(\\xi)$ its spectral decomposition, $Z^0_+=\\{\\xi\\in Z^0: s(\\xi)\\in(\\frac12,1)\\}$, and $\\mathcal{H}^\\infty$ the smooth vectors (smooth along $SL_2(\\mathbb{R})$ and fixed by some compact open subgroup of $SL_2(\\mathbb{Q}_p)$). For every $f\\in\\mathcal{H}^\\infty$ the set of $\\xi\\in Z^0_+$ with $f_\\xi\\neq0$ is finite, so the component of $f$ in $\\mathcal{H}^0_+$ is a finite sum of vectors $f_\\xi$ in the closed $G$-invariant subspaces $\\mathcal{H}_\\xi$, each with $s(\\xi)\\le s_1$ where $\\lambda_1=s_1(1-s_1)$ is the smallest nontrivial exceptional Casimir eigenvalue.",
+      "definitions": [
+        "setting",
+        "spectral-decomposition",
+        "sobolev-norm"
+      ],
+      "dependencies": [
+        "exceptional-cuspidal-finite-per-level"
+      ],
+      "workflow_state": "blocked",
+      "blocked_reason": "not-accepted",
+      "acceptance_state": "unreviewed",
+      "trust_rule": [],
+      "integrity_state": "current",
+      "assignee": null,
+      "frontier": false,
+      "provisional": true,
+      "conditional_on": [
+        "exceptional-cuspidal-finite-per-level"
+      ],
+      "parked": null,
+      "core_idea": "\u5149\u6ed1\u5411\u91cf $f$ \u88ab\u67d0\u4e2a\u7d27\u5f00\u5b50\u7fa4 $K<G_p$ \u56fa\u5b9a\uff1b\u7531\u4e8e $Z^0$ \u4e0a\u662f\u8ba1\u6570\u6d4b\u5ea6\uff0c\u6bcf\u4e2a $\\xi\\in Z^0$ \u662f\u539f\u5b50\uff0c\u6295\u5f71 $P_\\xi$ \u4e0e $\\pi(G)$ \u4ea4\u6362\uff0c\u6240\u4ee5 $K$-\u4e0d\u53d8\u6027\u4f20\u5230\u6bcf\u4e2a\u5206\u91cf $f_\\xi$\uff0c\u4ece\u800c $f_\\xi\\neq0$ \u8feb\u4f7f $\\mathcal{H}_{p,\\xi}^K\\neq0$\uff1b\u4f9d\u8d56\u8282\u70b9\u7ed9\u51fa\u8fd9\u6837\u7684 $\\xi\\in Z^0_+$ \u53ea\u6709\u6709\u9650\u4e2a\u3002$s(\\xi)\\le s_1$ \u53ea\u662f $\\lambda_1$ \u5b9a\u4e49\u52a0\u4e0a $s\\mapsto s(1-s)$ \u5728 $[\\frac12,1]$ \u4e0a\u4e25\u683c\u9012\u51cf\u3002",
+      "status": {
+        "text": "Blocked",
+        "kind": "blocked"
+      }
+    },
+    {
+      "id": "sobolev-cuspidal-real",
+      "kind": "imported_result",
+      "display_label": "",
+      "medium": null,
+      "run": null,
+      "coordinator": null,
+      "statement": "For a non-cocompact lattice $\\Gamma^\\prime<SL_2(\\mathbb{R})$ and $F$ in the cuspidal subspace with $\\|F\\|_{W_3}<\\infty$: $|F(p)|\\ll_{\\Gamma^\\prime}\\|F\\|_{W_3}\\,Y_{\\Gamma^\\prime}(p)^{-1/2}$ for all $p\\in\\Gamma^\\prime\\backslash SL_2(\\mathbb{R})$, $Y_{\\Gamma^\\prime}$ the invariant height.",
+      "definitions": [
+        "sobolev-norm",
+        "spectral-decomposition"
+      ],
+      "dependencies": [],
+      "workflow_state": "open",
+      "blocked_reason": null,
+      "acceptance_state": "unreviewed",
+      "trust_rule": [],
+      "integrity_state": "current",
+      "assignee": null,
+      "frontier": false,
+      "provisional": true,
+      "conditional_on": [],
+      "parked": null,
+      "core_idea": null,
+      "status": {
+        "text": "Open",
+        "kind": "open"
+      }
+    },
+    {
+      "id": "sobolev-embedding-cuspidal",
+      "kind": "lemma",
+      "display_label": "Lemma 4 (cuspidal Sobolev embedding)",
+      "medium": "latex",
+      "run": null,
+      "coordinator": null,
+      "statement": "Let $W\\le K_p$ be open compact and $F\\in\\mathcal{H}^0$ (cuspidal) $W$-invariant with $\\|F\\|_{W_3}<\\infty$. Then for every $x\\in X$: $|F(x)|\\ll_\\Gamma\\|F\\|_{W_3}\\,ht(x)^{-1/2}\\,\\mu_p(W)^{-1/2}$.",
+      "definitions": [
+        "spectral-decomposition",
+        "sobolev-norm",
+        "height-function",
+        "smooth-w-invariant"
+      ],
+      "dependencies": [
+        "sobolev-cuspidal-real",
+        "sobolev-embedding-general",
+        "height-vs-distance"
+      ],
+      "workflow_state": "blocked",
+      "blocked_reason": "not-accepted",
+      "acceptance_state": "unreviewed",
+      "trust_rule": [],
+      "integrity_state": "current",
+      "assignee": null,
+      "frontier": false,
+      "provisional": false,
+      "conditional_on": [
+        "local-sobolev-inequality",
+        "sobolev-cuspidal-real"
+      ],
+      "parked": null,
+      "core_idea": null,
+      "status": {
+        "text": "Blocked",
+        "kind": "blocked"
+      }
+    },
+    {
+      "id": "sobolev-embedding-general",
+      "kind": "lemma",
+      "display_label": "Lemma 3 (Sobolev embedding)",
+      "medium": "latex",
+      "run": null,
+      "coordinator": null,
+      "statement": "Let $W\\le K_p$ be open compact and $F\\in L^2(X)$ $W$-invariant with $\\|F\\|_{W_3}<\\infty$. Then $F$ is continuous and for every $x\\in X$: $|F(x)|\\ll_\\Gamma ht(x)^{1/2}\\,\\mu_p(W)^{-1/2}\\,\\|F\\|_{W_3}$.",
+      "definitions": [
+        "setting",
+        "sobolev-norm",
+        "height-function",
+        "injectivity-radius",
+        "smooth-w-invariant"
+      ],
+      "dependencies": [
+        "local-sobolev-inequality",
+        "height-vs-distance"
+      ],
+      "workflow_state": "blocked",
+      "blocked_reason": "not-accepted",
+      "acceptance_state": "unreviewed",
+      "trust_rule": [],
+      "integrity_state": "current",
+      "assignee": null,
+      "frontier": false,
+      "provisional": false,
+      "conditional_on": [
+        "local-sobolev-inequality"
+      ],
+      "parked": null,
+      "core_idea": null,
+      "status": {
+        "text": "Blocked",
+        "kind": "blocked"
+      }
+    },
+    {
+      "id": "sobolev-embedding-residual",
+      "kind": "lemma",
+      "display_label": "Lemma 5 (residual Sobolev embedding)",
+      "medium": "latex",
+      "run": null,
+      "coordinator": null,
+      "statement": "Let $W\\le K_p$ be open compact, $\\xi\\in Z^{rs}$, $s=s(\\xi)$, and $F\\in\\mathcal{H}_\\xi$ $W$-invariant with $\\|F\\|_{W_3}<\\infty$. Then for every $x\\in X$: $|F(x)|\\ll_\\Gamma\\|F\\|_{W_3}\\,ht(x)^{1-s}\\,\\mu_p(W)^{-1/2}$.",
+      "definitions": [
+        "spectral-decomposition",
+        "sobolev-norm",
+        "height-function",
+        "smooth-w-invariant"
+      ],
+      "dependencies": [
+        "sobolev-residual-real",
+        "sobolev-embedding-general",
+        "height-vs-distance"
+      ],
+      "workflow_state": "blocked",
+      "blocked_reason": "not-accepted",
+      "acceptance_state": "unreviewed",
+      "trust_rule": [],
+      "integrity_state": "current",
+      "assignee": null,
+      "frontier": false,
+      "provisional": false,
+      "conditional_on": [
+        "local-sobolev-inequality",
+        "sobolev-residual-real"
+      ],
+      "parked": null,
+      "core_idea": null,
+      "status": {
+        "text": "Blocked",
+        "kind": "blocked"
+      }
+    },
+    {
+      "id": "sobolev-residual-real",
+      "kind": "imported_result",
+      "display_label": "",
+      "medium": null,
+      "run": null,
+      "coordinator": null,
+      "statement": "For a non-cocompact lattice $\\Gamma^\\prime<SL_2(\\mathbb{R})$, $\\xi\\in Z^{rs}$ with $s=s(\\xi)$, and $F\\in\\mathcal{H}_\\xi$ with $\\|F\\|_{W_3}<\\infty$: $|F(p)|\\ll_{\\Gamma^\\prime}\\|F\\|_{W_3}\\,Y_{\\Gamma^\\prime}(p)^{1-s}$ for all $p$.",
+      "definitions": [
+        "sobolev-norm",
+        "spectral-decomposition"
+      ],
+      "dependencies": [],
+      "workflow_state": "open",
+      "blocked_reason": null,
+      "acceptance_state": "unreviewed",
+      "trust_rule": [],
+      "integrity_state": "current",
+      "assignee": null,
+      "frontier": false,
+      "provisional": true,
+      "conditional_on": [],
+      "parked": null,
+      "core_idea": null,
+      "status": {
+        "text": "Open",
+        "kind": "open"
+      }
+    },
+    {
+      "id": "spectral-structure-real",
+      "kind": "imported_result",
+      "display_label": "",
+      "medium": null,
+      "run": null,
+      "coordinator": null,
+      "statement": "For a non-cocompact lattice $\\Gamma^\\prime<SL_2(\\mathbb{R})$, $L^2(\\Gamma^\\prime\\backslash SL_2(\\mathbb{R}))=\\int^\\oplus_Z\\mathcal{H}_\\xi\\,d\\mu_Z(\\xi)$ with $Z=Z^0\\sqcup Z^{rs}\\sqcup Z^{ct}$, where $Z^0\\cup Z^{rs}$ is discrete with counting measure, $Z^{rs}$ is finite and contains exactly one $\\xi$ with $\\pi_\\xi$ trivial, $s(\\xi)\\in(\\frac12,1)$ for the other $\\xi\\in Z^{rs}$, $\\pi_\\xi$ is principal series with $s(\\xi)\\in\\frac12+i\\mathbb{R}_{\\ge0}$ for $\\xi\\in Z^{ct}$, and $Z^0_+=\\{\\xi\\in Z^0: s(\\xi)\\in(\\frac12,1)\\}$ is finite.",
+      "definitions": [
+        "subgroups-real",
+        "spectral-decomposition"
+      ],
+      "dependencies": [],
+      "workflow_state": "open",
+      "blocked_reason": null,
+      "acceptance_state": "unreviewed",
+      "trust_rule": [],
+      "integrity_state": "current",
+      "assignee": null,
+      "frontier": false,
+      "provisional": true,
+      "conditional_on": [],
+      "parked": null,
+      "core_idea": null,
+      "status": {
+        "text": "Open",
+        "kind": "open"
+      }
+    },
+    {
+      "id": "tree-spherical-asymptotics",
+      "kind": "imported_result",
+      "display_label": "",
+      "medium": null,
+      "run": null,
+      "coordinator": null,
+      "statement": "On $G_p$: (a) the Harish-Chandra function satisfies $\\Xi_p(a_n)=\\frac{p^{-n}}{p+1}\\big((2n+1)(p-1)+2\\big)$ for $n\\ge0$; (b) the spherical function of the complementary series $\\gamma^s$, $s\\in(0,1)$, satisfies $\\varpi_{\\gamma^s}(a_n)\\ll\\frac{p^{n(s-1)}}{1-p^{-s}}$.",
+      "definitions": [
+        "subgroups-p",
+        "harish-chandra-function",
+        "spherical-function"
+      ],
+      "dependencies": [],
+      "workflow_state": "open",
+      "blocked_reason": null,
+      "acceptance_state": "unreviewed",
+      "trust_rule": [],
+      "integrity_state": "current",
+      "assignee": null,
+      "frontier": false,
+      "provisional": true,
+      "conditional_on": [],
+      "parked": null,
+      "core_idea": null,
+      "status": {
+        "text": "Open",
+        "kind": "open"
+      }
+    },
+    {
+      "id": "unitary-dual-sl2-qp",
+      "kind": "imported_result",
+      "display_label": "",
+      "medium": null,
+      "run": null,
+      "coordinator": null,
+      "statement": "Every irreducible unitary representation of $G_p=SL_2(\\mathbb{Q}_p)$ is the trivial representation, a tempered representation, or a complementary series representation $\\gamma^s$, $s\\in(0,1)$: $\\widehat{G_p}=\\{1\\}\\cup\\{\\pi \\text{ tempered}\\}\\cup\\{\\gamma^s: s\\in(0,1)\\}$.",
+      "definitions": [
+        "setting",
+        "tempered-representation",
+        "spherical-function"
+      ],
+      "dependencies": [],
+      "workflow_state": "open",
+      "blocked_reason": null,
+      "acceptance_state": "unreviewed",
+      "trust_rule": [],
+      "integrity_state": "current",
+      "assignee": null,
+      "frontier": false,
+      "provisional": true,
+      "conditional_on": [],
+      "parked": null,
+      "core_idea": null,
+      "status": {
+        "text": "Open",
+        "kind": "open"
+      }
+    }
+  ]
+}

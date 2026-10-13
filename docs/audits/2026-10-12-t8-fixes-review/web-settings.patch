@@ -1,0 +1,142 @@
+diff --git a/src/proof_web/server.py b/src/proof_web/server.py
+index 4cc281b..06abdbc 100644
+--- a/src/proof_web/server.py
++++ b/src/proof_web/server.py
+@@ -52,6 +52,11 @@ from proof_cli.authority import candidate_proof_sha256
+ from proof_cli import key_ideas
+ from proof_cli.vault import OUT_DIR, SNAPSHOT_MANIFEST, archived_pdf_path, build_pdf_path, frozen_key_ideas, node_folder, snapshot_folder_file, snapshot_folder_files
+ from proof_agents.agent_run import ACTIONS as RUN_ACTIONS
++try:
++    from proof_agents.proof_agent import unknown_studio_keys
++except ImportError:  # an older proof-agents: no check of proof.toml's [studio] keys
++    def unknown_studio_keys(project_root):  # noqa: ARG001
++        return []
+ from .node_status import node_status
+ from proof_agents.coordinator import ACTIONS as COORDINATOR_ACTIONS
+ from .review_queue import import_review, review_queue
+@@ -327,6 +332,8 @@ class ReviewApp:
+             # whose decisions these will be: the git identity that commits them
+             "reviewer": git_identity(self.store.root),
+             "warnings": [warning.model_dump(mode="json") for warning in warnings],
++            # proof.toml [studio] keys nothing reads, so a misspelt or invented setting isn't silently ignored (proof-cli#197)
++            "settings_warnings": unknown_studio_keys(self.store.root),
+             "pending": self._pending(),
+             # imported results trusted by a rule (ADR-0014): what the researcher hasn't looked at; never "awaiting"
+             "trusted_by_rule": self._trusted_by_rule(),
+diff --git a/src/proof_web/static/app.js b/src/proof_web/static/app.js
+index 5a862f5..446e926 100644
+--- a/src/proof_web/static/app.js
++++ b/src/proof_web/static/app.js
+@@ -446,6 +446,11 @@ function showHome() {
+   $("rail-review").textContent = state.pending.length ? pending : "";
+   $("rail-review").className = state.pending.length ? "n hot" : "n";
+   $("records-count").textContent = state.warnings.length ? String(state.warnings.length) : "";
++  // proof.toml [studio] keys nothing reads (proof-cli#197): shown only when there are some
++  const settings = state.settings_warnings || [];
++  $("settings-group").hidden = !settings.length;
++  $("settings-count").textContent = settings.length ? String(settings.length) : "";
++  $("settings-warnings").replaceChildren(...settings.map((w) => el("li", w.message, { class: "warning" })));
+ }
+ 
+ // The imported results callable under a Trust rule without a review of their own (ADR-0014): what the
+@@ -1383,7 +1388,7 @@ function showAttention() {
+   }));
+   if (!nodes.length) list.append(el("li", "Nothing on the map needs attention.", { class: "attention-none" }));
+   $("attention-count").textContent = nodes.length ? String(nodes.length) : "";
+-  const total = nodes.length + state.warnings.length;
++  const total = nodes.length + state.warnings.length + (state.settings_warnings || []).length;
+   $("rail-warnings").textContent = total ? String(total) : "";
+   $("rail-warnings").className = total ? "n hot" : "n";
+ }
+diff --git a/src/proof_web/static/index.html b/src/proof_web/static/index.html
+index 01d0b33..b530b7a 100644
+--- a/src/proof_web/static/index.html
++++ b/src/proof_web/static/index.html
+@@ -154,6 +154,11 @@
+         <h2 class="group-head">Review records <span class="n" id="records-count"></span></h2>
+         <p class="hint">Unreadable or unconfirmed records, decisions git doesn't have yet, an Acceptance that no longer describes its node, a snapshot that was never indexed.</p>
+         <div class="card"><div class="pb"><ul id="warnings"></ul></div></div>
++        <div id="settings-group" hidden>
++          <h2 class="group-head">Project settings <span class="n" id="settings-count"></span></h2>
++          <p class="hint">Keys in proof.toml that nothing reads: each is ignored.</p>
++          <div class="card"><div class="pb"><ul id="settings-warnings"></ul></div></div>
++        </div>
+       </section>
+       <section id="node-page" hidden>
+         <div class="nodehead">
+diff --git a/tests/js/map_home_harness.js b/tests/js/map_home_harness.js
+index 8397f8b..ffeadbc 100644
+--- a/tests/js/map_home_harness.js
++++ b/tests/js/map_home_harness.js
+@@ -92,7 +92,7 @@ class FakeElement {
+   const ids = ["message", "project", "reviewer", "reviewer-initial", "stat-frontier", "stat-review", "rail-review", "rail-warnings",
+     "home", "node-page", "confirm", "confirm-decisions", "confirm-record", "confirm-cancel",
+     "sidebar-toggle", "review-page", "warnings-page", "attention-nodes", "attention-count", "records-count",
+-    "pending", "pending-count", "decide-batch", "warnings",
++    "pending", "pending-count", "decide-batch", "warnings", "settings-group", "settings-count", "settings-warnings",
+     "view-dag", "view-tree", "tree-root", "tree-root-label", "map-caption", "map-dag", "map-tree", "dag-svg",
+     "zoom-in", "zoom-out", "zoom-fit", "zoom-tidy", "zoom-level", "map-find", "map-find-count",
+     "node-title", "node-axes", "node-warnings", "node-definitions", "node-statement", "node-assumptions", "node-claim", "node-folder", "node-source",
+@@ -108,7 +108,7 @@ class FakeElement {
+     "map-legend",
+     // ADR-0021: Pursue on a project with a draft and no map, and the review queue
+     "pursue-banner", "pursue-start", "pursue-stop", "pursue-status", "pursue-limits", "pursue-turns", "pursue-minutes", "pursue-limits-why", "pursue-spend", "queue-count", "queue-departures", "queue-departures-text", "review-queue"];
+-  const tags = { "tree-root": "select", "dag-svg": "svg", "decide-batch": "button", pending: "table", warnings: "ul", "map-find": "input", "attention-nodes": "ul",
++  const tags = { "tree-root": "select", "dag-svg": "svg", "decide-batch": "button", pending: "table", warnings: "ul", "settings-warnings": "ul", "map-find": "input", "attention-nodes": "ul",
+     "node-deps": "table", "node-decisions": "table", "node-challenges": "ul", "node-evidence": "ul", "node-history": "ul",
+     trusted: "table", "rules-list": "ul", "rules-retired-list": "ul", "rule-name": "input", "rule-rationale": "input", "rule-decision": "input",
+     "cond-reviewed": "input", "cond-doi": "input", "cond-arxiv": "input", "manage-rules": "button", "rule-record": "button", "rule-cancel": "button", "rule-new": "button",
+@@ -233,6 +233,8 @@ class FakeElement {
+     // the warnings page's nodes that need attention, and the sidebar's count of everything on it
+     attention: elements["attention-nodes"].querySelectorAll("li").map((li) => li.textContent),
+     railWarnings: elements["rail-warnings"].textContent,
++    settingsShown: !elements["settings-group"].hidden,
++    settingsWarnings: elements["settings-warnings"].querySelectorAll("li").map((li) => li.textContent),
+     message: elements.message.textContent,
+     // the node's own page, once one is open: its source block, which carries the citation
+     nodePageShown: !elements["node-page"].hidden,
+diff --git a/tests/js/node_form_harness.js b/tests/js/node_form_harness.js
+index 683665e..9ad962f 100644
+--- a/tests/js/node_form_harness.js
++++ b/tests/js/node_form_harness.js
+@@ -94,7 +94,7 @@ class FakeElement {
+   const ids = ["message", "project", "reviewer", "reviewer-initial", "stat-frontier", "stat-review", "rail-review", "rail-warnings",
+     "home", "node-page", "confirm", "confirm-decisions", "confirm-record", "confirm-cancel",
+     "sidebar-toggle", "review-page", "warnings-page", "attention-nodes", "attention-count", "records-count",
+-    "pending", "pending-count", "decide-batch", "warnings",
++    "pending", "pending-count", "decide-batch", "warnings", "settings-group", "settings-count", "settings-warnings",
+     "view-dag", "view-tree", "tree-root", "tree-root-label", "map-caption", "map-stage", "map-dag", "map-tree", "dag-svg",
+     "zoom-in", "zoom-out", "zoom-fit", "zoom-tidy", "zoom-level", "map-find", "map-find-count",
+     "trusted", "trusted-count", "manage-rules", "rules-sheet", "rule-form", "rule-new", "rule-cancel", "rule-record",
+diff --git a/tests/test_map_home.py b/tests/test_map_home.py
+index b756a8c..1571471 100644
+--- a/tests/test_map_home.py
++++ b/tests/test_map_home.py
+@@ -414,6 +414,27 @@ def test_the_warnings_page_lists_the_nodes_that_need_attention_and_the_sidebar_c
+     assert shown["railWarnings"] == "3"  # two nodes and one review record
+     (quiet,) = _home(state=_state(), map_={"nodes": [_node("lem_ok")]})
+     assert quiet["attention"] == ["Nothing on the map needs attention."] and quiet["railWarnings"] == ""
++    assert not quiet["settingsShown"]
++
++
++def test_the_warnings_page_names_the_proof_toml_keys_nothing_reads():
++    """proof-cli#197: T8 set `claude_config_dir`, which no setting reads; the page says so instead of ignoring it."""
++    unknown = {"key": "claude_config_dir", "message": "proof.toml [studio] claude_config_dir is not a setting and is ignored"}
++    (shown,) = _home(state={**_state(), "settings_warnings": [unknown]}, map_={"nodes": [_node("lem_ok")]})
++    assert shown["settingsShown"] and shown["settingsWarnings"] == [unknown["message"]]
++    assert shown["railWarnings"] == "1"
++
++
++def test_the_state_carries_the_unknown_studio_keys(tmp_path):
++    from proof_agents import proof_agent
++    if not hasattr(proof_agent, "unknown_studio_keys"):
++        pytest.skip("an older proof-agents")
++    from proof_cli.storage import ensure_project
++    from proof_web.server import ReviewApp
++    store = ensure_project(tmp_path, project_id="settings")
++    (tmp_path / "proof.toml").write_text('[studio]\nparallel = 1\nclaude_config_dir = "x"\n', encoding="utf-8")
++    (item,) = ReviewApp(store).state()["settings_warnings"]
++    assert item["key"] == "claude_config_dir" and "CLAUDE_CONFIG_DIR" in item["message"]
+ 
+ 
+ # -- each Evidence check names the Review snapshot it checked (issue #122) -------------------

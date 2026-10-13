@@ -1,0 +1,23 @@
+{
+  "checkedAt": "2026-10-11T20:30:58.344979+00:00",
+  "repositories": [
+    {
+      "repo": "core",
+      "source": "/Volumes/Codex-Workspace/live/home/zhdeng/proof-cli/.claude/worktrees/0021-merge",
+      "head": "3dd0a7bde3ad1ea9e040c02b1bff6589a9cf378c",
+      "clean": true
+    },
+    {
+      "repo": "agents",
+      "source": "/private/tmp/claude-502/-Volumes-Codex-Workspace-live-home-zhdeng-proof-cli/ece36e1b-cb9b-4860-9b1c-030026ba35d7/scratchpad/agents",
+      "head": "3ff0a7121e82b3c8eb1153c7bc1e296c96a36c69",
+      "clean": true
+    },
+    {
+      "repo": "web",
+      "source": "/private/tmp/claude-502/-Volumes-Codex-Workspace-live-home-zhdeng-proof-cli/ece36e1b-cb9b-4860-9b1c-030026ba35d7/scratchpad/web",
+      "head": "b8157191d26834c570a0edbc310599a632b355b8",
+      "clean": true
+    }
+  ]
+}

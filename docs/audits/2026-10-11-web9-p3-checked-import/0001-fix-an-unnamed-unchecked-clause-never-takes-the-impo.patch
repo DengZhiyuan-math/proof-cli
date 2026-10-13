@@ -1,0 +1,129 @@
+From 90c0377ed083fe3dc11a3f825a4716ea75a0e494 Mon Sep 17 00:00:00 2001
+From: Yomathnotcool <125728853+DengZhiyuan-math@users.noreply.github.com>
+Date: Sun, 11 Oct 2026 12:07:41 +0200
+Subject: [PATCH] fix: an unnamed unchecked clause never takes the import its
+ sentence calls checked (#9)
+
+"R: checked against the source; unchecked against the source for the other import." marked R: the clause names
+no import, so the sentence fallback found R, which the note had just called checked. The sentence's names and the
+single-import fallback now leave out the imports another clause of the sentence calls checked ("not checked",
+"never checked" and "wasn't checked" do not count). With R2 the snapshot's one other import, R2 is marked; with
+several left, none is chosen, as for any unnamed mark on several imports.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/proof_web/review_queue.py | 28 +++++++++++++++++++---------
+ tests/test_import_review.py   | 34 ++++++++++++++++++++++++++++++++++
+ 2 files changed, 53 insertions(+), 9 deletions(-)
+
+diff --git a/src/proof_web/review_queue.py b/src/proof_web/review_queue.py
+index 1864b88..44f18b4 100644
+--- a/src/proof_web/review_queue.py
++++ b/src/proof_web/review_queue.py
+@@ -103,8 +103,9 @@ def source_marks(store: ProjectStore, node_id: str) -> list[dict]:
+     Evidence check on a dependent's snapshot that recorded it: the dependent, the snapshot, whether that snapshot is
+     the dependent's current one, and the note. The snapshot's own frozen dependencies say what it rested on (the
+     node's current ones for a snapshot from before they were frozen). A mark is read clause by clause: a clause
+-    saying "unchecked against the source" uses its own import names first, then those of its sentence. Only when
+-    neither names an imported result does it fall back to the snapshot's sole import."""
++    saying "unchecked against the source" uses its own import names first, then those of its sentence. An import its
++    sentence calls checked is never one of them. Only when neither names an imported result does it fall back to the
++    snapshot's sole import, the one its sentence did not call checked."""
+     nodes = proof_map.list_nodes(store)
+     imported = [node.id for node in nodes if node.kind == ProofMapNodeKind.imported_result]
+     names = {i: re.compile(rf"(?<![\w.-]){re.escape(i)}(?![\w.-])") for i in imported}
+@@ -115,9 +116,9 @@ def source_marks(store: ProjectStore, node_id: str) -> list[dict]:
+             rests_on = proof.dependencies if proof.dependencies is not None else dependent.dependencies
+             if node_id not in rests_on:
+                 continue
+-            alone = [d for d in rests_on if d in names] == [node_id]
++            frozen = [d for d in rests_on if d in names]
+             for check in list_evidence_checks_for_candidate_proof(store, proof.id):
+-                if any(_marks(clause, sentence, node_id, names, alone)
++                if any(_marks(clause, sentence, node_id, names, frozen)
+                        for sentence in _SENTENCE_BOUNDARY.split(check.notes) for clause in _clauses(sentence)):
+                     current = current or get_current_candidate_proof(store, dependent.id)
+                     marks.append({"dependent": dependent.id, "snapshot": proof.version, "current": current is not None and current.id == proof.id,
+@@ -127,6 +128,8 @@ def source_marks(store: ProjectStore, node_id: str) -> list[dict]:
+ 
+ # Keep common abbreviations with the import named after them.
+ _SENTENCE_BOUNDARY = re.compile(r"\n+|(?<=[.!?])(?<!\be\.g\.)(?<!\bi\.e\.)\s+", re.IGNORECASE)
++# A clause calling an import checked: "R: checked …", not "unchecked", "not checked", "never checked", "wasn't checked".
++_CHECKED = re.compile(r"(?<!\bnot\s)(?<!\bnever\s)(?<!n't\s)\bchecked\b", re.IGNORECASE)
+ _CHECK_COMMA = re.compile(
+     r",\s*(?=(?:\w+\s+)?[\w.-]+(?:\s*:\s*|\s+)(?:un)?checked\b)",
+     re.IGNORECASE,
+@@ -148,13 +151,20 @@ def _clauses(sentence: str) -> Iterator[str]:
+         yield clause
+ 
+ 
+-def _marks(clause: str, sentence: str, node_id: str, names: dict, alone: bool) -> bool:
+-    """Read an unchecked clause's own names, its sentence's names, then the single-import fallback."""
++def _marks(clause: str, sentence: str, node_id: str, names: dict, frozen: list[str]) -> bool:
++    """Read an unchecked clause's own names, its sentence's names, then the single-import fallback; the last two leave
++    out the imports another clause of the sentence calls checked."""
+     if UNCHECKED not in clause.lower():
+         return False
+-    named = ([i for i, name in names.items() if name.search(clause)]
+-             or [i for i, name in names.items() if name.search(sentence)])
+-    return node_id in named if named else alone
++    own = [i for i, name in names.items() if name.search(clause)]
++    if own:
++        return node_id in own
++    checked = {i for other in _clauses(sentence) if UNCHECKED not in other.lower() and _CHECKED.search(other)
++               for i, name in names.items() if name.search(other)}
++    named = [i for i, name in names.items() if name.search(sentence) and i not in checked]
++    if named:
++        return node_id in named
++    return [i for i in frozen if i not in checked] == [node_id]
+ 
+ 
+ def import_review(store: ProjectStore, node_id: str) -> dict:
+diff --git a/tests/test_import_review.py b/tests/test_import_review.py
+index 819f84c..9707548 100644
+--- a/tests/test_import_review.py
++++ b/tests/test_import_review.py
+@@ -173,6 +173,40 @@ def test_the_sentence_fallback_does_not_take_an_import_from_another_sentence(sto
+     assert _marked(store, "R2") == [("L", 1, True)]
+ 
+ 
++@pytest.mark.parametrize("note", [
++    "R: checked against the source; unchecked against the source for the other import.",
++    "R checked against the source; the other import unchecked against the source.",
++    "Unchecked against the source for the other import; R: checked against the source.",
++])
++def test_an_unnamed_unchecked_clause_never_takes_the_import_its_sentence_calls_checked(store, note):
++    _two_imports(store)
++    create_node(store, node_id="L", kind="lemma", statement="L", dependencies=["R", "R2"], created_by="reader-1")
++    _checked(store, "L", note)
++    assert _marked(store, "R") == []
++    assert _marked(store, "R2") == [("L", 1, True)]   # the snapshot's one import its sentence did not call checked
++
++
++@pytest.mark.parametrize("note", [
++    "R: not checked; unchecked against the source for this reason.",
++    "R wasn't checked; unchecked against the source.",
++])
++def test_an_import_said_not_checked_is_still_the_unnamed_clauses(store, note):
++    _two_imports(store)
++    create_node(store, node_id="L", kind="lemma", statement="L", dependencies=["R", "R2"], created_by="reader-1")
++    _checked(store, "L", note)
++    assert _marked(store, "R") == [("L", 1, True)]   # its sentence names R and calls it checked nowhere
++    assert _marked(store, "R2") == []
++
++
++def test_with_several_imports_left_an_unnamed_unchecked_clause_marks_none_of_them(store):
++    _two_imports(store)
++    create_node(store, node_id="R3", kind="imported_result", statement="R3", source_locator="source R3", source_version="v1", created_by="reader-1")
++    create_node(store, node_id="L", kind="lemma", statement="L", dependencies=["R", "R2", "R3"], created_by="reader-1")
++    _checked(store, "L", "R: checked against the source; unchecked against the source for the others.")
++    assert _marked(store, "R") == []
++    assert _marked(store, "R2") == _marked(store, "R3") == []   # as an unnamed mark on several imports: none is chosen
++
++
+ def test_a_snapshot_is_read_against_the_dependencies_it_froze_not_the_maps_current_edges(store):
+     _two_imports(store)
+     create_node(store, node_id="L", kind="lemma", statement="L", dependencies=["R"], created_by="reader-1")
+-- 
+2.54.0
+

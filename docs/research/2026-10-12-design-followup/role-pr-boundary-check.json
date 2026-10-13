@@ -1,0 +1,109 @@
+{
+  "core_head": "a6d4710bcc3fa42d92728703384b13facc70f257",
+  "agents_head": "81dc8c041f6c352cb3016a42f3f3ed9a4d014a87",
+  "checks": [
+    {
+      "role": "prover",
+      "pursue": false,
+      "claude_args_equal": true,
+      "codex_args_equal": true,
+      "command_sheet_equal": true
+    },
+    {
+      "role": "prover",
+      "pursue": true,
+      "claude_args_equal": true,
+      "codex_args_equal": true,
+      "command_sheet_equal": true
+    },
+    {
+      "role": "verifier",
+      "pursue": false,
+      "claude_args_equal": true,
+      "codex_args_equal": true,
+      "command_sheet_equal": true
+    },
+    {
+      "role": "verifier",
+      "pursue": true,
+      "claude_args_equal": true,
+      "codex_args_equal": true,
+      "command_sheet_equal": true
+    },
+    {
+      "role": "typesetter",
+      "pursue": false,
+      "claude_args_equal": true,
+      "codex_args_equal": true,
+      "command_sheet_equal": true
+    },
+    {
+      "role": "typesetter",
+      "pursue": true,
+      "claude_args_equal": true,
+      "codex_args_equal": true,
+      "command_sheet_equal": true
+    },
+    {
+      "role": "numerics",
+      "pursue": false,
+      "claude_args_equal": true,
+      "codex_args_equal": true,
+      "command_sheet_equal": true
+    },
+    {
+      "role": "numerics",
+      "pursue": true,
+      "claude_args_equal": true,
+      "codex_args_equal": true,
+      "command_sheet_equal": true
+    },
+    {
+      "role": "decomposer",
+      "pursue": false,
+      "claude_args_equal": true,
+      "codex_args_equal": true,
+      "command_sheet_equal": true
+    },
+    {
+      "role": "decomposer",
+      "pursue": true,
+      "claude_args_equal": true,
+      "codex_args_equal": true,
+      "command_sheet_equal": true
+    }
+  ],
+  "acceptance_sources": [
+    {
+      "path": "src/proof_cli/cli.py",
+      "blob": "787dcd510ab1414417e64ab3b1845419b5c2d40a",
+      "unchanged": true
+    },
+    {
+      "path": "src/proof_cli/proof_map.py",
+      "blob": "0731887cdec83b85e610d26df954bd3fc81ac7af",
+      "unchanged": true
+    },
+    {
+      "path": "src/proof_cli/domain.py",
+      "blob": "3dbc2b3048a0549f1c6c15f1c8ad4e6adf7494b0",
+      "unchanged": true
+    },
+    {
+      "path": "docs/adr/0004-only-human-review-changes-acceptance.md",
+      "blob": "2a15ff2054131566f877974939498de8a525e740",
+      "unchanged": true
+    },
+    {
+      "path": "docs/adr/0019-the-run-is-a-prove-verify-loop-over-the-map.md",
+      "blob": "95c41252d1d831225c927ef2bb62c6ae0e9b9ee2",
+      "unchanged": true
+    },
+    {
+      "path": "docs/adr/0021-progress-is-not-gated-by-trust.md",
+      "blob": "17bc526374e12757c3459492c291efabe8af242a",
+      "unchanged": true
+    }
+  ],
+  "provider_calls": 0
+}

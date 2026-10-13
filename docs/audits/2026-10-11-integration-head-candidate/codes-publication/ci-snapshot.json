@@ -1,0 +1,340 @@
+{
+  "conclusion": "",
+  "headSha": "24d3a296d9995774c01df755df904c769d6598da",
+  "jobs": [
+    {
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "databaseId": 114484746775,
+      "name": "core-and-studio (ubuntu-24.04, 3.12)",
+      "startedAt": "2026-10-11T13:45:28Z",
+      "status": "in_progress",
+      "steps": [
+        {
+          "completedAt": "2026-10-11T13:45:30Z",
+          "conclusion": "success",
+          "name": "Set up job",
+          "number": 1,
+          "startedAt": "2026-10-11T13:45:29Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-10-11T13:45:31Z",
+          "conclusion": "success",
+          "name": "Run actions/checkout@v4",
+          "number": 2,
+          "startedAt": "2026-10-11T13:45:30Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-10-11T13:45:31Z",
+          "conclusion": "success",
+          "name": "Run actions/setup-python@v5",
+          "number": 3,
+          "startedAt": "2026-10-11T13:45:31Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-10-11T13:45:33Z",
+          "conclusion": "success",
+          "name": "Run python -m pip install -U pip setuptools wheel",
+          "number": 4,
+          "startedAt": "2026-10-11T13:45:31Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-10-11T13:45:41Z",
+          "conclusion": "success",
+          "name": "Run python -m pip install -e \".[dev]\" -e packages/latex-agent",
+          "number": 5,
+          "startedAt": "2026-10-11T13:45:33Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-10-11T13:45:42Z",
+          "conclusion": "success",
+          "name": "Run python -c \"import click, typer, pydantic, rich, proof_cli.cli, latex_agent.server; print('imports ok')\"",
+          "number": 6,
+          "startedAt": "2026-10-11T13:45:41Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "0001-01-01T00:00:00Z",
+          "conclusion": "",
+          "name": "Run python -m pytest -q -x",
+          "number": 7,
+          "startedAt": "2026-10-11T13:45:42Z",
+          "status": "in_progress"
+        },
+        {
+          "completedAt": "0001-01-01T00:00:00Z",
+          "conclusion": "",
+          "name": "Post Run actions/setup-python@v5",
+          "number": 13,
+          "startedAt": "0001-01-01T00:00:00Z",
+          "status": "pending"
+        },
+        {
+          "completedAt": "0001-01-01T00:00:00Z",
+          "conclusion": "",
+          "name": "Post Run actions/checkout@v4",
+          "number": 14,
+          "startedAt": "0001-01-01T00:00:00Z",
+          "status": "pending"
+        }
+      ],
+      "url": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38144445188/job/114484746775"
+    },
+    {
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "databaseId": 114484746970,
+      "name": "core-and-studio (windows-latest, 3.12)",
+      "startedAt": "2026-10-11T13:45:28Z",
+      "status": "in_progress",
+      "steps": [
+        {
+          "completedAt": "2026-10-11T13:45:29Z",
+          "conclusion": "success",
+          "name": "Set up job",
+          "number": 1,
+          "startedAt": "2026-10-11T13:45:28Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-10-11T13:45:34Z",
+          "conclusion": "success",
+          "name": "Run actions/checkout@v4",
+          "number": 2,
+          "startedAt": "2026-10-11T13:45:29Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-10-11T13:45:34Z",
+          "conclusion": "success",
+          "name": "Run actions/setup-python@v5",
+          "number": 3,
+          "startedAt": "2026-10-11T13:45:34Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-10-11T13:45:41Z",
+          "conclusion": "success",
+          "name": "Run python -m pip install -U pip setuptools wheel",
+          "number": 4,
+          "startedAt": "2026-10-11T13:45:34Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-10-11T13:46:03Z",
+          "conclusion": "success",
+          "name": "Run python -m pip install -e \".[dev]\" -e packages/latex-agent",
+          "number": 5,
+          "startedAt": "2026-10-11T13:45:41Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-10-11T13:46:05Z",
+          "conclusion": "success",
+          "name": "Run python -c \"import click, typer, pydantic, rich, proof_cli.cli, latex_agent.server; print('imports ok')\"",
+          "number": 6,
+          "startedAt": "2026-10-11T13:46:03Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "0001-01-01T00:00:00Z",
+          "conclusion": "",
+          "name": "Run python -m pytest -q -x",
+          "number": 7,
+          "startedAt": "2026-10-11T13:46:05Z",
+          "status": "in_progress"
+        },
+        {
+          "completedAt": "0001-01-01T00:00:00Z",
+          "conclusion": "",
+          "name": "Post Run actions/setup-python@v5",
+          "number": 13,
+          "startedAt": "0001-01-01T00:00:00Z",
+          "status": "pending"
+        },
+        {
+          "completedAt": "0001-01-01T00:00:00Z",
+          "conclusion": "",
+          "name": "Post Run actions/checkout@v4",
+          "number": 14,
+          "startedAt": "0001-01-01T00:00:00Z",
+          "status": "pending"
+        }
+      ],
+      "url": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38144445188/job/114484746970"
+    },
+    {
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "databaseId": 114484747021,
+      "name": "core-and-studio (ubuntu-24.04, 3.11)",
+      "startedAt": "2026-10-11T13:45:28Z",
+      "status": "in_progress",
+      "steps": [
+        {
+          "completedAt": "2026-10-11T13:45:30Z",
+          "conclusion": "success",
+          "name": "Set up job",
+          "number": 1,
+          "startedAt": "2026-10-11T13:45:29Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-10-11T13:45:31Z",
+          "conclusion": "success",
+          "name": "Run actions/checkout@v4",
+          "number": 2,
+          "startedAt": "2026-10-11T13:45:30Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-10-11T13:45:31Z",
+          "conclusion": "success",
+          "name": "Run actions/setup-python@v5",
+          "number": 3,
+          "startedAt": "2026-10-11T13:45:31Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-10-11T13:45:33Z",
+          "conclusion": "success",
+          "name": "Run python -m pip install -U pip setuptools wheel",
+          "number": 4,
+          "startedAt": "2026-10-11T13:45:31Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-10-11T13:45:40Z",
+          "conclusion": "success",
+          "name": "Run python -m pip install -e \".[dev]\" -e packages/latex-agent",
+          "number": 5,
+          "startedAt": "2026-10-11T13:45:33Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-10-11T13:45:40Z",
+          "conclusion": "success",
+          "name": "Run python -c \"import click, typer, pydantic, rich, proof_cli.cli, latex_agent.server; print('imports ok')\"",
+          "number": 6,
+          "startedAt": "2026-10-11T13:45:40Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "0001-01-01T00:00:00Z",
+          "conclusion": "",
+          "name": "Run python -m pytest -q -x",
+          "number": 7,
+          "startedAt": "2026-10-11T13:45:40Z",
+          "status": "in_progress"
+        },
+        {
+          "completedAt": "0001-01-01T00:00:00Z",
+          "conclusion": "",
+          "name": "Post Run actions/setup-python@v5",
+          "number": 13,
+          "startedAt": "0001-01-01T00:00:00Z",
+          "status": "pending"
+        },
+        {
+          "completedAt": "0001-01-01T00:00:00Z",
+          "conclusion": "",
+          "name": "Post Run actions/checkout@v4",
+          "number": 14,
+          "startedAt": "0001-01-01T00:00:00Z",
+          "status": "pending"
+        }
+      ],
+      "url": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38144445188/job/114484747021"
+    },
+    {
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "databaseId": 114484747022,
+      "name": "core-and-studio (windows-latest, 3.11)",
+      "startedAt": "2026-10-11T13:45:27Z",
+      "status": "in_progress",
+      "steps": [
+        {
+          "completedAt": "2026-10-11T13:45:28Z",
+          "conclusion": "success",
+          "name": "Set up job",
+          "number": 1,
+          "startedAt": "2026-10-11T13:45:28Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-10-11T13:45:33Z",
+          "conclusion": "success",
+          "name": "Run actions/checkout@v4",
+          "number": 2,
+          "startedAt": "2026-10-11T13:45:28Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-10-11T13:45:33Z",
+          "conclusion": "success",
+          "name": "Run actions/setup-python@v5",
+          "number": 3,
+          "startedAt": "2026-10-11T13:45:33Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-10-11T13:45:44Z",
+          "conclusion": "success",
+          "name": "Run python -m pip install -U pip setuptools wheel",
+          "number": 4,
+          "startedAt": "2026-10-11T13:45:33Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-10-11T13:45:59Z",
+          "conclusion": "success",
+          "name": "Run python -m pip install -e \".[dev]\" -e packages/latex-agent",
+          "number": 5,
+          "startedAt": "2026-10-11T13:45:44Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-10-11T13:46:00Z",
+          "conclusion": "success",
+          "name": "Run python -c \"import click, typer, pydantic, rich, proof_cli.cli, latex_agent.server; print('imports ok')\"",
+          "number": 6,
+          "startedAt": "2026-10-11T13:45:59Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "0001-01-01T00:00:00Z",
+          "conclusion": "",
+          "name": "Run python -m pytest -q -x",
+          "number": 7,
+          "startedAt": "2026-10-11T13:46:00Z",
+          "status": "in_progress"
+        },
+        {
+          "completedAt": "0001-01-01T00:00:00Z",
+          "conclusion": "",
+          "name": "Post Run actions/setup-python@v5",
+          "number": 13,
+          "startedAt": "0001-01-01T00:00:00Z",
+          "status": "pending"
+        },
+        {
+          "completedAt": "0001-01-01T00:00:00Z",
+          "conclusion": "",
+          "name": "Post Run actions/checkout@v4",
+          "number": 14,
+          "startedAt": "0001-01-01T00:00:00Z",
+          "status": "pending"
+        }
+      ],
+      "url": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38144445188/job/114484747022"
+    }
+  ],
+  "status": "in_progress",
+  "url": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38144445188"
+}

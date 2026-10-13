@@ -1,0 +1,10 @@
+{
+  "status": "passed",
+  "queueExact": true,
+  "departuresExact": true,
+  "entries": 68,
+  "parkedFirst": true,
+  "parkedBottomUp": true,
+  "restBottomUp": true,
+  "note": "Unfixed Definitions may precede the first node that names them, as specified."
+}

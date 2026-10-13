@@ -1,0 +1,1 @@
+Revision 3 updates the existing three Draft PRs. publication.json records exact remote readback, offline counts and preservation verification. No trial service, package pin, model call, merge, issue closure or Acceptance changed. Core CI was pending at readback. Structural coverage does not identify the mathematical main theorem.

@@ -1,0 +1,33 @@
+{
+  "status": "passed",
+  "checkedAt": "2026-10-11T21:36:20.286004+00:00",
+  "scenario": "server restart after automatic trial completion; no new Pursue or Start action",
+  "storedProofStateExact": true,
+  "queueAndDeparturesExact": true,
+  "mapMarksAndNodeStatusExact": true,
+  "enabledNodeResumeControls": [
+    {
+      "disabled": false,
+      "text": "Start agent"
+    },
+    {
+      "disabled": false,
+      "text": "Start"
+    }
+  ],
+  "additionalProviderCalls": 0,
+  "globalCanPursueBefore": false,
+  "globalCanPursueAfter": false,
+  "liveViewChanges": {
+    "cuspidal-exceptional-finite": [
+      "run"
+    ],
+    "height-vs-distance": [
+      "run"
+    ],
+    "main-theorem": [
+      "run"
+    ]
+  },
+  "note": "Live run/coordinator overlays and counters reset to idle. Completed project-view fields differ from the live terminal response; the full trial is retained in the primary snapshots and work log."
+}

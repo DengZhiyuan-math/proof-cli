@@ -1,0 +1,11 @@
+{
+  "at": "2026-10-12T16:52:08.981682+00:00",
+  "server_stopped": 3526,
+  "chrome_stopped": 3632,
+  "ports_closed": {
+    "home": true,
+    "project": true,
+    "chrome": true
+  },
+  "isolated_sources_and_fixtures_retained": true
+}

@@ -1,0 +1,139 @@
+{
+  "job": 114822692816,
+  "version": "3.11",
+  "phaseRows": 25,
+  "top25Seconds": 554.1799999999998,
+  "phaseTotals": {
+    "setup": 60.96,
+    "call": 493.2199999999999,
+    "teardown": 0
+  },
+  "summary": "2026-10-12T13:34:20.7309410Z 1123 passed, 46 skipped, 2 warnings in 1986.87s (0:33:06)",
+  "rows": [
+    {
+      "seconds": 163.91,
+      "phase": "call",
+      "test": "tests/test_no_cli_decisions.py::test_no_command_changes_any_protected_state"
+    },
+    {
+      "seconds": 93.46,
+      "phase": "call",
+      "test": "tests/test_proof_map.py::test_stale_pin_reachability_walk_does_not_recurse_on_a_deep_chain"
+    },
+    {
+      "seconds": 60.96,
+      "phase": "setup",
+      "test": "tests/test_performance.py::test_one_read_visits_each_upstream_node_once[frontier]"
+    },
+    {
+      "seconds": 29.34,
+      "phase": "call",
+      "test": "tests/test_performance.py::test_a_decision_on_the_top_of_a_chain_grows_linearly_with_it"
+    },
+    {
+      "seconds": 26.77,
+      "phase": "call",
+      "test": "tests/test_performance.py::test_the_frontier_and_a_node_read_grow_linearly_with_the_chain"
+    },
+    {
+      "seconds": 22.32,
+      "phase": "call",
+      "test": "tests/test_performance.py::test_provisional_and_unfixed_reads_grow_linearly_with_the_chain"
+    },
+    {
+      "seconds": 18.25,
+      "phase": "call",
+      "test": "tests/test_no_cli_decisions.py::test_adding_a_theorem_that_exists_does_not_replace_its_trust"
+    },
+    {
+      "seconds": 15.59,
+      "phase": "call",
+      "test": "tests/test_legacy_trust_retired.py::test_the_refusing_commands_are_gone[True-command1]"
+    },
+    {
+      "seconds": 14.22,
+      "phase": "call",
+      "test": "tests/test_legacy_trust_retired.py::test_a_legacy_callable_or_trust_output_says_it_is_not_a_trust_source[theorem show thm_main]"
+    },
+    {
+      "seconds": 12.2,
+      "phase": "call",
+      "test": "tests/test_performance.py::test_the_one_pass_derives_exactly_what_a_walk_per_node_does"
+    },
+    {
+      "seconds": 11.28,
+      "phase": "call",
+      "test": "tests/test_no_cli_decisions.py::test_importing_a_bundle_keeps_every_local_record_it_names"
+    },
+    {
+      "seconds": 10.51,
+      "phase": "call",
+      "test": "tests/test_phase9_validation.py::test_radial_cluster_snapshot_and_exchange_round_trip_preserve_diagnostics"
+    },
+    {
+      "seconds": 8.22,
+      "phase": "call",
+      "test": "tests/test_cli.py::test_phase_three_cli_paths_cover_reasoning_bug_review_and_repair"
+    },
+    {
+      "seconds": 8.09,
+      "phase": "call",
+      "test": "tests/test_review_history.py::test_concurrent_decisions_from_several_processes_are_all_kept"
+    },
+    {
+      "seconds": 6.81,
+      "phase": "call",
+      "test": "tests/test_cli.py::test_phase_four_cli_paths_cover_formal_bridge_workflows"
+    },
+    {
+      "seconds": 6.07,
+      "phase": "call",
+      "test": "tests/test_cli_contract.py::test_only_the_commands_that_start_a_project_create_one"
+    },
+    {
+      "seconds": 5.92,
+      "phase": "call",
+      "test": "tests/test_proof_map.py::test_promote_leaves_the_interface_fingerprint_alone"
+    },
+    {
+      "seconds": 5.54,
+      "phase": "call",
+      "test": "tests/test_concurrent_side_files.py::test_concurrent_collaboration_and_memory_writes_are_all_kept"
+    },
+    {
+      "seconds": 5.36,
+      "phase": "call",
+      "test": "tests/test_phase9_validation.py::test_radial_cluster_validation_slice_is_structure_first"
+    },
+    {
+      "seconds": 5.33,
+      "phase": "call",
+      "test": "tests/test_legacy_trust_retired.py::test_a_legacy_callable_or_trust_output_says_it_is_not_a_trust_source[theorem extract thm_main]"
+    },
+    {
+      "seconds": 5.18,
+      "phase": "call",
+      "test": "tests/test_cli.py::test_cli_exposes_publication_workflows"
+    },
+    {
+      "seconds": 4.85,
+      "phase": "call",
+      "test": "tests/test_proof_map.py::test_parent_blocked_until_children_accepted_then_still_needs_own_acceptance"
+    },
+    {
+      "seconds": 4.78,
+      "phase": "call",
+      "test": "tests/test_proof_map.py::test_promote_has_no_demote_path"
+    },
+    {
+      "seconds": 4.63,
+      "phase": "call",
+      "test": "tests/test_proof_map.py::test_promote_does_not_make_an_existing_dependent_stale"
+    },
+    {
+      "seconds": 4.59,
+      "phase": "call",
+      "test": "tests/test_performance.py::test_a_dropped_trigger_is_recreated_on_the_next_connect"
+    }
+  ]
+}

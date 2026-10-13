@@ -1,0 +1,13 @@
+{
+  "passed": [
+    "ending: ending and reason survive refresh and process restart",
+    "reader-error: ending and reason survive refresh and process restart",
+    "release-retry: ending and reason survive refresh and process restart",
+    "release-interrupted: reason retained and Stop hidden after restart",
+    "release-retry: first Stop fails; second Stop records released",
+    "record-error: visible History not saved survives same-hub refresh",
+    "start-record-error: visible refusal and idle state",
+    "core histories: failed release has no end; retry adds one end; refused start adds no event"
+  ],
+  "real_model_calls": 0
+}

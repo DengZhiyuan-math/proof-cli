@@ -1,0 +1,90 @@
+hubload 1 1 failed in 63.26s (0:01:03)
+hubload 2 1 passed in 3.62s
+hubload 3 1 passed in 4.07s
+hubload 4 1 failed in 63.13s (0:01:03)
+hubload 5 1 failed in 63.19s (0:01:03)
+hubload 6 1 passed in 3.50s
+hubold 1 1 passed in 5.41s
+hubold 2 1 failed in 63.31s (0:01:03)
+hubold 3 1 passed in 5.29s
+hubold 4 1 passed in 5.38s
+hubold 5 1 passed in 5.44s
+hubold 6 1 passed in 5.33s
+hubr2 1 1 passed, 3 deselected in 7.22s
+hubr2 2 1 failed, 3 deselected in 7.09s
+hubr2 3 1 passed, 3 deselected in 6.97s
+hubr2 4 1 passed, 3 deselected in 6.20s
+hubr2 5 1 failed, 3 deselected in 7.34s
+hubr2 6 1 passed, 3 deselected in 6.35s
+hubr3 1 1 passed, 3 deselected in 6.91s
+hubr3 2 1 passed, 3 deselected in 7.32s
+hubr3 3 1 passed, 3 deselected in 7.07s
+hubr3 4 1 passed, 3 deselected in 6.53s
+hubr3 5 1 passed, 3 deselected in 7.00s
+hubr3 6 1 passed, 3 deselected in 6.42s
+hubr6 1 1 passed, 3 deselected in 6.91s
+hubr6 2 1 passed, 3 deselected in 7.91s
+hubr6 3 1 passed, 3 deselected in 7.72s
+hubr6 4 1 passed, 3 deselected in 6.77s
+hubr6 5 1 passed, 3 deselected in 7.66s
+hubr6 6 1 passed, 3 deselected in 7.64s
+hubr7 1 1 passed, 3 deselected in 7.91s
+hubr7 2 1 passed, 3 deselected in 6.92s
+hubr7 3 1 passed, 3 deselected in 7.82s
+hubr7 4 1 passed, 3 deselected in 7.82s
+hubr7 5 1 failed, 3 deselected in 7.01s
+hubr7 6 1 passed, 3 deselected in 8.16s
+hubr8 1 1 passed, 3 deselected in 10.18s
+hubr8 2 1 passed, 3 deselected in 9.48s
+hubr8 3 1 passed, 3 deselected in 9.61s
+hubr8 4 1 passed, 3 deselected in 8.45s
+hubr8 5 1 passed, 3 deselected in 9.67s
+hubr8 6 1 passed, 3 deselected in 9.90s
+hubr9 1 1 passed, 3 deselected in 10.20s
+hubr9 2 1 passed, 3 deselected in 8.27s
+hubr9 3 1 passed, 3 deselected in 9.21s
+hubr9 4 1 passed, 3 deselected in 9.89s
+hubr9 5 1 passed, 3 deselected in 8.94s
+hubr9 6 1 failed, 3 deselected in 63.46s (0:01:03)
+hubr10 1 1 passed, 3 deselected in 10.02s
+hubr10 2 1 passed, 3 deselected in 8.62s
+hubr10 3 1 passed, 3 deselected in 9.41s
+hubr10 4 1 passed, 3 deselected in 8.51s
+hubr10 5 1 passed, 3 deselected in 9.82s
+hubr10 6 1 passed, 3 deselected in 9.64s
+hubr11 1 1 passed, 3 deselected in 10.57s
+hubr11 2 1 passed, 3 deselected in 10.95s
+hubr11 3 1 passed, 3 deselected in 11.83s
+hubr11 4 1 passed, 3 deselected in 11.38s
+hubr11 5 1 passed, 3 deselected in 11.69s
+hubr11 6 1 passed, 3 deselected in 9.60s
+hubr12 1 1 passed, 3 deselected in 8.95s
+hubr12 2 1 passed, 3 deselected in 10.28s
+hubr12 3 1 passed, 3 deselected in 8.52s
+hubr12 4 1 passed, 3 deselected in 11.04s
+hubr12 5 1 passed, 3 deselected in 11.95s
+hubr12 6 1 passed, 3 deselected in 11.39s
+hubr13 1 1 passed, 3 deselected in 8.53s
+hubr13 2 1 passed, 3 deselected in 11.91s
+hubr13 3 1 passed, 3 deselected in 11.50s
+hubr13 4 1 passed, 3 deselected in 11.68s
+hubr13 5 1 passed, 3 deselected in 11.62s
+hubr13 6 1 passed, 3 deselected in 10.41s
+hubr14 1 1 passed, 3 deselected in 15.33s
+hubr14 2 1 passed, 3 deselected in 14.51s
+hubr14 3 1 passed, 3 deselected in 14.66s
+hubr14 4 1 passed, 3 deselected in 15.00s
+hubr14 5 1 passed, 3 deselected in 15.53s
+hubr14 6 1 passed, 3 deselected in 10.48s
+hubr15 1 1 passed, 3 deselected in 12.13s
+hubr15 2 1 passed, 3 deselected in 14.56s
+hubr15 3 1 passed, 3 deselected in 10.69s
+hubr15 4 1 passed, 3 deselected in 14.38s
+hubr15 5 1 passed, 3 deselected in 14.57s
+hubr15 6 1 passed, 3 deselected in 13.35s
+hubr16 1 1 passed, 3 deselected in 15.18s
+hubr16 2 1 passed, 3 deselected in 14.82s
+hubr16 3 1 passed, 3 deselected in 12.84s
+hubr16 4 1 passed, 3 deselected in 10.65s
+hubr16 5 1 passed, 3 deselected in 15.48s
+hubr16 6 1 passed, 3 deselected in 14.17s

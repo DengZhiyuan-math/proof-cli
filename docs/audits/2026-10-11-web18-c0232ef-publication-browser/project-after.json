@@ -1,0 +1,73 @@
+{
+  "requests": [
+    {
+      "body": "{\"limits\":{\"turns\":0,\"minutes\":3.5}}",
+      "reply": {
+        "error": {
+          "code": "INVALID_LIMITS",
+          "message": "a Pursue's limits are at least one turn and more than no minutes: {'turns': 0, 'minutes': 3.5}"
+        },
+        "ok": false
+      },
+      "status": 400,
+      "url": "/api/pursue/start"
+    },
+    {
+      "body": "{\"limits\":{\"turns\":9,\"minutes\":3.5}}",
+      "reply": {
+        "data": {
+          "budget": {
+            "deadline": 1791672367.685272,
+            "failed_launches": 0,
+            "minutes_max": 3.5,
+            "spent": 0,
+            "turns_max": 9
+          },
+          "current": null,
+          "reason": "",
+          "results": {},
+          "status": "reading",
+          "theorems": []
+        },
+        "ok": true
+      },
+      "status": 200,
+      "url": "/api/pursue/start"
+    }
+  ],
+  "spend": "Turns 1/9 · failed launches 0 · 3.1 of 3.5 min left",
+  "title": "Proof map",
+  "url": "http://localhost:20669/",
+  "view": {
+    "budget": {
+      "deadline": 1791672367.685272,
+      "failed_launches": 0,
+      "minutes_max": 3.5,
+      "spent": 1,
+      "turns_max": 9
+    },
+    "can_pursue": true,
+    "current": null,
+    "limits": {
+      "minutes": 10,
+      "node_minutes": 4,
+      "node_turns": 2,
+      "open_nodes": 0,
+      "structure_allowance": 3,
+      "turns": 5
+    },
+    "reason": "the Reader stated no Theorem",
+    "results": {},
+    "spend": {
+      "failed_launches": 0,
+      "minutes_left": 3.1,
+      "minutes_max": 3.5,
+      "structure_turns": 0,
+      "turns": 1,
+      "turns_max": 9
+    },
+    "status": "stuck",
+    "stopping": false,
+    "theorems": []
+  }
+}

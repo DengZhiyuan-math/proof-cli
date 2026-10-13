@@ -1,0 +1,37 @@
+{
+  "questions": [
+    {
+      "at": "2026-10-11T19:45:09.910482+00:00",
+      "kind": "question",
+      "id": "q_eaf8f1d5c9",
+      "role": "prover",
+      "by": "prover-fixture",
+      "question": "took n >= 1; the alternative is n >= 2",
+      "state": "answered",
+      "answer": {
+        "at": "2026-10-11T19:45:35.867321+00:00",
+        "by": "human",
+        "keep": true,
+        "answer": null,
+        "redirect": null
+      }
+    }
+  ],
+  "definitionEdits": [
+    {
+      "at": "2026-10-11T19:47:07.560096+00:00",
+      "kind": "definition-edited",
+      "by": "human",
+      "definition_id": "D",
+      "reason": "T8 controlled fixture: tighten the parameter",
+      "from": {
+        "text": "$n \\ge 1$."
+      },
+      "to": {
+        "text": "$n \\ge 2$."
+      },
+      "role": null
+    }
+  ],
+  "integrity": "potentially-stale"
+}

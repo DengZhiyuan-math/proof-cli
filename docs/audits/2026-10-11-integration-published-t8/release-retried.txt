@@ -1,0 +1,40 @@
+browser10-release-retry
+1 node · 1 on the frontier
+Graph
+Tree
+/
+1
+Frontier
+0
+Awaiting you
+0
+Fog
+Y
+Yomathnotcool <125728853+DengZhiyuan-math@users.noreply.github.com>
+
+Proof map
+
+Map
+Review
+Warnings
+Discuss
+RELEASE_FAILED: L1 is still claimed by claude-code
+
+Your library has a draft and the map is empty. Pursue reads the draft, states it as a map, and works every Theorem as far as the agents can go. What it leaves you is the review queue; nothing it does is trust until you Accept it.
+
+released — stopped by the researcher
+Theorem T1
+T1 holds
+Ready
+▶ Start
+Ready to start
+In progress
+Blocked
+Awaiting review
+Accepted
+Rejected
+Needs attention
+Open
+110%
+Fit
+Tidy

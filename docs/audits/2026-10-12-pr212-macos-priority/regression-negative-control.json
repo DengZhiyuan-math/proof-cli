@@ -1,0 +1,38 @@
+[
+  {
+    "variant": "fixed",
+    "cost": {
+      "20": {
+        "decision statements": 268,
+        "decision review reads": 38
+      },
+      "40": {
+        "decision statements": 508,
+        "decision review reads": 78
+      }
+    },
+    "ratios": {
+      "decision statements": 1.8955223880597014,
+      "decision review reads": 2.0526315789473686
+    },
+    "growthAssertionPasses": true
+  },
+  {
+    "variant": "decorator_removed",
+    "cost": {
+      "20": {
+        "decision statements": 1165,
+        "decision review reads": 2166
+      },
+      "40": {
+        "decision statements": 2365,
+        "decision review reads": 9126
+      }
+    },
+    "ratios": {
+      "decision statements": 2.0300429184549356,
+      "decision review reads": 4.213296398891967
+    },
+    "growthAssertionPasses": false
+  }
+]

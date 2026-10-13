@@ -1,0 +1,17 @@
+[
+  {
+    "role": "decomposer",
+    "pursue": false,
+    "permissions_equal": true
+  },
+  {
+    "role": "decomposer",
+    "pursue": true,
+    "permissions_equal": true
+  },
+  {
+    "role": "verifier",
+    "pursue": false,
+    "permissions_equal": true
+  }
+]

@@ -1,0 +1,233 @@
+[
+  {
+    "repo": "DengZhiyuan-math/proof-cli",
+    "prs": [
+      {
+        "baseRefName": "integ/0021",
+        "headRefName": "fix/0021-pursue-budget-codes",
+        "headRefOid": "24d3a296d9995774c01df755df904c769d6598da",
+        "mergeCommit": {
+          "oid": "3dd0a7bde3ad1ea9e040c02b1bff6589a9cf378c"
+        },
+        "mergedAt": "2026-10-11T19:41:50Z",
+        "number": 209,
+        "state": "MERGED",
+        "url": "https://github.com/DengZhiyuan-math/proof-cli/pull/209"
+      },
+      {
+        "baseRefName": "integ/0021",
+        "headRefName": "fix/203-reader-role",
+        "headRefOid": "502f074aa50c328871b331f6ba355defd6869428",
+        "mergeCommit": {
+          "oid": "4b61302aabc93913d425ec1ccc62e0f5ab7b52d1"
+        },
+        "mergedAt": "2026-10-11T19:41:50Z",
+        "number": 208,
+        "state": "MERGED",
+        "url": "https://github.com/DengZhiyuan-math/proof-cli/pull/208"
+      },
+      {
+        "baseRefName": "integ/0021",
+        "headRefName": "fix/202-reference-edit",
+        "headRefOid": "2f7c2460bca05bc2d823403f17b05ed28766412b",
+        "mergeCommit": {
+          "oid": "d4e3aeb60913e01aedf5c6250226609e5fdcb1d4"
+        },
+        "mergedAt": "2026-10-11T19:41:50Z",
+        "number": 207,
+        "state": "MERGED",
+        "url": "https://github.com/DengZhiyuan-math/proof-cli/pull/207"
+      },
+      {
+        "baseRefName": "integ/0021",
+        "headRefName": "fix/201-pursuit-events",
+        "headRefOid": "09e64a365153650cade0579afca52a56028b0f07",
+        "mergeCommit": {
+          "oid": "0edf3a5adfa4dc91ce9f805de9d79b8c3dd449be"
+        },
+        "mergedAt": "2026-10-11T19:41:50Z",
+        "number": 206,
+        "state": "MERGED",
+        "url": "https://github.com/DengZhiyuan-math/proof-cli/pull/206"
+      },
+      {
+        "baseRefName": "integ/0021",
+        "headRefName": "fix/200-pursuit-error-codes",
+        "headRefOid": "13370808a605a31632b9883606330183fd0fd8a3",
+        "mergeCommit": {
+          "oid": "feab010e9779b8af38d0fb3d13f28ae158784aff"
+        },
+        "mergedAt": "2026-10-11T19:41:50Z",
+        "number": 205,
+        "state": "MERGED",
+        "url": "https://github.com/DengZhiyuan-math/proof-cli/pull/205"
+      },
+      {
+        "baseRefName": "integ/0021",
+        "headRefName": "fix/199-trust-rule-researcher-imports",
+        "headRefOid": "ad479f6d69186105a934d9765a553c48f859ceca",
+        "mergeCommit": {
+          "oid": "10ec5bda85bf84675d193fdc46a003d39df09c2e"
+        },
+        "mergedAt": "2026-10-11T19:41:50Z",
+        "number": 204,
+        "state": "MERGED",
+        "url": "https://github.com/DengZhiyuan-math/proof-cli/pull/204"
+      }
+    ]
+  },
+  {
+    "repo": "zeqome/proof-agents",
+    "prs": [
+      {
+        "baseRefName": "integ/0021",
+        "headRefName": "fix/19-structure-budget",
+        "headRefOid": "ead54fe8d3480f1d4ba45a5b7b1bfb97b0f796ee",
+        "mergeCommit": {
+          "oid": "a1218e5bd9de1d25127592c70e12c2bc4bfdf767"
+        },
+        "mergedAt": "2026-10-11T19:41:53Z",
+        "number": 26,
+        "state": "MERGED",
+        "url": "https://github.com/zeqome/proof-agents/pull/26"
+      },
+      {
+        "baseRefName": "integ/0021",
+        "headRefName": "fix/20-reader-role-bibliography",
+        "headRefOid": "754313462607b6e1a90d9ba484794fce1a283008",
+        "mergeCommit": {
+          "oid": "3ff0a7121e82b3c8eb1153c7bc1e296c96a36c69"
+        },
+        "mergedAt": "2026-10-11T19:41:53Z",
+        "number": 25,
+        "state": "MERGED",
+        "url": "https://github.com/zeqome/proof-agents/pull/25"
+      },
+      {
+        "baseRefName": "integ/0021",
+        "headRefName": "fix/18-park-at-budget",
+        "headRefOid": "7e742b5823ad72ee37f429aa4983e8d632102796",
+        "mergeCommit": {
+          "oid": "7e742b5823ad72ee37f429aa4983e8d632102796"
+        },
+        "mergedAt": "2026-10-11T19:41:53Z",
+        "number": 24,
+        "state": "MERGED",
+        "url": "https://github.com/zeqome/proof-agents/pull/24"
+      },
+      {
+        "baseRefName": "integ/0021",
+        "headRefName": "fix/17-pursuit-release-failed",
+        "headRefOid": "e2d6f9ee570f81e99ccaf69a40315ad46bb9cc96",
+        "mergeCommit": {
+          "oid": "85244a7d726dc3f97dd7d51034f5b10ad824efd4"
+        },
+        "mergedAt": "2026-10-11T19:41:53Z",
+        "number": 23,
+        "state": "MERGED",
+        "url": "https://github.com/zeqome/proof-agents/pull/23"
+      },
+      {
+        "baseRefName": "integ/0021",
+        "headRefName": "fix/16-record-failed",
+        "headRefOid": "8340de98507a9ed38ce72276ca4b9c9791dcfa53",
+        "mergeCommit": {
+          "oid": "0923c3acf21291f397d4a4855729f199e50b5809"
+        },
+        "mergedAt": "2026-10-11T19:41:53Z",
+        "number": 22,
+        "state": "MERGED",
+        "url": "https://github.com/zeqome/proof-agents/pull/22"
+      },
+      {
+        "baseRefName": "integ/0021",
+        "headRefName": "fix/15-needs-human-kept",
+        "headRefOid": "9558fd0caf6eef2f80401c503a0a4549f4bbaa6f",
+        "mergeCommit": {
+          "oid": "9558fd0caf6eef2f80401c503a0a4549f4bbaa6f"
+        },
+        "mergedAt": "2026-10-11T19:41:53Z",
+        "number": 21,
+        "state": "MERGED",
+        "url": "https://github.com/zeqome/proof-agents/pull/21"
+      }
+    ]
+  },
+  {
+    "repo": "zeqome/proof-web",
+    "prs": [
+      {
+        "baseRefName": "feat/0021-pursue-review-queue",
+        "headRefName": "fix/discussion-empty-reply",
+        "headRefOid": "bb9ac2960e2e9d6f2607bffd5affa96f0151d1d1",
+        "mergeCommit": {
+          "oid": "b8157191d26834c570a0edbc310599a632b355b8"
+        },
+        "mergedAt": "2026-10-11T19:41:57Z",
+        "number": 21,
+        "state": "MERGED",
+        "url": "https://github.com/zeqome/proof-web/pull/21"
+      },
+      {
+        "baseRefName": "feat/0021-pursue-review-queue",
+        "headRefName": "fix/18-pursue-limits",
+        "headRefOid": "355837c333fd8189c105aa241d4e9fa8ffe50e6f",
+        "mergeCommit": {
+          "oid": "e93ed0a2c892e97aca00ae2e9b315fd18c1920ea"
+        },
+        "mergedAt": "2026-10-11T19:41:57Z",
+        "number": 19,
+        "state": "MERGED",
+        "url": "https://github.com/zeqome/proof-web/pull/19"
+      },
+      {
+        "baseRefName": "feat/0021-pursue-review-queue",
+        "headRefName": "fix/10-pursuit-history",
+        "headRefOid": "07bb06e67dbd767a8390593b464fee4dba2d07a4",
+        "mergeCommit": {
+          "oid": "07bb06e67dbd767a8390593b464fee4dba2d07a4"
+        },
+        "mergedAt": "2026-10-11T19:41:57Z",
+        "number": 16,
+        "state": "MERGED",
+        "url": "https://github.com/zeqome/proof-web/pull/16"
+      },
+      {
+        "baseRefName": "feat/0021-pursue-review-queue",
+        "headRefName": "fix/12-pursuit-release-retry",
+        "headRefOid": "f0ea4a7d1d99716f06356479bceea0771cc2f7c7",
+        "mergeCommit": {
+          "oid": "f0ea4a7d1d99716f06356479bceea0771cc2f7c7"
+        },
+        "mergedAt": "2026-10-11T19:41:57Z",
+        "number": 15,
+        "state": "MERGED",
+        "url": "https://github.com/zeqome/proof-web/pull/15"
+      },
+      {
+        "baseRefName": "feat/0021-pursue-review-queue",
+        "headRefName": "fix/11-record-failed",
+        "headRefOid": "d5df6e98088bf13d073977d072293b5eea9e4cdf",
+        "mergeCommit": {
+          "oid": "d0f6c3f761a7332451b0af28189a60ea26cb0917"
+        },
+        "mergedAt": "2026-10-11T19:41:57Z",
+        "number": 14,
+        "state": "MERGED",
+        "url": "https://github.com/zeqome/proof-web/pull/14"
+      },
+      {
+        "baseRefName": "feat/0021-pursue-review-queue",
+        "headRefName": "fix/9-reference-review-marks",
+        "headRefOid": "90c0377ed083fe3dc11a3f825a4716ea75a0e494",
+        "mergeCommit": {
+          "oid": "953e74e252b27e2670afcdbfbf83fa923b41f4ab"
+        },
+        "mergedAt": "2026-10-11T19:41:57Z",
+        "number": 13,
+        "state": "MERGED",
+        "url": "https://github.com/zeqome/proof-web/pull/13"
+      }
+    ]
+  }
+]

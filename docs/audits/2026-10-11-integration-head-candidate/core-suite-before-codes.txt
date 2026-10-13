@@ -1,0 +1,5 @@
+FAILED tests/test_cli_contract.py::test_every_error_code_the_code_raises_is_registered
+FAILED tests/test_latex_snapshots.py::test_the_working_file_compiles_standalone
+FAILED tests/test_latex_snapshots.py::test_a_real_build_is_archived_with_the_snapshot
+FAILED packages/latex-agent/tests/test_studio_server.py::SyncTeX::test_source_to_pdf_and_back
+4 failed, 1149 passed, 15 skipped in 837.43s (0:13:57)

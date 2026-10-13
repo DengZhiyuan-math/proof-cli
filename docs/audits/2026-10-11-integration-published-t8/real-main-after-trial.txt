@@ -1,0 +1,3550 @@
+Map
+main-theorem
+Agent
+Claude Code
+Codex CLI
+Node
+Definitions
+Setting: the S-adic homogeneous space X. Let 
+𝐺
+𝑝
+=
+𝑆
+𝐿
+2
+(
+𝑄
+𝑝
+)
+G
+p
+	​
+
+=SL
+2
+	​
+
+(Q
+p
+	​
+
+), 
+𝐺
+∞
+=
+𝑆
+𝐿
+2
+(
+𝑅
+)
+G
+∞
+	​
+
+=SL
+2
+	​
+
+(R) (
+𝑅
+=
+𝑄
+∞
+R=Q
+∞
+	​
+
+), 
+𝐺
+=
+𝐺
+∞
+×
+𝐺
+𝑝
+G=G
+∞
+	​
+
+×G
+p
+	​
+
+, and let 
+Γ
+<
+𝐺
+Γ<G be a lattice. 
+𝑋
+=
+Γ
+\
+𝐺
+X=Γ\G, on which 
+𝐺
+G acts by right translation: 
+Γ
+(
+𝑔
+∞
+𝑧
+,
+𝑔
+𝑝
+𝑧
+)
+⋅
+(
+𝑔
+∞
+,
+𝑔
+𝑝
+)
+=
+Γ
+(
+𝑔
+∞
+𝑧
+𝑔
+∞
+,
+𝑔
+𝑝
+𝑧
+𝑔
+𝑝
+)
+Γ(g
+∞
+z
+	​
+
+,g
+p
+z
+	​
+
+)⋅(g
+∞
+	​
+
+,g
+p
+	​
+
+)=Γ(g
+∞
+z
+	​
+
+g
+∞
+	​
+
+,g
+p
+z
+	​
+
+g
+p
+	​
+
+). 
+𝜇
+∞
+,
+𝜇
+𝑝
+μ
+∞
+	​
+
+,μ
+p
+	​
+
+ are Haar measures on 
+𝐺
+∞
+,
+𝐺
+𝑝
+G
+∞
+	​
+
+,G
+p
+	​
+
+, 
+𝜇
+=
+𝜇
+∞
+⊗
+𝜇
+𝑝
+μ=μ
+∞
+	​
+
+⊗μ
+p
+	​
+
+, and 
+𝜇
+ˉ
+μ
+ˉ
+	​
+
+ is the 
+𝐺
+G-invariant probability measure on 
+𝑋
+X induced by 
+𝜇
+μ. 
+𝐻
+=
+𝐿
+2
+(
+𝑋
+,
+𝜇
+ˉ
+)
+H=L
+2
+(X,
+μ
+ˉ
+	​
+
+) with the right regular representation 
+𝜋
+π of 
+𝐺
+G.
+p-adic subgroups K_p, A_p, H_p, H_p^-. 
+𝐾
+𝑝
+=
+𝑆
+𝐿
+2
+(
+𝑍
+𝑝
+)
+K
+p
+	​
+
+=SL
+2
+	​
+
+(Z
+p
+	​
+
+). 
+𝐴
+𝑝
+=
+{
+𝑎
+𝑝
+(
+𝜔
+,
+𝑛
+)
+=
+d
+i
+a
+g
+(
+𝜔
+𝑝
+𝑛
+,
+𝜔
+−
+1
+𝑝
+−
+𝑛
+)
+:
+𝑛
+∈
+𝑍
+≥
+0
+,
+ 
+𝜔
+∈
+𝑍
+𝑝
+×
+}
+A
+p
+	​
+
+={a
+p
+	​
+
+(ω,n)=diag(ωp
+n
+,ω
+−1
+p
+−n
+):n∈Z
+≥0
+	​
+
+, ω∈Z
+p
+×
+	​
+
+} (a subset of the diagonal group, not a subgroup, since 
+𝑛
+≥
+0
+n≥0), 
+𝑎
+𝑛
+=
+𝑎
+𝑝
+(
+1
+,
+𝑛
+)
+a
+n
+	​
+
+=a
+p
+	​
+
+(1,n). 
+𝐻
+𝑝
+=
+{
+ℎ
+𝑝
+(
+𝑡
+)
+=
+(
+1
+	
+𝑡
+
+
+0
+	
+1
+)
+:
+𝑡
+∈
+𝑄
+𝑝
+}
+H
+p
+	​
+
+={h
+p
+	​
+
+(t)=(
+1
+0
+	​
+
+t
+1
+	​
+
+):t∈Q
+p
+	​
+
+}, 
+𝐻
+𝑝
+−
+=
+{
+ℎ
+𝑝
+−
+(
+𝑡
+)
+=
+(
+1
+	
+0
+
+
+𝑡
+	
+1
+)
+:
+𝑡
+∈
+𝑄
+𝑝
+}
+H
+p
+−
+	​
+
+={h
+p
+−
+	​
+
+(t)=(
+1
+t
+	​
+
+0
+1
+	​
+
+):t∈Q
+p
+	​
+
+}.
+Real subgroups, Lie algebra basis, Casimir. 
+𝐾
+∞
+=
+𝑆
+𝑂
+(
+2
+)
+=
+{
+𝑟
+(
+𝜃
+)
+=
+(
+cos
+⁡
+𝜃
+	
+sin
+⁡
+𝜃
+
+
+−
+sin
+⁡
+𝜃
+	
+cos
+⁡
+𝜃
+)
+}
+K
+∞
+	​
+
+=SO(2)={r(θ)=(
+cosθ
+−sinθ
+	​
+
+sinθ
+cosθ
+	​
+
+)}, 
+𝐴
+∞
+=
+{
+𝑎
+∞
+(
+𝑥
+)
+=
+d
+i
+a
+g
+(
+𝑒
+𝑥
+/
+2
+,
+𝑒
+−
+𝑥
+/
+2
+)
+:
+𝑥
+≥
+0
+}
+A
+∞
+	​
+
+={a
+∞
+	​
+
+(x)=diag(e
+x/2
+,e
+−x/2
+):x≥0} (a subset, not a subgroup, since 
+𝑥
+≥
+0
+x≥0), 
+𝐻
+∞
+=
+{
+ℎ
+∞
+(
+𝑡
+)
+=
+(
+1
+	
+𝑡
+
+
+0
+	
+1
+)
+:
+𝑡
+∈
+𝑅
+}
+H
+∞
+	​
+
+={h
+∞
+	​
+
+(t)=(
+1
+0
+	​
+
+t
+1
+	​
+
+):t∈R}, 
+𝐻
+∞
+−
+=
+{
+ℎ
+∞
+−
+(
+𝑡
+)
+=
+(
+1
+	
+0
+
+
+𝑡
+	
+1
+)
+}
+H
+∞
+−
+	​
+
+={h
+∞
+−
+	​
+
+(t)=(
+1
+t
+	​
+
+0
+1
+	​
+
+)}. Basis of 
+𝑔
+∞
+=
+𝑠
+𝑙
+2
+(
+𝑅
+)
+g
+∞
+	​
+
+=sl
+2
+	​
+
+(R): 
+𝑌
+=
+d
+i
+a
+g
+(
+1
+,
+−
+1
+)
+Y=diag(1,−1), 
+𝑋
+−
+=
+(
+0
+	
+0
+
+
+1
+	
+0
+)
+X
+−
+	​
+
+=(
+0
+1
+	​
+
+0
+0
+	​
+
+), 
+𝑋
++
+=
+(
+0
+	
+1
+
+
+0
+	
+0
+)
+X
++
+	​
+
+=(
+0
+0
+	​
+
+1
+0
+	​
+
+). For a unitary representation 
+𝜋
+π of 
+𝐺
+G and 
+𝑍
+∈
+𝑔
+∞
+Z∈g
+∞
+	​
+
+, 
+𝑑
+𝜋
+(
+𝑍
+)
+𝑓
+=
+lim
+⁡
+𝑡
+→
+0
+(
+𝜋
+(
+exp
+⁡
+𝑡
+𝑍
+,
+1
+)
+𝑓
+−
+𝑓
+)
+/
+𝑡
+dπ(Z)f=lim
+t→0
+	​
+
+(π(exptZ,1)f−f)/t. Casimir: 
+Ω
+∞
+=
+−
+1
+4
+(
+𝑌
+2
++
+2
+𝑋
++
+𝑋
+−
++
+2
+𝑋
+−
+𝑋
++
+)
+Ω
+∞
+	​
+
+=−
+4
+1
+	​
+
+(Y
+2
++2X
++
+	​
+
+X
+−
+	​
+
++2X
+−
+	​
+
+X
++
+	​
+
+); 
+Δ
+=
+−
+∑
+𝑖
+𝑋
+𝑖
+2
+Δ=−∑
+i
+	​
+
+X
+i
+2
+	​
+
+ for a fixed basis 
+{
+𝑋
+𝑖
+}
+{X
+i
+	​
+
+} of 
+𝑔
+∞
+g
+∞
+	​
+
+. Burger notation: 
+𝑎
+(
+𝑦
+)
+=
+d
+i
+a
+g
+(
+𝑦
+1
+/
+2
+,
+𝑦
+−
+1
+/
+2
+)
+=
+𝑎
+∞
+(
+log
+⁡
+𝑦
+)
+a(y)=diag(y
+1/2
+,y
+−1/2
+)=a
+∞
+	​
+
+(logy) for 
+𝑦
+>
+0
+y>0.
+Horocycle balls and ergodic average A_B. 
+𝐻
+=
+𝐻
+∞
+×
+𝐻
+𝑝
+H=H
+∞
+	​
+
+×H
+p
+	​
+
+ with Haar measure 
+𝜈
+=
+𝜈
+∞
+⊗
+𝜈
+𝑝
+ν=ν
+∞
+	​
+
+⊗ν
+p
+	​
+
+, 
+𝜈
+∞
+=
+𝑑
+𝑡
+ν
+∞
+	​
+
+=dt and 
+𝜈
+𝑝
+ν
+p
+	​
+
+ normalised by 
+𝜈
+𝑝
+(
+ℎ
+𝑝
+(
+𝑍
+𝑝
+)
+)
+=
+1
+ν
+p
+	​
+
+(h
+p
+	​
+
+(Z
+p
+	​
+
+))=1. 
+𝐵
+∞
+(
+𝑅
+)
+=
+{
+ℎ
+∞
+(
+𝑡
+)
+:
+∣
+𝑡
+∣
+≤
+𝑅
+}
+B
+∞
+	​
+
+(R)={h
+∞
+	​
+
+(t):∣t∣≤R}, 
+𝐵
+𝑝
+(
+𝑅
+)
+=
+{
+ℎ
+𝑝
+(
+𝑡
+)
+:
+∣
+𝑡
+∣
+𝑝
+≤
+𝑅
+}
+B
+p
+	​
+
+(R)={h
+p
+	​
+
+(t):∣t∣
+p
+	​
+
+≤R}, 
+𝐵
+=
+𝐵
+∞
+(
+𝑅
+∞
+)
+×
+𝐵
+𝑝
+(
+𝑅
+𝑝
+)
+B=B
+∞
+	​
+
+(R
+∞
+	​
+
+)×B
+p
+	​
+
+(R
+p
+	​
+
+). For 
+𝑓
+f on 
+𝑋
+X and 
+𝑥
+∈
+𝑋
+x∈X: 
+𝐴
+𝐵
+(
+𝑓
+)
+(
+𝑥
+)
+=
+1
+𝜈
+(
+𝐵
+)
+∫
+𝐵
+𝑓
+(
+𝑥
+⋅
+(
+ℎ
+∞
+,
+ℎ
+𝑝
+)
+)
+𝑑
+𝜈
+(
+ℎ
+∞
+,
+ℎ
+𝑝
+)
+A
+B
+	​
+
+(f)(x)=
+ν(B)
+1
+	​
+
+∫
+B
+	​
+
+f(x⋅(h
+∞
+	​
+
+,h
+p
+	​
+
+))dν(h
+∞
+	​
+
+,h
+p
+	​
+
+). A point 
+𝑥
+x lies on a periodic 
+𝐻
+H-orbit if 
+𝑥
+𝐻
+xH is compact.
+Harish-Chandra functions Xi_infty, Xi_p. Harish-Chandra functions. Real: 
+Ξ
+∞
+(
+𝑔
+)
+=
+1
+2
+𝜋
+∫
+0
+2
+𝜋
+∥
+𝑔
+𝑇
+(
+cos
+⁡
+𝜃
+,
+sin
+⁡
+𝜃
+)
+𝑇
+∥
+−
+1
+𝑑
+𝜃
+Ξ
+∞
+	​
+
+(g)=
+2π
+1
+	​
+
+∫
+0
+2π
+	​
+
+∥g
+T
+(cosθ,sinθ)
+T
+∥
+−1
+dθ for 
+𝑔
+∈
+𝐺
+∞
+g∈G
+∞
+	​
+
+ (bi-
+𝐾
+∞
+K
+∞
+	​
+
+-invariant, 
+Ξ
+∞
+(
+1
+)
+=
+1
+Ξ
+∞
+	​
+
+(1)=1, 
+Ξ
+∞
+(
+𝑎
+∞
+(
+𝑥
+)
+)
+≍
+(
+1
++
+𝑥
+)
+𝑒
+−
+𝑥
+/
+2
+Ξ
+∞
+	​
+
+(a
+∞
+	​
+
+(x))≍(1+x)e
+−x/2
+). 
+𝑝
+p-adic: 
+Ξ
+𝑝
+Ξ
+p
+	​
+
+ is the bi-
+𝐾
+𝑝
+K
+p
+	​
+
+-invariant function on 
+𝐺
+𝑝
+G
+p
+	​
+
+ given on the Bruhat-Tits tree (
+(
+𝑝
++
+1
+)
+(p+1)-regular, base vertex 
+𝑜
+o fixed by 
+𝐾
+𝑝
+K
+p
+	​
+
+) by 
+Ξ
+𝑝
+(
+𝑔
+)
+=
+𝑝
+−
+𝑚
+/
+2
+(
+1
++
+𝑚
+𝑝
+−
+1
+𝑝
++
+1
+)
+Ξ
+p
+	​
+
+(g)=p
+−m/2
+(1+m
+p+1
+p−1
+	​
+
+), 
+𝑚
+=
+𝑑
+(
+𝑜
+,
+𝑔
+𝑜
+)
+m=d(o,go); since 
+𝑑
+(
+𝑜
+,
+𝑎
+𝑛
+𝑜
+)
+=
+2
+𝑛
+d(o,a
+n
+	​
+
+o)=2n, 
+Ξ
+𝑝
+(
+𝑎
+𝑛
+)
+=
+𝑝
+−
+𝑛
+𝑝
++
+1
+(
+(
+2
+𝑛
++
+1
+)
+(
+𝑝
+−
+1
+)
++
+2
+)
+Ξ
+p
+	​
+
+(a
+n
+	​
+
+)=
+p+1
+p
+−n
+	​
+
+((2n+1)(p−1)+2).
+Decay exponents kappa. Decay exponent of an irreducible unitary representation (of 
+𝐺
+∞
+G
+∞
+	​
+
+ or 
+𝐺
+𝑝
+G
+p
+	​
+
+): 
+𝜅
+=
+1
+−
+𝑠
+κ=1−s for the complementary series of parameter 
+𝑠
+s (real: 
+𝜆
+=
+𝑠
+(
+1
+−
+𝑠
+)
+λ=s(1−s) the Casimir eigenvalue, 
+𝑠
+∈
+(
+1
+2
+,
+1
+)
+s∈(
+2
+1
+	​
+
+,1); 
+𝑝
+p-adic: 
+𝛾
+𝑠
+γ
+s
+, 
+𝑠
+∈
+(
+0
+,
+1
+)
+s∈(0,1) as in the spherical function definition), and 
+𝜅
+=
+1
+κ=1 for tempered representations. For 
+𝜋
+=
+∫
+𝑍
+⊕
+𝜋
+∞
+,
+𝜉
+⊗
+𝜋
+𝑝
+,
+𝜉
+𝑑
+𝜇
+𝑍
+(
+𝜉
+)
+π=∫
+Z
+⊕
+	​
+
+π
+∞,ξ
+	​
+
+⊗π
+p,ξ
+	​
+
+dμ
+Z
+	​
+
+(ξ): 
+𝜅
+∞
+,
+𝜉
+=
+1
+−
+𝑠
+∞
+(
+𝜉
+)
+κ
+∞,ξ
+	​
+
+=1−s
+∞
+	​
+
+(ξ), 
+𝜅
+𝑝
+,
+𝜉
+=
+1
+−
+𝑠
+𝑝
+(
+𝜉
+)
+κ
+p,ξ
+	​
+
+=1−s
+p
+	​
+
+(ξ), and 
+𝜅
+∞
+=
+ess inf
+⁡
+𝜉
+𝜅
+∞
+,
+𝜉
+κ
+∞
+	​
+
+=essinf
+ξ
+	​
+
+κ
+∞,ξ
+	​
+
+, 
+𝜅
+𝑝
+=
+ess inf
+⁡
+𝜉
+𝜅
+𝑝
+,
+𝜉
+κ
+p
+	​
+
+=essinf
+ξ
+	​
+
+κ
+p,ξ
+	​
+
+ over the nontrivial components.
+Spectral decomposition of L^2(X). 
+𝐻
+=
+𝐿
+2
+(
+𝑋
+)
+=
+∫
+𝑍
+⊕
+𝐻
+∞
+,
+𝜉
+⊗
+𝐻
+𝑝
+,
+𝜉
+𝑑
+𝜇
+𝑍
+(
+𝜉
+)
+H=L
+2
+(X)=∫
+Z
+⊕
+	​
+
+H
+∞,ξ
+	​
+
+⊗H
+p,ξ
+	​
+
+dμ
+Z
+	​
+
+(ξ), 
+𝜋
+=
+∫
+𝑍
+⊕
+𝜋
+∞
+,
+𝜉
+⊗
+𝜋
+𝑝
+,
+𝜉
+𝑑
+𝜇
+𝑍
+π=∫
+Z
+⊕
+	​
+
+π
+∞,ξ
+	​
+
+⊗π
+p,ξ
+	​
+
+dμ
+Z
+	​
+
+, each 
+𝜋
+∞
+,
+𝜉
+π
+∞,ξ
+	​
+
+ irreducible unitary of 
+𝐺
+∞
+G
+∞
+	​
+
+, with 
+𝐾
+∞
+K
+∞
+	​
+
+-eigenbasis 
+𝜙
+∞
+,
+𝜉
+(
+𝑛
+)
+ϕ
+∞,ξ
+(n)
+	​
+
+, 
+𝜋
+∞
+,
+𝜉
+(
+𝑟
+(
+𝜃
+)
+)
+𝜙
+(
+𝑛
+)
+=
+𝑒
+𝑖
+𝑛
+𝜃
+𝜙
+(
+𝑛
+)
+π
+∞,ξ
+	​
+
+(r(θ))ϕ
+(n)
+=e
+inθ
+ϕ
+(n)
+, 
+𝑛
+∈
+Σ
+(
+𝜉
+)
+⊆
+2
+𝑍
+n∈Σ(ξ)⊆2Z (Bargmann). 
+𝜋
+∞
+,
+𝜉
+(
+Ω
+∞
+)
+=
+𝜆
+(
+𝜉
+)
+i
+d
+π
+∞,ξ
+	​
+
+(Ω
+∞
+	​
+
+)=λ(ξ)id, 
+𝜆
+=
+𝑠
+(
+1
+−
+𝑠
+)
+λ=s(1−s) with 
+R
+e
+𝑠
+≥
+1
+2
+Res≥
+2
+1
+	​
+
+, 
+I
+m
+𝑠
+≥
+0
+Ims≥0: 
+𝑠
+∈
+1
+2
++
+𝑖
+𝑅
+s∈
+2
+1
+	​
+
++iR if 
+𝜆
+≥
+1
+4
+λ≥
+4
+1
+	​
+
+, 
+𝑠
+∈
+(
+1
+2
+,
+1
+]
+s∈(
+2
+1
+	​
+
+,1] if 
+0
+≤
+𝜆
+<
+1
+4
+0≤λ<
+4
+1
+	​
+
+, 
+𝑠
+∈
+𝑍
++
+s∈Z
++
+ if 
+𝜆
+<
+0
+λ<0. 
+𝑍
+=
+𝑍
+0
+⊔
+𝑍
+𝑟
+𝑠
+⊔
+𝑍
+𝑐
+𝑡
+Z=Z
+0
+⊔Z
+rs
+⊔Z
+ct
+ (cuspidal, residual, continuous spectrum, as in Strömbergsson 2013): 
+𝑍
+0
+∪
+𝑍
+𝑟
+𝑠
+Z
+0
+∪Z
+rs
+ discrete with counting measure; 
+𝑍
+𝑟
+𝑠
+Z
+rs
+ finite, containing exactly one 
+𝜉
+ξ with 
+𝜋
+∞
+,
+𝜉
+π
+∞,ξ
+	​
+
+ trivial and 
+𝑠
+(
+𝜉
+)
+∈
+(
+1
+2
+,
+1
+)
+s(ξ)∈(
+2
+1
+	​
+
+,1) for the others; 
+𝑠
+(
+𝜉
+)
+∈
+1
+2
++
+𝑖
+𝑅
+≥
+0
+s(ξ)∈
+2
+1
+	​
+
++iR
+≥0
+	​
+
+ (principal series) on 
+𝑍
+𝑐
+𝑡
+Z
+ct
+. 
+𝑍
++
+0
+=
+{
+𝜉
+∈
+𝑍
+0
+:
+𝑠
+(
+𝜉
+)
+∈
+(
+1
+2
+,
+1
+)
+}
+Z
++
+0
+	​
+
+={ξ∈Z
+0
+:s(ξ)∈(
+2
+1
+	​
+
+,1)}, 
+𝑍
+−
+0
+=
+𝑍
+0
+∖
+𝑍
++
+0
+Z
+−
+0
+	​
+
+=Z
+0
+∖Z
++
+0
+	​
+
+. 
+𝐻
++
+0
+,
+𝐻
+−
+0
+,
+𝐻
+𝑟
+𝑠
+,
+𝐻
+𝑐
+𝑡
+H
++
+0
+	​
+
+,H
+−
+0
+	​
+
+,H
+rs
+,H
+ct
+ are the closed subspaces over 
+𝑍
++
+0
+,
+𝑍
+−
+0
+,
+𝑍
+𝑟
+𝑠
+,
+𝑍
+𝑐
+𝑡
+Z
++
+0
+	​
+
+,Z
+−
+0
+	​
+
+,Z
+rs
+,Z
+ct
+, 
+𝐻
+0
+=
+𝐻
++
+0
+⊕
+𝐻
+−
+0
+H
+0
+=H
++
+0
+	​
+
+⊕H
+−
+0
+	​
+
+ (cuspidal functions), 
+𝐻
+𝜉
+=
+𝐻
+∞
+,
+𝜉
+⊗
+𝐻
+𝑝
+,
+𝜉
+H
+ξ
+	​
+
+=H
+∞,ξ
+	​
+
+⊗H
+p,ξ
+	​
+
+. 
+𝜆
+1
+=
+𝑠
+1
+(
+1
+−
+𝑠
+1
+)
+λ
+1
+	​
+
+=s
+1
+	​
+
+(1−s
+1
+	​
+
+) is the smallest Casimir eigenvalue over the nontrivial 
+𝜉
+∈
+𝑍
++
+0
+∪
+𝑍
+𝑟
+𝑠
+ξ∈Z
++
+0
+	​
+
+∪Z
+rs
+ (assumed to exist, 
+𝑠
+1
+∈
+(
+1
+2
+,
+1
+)
+s
+1
+	​
+
+∈(
+2
+1
+	​
+
+,1)).
+Sobolev norm W_k. For 
+𝑓
+∈
+𝐻
+f∈H (smooth vectors 
+𝐻
+∞
+H
+∞
+ dense), 
+∥
+𝑓
+∥
+𝑊
+𝑘
+=
+∥
+(
+𝐼
++
+𝑑
+𝜋
+(
+Δ
+)
+‾
+)
+𝑘
+/
+2
+𝑓
+∥
+2
+∥f∥
+W
+k
+	​
+
+	​
+
+=∥(I+
+dπ(Δ)
+	​
+
+)
+k/2
+f∥
+2
+	​
+
+, 
+Δ
+=
+−
+∑
+𝑖
+𝑋
+𝑖
+2
+∈
+𝑈
+(
+𝑔
+∞
+)
+Δ=−∑
+i
+	​
+
+X
+i
+2
+	​
+
+∈U(g
+∞
+	​
+
+) acting through 
+𝐺
+∞
+×
+{
+1
+}
+G
+∞
+	​
+
+×{1} (
+𝑑
+𝜋
+(
+Δ
+)
+‾
+dπ(Δ)
+	​
+
+ is self-adjoint by Nelson); for a pure tensor this is 
+∥
+(
+𝐼
++
+𝜋
+∞
+(
+Δ
+)
+‾
+)
+𝑘
+/
+2
+𝑓
+∞
+∥
+⋅
+∥
+𝑓
+𝑝
+∥
+2
+∥(I+
+π
+∞
+	​
+
+(Δ)
+	​
+
+)
+k/2
+f
+∞
+	​
+
+∥⋅∥f
+p
+	​
+
+∥
+2
+	​
+
+. 
+𝑊
+𝑘
+(
+𝐻
+)
+W
+k
+	​
+
+(H) is the space of 
+𝑓
+f with 
+∥
+𝑓
+∥
+𝑊
+𝑘
+<
+∞
+∥f∥
+W
+k
+	​
+
+	​
+
+<∞. Up to constants, 
+∥
+𝑓
+∥
+𝑊
+𝑘
+2
+≍
+∫
+𝑍
+∑
+𝑛
+∈
+Σ
+(
+𝜉
+)
+(
+1
++
+𝑛
+2
++
+∣
+𝑠
+(
+𝜉
+)
+∣
+2
+)
+𝑘
+∣
+⟨
+𝑓
+𝜉
+,
+𝜙
+∞
+,
+𝜉
+(
+𝑛
+)
+⟩
+∣
+2
+𝑑
+𝜇
+𝑍
+(
+𝜉
+)
+∥f∥
+W
+k
+	​
+
+2
+	​
+
+≍∫
+Z
+	​
+
+∑
+n∈Σ(ξ)
+	​
+
+(1+n
+2
++∣s(ξ)∣
+2
+)
+k
+∣⟨f
+ξ
+	​
+
+,ϕ
+∞,ξ
+(n)
+	​
+
+⟩∣
+2
+dμ
+Z
+	​
+
+(ξ). Only real derivatives enter: 
+𝑊
+𝑘
+W
+k
+	​
+
+ measures smoothness in the 
+𝐺
+∞
+G
+∞
+	​
+
+ direction.
+Height function ht. For 
+𝑥
+=
+Γ
+(
+𝑔
+∞
+,
+𝑔
+𝑝
+)
+∈
+𝑋
+x=Γ(g
+∞
+	​
+
+,g
+p
+	​
+
+)∈X, let 
+Γ
+𝑔
+𝑝
+=
+{
+𝛾
+=
+(
+𝛾
+∞
+,
+𝛾
+𝑝
+)
+∈
+Γ
+:
+𝛾
+𝑝
+𝑔
+𝑝
+∈
+𝐾
+𝑝
+}
+Γ
+g
+p
+	​
+
+	​
+
+={γ=(γ
+∞
+	​
+
+,γ
+p
+	​
+
+)∈Γ:γ
+p
+	​
+
+g
+p
+	​
+
+∈K
+p
+	​
+
+} and 
+ℎ
+𝑡
+(
+𝑥
+)
+=
+sup
+⁡
+𝛾
+∈
+Γ
+𝑔
+𝑝
+I
+m
+(
+𝛾
+∞
+𝑔
+∞
+⋅
+𝑖
+)
+ht(x)=sup
+γ∈Γ
+g
+p
+	​
+
+	​
+
+	​
+
+Im(γ
+∞
+	​
+
+g
+∞
+	​
+
+⋅i), where 
+𝐺
+∞
+G
+∞
+	​
+
+ acts on the upper half-plane 
+𝐻
+H by Möbius transformations. (Independent of the representative: replacing 
+(
+𝑔
+∞
+,
+𝑔
+𝑝
+)
+(g
+∞
+	​
+
+,g
+p
+	​
+
+) by 
+𝛿
+(
+𝑔
+∞
+,
+𝑔
+𝑝
+)
+δ(g
+∞
+	​
+
+,g
+p
+	​
+
+), 
+𝛿
+∈
+Γ
+δ∈Γ, replaces 
+Γ
+𝑔
+𝑝
+Γ
+g
+p
+	​
+
+	​
+
+ by 
+Γ
+𝑔
+𝑝
+𝛿
+−
+1
+Γ
+g
+p
+	​
+
+	​
+
+δ
+−1
+.) Large height means deep in a cusp.
+W-invariant functions and d_W. For an open compact subgroup 
+𝑊
+≤
+𝐾
+𝑝
+W≤K
+p
+	​
+
+, a function 
+𝑓
+∈
+𝐿
+2
+(
+𝑋
+)
+f∈L
+2
+(X) is 
+𝑊
+W-invariant if 
+𝑓
+(
+𝑥
+⋅
+(
+1
+,
+𝑤
+)
+)
+=
+𝑓
+(
+𝑥
+)
+f(x⋅(1,w))=f(x) for all 
+𝑤
+∈
+𝑊
+w∈W; then 
+𝑓
+f is 
+𝐾
+𝑝
+K
+p
+	​
+
+-finite with 
+𝑑
+𝐾
+𝑝
+(
+𝑓
+)
+≤
+𝑑
+𝑊
+d
+K
+p
+	​
+
+	​
+
+(f)≤d
+W
+	​
+
+, where 
+𝑑
+𝑊
+=
+[
+𝐾
+𝑝
+:
+𝑊
+]
+d
+W
+	​
+
+=[K
+p
+	​
+
+:W].
+Burger operators F_y, S_y, T_y. Fix 
+𝑌
+≥
+1
+Y≥1. For 
+𝑦
+≥
+1
+y≥1, 
+𝐹
+𝑦
+,
+𝑆
+𝑦
+:
+𝐻
+→
+𝐻
+F
+y
+	​
+
+,S
+y
+	​
+
+:H→H are the intertwining operators acting on 
+𝐻
+𝜉
+H
+ξ
+	​
+
+ by the scalars 
+𝑓
+𝑦
+(
+𝜉
+)
+=
+𝑠
+𝑦
+𝑠
+−
+1
+−
+(
+1
+−
+𝑠
+)
+𝑦
+−
+𝑠
+2
+𝑠
+−
+1
+f
+y
+	​
+
+(ξ)=
+2s−1
+sy
+s−1
+−(1−s)y
+−s
+	​
+
+ if 
+R
+e
+𝑠
+<
+1
+,
+𝑠
+≠
+1
+2
+Res<1,s
+
+=
+2
+1
+	​
+
+; 
+2
++
+log
+⁡
+𝑦
+2
+𝑦
+2
+y
+	​
+
+2+logy
+	​
+
+ if 
+𝑠
+=
+1
+2
+s=
+2
+1
+	​
+
+; 
+𝑦
+−
+𝑠
+y
+−s
+ if 
+𝑠
+∈
+𝑍
++
+s∈Z
++
+; and 
+𝑠
+𝑦
+(
+𝜉
+)
+=
+𝑦
+𝑠
+−
+1
+−
+𝑦
+−
+𝑠
+2
+𝑠
+−
+1
+s
+y
+	​
+
+(ξ)=
+2s−1
+y
+s−1
+−y
+−s
+	​
+
+ if 
+R
+e
+𝑠
+<
+1
+,
+𝑠
+≠
+1
+2
+Res<1,s
+
+=
+2
+1
+	​
+
+; 
+log
+⁡
+𝑦
+2
+𝑦
+2
+y
+	​
+
+logy
+	​
+
+ if 
+𝑠
+=
+1
+2
+s=
+2
+1
+	​
+
+; 
+0
+0 if 
+𝑠
+∈
+𝑍
++
+s∈Z
++
+ (
+𝑠
+=
+𝑠
+(
+𝜉
+)
+s=s(ξ)). For 
+𝑦
+>
+0
+y>0, 
+𝑇
+𝑦
+T
+y
+	​
+
+ acts by 
+𝑡
+𝑦
+(
+𝜉
+)
+=
+𝑠
+𝑦
+(
+𝜉
+)
+t
+y
+	​
+
+(ξ)=s
+y
+	​
+
+(ξ) if 
+R
+e
+𝑠
+<
+1
+,
+𝑦
+≥
+1
+Res<1,y≥1; 
+0
+0 if 
+R
+e
+𝑠
+<
+1
+,
+𝑦
+<
+1
+Res<1,y<1; 
+𝑦
+𝑠
+−
+1
+max
+⁡
+(
+1
+,
+𝑦
+)
+1
+−
+2
+𝑠
+−
+𝑌
+1
+−
+2
+𝑠
+1
+−
+2
+𝑠
+y
+s−1
+1−2s
+max(1,y)
+1−2s
+−Y
+1−2s
+	​
+
+ if 
+𝑠
+∈
+𝑍
++
+s∈Z
++
+.
+
+Let 
+Γ
+<
+𝐺
+Γ<G be an irreducible non-cocompact lattice, with 
+𝜆
+1
+=
+𝑠
+1
+(
+1
+−
+𝑠
+1
+)
+λ
+1
+	​
+
+=s
+1
+	​
+
+(1−s
+1
+	​
+
+) and 
+𝑝
+p-adic decay exponent 
+𝜅
+𝑝
+κ
+p
+	​
+
+ of 
+𝐿
+0
+2
+(
+𝑋
+)
+L
+0
+2
+	​
+
+(X). Let 
+𝑊
+≤
+𝐾
+𝑝
+W≤K
+p
+	​
+
+ be open compact and 
+𝑓
+∈
+𝐿
+2
+(
+𝑋
+)
+f∈L
+2
+(X) smooth, 
+𝑊
+W-invariant, with 
+∫
+𝑋
+𝑓
+𝑑
+𝜇
+ˉ
+=
+0
+∫
+X
+	​
+
+fd
+μ
+ˉ
+	​
+
+=0 and 
+∥
+𝑓
+∥
+𝑊
+4
+<
+∞
+∥f∥
+W
+4
+	​
+
+	​
+
+<∞. Let 
+𝑥
+∈
+𝑋
+x∈X not lie on a periodic 
+𝐻
+H-orbit, 
+𝑇
+≥
+2
+T≥2, 
+𝑛
+≥
+0
+n≥0, 
+𝐵
+=
+𝐵
+∞
+(
+𝑇
+)
+×
+𝐵
+𝑝
+(
+𝑝
+𝑛
+)
+B=B
+∞
+	​
+
+(T)×B
+p
+	​
+
+(p
+n
+) and 
+𝑟
+=
+𝑇
+/
+ℎ
+𝑡
+(
+𝑥
+⋅
+(
+𝑎
+∞
+(
+log
+⁡
+𝑇
+)
+,
+1
+)
+)
+r=T/ht(x⋅(a
+∞
+	​
+
+(logT),1)). Then 
+∣
+𝐴
+𝐵
+(
+𝑓
+)
+(
+𝑥
+)
+∣
+≪
+Γ
+(
+𝑟
+−
+1
+/
+2
+(
+log
+⁡
+𝑇
+)
+2
++
+𝑇
+𝑠
+1
+−
+1
++
+𝑇
+−
+1
+/
+2
+log
+⁡
+(
+𝑇
++
+1
+)
+)
+𝜇
+𝑝
+(
+𝑊
+)
+−
+1
+/
+2
+𝑑
+𝑊
+𝜈
+𝑝
+(
+𝐵
+𝑝
+(
+𝑝
+𝑛
+)
+)
+−
+1
+/
+2
+Ξ
+𝑝
+(
+𝑎
+𝑛
+)
+𝜅
+𝑝
+∥
+𝑓
+∥
+𝑊
+4
+∣A
+B
+	​
+
+(f)(x)∣≪
+Γ
+	​
+
+(r
+−1/2
+(logT)
+2
++T
+s
+1
+	​
+
+−1
++T
+−1/2
+log(T+1))μ
+p
+	​
+
+(W)
+−1/2
+d
+W
+	​
+
+ν
+p
+	​
+
+(B
+p
+	​
+
+(p
+n
+))
+−1/2
+Ξ
+p
+	​
+
+(a
+n
+	​
+
+)
+κ
+p
+	​
+
+∥f∥
+W
+4
+	​
+
+	​
+
+.
+
+Decomposer · needs you
+blocked
+unreviewed
+current
+claimed by claude-code
+Depends on
+hilbert-space-decomposition · not pinned yet
+sobolev-embedding-general · not pinned yet
+sobolev-embedding-cuspidal · not pinned yet
+sobolev-embedding-residual · not pinned yet
+burger-integral-formula · imported result
+burger-operator-bounds · imported result
+matrix-coefficient-decay-product · not pinned yet
+matrix-coefficient-decay-p · not pinned yet
+height-vs-distance · not pinned yet
+
+No key-ideas.md yet: a review request needs one (核心思路, 主要步骤, 难点, 未覆盖). The Typesetter drafts it: "+" → Ask the agent to… → Typesetter · draft key ideas.
+
+Files
+proof.tex
+??
+Outline
+Definitions
+Thmline 29
+Work log
+Files
+Compile
+Draft
+Subtree
+stuck — nothing left to work without the researcher: sobolev-embedding-general, sobolev-embedding-cuspidal, sobolev-embedding-residual rest(s) on what no run will settle (parked: main-theorem, height-vs-distance)
+Stop subtree
+turns 40/60 (2 structure) · failed launches 0 · 28.1 of 120 min left
+main-theorem parked — needs-human: No split. The statement is false as written: its p-adic factor nu_p(B_p(p^n))^{-1/2} Xi_p(a_n)^{kappa_p} is beaten by an L^2 lower bound (fog-10). For Gamma=SL_2(Z[1/p]), W=K_p, f a lifted Hecke-Maass form and T fixed, ||A_B f||_2 >> nu_p^{-1/2} infinitely often in n, while the claim forces an extra Xi_p(a_n)^{kappa_p}. The researcher must choose the intended p-adic factor. Likely intended: B_p(p^{2n}) with factor Xi_p(a_n)^{kappa_p}, proved by thickening. A split for that reading is drafted in scratch/decomposer/notes.md.; height-vs-distance parked — needs-human: The node statement is false as written, not ambiguous (scratch/proof-draft.md). (1) Gamma=SL_2(Z[1/p]), g_p=1, admissible bounded p-adic metric min(d_p,1): d_X((diag(p^k,p^-k),1),x_0) stays bounded while ht>=p^{2k}. (2) Doubling both metrics doubles d_X, so at most one metric scaling can satisfy it. (3) Conjugating Gamma by (h_inf,1) makes ht identically +inf. The researcher needs to choose a corrected statement. Proposal R2, proved in the draft: Gamma=SL_2(Z[1/p]), K_p=SL_2(Z_p); ht(Gamma(g_inf,g_p)) = y(delta_inf g_inf i) ≍ exp(hyperbolic distance in SL_2(Z)\H), i.e. d_X replaced by the fibre distance with g_p frozen. This is also what the Sobolev-embedding use and fog-2 need. Alternatively, restrict Gamma and fix specific metrics, but then the exponent only matches for one tuned normalisation.; cuspidal-exceptional-finite parked — needs-human: The claim cannot be proved with known mathematics. For irreducible Gamma (the only reading the setting allows) it is equivalent to finiteness of exceptional Maass cusp forms across the p-power level tower, which is open; Selberg's conjecture would imply it. For reducible Gamma it is false. The researcher must choose what this node states: (a) the provable uniform gap sup_{Z^0_+} s <= 1/2+7/64 (Kim-Sarnak), (b) an explicit hypothesis on Gamma, or (c) conditional on Selberg's conjecture. Details are in scratch/proof-draft.md.
+Needs-Human
+Decomposer · step 1/3
+claude-code · turn 1/1
+No split. The statement is false as written: its p-adic factor nu_p(B_p(p^n))^{-1/2} Xi_p(a_n)^{kappa_p} is beaten by an L^2 lower bound (fog-10). For Gamma=SL_2(Z[1/p]), W=K_p, f a lifted Hecke-Maass form and T fixed, ||A_B f||_2 >> nu_p^{-1/2} infinitely often in n, while the claim forces an extra Xi_p(a_n)^{kappa_p}. The researcher must choose the intended p-adic factor. Likely intended: B_p(p^{2n}) with factor Xi_p(a_n)^{kappa_p}, proved by thickening. A split for that reading is drafted in scratch/decomposer/notes.md.
+
+Needs you: No split. The statement is false as written: its p-adic factor nu_p(B_p(p^n))^{-1/2} Xi_p(a_n)^{kappa_p} is beaten by an L^2 lower bound (fog-10). For Gamma=SL_2(Z[1/p]), W=K_p, f a lifted Hecke-Maass form and T fixed, ||A_B f||_2 >> nu_p^{-1/2} infinitely often in n, while the claim forces an extra Xi_p(a_n)^{kappa_p}. The researcher must choose the intended p-adic factor. Likely intended: B_p(p^{2n}) with factor Xi_p(a_n)^{kappa_p}, proved by thickening. A split for that reading is drafted in scratch/decomposer/notes.md.
+
+Read the library draft (Thm 4.1 and proof), the fog, the dependencies and project memory done
+Check the statement's p-adic factor against the L^2 size of A_B f before choosing a split done
+Split into Claims, or stop with needs-human if the statement is false as written needs you
+Start agent
+all roles
+Prover only
+Typesetter only
+Numerics only
+Verifier only
+Decomposer only
+Start
+
+WORK LOG
+20:05
+reader
+fog fog-1: The p-adic factor of the main bound is not derived: the draft writes "the bound from matrix coefficient has to be rewritten" for the integral of the p-adic norms over B_p, and its three case bounds carry Xi(a_n)^{-s_1} (continuous case) and Xi(a_n)^{1-s_1} (other cases), mixing the real parameter s_1 with a p-adic decay. How nu_p(B_p(p^n))^{-1/2}, d_W and Xi_p(a_n)^{kappa_p} arise, and how n relates to the radius p^n, is open.
+20:05
+reader
+fog fog-2: A lemma on how the height changes along x(h_infty a(Y), h_p) is missing (draft bold note after the continuous-spectrum estimate): the proof replaces ht(x h_infty a(Y)) by ht(x a(T)) inside the integral over h_infty.
+20:05
+reader
+fog fog-3: Conditions on the starting point: the draft notes the theorem needs conditions on x as in Strombergsson (bold note after the theorem); only "not on a periodic H-orbit" is stated, and the role of r = T/ht(x a(T)) is the reader reading.
+20:05
+reader
+fog fog-4: The H^0_- case copies Burger/Strombergsson references ("Lemma 2.2", "(22)", "(23)", sup-norm N(f) finite on H^0_- with H^infty); their S-adic counterparts (W-invariance, p-adic integral) are not stated.
+20:05
+reader
+fog fog-9: The introduction announces a first proof by Kleinbock-Margulis thickening with the Kunze-Stein inequality (Cowling, Veca) giving an optimal p-adic rate; it is absent from the draft.
+20:06
+claude-code/coordinator
+coordinator: started on main-theorem: 8 open node(s), up to 2 run(s) at a time; the Pursue's total 60 turns (1 spent before) and 120 minutes, a node's proof budget 60 turns
+20:06
+claude-code
+took the node
+20:06
+claude-code/coordinator
+coordinator: started a Decomposer turn on main-theorem (start 1, up to 1 turn(s) and 110.763 minute(s))
+20:06
+claude-code/coordinator
+coordinator: started a run on hilbert-space-decomposition (start 1, up to 58 turn(s) and 110.762 minute(s))
+20:09
+Decomposer
+plan: 1. Read the library draft (Thm 4.1 and proof), the fog, the dependencies and project memory 2. Check the statement's p-adic factor against the L^2 size of A_B f before choosing a split 3. Split into Claims, or stop with needs-human if the statement is false as written
+20:10
+Decomposer
+fog fog-10: The stated p-adic factor nu_p(B_p(p^n))^{-1/2} Xi_p(a_n)^{kappa_p} is too strong. Take Gamma=SL_2(Z[1/p]), W=K_p, f a K_p-invariant lifted Hecke-Maass cusp form, and T fixed. With n=2m, B_p(p^{2m})=a_m^{-1}B_p(1)a_m gives ||A_B f||_2 >= |phi_p(a_m)| ||A_{B_inf(T)}f|| >> p^{-m} infinitely often. Since sup_x |A_B f(x)| >= ||A_B f||_2, this exceeds the claimed p^{-m} Xi_p(a_{2m})^{kappa_p} once kappa_p>0. Consistent alternatives: ball B_p(p^{2n}) with factor Xi_p(a_n)^{kappa_p} (Kleinbock-Margulis thickening), or the square root of the averaged Xi_p^{kappa_p}. See proofs/main-theorem/scratch/decomposer/notes.md.
+20:10
+Decomposer
+step 3 needs you — No split. The statement is false as written: its p-adic factor nu_p(B_p(p^n))^{-1/2} Xi_p(a_n)^{kappa_p} is beaten by an L^2 lower bound (fog-10). For Gamma=SL_2(Z[1/p]), W=K_p, f a lifted Hecke-Maass form and T fixed, ||A_B f||_2 >> nu_p^{-1/2} infinitely often in n, while the claim forces an extra Xi_p(a_n)^{kappa_p}. The researcher must choose the intended p-adic factor. Likely intended: B_p(p^{2n}) with factor Xi_p(a_n)^{kappa_p}, proved by thickening. A split for that reading is drafted in scratch/decomposer/notes.md.
+20:10
+Decomposer
+step 2 done — The p-adic factor fails against the L^2 lower bound ||A_B f||_2 >= |phi_p(a_m)| ||A_{B_inf}f|| (n=2m); see fog-10.
+20:10
+Decomposer
+step 1 done — Read library-horo section 4, fog-1..9, the dependencies and project memory. Notes are in scratch/decomposer/notes.md.
+20:10
+Decomposer
+step 1 · Decomposer's turn — its conversation
+20:10
+claude-code/coordinator
+coordinator: the run on main-theorem ended: needs-human — No split. The statement is false as written: its p-adic factor nu_p(B_p(p^n))^{-1/2} Xi_p(a_n)^{kappa_p} is beaten by an L^2 lower bound (fog-10). For Gamma=SL_2(Z[1/p]), W=K_p, f a lifted Hecke-Maass form and T fixed, ||A_B f||_2 >> nu_p^{-1/2} infinitely often in n, while the claim forces an extra Xi_p(a_n)^{kappa_p}. The researcher must choose the intended p-adic factor. Likely intended: B_p(p^{2n}) with factor Xi_p(a_n)^{kappa_p}, proved by thickening. A split for that reading is drafted in scratch/decomposer/notes.md.
+20:10
+claude-code/coordinator
+coordinator: parked main-theorem: needs-human: No split. The statement is false as written: its p-adic factor nu_p(B_p(p^n))^{-1/2} Xi_p(a_n)^{kappa_p} is beaten by an L^2 lower bound (fog-10). For Gamma=SL_2(Z[1/p]), W=K_p, f a lifted Hecke-Maass form and T fixed, ||A_B f||_2 >> nu_p^{-1/2} infinitely often in n, while the claim forces an extra Xi_p(a_n)^{kappa_p}. The researcher must choose the intended p-adic factor. Likely intended: B_p(p^{2n}) with factor Xi_p(a_n)^{kappa_p}, proved by thickening. A split for that reading is drafted in scratch/decomposer/notes.md.
+20:10
+claude-code/coordinator
+coordinator: parked: needs-human: No split. The statement is false as written: its p-adic factor nu_p(B_p(p^n))^{-1/2} Xi_p(a_n)^{kappa_p} is beaten by an L^2 lower bound (fog-10). For Gamma=SL_2(Z[1/p]), W=K_p, f a lifted Hecke-Maass form and T fixed, ||A_B f||_2 >> nu_p^{-1/2} infinitely often in n, while the claim forces an extra Xi_p(a_n)^{kappa_p}. The researcher must choose the intended p-adic factor. Likely intended: B_p(p^{2n}) with factor Xi_p(a_n)^{kappa_p}, proved by thickening. A split for that reading is drafted in scratch/decomposer/notes.md.
+20:13
+claude-code/coordinator
+coordinator: the run on hilbert-space-decomposition ended: done — review-requested
+20:13
+claude-code/coordinator
+coordinator: started a run on matrix-coefficient-decay-p (start 1, up to 54 turn(s) and 104.61 minute(s))
+20:23
+claude-code/coordinator
+coordinator: the run on matrix-coefficient-decay-p ended: done — review-requested
+20:23
+claude-code/coordinator
+coordinator: started a run on height-vs-distance (start 1, up to 50 turn(s) and 93.789 minute(s))
+20:27
+claude-code/coordinator
+coordinator: the run on height-vs-distance ended: needs-human — The node statement is false as written, not ambiguous (scratch/proof-draft.md). (1) Gamma=SL_2(Z[1/p]), g_p=1, admissible bounded p-adic metric min(d_p,1): d_X((diag(p^k,p^-k),1),x_0) stays bounded while ht>=p^{2k}. (2) Doubling both metrics doubles d_X, so at most one metric scaling can satisfy it. (3) Conjugating Gamma by (h_inf,1) makes ht identically +inf. The researcher needs to choose a corrected statement. Proposal R2, proved in the draft: Gamma=SL_2(Z[1/p]), K_p=SL_2(Z_p); ht(Gamma(g_inf,g_p)) = y(delta_inf g_inf i) ≍ exp(hyperbolic distance in SL_2(Z)\H), i.e. d_X replaced by the fibre distance with g_p frozen. This is also what the Sobolev-embedding use and fog-2 need. Alternatively, restrict Gamma and fix specific metrics, but then the exponent only matches for one tuned normalisation.
+20:27
+claude-code/coordinator
+coordinator: parked height-vs-distance: needs-human: The node statement is false as written, not ambiguous (scratch/proof-draft.md). (1) Gamma=SL_2(Z[1/p]), g_p=1, admissible bounded p-adic metric min(d_p,1): d_X((diag(p^k,p^-k),1),x_0) stays bounded while ht>=p^{2k}. (2) Doubling both metrics doubles d_X, so at most one metric scaling can satisfy it. (3) Conjugating Gamma by (h_inf,1) makes ht identically +inf. The researcher needs to choose a corrected statement. Proposal R2, proved in the draft: Gamma=SL_2(Z[1/p]), K_p=SL_2(Z_p); ht(Gamma(g_inf,g_p)) = y(delta_inf g_inf i) ≍ exp(hyperbolic distance in SL_2(Z)\H), i.e. d_X replaced by the fibre distance with g_p frozen. This is also what the Sobolev-embedding use and fog-2 need. Alternatively, restrict Gamma and fix specific metrics, but then the exponent only matches for one tuned normalisation.
+20:27
+claude-code/coordinator
+coordinator: started a run on cuspidal-exceptional-finite (start 1, up to 49 turn(s) and 90.4508 minute(s))
+20:29
+claude-code/coordinator
+coordinator: the run on cuspidal-exceptional-finite ended: needs-human — The claim cannot be proved with known mathematics. For irreducible Gamma (the only reading the setting allows) it is equivalent to finiteness of exceptional Maass cusp forms across the p-power level tower, which is open; Selberg's conjecture would imply it. For reducible Gamma it is false. The researcher must choose what this node states: (a) the provable uniform gap sup_{Z^0_+} s <= 1/2+7/64 (Kim-Sarnak), (b) an explicit hypothesis on Gamma, or (c) conditional on Selberg's conjecture. Details are in scratch/proof-draft.md.
+20:29
+claude-code/coordinator
+coordinator: parked cuspidal-exceptional-finite: needs-human: The claim cannot be proved with known mathematics. For irreducible Gamma (the only reading the setting allows) it is equivalent to finiteness of exceptional Maass cusp forms across the p-power level tower, which is open; Selberg's conjecture would imply it. For reducible Gamma it is false. The researcher must choose what this node states: (a) the provable uniform gap sup_{Z^0_+} s <= 1/2+7/64 (Kim-Sarnak), (b) an explicit hypothesis on Gamma, or (c) conditional on Selberg's conjecture. Details are in scratch/proof-draft.md.
+20:29
+claude-code/coordinator
+coordinator: started a Decomposer turn on hilbert-space-decomposition (start 2, up to 1 turn(s) and 88.1509 minute(s))
+20:29
+claude-code/coordinator
+coordinator: started a run on complementary-series-model (start 1, up to 47 turn(s) and 88.15 minute(s))
+20:32
+claude-code/coordinator
+coordinator: the run on hilbert-space-decomposition ended: done — split into 2 Claim(s): exceptional-cuspidal-finite-per-level, smooth-vector-exceptional-support-finite; the Coordinator works them
+20:43
+claude-code/coordinator
+coordinator: the run on complementary-series-model ended: done — review-requested
+20:43
+claude-code/coordinator
+coordinator: started a run on matrix-coefficient-decay-product (start 1, up to 40 turn(s) and 73.7622 minute(s))
+20:53
+claude-code/coordinator
+coordinator: the run on matrix-coefficient-decay-product ended: done — review-requested
+20:53
+claude-code/coordinator
+coordinator: started a run on exceptional-cuspidal-finite-per-level (start 1, up to 36 turn(s) and 64.7094 minute(s))
+21:01
+claude-code/coordinator
+coordinator: the run on exceptional-cuspidal-finite-per-level ended: done — review-requested
+21:01
+claude-code/coordinator
+coordinator: started a run on smooth-vector-exceptional-support-finite (start 1, up to 32 turn(s) and 56.1053 minute(s))
+21:04
+claude-code/coordinator
+coordinator: the run on smooth-vector-exceptional-support-finite ended: done — review-requested
+21:04
+claude-code/coordinator
+coordinator: started a run on real-unitary-dual-ktypes (start 1, up to 28 turn(s) and 53.0403 minute(s))
+21:16
+claude-code/coordinator
+coordinator: the run on real-unitary-dual-ktypes ended: done — review-requested
+21:16
+claude-code/coordinator
+coordinator: started a run on real-complementary-decay (start 1, up to 24 turn(s) and 40.9134 minute(s))
+21:25
+claude-code/coordinator
+coordinator: the run on real-complementary-decay ended: done — review-requested
+21:25
+claude-code/coordinator
+coordinator: stuck: nothing left to work without the researcher: sobolev-embedding-general, sobolev-embedding-cuspidal, sobolev-embedding-residual rest(s) on what no run will settle (parked: main-theorem, height-vs-distance)
+21:25
+claude-code/coordinator
+coordinator: budget: 39 real turn(s) in this Start (2 structure, 37 proof), 40 of the Pursue's 60; 0 failed launch(es)
+New chat
+This is the node's proof agent: it reads the project, its library and the web, runs
+proof and computations, and writes this node's proof. Pick Claude Code or Codex CLI above.
+Here you only Ask: read-only questions about the node — the agent works it from its run, in the centre.
+Type @ to point it at a file or the selection (or select text and press ⌘L).
+Type / for commands.
+Commits, pushes and non-allowlisted shell commands are not permitted from here.
+Send
+Problems
+Output
+Diff

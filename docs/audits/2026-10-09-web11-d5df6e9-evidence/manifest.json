@@ -1,0 +1,43 @@
+{
+  "date": "2026-10-09",
+  "pr": "https://github.com/zeqome/proof-web/pull/14",
+  "head": "d5df6e98088bf13d073977d072293b5eea9e4cdf",
+  "base": "feat/0021-pursue-review-queue",
+  "merge_base": "864a2c29bd4f41a5344ae7be960b842a1d4aed62",
+  "archives": {
+    "web": {
+      "path": "/private/tmp/proof-web11-d5df6e9-g0mrv8rj/web/zeqome-proof-web-d5df6e98088bf13d073977d072293b5eea9e4cdf",
+      "head": "d5df6e98088bf13d073977d072293b5eea9e4cdf"
+    },
+    "agents": {
+      "path": "/private/tmp/proof-web11-d5df6e9-g0mrv8rj/agents/zeqome-proof-agents-8340de98507a9ed38ce72276ca4b9c9791dcfa53",
+      "head": "8340de98507a9ed38ce72276ca4b9c9791dcfa53"
+    },
+    "core": {
+      "path": "/private/tmp/proof-web11-d5df6e9-g0mrv8rj/core/DengZhiyuan-math-proof-cli-b7f3943",
+      "head": "b7f394374ce73e9a23754e12506e87e97326efd9"
+    }
+  },
+  "targeted_tests": "44 passed in 17.26s; run pane and real AgentRun/StudioHub write-failure path",
+  "older_agents": "43 passed, 1 skipped in 18.52s at agents 9558fd0; absence of the field preserved",
+  "old_web_control": "3 failed, 3 passed, 37 deselected in 3.84s; updated tests/harness, unchanged old production source",
+  "local_audit": "No new display defect found; the full-suite Coordinator timeout remains unresolved. No green full-suite claim.",
+  "run_js_sha256": "f76c37c81591d2b96ab1a1a7aee479915440467f1a6901d19c52f73ec3e43b65",
+  "scope": "Synthetic role job and CLI subprocesses, SQLite and JavaScript harness; no live browser or real agent provider. PR created and attached; no merge, push, comment, review, issue edit or automation change.",
+  "full_suite": "747 passed, 1 failed, 1 skipped in 491.62s; no port-binding PermissionError failures",
+  "full_suite_failures": [
+    {
+      "class": "tests.test_coordinator_hub",
+      "name": "test_the_coordinator_works_the_children_then_the_root_and_the_page_and_the_map_read_it",
+      "time": "63.893"
+    }
+  ],
+  "isolated_failure_rerun": "1 passed in 8.00s at the same exact source heads",
+  "isolated_coordinator_ending": {
+    "status": "done",
+    "reason": "T is requested for review"
+  },
+  "ci": {
+    "package": "SUCCESS"
+  }
+}

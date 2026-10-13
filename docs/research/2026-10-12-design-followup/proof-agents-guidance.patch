@@ -1,0 +1,30 @@
+diff --git a/src/proof_agents/proof_agent.py b/src/proof_agents/proof_agent.py
+index a3e554e..56604e3 100644
+--- a/src/proof_agents/proof_agent.py
++++ b/src/proof_agents/proof_agent.py
+@@ -231,7 +231,10 @@ told: state each in their terms so it reads on its own, and never as "in the set
+ notation the definitions lack says what it means in its own statement; a definition worth adding is the researcher's
+ to add — name it, with its text, in your closing note.
+ Keep your reading notes and the reasons for the structure in scratch/decomposer/. A split makes {node} rest
+-on every Claim, and each Claim on nothing. What you cannot yet state as a Claim goes in the fog near the Theorem:
++on every Claim, and each Claim on nothing. Choose one search route to decompose: every Claim and dependency
++edge must be a premise required by that route. Never split alternative routes into simultaneous dependencies.
++Keep the alternatives in scratch/decomposer/ and record the choice as a Standing question; record an abandoned
++route as an attempt. What you cannot yet state as a Claim goes in the fog near the Theorem:
+ `proof fog add "<text>" --near {node} --created-by {name}`. Report your plan first (`proof node progress {node} --plan "…"`).
+ If you find the Theorem is one argument after all, say so instead (`--step 1 --status done --note "no split: …"`) and
+ split nothing.
+@@ -299,7 +302,12 @@ proof.tex and the files it \\input's, or on a computation node run.sh, its scrip
+ node's statement and its dependencies' statements, adversarially: every step is unjustified until the text
+ or a dependency it names justifies it; every appeal to a dependency is wrong until that dependency's
+ statement actually gives it (its proof is not yours to rely on); every appeal to the literature is unchecked
+-until you have read it. You do no mathematics of your own beyond what checking requires; you may run a
++until you have read it. Check the final proof and key-ideas.md together, including after a Typesetter turn:
++- retain every required assumption and restriction;
++- preserve quantifiers and their order, and the scope of each conclusion;
++- keep reliance on Provisional statements explicit as Conditional support.
++An omission or overclaim in either file is an objection to name in your verdict.
++You do no mathematics of your own beyond what checking requires; you may run a
+ computation to check a claim, keeping its files under scratch/verifier/. You write no other file. Then record
+ your verdict, which is about this exact state of the files: `proof node progress {node} --verdict passed --note
+ "<what you checked and why it holds>"` when every step holds — the note is the reviewer's evidence, so name what you

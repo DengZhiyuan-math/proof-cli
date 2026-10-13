@@ -1,0 +1,17 @@
+{
+  "date": "2026-10-09",
+  "head": "9558fd0caf6eef2f80401c503a0a4549f4bbaa6f",
+  "issue": "https://github.com/zeqome/proof-agents/issues/17",
+  "baseline_pr": "https://github.com/zeqome/proof-agents/pull/21",
+  "interpreter": "/opt/anaconda3/bin/python (3.11.14)",
+  "tests": "2 failed in 0.03s",
+  "observed": {
+    "project_stop": "released, no RELEASE_FAILED code",
+    "theorems_started": [
+      "T1",
+      "T2"
+    ]
+  },
+  "extraction": "The four classes/functions for #17 were extracted unchanged in behavior from the 2026-10-08 audit probes. Other imports and unrelated probes were omitted.",
+  "scope": "Synthetic Coordinator hooks; no real provider or browser."
+}

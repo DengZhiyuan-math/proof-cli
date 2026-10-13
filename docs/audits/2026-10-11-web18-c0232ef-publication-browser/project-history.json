@@ -1,0 +1,45 @@
+[
+  {
+    "pursuit_id": "f66d308a-9498-4626-992a-bc6654ed1021",
+    "status": "stuck",
+    "reason": "the Reader stated no Theorem",
+    "provider": "browser18-fixture",
+    "theorem": null,
+    "budget": null,
+    "last_phase": "end",
+    "started_at": "2026-10-10T22:42:37.683896+00:00",
+    "ended_at": "2026-10-10T22:42:39.397595+00:00",
+    "events": [
+      {
+        "id": "7a36ef26-866d-4154-89db-792ea748510d",
+        "phase": "start",
+        "outcome": "",
+        "reason": "",
+        "provider": "browser18-fixture",
+        "theorem": null,
+        "budget": null,
+        "created_at": "2026-10-10T22:42:37.683896+00:00"
+      },
+      {
+        "id": "84f2fcb2-e18c-4c82-a598-2c46b6bea48f",
+        "phase": "reader_end",
+        "outcome": "ok",
+        "reason": "",
+        "provider": "",
+        "theorem": null,
+        "budget": null,
+        "created_at": "2026-10-10T22:42:39.395678+00:00"
+      },
+      {
+        "id": "a76971ed-189b-403c-9b79-878124dc91e7",
+        "phase": "end",
+        "outcome": "stuck",
+        "reason": "the Reader stated no Theorem",
+        "provider": "",
+        "theorem": null,
+        "budget": null,
+        "created_at": "2026-10-10T22:42:39.397595+00:00"
+      }
+    ]
+  }
+]

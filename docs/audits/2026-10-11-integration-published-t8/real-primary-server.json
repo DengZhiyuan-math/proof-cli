@@ -1,0 +1,8 @@
+{
+  "pid": 75607,
+  "url": "http://localhost:29198",
+  "scenario": "real",
+  "root": "/Volumes/Codex-Workspace/live/home/zhdeng/proof-cli/docs/audits/2026-10-11-integration-published-t8/projects/real-trial-profile",
+  "stoppedAfterTerminalSnapshotAt": "2026-10-11T21:31:28.422113+00:00",
+  "verifiedCommand": "/opt/anaconda3/bin/python -u docs/audits/2026-10-11-integration-published-t8/browser_server.py real --root /Volumes/Codex-Workspace/live/home/zhdeng/proof-cli/docs/audits/2026-10-11-integration-published-t8/projects/real-trial-profile"
+}

@@ -1,0 +1,291 @@
+{
+  "url": "https://api.github.com/repos/zeqome/proof-web/compare/feat/0021-pursue-review-queue...d5df6e98088bf13d073977d072293b5eea9e4cdf",
+  "html_url": "https://github.com/zeqome/proof-web/compare/feat/0021-pursue-review-queue...d5df6e98088bf13d073977d072293b5eea9e4cdf",
+  "permalink_url": "https://github.com/zeqome/proof-web/compare/zeqome:864a2c2...zeqome:d5df6e9",
+  "diff_url": "https://github.com/zeqome/proof-web/compare/feat/0021-pursue-review-queue...d5df6e98088bf13d073977d072293b5eea9e4cdf.diff",
+  "patch_url": "https://github.com/zeqome/proof-web/compare/feat/0021-pursue-review-queue...d5df6e98088bf13d073977d072293b5eea9e4cdf.patch",
+  "base_commit": {
+    "sha": "864a2c29bd4f41a5344ae7be960b842a1d4aed62",
+    "node_id": "C_kwDOU7Q6FtoAKDg2NGEyYzI5YmQ0ZjQxYTUzNDRhZTdiZTk2MGI4NDJhMWQ0YWVkNjI",
+    "commit": {
+      "author": {
+        "name": "Yomathnotcool",
+        "email": "125728853+DengZhiyuan-math@users.noreply.github.com",
+        "date": "2026-10-08T09:12:37Z"
+      },
+      "committer": {
+        "name": "Yomathnotcool",
+        "email": "125728853+DengZhiyuan-math@users.noreply.github.com",
+        "date": "2026-10-08T09:12:37Z"
+      },
+      "message": "Merge the Definitions support (#6) into the ADR-0021 integration (proof-cli#198)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+      "tree": {
+        "sha": "b35064ff43f6eb76ec2abdea814fd464ea57b665",
+        "url": "https://api.github.com/repos/zeqome/proof-web/git/trees/b35064ff43f6eb76ec2abdea814fd464ea57b665"
+      },
+      "url": "https://api.github.com/repos/zeqome/proof-web/git/commits/864a2c29bd4f41a5344ae7be960b842a1d4aed62",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/zeqome/proof-web/commits/864a2c29bd4f41a5344ae7be960b842a1d4aed62",
+    "html_url": "https://github.com/zeqome/proof-web/commit/864a2c29bd4f41a5344ae7be960b842a1d4aed62",
+    "comments_url": "https://api.github.com/repos/zeqome/proof-web/commits/864a2c29bd4f41a5344ae7be960b842a1d4aed62/comments",
+    "author": {
+      "login": "DengZhiyuan-math",
+      "id": 125728853,
+      "node_id": "U_kgDOB354VQ",
+      "avatar_url": "https://avatars.githubusercontent.com/u/125728853?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/DengZhiyuan-math",
+      "html_url": "https://github.com/DengZhiyuan-math",
+      "followers_url": "https://api.github.com/users/DengZhiyuan-math/followers",
+      "following_url": "https://api.github.com/users/DengZhiyuan-math/following{/other_user}",
+      "gists_url": "https://api.github.com/users/DengZhiyuan-math/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/DengZhiyuan-math/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/DengZhiyuan-math/subscriptions",
+      "organizations_url": "https://api.github.com/users/DengZhiyuan-math/orgs",
+      "repos_url": "https://api.github.com/users/DengZhiyuan-math/repos",
+      "events_url": "https://api.github.com/users/DengZhiyuan-math/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/DengZhiyuan-math/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "DengZhiyuan-math",
+      "id": 125728853,
+      "node_id": "U_kgDOB354VQ",
+      "avatar_url": "https://avatars.githubusercontent.com/u/125728853?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/DengZhiyuan-math",
+      "html_url": "https://github.com/DengZhiyuan-math",
+      "followers_url": "https://api.github.com/users/DengZhiyuan-math/followers",
+      "following_url": "https://api.github.com/users/DengZhiyuan-math/following{/other_user}",
+      "gists_url": "https://api.github.com/users/DengZhiyuan-math/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/DengZhiyuan-math/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/DengZhiyuan-math/subscriptions",
+      "organizations_url": "https://api.github.com/users/DengZhiyuan-math/orgs",
+      "repos_url": "https://api.github.com/users/DengZhiyuan-math/repos",
+      "events_url": "https://api.github.com/users/DengZhiyuan-math/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/DengZhiyuan-math/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "0c1375a34a95ec5959578d905e4ae5a5cf0f3ed5",
+        "url": "https://api.github.com/repos/zeqome/proof-web/commits/0c1375a34a95ec5959578d905e4ae5a5cf0f3ed5",
+        "html_url": "https://github.com/zeqome/proof-web/commit/0c1375a34a95ec5959578d905e4ae5a5cf0f3ed5"
+      },
+      {
+        "sha": "b0c43b85eaf679324ed23196b1eedeecfbef4688",
+        "url": "https://api.github.com/repos/zeqome/proof-web/commits/b0c43b85eaf679324ed23196b1eedeecfbef4688",
+        "html_url": "https://github.com/zeqome/proof-web/commit/b0c43b85eaf679324ed23196b1eedeecfbef4688"
+      }
+    ]
+  },
+  "merge_base_commit": {
+    "sha": "864a2c29bd4f41a5344ae7be960b842a1d4aed62",
+    "node_id": "C_kwDOU7Q6FtoAKDg2NGEyYzI5YmQ0ZjQxYTUzNDRhZTdiZTk2MGI4NDJhMWQ0YWVkNjI",
+    "commit": {
+      "author": {
+        "name": "Yomathnotcool",
+        "email": "125728853+DengZhiyuan-math@users.noreply.github.com",
+        "date": "2026-10-08T09:12:37Z"
+      },
+      "committer": {
+        "name": "Yomathnotcool",
+        "email": "125728853+DengZhiyuan-math@users.noreply.github.com",
+        "date": "2026-10-08T09:12:37Z"
+      },
+      "message": "Merge the Definitions support (#6) into the ADR-0021 integration (proof-cli#198)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+      "tree": {
+        "sha": "b35064ff43f6eb76ec2abdea814fd464ea57b665",
+        "url": "https://api.github.com/repos/zeqome/proof-web/git/trees/b35064ff43f6eb76ec2abdea814fd464ea57b665"
+      },
+      "url": "https://api.github.com/repos/zeqome/proof-web/git/commits/864a2c29bd4f41a5344ae7be960b842a1d4aed62",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/zeqome/proof-web/commits/864a2c29bd4f41a5344ae7be960b842a1d4aed62",
+    "html_url": "https://github.com/zeqome/proof-web/commit/864a2c29bd4f41a5344ae7be960b842a1d4aed62",
+    "comments_url": "https://api.github.com/repos/zeqome/proof-web/commits/864a2c29bd4f41a5344ae7be960b842a1d4aed62/comments",
+    "author": {
+      "login": "DengZhiyuan-math",
+      "id": 125728853,
+      "node_id": "U_kgDOB354VQ",
+      "avatar_url": "https://avatars.githubusercontent.com/u/125728853?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/DengZhiyuan-math",
+      "html_url": "https://github.com/DengZhiyuan-math",
+      "followers_url": "https://api.github.com/users/DengZhiyuan-math/followers",
+      "following_url": "https://api.github.com/users/DengZhiyuan-math/following{/other_user}",
+      "gists_url": "https://api.github.com/users/DengZhiyuan-math/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/DengZhiyuan-math/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/DengZhiyuan-math/subscriptions",
+      "organizations_url": "https://api.github.com/users/DengZhiyuan-math/orgs",
+      "repos_url": "https://api.github.com/users/DengZhiyuan-math/repos",
+      "events_url": "https://api.github.com/users/DengZhiyuan-math/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/DengZhiyuan-math/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "DengZhiyuan-math",
+      "id": 125728853,
+      "node_id": "U_kgDOB354VQ",
+      "avatar_url": "https://avatars.githubusercontent.com/u/125728853?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/DengZhiyuan-math",
+      "html_url": "https://github.com/DengZhiyuan-math",
+      "followers_url": "https://api.github.com/users/DengZhiyuan-math/followers",
+      "following_url": "https://api.github.com/users/DengZhiyuan-math/following{/other_user}",
+      "gists_url": "https://api.github.com/users/DengZhiyuan-math/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/DengZhiyuan-math/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/DengZhiyuan-math/subscriptions",
+      "organizations_url": "https://api.github.com/users/DengZhiyuan-math/orgs",
+      "repos_url": "https://api.github.com/users/DengZhiyuan-math/repos",
+      "events_url": "https://api.github.com/users/DengZhiyuan-math/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/DengZhiyuan-math/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "0c1375a34a95ec5959578d905e4ae5a5cf0f3ed5",
+        "url": "https://api.github.com/repos/zeqome/proof-web/commits/0c1375a34a95ec5959578d905e4ae5a5cf0f3ed5",
+        "html_url": "https://github.com/zeqome/proof-web/commit/0c1375a34a95ec5959578d905e4ae5a5cf0f3ed5"
+      },
+      {
+        "sha": "b0c43b85eaf679324ed23196b1eedeecfbef4688",
+        "url": "https://api.github.com/repos/zeqome/proof-web/commits/b0c43b85eaf679324ed23196b1eedeecfbef4688",
+        "html_url": "https://github.com/zeqome/proof-web/commit/b0c43b85eaf679324ed23196b1eedeecfbef4688"
+      }
+    ]
+  },
+  "status": "ahead",
+  "ahead_by": 1,
+  "behind_by": 0,
+  "total_commits": 1,
+  "commits": [
+    {
+      "sha": "d5df6e98088bf13d073977d072293b5eea9e4cdf",
+      "node_id": "C_kwDOU7Q6FtoAKGQ1ZGY2ZTk4MDg4YmYxM2QwNzM5NzdkMDcyMjkzYjVlZWE5ZTRjZGY",
+      "commit": {
+        "author": {
+          "name": "Yomathnotcool",
+          "email": "zy@zeqome.com",
+          "date": "2026-10-09T15:16:02Z"
+        },
+        "committer": {
+          "name": "Yomathnotcool",
+          "email": "zy@zeqome.com",
+          "date": "2026-10-09T15:16:02Z"
+        },
+        "message": "feat: the run pane shows the run's own work-log writes that failed (#11)\n\nAgentRun keeps record_failed (proof-agents#16): each of its own writes that\nfailed this Start (closing note, suggested redirect, turn record) with the\nhook and error. The run card lists them as text under the decision, saying\nthey are not in the work log and are held by this Start only; status, reason,\ndecision and controls are as before. A run without the field, or with none\nfailed, shows nothing.\n\nCloses #11\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+        "tree": {
+          "sha": "6283f430bfb0fa1db910b9947e05383fa16d9d0a",
+          "url": "https://api.github.com/repos/zeqome/proof-web/git/trees/6283f430bfb0fa1db910b9947e05383fa16d9d0a"
+        },
+        "url": "https://api.github.com/repos/zeqome/proof-web/git/commits/d5df6e98088bf13d073977d072293b5eea9e4cdf",
+        "comment_count": 0,
+        "verification": {
+          "verified": false,
+          "reason": "unsigned",
+          "signature": null,
+          "payload": null,
+          "verified_at": null
+        }
+      },
+      "url": "https://api.github.com/repos/zeqome/proof-web/commits/d5df6e98088bf13d073977d072293b5eea9e4cdf",
+      "html_url": "https://github.com/zeqome/proof-web/commit/d5df6e98088bf13d073977d072293b5eea9e4cdf",
+      "comments_url": "https://api.github.com/repos/zeqome/proof-web/commits/d5df6e98088bf13d073977d072293b5eea9e4cdf/comments",
+      "author": null,
+      "committer": null,
+      "parents": [
+        {
+          "sha": "864a2c29bd4f41a5344ae7be960b842a1d4aed62",
+          "url": "https://api.github.com/repos/zeqome/proof-web/commits/864a2c29bd4f41a5344ae7be960b842a1d4aed62",
+          "html_url": "https://github.com/zeqome/proof-web/commit/864a2c29bd4f41a5344ae7be960b842a1d4aed62"
+        }
+      ]
+    }
+  ],
+  "files": [
+    {
+      "sha": "cd64f31a8146a945aee17eec9aaa72b142a06768",
+      "filename": "src/proof_web/static/studio/node.css",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 0,
+      "changes": 1,
+      "blob_url": "https://github.com/zeqome/proof-web/blob/d5df6e98088bf13d073977d072293b5eea9e4cdf/src%2Fproof_web%2Fstatic%2Fstudio%2Fnode.css",
+      "raw_url": "https://github.com/zeqome/proof-web/raw/d5df6e98088bf13d073977d072293b5eea9e4cdf/src%2Fproof_web%2Fstatic%2Fstudio%2Fnode.css",
+      "contents_url": "https://api.github.com/repos/zeqome/proof-web/contents/src%2Fproof_web%2Fstatic%2Fstudio%2Fnode.css?ref=d5df6e98088bf13d073977d072293b5eea9e4cdf",
+      "patch": "@@ -82,6 +82,7 @@\n .run-status.needs-human { color: var(--warn); } .run-decision { margin: 0; font-size: 13px; font-weight: 600; color: var(--warn); }\n .run-where { font-weight: 600; } .run-meta, .run-reason { color: var(--muted); font-size: 12px; } .run-reason::before { content: \"\u2014 \"; }\n .run-hint { margin: 0; color: var(--muted); font-size: 12px; }\n+.run-record-failed { margin: 0; font-size: 13px; font-weight: 600; color: var(--warn); } .run-record-failed-list { margin: 0; padding-left: 20px; font-size: 12px; color: var(--warn); overflow-wrap: anywhere; }\n .run-suggestion { margin: 0; font-size: 13px; color: var(--warn); } .run-suggestion button { font-size: 12px; margin-left: 4px; }\n /* ADR-0019 point 18: the Coordinator over this node's subtree, above the node's own run */\n .coordinator-card { border: 1px solid var(--faint); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; }"
+    },
+    {
+      "sha": "0a2b4600d303a87bd7d15cdd04bd56677fb07ea5",
+      "filename": "src/proof_web/static/studio/run.js",
+      "status": "modified",
+      "additions": 9,
+      "deletions": 0,
+      "changes": 9,
+      "blob_url": "https://github.com/zeqome/proof-web/blob/d5df6e98088bf13d073977d072293b5eea9e4cdf/src%2Fproof_web%2Fstatic%2Fstudio%2Frun.js",
+      "raw_url": "https://github.com/zeqome/proof-web/raw/d5df6e98088bf13d073977d072293b5eea9e4cdf/src%2Fproof_web%2Fstatic%2Fstudio%2Frun.js",
+      "contents_url": "https://api.github.com/repos/zeqome/proof-web/contents/src%2Fproof_web%2Fstatic%2Fstudio%2Frun.js?ref=d5df6e98088bf13d073977d072293b5eea9e4cdf",
+      "patch": "@@ -141,6 +141,8 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page\n     return box;\n   }\n \n+  const RECORD_SITE = { _close_note: \"its closing note\", _suggest: \"its suggested redirect\", _note_turn: \"its turn record\" };\n+\n   function runCard(run) {\n     const card = h(\"section\", null, { class: \"run-card\" });\n     const line = h(\"div\", null, { class: \"run-line\" });\n@@ -157,6 +159,13 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page\n       if (run.reason && !run.active) line.append(h(\"span\", run.reason, { class: \"run-reason\" }));\n       card.append(line);\n       if (run.status === \"needs-human\" && run.decision) card.append(h(\"p\", `Needs you: ${run.decision}`, { class: \"run-decision\" }));\n+      // the run's own work-log writes that failed this Start (proof-agents#16): held by the run, not in the work log\n+      const failed = Object.entries(run.record_failed && typeof run.record_failed === \"object\" ? run.record_failed : {});\n+      if (failed.length) {\n+        const list = h(\"ul\", null, { class: \"run-record-failed-list\" });\n+        for (const [site, error] of failed) list.append(h(\"li\", `${RECORD_SITE[site] || site} (${site}): ${error}`));\n+        card.append(h(\"p\", \"Not in the work log \u2014 the run could not write:\", { class: \"run-record-failed\", title: \"Held by this Start only, not saved: it is gone after a new Start or a restart\" }), list);\n+      }\n       if (run.redirect && run.redirect.text) card.append(h(\"p\", `Redirect waiting: ${run.redirect.text}${run.redirect.role ? ` (for the ${ROLE_WORD[run.redirect.role]})` : \"\"}`, { class: \"run-hint\" }));\n       // what the record repeats (ADR-0019 point 17): a suggested redirect for the researcher, who decides \u2014 it is sent only by them\n       if (run.suggestion) {"
+    },
+    {
+      "sha": "1270f3bece4c67b1be5cef917dd176b4c60ad2b0",
+      "filename": "tests/js/run_pane_harness.js",
+      "status": "modified",
+      "additions": 2,
+      "deletions": 1,
+      "changes": 3,
+      "blob_url": "https://github.com/zeqome/proof-web/blob/d5df6e98088bf13d073977d072293b5eea9e4cdf/tests%2Fjs%2Frun_pane_harness.js",
+      "raw_url": "https://github.com/zeqome/proof-web/raw/d5df6e98088bf13d073977d072293b5eea9e4cdf/tests%2Fjs%2Frun_pane_harness.js",
+      "contents_url": "https://api.github.com/repos/zeqome/proof-web/contents/tests%2Fjs%2Frun_pane_harness.js?ref=d5df6e98088bf13d073977d072293b5eea9e4cdf",
+      "patch": "@@ -79,7 +79,8 @@ class El {\n     status: (pane.all().find((x) => x.cls().startsWith(\"run-status\")) || { textContent: \"\" }).textContent,\n     where: (pane.all().find((x) => x.cls() === \"run-where\") || { textContent: \"\" }).textContent,\n     verdict: (pane.all().find((x) => x.cls().startsWith(\"run-verdict\")) || { textContent: null }).textContent,  // the newest verdict on the run line (ADR-0019)\n-    suggestion: (pane.all().find((x) => x.cls() === \"run-suggestion\") || { textContent: null }).textContent,  // what the record repeats, for the researcher (point 17)\n+    suggestion: (pane.all().find((x) => x.cls() === \"run-suggestion\") || { textContent: null }).textContent,\n+    recordFailed: pane.all().filter((x) => x.cls() === \"run-record-failed-list\").flatMap((x) => x.children.map((li) => li.textContent)),  // the run's failed own writes (proof-agents#16)  // what the record repeats, for the researcher (point 17)\n     coordinator: (pane.all().find((x) => x.cls() === \"coordinator-line\") || { text: () => null }).text(),  // the subtree's Coordinator (point 18)\n     plan: pane.all().filter((x) => x.tag === \"li\" && x.attrs[\"data-step\"]).map((x) => ({ step: x.attrs[\"data-step\"], text: x.textContent, status: x.cls(), mark: (x.children.find((c) => typeof c === \"object\" && c.cls() === \"plan-mark\") || { textContent: \"\" }).textContent })),\n     log: pane.all().filter((x) => x.tag === \"li\" && x.attrs[\"data-kind\"]).map((x) => ({ kind: x.attrs[\"data-kind\"], text: x.text() })),"
+    },
+    {
+      "sha": "b318c15b5add2b6b7a9a9c3870cb829981f72e86",
+      "filename": "tests/test_agent_run.py",
+      "status": "modified",
+      "additions": 25,
+      "deletions": 0,
+      "changes": 25,
+      "blob_url": "https://github.com/zeqome/proof-web/blob/d5df6e98088bf13d073977d072293b5eea9e4cdf/tests%2Ftest_agent_run.py",
+      "raw_url": "https://github.com/zeqome/proof-web/raw/d5df6e98088bf13d073977d072293b5eea9e4cdf/tests%2Ftest_agent_run.py",
+      "contents_url": "https://api.github.com/repos/zeqome/proof-web/contents/tests%2Ftest_agent_run.py?ref=d5df6e98088bf13d073977d072293b5eea9e4cdf",
+      "patch": "@@ -711,6 +711,31 @@ def test_a_decision_only_a_human_can_make_stops_the_run_as_needs_human_and_names\n     assert node[\"run\"][\"status\"] == \"needs-human\" and node[\"run\"][\"decision\"] == \"choose the L2 or the sup norm\"\n \n \n+def test_a_closing_note_the_project_could_not_take_reaches_the_run_pane_beside_the_decision(studio, monkeypatch):\n+    \"\"\"proof-web#11: the run keeps its own failed work-log writes (proof-agents#16); the studio hands them to the pane.\"\"\"\n+    from dataclasses import fields\n+\n+    from proof_agents.agent_run import RunState\n+\n+    if \"record_failed\" not in {f.name for f in fields(RunState)}:\n+        pytest.skip(\"needs proof-agents#16\")\n+    store, hub, log, queue = studio\n+\n+    def full(self, node_id, role, name, status, note):\n+        raise OSError(\"disk full\")\n+\n+    monkeypatch.setattr(StudioHub, \"_record_close\", full)\n+    create_node(store, node_id=\"T\", kind=\"theorem\", statement=\"the main theorem\")\n+    # the standalone Decomposer's split with no needs-human step of its own: the run's closing note is its decision's record\n+    _queue(queue, [[\"proof\", \"node\", \"split\", \"T\", \"--child\", \"T1=the first half\", \"--child\", \"T2=the second half\", \"--created-by\", \"claude-code\"]])\n+    assert _post(hub, \"/studio/T/api/agent/start\", {\"provider\": \"claude\", \"roles\": [\"decomposer\"]})[0] == 200\n+    decision = \"structure proposed (2 Claim(s): T1, T2); the researcher decides\"\n+    state = _until(lambda: (lambda s: s if s[\"status\"] == \"needs-human\" and s[\"record_failed\"] else None)(_get(hub, \"/studio/T/api/agent/run\")[1]),\n+                   \"the run ended needs-human with its failed note\")\n+    assert state[\"decision\"] == decision and state[\"record_failed\"] == {\"_close_note\": \"record_close: OSError: disk full\"}\n+    assert proof_map.require_node(store, \"T\").dependencies == [\"T1\", \"T2\"]\n+    assert not [e for e in work_log(store, \"T\") if e.get(\"kind\") == \"step\" and e.get(\"status\") == \"needs-human\"]  # not in the work log\n+\n def test_the_run_leaves_a_closing_note_on_every_stop(studio):\n     store, hub, log, queue = studio\n     write_key_ideas(store, \"N\")"
+    },
+    {
+      "sha": "fed711d5b1d4a8d493d64c5c05dda8db328d20b9",
+      "filename": "tests/test_run_pane.py",
+      "status": "modified",
+      "additions": 43,
+      "deletions": 0,
+      "changes": 43,
+      "blob_url": "https://github.com/zeqome/proof-web/blob/d5df6e98088bf13d073977d072293b5eea9e4cdf/tests%2Ftest_run_pane.py",
+      "raw_url": "https://github.com/zeqome/proof-web/raw/d5df6e98088bf13d073977d072293b5eea9e4cdf/tests%2Ftest_run_pane.py",
+      "contents_url": "https://api.github.com/repos/zeqome/proof-web/contents/tests%2Ftest_run_pane.py?ref=d5df6e98088bf13d073977d072293b5eea9e4cdf",
+      "patch": "@@ -164,6 +164,49 @@ def test_a_run_that_needs_the_researcher_says_what_it_needs_and_a_failed_release\n     assert \"still assigned\" in shown[\"text\"] and \"Stop and release\" in shown[\"buttons\"]\n \n \n+\n+# -- the run's own work-log writes that failed (proof-web#11, proof-agents#16) -------------------------\n+\n+FAILED = {\"_close_note\": \"record_close: OSError: disk full\", \"_suggest\": \"record_close: OSError: disk full\",\n+          \"_note_turn\": \"record_turn: OSError: <b>no space</b> & more\"}\n+\n+\n+def test_each_failed_own_write_shows_its_site_and_error_and_the_run_is_shown_as_before():\n+    (before,) = _pane(run={**RUNNING, \"suggestion\": \"read L1 again\"}, log=LOG)\n+    (shown,) = _pane(run={**RUNNING, \"suggestion\": \"read L1 again\", \"record_failed\": FAILED}, log=LOG)\n+    assert shown[\"recordFailed\"] == [\"its closing note (_close_note): record_close: OSError: disk full\",\n+                                     \"its suggested redirect (_suggest): record_close: OSError: disk full\",\n+                                     \"its turn record (_note_turn): record_turn: OSError: <b>no space</b> & more\"]  # text, as written\n+    assert \"Not in the work log \u2014 the run could not write:\" in shown[\"text\"] and \"saved\" not in shown[\"text\"]\n+    assert (shown[\"status\"], shown[\"where\"], shown[\"buttons\"], shown[\"suggestion\"]) == (before[\"status\"], before[\"where\"], before[\"buttons\"], before[\"suggestion\"])\n+\n+\n+def test_a_needs_human_run_whose_note_failed_still_shows_its_decision_and_controls():\n+    needs = {**RUNNING, \"status\": \"needs-human\", \"active\": False, \"role\": \"decomposer\", \"decision\": \"structure proposed (2 Claim(s): N1, N2); the researcher decides\"}\n+    (before,) = _pane(run=needs, log=LOG)\n+    (shown,) = _pane(run={**needs, \"record_failed\": {\"_close_note\": \"record_close: OSError: disk full\"}}, log=LOG)\n+    assert \"Needs you: structure proposed (2 Claim(s): N1, N2); the researcher decides\" in shown[\"text\"]\n+    assert shown[\"recordFailed\"] == [\"its closing note (_close_note): record_close: OSError: disk full\"]\n+    assert shown[\"buttons\"] == before[\"buttons\"] and shown[\"status\"] == \"needs-human\"\n+\n+\n+@pytest.mark.parametrize(\"field\", [{}, {\"record_failed\": {}}, {\"record_failed\": None}])\n+def test_an_older_run_without_the_field_or_with_none_failed_shows_no_warning(field):\n+    (before,) = _pane(run=RUNNING, log=LOG)\n+    (shown,) = _pane(run={**RUNNING, **field}, log=LOG)\n+    assert shown[\"recordFailed\"] == [] and shown[\"text\"] == before[\"text\"]\n+\n+\n+def test_the_errors_stay_through_polls_and_a_new_start_shows_its_own():\n+    first = {**RUNNING, \"record_failed\": {\"_note_turn\": \"record_turn: OSError: disk full\"}}\n+    both = {**first, \"turns\": 4, \"record_failed\": {**first[\"record_failed\"], \"_close_note\": \"record_close: OSError: disk full\"}}\n+    started = {**RUNNING, \"turns\": 1, \"record_failed\": {}}\n+    shown = _pane(run=first, log=LOG, sequence=[{\"run\": {**first, \"turns\": 4}}, {\"run\": both}, {\"run\": started}])\n+    assert [len(r[\"recordFailed\"]) for r in shown] == [1, 1, 2, 0]\n+    assert shown[2][\"recordFailed\"] == [\"its turn record (_note_turn): record_turn: OSError: disk full\",  # the earlier one is kept\n+                                        \"its closing note (_close_note): record_close: OSError: disk full\"]\n+    assert \"Not in the work log\" not in shown[3][\"text\"]\n+\n # -- seventh review ---------------------------------------------------------------------------------\n \n CHANGED = [_turn(\"t5\", \"numerics\", 2, changed=[{\"path\": \"check.py\", \"line\": 40, \"url\": \"vscode://file//proj/proofs/N/check.py:40\"}])]"
+    }
+  ]
+}

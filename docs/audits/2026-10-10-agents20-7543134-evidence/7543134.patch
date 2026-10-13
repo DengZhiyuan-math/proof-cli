@@ -1,0 +1,340 @@
+From 754313462607b6e1a90d9ba484794fce1a283008 Mon Sep 17 00:00:00 2001
+From: Yomathnotcool <125728853+DengZhiyuan-math@users.noreply.github.com>
+Date: Sat, 10 Oct 2026 16:13:19 +0200
+Subject: [PATCH] fix: the Reader runs under proof-cli's reader role and writes
+ the full bibliography (#20)
+
+The Reader's environment sets PROOF_AGENT_ROLE=reader (proof-cli#203), and
+its permissions allow `proof node create *`: proof-cli refuses kind=claim,
+--parent and --reassign on the parsed arguments, so the raw `claim "`
+patterns go and a statement quoting it is written.
+
+The ban on `reference import --identifier/--source-type` and the brief's
+"leave out" line go too: under ADR-0022 (proof-cli#199) a Trust rule covers
+only the researcher's imports, so the Reader's import still reads unreviewed
+under a matching rule.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/proof_agents/reader.py | 41 +++++++----------
+ tests/test_reader.py       | 54 ++++++++++------------
+ tests/test_reader_cli.py   | 94 ++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 134 insertions(+), 55 deletions(-)
+ create mode 100644 tests/test_reader_cli.py
+
+diff --git a/src/proof_agents/reader.py b/src/proof_agents/reader.py
+index 4d2c9d8..0878f19 100644
+--- a/src/proof_agents/reader.py
++++ b/src/proof_agents/reader.py
+@@ -24,37 +24,28 @@ from pathlib import Path
+ from .map_agent import MAP_PROOF_READS
+ from .proof_agent import COMPUTATION, NO_OTHER_PROJECT, anchored, claude_md_excludes, inline_code_rules
+ 
++READER_ROLE = "reader"   # proof-cli's reader role (`proof_cli.domain.READER_ROLE`, proof-cli#203), set as PROOF_AGENT_ROLE
+ READER_NAME = "reader"   # the name its definitions, nodes and fog carry, unless `[studio] agent_name` says otherwise
+ READER_SCRATCH = "scratch/reader"   # under the project root: its reading notes and the departures from the draft
+ DEPARTURES_FILE = "departures.md"
+ 
+ # what it reads besides the map agent's reads: the Definitions a statement is written in (ADR-0020)
+ READER_READS = (*MAP_PROOF_READS, "Bash(proof definition list *)", "Bash(proof definition show *)")
+-# what it writes, each a `proof` command: a Definition, a Theorem, a Lemma or an imported result (never a Claim: a
+-# Claim is a Split's, the Decomposer's), a citation, fog, and corrections of its own unfixed text (ADR-0021 point 6:
+-# proof-cli refuses any other). ADR-0010: a contract for a cooperative agent, not a sandbox. Claude Code's `*` matches
+-# spaces too, so `create * theorem *` would match a Claim whose statement names a theorem (audit P2-2): the kind is
+-# matched as the word right before the double-quoted statement, and the denials below catch a Claim written any other
+-# way — at the cost of refusing a statement with `claim "` in it, which the Reader rewords.
+-READER_KINDS = ("theorem", "lemma", "imported_result")
++# what it writes, each a `proof` command: a Definition, a Theorem, a Lemma or an imported result, a citation with its
++# full bibliography, fog, and corrections of its own unfixed text (ADR-0021 point 6: proof-cli refuses any other).
++# ADR-0010: a contract for a cooperative agent, not a sandbox. Never a Claim (a Claim is a Split's, the Decomposer's),
++# a node under a parent or a claim taken over: under the reader role proof-cli refuses kind=claim, --parent and
++# --reassign on the parsed arguments (READER_ROLE_REFUSED, proof-cli#203), so no pattern here reads the statement's
++# text and one quoting `claim "` is the Reader's to write. Its --identifier and --source-type give its import no trust:
++# a Trust rule covers only the researcher's imports (ADR-0022), so the Reader writes the whole bibliography.
+ READER_WRITES = (
+     "Bash(proof definition add *)",
+-    *(f'Bash(proof node create * {kind} "*)' for kind in READER_KINDS),
++    "Bash(proof node create *)",
+     "Bash(proof reference import *)",
+     "Bash(proof fog add *)",
+     "Bash(proof node restate *)",
+     "Bash(proof definition edit *)",
+ )
+-READER_DENIED = (
+-    "Bash(proof node create * --reassign*)",   # taking a claim over with a new node
+-    "Bash(proof node create * --parent*)",     # a node under a parent: an edge made at creation, a split by another name
+-    # a Claim, however it is spelt: the kind before a quoted statement or an option, or quoted itself
+-    'Bash(proof node create * claim "*)', "Bash(proof node create * claim '*)", "Bash(proof node create * claim -*)",
+-    'Bash(proof node create * "claim" *)', "Bash(proof node create * 'claim' *)",
+-    # the typed metadata a Trust rule reads (`identifier has DOI|arXiv`, `source_type in {…}`, ADR-0014): with it, a
+-    # researcher's rule would make the Reader's paraphrase of a result callable with no Reference review of it (audit P2-7)
+-    "Bash(proof reference import * --identifier*)", "Bash(proof reference import * --source-type*)",
+-)
+ 
+ READER_BRIEF = """\
+ You are the **Reader** of a proof project (ADR-0021): you turn the researcher's draft into a proof map — a map of
+@@ -75,10 +66,10 @@ Work this way:
+    draft leaves a statement empty, write the statement it means — what its proof sketch or its use proves — and
+    record that as a departure (point 7).
+ 4. For each piece of literature the draft calls on, the citation, then the result itself as an imported result:
+-   `proof reference import <ref-id> "<title>" <year> --author "<name>" --url <the DOI or arXiv link> --created-by {name}`
+-   (`--author` repeatable). Leave out `--identifier` and `--source-type`: a Trust rule the researcher declares reads
+-   them, and would make your statement of the result callable before anyone reviewed it; they are the researcher's to
+-   give. Then
++   `proof reference import <ref-id> "<title>" <year> --author "<name>" --identifier <the DOI, arXiv id or ISBN>
++   --source-type <research_paper|textbook|monograph|survey|standard_reference|website|other> --url <the link>
++   --created-by {name}` (`--author` repeatable). Give the whole bibliography you can read: it gives your import no
++   trust, which only the researcher's Reference review of it does. Then
+    `proof node create <id> imported_result "<the statement used, as the work states it>" --source-locator "<theorem
+    number, page>" --source-version "<edition, arXiv version>" --reference-id <ref-id> --created-by {name}`.
+    State what the work proves, read from the work itself where you can reach it; where you cannot, say so in the
+@@ -128,7 +119,7 @@ class ReaderContext:
+ 
+     def env(self) -> dict[str, str]:
+         env = {**os.environ, "PROOF_ROOT": str(self.project_root), "PROOF_AGENT_NAME": self.name}
+-        env.pop("PROOF_AGENT_ROLE", None)   # no node role: `proof node progress` is not its record
++        env["PROOF_AGENT_ROLE"] = READER_ROLE   # no node role (`proof node progress` refuses it); proof-cli's limits on node create
+         env["CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR"] = "1"
+         if shutil.which("proof", path=env.get("PATH")) is None:  # the interpreter running proof-cli has it
+             env["PATH"] = os.pathsep.join(filter(None, [env.get("PATH"), str(Path(sys.executable).parent)]))
+@@ -154,7 +145,7 @@ class ReaderContext:
+         writes = [anchored(f"{tool}(./**)", scratch) for tool in ("Edit", "Write", "MultiEdit")]
+         allowed = ["Read", "Glob", "Grep", "WebSearch", "WebFetch", *READER_READS, *READER_WRITES,
+                    *(f"Bash({command} *)" for command in COMPUTATION), *writes, *tools]
+-        denied = [*READER_DENIED, *inline_code_rules(COMPUTATION), *NO_OTHER_PROJECT]
++        denied = [*inline_code_rules(COMPUTATION), *NO_OTHER_PROJECT]
+         return [*args, "--allowedTools", *allowed, "--disallowedTools", *denied]
+ 
+     def codex_args(self, sandbox: str) -> tuple[list[str], list[str]]:
+@@ -166,4 +157,4 @@ class ReaderContext:
+         return ["--search"], exec_args
+ 
+ 
+-__all__ = ["DEPARTURES_FILE", "READER_NAME", "READER_READS", "READER_SCRATCH", "READER_WRITES", "ReaderContext"]
++__all__ = ["DEPARTURES_FILE", "READER_NAME", "READER_READS", "READER_ROLE", "READER_SCRATCH", "READER_WRITES", "ReaderContext"]
+diff --git a/tests/test_reader.py b/tests/test_reader.py
+index dca0f31..ceb1ee7 100644
+--- a/tests/test_reader.py
++++ b/tests/test_reader.py
+@@ -3,7 +3,7 @@ Lemmas, imported results, citations and fog under its own name, files only under
+ 
+ from pathlib import Path
+ 
+-from proof_agents.reader import READER_READS, READER_WRITES, ReaderContext
++from proof_agents.reader import READER_READS, READER_ROLE, READER_WRITES, ReaderContext
+ from proof_agents.proof_agent import NO_OTHER_PROJECT, ProofAgentContext
+ 
+ 
+@@ -16,21 +16,21 @@ def test_the_reader_writes_the_map_through_proof_and_files_only_under_scratch_re
+     for edit, scope in ((False, None), (True, ["Edit(./x.tex)"])):
+         allowed, denied = _allowed_denied(ctx.claude_args(edit, scope))
+         assert set(READER_READS) <= set(allowed) and set(READER_WRITES) <= set(allowed)
+-        for write in ("proof definition add", "proof node create * theorem", "proof node create * lemma",
+-                      "proof node create * imported_result", "proof reference import", "proof fog add"):
++        for write in ("proof definition add", "proof node create", "proof reference import", "proof fog add"):
+             assert any(write in rule for rule in allowed), write
+         files = [rule for rule in allowed if rule.startswith(("Edit", "Write", "MultiEdit"))]
+         scratch = (tmp_path / "scratch" / "reader").resolve().as_posix()
+         assert len(files) == 3 and all(rule.endswith(f"/{scratch}/**)") for rule in files), files
+         assert "Edit(./x.tex)" not in allowed  # its write scope is its own, whatever the turn's scope says
+         assert all(rule in denied for rule in NO_OTHER_PROJECT) and "Bash(python3 -c *)" in denied
+-        assert any("--reassign" in rule for rule in denied)
++        # its limits on node create and its bibliography are proof-cli's to check (#20), not patterns on the command text
++        assert not any("proof node create" in rule or "proof reference import" in rule for rule in denied)
+ 
+ 
+ def test_the_reader_never_proves_splits_claims_or_decides(tmp_path: Path):
+     allowed, _ = _allowed_denied(ReaderContext(tmp_path).claude_args(True))
+     for forbidden in ("proof node split", "proof node depend", "proof node request-review", "proof node claim", "proof node unassign",
+-                      "proof node progress", "proof review", "proof challenge open", "* claim *", "Bash(proof *)", "Bash(proof node create *)"):
++                      "proof node progress", "proof review", "proof challenge open", "* claim *", "Bash(proof *)", "Bash(proof node *)"):
+         assert not any(forbidden in rule for rule in allowed), forbidden
+ 
+ 
+@@ -55,11 +55,12 @@ def test_started_on_one_library_file_it_reads_that_draft_and_may_reach_its_folde
+     assert inside.count("--add-dir") == 1
+ 
+ 
+-def test_env_roots_it_at_the_project_with_no_node_role(monkeypatch, tmp_path: Path):
++def test_env_roots_it_at_the_project_under_the_reader_role(monkeypatch, tmp_path: Path):
++    """proof-cli#203: the reader role, never a node role inherited from the server's environment."""
+     monkeypatch.setenv("PROOF_AGENT_ROLE", "prover")
+     ctx = ReaderContext(tmp_path, name="r")
+     env = ctx.env()
+-    assert env["PROOF_ROOT"] == str(tmp_path) and env["PROOF_AGENT_NAME"] == "r" and "PROOF_AGENT_ROLE" not in env
++    assert env["PROOF_ROOT"] == str(tmp_path) and env["PROOF_AGENT_NAME"] == "r" and env["PROOF_AGENT_ROLE"] == READER_ROLE == "reader"
+     assert not ctx.compiles and ctx.writes_files is True
+     before, after = ctx.codex_args("workspace-write")
+     assert before == ["--search"] and "--add-dir" in after and str(tmp_path) in after
+@@ -77,13 +78,11 @@ def test_every_command_it_is_briefed_to_run_is_one_its_permissions_allow(tmp_pat
+         'proof definition add def_height "The height $h(x)$ …" --term "Height" --created-by reader-1',
+         'proof node create thm_main theorem "Horocycle orbits equidistribute" --definition def_height --dependency lem_height --created-by reader-1',
+         'proof node create lem_height lemma "The height is proper" --created-by reader-1',
+-        'proof reference import ref_ratner "On Raghunathan\'s measure conjecture" 1991 --author "M. Ratner" --url https://doi.org/10.2307/2944357 --created-by reader-1',
++        'proof reference import ref_ratner "On Raghunathan\'s measure conjecture" 1991 --author "M. Ratner" --identifier 10.2307/2944357 --source-type research_paper --url https://doi.org/10.2307/2944357 --created-by reader-1',
+         'proof node create imp_ratner imported_result "Every ergodic measure is homogeneous" --source-locator "Thm 1" --source-version "Ann. 1991" --reference-id ref_ratner --created-by reader-1',
+         'proof fog add "Uniformity in p of the rate" --near thm_main --created-by reader-1',
+     ):
+         assert any(fnmatch.fnmatchcase(command, rule) for rule in rules), command
+-    claim = 'proof node create clm_1 claim "Something" --created-by reader-1'
+-    assert not any(fnmatch.fnmatchcase(claim, rule) for rule in rules)
+ 
+ 
+ def _permitted(command, allowed, denied):
+@@ -112,22 +111,17 @@ def test_every_agent_runs_with_its_own_name_as_proof_agent_name_whatever_the_env
+     assert re.search(r"`proof reference import <ref-id>[^`]*--created-by reader-1`", brief), brief
+ 
+ 
+-def test_the_reader_creates_no_claim_and_no_child_whatever_its_statement_says(tmp_path: Path):
+-    """P2-2: `*` matches spaces, so `create * theorem *` let a Claim through whose statement names a theorem; the kind is
+-    matched where it stands, before the quoted statement, and a create under a parent is refused."""
++def test_its_permissions_no_longer_read_the_statement_text(tmp_path: Path):
++    """#20 (audit, the third trade-off): the raw `claim "` match is gone, so a statement quoting it is permitted; a Claim,
++    --parent and --reassign reach proof-cli, which refuses them under the reader role (test_reader_cli.py)."""
+     allowed, denied = _allowed_denied(ReaderContext(tmp_path, name="reader-1").claude_args(True))
+-    for command in ('proof node create c1 claim "By the theorem of Ratner, every orbit closure is homogeneous" --created-by reader-1',
+-                    'proof node create c1 claim "A lemma" --created-by reader-1',
+-                    "proof node create c1 claim 'By the theorem \"x\"' --created-by reader-1",
+-                    'proof node create c1 claim --created-by reader-1 "By the theorem "',
+-                    'proof node create c1 "claim" "By the theorem of Ratner"',
+-                    'proof node create c1 lemma "Height bound" --parent thm_main --created-by reader-1',
+-                    'proof node create c1 lemma "Height bound" --created-by reader-1 --parent=thm_main'):
+-        assert not _permitted(command, allowed, denied), command
+-    for command in ('proof node create thm_main theorem "Horocycle orbits equidistribute" --created-by reader-1',
+-                    'proof node create lem_h lemma "By the theorem of Ratner, the height is proper" --dependency imp_r --created-by reader-1',
++    for command in ('proof node create lem_q lemma "By Ratner, every orbit closure is a claim \\"homogeneous\\"" --created-by reader-1',
++                    "proof node create lem_q lemma \"the claim 'x' fails\" --created-by reader-1",
++                    'proof node create thm_main theorem "Horocycle orbits equidistribute" --created-by reader-1',
+                     'proof node create imp_r imported_result "Every ergodic measure is homogeneous" --source-locator "Thm 1" --source-version "1991" --reference-id ref_r --created-by reader-1'):
+         assert _permitted(command, allowed, denied), command
++    for command in ('proof node create c1 lemma "x" --root /elsewhere', 'proof node create c1 lemma "x" --root=/elsewhere'):
++        assert not _permitted(command, allowed, denied), command
+ 
+ 
+ def test_a_second_reader_turn_may_correct_its_own_unfixed_text(tmp_path: Path):
+@@ -141,15 +135,15 @@ def test_a_second_reader_turn_may_correct_its_own_unfixed_text(tmp_path: Path):
+     assert "proof node restate <id>" in brief and "proof definition edit <def-id>" in brief and "--by reader-1" in brief
+ 
+ 
+-def test_the_reader_leaves_out_the_typed_metadata_a_trust_rule_reads(tmp_path: Path):
+-    """P2-7: a Trust rule (`identifier has DOI`, `source_type in {…}`) would make the Reader's paraphrase of a result callable
+-    with no Reference review of it; the Reader gives the link as --url and leaves the typed metadata to the researcher."""
++def test_the_reader_writes_the_full_bibliography(tmp_path: Path):
++    """#20 (ADR-0022): --identifier and --source-type give an agent's import no trust, so the Reader is briefed and permitted
++    to give them; the old P2-7 ban and its "leave out" line are gone."""
+     ctx = ReaderContext(tmp_path, name="reader-1")
+     allowed, denied = _allowed_denied(ctx.claude_args(True))
+     brief = " ".join(ctx.brief().split())
+-    assert "--identifier" in brief and "--source-type" in brief and "Leave out `--identifier`" in brief and "Trust rule" in brief
++    assert "--identifier <the DOI, arXiv id or ISBN>" in brief and "--source-type <research_paper|" in brief
++    assert "Leave out" not in brief and "gives your import no trust" in brief and "Reference review" in brief
+     for command in ('proof reference import ref_r "Title" 1991 --author "M. Ratner" --identifier 10.2307/2944357 --created-by reader-1',
+                     'proof reference import ref_r "Title" 1991 --identifier=arXiv:1234.5678 --created-by reader-1',
+-                    'proof reference import ref_r "Title" 1991 --source-type journal --created-by reader-1'):
+-        assert not _permitted(command, allowed, denied), command
+-    assert _permitted('proof reference import ref_r "Title" 1991 --author "M. Ratner" --url https://doi.org/10.2307/2944357 --created-by reader-1', allowed, denied)
++                    'proof reference import ref_r "Title" 1991 --source-type research_paper --created-by reader-1'):
++        assert _permitted(command, allowed, denied), command
+diff --git a/tests/test_reader_cli.py b/tests/test_reader_cli.py
+new file mode 100644
+index 0000000..0d29d7d
+--- /dev/null
++++ b/tests/test_reader_cli.py
+@@ -0,0 +1,94 @@
++"""Issue #20: the Reader's commands, run through its permissions and then proof-cli itself, in the Reader's environment.
++
++Its limits on `node create` are proof-cli's, on the parsed arguments, under the reader role (proof-cli#203): a statement
++quoting `claim "` is written, and kind=claim, --parent and --reassign are refused. It writes the full bibliography
++(--identifier, --source-type), which gives its import no trust: a Trust rule covers only the researcher's imports
++(ADR-0022, proof-cli#199).
++"""
++
++import json
++import shlex
++from pathlib import Path
++
++import pytest
++from typer.testing import CliRunner
++
++from proof_agents.reader import READER_ROLE, ReaderContext
++
++domain = pytest.importorskip("proof_cli.domain")
++proof_map = pytest.importorskip("proof_cli.proof_map")
++if getattr(domain, "READER_ROLE", None) is None or not hasattr(proof_map, "would_meet_trust_rules"):
++    pytest.skip("needs proof-cli#203 (the reader role) and #199 (a Trust rule covers the researcher's imports)", allow_module_level=True)
++
++from proof_cli.cli import app  # noqa: E402
++from proof_cli.proof_map import create_node, decide_trust_rule, get_node, get_reference_review_state, list_nodes, would_meet_trust_rules  # noqa: E402
++from proof_cli.storage import ensure_project  # noqa: E402
++
++from test_reader import _allowed_denied, _permitted  # noqa: E402
++
++runner = CliRunner()
++
++
++@pytest.fixture
++def reader(tmp_path: Path):
++    store = ensure_project(tmp_path)
++    create_node(store, node_id="thm_main", kind="theorem", statement="Horocycle orbits equidistribute")
++    ctx = ReaderContext(tmp_path, name="reader-1")
++    allowed, denied = _allowed_denied(ctx.claude_args(True))
++
++    def run(command: str) -> tuple[int, dict]:
++        """The command as a Reader's turn runs it: Claude Code's permissions, then `proof` in the Reader's environment."""
++        assert _permitted(command, allowed, denied), command
++        result = runner.invoke(app, [*shlex.split(command)[1:], "--json"], env=ctx.env())
++        return result.exit_code, json.loads(result.output)
++
++    return store, run
++
++
++def test_the_reader_role_is_proof_clis(tmp_path: Path):
++    assert READER_ROLE == domain.READER_ROLE
++    assert ReaderContext(tmp_path).env()["PROOF_AGENT_ROLE"] == domain.READER_ROLE
++
++
++@pytest.mark.parametrize("statement", [
++    'By the theorem of Ratner, every orbit closure is a claim "homogeneous" in his sense',
++    "the claim 'every orbit is closed' fails for p = 2",
++])
++def test_a_statement_quoting_claim_is_written(reader, statement):
++    store, run = reader
++    code, envelope = run(f"proof node create lem_q lemma {shlex.quote(statement)} --created-by reader-1")
++    assert code == 0, envelope
++    node = get_node(store, "lem_q")
++    assert (node.kind.value, node.statement, node.created_by) == ("lemma", statement, "reader-1")
++
++
++@pytest.mark.parametrize("command, option", [
++    ('proof node create c1 claim "A step" --created-by reader-1', "kind=claim"),
++    ('proof node create c1 "claim" "By the theorem of Ratner"', "kind=claim"),
++    ('proof node create c1 claim --created-by reader-1 "By the theorem "', "kind=claim"),
++    ('proof node create c1 lemma "Height bound" --parent thm_main --created-by reader-1', "--parent"),
++    ('proof node create c1 lemma "Height bound" --created-by reader-1 --parent=thm_main', "--parent"),
++    ('proof node create c1 lemma "Height bound" --parent thm_main --reassign --created-by reader-1', "--parent"),
++    ('proof node create c1 lemma "Height bound" --reassign --created-by reader-1', "--reassign"),
++])
++def test_a_claim_a_parent_and_a_reassign_are_still_refused(reader, command, option):
++    store, run = reader
++    code, envelope = run(command)
++    assert code == 1 and (envelope["error"]["code"], envelope["error"]["option"]) == ("READER_ROLE_REFUSED", option)
++    assert [node.id for node in list_nodes(store)] == ["thm_main"] and get_node(store, "thm_main").dependencies == []
++
++
++def test_the_reader_imports_the_full_bibliography_and_its_import_still_reads_unreviewed_under_a_matching_rule(reader):
++    store, run = reader
++    decide_trust_rule(store, "doi-papers", "declare", conditions=[{"kind": "identifier_has_doi"}, {"kind": "source_type_in", "values": ["research_paper"]}],
++                      reviewer="Researcher <researcher@example.org>", rationale="published papers")
++    code, envelope = run('proof reference import ref_ratner "On Raghunathan\'s measure conjecture" 1991 --author "M. Ratner" '
++                         "--identifier 10.2307/2944357 --source-type research_paper --url https://doi.org/10.2307/2944357 --created-by reader-1")
++    assert code == 0, envelope
++    assert (envelope["data"]["identifier"], envelope["data"]["source_type"], envelope["data"]["created_by"]) == ("10.2307/2944357", "research_paper", "reader-1")
++    code, envelope = run('proof node create imp_ratner imported_result "Every ergodic invariant measure is homogeneous" '
++                         '--source-locator "Thm 1" --source-version "Ann. of Math. 1991" --reference-id ref_ratner --created-by reader-1')
++    assert code == 0, envelope
++
++    assert get_reference_review_state(store, "imp_ratner") == "unreviewed"
++    assert would_meet_trust_rules(store, "imp_ratner") == ["doi-papers"]  # shown for its own Reference review, no standing
+-- 
+2.54.0
+

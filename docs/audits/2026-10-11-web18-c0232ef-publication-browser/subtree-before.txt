@@ -1,0 +1,112 @@
+- banner
+  - button "Files sidebar" [ref=e1]
+  - link "Map" [ref=e2]
+  - StaticText "T"
+  - generic
+    - button "Agent" [ref=e4]
+    - combobox "Which CLI runs the node's proof agent: Claude Code or Codex" [expanded=false, ref=e5]: browser18-fixture
+      - MenuListPopup
+        - option "browser18-fixture" [selected, ref=e21]
+  - button "Theme" [ref=e3]
+- main
+  - complementary
+    - generic
+      - heading "Node" [level=3, ref=e10]
+      - generic
+        - paragraph
+          - StaticText "T holds"
+        - StaticText "Ready"
+        - StaticText "open"
+        - StaticText "unreviewed"
+        - StaticText "current"
+        - StaticText "unclaimed"
+        - heading "Depends on" [level=4, ref=e22]
+        - list
+          - listitem [level=1, ref=e29] clickable [cursor:pointer]
+            - StaticText "no dependencies"
+        - paragraph
+          - StaticText "No key-ideas.md yet: a review request needs one (核心思路, 主要步骤, 难点, 未覆盖). The Typesetter drafts it: \"+\" → Ask the agent to… → Typesetter · draft key ideas."
+    - generic
+      - heading "Files" [level=3, ref=e11]
+      - list
+        - listitem [level=1, ref=e23] clickable [cursor:pointer]
+          - StaticText "proof.tex"
+    - generic
+      - heading "Outline Refresh outline" [level=3, ref=e12]
+        - StaticText "Outline"
+        - button "Refresh outline" [ref=e24]
+      - list
+        - listitem "proof.tex:6" [level=1, ref=e25] clickable [cursor:pointer]
+          - StaticText "Thmline 6"
+  - generic
+    - tablist "Centre"
+      - tab "Work log" [selected, ref=e13]
+      - tab "Files" [ref=e14]
+      - generic
+        - button "Compile" [ref=e26]
+          - StaticText "Compile"
+        - button "Draft" [expanded=false, ref=e27]
+          - StaticText "Draft"
+    - generic
+      - region "The agent's run on this node" [ref=e15]
+        - StaticText "Subtree"
+        - StaticText "1 open of 1 node(s) under this one"
+        - StaticText "Total"
+        - spinbutton "Total turns for this Pursue" [ref=e30]: 4
+          - StaticText "4"
+        - StaticText "turns and"
+        - spinbutton "Time limit in minutes for this Pursue" [ref=e31]: 8
+          - StaticText "8"
+        - StaticText "minutes"
+        - StaticText "2 turns per node × 1 open node(s) + 2 structure turn(s) for splits. A node's budget is a ceiling, not a share: Claims a split adds spend what is left of the total."
+        - button "Pursue" [ref=e32]
+        - generic
+          - StaticText "No Agent Is Working On This Node."
+          - paragraph
+            - StaticText "Start it once: it works the node on its own — the Prover finds the proof, the Typesetter writes it, Numerics computes, the Verifier reads it against them — and stops when it requests review or needs you."
+          - paragraph
+            - StaticText "Or have the Decomposer propose a split of this node into the Claims its proof needs; it stops for you to read them on the map and decide."
+          - button "Start agent" [ref=e33]
+          - button "Propose a split" [ref=e34]
+          - combobox "Or one role alone, for one turn" [expanded=false, ref=e35]: all roles
+            - MenuListPopup
+              - option "all roles" [selected, ref=e37]
+              - option "Prover only" [ref=e38]
+              - option "Typesetter only" [ref=e39]
+              - option "Numerics only" [ref=e40]
+              - option "Verifier only" [ref=e41]
+              - option "Decomposer only" [ref=e42]
+          - button "Start" [ref=e36]
+          - status
+        - heading "WORK LOG" [level=3, ref=e28]
+        - list
+          - listitem [level=1]
+            - StaticText "Nothing yet: the work log fills as the agent reports its plan and its steps."
+  - complementary
+    - generic
+      - button "Account and usage limits" [expanded=false, ref=e16]
+      - button "New chat" [ref=e17]
+    - generic
+      - StaticText "This is the node's proof agent: it reads the project, its library and the web, runs\n"
+      - code
+        - StaticText "proof"
+      - StaticText " and computations, and writes this node's proof. Pick Claude Code or Codex CLI above.\nHere you only Ask: read-only questions about the node — the agent works it from its run, in the centre.\nType "
+      - code
+        - StaticText "@"
+      - StaticText " to point it at a file or the selection (or select text and press "
+      - code
+        - StaticText "⌘L"
+      - StaticText ").\nType "
+      - code
+        - StaticText "/"
+      - StaticText " for commands.\nCommits, pushes and non-allowlisted shell commands are not permitted from here."
+    - generic
+      - textbox "A read-only question; the agent is driven from its run above · ↵ send, ⇧↵ newline" [ref=e18]
+      - button "Actions and review" [expanded=false, ref=e19]
+      - button "Send" [ref=e20]
+- contentinfo
+  - generic
+    - button "Problems" [ref=e6]
+    - button "Output" [ref=e7]
+    - button "Diff" [ref=e8]
+    - button "Show/hide panel" [ref=e9]

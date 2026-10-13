@@ -1,0 +1,1426 @@
+{
+  "core": {
+    "integration": {
+      "baseRefOid": "c259da02f2ddb7c255aecf0db3d5ec2af40bb357",
+      "headRefOid": "5a5da1989ca8ea9b33aac73fb62b96ce7cb40fe0",
+      "mergeCommit": {
+        "oid": "d433159214156239e31094d1eaea3b7b991b927f"
+      },
+      "mergedAt": "2026-10-12T16:37:22Z",
+      "number": 217,
+      "state": "MERGED",
+      "statusCheckRollup": [
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-12T16:41:19Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38278602785/job/114910073355",
+          "name": "core-and-studio (ubuntu-24.04, 3.11)",
+          "startedAt": "2026-10-12T16:36:44Z",
+          "status": "COMPLETED",
+          "workflowName": "tests"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-12T16:43:05Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38278602785/job/114910073318",
+          "name": "core-and-studio (ubuntu-24.04, 3.12)",
+          "startedAt": "2026-10-12T16:36:44Z",
+          "status": "COMPLETED",
+          "workflowName": "tests"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "0001-01-01T00:00:00Z",
+          "conclusion": "",
+          "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38278602785/job/114910073239",
+          "name": "core-and-studio (windows-latest, 3.11)",
+          "startedAt": "2026-10-12T16:36:44Z",
+          "status": "IN_PROGRESS",
+          "workflowName": "tests"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "0001-01-01T00:00:00Z",
+          "conclusion": "",
+          "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38278602785/job/114910072917",
+          "name": "core-and-studio (windows-latest, 3.12)",
+          "startedAt": "2026-10-12T16:36:44Z",
+          "status": "IN_PROGRESS",
+          "workflowName": "tests"
+        }
+      ],
+      "url": "https://github.com/DengZhiyuan-math/proof-cli/pull/217"
+    },
+    "master_checks": {
+      "total_count": 4,
+      "check_runs": [
+        {
+          "id": 114910358911,
+          "name": "core-and-studio (ubuntu-24.04, 3.11)",
+          "node_id": "CR_kwDOTZw3DM8AAAAawTDtfw",
+          "head_sha": "d433159214156239e31094d1eaea3b7b991b927f",
+          "external_id": "3116224f-dfc7-50b0-9e67-da0c82d7964c",
+          "url": "https://api.github.com/repos/DengZhiyuan-math/proof-cli/check-runs/114910358911",
+          "html_url": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38278689312/job/114910358911",
+          "details_url": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38278689312/job/114910358911",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T16:37:28Z",
+          "completed_at": "2026-10-12T16:42:57Z",
+          "output": {
+            "title": null,
+            "summary": null,
+            "text": null,
+            "annotations_count": 1,
+            "annotations_url": "https://api.github.com/repos/DengZhiyuan-math/proof-cli/check-runs/114910358911/annotations"
+          },
+          "check_suite": {
+            "id": 103711963354
+          },
+          "app": {
+            "id": 15368,
+            "client_id": "Iv1.05c79e9ad1f6bdfa",
+            "slug": "github-actions",
+            "node_id": "MDM6QXBwMTUzNjg=",
+            "owner": {
+              "login": "github",
+              "id": 9919,
+              "node_id": "MDEyOk9yZ2FuaXphdGlvbjk5MTk=",
+              "avatar_url": "https://avatars.githubusercontent.com/u/9919?v=4",
+              "gravatar_id": "",
+              "url": "https://api.github.com/users/github",
+              "html_url": "https://github.com/github",
+              "followers_url": "https://api.github.com/users/github/followers",
+              "following_url": "https://api.github.com/users/github/following{/other_user}",
+              "gists_url": "https://api.github.com/users/github/gists{/gist_id}",
+              "starred_url": "https://api.github.com/users/github/starred{/owner}{/repo}",
+              "subscriptions_url": "https://api.github.com/users/github/subscriptions",
+              "organizations_url": "https://api.github.com/users/github/orgs",
+              "repos_url": "https://api.github.com/users/github/repos",
+              "events_url": "https://api.github.com/users/github/events{/privacy}",
+              "received_events_url": "https://api.github.com/users/github/received_events",
+              "type": "Organization",
+              "user_view_type": "public",
+              "site_admin": false
+            },
+            "name": "GitHub Actions",
+            "description": "Automate your workflow from idea to production",
+            "external_url": "https://help.github.com/en/actions",
+            "html_url": "https://github.com/apps/github-actions",
+            "created_at": "2018-07-30T09:30:17Z",
+            "updated_at": "2026-06-18T16:17:48Z",
+            "permissions": {
+              "actions": "write",
+              "administration": "read",
+              "artifact_metadata": "write",
+              "attestations": "write",
+              "checks": "write",
+              "code_quality": "write",
+              "contents": "write",
+              "copilot_requests": "write",
+              "deployments": "write",
+              "discussions": "write",
+              "drives": "write",
+              "issues": "write",
+              "merge_queues": "write",
+              "metadata": "read",
+              "models": "read",
+              "packages": "write",
+              "pages": "write",
+              "pull_requests": "write",
+              "repository_hooks": "write",
+              "repository_projects": "write",
+              "security_events": "write",
+              "statuses": "write",
+              "vulnerability_alerts": "read"
+            },
+            "events": [
+              "branch_protection_rule",
+              "check_run",
+              "check_suite",
+              "create",
+              "delete",
+              "deployment",
+              "deployment_status",
+              "discussion",
+              "discussion_comment",
+              "fork",
+              "gollum",
+              "issues",
+              "issue_comment",
+              "label",
+              "merge_group",
+              "milestone",
+              "page_build",
+              "public",
+              "pull_request",
+              "pull_request_review",
+              "pull_request_review_comment",
+              "push",
+              "registry_package",
+              "release",
+              "repository",
+              "repository_dispatch",
+              "status",
+              "watch",
+              "workflow_dispatch",
+              "workflow_run"
+            ]
+          },
+          "pull_requests": []
+        },
+        {
+          "id": 114910358882,
+          "name": "core-and-studio (ubuntu-24.04, 3.12)",
+          "node_id": "CR_kwDOTZw3DM8AAAAawTDtYg",
+          "head_sha": "d433159214156239e31094d1eaea3b7b991b927f",
+          "external_id": "c65448d0-4934-576d-89fc-86d4e31a35dc",
+          "url": "https://api.github.com/repos/DengZhiyuan-math/proof-cli/check-runs/114910358882",
+          "html_url": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38278689312/job/114910358882",
+          "details_url": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38278689312/job/114910358882",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T16:37:28Z",
+          "completed_at": "2026-10-12T16:44:41Z",
+          "output": {
+            "title": null,
+            "summary": null,
+            "text": null,
+            "annotations_count": 1,
+            "annotations_url": "https://api.github.com/repos/DengZhiyuan-math/proof-cli/check-runs/114910358882/annotations"
+          },
+          "check_suite": {
+            "id": 103711963354
+          },
+          "app": {
+            "id": 15368,
+            "client_id": "Iv1.05c79e9ad1f6bdfa",
+            "slug": "github-actions",
+            "node_id": "MDM6QXBwMTUzNjg=",
+            "owner": {
+              "login": "github",
+              "id": 9919,
+              "node_id": "MDEyOk9yZ2FuaXphdGlvbjk5MTk=",
+              "avatar_url": "https://avatars.githubusercontent.com/u/9919?v=4",
+              "gravatar_id": "",
+              "url": "https://api.github.com/users/github",
+              "html_url": "https://github.com/github",
+              "followers_url": "https://api.github.com/users/github/followers",
+              "following_url": "https://api.github.com/users/github/following{/other_user}",
+              "gists_url": "https://api.github.com/users/github/gists{/gist_id}",
+              "starred_url": "https://api.github.com/users/github/starred{/owner}{/repo}",
+              "subscriptions_url": "https://api.github.com/users/github/subscriptions",
+              "organizations_url": "https://api.github.com/users/github/orgs",
+              "repos_url": "https://api.github.com/users/github/repos",
+              "events_url": "https://api.github.com/users/github/events{/privacy}",
+              "received_events_url": "https://api.github.com/users/github/received_events",
+              "type": "Organization",
+              "user_view_type": "public",
+              "site_admin": false
+            },
+            "name": "GitHub Actions",
+            "description": "Automate your workflow from idea to production",
+            "external_url": "https://help.github.com/en/actions",
+            "html_url": "https://github.com/apps/github-actions",
+            "created_at": "2018-07-30T09:30:17Z",
+            "updated_at": "2026-06-18T16:17:48Z",
+            "permissions": {
+              "actions": "write",
+              "administration": "read",
+              "artifact_metadata": "write",
+              "attestations": "write",
+              "checks": "write",
+              "code_quality": "write",
+              "contents": "write",
+              "copilot_requests": "write",
+              "deployments": "write",
+              "discussions": "write",
+              "drives": "write",
+              "issues": "write",
+              "merge_queues": "write",
+              "metadata": "read",
+              "models": "read",
+              "packages": "write",
+              "pages": "write",
+              "pull_requests": "write",
+              "repository_hooks": "write",
+              "repository_projects": "write",
+              "security_events": "write",
+              "statuses": "write",
+              "vulnerability_alerts": "read"
+            },
+            "events": [
+              "branch_protection_rule",
+              "check_run",
+              "check_suite",
+              "create",
+              "delete",
+              "deployment",
+              "deployment_status",
+              "discussion",
+              "discussion_comment",
+              "fork",
+              "gollum",
+              "issues",
+              "issue_comment",
+              "label",
+              "merge_group",
+              "milestone",
+              "page_build",
+              "public",
+              "pull_request",
+              "pull_request_review",
+              "pull_request_review_comment",
+              "push",
+              "registry_package",
+              "release",
+              "repository",
+              "repository_dispatch",
+              "status",
+              "watch",
+              "workflow_dispatch",
+              "workflow_run"
+            ]
+          },
+          "pull_requests": []
+        },
+        {
+          "id": 114910358763,
+          "name": "core-and-studio (windows-latest, 3.11)",
+          "node_id": "CR_kwDOTZw3DM8AAAAawTDs6w",
+          "head_sha": "d433159214156239e31094d1eaea3b7b991b927f",
+          "external_id": "1f584c17-2da8-531e-a438-c6557fc56730",
+          "url": "https://api.github.com/repos/DengZhiyuan-math/proof-cli/check-runs/114910358763",
+          "html_url": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38278689312/job/114910358763",
+          "details_url": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38278689312/job/114910358763",
+          "status": "in_progress",
+          "conclusion": null,
+          "started_at": "2026-10-12T16:37:27Z",
+          "completed_at": null,
+          "output": {
+            "title": null,
+            "summary": null,
+            "text": null,
+            "annotations_count": 0,
+            "annotations_url": "https://api.github.com/repos/DengZhiyuan-math/proof-cli/check-runs/114910358763/annotations"
+          },
+          "check_suite": {
+            "id": 103711963354
+          },
+          "app": {
+            "id": 15368,
+            "client_id": "Iv1.05c79e9ad1f6bdfa",
+            "slug": "github-actions",
+            "node_id": "MDM6QXBwMTUzNjg=",
+            "owner": {
+              "login": "github",
+              "id": 9919,
+              "node_id": "MDEyOk9yZ2FuaXphdGlvbjk5MTk=",
+              "avatar_url": "https://avatars.githubusercontent.com/u/9919?v=4",
+              "gravatar_id": "",
+              "url": "https://api.github.com/users/github",
+              "html_url": "https://github.com/github",
+              "followers_url": "https://api.github.com/users/github/followers",
+              "following_url": "https://api.github.com/users/github/following{/other_user}",
+              "gists_url": "https://api.github.com/users/github/gists{/gist_id}",
+              "starred_url": "https://api.github.com/users/github/starred{/owner}{/repo}",
+              "subscriptions_url": "https://api.github.com/users/github/subscriptions",
+              "organizations_url": "https://api.github.com/users/github/orgs",
+              "repos_url": "https://api.github.com/users/github/repos",
+              "events_url": "https://api.github.com/users/github/events{/privacy}",
+              "received_events_url": "https://api.github.com/users/github/received_events",
+              "type": "Organization",
+              "user_view_type": "public",
+              "site_admin": false
+            },
+            "name": "GitHub Actions",
+            "description": "Automate your workflow from idea to production",
+            "external_url": "https://help.github.com/en/actions",
+            "html_url": "https://github.com/apps/github-actions",
+            "created_at": "2018-07-30T09:30:17Z",
+            "updated_at": "2026-06-18T16:17:48Z",
+            "permissions": {
+              "actions": "write",
+              "administration": "read",
+              "artifact_metadata": "write",
+              "attestations": "write",
+              "checks": "write",
+              "code_quality": "write",
+              "contents": "write",
+              "copilot_requests": "write",
+              "deployments": "write",
+              "discussions": "write",
+              "drives": "write",
+              "issues": "write",
+              "merge_queues": "write",
+              "metadata": "read",
+              "models": "read",
+              "packages": "write",
+              "pages": "write",
+              "pull_requests": "write",
+              "repository_hooks": "write",
+              "repository_projects": "write",
+              "security_events": "write",
+              "statuses": "write",
+              "vulnerability_alerts": "read"
+            },
+            "events": [
+              "branch_protection_rule",
+              "check_run",
+              "check_suite",
+              "create",
+              "delete",
+              "deployment",
+              "deployment_status",
+              "discussion",
+              "discussion_comment",
+              "fork",
+              "gollum",
+              "issues",
+              "issue_comment",
+              "label",
+              "merge_group",
+              "milestone",
+              "page_build",
+              "public",
+              "pull_request",
+              "pull_request_review",
+              "pull_request_review_comment",
+              "push",
+              "registry_package",
+              "release",
+              "repository",
+              "repository_dispatch",
+              "status",
+              "watch",
+              "workflow_dispatch",
+              "workflow_run"
+            ]
+          },
+          "pull_requests": []
+        },
+        {
+          "id": 114910358597,
+          "name": "core-and-studio (windows-latest, 3.12)",
+          "node_id": "CR_kwDOTZw3DM8AAAAawTDsRQ",
+          "head_sha": "d433159214156239e31094d1eaea3b7b991b927f",
+          "external_id": "c40023fe-6545-5fb7-9223-aa0c2cf5ed3a",
+          "url": "https://api.github.com/repos/DengZhiyuan-math/proof-cli/check-runs/114910358597",
+          "html_url": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38278689312/job/114910358597",
+          "details_url": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38278689312/job/114910358597",
+          "status": "in_progress",
+          "conclusion": null,
+          "started_at": "2026-10-12T16:37:27Z",
+          "completed_at": null,
+          "output": {
+            "title": null,
+            "summary": null,
+            "text": null,
+            "annotations_count": 0,
+            "annotations_url": "https://api.github.com/repos/DengZhiyuan-math/proof-cli/check-runs/114910358597/annotations"
+          },
+          "check_suite": {
+            "id": 103711963354
+          },
+          "app": {
+            "id": 15368,
+            "client_id": "Iv1.05c79e9ad1f6bdfa",
+            "slug": "github-actions",
+            "node_id": "MDM6QXBwMTUzNjg=",
+            "owner": {
+              "login": "github",
+              "id": 9919,
+              "node_id": "MDEyOk9yZ2FuaXphdGlvbjk5MTk=",
+              "avatar_url": "https://avatars.githubusercontent.com/u/9919?v=4",
+              "gravatar_id": "",
+              "url": "https://api.github.com/users/github",
+              "html_url": "https://github.com/github",
+              "followers_url": "https://api.github.com/users/github/followers",
+              "following_url": "https://api.github.com/users/github/following{/other_user}",
+              "gists_url": "https://api.github.com/users/github/gists{/gist_id}",
+              "starred_url": "https://api.github.com/users/github/starred{/owner}{/repo}",
+              "subscriptions_url": "https://api.github.com/users/github/subscriptions",
+              "organizations_url": "https://api.github.com/users/github/orgs",
+              "repos_url": "https://api.github.com/users/github/repos",
+              "events_url": "https://api.github.com/users/github/events{/privacy}",
+              "received_events_url": "https://api.github.com/users/github/received_events",
+              "type": "Organization",
+              "user_view_type": "public",
+              "site_admin": false
+            },
+            "name": "GitHub Actions",
+            "description": "Automate your workflow from idea to production",
+            "external_url": "https://help.github.com/en/actions",
+            "html_url": "https://github.com/apps/github-actions",
+            "created_at": "2018-07-30T09:30:17Z",
+            "updated_at": "2026-06-18T16:17:48Z",
+            "permissions": {
+              "actions": "write",
+              "administration": "read",
+              "artifact_metadata": "write",
+              "attestations": "write",
+              "checks": "write",
+              "code_quality": "write",
+              "contents": "write",
+              "copilot_requests": "write",
+              "deployments": "write",
+              "discussions": "write",
+              "drives": "write",
+              "issues": "write",
+              "merge_queues": "write",
+              "metadata": "read",
+              "models": "read",
+              "packages": "write",
+              "pages": "write",
+              "pull_requests": "write",
+              "repository_hooks": "write",
+              "repository_projects": "write",
+              "security_events": "write",
+              "statuses": "write",
+              "vulnerability_alerts": "read"
+            },
+            "events": [
+              "branch_protection_rule",
+              "check_run",
+              "check_suite",
+              "create",
+              "delete",
+              "deployment",
+              "deployment_status",
+              "discussion",
+              "discussion_comment",
+              "fork",
+              "gollum",
+              "issues",
+              "issue_comment",
+              "label",
+              "merge_group",
+              "milestone",
+              "page_build",
+              "public",
+              "pull_request",
+              "pull_request_review",
+              "pull_request_review_comment",
+              "push",
+              "registry_package",
+              "release",
+              "repository",
+              "repository_dispatch",
+              "status",
+              "watch",
+              "workflow_dispatch",
+              "workflow_run"
+            ]
+          },
+          "pull_requests": []
+        }
+      ]
+    },
+    "other_prs": [
+      {
+        "headRefOid": "d4e977fa9c02a5525e0bd2b29a1f0d12639a11c5",
+        "mergeCommit": null,
+        "mergedAt": null,
+        "number": 183,
+        "state": "OPEN",
+        "statusCheckRollup": [
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-12T16:36:25Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38277948101/job/114907915094",
+            "name": "core-and-studio (ubuntu-24.04, 3.11)",
+            "startedAt": "2026-10-12T16:31:09Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          },
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-12T16:37:41Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38277948101/job/114907914373",
+            "name": "core-and-studio (ubuntu-24.04, 3.12)",
+            "startedAt": "2026-10-12T16:31:09Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          },
+          {
+            "__typename": "CheckRun",
+            "completedAt": "0001-01-01T00:00:00Z",
+            "conclusion": "",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38277948101/job/114907914851",
+            "name": "core-and-studio (windows-latest, 3.11)",
+            "startedAt": "2026-10-12T16:31:09Z",
+            "status": "IN_PROGRESS",
+            "workflowName": "tests"
+          },
+          {
+            "__typename": "CheckRun",
+            "completedAt": "0001-01-01T00:00:00Z",
+            "conclusion": "",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38277948101/job/114907914960",
+            "name": "core-and-studio (windows-latest, 3.12)",
+            "startedAt": "2026-10-12T16:31:09Z",
+            "status": "IN_PROGRESS",
+            "workflowName": "tests"
+          }
+        ],
+        "title": "feat: take prism-local context ring, Show here, and no git remote for agents",
+        "url": "https://github.com/DengZhiyuan-math/proof-cli/pull/183"
+      },
+      {
+        "headRefOid": "a7a1c7fdf05baac0107ea0f8622eb61e32a2ff7b",
+        "mergeCommit": {
+          "oid": "a7a1c7fdf05baac0107ea0f8622eb61e32a2ff7b"
+        },
+        "mergedAt": "2026-10-12T16:37:25Z",
+        "number": 184,
+        "state": "MERGED",
+        "statusCheckRollup": [
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-06T20:04:46Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/37522954431/job/112472719718",
+            "name": "core-and-studio (ubuntu-24.04, 3.11)",
+            "startedAt": "2026-10-06T19:58:55Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          },
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-06T20:05:51Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/37522954431/job/112472719658",
+            "name": "core-and-studio (ubuntu-24.04, 3.12)",
+            "startedAt": "2026-10-06T19:58:55Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          },
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-06T20:31:30Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/37522954431/job/112472719438",
+            "name": "core-and-studio (windows-latest, 3.11)",
+            "startedAt": "2026-10-06T19:58:55Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          },
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-06T20:28:25Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/37522954431/job/112472719595",
+            "name": "core-and-studio (windows-latest, 3.12)",
+            "startedAt": "2026-10-06T19:58:56Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          }
+        ],
+        "title": "feat: Definitions — the named text a node's statement is written in (ADR-0020, #132 tier 3)",
+        "url": "https://github.com/DengZhiyuan-math/proof-cli/pull/184"
+      },
+      {
+        "headRefOid": "0c3e1f1cf0bd9048d57ab207d76f60fc3a62e1aa",
+        "mergeCommit": {
+          "oid": "524bf1891370ad79366d7ab40cc83dabaad54e3d"
+        },
+        "mergedAt": "2026-10-12T16:34:05Z",
+        "number": 210,
+        "state": "MERGED",
+        "statusCheckRollup": [
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-12T09:26:43Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38229003439/job/114743532730",
+            "name": "core-and-studio (ubuntu-24.04, 3.11)",
+            "startedAt": "2026-10-12T09:18:10Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          },
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-12T09:32:09Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38229003439/job/114743532912",
+            "name": "core-and-studio (ubuntu-24.04, 3.12)",
+            "startedAt": "2026-10-12T09:18:10Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          },
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-12T10:03:18Z",
+            "conclusion": "CANCELLED",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38229003439/job/114743532811",
+            "name": "core-and-studio (windows-latest, 3.11)",
+            "startedAt": "2026-10-12T09:18:10Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          },
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-12T10:03:18Z",
+            "conclusion": "CANCELLED",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38229003439/job/114743532485",
+            "name": "core-and-studio (windows-latest, 3.12)",
+            "startedAt": "2026-10-12T09:18:10Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          }
+        ],
+        "title": "feat: get_stale_cause says why a node reads potentially-stale; node show carries it",
+        "url": "https://github.com/DengZhiyuan-math/proof-cli/pull/210"
+      },
+      {
+        "headRefOid": "a6d4710bcc3fa42d92728703384b13facc70f257",
+        "mergeCommit": {
+          "oid": "52bc210362b1c17d7ebe63911255f74d1e418e92"
+        },
+        "mergedAt": "2026-10-12T16:34:10Z",
+        "number": 211,
+        "state": "MERGED",
+        "statusCheckRollup": [
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-12T09:59:23Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38232048169/job/114753626865",
+            "name": "core-and-studio (ubuntu-24.04, 3.11)",
+            "startedAt": "2026-10-12T09:46:31Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          },
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-12T10:04:32Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38232048169/job/114753626752",
+            "name": "core-and-studio (ubuntu-24.04, 3.12)",
+            "startedAt": "2026-10-12T09:46:31Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          },
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-12T10:31:38Z",
+            "conclusion": "CANCELLED",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38232048169/job/114753626651",
+            "name": "core-and-studio (windows-latest, 3.11)",
+            "startedAt": "2026-10-12T09:46:31Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          },
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-12T10:31:38Z",
+            "conclusion": "CANCELLED",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38232048169/job/114753626872",
+            "name": "core-and-studio (windows-latest, 3.12)",
+            "startedAt": "2026-10-12T09:46:31Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          }
+        ],
+        "title": "docs: distinguish search routes from proof dependencies",
+        "url": "https://github.com/DengZhiyuan-math/proof-cli/pull/211"
+      },
+      {
+        "headRefOid": "95bce91824d424f7224cc0d4e8f1e04d78b2d6a0",
+        "mergeCommit": {
+          "oid": "5a5da1989ca8ea9b33aac73fb62b96ce7cb40fe0"
+        },
+        "mergedAt": "2026-10-12T16:34:14Z",
+        "number": 212,
+        "state": "MERGED",
+        "statusCheckRollup": [
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-12T13:09:49Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38252674087/job/114822692998",
+            "name": "core-and-studio (ubuntu-24.04, 3.11)",
+            "startedAt": "2026-10-12T13:00:25Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          },
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-12T13:07:02Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38252674087/job/114822692815",
+            "name": "core-and-studio (ubuntu-24.04, 3.12)",
+            "startedAt": "2026-10-12T13:00:25Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          },
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-12T13:34:24Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38252674087/job/114822692816",
+            "name": "core-and-studio (windows-latest, 3.11)",
+            "startedAt": "2026-10-12T13:00:26Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          },
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-12T13:44:49Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38252674087/job/114822692322",
+            "name": "core-and-studio (windows-latest, 3.12)",
+            "startedAt": "2026-10-12T13:00:25Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          }
+        ],
+        "title": "perf: a Review decision's Blocked check reads the chain once, not once per node (ADR-0021)",
+        "url": "https://github.com/DengZhiyuan-math/proof-cli/pull/212"
+      }
+    ]
+  },
+  "agents": {
+    "integration": {
+      "baseRefOid": "dc802c068a4b81f611b2d791b1c5087405c24844",
+      "headRefOid": "8599fcc6f1695b47ccb7a01acee49c3f319ef28e",
+      "mergeCommit": {
+        "oid": "7d3f312269b9868415e06302b97637db1a490220"
+      },
+      "mergedAt": "2026-10-12T16:41:08Z",
+      "number": 29,
+      "state": "MERGED",
+      "statusCheckRollup": [
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-12T16:37:20Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/zeqome/proof-agents/actions/runs/38278608348/job/114910090576",
+          "name": "agents (3.11)",
+          "startedAt": "2026-10-12T16:36:46Z",
+          "status": "COMPLETED",
+          "workflowName": "tests"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-12T16:37:22Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/zeqome/proof-agents/actions/runs/38278608348/job/114910090134",
+          "name": "agents (3.12)",
+          "startedAt": "2026-10-12T16:36:46Z",
+          "status": "COMPLETED",
+          "workflowName": "tests"
+        }
+      ],
+      "url": "https://github.com/zeqome/proof-agents/pull/29"
+    },
+    "master_checks": {
+      "total_count": 2,
+      "check_runs": [
+        {
+          "id": 114911811880,
+          "name": "agents (3.11)",
+          "node_id": "CR_kwDOU7Q5uM8AAAAawUcZKA",
+          "head_sha": "7d3f312269b9868415e06302b97637db1a490220",
+          "external_id": "2c0685a9-6681-5e3d-b0d4-019b4b5a9742",
+          "url": "https://api.github.com/repos/zeqome/proof-agents/check-runs/114911811880",
+          "html_url": "https://github.com/zeqome/proof-agents/actions/runs/38279130779/job/114911811880",
+          "details_url": "https://github.com/zeqome/proof-agents/actions/runs/38279130779/job/114911811880",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T16:41:14Z",
+          "completed_at": "2026-10-12T16:41:53Z",
+          "output": {
+            "title": null,
+            "summary": null,
+            "text": null,
+            "annotations_count": 1,
+            "annotations_url": "https://api.github.com/repos/zeqome/proof-agents/check-runs/114911811880/annotations"
+          },
+          "check_suite": {
+            "id": 103713176013
+          },
+          "app": {
+            "id": 15368,
+            "client_id": "Iv1.05c79e9ad1f6bdfa",
+            "slug": "github-actions",
+            "node_id": "MDM6QXBwMTUzNjg=",
+            "owner": {
+              "login": "github",
+              "id": 9919,
+              "node_id": "MDEyOk9yZ2FuaXphdGlvbjk5MTk=",
+              "avatar_url": "https://avatars.githubusercontent.com/u/9919?v=4",
+              "gravatar_id": "",
+              "url": "https://api.github.com/users/github",
+              "html_url": "https://github.com/github",
+              "followers_url": "https://api.github.com/users/github/followers",
+              "following_url": "https://api.github.com/users/github/following{/other_user}",
+              "gists_url": "https://api.github.com/users/github/gists{/gist_id}",
+              "starred_url": "https://api.github.com/users/github/starred{/owner}{/repo}",
+              "subscriptions_url": "https://api.github.com/users/github/subscriptions",
+              "organizations_url": "https://api.github.com/users/github/orgs",
+              "repos_url": "https://api.github.com/users/github/repos",
+              "events_url": "https://api.github.com/users/github/events{/privacy}",
+              "received_events_url": "https://api.github.com/users/github/received_events",
+              "type": "Organization",
+              "user_view_type": "public",
+              "site_admin": false
+            },
+            "name": "GitHub Actions",
+            "description": "Automate your workflow from idea to production",
+            "external_url": "https://help.github.com/en/actions",
+            "html_url": "https://github.com/apps/github-actions",
+            "created_at": "2018-07-30T09:30:17Z",
+            "updated_at": "2026-06-18T16:17:48Z",
+            "permissions": {
+              "actions": "write",
+              "administration": "read",
+              "artifact_metadata": "write",
+              "attestations": "write",
+              "checks": "write",
+              "code_quality": "write",
+              "contents": "write",
+              "copilot_requests": "write",
+              "deployments": "write",
+              "discussions": "write",
+              "drives": "write",
+              "issues": "write",
+              "merge_queues": "write",
+              "metadata": "read",
+              "models": "read",
+              "packages": "write",
+              "pages": "write",
+              "pull_requests": "write",
+              "repository_hooks": "write",
+              "repository_projects": "write",
+              "security_events": "write",
+              "statuses": "write",
+              "vulnerability_alerts": "read"
+            },
+            "events": [
+              "branch_protection_rule",
+              "check_run",
+              "check_suite",
+              "create",
+              "delete",
+              "deployment",
+              "deployment_status",
+              "discussion",
+              "discussion_comment",
+              "fork",
+              "gollum",
+              "issues",
+              "issue_comment",
+              "label",
+              "merge_group",
+              "milestone",
+              "page_build",
+              "public",
+              "pull_request",
+              "pull_request_review",
+              "pull_request_review_comment",
+              "push",
+              "registry_package",
+              "release",
+              "repository",
+              "repository_dispatch",
+              "status",
+              "watch",
+              "workflow_dispatch",
+              "workflow_run"
+            ]
+          },
+          "pull_requests": []
+        },
+        {
+          "id": 114911811452,
+          "name": "agents (3.12)",
+          "node_id": "CR_kwDOU7Q5uM8AAAAawUcXfA",
+          "head_sha": "7d3f312269b9868415e06302b97637db1a490220",
+          "external_id": "2dfdfcf0-56d6-579f-84d9-da699b2cd05f",
+          "url": "https://api.github.com/repos/zeqome/proof-agents/check-runs/114911811452",
+          "html_url": "https://github.com/zeqome/proof-agents/actions/runs/38279130779/job/114911811452",
+          "details_url": "https://github.com/zeqome/proof-agents/actions/runs/38279130779/job/114911811452",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T16:41:14Z",
+          "completed_at": "2026-10-12T16:41:52Z",
+          "output": {
+            "title": null,
+            "summary": null,
+            "text": null,
+            "annotations_count": 1,
+            "annotations_url": "https://api.github.com/repos/zeqome/proof-agents/check-runs/114911811452/annotations"
+          },
+          "check_suite": {
+            "id": 103713176013
+          },
+          "app": {
+            "id": 15368,
+            "client_id": "Iv1.05c79e9ad1f6bdfa",
+            "slug": "github-actions",
+            "node_id": "MDM6QXBwMTUzNjg=",
+            "owner": {
+              "login": "github",
+              "id": 9919,
+              "node_id": "MDEyOk9yZ2FuaXphdGlvbjk5MTk=",
+              "avatar_url": "https://avatars.githubusercontent.com/u/9919?v=4",
+              "gravatar_id": "",
+              "url": "https://api.github.com/users/github",
+              "html_url": "https://github.com/github",
+              "followers_url": "https://api.github.com/users/github/followers",
+              "following_url": "https://api.github.com/users/github/following{/other_user}",
+              "gists_url": "https://api.github.com/users/github/gists{/gist_id}",
+              "starred_url": "https://api.github.com/users/github/starred{/owner}{/repo}",
+              "subscriptions_url": "https://api.github.com/users/github/subscriptions",
+              "organizations_url": "https://api.github.com/users/github/orgs",
+              "repos_url": "https://api.github.com/users/github/repos",
+              "events_url": "https://api.github.com/users/github/events{/privacy}",
+              "received_events_url": "https://api.github.com/users/github/received_events",
+              "type": "Organization",
+              "user_view_type": "public",
+              "site_admin": false
+            },
+            "name": "GitHub Actions",
+            "description": "Automate your workflow from idea to production",
+            "external_url": "https://help.github.com/en/actions",
+            "html_url": "https://github.com/apps/github-actions",
+            "created_at": "2018-07-30T09:30:17Z",
+            "updated_at": "2026-06-18T16:17:48Z",
+            "permissions": {
+              "actions": "write",
+              "administration": "read",
+              "artifact_metadata": "write",
+              "attestations": "write",
+              "checks": "write",
+              "code_quality": "write",
+              "contents": "write",
+              "copilot_requests": "write",
+              "deployments": "write",
+              "discussions": "write",
+              "drives": "write",
+              "issues": "write",
+              "merge_queues": "write",
+              "metadata": "read",
+              "models": "read",
+              "packages": "write",
+              "pages": "write",
+              "pull_requests": "write",
+              "repository_hooks": "write",
+              "repository_projects": "write",
+              "security_events": "write",
+              "statuses": "write",
+              "vulnerability_alerts": "read"
+            },
+            "events": [
+              "branch_protection_rule",
+              "check_run",
+              "check_suite",
+              "create",
+              "delete",
+              "deployment",
+              "deployment_status",
+              "discussion",
+              "discussion_comment",
+              "fork",
+              "gollum",
+              "issues",
+              "issue_comment",
+              "label",
+              "merge_group",
+              "milestone",
+              "page_build",
+              "public",
+              "pull_request",
+              "pull_request_review",
+              "pull_request_review_comment",
+              "push",
+              "registry_package",
+              "release",
+              "repository",
+              "repository_dispatch",
+              "status",
+              "watch",
+              "workflow_dispatch",
+              "workflow_run"
+            ]
+          },
+          "pull_requests": []
+        }
+      ]
+    },
+    "other_prs": [
+      {
+        "headRefOid": "98416ea0458b486e8dba6d9cb82ffce722410079",
+        "mergeCommit": null,
+        "mergedAt": null,
+        "number": 8,
+        "state": "CLOSED",
+        "statusCheckRollup": [
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-06T19:10:32Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/zeqome/proof-agents/actions/runs/37516907180/job/112452079338",
+            "name": "agents (3.11)",
+            "startedAt": "2026-10-06T19:10:09Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          },
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-06T19:10:35Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/zeqome/proof-agents/actions/runs/37516907180/job/112452078908",
+            "name": "agents (3.12)",
+            "startedAt": "2026-10-06T19:10:09Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          }
+        ],
+        "title": "feat: [studio] claude_config_dir — the project's Claude Code profile folder for every agent turn (prism-local 245a535)",
+        "url": "https://github.com/zeqome/proof-agents/pull/8"
+      },
+      {
+        "headRefOid": "544a95f0c27fcb71133a7f0ca421003e34a7ee9c",
+        "mergeCommit": {
+          "oid": "d9719d456fa445abee1d391b36d1f27748342eb2"
+        },
+        "mergedAt": "2026-10-12T16:34:19Z",
+        "number": 27,
+        "state": "MERGED",
+        "statusCheckRollup": [
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-12T07:59:57Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/zeqome/proof-agents/actions/runs/38220850767/job/114716477773",
+            "name": "agents (3.11)",
+            "startedAt": "2026-10-12T07:59:17Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          },
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-12T07:59:52Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/zeqome/proof-agents/actions/runs/38220850767/job/114716478106",
+            "name": "agents (3.12)",
+            "startedAt": "2026-10-12T07:59:17Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          }
+        ],
+        "title": "fix: failure_reason is public, so a host's own turn names why it failed",
+        "url": "https://github.com/zeqome/proof-agents/pull/27"
+      },
+      {
+        "headRefOid": "81dc8c041f6c352cb3016a42f3f3ed9a4d014a87",
+        "mergeCommit": {
+          "oid": "8599fcc6f1695b47ccb7a01acee49c3f319ef28e"
+        },
+        "mergedAt": "2026-10-12T16:34:24Z",
+        "number": 28,
+        "state": "MERGED",
+        "statusCheckRollup": [
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-12T09:47:34Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/zeqome/proof-agents/actions/runs/38232096850/job/114753787330",
+            "name": "agents (3.11)",
+            "startedAt": "2026-10-12T09:46:59Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          },
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-12T09:47:36Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/zeqome/proof-agents/actions/runs/38232096850/job/114753786924",
+            "name": "agents (3.12)",
+            "startedAt": "2026-10-12T09:46:59Z",
+            "status": "COMPLETED",
+            "workflowName": "tests"
+          }
+        ],
+        "title": "fix: clarify Decomposer routes and Verifier final-proof checks",
+        "url": "https://github.com/zeqome/proof-agents/pull/28"
+      }
+    ]
+  },
+  "web": {
+    "integration": {
+      "baseRefOid": "045307a54bf03e8fda9558d9ecd127bdd8dc15f6",
+      "headRefOid": "13db61bfe2bb5747ec0e9ea46d1fcb919f530d15",
+      "mergeCommit": {
+        "oid": "af687b02b7d03dbf5bd2b60062284d8421dfa5c0"
+      },
+      "mergedAt": "2026-10-12T16:45:54Z",
+      "number": 24,
+      "state": "MERGED",
+      "statusCheckRollup": [
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-12T16:38:33Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/zeqome/proof-web/actions/runs/38278795296/job/114910707602",
+          "name": "package",
+          "startedAt": "2026-10-12T16:38:22Z",
+          "status": "COMPLETED",
+          "workflowName": "package"
+        }
+      ],
+      "url": "https://github.com/zeqome/proof-web/pull/24"
+    },
+    "master_checks": {
+      "total_count": 1,
+      "check_runs": [
+        {
+          "id": 114913620016,
+          "name": "package",
+          "node_id": "CR_kwDOU7Q6Fs8AAAAawWKwMA",
+          "head_sha": "af687b02b7d03dbf5bd2b60062284d8421dfa5c0",
+          "external_id": "572d4e69-76f9-5898-8fae-db06451ce70e",
+          "url": "https://api.github.com/repos/zeqome/proof-web/check-runs/114913620016",
+          "html_url": "https://github.com/zeqome/proof-web/actions/runs/38279679375/job/114913620016",
+          "details_url": "https://github.com/zeqome/proof-web/actions/runs/38279679375/job/114913620016",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-12T16:46:00Z",
+          "completed_at": "2026-10-12T16:46:16Z",
+          "output": {
+            "title": null,
+            "summary": null,
+            "text": null,
+            "annotations_count": 1,
+            "annotations_url": "https://api.github.com/repos/zeqome/proof-web/check-runs/114913620016/annotations"
+          },
+          "check_suite": {
+            "id": 103714668344
+          },
+          "app": {
+            "id": 15368,
+            "client_id": "Iv1.05c79e9ad1f6bdfa",
+            "slug": "github-actions",
+            "node_id": "MDM6QXBwMTUzNjg=",
+            "owner": {
+              "login": "github",
+              "id": 9919,
+              "node_id": "MDEyOk9yZ2FuaXphdGlvbjk5MTk=",
+              "avatar_url": "https://avatars.githubusercontent.com/u/9919?v=4",
+              "gravatar_id": "",
+              "url": "https://api.github.com/users/github",
+              "html_url": "https://github.com/github",
+              "followers_url": "https://api.github.com/users/github/followers",
+              "following_url": "https://api.github.com/users/github/following{/other_user}",
+              "gists_url": "https://api.github.com/users/github/gists{/gist_id}",
+              "starred_url": "https://api.github.com/users/github/starred{/owner}{/repo}",
+              "subscriptions_url": "https://api.github.com/users/github/subscriptions",
+              "organizations_url": "https://api.github.com/users/github/orgs",
+              "repos_url": "https://api.github.com/users/github/repos",
+              "events_url": "https://api.github.com/users/github/events{/privacy}",
+              "received_events_url": "https://api.github.com/users/github/received_events",
+              "type": "Organization",
+              "user_view_type": "public",
+              "site_admin": false
+            },
+            "name": "GitHub Actions",
+            "description": "Automate your workflow from idea to production",
+            "external_url": "https://help.github.com/en/actions",
+            "html_url": "https://github.com/apps/github-actions",
+            "created_at": "2018-07-30T09:30:17Z",
+            "updated_at": "2026-06-18T16:17:48Z",
+            "permissions": {
+              "actions": "write",
+              "administration": "read",
+              "artifact_metadata": "write",
+              "attestations": "write",
+              "checks": "write",
+              "code_quality": "write",
+              "contents": "write",
+              "copilot_requests": "write",
+              "deployments": "write",
+              "discussions": "write",
+              "drives": "write",
+              "issues": "write",
+              "merge_queues": "write",
+              "metadata": "read",
+              "models": "read",
+              "packages": "write",
+              "pages": "write",
+              "pull_requests": "write",
+              "repository_hooks": "write",
+              "repository_projects": "write",
+              "security_events": "write",
+              "statuses": "write",
+              "vulnerability_alerts": "read"
+            },
+            "events": [
+              "branch_protection_rule",
+              "check_run",
+              "check_suite",
+              "create",
+              "delete",
+              "deployment",
+              "deployment_status",
+              "discussion",
+              "discussion_comment",
+              "fork",
+              "gollum",
+              "issues",
+              "issue_comment",
+              "label",
+              "merge_group",
+              "milestone",
+              "page_build",
+              "public",
+              "pull_request",
+              "pull_request_review",
+              "pull_request_review_comment",
+              "push",
+              "registry_package",
+              "release",
+              "repository",
+              "repository_dispatch",
+              "status",
+              "watch",
+              "workflow_dispatch",
+              "workflow_run"
+            ]
+          },
+          "pull_requests": []
+        }
+      ]
+    },
+    "other_prs": [
+      {
+        "headRefOid": "97abce7112f9611ca3c82bcf786c9088d0ab2094",
+        "mergeCommit": null,
+        "mergedAt": null,
+        "number": 5,
+        "state": "CLOSED",
+        "statusCheckRollup": [
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-06T18:25:07Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/zeqome/proof-web/actions/runs/37511121416/job/112432219457",
+            "name": "package",
+            "startedAt": "2026-10-06T18:24:57Z",
+            "status": "COMPLETED",
+            "workflowName": "package"
+          }
+        ],
+        "title": "feat: the subtree card names a node the Coordinator will not start again (#132 tier 3 audit)",
+        "url": "https://github.com/zeqome/proof-web/pull/5"
+      },
+      {
+        "headRefOid": "b0c43b85eaf679324ed23196b1eedeecfbef4688",
+        "mergeCommit": {
+          "oid": "864a2c29bd4f41a5344ae7be960b842a1d4aed62"
+        },
+        "mergedAt": "2026-10-12T16:45:56Z",
+        "number": 6,
+        "state": "MERGED",
+        "statusCheckRollup": [
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-06T19:59:27Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/zeqome/proof-web/actions/runs/37522996030/job/112472861596",
+            "name": "package",
+            "startedAt": "2026-10-06T19:59:14Z",
+            "status": "COMPLETED",
+            "workflowName": "package"
+          }
+        ],
+        "title": "feat: Definitions on the node page, the studio panel, the briefing and the node form (proof-cli ADR-0020)",
+        "url": "https://github.com/zeqome/proof-web/pull/6"
+      },
+      {
+        "headRefOid": "4b05462f14b39f5a97e13a0cbfeb1af87f42bf65",
+        "mergeCommit": {
+          "oid": "045307a54bf03e8fda9558d9ecd127bdd8dc15f6"
+        },
+        "mergedAt": "2026-10-12T16:31:37Z",
+        "number": 17,
+        "state": "MERGED",
+        "statusCheckRollup": [
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-10T14:02:00Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/zeqome/proof-web/actions/runs/38058000907/job/114230306603",
+            "name": "package",
+            "startedAt": "2026-10-10T14:01:51Z",
+            "status": "COMPLETED",
+            "workflowName": "package"
+          }
+        ],
+        "title": "docs: README gives the Proof OS's install, all four packages",
+        "url": "https://github.com/zeqome/proof-web/pull/17"
+      },
+      {
+        "headRefOid": "f1a58ceb576bfdaf615b77791da83ad649e16ba9",
+        "mergeCommit": {
+          "oid": "131de17b9211816b333f5b746932154dd9a649f9"
+        },
+        "mergedAt": "2026-10-12T16:34:44Z",
+        "number": 22,
+        "state": "MERGED",
+        "statusCheckRollup": [
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-12T07:59:31Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/zeqome/proof-web/actions/runs/38220854405/job/114716489634",
+            "name": "package",
+            "startedAt": "2026-10-12T07:59:20Z",
+            "status": "COMPLETED",
+            "workflowName": "package"
+          }
+        ],
+        "title": "fix: a Reader turn that failed names why, not its subtype",
+        "url": "https://github.com/zeqome/proof-web/pull/22"
+      },
+      {
+        "headRefOid": "4e826fffcceb643b2baea3e736e80076cdaa674c",
+        "mergeCommit": {
+          "oid": "13db61bfe2bb5747ec0e9ea46d1fcb919f530d15"
+        },
+        "mergedAt": "2026-10-12T16:36:50Z",
+        "number": 23,
+        "state": "MERGED",
+        "statusCheckRollup": [
+          {
+            "__typename": "CheckRun",
+            "completedAt": "2026-10-12T16:36:04Z",
+            "conclusion": "SUCCESS",
+            "detailsUrl": "https://github.com/zeqome/proof-web/actions/runs/38278503057/job/114909738617",
+            "name": "package",
+            "startedAt": "2026-10-12T16:35:52Z",
+            "status": "COMPLETED",
+            "workflowName": "package"
+          }
+        ],
+        "title": "fix: Warnings and the work log say why a node may no longer hold",
+        "url": "https://github.com/zeqome/proof-web/pull/23"
+      }
+    ]
+  },
+  "issue197": {
+    "number": 197,
+    "state": "OPEN",
+    "url": "https://github.com/DengZhiyuan-math/proof-cli/issues/197"
+  },
+  "issue132": {
+    "number": 132,
+    "state": "OPEN",
+    "url": "https://github.com/DengZhiyuan-math/proof-cli/issues/132"
+  }
+}

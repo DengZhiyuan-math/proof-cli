@@ -1,0 +1,33 @@
+From b8bc20f2be4a2cf85dd64df195ea1e46c11a10ad Mon Sep 17 00:00:00 2001
+From: Yomathnotcool <zy@zeqome.com>
+Date: Sun, 11 Oct 2026 14:44:42 +0200
+Subject: [PATCH 1/2] fix: register the Pursue limit codes INVALID_LIMITS,
+ BUDGET_SPENT, NO_BUDGET
+
+zeqome/proof-agents#19 (a Pursue's total turns and time limit) refuses with INVALID_LIMITS, BUDGET_SPENT and
+NO_BUDGET, and zeqome/proof-web#18 answers INVALID_LIMITS; none was in ERROR_CODES, so
+test_every_error_code_the_code_raises_is_registered failed on the integration Head built with them.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/proof_cli/errors.py | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/proof_cli/errors.py b/src/proof_cli/errors.py
+index ea86360..8dbc44b 100644
+--- a/src/proof_cli/errors.py
++++ b/src/proof_cli/errors.py
+@@ -234,6 +234,10 @@ ERROR_CODES: dict[str, str] = {
+     "AGENT_INVALID_OPTION": "the model or effort asked for is not one the agent's CLI accepts",
+     "AGENT_NO_USAGE_LIMITS": "this agent backend reports no usage limits to probe",
+     "TURN_CALLED_OFF": "the run was stopped while its turn was being prepared, so no turn started",
++    # -- a Pursue's total turns and time limit, fixed at its Start (zeqome/proof-agents#19, zeqome/proof-web#18) --
++    "INVALID_LIMITS": "a Pursue's limits are a whole number of turns (at least one) and a number of minutes (more than none)",
++    "BUDGET_SPENT": "the Pursue's total turns or its time limit is spent; no new part of it starts",
++    "NO_BUDGET": "no node budget to compute a Pursue's default total from before the Reader states the map",
+ }
+ 
+ 
+-- 
+2.54.0
+

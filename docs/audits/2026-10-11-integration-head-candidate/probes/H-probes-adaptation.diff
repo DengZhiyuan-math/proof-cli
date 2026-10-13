@@ -1,0 +1,11 @@
+64c64
+<         def start(self, provider):
+---
+>         def start(self, provider, **kw):   # adapted: proof-agents#19 passes the shared budget
+70c70,73
+<     pursuit._loop("stub")
+---
+>     pursuit.start("stub", limits={"turns": 10, "minutes": 10})   # adapted: through start(), which fixes the shared budget (proof-agents#19), not _loop alone
+>     deadline = time.monotonic() + 5
+>     while pursuit.active() and time.monotonic() < deadline:
+>         time.sleep(0.01)

@@ -1,0 +1,157 @@
+{
+  "verified_at": "2026-10-12",
+  "audit": {
+    "standards_findings": 0,
+    "spec_findings": 0
+  },
+  "local_agents_tests": {
+    "passed": 199,
+    "failed": 0,
+    "skipped": 0
+  },
+  "provider_calls": 0,
+  "pull_requests": [
+    {
+      "autoMergeRequest": null,
+      "baseRefName": "integ/0021",
+      "baseRefOid": "3dd0a7bde3ad1ea9e040c02b1bff6589a9cf378c",
+      "body": "Define a Search route as one possible way to prove a statement, and distinguish alternative routes from the premises required by a chosen proof. This clarifies why Split dependencies are required together while alternative approaches remain in attempts and memory.\n\nValidation: Standards and Spec audits passed with no findings. The diff is limited to three glossary lines; Acceptance rules and runtime source blobs are unchanged. No model trial was run.\n",
+      "commits": [
+        {
+          "authoredDate": "2026-10-12T09:42:46Z",
+          "authors": [
+            {
+              "email": "125728853+DengZhiyuan-math@users.noreply.github.com",
+              "id": "U_kgDOB354VQ",
+              "login": "DengZhiyuan-math",
+              "name": "Yomathnotcool"
+            }
+          ],
+          "committedDate": "2026-10-12T09:42:46Z",
+          "messageBody": "",
+          "messageHeadline": "docs: distinguish search routes from proof dependencies",
+          "oid": "a6d4710bcc3fa42d92728703384b13facc70f257"
+        }
+      ],
+      "files": [
+        {
+          "path": "CONTEXT.md",
+          "additions": 3,
+          "deletions": 0,
+          "changeType": "MODIFIED"
+        }
+      ],
+      "headRefName": "D_m/define-search-route",
+      "headRefOid": "a6d4710bcc3fa42d92728703384b13facc70f257",
+      "isDraft": false,
+      "mergeStateStatus": "UNSTABLE",
+      "number": 211,
+      "state": "OPEN",
+      "statusCheckRollup": [
+        {
+          "__typename": "CheckRun",
+          "completedAt": "0001-01-01T00:00:00Z",
+          "conclusion": "",
+          "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38232048169/job/114753626865",
+          "name": "core-and-studio (ubuntu-24.04, 3.11)",
+          "startedAt": "2026-10-12T09:46:31Z",
+          "status": "IN_PROGRESS",
+          "workflowName": "tests"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "0001-01-01T00:00:00Z",
+          "conclusion": "",
+          "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38232048169/job/114753626752",
+          "name": "core-and-studio (ubuntu-24.04, 3.12)",
+          "startedAt": "2026-10-12T09:46:31Z",
+          "status": "IN_PROGRESS",
+          "workflowName": "tests"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "0001-01-01T00:00:00Z",
+          "conclusion": "",
+          "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38232048169/job/114753626651",
+          "name": "core-and-studio (windows-latest, 3.11)",
+          "startedAt": "2026-10-12T09:46:31Z",
+          "status": "IN_PROGRESS",
+          "workflowName": "tests"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "0001-01-01T00:00:00Z",
+          "conclusion": "",
+          "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38232048169/job/114753626872",
+          "name": "core-and-studio (windows-latest, 3.12)",
+          "startedAt": "2026-10-12T09:46:31Z",
+          "status": "IN_PROGRESS",
+          "workflowName": "tests"
+        }
+      ],
+      "title": "docs: distinguish search routes from proof dependencies",
+      "url": "https://github.com/DengZhiyuan-math/proof-cli/pull/211"
+    },
+    {
+      "autoMergeRequest": null,
+      "baseRefName": "integ/0021",
+      "baseRefOid": "3ff0a7121e82b3c8eb1153c7bc1e296c96a36c69",
+      "body": "A Decomposer can otherwise turn two alternative approaches into Claims and make both required by the parent. Its shared brief now selects one search route, adds only that route's necessary premises, and preserves alternatives as notes and existing progress records. The constraint applies to standalone and Pursue turns.\n\nThe Verifier now reads the final proof and key-ideas summary together for omitted assumptions, changes to quantifiers or scope, and hidden Conditional support. Tool permissions, write scopes, commands, the run state machine, and researcher Acceptance remain unchanged.\n\nValidation: Standards and Spec audits passed with no findings; all 10 role/Pursue contexts retained identical Claude/Codex arguments and command sheets; full agents suite passed (199 tests). No model trial was run.\n\nRelated glossary: DengZhiyuan-math/proof-cli#211.\n",
+      "commits": [
+        {
+          "authoredDate": "2026-10-12T09:42:47Z",
+          "authors": [
+            {
+              "email": "125728853+DengZhiyuan-math@users.noreply.github.com",
+              "id": "U_kgDOB354VQ",
+              "login": "DengZhiyuan-math",
+              "name": "Yomathnotcool"
+            }
+          ],
+          "committedDate": "2026-10-12T09:42:47Z",
+          "messageBody": "",
+          "messageHeadline": "fix: clarify Decomposer routes and Verifier final-proof checks",
+          "oid": "81dc8c041f6c352cb3016a42f3f3ed9a4d014a87"
+        }
+      ],
+      "files": [
+        {
+          "path": "src/proof_agents/proof_agent.py",
+          "additions": 10,
+          "deletions": 2,
+          "changeType": "MODIFIED"
+        }
+      ],
+      "headRefName": "D_m/decomposer-verifier-review",
+      "headRefOid": "81dc8c041f6c352cb3016a42f3f3ed9a4d014a87",
+      "isDraft": false,
+      "mergeStateStatus": "UNSTABLE",
+      "number": 28,
+      "state": "OPEN",
+      "statusCheckRollup": [
+        {
+          "__typename": "CheckRun",
+          "completedAt": "0001-01-01T00:00:00Z",
+          "conclusion": "",
+          "detailsUrl": "https://github.com/zeqome/proof-agents/actions/runs/38232096850/job/114753787330",
+          "name": "agents (3.11)",
+          "startedAt": "2026-10-12T09:46:59Z",
+          "status": "IN_PROGRESS",
+          "workflowName": "tests"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "0001-01-01T00:00:00Z",
+          "conclusion": "",
+          "detailsUrl": "https://github.com/zeqome/proof-agents/actions/runs/38232096850/job/114753786924",
+          "name": "agents (3.12)",
+          "startedAt": "2026-10-12T09:46:59Z",
+          "status": "IN_PROGRESS",
+          "workflowName": "tests"
+        }
+      ],
+      "title": "fix: clarify Decomposer routes and Verifier final-proof checks",
+      "url": "https://github.com/zeqome/proof-agents/pull/28"
+    }
+  ]
+}

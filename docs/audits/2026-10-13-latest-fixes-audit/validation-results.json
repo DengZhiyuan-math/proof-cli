@@ -1,0 +1,67 @@
+{
+  "core": {
+    "head": "c55be72e08735d94c438fbc1f61cb2f4d013f627",
+    "base": "d433159214156239e31094d1eaea3b7b991b927f",
+    "passed": 1172,
+    "skipped": 15,
+    "failed": 0,
+    "errors": 0,
+    "checks": [
+      {
+        "name": "core-and-studio (ubuntu-24.04, 3.11)",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS"
+      },
+      {
+        "name": "core-and-studio (ubuntu-24.04, 3.12)",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS"
+      },
+      {
+        "name": "core-and-studio (windows-latest, 3.11)",
+        "status": "IN_PROGRESS",
+        "conclusion": ""
+      },
+      {
+        "name": "core-and-studio (windows-latest, 3.12)",
+        "status": "IN_PROGRESS",
+        "conclusion": ""
+      }
+    ]
+  },
+  "agents": {
+    "head": "528f2235771320241bcb2e171d2a293404fce45b",
+    "base": "7d3f312269b9868415e06302b97637db1a490220",
+    "passed": 229,
+    "skipped": 0,
+    "failed": 0,
+    "errors": 0,
+    "checks": [
+      {
+        "name": "agents (3.11)",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS"
+      },
+      {
+        "name": "agents (3.12)",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS"
+      }
+    ]
+  },
+  "web": {
+    "head": "5667befee615dfdbd7336affd6c069b799e84ebc",
+    "base": "af687b02b7d03dbf5bd2b60062284d8421dfa5c0",
+    "passed": 839,
+    "skipped": 1,
+    "failed": 0,
+    "errors": 0,
+    "checks": [
+      {
+        "name": "package",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS"
+      }
+    ]
+  }
+}

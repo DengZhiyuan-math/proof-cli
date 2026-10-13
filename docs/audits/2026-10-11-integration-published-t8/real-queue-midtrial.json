@@ -1,0 +1,804 @@
+{
+  "ok": true,
+  "data": {
+    "items": [
+      {
+        "kind": "unfixed",
+        "definition_id": "setting",
+        "term": "Setting: the S-adic homogeneous space X",
+        "text": "Let $G_p=SL_2(\\mathbb{Q}_p)$, $G_\\infty=SL_2(\\mathbb{R})$ ($\\mathbb{R}=\\mathbb{Q}_\\infty$), $G=G_\\infty\\times G_p$, and let $\\Gamma<G$ be a lattice. $X=\\Gamma\\backslash G$, on which $G$ acts by right translation: $\\Gamma(g^z_\\infty,g^z_p)\\cdot(g_\\infty,g_p)=\\Gamma(g^z_\\infty g_\\infty,g^z_p g_p)$. $\\mu_\\infty,\\mu_p$ are Haar measures on $G_\\infty,G_p$, $\\mu=\\mu_\\infty\\otimes\\mu_p$, and $\\bar\\mu$ is the $G$-invariant probability measure on $X$ induced by $\\mu$. $\\mathcal{H}=L^2(X,\\bar\\mu)$ with the right regular representation $\\pi$ of $G$.",
+        "by": "reader",
+        "named_by": [
+          "cuspidal-exceptional-finite",
+          "height-vs-distance",
+          "hilbert-space-decomposition",
+          "main-theorem",
+          "sobolev-embedding-general",
+          "unitary-dual-sl2-qp"
+        ],
+        "depth": 3
+      },
+      {
+        "kind": "unfixed",
+        "definition_id": "subgroups-p",
+        "term": "p-adic subgroups K_p, A_p, H_p, H_p^-",
+        "text": "$K_p=SL_2(\\mathbb{Z}_p)$. $A_p=\\{a_p(\\omega,n)=\\mathrm{diag}(\\omega p^n,\\omega^{-1}p^{-n}) : n\\in\\mathbb{Z}_{\\ge0},\\ \\omega\\in\\mathbb{Z}_p^\\times\\}$ (a subset of the diagonal group, not a subgroup, since $n\\ge0$), $a_n=a_p(1,n)$. $H_p=\\{h_p(t)=\\begin{pmatrix}1&t\\\\0&1\\end{pmatrix}: t\\in\\mathbb{Q}_p\\}$, $H_p^-=\\{h_p^-(t)=\\begin{pmatrix}1&0\\\\t&1\\end{pmatrix}: t\\in\\mathbb{Q}_p\\}$.",
+        "by": "reader",
+        "named_by": [
+          "complementary-series-model",
+          "main-theorem",
+          "matrix-coefficient-decay-p",
+          "matrix-coefficient-decay-product",
+          "tree-spherical-asymptotics"
+        ],
+        "depth": 3
+      },
+      {
+        "kind": "unfixed",
+        "definition_id": "subgroups-real",
+        "term": "Real subgroups, Lie algebra basis, Casimir",
+        "text": "$K_\\infty=SO(2)=\\{r(\\theta)=\\begin{pmatrix}\\cos\\theta&\\sin\\theta\\\\-\\sin\\theta&\\cos\\theta\\end{pmatrix}\\}$, $A_\\infty=\\{a_\\infty(x)=\\mathrm{diag}(e^{x/2},e^{-x/2}): x\\ge0\\}$ (a subset, not a subgroup, since $x\\ge0$), $H_\\infty=\\{h_\\infty(t)=\\begin{pmatrix}1&t\\\\0&1\\end{pmatrix}: t\\in\\mathbb{R}\\}$, $H_\\infty^-=\\{h^-_\\infty(t)=\\begin{pmatrix}1&0\\\\t&1\\end{pmatrix}\\}$. Basis of $\\mathfrak{g}_\\infty=\\mathfrak{sl}_2(\\mathbb{R})$: $Y=\\mathrm{diag}(1,-1)$, $X_-=\\begin{pmatrix}0&0\\\\1&0\\end{pmatrix}$, $X_+=\\begin{pmatrix}0&1\\\\0&0\\end{pmatrix}$. For a unitary representation $\\pi$ of $G$ and $Z\\in\\mathfrak{g}_\\infty$, $d\\pi(Z)f=\\lim_{t\\to0}(\\pi(\\exp tZ,1)f-f)/t$. Casimir: $\\Omega_\\infty=-\\frac14(Y^2+2X_+X_-+2X_-X_+)$; $\\Delta=-\\sum_i X_i^2$ for a fixed basis $\\{X_i\\}$ of $\\mathfrak{g}_\\infty$. Burger notation: $a(y)=\\mathrm{diag}(y^{1/2},y^{-1/2})=a_\\infty(\\log y)$ for $y>0$.",
+        "by": "reader",
+        "named_by": [
+          "burger-integral-formula",
+          "main-theorem",
+          "matrix-coefficient-decay-product",
+          "spectral-structure-real"
+        ],
+        "depth": 3
+      },
+      {
+        "kind": "unfixed",
+        "definition_id": "horocycle-average",
+        "term": "Horocycle balls and ergodic average A_B",
+        "text": "$H=H_\\infty\\times H_p$ with Haar measure $\\nu=\\nu_\\infty\\otimes\\nu_p$, $\\nu_\\infty=dt$ and $\\nu_p$ normalised by $\\nu_p(h_p(\\mathbb{Z}_p))=1$. $B_\\infty(R)=\\{h_\\infty(t): |t|\\le R\\}$, $B_p(R)=\\{h_p(t): |t|_p\\le R\\}$, $B=B_\\infty(R_\\infty)\\times B_p(R_p)$. For $f$ on $X$ and $x\\in X$: $A_B(f)(x)=\\frac{1}{\\nu(B)}\\int_B f(x\\cdot(h_\\infty,h_p))\\,d\\nu(h_\\infty,h_p)$. A point $x$ lies on a periodic $H$-orbit if $xH$ is compact.",
+        "by": "reader",
+        "named_by": [
+          "main-theorem"
+        ],
+        "depth": 3
+      },
+      {
+        "kind": "unfixed",
+        "definition_id": "harish-chandra-function",
+        "term": "Harish-Chandra functions Xi_infty, Xi_p",
+        "text": "Harish-Chandra functions. Real: $\\Xi_\\infty(g)=\\frac{1}{2\\pi}\\int_0^{2\\pi}\\|g^{T}(\\cos\\theta,\\sin\\theta)^{T}\\|^{-1}\\,d\\theta$ for $g\\in G_\\infty$ (bi-$K_\\infty$-invariant, $\\Xi_\\infty(1)=1$, $\\Xi_\\infty(a_\\infty(x))\\asymp(1+x)e^{-x/2}$). $p$-adic: $\\Xi_p$ is the bi-$K_p$-invariant function on $G_p$ given on the Bruhat-Tits tree ($(p+1)$-regular, base vertex $o$ fixed by $K_p$) by $\\Xi_p(g)=p^{-m/2}\\big(1+m\\frac{p-1}{p+1}\\big)$, $m=d(o,g o)$; since $d(o,a_n o)=2n$, $\\Xi_p(a_n)=\\frac{p^{-n}}{p+1}\\big((2n+1)(p-1)+2\\big)$.",
+        "by": "reader",
+        "named_by": [
+          "chh-tempered-bound",
+          "emmv-uniform-decay",
+          "main-theorem",
+          "matrix-coefficient-decay-product",
+          "tree-spherical-asymptotics"
+        ],
+        "depth": 3
+      },
+      {
+        "kind": "unfixed",
+        "definition_id": "decay-exponent",
+        "term": "Decay exponents kappa",
+        "text": "Decay exponent of an irreducible unitary representation (of $G_\\infty$ or $G_p$): $\\kappa=1-s$ for the complementary series of parameter $s$ (real: $\\lambda=s(1-s)$ the Casimir eigenvalue, $s\\in(\\frac12,1)$; $p$-adic: $\\gamma^s$, $s\\in(0,1)$ as in the spherical function definition), and $\\kappa=1$ for tempered representations. For $\\pi=\\int^\\oplus_Z\\pi_{\\infty,\\xi}\\otimes\\pi_{p,\\xi}\\,d\\mu_Z(\\xi)$: $\\kappa_{\\infty,\\xi}=1-s_\\infty(\\xi)$, $\\kappa_{p,\\xi}=1-s_p(\\xi)$, and $\\kappa_\\infty=\\operatorname{ess\\,inf}_\\xi\\kappa_{\\infty,\\xi}$, $\\kappa_p=\\operatorname{ess\\,inf}_\\xi\\kappa_{p,\\xi}$ over the nontrivial components.",
+        "by": "reader",
+        "named_by": [
+          "main-theorem",
+          "matrix-coefficient-decay-product"
+        ],
+        "depth": 3
+      },
+      {
+        "kind": "unfixed",
+        "definition_id": "spectral-decomposition",
+        "term": "Spectral decomposition of L^2(X)",
+        "text": "$\\mathcal{H}=L^2(X)=\\int^\\oplus_Z\\mathcal{H}_{\\infty,\\xi}\\otimes\\mathcal{H}_{p,\\xi}\\,d\\mu_Z(\\xi)$, $\\pi=\\int^\\oplus_Z\\pi_{\\infty,\\xi}\\otimes\\pi_{p,\\xi}\\,d\\mu_Z$, each $\\pi_{\\infty,\\xi}$ irreducible unitary of $G_\\infty$, with $K_\\infty$-eigenbasis $\\phi^{(n)}_{\\infty,\\xi}$, $\\pi_{\\infty,\\xi}(r(\\theta))\\phi^{(n)}=e^{in\\theta}\\phi^{(n)}$, $n\\in\\Sigma(\\xi)\\subseteq2\\mathbb{Z}$ (Bargmann). $\\pi_{\\infty,\\xi}(\\Omega_\\infty)=\\lambda(\\xi)\\,\\mathrm{id}$, $\\lambda=s(1-s)$ with $\\mathrm{Re}\\,s\\ge\\frac12$, $\\mathrm{Im}\\,s\\ge0$: $s\\in\\frac12+i\\mathbb{R}$ if $\\lambda\\ge\\frac14$, $s\\in(\\frac12,1]$ if $0\\le\\lambda<\\frac14$, $s\\in\\mathbb{Z}^+$ if $\\lambda<0$. $Z=Z^0\\sqcup Z^{rs}\\sqcup Z^{ct}$ (cuspidal, residual, continuous spectrum, as in Str\u00f6mbergsson 2013): $Z^0\\cup Z^{rs}$ discrete with counting measure; $Z^{rs}$ finite, containing exactly one $\\xi$ with $\\pi_{\\infty,\\xi}$ trivial and $s(\\xi)\\in(\\frac12,1)$ for the others; $s(\\xi)\\in\\frac12+i\\mathbb{R}_{\\ge0}$ (principal series) on $Z^{ct}$. $Z^0_+=\\{\\xi\\in Z^0: s(\\xi)\\in(\\frac12,1)\\}$, $Z^0_-=Z^0\\setminus Z^0_+$. $\\mathcal{H}^0_+,\\mathcal{H}^0_-,\\mathcal{H}^{rs},\\mathcal{H}^{ct}$ are the closed subspaces over $Z^0_+,Z^0_-,Z^{rs},Z^{ct}$, $\\mathcal{H}^0=\\mathcal{H}^0_+\\oplus\\mathcal{H}^0_-$ (cuspidal functions), $\\mathcal{H}_\\xi=\\mathcal{H}_{\\infty,\\xi}\\otimes\\mathcal{H}_{p,\\xi}$. $\\lambda_1=s_1(1-s_1)$ is the smallest Casimir eigenvalue over the nontrivial $\\xi\\in Z^0_+\\cup Z^{rs}$ (assumed to exist, $s_1\\in(\\frac12,1)$).",
+        "by": "reader",
+        "named_by": [
+          "burger-integral-formula",
+          "burger-operator-bounds",
+          "cuspidal-exceptional-finite",
+          "hilbert-space-decomposition",
+          "main-theorem",
+          "sobolev-cuspidal-real",
+          "sobolev-embedding-cuspidal",
+          "sobolev-embedding-residual",
+          "sobolev-residual-real",
+          "spectral-structure-real"
+        ],
+        "depth": 3
+      },
+      {
+        "kind": "unfixed",
+        "definition_id": "sobolev-norm",
+        "term": "Sobolev norm W_k",
+        "text": "For $f\\in\\mathcal{H}$ (smooth vectors $\\mathcal{H}^\\infty$ dense), $\\|f\\|_{W_k}=\\|(I+\\overline{d\\pi(\\Delta)})^{k/2}f\\|_2$, $\\Delta=-\\sum_iX_i^2\\in U(\\mathfrak{g}_\\infty)$ acting through $G_\\infty\\times\\{1\\}$ ($\\overline{d\\pi(\\Delta)}$ is self-adjoint by Nelson); for a pure tensor this is $\\|(I+\\overline{\\pi_\\infty(\\Delta)})^{k/2}f_\\infty\\|\\cdot\\|f_p\\|_2$. $W_k(\\mathcal{H})$ is the space of $f$ with $\\|f\\|_{W_k}<\\infty$. Up to constants, $\\|f\\|^2_{W_k}\\asymp\\int_Z\\sum_{n\\in\\Sigma(\\xi)}(1+n^2+|s(\\xi)|^2)^k|\\langle f_{\\xi},\\phi^{(n)}_{\\infty,\\xi}\\rangle|^2\\,d\\mu_Z(\\xi)$. Only real derivatives enter: $W_k$ measures smoothness in the $G_\\infty$ direction.",
+        "by": "reader",
+        "named_by": [
+          "burger-operator-bounds",
+          "cuspidal-exceptional-finite",
+          "hilbert-space-decomposition",
+          "main-theorem",
+          "sobolev-cuspidal-real",
+          "sobolev-embedding-cuspidal",
+          "sobolev-embedding-general",
+          "sobolev-embedding-residual",
+          "sobolev-residual-real"
+        ],
+        "depth": 3
+      },
+      {
+        "kind": "unfixed",
+        "definition_id": "height-function",
+        "term": "Height function ht",
+        "text": "For $x=\\Gamma(g_\\infty,g_p)\\in X$, let $\\Gamma_{g_p}=\\{\\gamma=(\\gamma_\\infty,\\gamma_p)\\in\\Gamma: \\gamma_p g_p\\in K_p\\}$ and $ht(x)=\\sup_{\\gamma\\in\\Gamma_{g_p}}\\mathrm{Im}(\\gamma_\\infty g_\\infty\\cdot i)$, where $G_\\infty$ acts on the upper half-plane $\\mathbb{H}$ by M\u00f6bius transformations. (Independent of the representative: replacing $(g_\\infty,g_p)$ by $\\delta(g_\\infty,g_p)$, $\\delta\\in\\Gamma$, replaces $\\Gamma_{g_p}$ by $\\Gamma_{g_p}\\delta^{-1}$.) Large height means deep in a cusp.",
+        "by": "reader",
+        "named_by": [
+          "height-vs-distance",
+          "main-theorem",
+          "sobolev-embedding-cuspidal",
+          "sobolev-embedding-general",
+          "sobolev-embedding-residual"
+        ],
+        "depth": 3
+      },
+      {
+        "kind": "unfixed",
+        "definition_id": "smooth-w-invariant",
+        "term": "W-invariant functions and d_W",
+        "text": "For an open compact subgroup $W\\le K_p$, a function $f\\in L^2(X)$ is $W$-invariant if $f(x\\cdot(1,w))=f(x)$ for all $w\\in W$; then $f$ is $K_p$-finite with $d_{K_p}(f)\\le d_W$, where $d_W=[K_p:W]$.",
+        "by": "reader",
+        "named_by": [
+          "main-theorem",
+          "sobolev-embedding-cuspidal",
+          "sobolev-embedding-general",
+          "sobolev-embedding-residual"
+        ],
+        "depth": 3
+      },
+      {
+        "kind": "unfixed",
+        "definition_id": "burger-operators",
+        "term": "Burger operators F_y, S_y, T_y",
+        "text": "Fix $\\mathcal{Y}\\ge1$. For $y\\ge1$, $F_y,S_y:\\mathcal{H}\\to\\mathcal{H}$ are the intertwining operators acting on $\\mathcal{H}_\\xi$ by the scalars $f_y(\\xi)=\\frac{sy^{s-1}-(1-s)y^{-s}}{2s-1}$ if $\\mathrm{Re}\\,s<1,s\\ne\\frac12$; $\\frac{2+\\log y}{2\\sqrt y}$ if $s=\\frac12$; $y^{-s}$ if $s\\in\\mathbb{Z}^+$; and $s_y(\\xi)=\\frac{y^{s-1}-y^{-s}}{2s-1}$ if $\\mathrm{Re}\\,s<1,s\\ne\\frac12$; $\\frac{\\log y}{2\\sqrt y}$ if $s=\\frac12$; $0$ if $s\\in\\mathbb{Z}^+$ ($s=s(\\xi)$). For $y>0$, $T_y$ acts by $t_y(\\xi)=s_y(\\xi)$ if $\\mathrm{Re}\\,s<1,y\\ge1$; $0$ if $\\mathrm{Re}\\,s<1,y<1$; $y^{s-1}\\frac{\\max(1,y)^{1-2s}-\\mathcal{Y}^{1-2s}}{1-2s}$ if $s\\in\\mathbb{Z}^+$.",
+        "by": "reader",
+        "named_by": [
+          "burger-integral-formula",
+          "burger-operator-bounds",
+          "main-theorem"
+        ],
+        "depth": 3
+      },
+      {
+        "node_id": "main-theorem",
+        "node_kind": "theorem",
+        "statement": "Let $\\Gamma<G$ be an irreducible non-cocompact lattice, with $\\lambda_1=s_1(1-s_1)$ and $p$-adic decay exponent $\\kappa_p$ of $L^2_0(X)$. Let $W\\le K_p$ be open compact and $f\\in L^2(X)$ smooth, $W$-invariant, with $\\int_Xf\\,d\\bar\\mu=0$ and $\\|f\\|_{W_4}<\\infty$. Let $x\\in X$ not lie on a periodic $H$-orbit, $T\\ge2$, $n\\ge0$, $B=B_\\infty(T)\\times B_p(p^n)$ and $r=T/ht\\big(x\\cdot(a_\\infty(\\log T),1)\\big)$. Then $|A_B(f)(x)|\\ll_\\Gamma\\Big(r^{-1/2}(\\log T)^2+T^{s_1-1}+T^{-1/2}\\log(T+1)\\Big)\\,\\mu_p(W)^{-1/2}\\,d_W\\,\\nu_p(B_p(p^n))^{-1/2}\\,\\Xi_p(a_n)^{\\kappa_p}\\,\\|f\\|_{W_4}$.",
+        "depth": 3,
+        "kind": "parked",
+        "reason": "needs-human: No split. The statement is false as written: its p-adic factor nu_p(B_p(p^n))^{-1/2} Xi_p(a_n)^{kappa_p} is beaten by an L^2 lower bound (fog-10). For Gamma=SL_2(Z[1/p]), W=K_p, f a lifted Hecke-Maass form and T fixed, ||A_B f||_2 >> nu_p^{-1/2} infinitely often in n, while the claim forces an extra Xi_p(a_n)^{kappa_p}. The researcher must choose the intended p-adic factor. Likely intended: B_p(p^{2n}) with factor Xi_p(a_n)^{kappa_p}, proved by thickening. A split for that reading is drafted in scratch/decomposer/notes.md.",
+        "attempts": []
+      },
+      {
+        "node_id": "burger-integral-formula",
+        "node_kind": "imported_result",
+        "statement": "Let $(\\pi,\\mathcal{H})$ be a unitary representation of $SL_2(\\mathbb{R})$ (no nonzero invariant vectors), $f\\in\\mathcal{H}^\\infty$, $\\mathcal{Y}\\ge1$, $T>0$, $h(t)=h_\\infty(t)$, $a(y)=\\mathrm{diag}(y^{1/2},y^{-1/2})$. Then $\\frac1T\\int_0^T\\pi(h(t))f\\,dt=\\frac1T\\int_0^T\\pi(h(t)a(\\mathcal{Y}))F_{\\mathcal{Y}}f\\,dt-\\frac{1}{2T}\\int_0^T\\pi(h(t)a(\\mathcal{Y}))S_{\\mathcal{Y}}\\,d\\pi(Y)f\\,dt+\\frac1T\\int_0^{\\mathcal{Y}}[1-\\pi(h(T))]\\pi(a(y))T_y\\,d\\pi(X_-)f\\,dy$, the last integral converging in $\\mathcal{H}$.",
+        "depth": 0,
+        "kind": "unfixed",
+        "by": "reader",
+        "assumptions": [],
+        "definitions": [
+          "subgroups-real",
+          "burger-operators",
+          "spectral-decomposition"
+        ]
+      },
+      {
+        "node_id": "burger-integral-formula",
+        "node_kind": "imported_result",
+        "statement": "Let $(\\pi,\\mathcal{H})$ be a unitary representation of $SL_2(\\mathbb{R})$ (no nonzero invariant vectors), $f\\in\\mathcal{H}^\\infty$, $\\mathcal{Y}\\ge1$, $T>0$, $h(t)=h_\\infty(t)$, $a(y)=\\mathrm{diag}(y^{1/2},y^{-1/2})$. Then $\\frac1T\\int_0^T\\pi(h(t))f\\,dt=\\frac1T\\int_0^T\\pi(h(t)a(\\mathcal{Y}))F_{\\mathcal{Y}}f\\,dt-\\frac{1}{2T}\\int_0^T\\pi(h(t)a(\\mathcal{Y}))S_{\\mathcal{Y}}\\,d\\pi(Y)f\\,dt+\\frac1T\\int_0^{\\mathcal{Y}}[1-\\pi(h(T))]\\pi(a(y))T_y\\,d\\pi(X_-)f\\,dy$, the last integral converging in $\\mathcal{H}$.",
+        "depth": 0,
+        "kind": "imported",
+        "citation": {
+          "reference_id": "burgerhorocycle",
+          "missing": false,
+          "title": "Horocycle flow on geometrically finite surfaces",
+          "authors": [
+            "Marc Burger"
+          ],
+          "year": 1990,
+          "identifier": "10.1215/S0012-7094-90-06129-0",
+          "url": "https://doi.org/10.1215/S0012-7094-90-06129-0",
+          "locator": "key lemma (number not read); the form with F_Y, S_Y, T_y is the draft display (equationfromburger)",
+          "version": "Duke Math. J. 61 (1990)"
+        },
+        "would_meet_trust_rule": [],
+        "unchecked": [],
+        "rationale": ""
+      },
+      {
+        "node_id": "burger-operator-bounds",
+        "node_kind": "imported_result",
+        "statement": "With $s=s(\\xi)$ and $f_y,s_y,t_y$ as in the Burger operators: $\\sup_{\\xi\\in Z^0_-\\cup Z^{ct}}|f_y(\\xi)|\\le\\frac{2+\\log y}{2\\sqrt y}$ and $\\sup_{\\xi\\in Z^0_-\\cup Z^{ct}}|s_y(\\xi)|\\le\\frac{\\log y}{\\sqrt y}$ for $y\\ge1$; $\\sup_{\\xi\\in Z^0_-\\cup Z^{ct}}|t_y(\\xi)|\\le\\frac{2\\log(y+10)}{\\sqrt{y+1}}$ for $y\\in(0,\\mathcal{Y}]$. Consequently $F_y,S_y,T_y$ are bounded on $\\mathcal{H}$ and on each $W_k(\\mathcal{H})$, continuous on $\\mathcal{H}^\\infty$, and $y\\mapsto T_y$ is continuous in operator norm on $W_k(\\mathcal{H})$.",
+        "depth": 0,
+        "kind": "unfixed",
+        "by": "reader",
+        "assumptions": [],
+        "definitions": [
+          "burger-operators",
+          "spectral-decomposition",
+          "sobolev-norm"
+        ]
+      },
+      {
+        "node_id": "burger-operator-bounds",
+        "node_kind": "imported_result",
+        "statement": "With $s=s(\\xi)$ and $f_y,s_y,t_y$ as in the Burger operators: $\\sup_{\\xi\\in Z^0_-\\cup Z^{ct}}|f_y(\\xi)|\\le\\frac{2+\\log y}{2\\sqrt y}$ and $\\sup_{\\xi\\in Z^0_-\\cup Z^{ct}}|s_y(\\xi)|\\le\\frac{\\log y}{\\sqrt y}$ for $y\\ge1$; $\\sup_{\\xi\\in Z^0_-\\cup Z^{ct}}|t_y(\\xi)|\\le\\frac{2\\log(y+10)}{\\sqrt{y+1}}$ for $y\\in(0,\\mathcal{Y}]$. Consequently $F_y,S_y,T_y$ are bounded on $\\mathcal{H}$ and on each $W_k(\\mathcal{H})$, continuous on $\\mathcal{H}^\\infty$, and $y\\mapsto T_y$ is continuous in operator norm on $W_k(\\mathcal{H})$.",
+        "depth": 0,
+        "kind": "imported",
+        "citation": {
+          "reference_id": "burgerhorocycle",
+          "missing": false,
+          "title": "Horocycle flow on geometrically finite surfaces",
+          "authors": [
+            "Marc Burger"
+          ],
+          "year": 1990,
+          "identifier": "10.1215/S0012-7094-90-06129-0",
+          "url": "https://doi.org/10.1215/S0012-7094-90-06129-0",
+          "locator": "bounds on f_y, s_y, t_y (number not read); the draft displays (fsboundofintertwiningoperator), (tboundofintertwiningoperator)",
+          "version": "Duke Math. J. 61 (1990)"
+        },
+        "would_meet_trust_rule": [],
+        "unchecked": [],
+        "rationale": ""
+      },
+      {
+        "kind": "unfixed",
+        "definition_id": "tempered-representation",
+        "term": "Tempered representation",
+        "text": "A unitary representation $(\\pi,\\mathcal{H})$ of a locally compact group $L$ is tempered if there is a dense subspace $\\mathcal{V}\\subset\\mathcal{H}$ such that for all $v\\in\\mathcal{V}$ and $\\epsilon>0$, $g\\mapsto\\langle\\pi(g)v,v\\rangle$ lies in $L^{2+\\epsilon}(L)$.",
+        "by": "reader",
+        "named_by": [
+          "chh-tempered-bound",
+          "unitary-dual-sl2-qp"
+        ],
+        "depth": 0
+      },
+      {
+        "kind": "unfixed",
+        "definition_id": "k-finite-dimension",
+        "term": "d_K(v): dimension of the K-span",
+        "text": "For a unitary representation of a group with compact subgroup $K$ and a vector $v$, $d_K(v)=\\dim\\langle K\\cdot v\\rangle$, the dimension of the linear span of $\\pi(K)v$; $v$ is $K$-finite if $d_K(v)<\\infty$.",
+        "by": "reader",
+        "named_by": [
+          "chh-tempered-bound",
+          "complementary-series-model",
+          "emmv-uniform-decay",
+          "matrix-coefficient-decay-p",
+          "matrix-coefficient-decay-product"
+        ],
+        "depth": 0
+      },
+      {
+        "node_id": "chh-tempered-bound",
+        "node_kind": "imported_result",
+        "statement": "Let $L$ be $G_\\infty$ or $G_p$ with maximal compact subgroup $K$ ($K_\\infty$, resp. $K_p$). If $\\pi$ is a tempered unitary representation of $L$ and $v,w$ are $K$-finite, then $|\\langle\\pi(g)v,w\\rangle|\\le(d_K(v)d_K(w))^{1/2}\\|v\\|\\|w\\|\\,\\Xi_L(g)$ for all $g\\in L$.",
+        "depth": 0,
+        "kind": "unfixed",
+        "by": "reader",
+        "assumptions": [],
+        "definitions": [
+          "tempered-representation",
+          "k-finite-dimension",
+          "harish-chandra-function"
+        ]
+      },
+      {
+        "node_id": "chh-tempered-bound",
+        "node_kind": "imported_result",
+        "statement": "Let $L$ be $G_\\infty$ or $G_p$ with maximal compact subgroup $K$ ($K_\\infty$, resp. $K_p$). If $\\pi$ is a tempered unitary representation of $L$ and $v,w$ are $K$-finite, then $|\\langle\\pi(g)v,w\\rangle|\\le(d_K(v)d_K(w))^{1/2}\\|v\\|\\|w\\|\\,\\Xi_L(g)$ for all $g\\in L$.",
+        "depth": 0,
+        "kind": "imported",
+        "citation": {
+          "reference_id": "cowling-haagerup-howe1988",
+          "missing": false,
+          "title": "Almost L2 matrix coefficients",
+          "authors": [
+            "Michael Cowling",
+            "Uffe Haagerup",
+            "Roger Howe"
+          ],
+          "year": 1988,
+          "identifier": "10.1515/crll.1988.387.97",
+          "url": "https://doi.org/10.1515/crll.1988.387.97",
+          "locator": "Theorem 2 (as recalled by the reader; not read)",
+          "version": "J. Reine Angew. Math. 387 (1988)"
+        },
+        "would_meet_trust_rule": [],
+        "unchecked": [
+          {
+            "dependent": "matrix-coefficient-decay-p",
+            "snapshot": 1,
+            "current": true,
+            "evidence_check": "18cb6dac-b1fb-420f-bb55-80051d13720f",
+            "outcome": "passed",
+            "note": "Read proof.tex in full. Steps 0-3: zero vectors; case split by the statement of unitary-dual-sl2-qp; trivial case by Cauchy-Schwarz with dim H=1, d_K=1; tempered case is chh-tempered-bound with L=G_p, g=a_n, and varpi=Xi_p by definition. Step 4 (gamma^s, model from the statement of complementary-series-model, used by statement only): (b) positivity |pi(g)f(k)|<=||f||_inf pi(g)1(k) from kg=bk', checked for I_{+s} and I_{-s}. (c) <pi_s(g)1,1>_s = int pi_{-s}(g)1 by M1=1 and intertwining; the +s version uses L2(K)-symmetry of M from (f); 1 is a K-fixed unit vector, and the K-fixed space is the constants. (d) restriction to P^1(Z_p), levels F_j, L_j = F_j minus F_{j-1}; the K-invariant measure is GL2(Z_p)-invariant, so the L_j are invariant. (e) K(p^i)-orbits are the fibres over P^1(Z/p^i); K(p^{j-1})-fixed vectors separate L_j from lower levels; normality makes this an isomorphism invariant, so each H_tau lies in one L_j. (f) recomputed t_eps w t_eps^{-1} = diag(eps,eps^{-1}) w and t_eps h(x) t_eps^{-1} = h(eps x), so M commutes with GL2(Z_p) acting on P^1(Z_p). Gelfand lemma (flagged by the Typesetter), checked: with base point [1:0], B_j-orbits are the affine chart (v=0), v(c)=1..j-1 and the base point (v=j), so j+1 orbits. v(det(x,y)) for primitive representatives is GL2-invariant (det(g) is a unit) and symmetric, so the orbitals are self-paired and F_j is multiplicity-free with j+1 constituents. The L_0..L_j are nonzero, so each L_i is irreducible; M preserves F_j (it commutes with K(p^j)), so M|L_i = lambda_i, and lambda_i > 0 by positivity of <,>_s. This gives (eq:norms). (g) P_tau H = H_tau, so K-finite vectors lie in I_s; (h) additivity of d_K holds. Step 5: Theta = sum |e_i|^2 is right-K-invariant, hence constant = d, so ||u||_inf <= sqrt(d)||u||_L2; dim<K Mf> <= d_K(f). Step 6: rechecked both placements of M and the exponents (lambda_sigma/lambda_tau)^{1/2} and (lambda_tau/lambda_sigma)^{1/2}; their minimum is <= 1. Step 7: Cauchy-Schwarz, additivity of d_K, <,>_s-orthogonality of the isotypic pieces, and unitary equivalence preserves d_K, norms and varpi. Background: Gelfand's lemma (symmetric orbitals give a commutative Hecke algebra; number of constituents = number of orbitals) and Schur's lemma. The appeals to unitary-dual-sl2-qp and chh-tempered-bound are to their statements and match them exactly; they are unchecked against the sources (Cowling-Haagerup-Howe 1988; dual classification), which are not readable from the project. complementary-series-model is unaccepted and is used by its statement only. tree-spherical-asymptotics is not used."
+          }
+        ],
+        "rationale": ""
+      },
+      {
+        "kind": "unfixed",
+        "definition_id": "spherical-function",
+        "term": "Spherical function varpi_pi",
+        "text": "For an irreducible unitary representation $\\pi$ of $G_p$: if $\\pi$ has a nonzero $K_p$-fixed unit vector $v$, its spherical function is $\\varpi_\\pi(g)=\\langle\\pi(g)v,v\\rangle$. In the bounds below $\\varpi_\\pi$ means: $\\varpi_\\pi=1$ for $\\pi$ trivial, $\\varpi_\\pi=\\Xi_p$ for $\\pi$ tempered, and $\\varpi_\\pi=\\varpi_{\\gamma^s}$, the spherical function of the complementary series representation $\\gamma^s$ ($s\\in(0,1)$), for $\\pi=\\gamma^s$. The complementary series are parametrised so that $\\varpi_{\\gamma^s}(a_n)$ decays like $p^{-n(1-s)}$.",
+        "by": "reader",
+        "named_by": [
+          "complementary-series-model",
+          "matrix-coefficient-decay-p",
+          "tree-spherical-asymptotics",
+          "unitary-dual-sl2-qp"
+        ],
+        "depth": 0
+      },
+      {
+        "node_id": "complementary-series-model",
+        "node_kind": "claim",
+        "statement": "For $s\\in(0,1)$ let $I_s$ be the space of locally constant $f:G_p\\to\\mathbb{C}$ with $f(bg)=|b_{11}|_p^{1+s}f(g)$ for upper triangular $b\\in G_p$, with $G_p$ acting by right translation $\\pi_s$. The intertwining operator $(M_sf)(g)=c_s\\int_{\\mathbb{Q}_p}f(w\\,h_p(x)\\,g)\\,dx$, $w=\\begin{pmatrix}0&-1\\\\1&0\\end{pmatrix}$, converges absolutely on $I_s$, maps $I_s$ to $I_{-s}$ with $M_s\\pi_s(g)=\\pi_{-s}(g)M_s$, and for a constant $c_s>0$ satisfies $M_s\\mathbf{1}=\\mathbf{1}$ ($\\mathbf{1}$ the function in $I_{\\pm s}$ equal to 1 on $K_p$). The form $\\langle f_1,f_2\\rangle_s=\\int_{K_p}(M_sf_1)(k)\\overline{f_2(k)}\\,dk$ (probability Haar measure) is Hermitian and positive definite on $I_s$, and the completion of $(I_s,\\langle,\\rangle_s,\\pi_s)$ is unitarily equivalent to the complementary series $\\gamma^s$ of unitary-dual-sl2-qp and spherical-function.",
+        "depth": 0,
+        "kind": "unfixed",
+        "by": "claude-code",
+        "assumptions": [],
+        "definitions": [
+          "subgroups-p",
+          "k-finite-dimension",
+          "spherical-function"
+        ]
+      },
+      {
+        "node_id": "emmv-uniform-decay",
+        "node_kind": "imported_result",
+        "statement": "Let $\\mathbf{G}$ be a simply connected semisimple group over a number field $F$ as in Theorem 4.1. There is $\\kappa_2>0$ such that for every place $v$, all $K_v$-finite $f_1,f_2\\in L^2(\\mathbf{G}(F)\\backslash\\mathbf{G}(\\mathbb{A}))$ with $\\int f_1=\\int f_2=0$ and all $g_v\\in\\mathbf{G}(F_v)$: $|\\langle\\pi_{g_v}f_1,f_2\\rangle|\\le\\dim\\langle K_v f_1\\rangle^{1/2}\\dim\\langle K_v f_2\\rangle^{1/2}\\|f_1\\|_2\\|f_2\\|_2\\,\\Xi_{G_v}(g_v)^{\\kappa_2}$, where $K_v$ is a good maximal compact open subgroup of $\\mathbf{G}(F_v)$ and $\\Xi_{G_v}$ a Harish-Chandra spherical function; $\\kappa_2$ is independent of $v$.",
+        "depth": 0,
+        "kind": "unfixed",
+        "by": "reader",
+        "assumptions": [],
+        "definitions": [
+          "k-finite-dimension",
+          "harish-chandra-function"
+        ]
+      },
+      {
+        "node_id": "emmv-uniform-decay",
+        "node_kind": "imported_result",
+        "statement": "Let $\\mathbf{G}$ be a simply connected semisimple group over a number field $F$ as in Theorem 4.1. There is $\\kappa_2>0$ such that for every place $v$, all $K_v$-finite $f_1,f_2\\in L^2(\\mathbf{G}(F)\\backslash\\mathbf{G}(\\mathbb{A}))$ with $\\int f_1=\\int f_2=0$ and all $g_v\\in\\mathbf{G}(F_v)$: $|\\langle\\pi_{g_v}f_1,f_2\\rangle|\\le\\dim\\langle K_v f_1\\rangle^{1/2}\\dim\\langle K_v f_2\\rangle^{1/2}\\|f_1\\|_2\\|f_2\\|_2\\,\\Xi_{G_v}(g_v)^{\\kappa_2}$, where $K_v$ is a good maximal compact open subgroup of $\\mathbf{G}(F_v)$ and $\\Xi_{G_v}$ a Harish-Chandra spherical function; $\\kappa_2$ is independent of $v$.",
+        "depth": 0,
+        "kind": "imported",
+        "citation": {
+          "reference_id": "emmv2020propertytau",
+          "missing": false,
+          "title": "Effective equidistribution and property (tau)",
+          "authors": [
+            "Manfred Einsiedler",
+            "Grigory Margulis",
+            "Amir Mohammadi",
+            "Akshay Venkatesh"
+          ],
+          "year": 2020,
+          "identifier": "arXiv:1503.05884",
+          "url": "https://arxiv.org/abs/1503.05884",
+          "locator": "Section 4.3, display (4.1), p. 12",
+          "version": "arXiv:1503.05884v3 (25 Jun 2019)"
+        },
+        "would_meet_trust_rule": [],
+        "unchecked": [],
+        "rationale": ""
+      },
+      {
+        "kind": "unfixed",
+        "definition_id": "injectivity-radius",
+        "term": "Metrics on G, X and injectivity radius",
+        "text": "Fix a left-invariant Riemannian metric $d_{G_\\infty}$ on $G_\\infty$ and a left-invariant metric $d_{G_p}$ inducing the topology of $G_p$; $d_G((g_\\infty,g_p),(g_\\infty^\\prime,g_p^\\prime))=\\max\\{d_{G_\\infty}(g_\\infty,g_\\infty^\\prime),d_{G_p}(g_p,g_p^\\prime)\\}$, and $d_X(\\Gamma g,\\Gamma g^\\prime)=\\inf_{\\gamma\\in\\Gamma}d_G(g,\\gamma g^\\prime)$. $B^G_r=\\{g\\in G: d_G(g,1)<r\\}$, $B^X_r(x)=\\{y: d_X(x,y)<r\\}$. The injectivity radius at $x\\in X$ is $\\rho(x)=\\sup\\{r>0: g\\mapsto x g \\text{ is injective on } B^G_r\\}$; for $r<\\rho(x)$ the map $B^G_r\\to B^X_r(x)$, $g\\mapsto xg$, is an isometry onto its image.",
+        "by": "reader",
+        "named_by": [
+          "height-vs-distance",
+          "local-sobolev-inequality",
+          "sobolev-embedding-general"
+        ],
+        "depth": 0
+      },
+      {
+        "node_id": "height-vs-distance",
+        "node_kind": "lemma",
+        "statement": "Fix $x_0\\in X$. For every $g_p\\in G_p$ there is $C=C(\\Gamma,x_0,g_p)\\ge1$ such that for all $g_\\infty\\in G_\\infty$: $C^{-1}e^{d_X(\\Gamma(g_\\infty,g_p),x_0)}\\le ht(\\Gamma(g_\\infty,g_p))\\le C\\,e^{d_X(\\Gamma(g_\\infty,g_p),x_0)}$.",
+        "depth": 0,
+        "kind": "unfixed",
+        "by": "reader",
+        "assumptions": [],
+        "definitions": [
+          "setting",
+          "injectivity-radius",
+          "height-function"
+        ]
+      },
+      {
+        "node_id": "local-sobolev-inequality",
+        "node_kind": "imported_result",
+        "statement": "Let $M$ be the unit tangent bundle of a finite-area hyperbolic surface (a 3-manifold, locally $SL_2(\\mathbb{R})$). For $0<\\epsilon$ below the injectivity radius at $y\\in M$ there is $C(\\epsilon)$ with $|u(y)|^2\\le C(\\epsilon)\\int_{B(y,\\epsilon)}|u|^2+|du|^2+|\\Delta u|^2$ for all $u\\in W^{2,2}$; in particular $W^{2,2}$ functions are continuous.",
+        "depth": 0,
+        "kind": "unfixed",
+        "by": "reader",
+        "assumptions": [],
+        "definitions": [
+          "injectivity-radius"
+        ]
+      },
+      {
+        "node_id": "local-sobolev-inequality",
+        "node_kind": "imported_result",
+        "statement": "Let $M$ be the unit tangent bundle of a finite-area hyperbolic surface (a 3-manifold, locally $SL_2(\\mathbb{R})$). For $0<\\epsilon$ below the injectivity radius at $y\\in M$ there is $C(\\epsilon)$ with $|u(y)|^2\\le C(\\epsilon)\\int_{B(y,\\epsilon)}|u|^2+|du|^2+|\\Delta u|^2$ for all $u\\in W^{2,2}$; in particular $W^{2,2}$ functions are continuous.",
+        "depth": 0,
+        "kind": "imported",
+        "citation": {
+          "reference_id": "flaminio-forni2003",
+          "missing": false,
+          "title": "Invariant distributions and time averages for horocycle flows",
+          "authors": [
+            "Livio Flaminio",
+            "Giovanni Forni"
+          ],
+          "year": 2003,
+          "identifier": "10.1215/S0012-7094-03-11932-8",
+          "url": "https://doi.org/10.1215/S0012-7094-03-11932-8",
+          "locator": "classical local Sobolev embedding; locator not read",
+          "version": "Duke Math. J. 119 (2003)"
+        },
+        "would_meet_trust_rule": [],
+        "unchecked": [],
+        "rationale": ""
+      },
+      {
+        "node_id": "sobolev-cuspidal-real",
+        "node_kind": "imported_result",
+        "statement": "For a non-cocompact lattice $\\Gamma^\\prime<SL_2(\\mathbb{R})$ and $F$ in the cuspidal subspace with $\\|F\\|_{W_3}<\\infty$: $|F(p)|\\ll_{\\Gamma^\\prime}\\|F\\|_{W_3}\\,Y_{\\Gamma^\\prime}(p)^{-1/2}$ for all $p\\in\\Gamma^\\prime\\backslash SL_2(\\mathbb{R})$, $Y_{\\Gamma^\\prime}$ the invariant height.",
+        "depth": 0,
+        "kind": "unfixed",
+        "by": "reader",
+        "assumptions": [],
+        "definitions": [
+          "sobolev-norm",
+          "spectral-decomposition"
+        ]
+      },
+      {
+        "node_id": "sobolev-cuspidal-real",
+        "node_kind": "imported_result",
+        "statement": "For a non-cocompact lattice $\\Gamma^\\prime<SL_2(\\mathbb{R})$ and $F$ in the cuspidal subspace with $\\|F\\|_{W_3}<\\infty$: $|F(p)|\\ll_{\\Gamma^\\prime}\\|F\\|_{W_3}\\,Y_{\\Gamma^\\prime}(p)^{-1/2}$ for all $p\\in\\Gamma^\\prime\\backslash SL_2(\\mathbb{R})$, $Y_{\\Gamma^\\prime}$ the invariant height.",
+        "depth": 0,
+        "kind": "imported",
+        "citation": {
+          "reference_id": "strombergsson2013deviation",
+          "missing": false,
+          "title": "On the deviation of ergodic averages for horocycle flows",
+          "authors": [
+            "Andreas Str\u00f6mbergsson"
+          ],
+          "year": 2013,
+          "identifier": "10.3934/jmd.2013.7.291",
+          "url": "https://doi.org/10.3934/jmd.2013.7.291",
+          "locator": "Sobolev embedding for cuspidal functions; locator not read (stated as the draft uses it)",
+          "version": "J. Mod. Dyn. 7 (2013), published version"
+        },
+        "would_meet_trust_rule": [],
+        "unchecked": [],
+        "rationale": ""
+      },
+      {
+        "node_id": "sobolev-residual-real",
+        "node_kind": "imported_result",
+        "statement": "For a non-cocompact lattice $\\Gamma^\\prime<SL_2(\\mathbb{R})$, $\\xi\\in Z^{rs}$ with $s=s(\\xi)$, and $F\\in\\mathcal{H}_\\xi$ with $\\|F\\|_{W_3}<\\infty$: $|F(p)|\\ll_{\\Gamma^\\prime}\\|F\\|_{W_3}\\,Y_{\\Gamma^\\prime}(p)^{1-s}$ for all $p$.",
+        "depth": 0,
+        "kind": "unfixed",
+        "by": "reader",
+        "assumptions": [],
+        "definitions": [
+          "sobolev-norm",
+          "spectral-decomposition"
+        ]
+      },
+      {
+        "node_id": "sobolev-residual-real",
+        "node_kind": "imported_result",
+        "statement": "For a non-cocompact lattice $\\Gamma^\\prime<SL_2(\\mathbb{R})$, $\\xi\\in Z^{rs}$ with $s=s(\\xi)$, and $F\\in\\mathcal{H}_\\xi$ with $\\|F\\|_{W_3}<\\infty$: $|F(p)|\\ll_{\\Gamma^\\prime}\\|F\\|_{W_3}\\,Y_{\\Gamma^\\prime}(p)^{1-s}$ for all $p$.",
+        "depth": 0,
+        "kind": "imported",
+        "citation": {
+          "reference_id": "strombergsson2013deviation",
+          "missing": false,
+          "title": "On the deviation of ergodic averages for horocycle flows",
+          "authors": [
+            "Andreas Str\u00f6mbergsson"
+          ],
+          "year": 2013,
+          "identifier": "10.3934/jmd.2013.7.291",
+          "url": "https://doi.org/10.3934/jmd.2013.7.291",
+          "locator": "Sobolev embedding for residual eigenfunctions; locator not read (stated as the draft uses it)",
+          "version": "J. Mod. Dyn. 7 (2013), published version"
+        },
+        "would_meet_trust_rule": [],
+        "unchecked": [],
+        "rationale": ""
+      },
+      {
+        "node_id": "spectral-structure-real",
+        "node_kind": "imported_result",
+        "statement": "For a non-cocompact lattice $\\Gamma^\\prime<SL_2(\\mathbb{R})$, $L^2(\\Gamma^\\prime\\backslash SL_2(\\mathbb{R}))=\\int^\\oplus_Z\\mathcal{H}_\\xi\\,d\\mu_Z(\\xi)$ with $Z=Z^0\\sqcup Z^{rs}\\sqcup Z^{ct}$, where $Z^0\\cup Z^{rs}$ is discrete with counting measure, $Z^{rs}$ is finite and contains exactly one $\\xi$ with $\\pi_\\xi$ trivial, $s(\\xi)\\in(\\frac12,1)$ for the other $\\xi\\in Z^{rs}$, $\\pi_\\xi$ is principal series with $s(\\xi)\\in\\frac12+i\\mathbb{R}_{\\ge0}$ for $\\xi\\in Z^{ct}$, and $Z^0_+=\\{\\xi\\in Z^0: s(\\xi)\\in(\\frac12,1)\\}$ is finite.",
+        "depth": 0,
+        "kind": "unfixed",
+        "by": "reader",
+        "assumptions": [],
+        "definitions": [
+          "subgroups-real",
+          "spectral-decomposition"
+        ]
+      },
+      {
+        "node_id": "spectral-structure-real",
+        "node_kind": "imported_result",
+        "statement": "For a non-cocompact lattice $\\Gamma^\\prime<SL_2(\\mathbb{R})$, $L^2(\\Gamma^\\prime\\backslash SL_2(\\mathbb{R}))=\\int^\\oplus_Z\\mathcal{H}_\\xi\\,d\\mu_Z(\\xi)$ with $Z=Z^0\\sqcup Z^{rs}\\sqcup Z^{ct}$, where $Z^0\\cup Z^{rs}$ is discrete with counting measure, $Z^{rs}$ is finite and contains exactly one $\\xi$ with $\\pi_\\xi$ trivial, $s(\\xi)\\in(\\frac12,1)$ for the other $\\xi\\in Z^{rs}$, $\\pi_\\xi$ is principal series with $s(\\xi)\\in\\frac12+i\\mathbb{R}_{\\ge0}$ for $\\xi\\in Z^{ct}$, and $Z^0_+=\\{\\xi\\in Z^0: s(\\xi)\\in(\\frac12,1)\\}$ is finite.",
+        "depth": 0,
+        "kind": "imported",
+        "citation": {
+          "reference_id": "strombergsson2013deviation",
+          "missing": false,
+          "title": "On the deviation of ergodic averages for horocycle flows",
+          "authors": [
+            "Andreas Str\u00f6mbergsson"
+          ],
+          "year": 2013,
+          "identifier": "10.3934/jmd.2013.7.291",
+          "url": "https://doi.org/10.3934/jmd.2013.7.291",
+          "locator": "section on the spectral decomposition; locator not read",
+          "version": "J. Mod. Dyn. 7 (2013), published version"
+        },
+        "would_meet_trust_rule": [],
+        "unchecked": [],
+        "rationale": ""
+      },
+      {
+        "node_id": "tree-spherical-asymptotics",
+        "node_kind": "imported_result",
+        "statement": "On $G_p$: (a) the Harish-Chandra function satisfies $\\Xi_p(a_n)=\\frac{p^{-n}}{p+1}\\big((2n+1)(p-1)+2\\big)$ for $n\\ge0$; (b) the spherical function of the complementary series $\\gamma^s$, $s\\in(0,1)$, satisfies $\\varpi_{\\gamma^s}(a_n)\\ll\\frac{p^{n(s-1)}}{1-p^{-s}}$.",
+        "depth": 0,
+        "kind": "unfixed",
+        "by": "reader",
+        "assumptions": [],
+        "definitions": [
+          "subgroups-p",
+          "harish-chandra-function",
+          "spherical-function"
+        ]
+      },
+      {
+        "node_id": "tree-spherical-asymptotics",
+        "node_kind": "imported_result",
+        "statement": "On $G_p$: (a) the Harish-Chandra function satisfies $\\Xi_p(a_n)=\\frac{p^{-n}}{p+1}\\big((2n+1)(p-1)+2\\big)$ for $n\\ge0$; (b) the spherical function of the complementary series $\\gamma^s$, $s\\in(0,1)$, satisfies $\\varpi_{\\gamma^s}(a_n)\\ll\\frac{p^{n(s-1)}}{1-p^{-s}}$.",
+        "depth": 0,
+        "kind": "imported",
+        "citation": {
+          "reference_id": "figa-talamanca-nebbia1991",
+          "missing": false,
+          "title": "Harmonic analysis and representation theory for groups acting on homogeneous trees",
+          "authors": [
+            "Alessandro Fig\u00e0-Talamanca",
+            "Claudio Nebbia"
+          ],
+          "year": 1991,
+          "identifier": "ISBN 0-521-42444-5",
+          "url": "https://doi.org/10.1017/CBO9780511662324",
+          "locator": "chapter on spherical functions on homogeneous trees; locator not read",
+          "version": "LMS Lecture Note Series 162, 1991"
+        },
+        "would_meet_trust_rule": [],
+        "unchecked": [],
+        "rationale": ""
+      },
+      {
+        "node_id": "unitary-dual-sl2-qp",
+        "node_kind": "imported_result",
+        "statement": "Every irreducible unitary representation of $G_p=SL_2(\\mathbb{Q}_p)$ is the trivial representation, a tempered representation, or a complementary series representation $\\gamma^s$, $s\\in(0,1)$: $\\widehat{G_p}=\\{1\\}\\cup\\{\\pi \\text{ tempered}\\}\\cup\\{\\gamma^s: s\\in(0,1)\\}$.",
+        "depth": 0,
+        "kind": "unfixed",
+        "by": "reader",
+        "assumptions": [],
+        "definitions": [
+          "setting",
+          "tempered-representation",
+          "spherical-function"
+        ]
+      },
+      {
+        "node_id": "unitary-dual-sl2-qp",
+        "node_kind": "imported_result",
+        "statement": "Every irreducible unitary representation of $G_p=SL_2(\\mathbb{Q}_p)$ is the trivial representation, a tempered representation, or a complementary series representation $\\gamma^s$, $s\\in(0,1)$: $\\widehat{G_p}=\\{1\\}\\cup\\{\\pi \\text{ tempered}\\}\\cup\\{\\gamma^s: s\\in(0,1)\\}$.",
+        "depth": 0,
+        "kind": "imported",
+        "citation": {
+          "reference_id": "gelfand-graev-piatetski1969",
+          "missing": false,
+          "title": "Representation theory and automorphic functions",
+          "authors": [
+            "I. M. Gelfand",
+            "M. I. Graev",
+            "I. I. Piatetski-Shapiro"
+          ],
+          "year": 1969,
+          "identifier": "ISBN 0-12-279506-7",
+          "url": "",
+          "locator": "chapter on irreducible unitary representations of SL(2) over a p-adic field; locator not read",
+          "version": "English translation, W. B. Saunders 1969"
+        },
+        "would_meet_trust_rule": [],
+        "unchecked": [
+          {
+            "dependent": "matrix-coefficient-decay-p",
+            "snapshot": 1,
+            "current": true,
+            "evidence_check": "18cb6dac-b1fb-420f-bb55-80051d13720f",
+            "outcome": "passed",
+            "note": "Read proof.tex in full. Steps 0-3: zero vectors; case split by the statement of unitary-dual-sl2-qp; trivial case by Cauchy-Schwarz with dim H=1, d_K=1; tempered case is chh-tempered-bound with L=G_p, g=a_n, and varpi=Xi_p by definition. Step 4 (gamma^s, model from the statement of complementary-series-model, used by statement only): (b) positivity |pi(g)f(k)|<=||f||_inf pi(g)1(k) from kg=bk', checked for I_{+s} and I_{-s}. (c) <pi_s(g)1,1>_s = int pi_{-s}(g)1 by M1=1 and intertwining; the +s version uses L2(K)-symmetry of M from (f); 1 is a K-fixed unit vector, and the K-fixed space is the constants. (d) restriction to P^1(Z_p), levels F_j, L_j = F_j minus F_{j-1}; the K-invariant measure is GL2(Z_p)-invariant, so the L_j are invariant. (e) K(p^i)-orbits are the fibres over P^1(Z/p^i); K(p^{j-1})-fixed vectors separate L_j from lower levels; normality makes this an isomorphism invariant, so each H_tau lies in one L_j. (f) recomputed t_eps w t_eps^{-1} = diag(eps,eps^{-1}) w and t_eps h(x) t_eps^{-1} = h(eps x), so M commutes with GL2(Z_p) acting on P^1(Z_p). Gelfand lemma (flagged by the Typesetter), checked: with base point [1:0], B_j-orbits are the affine chart (v=0), v(c)=1..j-1 and the base point (v=j), so j+1 orbits. v(det(x,y)) for primitive representatives is GL2-invariant (det(g) is a unit) and symmetric, so the orbitals are self-paired and F_j is multiplicity-free with j+1 constituents. The L_0..L_j are nonzero, so each L_i is irreducible; M preserves F_j (it commutes with K(p^j)), so M|L_i = lambda_i, and lambda_i > 0 by positivity of <,>_s. This gives (eq:norms). (g) P_tau H = H_tau, so K-finite vectors lie in I_s; (h) additivity of d_K holds. Step 5: Theta = sum |e_i|^2 is right-K-invariant, hence constant = d, so ||u||_inf <= sqrt(d)||u||_L2; dim<K Mf> <= d_K(f). Step 6: rechecked both placements of M and the exponents (lambda_sigma/lambda_tau)^{1/2} and (lambda_tau/lambda_sigma)^{1/2}; their minimum is <= 1. Step 7: Cauchy-Schwarz, additivity of d_K, <,>_s-orthogonality of the isotypic pieces, and unitary equivalence preserves d_K, norms and varpi. Background: Gelfand's lemma (symmetric orbitals give a commutative Hecke algebra; number of constituents = number of orbitals) and Schur's lemma. The appeals to unitary-dual-sl2-qp and chh-tempered-bound are to their statements and match them exactly; they are unchecked against the sources (Cowling-Haagerup-Howe 1988; dual classification), which are not readable from the project. complementary-series-model is unaccepted and is used by its statement only. tree-spherical-asymptotics is not used."
+          }
+        ],
+        "rationale": ""
+      },
+      {
+        "node_id": "cuspidal-exceptional-finite",
+        "node_kind": "claim",
+        "statement": "In the setting of the S-adic homogeneous space X, with the spectral decomposition of L^2(X), the set ^0_+=\\{\\xi\\in Z^0: s(\\xi)\\in(\\frac12,1)\\}$ is finite.",
+        "depth": 1,
+        "kind": "unfixed",
+        "by": "claude-code",
+        "assumptions": [],
+        "definitions": [
+          "setting",
+          "spectral-decomposition",
+          "sobolev-norm"
+        ]
+      },
+      {
+        "node_id": "matrix-coefficient-decay-p",
+        "node_kind": "lemma",
+        "statement": "For an irreducible unitary representation $(\\pi,\\mathcal{H})$ of $G_p$ and $K_p$-finite $\\phi,\\psi\\in\\mathcal{H}$: $|\\langle\\pi(a_n)\\phi,\\psi\\rangle|\\le\\sqrt{d_{K_p}(\\phi)d_{K_p}(\\psi)}\\,\\|\\phi\\|_2\\|\\psi\\|_2\\,\\varpi_\\pi(a_n)$ for all $n\\ge0$.",
+        "depth": 1,
+        "kind": "question",
+        "question_id": "q_b88bb657d3",
+        "question": "gamma^s is read as the standard unitarisation of the unramified principal series Ind(|.|^s) via the intertwiner M_s (Claim complementary-series-model), parametrised so varpi decays like p^{-n(1-s)}; alternative: another model/parametrisation of the complementary series, which would change only the Claim.",
+        "by": "claude-code",
+        "role": "prover",
+        "at": "2026-10-11T20:19:45.300767+00:00"
+      },
+      {
+        "node_id": "matrix-coefficient-decay-p",
+        "node_kind": "lemma",
+        "statement": "For an irreducible unitary representation $(\\pi,\\mathcal{H})$ of $G_p$ and $K_p$-finite $\\phi,\\psi\\in\\mathcal{H}$: $|\\langle\\pi(a_n)\\phi,\\psi\\rangle|\\le\\sqrt{d_{K_p}(\\phi)d_{K_p}(\\psi)}\\,\\|\\phi\\|_2\\|\\psi\\|_2\\,\\varpi_\\pi(a_n)$ for all $n\\ge0$.",
+        "depth": 1,
+        "kind": "unfixed",
+        "by": "reader",
+        "assumptions": [],
+        "definitions": [
+          "subgroups-p",
+          "k-finite-dimension",
+          "spherical-function"
+        ]
+      },
+      {
+        "node_id": "sobolev-embedding-general",
+        "node_kind": "lemma",
+        "statement": "Let $W\\le K_p$ be open compact and $F\\in L^2(X)$ $W$-invariant with $\\|F\\|_{W_3}<\\infty$. Then $F$ is continuous and for every $x\\in X$: $|F(x)|\\ll_\\Gamma ht(x)^{1/2}\\,\\mu_p(W)^{-1/2}\\,\\|F\\|_{W_3}$.",
+        "depth": 1,
+        "kind": "unfixed",
+        "by": "reader",
+        "assumptions": [],
+        "definitions": [
+          "setting",
+          "sobolev-norm",
+          "height-function",
+          "injectivity-radius",
+          "smooth-w-invariant"
+        ]
+      },
+      {
+        "node_id": "hilbert-space-decomposition",
+        "node_kind": "lemma",
+        "statement": "$\\mathcal{H}=L^2(X)=\\mathcal{H}^0_+\\oplus\\mathcal{H}^0_-\\oplus\\mathcal{H}^{rs}\\oplus\\mathcal{H}^{ct}$, an orthogonal sum of closed $G$-invariant subspaces, with $Z^0_+$ and $Z^{rs}$ finite; for $f\\in\\mathcal{H}^\\infty$ with components $f_0\\in\\mathcal{H}^0$, $f_{rs}$, $f_{ct}$: $\\|f\\|^2_{W_k}=\\|f_0\\|^2_{W_k}+\\|f_{ct}\\|^2_{W_k}+\\|f_{rs}\\|^2_{W_k}$.",
+        "depth": 2,
+        "kind": "question",
+        "question_id": "q_1f576eeb24",
+        "question": "Finiteness of Z^0_+ is not derivable from spectral-structure-real (that is for lattices in SL_2(R); here Gamma is a lattice in SL_2(R)xSL_2(Q_p), and the per-level finiteness over K_p(p^n)-invariants does not bound the union over n). I split it off as the Claim cuspidal-exceptional-finite and prove the rest directly. Alternative: make finiteness of Z^0_+ a standing hypothesis of the setup (like the assumed existence of lambda_1) and drop it from this statement. Note: the child's statement text lost '$Z' to shell expansion ('^0_+=...'); restating it needed approval this session could not get.",
+        "by": "claude-code",
+        "role": "prover",
+        "at": "2026-10-11T20:09:24.231346+00:00"
+      },
+      {
+        "node_id": "hilbert-space-decomposition",
+        "node_kind": "lemma",
+        "statement": "$\\mathcal{H}=L^2(X)=\\mathcal{H}^0_+\\oplus\\mathcal{H}^0_-\\oplus\\mathcal{H}^{rs}\\oplus\\mathcal{H}^{ct}$, an orthogonal sum of closed $G$-invariant subspaces, with $Z^0_+$ and $Z^{rs}$ finite; for $f\\in\\mathcal{H}^\\infty$ with components $f_0\\in\\mathcal{H}^0$, $f_{rs}$, $f_{ct}$: $\\|f\\|^2_{W_k}=\\|f_0\\|^2_{W_k}+\\|f_{ct}\\|^2_{W_k}+\\|f_{rs}\\|^2_{W_k}$.",
+        "depth": 2,
+        "kind": "unfixed",
+        "by": "reader",
+        "assumptions": [],
+        "definitions": [
+          "setting",
+          "spectral-decomposition",
+          "sobolev-norm"
+        ]
+      },
+      {
+        "node_id": "matrix-coefficient-decay-product",
+        "node_kind": "lemma",
+        "statement": "Let $(\\pi,\\mathcal{H})=\\int^\\oplus_Z\\pi_{\\infty,\\xi}\\otimes\\pi_{p,\\xi}\\,d\\mu_Z$ be a unitary representation of $G=G_\\infty\\times G_p$ with no nonzero $G_\\infty$- or $G_p$-invariant vectors, with decay exponents $\\kappa_\\infty,\\kappa_p$. Then for $K_\\infty\\times K_p$-finite $v,w$, $t\\ge0$, $n\\ge0$: $|\\langle\\pi(a_\\infty(t),a_n)v,w\\rangle|\\le\\sqrt{d_{K_\\infty}(v)d_{K_\\infty}(w)d_{K_p}(v)d_{K_p}(w)}\\,\\|v\\|\\|w\\|\\,\\Xi_\\infty(a_\\infty(t))^{\\kappa_\\infty}\\,\\Xi_p(a_n)^{\\kappa_p}$.",
+        "depth": 2,
+        "kind": "unfixed",
+        "by": "reader",
+        "assumptions": [],
+        "definitions": [
+          "subgroups-p",
+          "subgroups-real",
+          "k-finite-dimension",
+          "harish-chandra-function",
+          "decay-exponent"
+        ]
+      },
+      {
+        "node_id": "sobolev-embedding-cuspidal",
+        "node_kind": "lemma",
+        "statement": "Let $W\\le K_p$ be open compact and $F\\in\\mathcal{H}^0$ (cuspidal) $W$-invariant with $\\|F\\|_{W_3}<\\infty$. Then for every $x\\in X$: $|F(x)|\\ll_\\Gamma\\|F\\|_{W_3}\\,ht(x)^{-1/2}\\,\\mu_p(W)^{-1/2}$.",
+        "depth": 2,
+        "kind": "unfixed",
+        "by": "reader",
+        "assumptions": [],
+        "definitions": [
+          "spectral-decomposition",
+          "sobolev-norm",
+          "height-function",
+          "smooth-w-invariant"
+        ]
+      },
+      {
+        "node_id": "sobolev-embedding-residual",
+        "node_kind": "lemma",
+        "statement": "Let $W\\le K_p$ be open compact, $\\xi\\in Z^{rs}$, $s=s(\\xi)$, and $F\\in\\mathcal{H}_\\xi$ $W$-invariant with $\\|F\\|_{W_3}<\\infty$. Then for every $x\\in X$: $|F(x)|\\ll_\\Gamma\\|F\\|_{W_3}\\,ht(x)^{1-s}\\,\\mu_p(W)^{-1/2}$.",
+        "depth": 2,
+        "kind": "unfixed",
+        "by": "reader",
+        "assumptions": [],
+        "definitions": [
+          "spectral-decomposition",
+          "sobolev-norm",
+          "height-function",
+          "smooth-w-invariant"
+        ]
+      },
+      {
+        "node_id": "main-theorem",
+        "node_kind": "theorem",
+        "statement": "Let $\\Gamma<G$ be an irreducible non-cocompact lattice, with $\\lambda_1=s_1(1-s_1)$ and $p$-adic decay exponent $\\kappa_p$ of $L^2_0(X)$. Let $W\\le K_p$ be open compact and $f\\in L^2(X)$ smooth, $W$-invariant, with $\\int_Xf\\,d\\bar\\mu=0$ and $\\|f\\|_{W_4}<\\infty$. Let $x\\in X$ not lie on a periodic $H$-orbit, $T\\ge2$, $n\\ge0$, $B=B_\\infty(T)\\times B_p(p^n)$ and $r=T/ht\\big(x\\cdot(a_\\infty(\\log T),1)\\big)$. Then $|A_B(f)(x)|\\ll_\\Gamma\\Big(r^{-1/2}(\\log T)^2+T^{s_1-1}+T^{-1/2}\\log(T+1)\\Big)\\,\\mu_p(W)^{-1/2}\\,d_W\\,\\nu_p(B_p(p^n))^{-1/2}\\,\\Xi_p(a_n)^{\\kappa_p}\\,\\|f\\|_{W_4}$.",
+        "depth": 3,
+        "kind": "unfixed",
+        "by": "reader",
+        "assumptions": [],
+        "definitions": [
+          "setting",
+          "subgroups-p",
+          "subgroups-real",
+          "horocycle-average",
+          "harish-chandra-function",
+          "decay-exponent",
+          "spectral-decomposition",
+          "sobolev-norm",
+          "height-function",
+          "smooth-w-invariant",
+          "burger-operators"
+        ]
+      }
+    ],
+    "departures": "# Reader departures from the draft (library-horo/main.tex)\n\nLine numbers are those of `library-horo/main.tex`.\n\n## Definitions corrected or fixed\n\n1. **Height function (l. 354).** The draft has $ht=\\sup_{\\gamma\\in\\Gamma_{g_p}} 1/\\mathrm{Im}(\\gamma z)$. That supremum is infinite, because $\\mathrm{Im}(\\gamma z)\\to0$ along the orbit. It also contradicts $ht\\asymp e^{d_X}$ (l. 359) and the $ht^{1/2}$ Sobolev bound. `height-function` uses $\\sup\\mathrm{Im}(\\gamma_\\infty g_\\infty i)$, which is large in cusps, as in Str\u00f6mbergsson's $Y_\\Gamma$. I also read $\\gamma g_p\\in SL_2(\\mathbb{Z}_p)$ as $\\gamma_p g_p$, and $\\gamma z$ as $\\gamma_\\infty z$.\n2. **Injectivity radius (l. 342\u2013349).** The draft's definition defines nothing: it says \"there exists $r$ such that the map is an isometry\". `injectivity-radius` defines $\\rho(x)$ as the sup of $r$ with $g\\mapsto xg$ injective on $B^G_r$. The draft never chooses the metrics. I chose left-invariant ones, which $d_X$ needs in order to be well defined. The typo $d_G(g_p,\\cdot)$ is read as $d_{G_p}$.\n3. **$A_p$ and $A_\\infty$ (l. 86, 107)** are called subgroups but are not, because $n\\ge0$ and $x\\ge0$. The definitions call them subsets.\n4. **Group action in the ergodic average (l. 130, 464, 542).** The draft writes $f((h_\\infty,h_p)\\cdot z)$, but its action is on the right (l. 61). Read as $f(z\\cdot(h_\\infty,h_p))$. The normalisation $\\nu_\\infty=dt$, $\\nu_p(h_p(\\mathbb{Z}_p))=1$ is my choice: the draft says only \"fix Haar measures\". A periodic $H$-orbit is read as a compact $xH$.\n5. **Harish-Chandra function and spherical function (l. 177\u2013182)** are empty in the draft, so I wrote them. $\\Xi_\\infty$ is the standard $K$-average. $\\Xi_p$ is the tree formula. A numerical check (`scratch/reader/xi_check.py`) confirms that the tree Harish-Chandra function at distance $2n$ equals the draft's formula $p^{-n}((2n+1)(p-1)+2)/(p+1)$ for $p=2,3,5,7$. $\\varpi_\\pi$ is read as $\\Xi_p$ for tempered $\\pi$, because Thm 2.3 applies it to non-spherical tempered representations, which have no spherical function of their own.\n6. **Decay exponent (l. 283\u2013287).** \"$s^2$ is the eigenvalue of the Casimir operator\" is garbled. I read $\\kappa=1-s$ in the parametrisation where $\\varpi_{\\gamma^s}(a_n)\\approx p^{-n(1-s)}$ (from l. 193), and $\\lambda=s(1-s)$ on the real side. $\\kappa_\\infty,\\kappa_p$ are taken as essential infima over nontrivial components.\n7. **Sobolev norm (l. 313\u2013318).** The draft defines it only on pure tensors. I extended it to all $f$ as $\\|(I+\\overline{d\\pi(\\Delta)})^{k/2}f\\|$ with $\\Delta$ acting through $G_\\infty$. The draft calls its spectral formula \"equivalent\". I recorded it as equivalent up to constants.\n8. **Spectral decomposition.** The draft never defines $Z^0$; its list at l. 254\u2013258 names $Z^0,Z^{rs},Z^{ct}$ without definitions. I took them from Str\u00f6mbergsson's real setting: cuspidal, residual and continuous spectrum. $\\lambda_1$/$s_1$ are taken over the nontrivial $\\xi\\in Z^0_+\\cup Z^{rs}$ (l. 282).\n9. **$d_W$** is used in the main proof (l. 584 ff.) but never defined. Read as $[K_p:W]$, which bounds $d_{K_p}(f)$ for $W$-invariant $f$ (`smooth-w-invariant`).\n10. **Burger's $a(y)$ vs the draft's $a_\\infty(x)$.** In Burger's formula, $a_\\infty(\\mathcal{Y})$ stands for $\\mathrm{diag}(\\mathcal{Y}^{1/2},\\mathcal{Y}^{-1/2})$, which is $a_\\infty(\\log\\mathcal{Y})$ in the draft's own notation (l. 107). I recorded this as $a(y)$ in `subgroups-real`. The draft uses the letter $Y$ for both the Lie element and the parameter $\\mathcal{Y}$; I kept them distinct.\n\n## Statements written or changed\n\n11. **Main theorem `main-theorem` (l. 442\u2013444, statement empty).** I wrote the statement from what the proof concludes: the sum of the three case bounds (l. 589, 599, 620), times the factors they share. Choices:\n    - $r=T/ht(x\\,a(T))$, from the continuous case.\n    - $T^{s_1-1}$ for $\\nu_\\infty(B)^{s_1-1}$.\n    - The bound $(1+\\log(T(T+1))/\\sqrt T)$ at l. 620 does not decay, so I dropped the \"1+\" and kept $T^{-1/2}\\log(T+1)$, as in the $N(v_0)$ bound at l. 614.\n    - The p-adic factor $\\Xi(a_n)^{-s_1}$ / $\\Xi(a_n)^{1-s_1}$ became $\\Xi_p(a_n)^{\\kappa_p}$, the exponent of the matrix-coefficient bound the proof invokes.\n    - The factor $\\mu_p(W)^{-1/2}$ comes from the Sobolev lemmas; I made it explicit.\n    - $\\int f=0$ added: the trivial component would otherwise contribute $\\int f$.\n    - Irreducibility of $\\Gamma$ added. If $\\Gamma=\\Gamma_\\infty\\times\\Gamma_p$, a $W$-invariant $f$ depending only on the real coordinate is not equidistributed by $p$-adic averaging, so no factor decaying in $n$ can hold.\n    - $B_\\infty(T)$ is symmetric, while Burger's formula is one-sided on $[0,T]$; the symmetric average follows by splitting.\n    - The alternative reading: drop the $p$-adic gain and state only the real rate times $d_W\\mu_p(W)^{-1/2}$. That reading is safe but ignores the draft's p-adic factors. See fog-1.\n12. **`hilbert-space-decomposition` (Lemma 1, l. 326).** The draft's \"lemma\" is notation only. I stated what the proof uses it for: an orthogonal $G$-invariant decomposition, finiteness of $Z^0_+$ and $Z^{rs}$, and the splitting of the $W_k$ norm (l. 330\u2013334).\n13. **`height-vs-distance` (l. 357).** \"Depending on ... the $g_p$\" is read as one constant for each fixed $g_p$, uniform in $g_\\infty$. The other reading, a constant uniform in $g_p$, is stronger and the draft does not suggest it.\n14. **`sobolev-embedding-general` (l. 365).** The draft states $F\\in W^2(H)$ and bounds by $\\|F\\|_{W^{3,2}}$. I used $W_3$ in both places, consistent with the other two lemmas and with the main proof. The hypothesis \"$F$ invariant under an open compact $W\\le G_p$\" appears only in the proof; I moved it into the statement, with $W\\le K_p$.\n15. **Cuspidal and residual Sobolev lemmas (l. 416\u2013425).** The draft cites them to Str\u00f6mbergsson, but they carry the S-adic factor $\\mu_p(W)^{-1/2}$, which a real-setting paper cannot contain. So they are lemmas of the draft. Each rests on an imported real version (`sobolev-cuspidal-real`, `sobolev-residual-real`) and on the general embedding, for the $\\mu_p(W)$ step. $W$-invariance was added.\n16. **`matrix-coefficient-decay-p` (Thm 2.3, l. 197).** The absolute value is missing in the draft; I added it. The stray \"such that\" is dropped, and $n\\ge0$ is stated. The draft gives no citation and no proof, so this is a lemma resting on the classification, CHH and the tree asymptotics.\n17. **`matrix-coefficient-decay-product` (Thm 2.4, l. 304).** The draft attributes this to EMMV. EMMV as read (v3, \u00a74.3, (4.1)) is a single-place adelic bound with a uniform $\\kappa_2$, so I imported (4.1) as written (`emmv-uniform-decay`) and made the draft's product form a lemma. Corrections:\n    - $\\pi((a_n,a_t))$ became $\\pi(a_\\infty(t),a_n)$, and $\\Xi_p(g)$ became $\\Xi_p(a_n)$.\n    - $d_{k_\\infty}$ became $d_{K_\\infty}$.\n    - Added the hypothesis \"no nonzero $G_\\infty$- or $G_p$-invariant vectors\". Without it the bound fails, for instance on the trivial representation.\n18. **The S-adic integral formula (l. 540\u2013548)** belongs to the proof of the main theorem. I did not make it a separate node.\n\n## Imported results: what was and was not read\n\n19. Only **EMMV** was read from the work itself (arXiv v3, p. 12, display (4.1)). The draft's product statement differs from it; see item 17.\n20. **Str\u00f6mbergsson 2013**: the author PDF failed certificate verification, and the sandbox denied a direct download. So `spectral-structure-real`, `sobolev-cuspidal-real` and `sobolev-residual-real` are stated as the draft uses them, specialised to the real case. Their locators are unknown.\n21. **Burger 1990, Gelfand\u2013Graev\u2013Piatetski-Shapiro, Fig\u00e0-Talamanca\u2013Nebbia, Cowling\u2013Haagerup\u2013Howe, Flaminio\u2013Forni**: not read. The imported statements follow the draft, and the locators are descriptive.\n    - The CHH bound is \"Theorem 2\" from memory.\n    - Burger's integral formula and bounds are attributed to Burger as the draft does. The $F_{\\mathcal{Y}},S_{\\mathcal{Y}},T_y$ form, with the cusp parameter $\\mathcal{Y}$, may instead be Str\u00f6mbergsson's adaptation of Burger.\n    - `local-sobolev-inequality` is a classical fact that the draft cites to Flaminio\u2013Forni. I doubt Flaminio\u2013Forni is its actual source.\n    - `burger-integral-formula`: I added \"no nonzero invariant vectors\". On invariant vectors $s=1$, and the operators are defined only for $\\mathrm{Re}\\,s<1$ or $s\\in\\mathbb{Z}^+$.\n22. **Bibliography.** `dynamics.bib` is not in the library, so I identified the references from the cite keys and the surrounding text.\n    - The assignment of the three Ratner keys and of `Danihorocycle` is my reading.\n    - The DOIs of Cowling 1978, Nelson 1959, Ratner 1991 and 1995, and Fig\u00e0-Talamanca\u2013Nebbia, and the GGPS ISBN, are from memory and not verified.\n    - The Einsiedler\u2013Ward entry has no verified bibliographic data; its year is a placeholder.\n    - The commented-out keys `casselman2014bruhat` and `benoist2004five` were not imported.\n"
+  }
+}

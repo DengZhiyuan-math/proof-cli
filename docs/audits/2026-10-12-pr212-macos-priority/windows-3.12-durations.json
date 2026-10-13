@@ -1,0 +1,139 @@
+{
+  "job": 114822692322,
+  "version": "3.12",
+  "phaseRows": 25,
+  "top25Seconds": 681.02,
+  "phaseTotals": {
+    "setup": 68.73,
+    "call": 612.29,
+    "teardown": 0
+  },
+  "summary": "2026-10-12T13:44:45.3909120Z 1123 passed, 46 skipped, 2 warnings in 2614.18s (0:43:34)",
+  "rows": [
+    {
+      "seconds": 226.48,
+      "phase": "call",
+      "test": "tests/test_proof_map.py::test_stale_pin_reachability_walk_does_not_recurse_on_a_deep_chain"
+    },
+    {
+      "seconds": 155.13,
+      "phase": "call",
+      "test": "tests/test_no_cli_decisions.py::test_no_command_changes_any_protected_state"
+    },
+    {
+      "seconds": 68.73,
+      "phase": "setup",
+      "test": "tests/test_performance.py::test_one_read_visits_each_upstream_node_once[frontier]"
+    },
+    {
+      "seconds": 39.84,
+      "phase": "call",
+      "test": "tests/test_cli_node.py::test_node_create_with_a_parent_someone_else_holds_leaves_nothing_behind[False]"
+    },
+    {
+      "seconds": 22.73,
+      "phase": "call",
+      "test": "tests/test_performance.py::test_the_one_pass_derives_exactly_what_a_walk_per_node_does"
+    },
+    {
+      "seconds": 18.04,
+      "phase": "call",
+      "test": "tests/test_performance.py::test_the_frontier_and_a_node_read_grow_linearly_with_the_chain"
+    },
+    {
+      "seconds": 17.84,
+      "phase": "call",
+      "test": "tests/test_performance.py::test_a_decision_on_the_top_of_a_chain_grows_linearly_with_it"
+    },
+    {
+      "seconds": 14.49,
+      "phase": "call",
+      "test": "tests/test_performance.py::test_provisional_and_unfixed_reads_grow_linearly_with_the_chain"
+    },
+    {
+      "seconds": 10.52,
+      "phase": "call",
+      "test": "tests/test_phase9_validation.py::test_radial_cluster_snapshot_and_exchange_round_trip_preserve_diagnostics"
+    },
+    {
+      "seconds": 9.36,
+      "phase": "call",
+      "test": "tests/test_review_history.py::test_concurrent_decisions_from_several_processes_are_all_kept"
+    },
+    {
+      "seconds": 9.25,
+      "phase": "call",
+      "test": "tests/test_phase9_validation.py::test_radial_cluster_validation_slice_is_structure_first"
+    },
+    {
+      "seconds": 6.98,
+      "phase": "call",
+      "test": "tests/test_export.py::test_export_summarizes_phase_five_governance_across_related_projects"
+    },
+    {
+      "seconds": 6.87,
+      "phase": "call",
+      "test": "tests/test_progress_not_gated.py::test_a_node_resting_on_nothing_settled_or_provisional_is_not_provisional"
+    },
+    {
+      "seconds": 6.56,
+      "phase": "call",
+      "test": "tests/test_progress_not_gated.py::test_a_challenge_on_an_accepted_node_in_the_support_ends_provisional_standing"
+    },
+    {
+      "seconds": 6.55,
+      "phase": "call",
+      "test": "tests/test_cli_node.py::test_every_human_only_command_says_where_to_decide_and_changes_nothing[False-node review clm_1_1]"
+    },
+    {
+      "seconds": 6.51,
+      "phase": "call",
+      "test": "tests/test_progress.py::test_a_gated_request_is_refused_once_the_files_changed_and_the_researchers_own_never_is"
+    },
+    {
+      "seconds": 6.45,
+      "phase": "call",
+      "test": "tests/test_progress_not_gated.py::test_accepting_bottom_up_clears_conditional_and_makes_the_parent_s_decision_possible"
+    },
+    {
+      "seconds": 6.39,
+      "phase": "call",
+      "test": "tests/test_acceptance_preconditions.py::test_split_promote_verify_and_exchange_import_never_write_acceptance_state"
+    },
+    {
+      "seconds": 6.23,
+      "phase": "call",
+      "test": "tests/test_export.py::test_export_includes_grounded_imported_reasoning_and_repair_state"
+    },
+    {
+      "seconds": 6.22,
+      "phase": "call",
+      "test": "tests/test_proof_map.py::test_revalidate_dependency_reaffirms_when_fingerprint_unchanged"
+    },
+    {
+      "seconds": 6.13,
+      "phase": "call",
+      "test": "tests/test_cli_node.py::test_node_create_with_a_parent_that_would_close_a_cycle_leaves_nothing_behind"
+    },
+    {
+      "seconds": 6.04,
+      "phase": "call",
+      "test": "tests/test_exchange_merge_import.py::test_reimporting_the_same_bundle_is_idempotent"
+    },
+    {
+      "seconds": 5.93,
+      "phase": "call",
+      "test": "tests/test_exchange_merge_import.py::test_an_imported_citation_that_meets_a_rule_here_is_on_record_from_the_import"
+    },
+    {
+      "seconds": 5.88,
+      "phase": "call",
+      "test": "tests/test_progress.py::test_a_malformed_report_is_refused[bad0-INVALID_ROLE]"
+    },
+    {
+      "seconds": 5.87,
+      "phase": "call",
+      "test": "tests/test_progress_not_gated.py::test_a_citation_found_no_longer_callable_makes_the_snapshots_resting_on_it_potentially_stale"
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "baseRefName": "fix/10-pursuit-history",
+  "body": "Closes #18.\n\nStacked on #16 (#10), which is stacked on #15 (#12): both Pursue panels were changed there.\n\nDepends on:\n- zeqome/proof-agents#26 (#19), which computes and enforces the limits;\n- proof-agents#23 (#17) and DengZhiyuan-math/proof-cli#206, as #16 does.\n\n## What\n\n- **Hub:**\n  - `PursuitHooks(budget=\u2026)` gets the node budget.\n  - Before Start, `/api/pursue` (while Pursue is offered) and `/api/node/<id>/coordinator` (while idle) carry `limits`, proof-agents' `default_limits()`.\n  - Start takes the researcher's `{\"limits\": {\"turns\", \"minutes\"}}`. It is checked with proof-agents' own rule before anything is recorded or started (400 `INVALID_LIMITS`), then passed to `ProjectPursuit.start` / `Coordinator.start`.\n  - `/api/pursue` adds `spend`: the Pursue's turns against the total, structure turns and failed launches apart, and minutes left.\n- **Page:**\n  - Before Start, the banner and the subtree card show editable total-turns and minutes fields, with how the default was computed. They say a node's budget is a ceiling, not a share, and that Claims a split adds spend what is left. A typed value survives a refresh.\n  - While running and after, the turns, structure turns, failed launches and time left are shown apart.\n  - The subtree card names the nodes the total interrupted (a parent whose re-split it prevented) and those whose launches failed.\n- **Recording fix:** a Theorem's Coordinator asked for while the pursuit is not on it (`default_limits` reads the subtree) records no Theorem step.\n- **Older proof-agents:** with a proof-agents from before #19, nothing changes. No limits are shown or sent.\n- **`test_coordinator_hub.py`:** the total is 122 with #19, 120 without.\n\n## Acceptance\n\n- [x] Before Start, the page shows the default total and time limit and how they were computed. Covered in the page harnesses and the hub tests; a browser check is still to do.\n- [x] A changed total is what the Pursue enforces; an invalid one is refused with its code.\n- [x] The budget panel shows real turns and failed launches separately.\n\n## Tests\n\n| Run | Result |\n| --- | --- |\n| full suite, twice, against proof-agents #26 merged with #23 | 759 passed, 1 skipped |\n| full suite against #23 alone (no #19) | 750 passed, 2 skipped (the new limits tests skip) |\n\nIn every run, the remaining 5 failed and 14 errors are the sandbox's local-port tests (`test_home.py`, `test_review_app.py`).\n\nNew tests:\n- `tests/test_pursue_limits.py`: 9 tests.\n- `test_review_queue_page.py`: 3 tests.\n- `test_run_pane.py`: 3 tests.\n\nNote: proof-agents #23 and #26 conflict in `ProjectPursuit`. The resolution and two #17 test changes needed under the shared total are in this PR's evidence.\n\n\ud83e\udd16 Generated with [Claude Code](https://claude.com/claude-code)\n",
+  "headRefName": "fix/18-pursue-limits",
+  "headRefOid": "c0232effb7f130368a4053d5491fabdfc7cd6c73",
+  "state": "OPEN",
+  "statusCheckRollup": [
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-10T22:42:04Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/zeqome/proof-web/actions/runs/38092390582/job/114331314196",
+      "name": "package",
+      "startedAt": "2026-10-10T22:41:55Z",
+      "status": "COMPLETED",
+      "workflowName": "package"
+    }
+  ],
+  "title": "A Pursue's total turns and time limit are shown before Start and submitted with it (#18)",
+  "url": "https://github.com/zeqome/proof-web/pull/19"
+}

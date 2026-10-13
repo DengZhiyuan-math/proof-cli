@@ -1,0 +1,6 @@
+{
+  "proof_cli": "/private/tmp/proof-paper-followup.JQRMD1/core/src/proof_cli/__init__.py",
+  "proof_agents": "/Volumes/Codex-Workspace/live/home/zhdeng/proof-agents/src/proof_agents/__init__.py",
+  "proof_web": "/Volumes/Codex-Workspace/live/home/zhdeng/proof-web/src/proof_web/__init__.py",
+  "latex_agent": "/Volumes/Codex-Workspace/live/home/zhdeng/proof-cli/packages/latex-agent/src/latex_agent/__init__.py"
+}

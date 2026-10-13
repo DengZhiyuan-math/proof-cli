@@ -1,0 +1,119 @@
+{
+  "baseRefName": "integ/0021",
+  "baseRefOid": "b7f394374ce73e9a23754e12506e87e97326efd9",
+  "body": "Found when the three repos were run together on the integration candidate (docs/audits/2026-10-11-integration-head-candidate). Neither problem shows in a single repo's suite.\n\n- Registers INVALID_LIMITS, BUDGET_SPENT and NO_BUDGET in ERROR_CODES. proof-agents#19 and proof-web#18 raise them.\n- The contract test's scanner now treats a dict that spreads another dict (`{**answer, \"code\": CODE}`, as in proof-agents#17's RELEASE_FAILED) as a refusal, not a notice. Adds a planted test case for it.\n\ntests/test_cli_contract.py: 33 passed.\n\n\ud83e\udd16 Generated with [Claude Code](https://claude.com/claude-code)",
+  "commits": [
+    {
+      "authoredDate": "2026-10-11T12:44:42Z",
+      "authors": [
+        {
+          "email": "zy@zeqome.com",
+          "id": "",
+          "login": "",
+          "name": "Yomathnotcool"
+        },
+        {
+          "email": "noreply@anthropic.com",
+          "id": "MDQ6VXNlcjgxODQ3",
+          "login": "claude",
+          "name": "Claude Opus 5.5"
+        }
+      ],
+      "committedDate": "2026-10-11T13:39:34Z",
+      "messageBody": "\u2026_BUDGET\n\nzeqome/proof-agents#19 (a Pursue's total turns and time limit) refuses with INVALID_LIMITS, BUDGET_SPENT and\nNO_BUDGET, and zeqome/proof-web#18 answers INVALID_LIMITS; none was in ERROR_CODES, so\ntest_every_error_code_the_code_raises_is_registered failed on the integration Head built with them.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+      "messageHeadline": "fix: register the Pursue limit codes INVALID_LIMITS, BUDGET_SPENT, NO\u2026",
+      "oid": "f711138d2c6de715b3bd689d9243a43251b88b6c"
+    },
+    {
+      "authoredDate": "2026-10-11T12:46:13Z",
+      "authors": [
+        {
+          "email": "zy@zeqome.com",
+          "id": "",
+          "login": "",
+          "name": "Yomathnotcool"
+        },
+        {
+          "email": "noreply@anthropic.com",
+          "id": "MDQ6VXNlcjgxODQ3",
+          "login": "claude",
+          "name": "Claude Opus 5.5"
+        }
+      ],
+      "committedDate": "2026-10-11T13:39:34Z",
+      "messageBody": "zeqome/proof-agents#17 answers a failed release as `{**answer, \"code\": \"RELEASE_FAILED\"}`: the answer it spreads is a\nrefusal, its `error` carried over. The scan read the dict as a notice (no literal `error`) and asked RELEASE_FAILED to\nbe a notice code. A dict that spreads another is now read as a refusal; a planted case covers it.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+      "messageHeadline": "test: the error-code scan reads a relabelled answer as a refusal",
+      "oid": "24d3a296d9995774c01df755df904c769d6598da"
+    }
+  ],
+  "files": [
+    {
+      "path": "src/proof_cli/errors.py",
+      "additions": 4,
+      "deletions": 0,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "tests/test_cli_contract.py",
+      "additions": 6,
+      "deletions": 3,
+      "changeType": "MODIFIED"
+    }
+  ],
+  "headRefName": "fix/0021-pursue-budget-codes",
+  "headRefOid": "24d3a296d9995774c01df755df904c769d6598da",
+  "isDraft": false,
+  "number": 209,
+  "state": "OPEN",
+  "statusCheckRollup": [
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38144445188/job/114484747021",
+      "name": "core-and-studio (ubuntu-24.04, 3.11)",
+      "startedAt": "2026-10-11T13:45:28Z",
+      "status": "IN_PROGRESS",
+      "workflowName": "tests"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38144445188/job/114484746775",
+      "name": "core-and-studio (ubuntu-24.04, 3.12)",
+      "startedAt": "2026-10-11T13:45:28Z",
+      "status": "IN_PROGRESS",
+      "workflowName": "tests"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38144445188/job/114484747022",
+      "name": "core-and-studio (windows-latest, 3.11)",
+      "startedAt": "2026-10-11T13:45:27Z",
+      "status": "IN_PROGRESS",
+      "workflowName": "tests"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38144445188/job/114484746970",
+      "name": "core-and-studio (windows-latest, 3.12)",
+      "startedAt": "2026-10-11T13:45:28Z",
+      "status": "IN_PROGRESS",
+      "workflowName": "tests"
+    }
+  ],
+  "title": "fix: register the Pursue limit codes; the error-code scan reads a relabelled answer as a refusal",
+  "url": "https://github.com/DengZhiyuan-math/proof-cli/pull/209",
+  "remoteRefs": {
+    "refs/heads/fix/0021-pursue-budget-codes": "24d3a296d9995774c01df755df904c769d6598da",
+    "refs/heads/integ/0021": "b7f394374ce73e9a23754e12506e87e97326efd9"
+  },
+  "verifiedAtUTC": "2026-10-11T13:46:11.430379+00:00",
+  "tree": "4354a6a2af5b409fed1ff5b9813cbd798de89723",
+  "candidateCodesTreeMatches": "a7a38570fb4f581531c1444cf267f26f38ad17c1"
+}

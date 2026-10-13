@@ -1,0 +1,27 @@
+[
+  {
+    "suite": "core-affected.xml",
+    "test": "test_benchmark_a_200_node_chain",
+    "reason": "wall-clock benchmark: set PROOF_BENCHMARK=1"
+  },
+  {
+    "suite": "core-affected.xml",
+    "test": "test_benchmark_the_frontier_of_a_1000_node_chain",
+    "reason": "wall-clock benchmark: set PROOF_BENCHMARK=1"
+  },
+  {
+    "suite": "web-full.xml",
+    "test": "test_a_studio_build_is_the_pdf_review_archives_and_a_failed_one_leaves_it_stale",
+    "reason": "needs pdflatex"
+  },
+  {
+    "suite": "older-dependencies.xml",
+    "test": "test_the_state_carries_the_unknown_studio_keys",
+    "reason": "an older proof-agents"
+  },
+  {
+    "suite": "older-dependencies.xml",
+    "test": "test_the_map_says_which_definition_edit_left_a_snapshot_stale",
+    "reason": "this proof-cli has no stale cause"
+  }
+]

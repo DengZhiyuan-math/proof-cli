@@ -1,0 +1,77 @@
+- banner
+  - button "Show or hide the sidebar" [ref=e2]
+  - link "ADR0021-candidate-smoke" [ref=e3]
+  - StaticText "2 nodes · 0 on the frontier"
+  - group "View"
+    - button "Graph" [ref=e10]
+    - button "Tree" [ref=e11]
+  - LabelText "Find a node by id, label or statement (/)"
+    - searchbox "Find a node by id, label or statement" [ref=e12]
+    - StaticText "/"
+  - status
+  - generic
+    - StaticText "0"
+    - StaticText "Frontier"
+  - link "1 Awaiting you" [ref=e4]
+    - StaticText "1"
+    - StaticText "Awaiting you"
+  - link "0 Fog" [ref=e5]
+    - StaticText "0"
+    - StaticText "Fog"
+  - generic
+    - StaticText "Y"
+    - StaticText "Yomathnotcool <125728853+DengZhiyuan-math@users.noreply.github.com>"
+- navigation "Sections" [ref=e1]
+  - paragraph
+    - StaticText "Proof map"
+  - link "Map" [ref=e6]
+    - StaticText "Map"
+  - link "Review 1" [ref=e7]
+    - StaticText "Review"
+    - StaticText "1"
+  - link "Warnings" [ref=e8]
+    - StaticText "Warnings"
+  - link "Discuss" [ref=e9]
+    - StaticText "Discuss"
+- main
+  - status
+  - generic
+    - generic
+      - image "Dependency graph of the proof map"
+        - link "claim C: unreviewed, review-needed, current" [ref=e17]
+          - generic
+            - StaticText "Claim C"
+          - StaticText "Smoke fixture claim."
+          - StaticText "Awaiting review"
+          - button "Start the agent on C" [ref=e19]
+            - StaticText "▶ Start"
+        - link "theorem T: unreviewed, blocked, current" [ref=e18]
+          - generic
+            - StaticText "Theorem T"
+          - StaticText "Smoke fixture theorem."
+          - StaticText "Blocked"
+          - button "Start the agent on T" [ref=e20]
+            - StaticText "▶ Start"
+      - list "What the icons mean"
+        - listitem [level=1]
+          - StaticText "Ready to start"
+        - listitem [level=1]
+          - StaticText "In progress"
+        - listitem [level=1]
+          - StaticText "Blocked"
+        - listitem [level=1]
+          - StaticText "Awaiting review"
+        - listitem [level=1]
+          - StaticText "Accepted"
+        - listitem [level=1]
+          - StaticText "Rejected"
+        - listitem [level=1]
+          - StaticText "Needs attention"
+        - listitem [level=1]
+          - StaticText "Open"
+      - group "Zoom"
+        - button "Zoom out" [ref=e13]
+        - StaticText "110%"
+        - button "Zoom in" [ref=e14]
+        - button "Fit" [ref=e15]
+        - button "Tidy" [ref=e16]

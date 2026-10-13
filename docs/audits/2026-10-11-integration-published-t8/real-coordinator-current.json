@@ -1,0 +1,204 @@
+{
+  "ok": true,
+  "data": {
+    "status": "stuck",
+    "active": false,
+    "reason": "nothing left to work without the researcher: sobolev-embedding-general, sobolev-embedding-cuspidal, sobolev-embedding-residual rest(s) on what no run will settle (parked: main-theorem, height-vs-distance)",
+    "root": "main-theorem",
+    "provider": "claude",
+    "name": "claude-code",
+    "turns": 39,
+    "turns_max": 60,
+    "started_at": 1791749217.641802,
+    "turns_before": 1,
+    "pursue_turns": 40,
+    "minutes_max": 120.0,
+    "deadline": 1791755863.506443,
+    "failed_launches": 0,
+    "structure_turns": 2,
+    "pursue_structure_turns": 3,
+    "running": [],
+    "accepted": [],
+    "nodes": {
+      "main-theorem": {
+        "starts": 1,
+        "turns": 0,
+        "last": "needs-human",
+        "verdict": null,
+        "started_at": 1791749217.756408,
+        "role": "decomposer",
+        "redirect": null,
+        "cap": 0,
+        "split_before": [],
+        "structure_turns": 1,
+        "reason": "No split. The statement is false as written: its p-adic factor nu_p(B_p(p^n))^{-1/2} Xi_p(a_n)^{kappa_p} is beaten by an L^2 lower bound (fog-10). For Gamma=SL_2(Z[1/p]), W=K_p, f a lifted Hecke-Maass form and T fixed, ||A_B f||_2 >> nu_p^{-1/2} infinitely often in n, while the claim forces an extra Xi_p(a_n)^{kappa_p}. The researcher must choose the intended p-adic factor. Likely intended: B_p(p^{2n}) with factor Xi_p(a_n)^{kappa_p}, proved by thickening. A split for that reading is drafted in scratch/decomposer/notes.md.",
+        "structure_starts": 1
+      },
+      "hilbert-space-decomposition": {
+        "starts": 2,
+        "turns": 4,
+        "last": "split",
+        "verdict": "passed",
+        "started_at": 1791750574.474217,
+        "role": null,
+        "redirect": "cuspidal-exceptional-finite is parked (needs-human: The claim cannot be proved with known mathematics. For irreducible Gamma (the only reading the setting allows) it is equivalent to finiteness of exceptional Maass cusp forms across the p-power level tower, which is open; Selberg's conjecture would imply it. For reducible Gamma it is false. The researcher must choose what this node states: (a) the provable uniform gap sup_{Z^0_+} s <= 1/2+7/64 (Kim-Sarnak), (b) an explicit hypothesis on Gamma, or (c) conditional on Selberg's conjecture. Details are in scratch/proof-draft.md.); propose another structure for hilbert-space-decomposition that does not need cuspidal-exceptional-finite as it stands",
+        "cap": 0,
+        "reason": "split into 2 Claim(s): exceptional-cuspidal-finite-per-level, smooth-vector-exceptional-support-finite; the Coordinator works them",
+        "split_before": [
+          "cuspidal-exceptional-finite"
+        ],
+        "structure_turns": 1,
+        "structure_starts": 1
+      },
+      "matrix-coefficient-decay-p": {
+        "starts": 1,
+        "turns": 4,
+        "last": "done",
+        "verdict": "passed",
+        "started_at": 1791749586.9016662,
+        "role": null,
+        "redirect": null,
+        "cap": 0,
+        "reason": "review-requested"
+      },
+      "height-vs-distance": {
+        "starts": 1,
+        "turns": 1,
+        "last": "needs-human",
+        "verdict": null,
+        "started_at": 1791750236.1854331,
+        "role": null,
+        "redirect": null,
+        "cap": 0,
+        "reason": "The node statement is false as written, not ambiguous (scratch/proof-draft.md). (1) Gamma=SL_2(Z[1/p]), g_p=1, admissible bounded p-adic metric min(d_p,1): d_X((diag(p^k,p^-k),1),x_0) stays bounded while ht>=p^{2k}. (2) Doubling both metrics doubles d_X, so at most one metric scaling can satisfy it. (3) Conjugating Gamma by (h_inf,1) makes ht identically +inf. The researcher needs to choose a corrected statement. Proposal R2, proved in the draft: Gamma=SL_2(Z[1/p]), K_p=SL_2(Z_p); ht(Gamma(g_inf,g_p)) = y(delta_inf g_inf i) \u224d exp(hyperbolic distance in SL_2(Z)\\H), i.e. d_X replaced by the fibre distance with g_p frozen. This is also what the Sobolev-embedding use and fog-2 need. Alternatively, restrict Gamma and fix specific metrics, but then the exponent only matches for one tuned normalisation."
+      },
+      "cuspidal-exceptional-finite": {
+        "starts": 1,
+        "turns": 1,
+        "last": "needs-human",
+        "verdict": null,
+        "started_at": 1791750436.471072,
+        "role": null,
+        "redirect": null,
+        "cap": 0,
+        "reason": "The claim cannot be proved with known mathematics. For irreducible Gamma (the only reading the setting allows) it is equivalent to finiteness of exceptional Maass cusp forms across the p-power level tower, which is open; Selberg's conjecture would imply it. For reducible Gamma it is false. The researcher must choose what this node states: (a) the provable uniform gap sup_{Z^0_+} s <= 1/2+7/64 (Kim-Sarnak), (b) an explicit hypothesis on Gamma, or (c) conditional on Selberg's conjecture. Details are in scratch/proof-draft.md."
+      },
+      "complementary-series-model": {
+        "starts": 1,
+        "turns": 7,
+        "last": "done",
+        "verdict": "passed",
+        "started_at": 1791750574.529941,
+        "role": null,
+        "redirect": null,
+        "cap": 0,
+        "reason": "review-requested"
+      },
+      "matrix-coefficient-decay-product": {
+        "starts": 1,
+        "turns": 4,
+        "last": "done",
+        "verdict": "passed",
+        "started_at": 1791751437.799362,
+        "role": null,
+        "redirect": null,
+        "cap": 0,
+        "reason": "review-requested"
+      },
+      "exceptional-cuspidal-finite-per-level": {
+        "starts": 1,
+        "turns": 4,
+        "last": "done",
+        "verdict": "passed",
+        "started_at": 1791751980.9623501,
+        "role": null,
+        "redirect": null,
+        "cap": 0,
+        "reason": "review-requested"
+      },
+      "smooth-vector-exceptional-support-finite": {
+        "starts": 1,
+        "turns": 4,
+        "last": "done",
+        "verdict": "passed",
+        "started_at": 1791752497.204894,
+        "role": null,
+        "redirect": null,
+        "cap": 0,
+        "reason": "review-requested"
+      },
+      "real-unitary-dual-ktypes": {
+        "starts": 1,
+        "turns": 4,
+        "last": "done",
+        "verdict": "passed",
+        "started_at": 1791752681.147943,
+        "role": null,
+        "redirect": null,
+        "cap": 0,
+        "reason": "review-requested"
+      },
+      "real-complementary-decay": {
+        "starts": 1,
+        "turns": 4,
+        "last": "done",
+        "verdict": "passed",
+        "started_at": 1791753408.7183611,
+        "role": null,
+        "redirect": null,
+        "cap": 0,
+        "reason": "review-requested"
+      }
+    },
+    "settling": false,
+    "can_release": true,
+    "parked": [
+      {
+        "node": "main-theorem",
+        "reason": "needs-human: No split. The statement is false as written: its p-adic factor nu_p(B_p(p^n))^{-1/2} Xi_p(a_n)^{kappa_p} is beaten by an L^2 lower bound (fog-10). For Gamma=SL_2(Z[1/p]), W=K_p, f a lifted Hecke-Maass form and T fixed, ||A_B f||_2 >> nu_p^{-1/2} infinitely often in n, while the claim forces an extra Xi_p(a_n)^{kappa_p}. The researcher must choose the intended p-adic factor. Likely intended: B_p(p^{2n}) with factor Xi_p(a_n)^{kappa_p}, proved by thickening. A split for that reading is drafted in scratch/decomposer/notes.md."
+      },
+      {
+        "node": "height-vs-distance",
+        "reason": "needs-human: The node statement is false as written, not ambiguous (scratch/proof-draft.md). (1) Gamma=SL_2(Z[1/p]), g_p=1, admissible bounded p-adic metric min(d_p,1): d_X((diag(p^k,p^-k),1),x_0) stays bounded while ht>=p^{2k}. (2) Doubling both metrics doubles d_X, so at most one metric scaling can satisfy it. (3) Conjugating Gamma by (h_inf,1) makes ht identically +inf. The researcher needs to choose a corrected statement. Proposal R2, proved in the draft: Gamma=SL_2(Z[1/p]), K_p=SL_2(Z_p); ht(Gamma(g_inf,g_p)) = y(delta_inf g_inf i) \u224d exp(hyperbolic distance in SL_2(Z)\\H), i.e. d_X replaced by the fibre distance with g_p frozen. This is also what the Sobolev-embedding use and fog-2 need. Alternatively, restrict Gamma and fix specific metrics, but then the exponent only matches for one tuned normalisation."
+      },
+      {
+        "node": "cuspidal-exceptional-finite",
+        "reason": "needs-human: The claim cannot be proved with known mathematics. For irreducible Gamma (the only reading the setting allows) it is equivalent to finiteness of exceptional Maass cusp forms across the p-power level tower, which is open; Selberg's conjecture would imply it. For reducible Gamma it is false. The researcher must choose what this node states: (a) the provable uniform gap sup_{Z^0_+} s <= 1/2+7/64 (Kim-Sarnak), (b) an explicit hypothesis on Gamma, or (c) conditional on Selberg's conjecture. Details are in scratch/proof-draft.md."
+      }
+    ],
+    "decomposed": [
+      "main-theorem",
+      "hilbert-space-decomposition"
+    ],
+    "resplit": [
+      "hilbert-space-decomposition"
+    ],
+    "needs_you": [
+      {
+        "node": "main-theorem",
+        "last": "needs-human",
+        "reason": "needs-human: No split. The statement is false as written: its p-adic factor nu_p(B_p(p^n))^{-1/2} Xi_p(a_n)^{kappa_p} is beaten by an L^2 lower bound (fog-10). For Gamma=SL_2(Z[1/p]), W=K_p, f a lifted Hecke-Maass form and T fixed, ||A_B f||_2 >> nu_p^{-1/2} infinitely often in n, while the claim forces an extra Xi_p(a_n)^{kappa_p}. The researcher must choose the intended p-adic factor. Likely intended: B_p(p^{2n}) with factor Xi_p(a_n)^{kappa_p}, proved by thickening. A split for that reading is drafted in scratch/decomposer/notes.md."
+      },
+      {
+        "node": "height-vs-distance",
+        "last": "needs-human",
+        "reason": "needs-human: The node statement is false as written, not ambiguous (scratch/proof-draft.md). (1) Gamma=SL_2(Z[1/p]), g_p=1, admissible bounded p-adic metric min(d_p,1): d_X((diag(p^k,p^-k),1),x_0) stays bounded while ht>=p^{2k}. (2) Doubling both metrics doubles d_X, so at most one metric scaling can satisfy it. (3) Conjugating Gamma by (h_inf,1) makes ht identically +inf. The researcher needs to choose a corrected statement. Proposal R2, proved in the draft: Gamma=SL_2(Z[1/p]), K_p=SL_2(Z_p); ht(Gamma(g_inf,g_p)) = y(delta_inf g_inf i) \u224d exp(hyperbolic distance in SL_2(Z)\\H), i.e. d_X replaced by the fibre distance with g_p frozen. This is also what the Sobolev-embedding use and fog-2 need. Alternatively, restrict Gamma and fix specific metrics, but then the exponent only matches for one tuned normalisation."
+      },
+      {
+        "node": "cuspidal-exceptional-finite",
+        "last": "needs-human",
+        "reason": "needs-human: The claim cannot be proved with known mathematics. For irreducible Gamma (the only reading the setting allows) it is equivalent to finiteness of exceptional Maass cusp forms across the p-power level tower, which is open; Selberg's conjecture would imply it. For reducible Gamma it is false. The researcher must choose what this node states: (a) the provable uniform gap sup_{Z^0_+} s <= 1/2+7/64 (Kim-Sarnak), (b) an explicit hypothesis on Gamma, or (c) conditional on Selberg's conjecture. Details are in scratch/proof-draft.md."
+      }
+    ],
+    "held": [],
+    "interrupted": [],
+    "launch_failed": [],
+    "resplit_refused": [],
+    "subtree": {
+      "nodes": 21,
+      "accepted": 0,
+      "open": 13
+    },
+    "parallel": 2
+  }
+}

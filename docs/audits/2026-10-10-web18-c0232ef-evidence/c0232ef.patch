@@ -1,0 +1,696 @@
+From c0232effb7f130368a4053d5491fabdfc7cd6c73 Mon Sep 17 00:00:00 2001
+From: Yomathnotcool <125728853+DengZhiyuan-math@users.noreply.github.com>
+Date: Sat, 10 Oct 2026 18:45:05 +0200
+Subject: [PATCH] feat: a Pursue's total turns and time limit are shown before
+ Start and submitted with it (#18)
+
+proof-agents#19 fixes one total of turns and one time limit for each
+Pursue at its Start. The hub passes PursuitHooks its node budget, shows
+default_limits() before Start (the project's Pursue and a subtree's), and
+checks the researcher's {"turns", "minutes"} with proof-agents' own rule
+before anything is recorded or started (INVALID_LIMITS, 400), then passes
+them to Start. While it runs and after, the page shows the Pursue's turns
+against the total, structure turns and failed launches apart, and the time
+left; the subtree card also names the nodes the total interrupted (a
+parent whose re-split it prevented) and those whose launches failed.
+
+A Theorem's Coordinator asked for while the pursuit is not on it (its
+default limits read the subtree) records no Theorem step. With a
+proof-agents from before #19 the page shows no limits and Start sends none.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/proof_web/static/app.css         |  3 +
+ src/proof_web/static/app.js          | 34 +++++++++-
+ src/proof_web/static/index.html      |  6 ++
+ src/proof_web/static/studio/node.css |  2 +
+ src/proof_web/static/studio/run.js   | 45 ++++++++++++-
+ src/proof_web/studios.py             | 66 +++++++++++++++++--
+ tests/js/map_home_harness.js         | 16 ++++-
+ tests/js/run_pane_harness.js         |  6 ++
+ tests/test_coordinator_hub.py        | 16 +++--
+ tests/test_pursue_limits.py          | 98 ++++++++++++++++++++++++++++
+ tests/test_pursue_review_queue.py    |  5 +-
+ tests/test_pursuit_history.py        |  5 +-
+ tests/test_review_queue_page.py      | 33 ++++++++++
+ tests/test_run_pane.py               | 31 +++++++++
+ 14 files changed, 349 insertions(+), 17 deletions(-)
+ create mode 100644 tests/test_pursue_limits.py
+
+diff --git a/src/proof_web/static/app.css b/src/proof_web/static/app.css
+index 9b9116e..556cb49 100644
+--- a/src/proof_web/static/app.css
++++ b/src/proof_web/static/app.css
+@@ -483,6 +483,9 @@ td a { font-family: var(--mono); font-size: 12px; }
+ /* ADR-0021: Pursue from the draft, the review queue, Conditional and Parked on the map */
+ .pursue-banner { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 10px; padding: 10px 14px; border-radius: 10px; background: var(--surface-2); }
+ .pursue-banner p { margin: 0; flex: 1 1 40ch; color: var(--label-2); font-size: 13px; }
++.pursue-limits { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex: 1 1 100%; font-size: 13px; }
++.pursue-limits input { width: 7ch; }
++.pursue-limits .hint { flex: 1 1 40ch; }
+ .queue-section { margin-top: 20px; }
+ .review-queue { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+ .review-queue > li { background: var(--surface); border: 1px solid var(--sep); border-radius: 10px; padding: 10px 12px; display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; }
+diff --git a/src/proof_web/static/app.js b/src/proof_web/static/app.js
+index 9c70f51..99f762e 100644
+--- a/src/proof_web/static/app.js
++++ b/src/proof_web/static/app.js
+@@ -343,12 +343,43 @@ function showPursuit(view) {
+     view.status === "pursuing" ? `Pursuing ${view.current} (${(view.theorems || []).join(", ")})` : `${view.status}${view.reason ? ` — ${view.reason}` : ""}`;
+   // a step of the pursuit that could not be recorded (proof-cli#201): said, not passed over
+   if (view.record_error) $("pursue-status").textContent += ` · History not saved: ${view.record_error}`;
++  showPursueLimits(view, !$("pursue-start").hidden);
+   clearTimeout(pursuitTimer);
+   if (running || view.stopping) pursuitTimer = setTimeout(() => refresh().catch(showError), 5000);
+ }
+ 
++// proof-agents#19: one total of turns and one time limit for the whole Pursue, fixed at Start. Before Start the default is
++// shown, with how it is made, for the researcher to keep or change; while it runs, what it has spent of them
++function limitsWhy(l) {
++  return `${l.node_turns} turns per node × ${Math.max(1, l.open_nodes)} open node(s) + ${l.structure_allowance} structure turn(s)`
++    + " (splits and the Reader). A node's budget is a ceiling, not a share: Claims a split adds spend what is left of the total.";
++}
++function spendText(s) {
++  return `Turns ${s.turns}/${s.turns_max}${s.structure_turns ? ` (${s.structure_turns} structure)` : ""} · failed launches ${s.failed_launches || 0}`
++    + (s.minutes_left !== null && s.minutes_left !== undefined ? ` · ${s.minutes_left} of ${s.minutes_max} min left` : "");
++}
++function showPursueLimits(view, startable) {
++  if (!$("pursue-limits")) return;
++  const limits = view.limits && !view.limits.error ? view.limits : null;
++  $("pursue-limits").hidden = !(startable && limits);
++  if (limits) {
++    for (const [id, value] of [["pursue-turns", limits.turns], ["pursue-minutes", limits.minutes]]) {
++      if (!$(id).dataset.edited) $(id).value = String(value);   // the researcher's own number is kept across refreshes
++    }
++    $("pursue-limits-why").textContent = limitsWhy(limits);
++  }
++  const spend = view.spend;
++  $("pursue-spend").hidden = !spend;
++  $("pursue-spend").textContent = spend ? spendText(spend) : "";
++}
++function pursueLimits() {
++  if (!$("pursue-limits") || $("pursue-limits").hidden) return null;
++  return { turns: Number($("pursue-turns").value), minutes: Number($("pursue-minutes").value) };
++}
++
+ async function pursue(action) {
+-  try { showPursuit(await api(`/api/pursue/${action}`, {})); } catch (error) {
++  const limits = action === "start" ? pursueLimits() : null;
++  try { showPursuit(await api(`/api/pursue/${action}`, limits ? { limits } : {})); } catch (error) {
+     // a Stop on a pursuit that had already ended: nothing to stop, so no error; show where it stands
+     if (action === "stop" && error.code === "NO_PURSUIT") { try { showPursuit(await api("/api/pursue")); } catch (again) { showError(again); } return; }
+     // a Stop whose release failed (proof-agents#17): the pursuit holds its runs; say why, and show Stop again
+@@ -1349,6 +1380,7 @@ document.addEventListener("DOMContentLoaded", () => {
+   });
+   if ($("pursue-start")) {
+     $("pursue-start").addEventListener("click", () => pursue("start"));
++    for (const id of ["pursue-turns", "pursue-minutes"]) if ($(id)) $(id).addEventListener("input", () => { $(id).dataset.edited = "1"; });
+     $("pursue-stop").addEventListener("click", () => pursue("stop"));
+   }
+   wireCanvas();
+diff --git a/src/proof_web/static/index.html b/src/proof_web/static/index.html
+index 0142a43..01d0b33 100644
+--- a/src/proof_web/static/index.html
++++ b/src/proof_web/static/index.html
+@@ -70,6 +70,12 @@
+         <div id="pursue-banner" class="pursue-banner" hidden>
+           <p><b>Your library has a draft and the map is empty.</b> Pursue reads the draft, states it as a map, and works every Theorem as far as the agents can go. What it leaves you is the review queue; nothing it does is trust until you Accept it.</p>
+           <span id="pursue-status" class="hint" role="status"></span>
++          <span id="pursue-limits" class="pursue-limits" hidden>
++            <label>Total <input id="pursue-turns" type="number" min="1" step="1" inputmode="numeric" aria-label="Total turns for the whole Pursue"> turns</label>
++            <label>and <input id="pursue-minutes" type="number" min="0.1" step="any" inputmode="decimal" aria-label="Time limit in minutes for the whole Pursue"> minutes</label>
++            <span id="pursue-limits-why" class="hint"></span>
++          </span>
++          <span id="pursue-spend" class="hint" hidden></span>
+           <button id="pursue-start" type="button" class="primary">Pursue</button>
+           <button id="pursue-stop" type="button" class="danger" hidden>Stop</button>
+         </div>
+diff --git a/src/proof_web/static/studio/node.css b/src/proof_web/static/studio/node.css
+index 27d6f11..99559a0 100644
+--- a/src/proof_web/static/studio/node.css
++++ b/src/proof_web/static/studio/node.css
+@@ -86,6 +86,8 @@
+ /* ADR-0019 point 18: the Coordinator over this node's subtree, above the node's own run */
+ .coordinator-card { border: 1px solid var(--faint); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; }
+ .coordinator-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
++.coordinator-limits { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; }
++.coordinator-limits input { width: 7ch; }
+ .coordinator-head { font-weight: 600; } .coordinator-meta { color: var(--muted); font-size: 12px; }
+ .coordinator-status.running { color: var(--ok); } .coordinator-status.paused { color: var(--warn); } .coordinator-status.stuck, .coordinator-status.budget, .coordinator-status.release-failed { color: var(--err); }
+ .coordinator-status.idle, .coordinator-status.done, .coordinator-status.released { color: var(--muted); }
+diff --git a/src/proof_web/static/studio/run.js b/src/proof_web/static/studio/run.js
+index 2f06fe6..5b20d0c 100644
+--- a/src/proof_web/static/studio/run.js
++++ b/src/proof_web/static/studio/run.js
+@@ -67,11 +67,42 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
+     return r;
+   }
+ 
++  // proof-agents#19: the Pursue's total turns and time limit, fixed at Start. Before Start the default and how it is made,
++  // the researcher's to keep or change (kept across refreshes once edited); while it runs, what it has spent of them
++  const limitsEdited = {};
++  function limitsBox(l) {
++    const box = h("span", null, { class: "coordinator-limits" });
++    const field = (key, label, step) => {
++      const input = h("input", null, { type: "number", min: key === "turns" ? "1" : "0.1", step, class: `coordinator-${key}`, "aria-label": label });
++      input.value = String(limitsEdited[key] ?? l[key]);
++      input.oninput = () => { limitsEdited[key] = input.value; };
++      return input;
++    };
++    box.append(h("span", "Total"), field("turns", "Total turns for this Pursue", "1"), h("span", "turns and"),
++               field("minutes", "Time limit in minutes for this Pursue", "any"), h("span", "minutes"),
++               h("span", `${l.node_turns} turns per node × ${Math.max(1, l.open_nodes)} open node(s) + ${l.structure_allowance} structure turn(s) for splits. `
++                 + "A node's budget is a ceiling, not a share: Claims a split adds spend what is left of the total.", { class: "coordinator-meta coordinator-limits-why" }));
++    return box;
++  }
++  function chosenLimits(c) {
++    if (!c.limits || c.limits.error) return null;
++    return { turns: Number(limitsEdited.turns ?? c.limits.turns), minutes: Number(limitsEdited.minutes ?? c.limits.minutes) };
++  }
++  function spentText(c) {
++    const left = c.deadline ? Math.max(0, (c.deadline * 1000 - Date.now()) / 60000) : null;
++    return `turns ${c.pursue_turns ?? c.turns}/${c.turns_max}` + (c.structure_turns ? ` (${c.structure_turns} structure)` : "")
++      + ` · failed launches ${c.failed_launches || 0}` + (left !== null ? ` · ${left.toFixed(1)} of ${c.minutes_max} min left` : "");
++  }
++
+   function coordinatorCard(c) {
+     const card = h("section", null, { class: "coordinator-card" });
+     const line = h("div", null, { class: "coordinator-line" });
+     line.append(h("span", "Subtree", { class: "coordinator-head" }));
+-    const button = (label, action, cls, title) => { const b = h("button", label, { type: "button", class: cls || "", ...(title ? { title } : {}) }); b.onclick = () => coordinate(action, {}); return b; };
++    const button = (label, action, cls, title) => {
++      const b = h("button", label, { type: "button", class: cls || "", ...(title ? { title } : {}) });
++      b.onclick = () => { const limits = action === "start" ? chosenLimits(c) : null; return coordinate(action, limits ? { limits } : {}); };
++      return b;
++    };
+     if (c.status === "release-failed") {  // a Stop that could not give every node back: the way out is Stop again, not a new Start
+       line.append(h("span", `release failed — ${c.reason || "a node is still assigned"}`, { class: "coordinator-status release-failed" }),
+                   button("Stop subtree", "release", "danger", "Try again to release the run(s) the Coordinator started"));
+@@ -84,13 +115,15 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
+       if (c.can_release) {
+         line.append(button("Stop subtree", "release", "danger", "Release the runs this Coordinator started before starting again"));
+       } else {
++        if (c.limits && !c.limits.error) line.append(limitsBox(c.limits));
+         line.append(button("Pursue", "start", "primary", `Work everything under this node to the end, up to ${c.parallel || 2} runs at a time: split it first if it has no Claims; each node starts once what it rests on is Accepted or Provisional. Nothing waits for you`));
+       }
++      if (c.status !== "idle" && c.turns_max) line.append(h("span", spentText(c), { class: "coordinator-meta coordinator-spent" }));
+     } else {
+       const sub = c.subtree || {};
+       const where = c.running && c.running.length ? `running: ${c.running.join(", ")}` : "no run on now";
+       line.append(h("span", c.status, { class: `coordinator-status ${c.status}` }),
+-                  h("span", `${where} · ${(c.accepted || []).length} accepted of ${sub.nodes || 0} · turns ${c.turns}/${c.turns_max}`, { class: "coordinator-meta" }),
++                  h("span", `${where} · ${(c.accepted || []).length} accepted of ${sub.nodes || 0} · ${spentText(c)}`, { class: "coordinator-meta" }),
+                   c.status === "paused" ? button("Resume subtree", "resume", "primary") : button("Pause subtree", "pause", "", "No new node run begins; the running ones hold after their turn"),
+                   button("Stop subtree", "release", "danger", "Stop the Coordinator and release every run it started"));
+     }
+@@ -103,6 +136,14 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
+     if ((c.held || []).length) {
+       line.append(h("span", c.held.map((x) => `${x.node} waits for you — ${x.reason}`).join("; "), { class: "coordinator-meta coordinator-held", title: "The Coordinator does not restart these; open the node to see why" }));
+     }
++    // proof-agents#18/#19: the nodes the total's end interrupted (a parent whose re-split it prevented, with why), and the
++    // nodes whose launches failed three times, given back: each said apart from the parked ones
++    if ((c.interrupted || []).length) {
++      line.append(h("span", c.interrupted.map((x) => `${x.node} interrupted — ${x.reason}`).join("; "), { class: "coordinator-meta coordinator-interrupted" }));
++    }
++    if ((c.launch_failed || []).length) {
++      line.append(h("span", c.launch_failed.map((x) => `${x.node} launch failed — ${x.reason}`).join("; "), { class: "coordinator-meta coordinator-launch-failed" }));
++    }
+     card.append(line);
+     return card;
+   }
+diff --git a/src/proof_web/studios.py b/src/proof_web/studios.py
+index 0b6d27b..2fd8ee3 100644
+--- a/src/proof_web/studios.py
++++ b/src/proof_web/studios.py
+@@ -16,6 +16,7 @@ from __future__ import annotations
+ import dataclasses
+ import hashlib
+ import threading
++import time
+ import uuid
+ from dataclasses import dataclass, fields
+ from functools import partial
+@@ -53,6 +54,11 @@ _COORDINATOR_PARKS = "park" in {f.name for f in fields(CoordinatorHooks)}  # ADR
+ # a project pursuit's Stop while its Reader reads stops the Reader's turn too (contract C4); an older one leaves it to the host
+ _PURSUIT_STOPS_READ = PursuitHooks is not None and "stop_read" in {f.name for f in fields(PursuitHooks)}
+ _PURSUIT_AT_WORK = ("reading", "pursuing")
++try:  # proof-agents#19: one Pursue total and time limit, fixed at Start; an older proof-agents has a budget per Coordinator
++    from proof_agents.coordinator import PursueBudget
++except ImportError:  # pragma: no cover — the page then shows no limits and Start sends none
++    PursueBudget = None
++_PURSUIT_HAS_BUDGET = PursuitHooks is not None and "budget" in {f.name for f in fields(PursuitHooks)}
+ # a pursuit giving its runs back, or holding them after that failed (proof-agents#17): Stop goes on, Pursue waits
+ _PURSUIT_HOLDING = ("stopping", "release-failed")
+ from latex_agent.agent import AgentManager
+@@ -135,6 +141,21 @@ def _error(status: HTTPStatus, code: str, message: str) -> StudioAnswer:
+     return StudioAnswer(int(status), body, "application/json")
+ 
+ 
++def _limits(body: dict) -> tuple[dict | None, tuple[int, dict] | None]:
++    """The researcher's total turns and minutes for a Start (proof-agents#19), checked by proof-agents' own rule before
++    anything is recorded or started: (the limits, or None for the default; a refusal, or None)."""
++    raw = body.get("limits")
++    if raw is None:
++        return None, None
++    if PursueBudget is None:
++        return None, (int(HTTPStatus.BAD_REQUEST), {"error": "this proof-agents fixes no Pursue limits", "code": "INVALID_LIMITS"})
++    try:
++        fixed = PursueBudget.from_limits(raw)
++    except ValueError as exc:
++        return None, (int(HTTPStatus.BAD_REQUEST), {"error": str(exc), "code": "INVALID_LIMITS"})
++    return {"turns": fixed.turns_max, "minutes": fixed.minutes_max}, None
++
++
+ class NoStudio(Exception):
+     """This node has no studio: (code, message)."""
+ 
+@@ -560,6 +581,7 @@ class StudioHub:
+                     coordinator=self._pursued_coordinator,
+                     record=lambda note: self._record_ending(),
+                     **({"stop_read": self._stop_read} if _PURSUIT_STOPS_READ else {}),
++                    **({"budget": lambda: budget(self.store.root)} if _PURSUIT_HAS_BUDGET else {}),
+                 ))
+             return self._pursuit
+ 
+@@ -595,7 +617,11 @@ class StudioHub:
+         return answer
+ 
+     def _pursued_coordinator(self, theorem: str) -> Coordinator:
+-        """A Theorem's Coordinator, as the pursuit asks for it: a Theorem it moves to is recorded once."""
++        """A Theorem's Coordinator, as the pursuit asks for it: a Theorem it moves to is recorded once. Asked for while the
++        pursuit is not on it (its default limits read the subtree, proof-agents#19), it is only handed over."""
++        pursuit = self._pursuit
++        if pursuit is None or pursuit.view().get("current") != theorem:
++            return self.coordinator(theorem)
+         with self._record_lock:
+             moved = theorem != self._pursuit_theorem
+             self._pursuit_theorem = theorem
+@@ -724,6 +750,9 @@ class StudioHub:
+                 return int(HTTPStatus.CONFLICT), {"error": "this project is still being pursued, or its Stop has not ended the "
+                                                   "Reader's turn yet; wait for it", "code": "PURSUIT_ACTIVE"}
+             provider = str(body.get("provider") or "").strip()
++            limits, refused = _limits(body)
++            if refused:
++                return refused
+             if not provider:
+                 backend = self._reader_agent().backend(None)
+                 provider = backend.id if backend is not None else ""
+@@ -739,7 +768,7 @@ class StudioHub:
+                     self._pursuit_ended, self._record_error = False, None
+             with self._lock:
+                 self._read_stopped = False  # a new pursuit's Reader: the last Stop is over
+-            answer = pursuit.start(provider)
++            answer = pursuit.start(provider, **({"limits": limits} if limits is not None else {}))
+             if "error" in answer:  # refused after all: the recorded start ends here
+                 self._record("end", outcome="refused", reason=str(answer["error"]))
+         elif action == "stop":
+@@ -759,10 +788,34 @@ class StudioHub:
+             view = self._recorded_pursuit() or view
+         if self._record_error:
+             view = {**view, "record_error": self._record_error}
++        view = {**view, **self._pursuit_spend(view)}
+         # stopped, but its Reader's turn (or its thread) not ended yet, or its runs being given back: no Pursue until it
+         # has. A release that failed is not stopping: it holds its runs until the researcher's Stop gives them back
+         stopping = view["status"] == "stopping" or (view["status"] not in (*_PURSUIT_AT_WORK, "release-failed") and self._pursuit_busy())
+-        return {**view, "can_pursue": self.can_pursue(), "stopping": stopping}
++        can_pursue = self.can_pursue()
++        if can_pursue and PursueBudget is not None:
++            # what a Start would fix (proof-agents#19), shown before it for the researcher to keep or change
++            try:
++                view = {**view, "limits": self.pursuit().default_limits()}
++            except NoStudio:
++                pass
++        return {**view, "can_pursue": can_pursue, "stopping": stopping}
++
++    def _pursuit_spend(self, view: dict) -> dict:
++        """The Pursue's total as it is being spent (proof-agents#19): the turns of the parts that ended and the live ones of
++        the Theorem being worked, structure turns and failed launches apart, and the time left."""
++        fixed = view.get("budget")
++        if not fixed:
++            return {}
++        spent, structure, failed = int(fixed.get("spent") or 0), 0, int(fixed.get("failed_launches") or 0)
++        coordinator = self._coordinators.get(view.get("current") or "")
++        if coordinator is not None and view.get("status") in _PURSUIT_AT_WORK:
++            live = coordinator.view()
++            spent = int(live.get("pursue_turns", spent))
++            structure = int(live.get("structure_turns") or 0)
++        left = max(0.0, (float(fixed["deadline"]) - time.time()) / 60) if fixed.get("deadline") else None
++        return {"spend": {"turns": spent, "turns_max": fixed.get("turns_max"), "structure_turns": structure, "failed_launches": failed,
++                          "minutes_max": fixed.get("minutes_max"), "minutes_left": None if left is None else round(left, 1)}}
+ 
+     def parked(self, node_id: str) -> str | None:
+         """Why a node is parked: as a Coordinator at work here parked it, else as its work log last said."""
+@@ -844,10 +897,13 @@ class StudioHub:
+             return int(HTTPStatus.GONE if code == "PROJECT_REPLACED" else HTTPStatus.NOT_FOUND), {"error": message, "code": code}
+         if action == "start":
+             provider = str(body.get("provider") or "").strip()
++            limits, refused = _limits(body)
++            if refused:
++                return refused
+             if not provider:
+                 backend = self.studio(root_id).agent.backend(None)
+                 provider = backend.id if backend is not None else ""
+-            answer = coordinator.start(provider)
++            answer = coordinator.start(provider, **({"limits": limits} if limits is not None else {}))
+         elif action == "pause":
+             answer = coordinator.pause()
+         elif action == "resume":
+@@ -865,6 +921,8 @@ class StudioHub:
+         view["subtree"] = {"nodes": len(nodes), "accepted": sum(1 for n in nodes if n["accepted"]),
+                            "open": sum(1 for n in nodes if n["has_run"] and not n["accepted"])}
+         view["parallel"] = parallel(self.store.root)
++        if PursueBudget is not None and not view.get("active") and not view.get("can_release") and not view.get("settling"):
++            view["limits"] = self.coordinator(root_id).default_limits()   # what a Start would fix (proof-agents#19)
+         return view
+ 
+     def coordinator_state(self, node_id: str) -> dict | None:
+diff --git a/tests/js/map_home_harness.js b/tests/js/map_home_harness.js
+index c4245a3..8397f8b 100644
+--- a/tests/js/map_home_harness.js
++++ b/tests/js/map_home_harness.js
+@@ -107,13 +107,13 @@ class FakeElement {
+     // the legend (issue #157)
+     "map-legend",
+     // ADR-0021: Pursue on a project with a draft and no map, and the review queue
+-    "pursue-banner", "pursue-start", "pursue-stop", "pursue-status", "queue-count", "queue-departures", "queue-departures-text", "review-queue"];
++    "pursue-banner", "pursue-start", "pursue-stop", "pursue-status", "pursue-limits", "pursue-turns", "pursue-minutes", "pursue-limits-why", "pursue-spend", "queue-count", "queue-departures", "queue-departures-text", "review-queue"];
+   const tags = { "tree-root": "select", "dag-svg": "svg", "decide-batch": "button", pending: "table", warnings: "ul", "map-find": "input", "attention-nodes": "ul",
+     "node-deps": "table", "node-decisions": "table", "node-challenges": "ul", "node-evidence": "ul", "node-history": "ul",
+     trusted: "table", "rules-list": "ul", "rules-retired-list": "ul", "rule-name": "input", "rule-rationale": "input", "rule-decision": "input",
+     "cond-reviewed": "input", "cond-doi": "input", "cond-arxiv": "input", "manage-rules": "button", "rule-record": "button", "rule-cancel": "button", "rule-new": "button",
+     "map-legend": "ul", "fog-badge": "a", "stat-fog": "b", "fog-drawer": "aside", "fog-list": "ul", "fog-close": "button", "fog-add-text": "input", "fog-add-near": "select", "fog-add": "button", "fog-show-all": "input", "fog-composer": "form",
+-    "pursue-start": "button", "pursue-stop": "button", "review-queue": "ol", "queue-departures": "details", "queue-departures-text": "pre" };
++    "pursue-start": "button", "pursue-stop": "button", "pursue-turns": "input", "pursue-minutes": "input", "review-queue": "ol", "queue-departures": "details", "queue-departures-text": "pre" };
+   const elements = Object.fromEntries(ids.map((id) => [id, new FakeElement(tags[id] || "div")]));
+   Object.assign(elements["map-dag"], { clientWidth: 800, clientHeight: 600 });  // the canvas has a size, so it can be fitted and panned
+   focus.body = focus.on = new FakeElement("body");
+@@ -323,7 +323,11 @@ class FakeElement {
+     queueCount: elements["queue-count"].textContent,
+     departures: elements["queue-departures"].hidden ? null : elements["queue-departures-text"].textContent,
+     pursue: { shown: !elements["pursue-banner"].hidden, start: !elements["pursue-start"].hidden, stop: !elements["pursue-stop"].hidden,
+-              status: elements["pursue-status"].textContent, focused: focus.on === elements["pursue-start"] },
++              status: elements["pursue-status"].textContent, focused: focus.on === elements["pursue-start"],
++              // proof-agents#19: the total and time limit before Start, and what is spent of them while it runs
++              limits: elements["pursue-limits"].hidden ? null : { turns: elements["pursue-turns"].value, minutes: elements["pursue-minutes"].value,
++                                                               why: elements["pursue-limits-why"].textContent },
++              spend: elements["pursue-spend"].hidden ? null : elements["pursue-spend"].textContent },
+   });
+   const readings = [read()];
+   // a key pressed where the focus is: the focused element hears it first, then it bubbles to the document
+@@ -394,6 +398,12 @@ class FakeElement {
+       if (step.runButton.redirect !== undefined) elements["node-run"].querySelector("input").value = step.runButton.redirect;
+       await elements["node-run"].querySelectorAll("button").find((b) => b.textContent === step.runButton.text).dispatch("click"); await settle();
+     }
++    if (step.pursueLimits) {   // the researcher types their own total before Start
++      for (const [key, id] of [["turns", "pursue-turns"], ["minutes", "pursue-minutes"]]) {
++        if (step.pursueLimits[key] !== undefined) { elements[id].value = String(step.pursueLimits[key]); await elements[id].dispatch("input"); }
++      }
++    }
++    if (step.refresh) { await context.refresh(); await settle(); }
+     if (step.pursue) { await elements[`pursue-${step.pursue}`].dispatch("click"); await settle(); }  // ADR-0021: Pursue / Stop
+     if (step.queueAnswer) {  // a Standing question answered in place: {node, keep: true} or {node, answer: "<reading>"}
+       const li = elements["review-queue"].children.find((l) => l.dataset.kind === "question" && l.textContent.includes(step.queueAnswer.node));
+diff --git a/tests/js/run_pane_harness.js b/tests/js/run_pane_harness.js
+index b95f237..2804bd2 100644
+--- a/tests/js/run_pane_harness.js
++++ b/tests/js/run_pane_harness.js
+@@ -81,6 +81,8 @@ class El {
+     verdict: (pane.all().find((x) => x.cls().startsWith("run-verdict")) || { textContent: null }).textContent,  // the newest verdict on the run line (ADR-0019)
+     suggestion: (pane.all().find((x) => x.cls() === "run-suggestion") || { textContent: null }).textContent,  // what the record repeats, for the researcher (point 17)
+     coordinator: (pane.all().find((x) => x.cls() === "coordinator-line") || { text: () => null }).text(),  // the subtree's Coordinator (point 18)
++    // proof-agents#19: the Pursue's total and time limit before Start, as the fields hold them
++    coordinatorLimits: ["turns", "minutes"].map((key) => (pane.all().find((x) => x.cls() === `coordinator-${key}`) || { value: null }).value),
+     plan: pane.all().filter((x) => x.tag === "li" && x.attrs["data-step"]).map((x) => ({ step: x.attrs["data-step"], text: x.textContent, status: x.cls(), mark: (x.children.find((c) => typeof c === "object" && c.cls() === "plan-mark") || { textContent: "" }).textContent })),
+     log: pane.all().filter((x) => x.tag === "li" && x.attrs["data-kind"]).map((x) => ({ kind: x.attrs["data-kind"], text: x.text() })),
+     links: pane.all().filter((x) => x.tag === "a").map((x) => x.attrs.href),
+@@ -129,6 +131,10 @@ class El {
+     readings.push({ ...read(), prevented });
+   }
+   for (const label of [].concat(scenario.press || [])) {
++    for (const [key, value] of Object.entries(scenario.limitsTyped || {})) {   // the researcher's own total, typed before Pursue
++      const input = pane.all().find((x) => x.cls() === `coordinator-${key}`);
++      input.value = String(value); if (input.oninput) input.oninput();
++    }
+     if (scenario.redirect !== undefined) { const box = pane.all().find((x) => x.cls() === "run-redirect"); if (box) box.value = scenario.redirect; }
+     if (scenario.role !== undefined) { for (const sel of pane.all().filter((x) => x.tag === "select")) sel.value = scenario.role; }
+     const button = pane.all().find((x) => x.tag === "button" && x.textContent === label);
+diff --git a/tests/test_coordinator_hub.py b/tests/test_coordinator_hub.py
+index 35aeea1..9e9a2ae 100644
+--- a/tests/test_coordinator_hub.py
++++ b/tests/test_coordinator_hub.py
+@@ -15,7 +15,7 @@ from _researcher import researcher
+ from _review_client import DirectClient
+ from proof_cli.proof_map import create_node, get_active_claim, get_workflow_state, split_node, work_log
+ from proof_cli.storage import ensure_project
+-from proof_web.studios import StudioHub
++from proof_web.studios import PursueBudget, StudioHub
+ from test_agent_run import FAKE_CLAUDE, SRC, _executable, _queue, _turns, _until
+ 
+ 
+@@ -69,7 +69,8 @@ def test_the_coordinator_works_the_children_then_the_root_and_the_page_and_the_m
+     # A's run first (one at a time), through a studio made for it: no page was opened on A
+     _until(lambda: get_workflow_state(store, "A") == "review-needed", "A requested for review", timeout=60)
+     shown = next(n for n in client.get("/api/map")[1]["data"]["nodes"] if n["id"] == "T")
+-    assert shown["coordinator"]["status"] == "running" and shown["coordinator"]["turns_max"] == 120
++    # proof-agents#19: one Pursue total, 40 × 3 open nodes + T's two structure turns; before it, the sum of the node budgets
++    assert shown["coordinator"]["status"] == "running" and shown["coordinator"]["turns_max"] == (122 if PursueBudget else 120)
+     _until(lambda: get_workflow_state(store, "B") == "review-needed", "B requested for review", timeout=60)
+     time.sleep(0.5)
+     assert get_workflow_state(store, "T") == "blocked" and _turns(log).__len__() == 2  # the root waits for the children's Acceptance
+@@ -81,9 +82,14 @@ def test_the_coordinator_works_the_children_then_the_root_and_the_page_and_the_m
+     assert (view["status"], view["reason"]) == ("done", "T is requested for review") and view["subtree"]["accepted"] == 2
+     assert [t["role"] for t in _turns(log)] == ["prover", "prover", "prover"]
+     notes = [e["note"] for e in work_log(store, "T") if e.get("kind") == "coordinator"]
+-    assert notes[0].startswith("started on T: 3 open node(s), up to 1 run(s) at a time, 120 turns in all")
+-    assert any(n.startswith("started a run on A (start 1, 40 turn(s) left") for n in notes) and any(n.startswith("the run on A ended: done — review-requested") for n in notes)
+-    assert notes[-1] == "done: T is requested for review"
++    if PursueBudget:
++        assert notes[0].startswith("started on T: 3 open node(s), up to 1 run(s) at a time; the Pursue's total 122 turns")
++        assert any(n.startswith("started a run on A (start 1, up to 40 turn(s)") for n in notes)
++        assert notes[-2] == "done: T is requested for review" and notes[-1].startswith("budget: ")   # real turns and failed launches apart
++    else:
++        assert notes[0].startswith("started on T: 3 open node(s), up to 1 run(s) at a time, 120 turns in all")
++        assert any(n.startswith("started a run on A (start 1, 40 turn(s) left") for n in notes) and notes[-1] == "done: T is requested for review"
++    assert any(n.startswith("the run on A ended: done — review-requested") for n in notes)
+     assert next(n for n in client.get("/api/map")[1]["data"]["nodes"] if n["id"] == "T")["coordinator"] is None
+     assert client.post("/api/node/T/coordinator/pause", {})[0] == 409  # nothing to pause once it ended
+ 
+diff --git a/tests/test_pursue_limits.py b/tests/test_pursue_limits.py
+new file mode 100644
+index 0000000..ca3c018
+--- /dev/null
++++ b/tests/test_pursue_limits.py
+@@ -0,0 +1,98 @@
++"""proof-web#18: a Pursue's total turns and time limit (proof-agents#19), shown before Start and submitted with it.
++
++proof-agents computes the default and enforces the limits; the hub shows the default before Start (the project's Pursue
++and a subtree's), checks and passes the researcher's own with Start, and shows what is being spent of them: real turns,
++structure turns and failed launches apart, and the time left.
++"""
++
++import pytest
++
++from _review_client import DirectClient
++from proof_cli.proof_map import create_node, split_node
++from test_pursuit_history import _phases, _settled, _until, _view, drafted  # noqa: F401 — the fixture
++
++coordinator_module = pytest.importorskip("proof_agents.coordinator")
++if not hasattr(coordinator_module, "PursueBudget"):
++    pytest.skip("needs proof-agents#19", allow_module_level=True)
++from proof_agents.coordinator import pursue_limits  # noqa: E402
++from proof_agents.proof_agent import budget  # noqa: E402
++
++
++def test_before_start_the_project_pursue_shows_its_default_total_and_how_it_is_made(drafted):  # noqa: F811
++    store, clients = drafted
++    view = _view(clients[0])
++    node_turns, node_minutes = budget(store.root)
++    assert view["can_pursue"] and view["limits"] == pursue_limits(node_turns, node_minutes, 0, 0, reader=True)
++    assert "spend" not in view   # nothing spent before Start
++
++
++def test_the_researchers_total_is_what_the_pursue_fixes_and_what_it_spends_is_shown(drafted):  # noqa: F811
++    store, clients = drafted
++    client = clients[0]
++    client.app.studios._read_turn = lambda provider: {}   # the Reader states no Theorem: the pursuit ends stuck
++    status, started = client.post("/api/pursue/start", {"provider": "stub", "limits": {"turns": 9, "minutes": 30}})
++    assert status == 200, started
++    _until(lambda: _view(client)["status"] == "stuck" and _settled(client))
++    view = _view(client)
++    assert (view["budget"]["turns_max"], view["budget"]["minutes_max"]) == (9, 30.0)
++    assert view["spend"]["turns"] == 1 and view["spend"]["turns_max"] == 9 and view["spend"]["failed_launches"] == 0   # the Reader's turn
++
++
++@pytest.mark.parametrize("limits", [{"turns": 0, "minutes": 30}, {"turns": 2.5, "minutes": 30}, {"turns": 5, "minutes": -1}, {"turns": 5}, "ten"])
++def test_limits_that_are_not_a_total_are_refused_before_anything_is_recorded_or_started(drafted, limits):  # noqa: F811
++    store, clients = drafted
++    client = clients[0]
++    read = []
++    client.app.studios._read_turn = lambda provider: read.append(provider) or {}
++    status, answer = client.post("/api/pursue/start", {"provider": "stub", "limits": limits})
++    assert status == 400 and answer["error"]["code"] == "INVALID_LIMITS"
++    assert read == [] and _view(client)["status"] == "idle"
++    from proof_cli.pursuit import project_progress
++
++    assert project_progress(store) == []   # no start recorded: nothing was started
++
++
++@pytest.fixture
++def split(tmp_path):
++    from proof_cli.storage import ensure_project
++
++    store = ensure_project(tmp_path / "project")
++    create_node(store, node_id="T", kind="theorem", statement="T holds")
++    split_node(store, "T", [{"id": "A", "statement": "A holds"}, {"id": "B", "statement": "B holds"}])
++    client = DirectClient(store)
++    yield store, client
++    client.app.close()
++
++
++def test_before_start_a_subtrees_pursue_shows_its_default_total_and_start_sends_the_researchers(split, monkeypatch):
++    store, client = split
++    idle = client.get("/api/node/T/coordinator")[1]["data"]
++    node_turns, node_minutes = budget(store.root)
++    assert idle["limits"] == pursue_limits(node_turns, node_minutes, 3, 1)
++    coordinator = client.app.studios.coordinator("T")
++    asked = {}
++    monkeypatch.setattr(coordinator, "start", lambda provider, **kw: asked.update(kw) or {"status": "running"})
++    assert client.post("/api/node/T/coordinator/start", {"provider": "claude", "limits": {"turns": 12, "minutes": 45}})[0] == 200
++    assert asked == {"limits": {"turns": 12, "minutes": 45.0}}
++    asked.clear()
++    assert client.post("/api/node/T/coordinator/start", {"provider": "claude"})[0] == 200
++    assert asked == {}   # no limits sent: proof-agents' default
++    status, answer = client.post("/api/node/T/coordinator/start", {"provider": "claude", "limits": {"turns": -3, "minutes": 45}})
++    assert status == 400 and answer["error"]["code"] == "INVALID_LIMITS"
++
++
++def test_a_subtree_started_with_the_researchers_total_enforces_it(split):
++    store, client = split
++    coordinator = client.app.studios.coordinator("T")
++
++    def no_run(node_id):   # no agent is launched by this test: each run is refused, and the Coordinator says so
++        raise RuntimeError("no run in this test")
++
++    coordinator.hooks.run = no_run
++    try:
++        answer = coordinator.start("claude", limits={"turns": 7, "minutes": 5})
++        assert "error" not in answer, answer
++        view = client.get("/api/node/T/coordinator")[1]["data"]
++        assert (view["turns_max"], view["minutes_max"]) == (7, 5.0) and "limits" not in view   # no default once it runs
++    finally:
++        coordinator.release()
+diff --git a/tests/test_pursue_review_queue.py b/tests/test_pursue_review_queue.py
+index ca9665d..af65d41 100644
+--- a/tests/test_pursue_review_queue.py
++++ b/tests/test_pursue_review_queue.py
+@@ -425,7 +425,10 @@ class _HeldCoordinator:
+     def __init__(self, fails: int) -> None:
+         self.fails, self.released, self.asked = fails, False, 0
+ 
+-    def start(self, provider):
++    def open_nodes(self):   # proof-agents#19: what the default total counts
++        return []
++
++    def start(self, provider, **limits):   # proof-agents#19: the Pursue's shared budget, or the researcher's limits
+         return {"status": "running"}
+ 
+     def active(self):
+diff --git a/tests/test_pursuit_history.py b/tests/test_pursuit_history.py
+index 66f9679..2246cbd 100644
+--- a/tests/test_pursuit_history.py
++++ b/tests/test_pursuit_history.py
+@@ -69,7 +69,10 @@ class _Coordinator:
+     def __init__(self, status="done", fails=0) -> None:
+         self.status, self.fails, self.released = status, fails, False
+ 
+-    def start(self, provider):
++    def open_nodes(self):   # proof-agents#19: what the default total counts
++        return []
++
++    def start(self, provider, **limits):   # proof-agents#19: the Pursue's shared budget, or the researcher's limits
+         return {"status": "running"}
+ 
+     def active(self):
+diff --git a/tests/test_review_queue_page.py b/tests/test_review_queue_page.py
+index 754aa59..a509034 100644
+--- a/tests/test_review_queue_page.py
++++ b/tests/test_review_queue_page.py
+@@ -145,3 +145,36 @@ def test_a_step_that_could_not_be_recorded_is_said_beside_the_pursuit():
+             "can_pursue": True, "stopping": False, "record_error": "its end was not recorded: disk full"}
+     (shown,) = _page(map_nodes=[], pursue=view)
+     assert shown["pursue"]["status"] == ("stuck — the Reader stated no Theorem · History not saved: its end was not recorded: disk full")
++
++
++# -- proof-web#18: the Pursue's total and time limit (proof-agents#19) -------------------------------------------------------
++
++LIMITS = {"turns": 15, "minutes": 75.0, "node_turns": 12, "node_minutes": 60.0, "open_nodes": 0, "structure_allowance": 3}
++OFFERED = {"status": "idle", "reason": "", "theorems": [], "current": None, "results": {}, "can_pursue": True, "limits": LIMITS}
++
++
++def test_before_start_the_banner_shows_the_default_total_and_how_it_is_made():
++    shown = _page(map_nodes=[], pursue=OFFERED)[0]["pursue"]
++    assert shown["start"] and shown["limits"]["turns"] == "15" and shown["limits"]["minutes"] == "75"
++    why = shown["limits"]["why"]
++    assert "12 turns per node × 1 open node(s) + 3 structure turn(s)" in why and "ceiling" in why and "spend what is left" in why
++    assert shown["spend"] is None
++
++
++def test_pursue_sends_the_researchers_total_and_a_refresh_keeps_what_they_typed():
++    running = {**OFFERED, "status": "reading", "can_pursue": False, "limits": None,
++               "spend": {"turns": 1, "turns_max": 20, "structure_turns": 0, "failed_launches": 0, "minutes_max": 90.0, "minutes_left": 89.5}}
++    out = _page(map_nodes=[], pursue=OFFERED, pursue_replies=[{"view": running}],
++                steps=[{"pursueLimits": {"turns": 20, "minutes": 90}}, {"refresh": True}, {"pursue": "start"}])
++    typed = out[2]["pursue"]["limits"]
++    assert (typed["turns"], typed["minutes"]) == ("20", "90")   # not reset to the default by the refresh
++    assert out[-1]["posted"][-1] == {"url": "/api/pursue/start", "body": {"limits": {"turns": 20, "minutes": 90}}}
++    after = out[-1]["pursue"]
++    assert after["limits"] is None and after["spend"] == "Turns 1/20 · failed launches 0 · 89.5 of 90 min left"
++
++
++def test_while_it_runs_the_banner_shows_real_turns_structure_and_failed_launches_apart():
++    pursuing = {"status": "pursuing", "reason": "", "theorems": ["T1"], "current": "T1", "results": {}, "can_pursue": False,
++                "spend": {"turns": 7, "turns_max": 20, "structure_turns": 2, "failed_launches": 1, "minutes_max": 90.0, "minutes_left": 40.0}}
++    shown = _page(map_nodes=MAP, pursue=pursuing)[0]["pursue"]
++    assert shown["spend"] == "Turns 7/20 (2 structure) · failed launches 1 · 40 of 90 min left" and shown["limits"] is None
+diff --git a/tests/test_run_pane.py b/tests/test_run_pane.py
+index b6dc2d9..f2d32fe 100644
+--- a/tests/test_run_pane.py
++++ b/tests/test_run_pane.py
+@@ -367,3 +367,34 @@ def test_the_decomposer_is_not_offered_while_a_run_is_on_and_its_stop_reads_as_n
+     stopped = {**IDLE, "status": "needs-human", "role": "decomposer", "name": "claude-code", "decision": "structure proposed (2 Claim(s): N1, N2); the researcher decides"}
+     (shown,) = _pane(run=stopped, log=[], node={**THEOREM, "node": {**THEOREM["node"], "dependencies": ["N1", "N2"]}})
+     assert "Needs you: structure proposed (2 Claim(s): N1, N2); the researcher decides" in shown["text"] and "Propose a split" not in shown["buttons"]
++
++
++# -- proof-web#18: the Pursue's total and time limit (proof-agents#19) -------------------------------------------------------
++
++LIMITS = {"turns": 38, "minutes": 190.0, "node_turns": 12, "node_minutes": 60.0, "open_nodes": 3, "structure_allowance": 2}
++
++
++def test_before_pursue_the_subtree_shows_its_default_total_and_pursue_sends_what_the_researcher_typed():
++    (shown, pressed) = _pane(run=IDLE, log=[], coordinator={**COORDINATOR_IDLE, "limits": LIMITS}, press="Pursue", provider="codex",
++                             limitsTyped={"turns": 20})
++    assert shown["coordinatorLimits"] == ["38", "190"]
++    assert "12 turns per node × 3 open node(s) + 2 structure turn(s) for splits" in shown["coordinator"] and "ceiling" in shown["coordinator"]
++    assert pressed["posted"] == [{"url": "../../api/node/N/coordinator/start", "body": {"provider": "codex", "limits": {"turns": 20, "minutes": 190}}}]
++    (plain, sent) = _pane(run=IDLE, log=[], coordinator=COORDINATOR_IDLE, press="Pursue", provider="codex")
++    assert plain["coordinatorLimits"] == [None, None] and sent["posted"][0]["body"] == {"provider": "codex"}   # an older proof-agents: no limits
++
++
++def test_a_working_subtree_shows_the_pursues_turns_structure_and_failed_launches_apart():
++    working = {**COORDINATOR_RUNNING, "turns": 9, "pursue_turns": 11, "turns_max": 38, "structure_turns": 2, "failed_launches": 1}
++    (shown,) = _pane(run=IDLE, log=[], coordinator=working)
++    assert "turns 11/38 (2 structure) · failed launches 1" in shown["coordinator"]
++
++
++def test_an_ended_subtree_says_which_nodes_the_total_interrupted_and_which_failed_to_launch():
++    ended = {**COORDINATOR_IDLE, "status": "budget", "reason": "the Pursue's total is spent (38 of 38 turns)", "turns": 38, "pursue_turns": 38, "turns_max": 38,
++             "interrupted": [{"node": "T", "reason": "the Pursue's total is spent (38 of 38 turns), which prevented its re-split: L1 is parked"}],
++             "launch_failed": [{"node": "L2", "reason": "its launch failed 3 time(s) in this Start: no such provider"}]}
++    (shown,) = _pane(run=IDLE, log=[], coordinator=ended)
++    text = shown["coordinator"]
++    assert "T interrupted — the Pursue's total is spent (38 of 38 turns), which prevented its re-split" in text
++    assert "L2 launch failed — its launch failed 3 time(s) in this Start" in text and "turns 38/38" in text
+-- 
+2.54.0
+

@@ -1,0 +1,151 @@
+diff --git a/src/proof_web/server.py b/src/proof_web/server.py
+index 4cc281b..cef410e 100644
+--- a/src/proof_web/server.py
++++ b/src/proof_web/server.py
+@@ -399,6 +399,8 @@ class ReviewApp:
+                     # the Trust rules an imported result meets (ADR-0014): named on its chip
+                     "trust_rule": proof_map.trust_rules_of(self.store, node.id) if imported else [],
+                     "integrity_state": proof_map.get_integrity_state(self.store, node.id),
++                    # why it may no longer hold, for the Warnings page (proof-cli#197); an older proof-cli has none
++                    "stale_cause": proof_map.get_stale_cause(self.store, node.id) if hasattr(proof_map, "get_stale_cause") else None,
+                     "assignee": claim.claimant_id if claim else None,
+                     "frontier": node.id in frontier,
+                     # ADR-0021: rested on for work (never trust); the Provisional nodes its proof rests on; why a
+diff --git a/src/proof_web/static/app.js b/src/proof_web/static/app.js
+index 5a862f5..69e88b4 100644
+--- a/src/proof_web/static/app.js
++++ b/src/proof_web/static/app.js
+@@ -1370,6 +1370,17 @@ const ATTENTION_WHY = {
+   "potentially-stale": "A dependency moved to a new accepted version: it may need a re-review or a new proof.",
+   unverifiable: "Its newest Review decision no longer matches its snapshot or its statement: decide it afresh.",
+ };
++// why a potentially-stale node may no longer hold, from its stale_cause (proof-cli#197); the generic line without one
++function staleWhy(n) {
++  const c = n.stale_cause;
++  if (!c) return ATTENTION_WHY["potentially-stale"];
++  const who = `${c.by ? ` by ${c.by}` : ""}${c.reason ? `: ${c.reason}` : ""}`;
++  if (c.cause === "definition-edited") return `Definition ${c.definition_id} was edited${who}. Its snapshot was frozen before: it may need a new proof.`;
++  if (c.cause === "restated") return `${c.node_id === n.id ? "Its statement" : `${c.node_id}, which it rests on,`} was restated${who}. Its snapshot was frozen before: it may need a new proof.`;
++  if (c.cause === "support-withdrawn") return `It rests on ${(c.nodes || []).join(", ")}, which the researcher sent back: its snapshot awaits a decision on support that no longer holds.`;
++  if (c.cause === "upstream-challenged") return "Something it rests on is Challenged, or cites a source found no longer callable: it may no longer be safe to depend on.";
++  return ATTENTION_WHY["potentially-stale"];
++}
+ function showAttention() {
+   const nodes = mapData.nodes.filter((n) => warningOf(n));
+   const list = $("attention-nodes");
+@@ -1378,7 +1389,7 @@ function showAttention() {
+     const row = el("li");
+     const link = el("a", null, { href: pageOf(n), class: "attention-node" });
+     link.append(el("b", n.display_label || short(n.statement, 60)), el("span", `${KIND_LABEL[n.kind] || n.kind} · ${n.id}`, { class: "attention-id" }));
+-    row.append(stateChip(reason, n.status.text), link, el("p", ATTENTION_WHY[reason], { class: "hint" }));
++    row.append(stateChip(reason, n.status.text), link, el("p", reason === "potentially-stale" ? staleWhy(n) : ATTENTION_WHY[reason], { class: "hint" }));
+     return row;
+   }));
+   if (!nodes.length) list.append(el("li", "Nothing on the map needs attention.", { class: "attention-none" }));
+diff --git a/src/proof_web/static/studio/run.js b/src/proof_web/static/studio/run.js
+index 9862f1a..a2e3706 100644
+--- a/src/proof_web/static/studio/run.js
++++ b/src/proof_web/static/studio/run.js
+@@ -272,6 +272,15 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
+     return change.url ? h("a", rel, { href: change.url, class: "log-file", title: `Open ${rel} at line ${line} in VS Code` }) : h("span", rel, { class: "log-file" });
+   }
+ 
++  // a restatement or a Definition edit, as `proof node progress` reads it: what, why, and each field's old → new
++  function changeLine(e) {
++    const shown = (v) => (Array.isArray(v) ? v.join(", ") || "none" : String(v));
++    const before = e.from || {}, after = e.to || {};
++    const changes = Object.entries(after).map(([key, value]) => `${key}: ${key in before ? shown(before[key]) : "…"} → ${shown(value)}`).join("; ");
++    const what = e.kind === "restated" ? "restated" : `definition ${e.definition_id} edited`;
++    return `${what}${e.reason ? ` — ${e.reason}` : ""}${changes ? ` (${changes})` : ""}`;
++  }
++
+   // one work-log entry as a line: time, role, what happened, and a link to what it produced
+   function entry(e) {
+     const li = h("li", null, { class: `log-${e.kind}`, "data-kind": e.kind });
+@@ -293,6 +302,8 @@ const IDLE_POLL_MS = 10000;  // otherwise: a Start from the map or the node page
+     else if (e.kind === "experiment") body.append(`Experiment ${e.seq} on `, h("a", e.fog_id, { href: `/#/fog/${encodeURIComponent(e.fog_id)}` }), `: ${e.outcome}`);
+     else if (e.kind === "dependencies") body.append(`dependency ${e.change}: `, h("a", e.dependency, { href: `/studio/${encodeURIComponent(e.dependency)}/` }));
+     else if (e.kind === "claimed") body.append("took the node");
++    // ADR-0021 point 6: who restated the text it is read against, or edited a Definition it names, why, and from what
++    else if (e.kind === "restated" || e.kind === "definition-edited") body.append(changeLine(e));
+     else body.append(String(e.kind));
+     li.append(body);
+     return li;
+diff --git a/tests/test_map_home.py b/tests/test_map_home.py
+index b756a8c..04e59b3 100644
+--- a/tests/test_map_home.py
++++ b/tests/test_map_home.py
+@@ -416,6 +416,24 @@ def test_the_warnings_page_lists_the_nodes_that_need_attention_and_the_sidebar_c
+     assert quiet["attention"] == ["Nothing on the map needs attention."] and quiet["railWarnings"] == ""
+ 
+ 
++def test_the_warnings_page_says_why_a_node_may_no_longer_hold():
++    """T8 (proof-cli#197): a Definition edit read "A dependency moved to a new accepted version"; each cause now says itself."""
++    edited = {"cause": "definition-edited", "definition_id": "D", "by": "reader-1", "reason": "n = 1 is degenerate"}
++    nodes = {"nodes": [_node("C", "claim", "Names D", integrity_state="potentially-stale", stale_cause=edited),
++                       _node("L", "lemma", "Rests on C", integrity_state="potentially-stale",
++                             stale_cause={"cause": "restated", "node_id": "C", "by": "reader-1", "reason": "too strong"}),
++                       _node("M", "lemma", "Own text", integrity_state="potentially-stale", stale_cause={"cause": "restated", "node_id": "M"}),
++                       _node("N", "lemma", "Sent back", integrity_state="potentially-stale", stale_cause={"cause": "support-withdrawn", "nodes": ["C"]}),
++                       _node("P", "lemma", "Older core", integrity_state="potentially-stale")]}
++    (shown,) = _home(state=_state(), map_=nodes)
++    why = dict(zip("CLMNP", shown["attention"]))
++    assert "Definition D was edited by reader-1: n = 1 is degenerate" in why["C"] and "A dependency moved" not in why["C"]
++    assert "C, which it rests on, was restated by reader-1: too strong" in why["L"]
++    assert "Its statement was restated." in why["M"]
++    assert "It rests on C, which the researcher sent back" in why["N"]
++    assert "A dependency moved to a new accepted version" in why["P"]  # no stale_cause: the generic line, as before
++
++
+ # -- each Evidence check names the Review snapshot it checked (issue #122) -------------------
+ 
+ SHA_V1, SHA_V2 = "1" * 8 + "e" * 56, "2" * 8 + "f" * 56
+diff --git a/tests/test_pursue_review_queue.py b/tests/test_pursue_review_queue.py
+index af65d41..1a54d16 100644
+--- a/tests/test_pursue_review_queue.py
++++ b/tests/test_pursue_review_queue.py
+@@ -510,3 +510,21 @@ def test_a_run_s_standing_question_is_recorded_on_the_node(project):
+     (asked,) = questions(store, "C")
+     assert asked["question"] == "took n ≥ 2; the alternative: n ≥ 1" and asked["state"] == "open"
+     assert any(item["kind"] == "question" and item["node_id"] == "C" for item in client.get("/api/review-queue")[1]["data"]["items"])
++
++
++def test_the_map_says_which_definition_edit_left_a_snapshot_stale(project):
++    """T8 (proof-cli#197): the Warnings page names the Definition, who edited it and why, from the map's stale_cause."""
++    from proof_cli import proof_map
++    from proof_cli.definitions import edit_definition
++
++    if not hasattr(proof_map, "get_stale_cause"):
++        pytest.skip("this proof-cli has no stale cause")
++    store, client = project
++    add_definition(store, "D", term="Positive parameter", text="$n \\ge 1$", created_by="reader-1")
++    create_node(store, node_id="E", kind="claim", statement="E holds for n", definitions=["D"], created_by="decomposer-1")
++    _passed(store, "E")
++    edit_definition(store, "D", text="$n \\ge 2$", edited_by="reader-1", reason="n = 1 is degenerate")
++
++    cause = _nodes(client)["E"]["stale_cause"]
++    assert (cause["cause"], cause["definition_id"], cause["by"], cause["reason"]) == ("definition-edited", "D", "reader-1", "n = 1 is degenerate")
++    assert _nodes(client)["C"]["stale_cause"] is None
+diff --git a/tests/test_run_pane.py b/tests/test_run_pane.py
+index 66267df..4f7d43a 100644
+--- a/tests/test_run_pane.py
++++ b/tests/test_run_pane.py
+@@ -67,6 +67,18 @@ def test_the_work_log_reads_in_time_order_with_roles_and_links():
+     assert "Evidence check passed" in texts["evidence"] and "fog-3" in texts["fog"] and "the constant may be optimal" in texts["fog"]
+ 
+ 
++def test_a_restatement_and_a_definition_edit_say_who_why_and_what_changed():
++    """T8 (proof-cli#197): the studio showed only "definition-edited"; it reads as `proof node progress` does."""
++    log = [{"at": "2026-10-11T19:47:00+00:00", "kind": "definition-edited", "by": "human", "definition_id": "D",
++            "reason": "n = 1 is degenerate", "from": {"text": "$n \\ge 1$"}, "to": {"text": "$n \\ge 2$"}},
++           {"at": "2026-10-11T19:48:00+00:00", "kind": "restated", "by": "reader-1", "reason": "too strong",
++            "from": {"statement": "c"}, "to": {"statement": "c'", "assumptions": ["a"]}}]
++    (shown,) = _pane(run=IDLE, log=log)
++    texts = {e["kind"]: e["text"] for e in shown["log"]}
++    assert "definition D edited — n = 1 is degenerate (text: $n \\ge 1$ → $n \\ge 2$)" in texts["definition-edited"]
++    assert "restated — too strong (statement: c → c'; assumptions: … → a)" in texts["restated"]
++
++
+ def test_pause_redirect_and_release_post_their_actions_with_what_was_typed():
+     _, paused = _pane(run=RUNNING, log=LOG, press="Pause", after={**RUNNING, "status": "paused"})  # still active
+     assert paused["posted"] == [{"url": "api/agent/pause", "body": {}}] and paused["buttons"][0] == "Resume"

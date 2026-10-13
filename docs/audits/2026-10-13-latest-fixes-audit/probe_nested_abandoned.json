@@ -1,0 +1,81 @@
+{
+  "map": [
+    {
+      "id": "C1",
+      "kind": "claim",
+      "dependencies": [
+        "D1",
+        "D2"
+      ],
+      "derived_from": "T",
+      "by_agent": true
+    },
+    {
+      "id": "C2",
+      "kind": "claim",
+      "dependencies": [],
+      "derived_from": "T",
+      "by_agent": true
+    },
+    {
+      "id": "D1",
+      "kind": "claim",
+      "dependencies": [],
+      "derived_from": "C1",
+      "by_agent": true
+    },
+    {
+      "id": "D2",
+      "kind": "claim",
+      "dependencies": [],
+      "derived_from": "C1",
+      "by_agent": true
+    },
+    {
+      "id": "T",
+      "kind": "theorem",
+      "dependencies": [
+        "C2"
+      ],
+      "derived_from": null,
+      "by_agent": true
+    }
+  ],
+  "runs": [
+    {
+      "status": "stuck",
+      "reason": "agent-made local nodes outside every Theorem's subtree; wire each under a Theorem, or park or delete it, then Start again: D1, D2",
+      "theorems": [
+        "T"
+      ],
+      "current": null,
+      "results": {},
+      "budget": {
+        "turns_max": 4,
+        "minutes_max": 1.0,
+        "deadline": 1791900791.645919,
+        "spent": 0,
+        "structure_spent": 0,
+        "failed_launches": 0
+      }
+    },
+    {
+      "status": "stuck",
+      "reason": "agent-made local nodes outside every Theorem's subtree; wire each under a Theorem, or park or delete it, then Start again: D1, D2",
+      "theorems": [
+        "T"
+      ],
+      "current": null,
+      "results": {},
+      "budget": {
+        "turns_max": 4,
+        "minutes_max": 1.0,
+        "deadline": 1791900791.658559,
+        "spent": 0,
+        "structure_spent": 0,
+        "failed_launches": 0
+      }
+    }
+  ],
+  "coordinator_starts": []
+}

@@ -1,0 +1,61 @@
+- banner
+  - button "Show or hide the sidebar" [ref=e2]
+  - link "t8-audit-definition" [ref=e3]
+  - StaticText "2 nodes · 0 on the frontier"
+  - generic
+    - StaticText "0"
+    - StaticText "Frontier"
+  - link "1 Awaiting you" [ref=e4]
+    - StaticText "1"
+    - StaticText "Awaiting you"
+  - link "0 Fog" [ref=e5]
+    - StaticText "0"
+    - StaticText "Fog"
+  - generic
+    - StaticText "Y"
+    - StaticText "Yomathnotcool <125728853+DengZhiyuan-math@users.noreply.github.com>"
+- navigation "Sections" [ref=e1]
+  - paragraph
+    - StaticText "Proof map"
+  - link "Map" [ref=e6]
+    - StaticText "Map"
+  - link "Review 1" [ref=e7]
+    - StaticText "Review"
+    - StaticText "1"
+  - link "Warnings 2" [ref=e8]
+    - StaticText "Warnings"
+    - StaticText "2"
+  - link "Discuss" [ref=e9]
+    - StaticText "Discuss"
+- main
+  - status
+  - generic
+    - heading "Warnings" [level=1, ref=e10]
+    - paragraph
+      - StaticText "What may no longer hold, and review decisions that don't count as recorded."
+    - heading "Nodes that need attention 2" [level=2, ref=e11]
+      - StaticText "Nodes that need attention"
+      - StaticText "2"
+    - list
+      - listitem [level=1]
+        - StaticText "Dependency changed"
+        - link "C holds for n. Claim · C" [ref=e13]
+          - StaticText "C holds for n."
+          - StaticText "Claim · C"
+        - paragraph
+          - StaticText "Definition D was edited by reader-1: n = 1 is degenerate. Its snapshot was frozen before: it may need a new proof."
+      - listitem [level=1]
+        - StaticText "Dependency changed"
+        - link "L follows from C. Lemma · L" [ref=e14]
+          - StaticText "L follows from C."
+          - StaticText "Lemma · L"
+        - paragraph
+          - StaticText "Definition D was edited by reader-1: n = 1 is degenerate. Its snapshot was frozen before: it may need a new proof."
+    - heading "Review records" [level=2, ref=e12]
+      - StaticText "Review records"
+    - paragraph
+      - StaticText "Unreadable or unconfirmed records, decisions git doesn't have yet, an Acceptance that no longer describes its node, a snapshot that was never indexed."
+    - list
+      - listitem [level=1]
+        - ListMarker "• "
+        - StaticText "None."

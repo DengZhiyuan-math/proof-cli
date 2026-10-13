@@ -1,0 +1,57 @@
+[
+  {
+    "repo": "DengZhiyuan-math/proof-cli",
+    "localMergeHead": "3dd0a7bde3ad1ea9e040c02b1bff6589a9cf378c",
+    "targetBranch": "integ/0021",
+    "remoteBaseSHA": "b7f394374ce73e9a23754e12506e87e97326efd9",
+    "prsVerified": [
+      204,
+      205,
+      206,
+      207,
+      208,
+      209
+    ],
+    "retarget": [
+      205
+    ]
+  },
+  {
+    "repo": "zeqome/proof-agents",
+    "localMergeHead": "3ff0a7121e82b3c8eb1153c7bc1e296c96a36c69",
+    "targetBranch": "integ/0021",
+    "remoteBaseSHA": "36c291f6ff26bebc0720b36dcb5708c98d9b8736",
+    "prsVerified": [
+      21,
+      22,
+      23,
+      24,
+      25,
+      26
+    ],
+    "retarget": [
+      22,
+      23,
+      24,
+      26
+    ]
+  },
+  {
+    "repo": "zeqome/proof-web",
+    "localMergeHead": "b8157191d26834c570a0edbc310599a632b355b8",
+    "targetBranch": "feat/0021-pursue-review-queue",
+    "remoteBaseSHA": "864a2c29bd4f41a5344ae7be960b842a1d4aed62",
+    "prsVerified": [
+      13,
+      14,
+      15,
+      16,
+      19,
+      21
+    ],
+    "retarget": [
+      16,
+      19
+    ]
+  }
+]

@@ -1,0 +1,166 @@
+From 9f4bacf21cd08494163b9a5b11531468d233ac0d Mon Sep 17 00:00:00 2001
+From: Yomathnotcool <125728853+DengZhiyuan-math@users.noreply.github.com>
+Date: Sun, 11 Oct 2026 09:59:20 +0200
+Subject: [PATCH 1/2] fix: a Pursue's structure turns add up across its Reader
+ and every Theorem (#19)
+
+The shared budget keeps `structure_spent` beside `spent`: the Reader's turn and each finished Coordinator's Decomposer
+turns. A Coordinator notes it at Start (`structure_before`) and its view says `pursue_structure_turns`, the Pursue's
+structure turns so far, as `pursue_turns` says its turns. A page reads the count after the Pursue has ended too.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/proof_agents/coordinator.py | 23 +++++++++++++++++------
+ tests/test_pursue_budget.py     | 26 ++++++++++++++++++++++++++
+ 2 files changed, 43 insertions(+), 6 deletions(-)
+
+diff --git a/src/proof_agents/coordinator.py b/src/proof_agents/coordinator.py
+index adac046..92891c9 100644
+--- a/src/proof_agents/coordinator.py
++++ b/src/proof_agents/coordinator.py
+@@ -68,13 +68,15 @@ def pursue_limits(node_turns: int, node_minutes: float, open_nodes: int, parents
+ class PursueBudget:
+     """One Pursue's total turns and time limit, fixed at its Start (#19) and shared by every part of it: a project
+     Pursue's Reader turn and each Theorem's Coordinator, one after another. `spent` is what the parts that have ended
+-    spent; the part working adds its own live turns to it."""
++    spent, and `structure_spent` the structure turns of it (the Reader's, the Decomposers'); the part working adds its
++    own live turns to them."""
+ 
+     def __init__(self, turns: int, minutes: float, *, now: float | None = None) -> None:
+         self.turns_max = int(turns)
+         self.minutes_max = float(minutes)
+         self.deadline = (time.time() if now is None else now) + self.minutes_max * 60
+         self.spent = 0
++        self.structure_spent = 0
+         self.failed_launches = 0
+ 
+     @classmethod
+@@ -93,7 +95,7 @@ class PursueBudget:
+ 
+     def view(self) -> dict:
+         return {"turns_max": self.turns_max, "minutes_max": self.minutes_max, "deadline": self.deadline, "spent": self.spent,
+-                "failed_launches": self.failed_launches}
++                "structure_spent": self.structure_spent, "failed_launches": self.failed_launches}
+ 
+ 
+ @dataclass
+@@ -127,6 +129,7 @@ class CoordinatorState:
+     turns: int = 0             # real turns spent by the runs this Start started, structure and proof
+     turns_max: int = 0         # the Pursue's total, fixed at its Start (#19)
+     turns_before: int = 0      # what the Pursue spent before this Coordinator began: its Reader, earlier Theorems
++    structure_before: int = 0  # the structure turns of it
+     minutes_max: float = 0.0   # the Pursue's time limit, fixed at its Start
+     deadline: float | None = None
+     failed_launches: int = 0   # launches that failed in this Start, apart from turns (#19)
+@@ -191,7 +194,7 @@ class Coordinator:
+                 "name": state.name, "turns": state.turns, "turns_max": state.turns_max, "started_at": state.started_at,
+                 "turns_before": state.turns_before, "pursue_turns": state.turns_before + state.turns, "minutes_max": state.minutes_max,
+                 "deadline": state.deadline, "failed_launches": state.failed_launches,
+-                "structure_turns": sum(int(entry.get("structure_turns") or 0) for entry in state.nodes.values()),
++                "structure_turns": _structure(state), "pursue_structure_turns": state.structure_before + _structure(state),
+                 "running": state.running, "accepted": state.accepted, "nodes": state.nodes, "settling": settling, "can_release": can_release,
+                 "parked": [{"node": node_id, "reason": reason} for node_id, reason in state.parked.items()],
+                 "decomposed": state.decomposed, "resplit": state.resplit, "needs_you": self._needs_you(state),
+@@ -252,7 +255,8 @@ class Coordinator:
+                 return {"error": f"the Pursue's total is spent ({budget.spent} of {budget.turns_max} turns, {budget.minutes_max:g} minutes)", "code": "BUDGET_SPENT"}
+             self.budget = budget
+             self.state = CoordinatorState(status="starting", root=self.root, provider=provider, name=self.hooks.agent_name(provider),
+-                                          turns_max=budget.turns_max, turns_before=budget.spent, minutes_max=budget.minutes_max,
++                                          turns_max=budget.turns_max, turns_before=budget.spent,
++                                          structure_before=budget.structure_spent, minutes_max=budget.minutes_max,
+                                           deadline=budget.deadline, started_at=time.time(),
+                                           accepted=[node["id"] for node in subtree if node.get("accepted")])
+             self._stop = self._pause = False
+@@ -803,7 +807,7 @@ class Coordinator:
+             self.state.status, self.state.reason = status, reason
+             self.state.running = [] if status != "budget" else self.state.running
+             state = self.state
+-            structure = sum(int(entry.get("structure_turns") or 0) for entry in state.nodes.values())
++            structure = _structure(state)
+             summary = (f"budget: {state.turns} real turn(s) in this Start ({structure} structure, {state.turns - structure} proof), "
+                        f"{state.turns_before + state.turns} of the Pursue's {state.turns_max}; {state.failed_launches} failed launch(es)")
+         self._record(f"{status}: {reason}")
+@@ -816,6 +820,11 @@ class Coordinator:
+             pass
+ 
+ 
++def _structure(state: CoordinatorState) -> int:
++    """The structure turns this Coordinator's Start spent: its Decomposers'."""
++    return sum(int(entry.get("structure_turns") or 0) for entry in state.nodes.values())
++
++
+ def _pursue_spent(budget: PursueBudget) -> str:
+     """Why a project Pursue starts no further Theorem (#19); empty while its total and time limit last."""
+     if budget.spent >= budget.turns_max:
+@@ -973,6 +982,7 @@ class ProjectPursuit:
+                 reader_turns = int(answer.get("turns", 1))
+                 if self.budget is not None:
+                     self.budget.spent += reader_turns
++                    self.budget.structure_spent += reader_turns   # the Reader's turn is structure: in the allowance
+                 if self._stopped():
+                     return
+                 if "error" in answer:
+@@ -985,7 +995,7 @@ class ProjectPursuit:
+             if deferred:   # no node budget before the map: the default total from the map the Reader stated, its turn counted
+                 limits = self.default_limits()
+                 budget = PursueBudget(limits["turns"] + 1, limits["minutes"], now=self._started_at)
+-                budget.spent = reader_turns
++                budget.spent = budget.structure_spent = reader_turns
+                 with self._lock:
+                     self.budget = budget
+             self._note(f"pursuing {len(theorems)} Theorem(s): {', '.join(theorems)}; the Pursue's total {self.budget.turns_max} turns "
+@@ -1018,6 +1028,7 @@ class ProjectPursuit:
+                 view = coordinator.view()
+                 with self._lock:
+                     self.budget.spent += int(view.get("turns") or 0)   # its real turns, now the Pursue's
++                    self.budget.structure_spent += int(view.get("structure_turns") or 0)
+                 if self._stopped():
+                     return
+                 with self._lock:
+diff --git a/tests/test_pursue_budget.py b/tests/test_pursue_budget.py
+index b2758cb..cd249f3 100644
+--- a/tests/test_pursue_budget.py
++++ b/tests/test_pursue_budget.py
+@@ -194,6 +194,31 @@ def test_a_project_pursue_shares_one_total_with_its_reader_and_every_theorem():
+     assert pursuit.view()["budget"]["spent"] == 7 and pursuit.view()["budget"]["turns_max"] == 7
+ 
+ 
++def test_a_project_pursues_structure_turns_add_up_across_the_reader_and_every_theorem_and_stay_after_it_ends():
++    worlds = {"T1": World(edges={"T1": []}, kinds={"T1": "theorem"}, budget=(3, 60.0)), "T2": World(edges={"T2": []}, kinds={"T2": "claim"}, budget=(3, 60.0))}
++    stated: list[str] = []
++    made = {name: Coordinator(CoordinatorHooks(subtree=w.subtree, run=lambda node, w=w: w.runs[node], budget=lambda w=w: w._budget,
++                                               parallel=lambda: 1), name, tick=0.01) for name, w in worlds.items()}
++    pursuit = ProjectPursuit(PursuitHooks(read=lambda provider: stated.extend(["T1", "T2"]) or {"turns": 1}, theorems=lambda: list(stated),
++                                          coordinator=made.__getitem__, budget=lambda: (3, 60.0)), tick=0.01)
++    pursuit.start("claude", limits={"turns": 20, "minutes": 60})
++    _until(lambda: worlds["T1"].runs["T1"].starts == 1, "the Decomposer on T1")
++    assert made["T1"].view()["pursue_structure_turns"] == 1   # the Reader's turn is structure
++    _split(worlds["T1"], "T1", ["A"])
++    _until(lambda: worlds["T1"].runs["A"].starts, "A worked")
++    _until(lambda: made["T1"].view()["pursue_structure_turns"] == 2, "the split's turn counted with the Reader's")
++    worlds["T1"].runs["A"].end("done", verdict="passed", turns=1, reason="review-requested"); worlds["T1"].requested.add("A")
++    _until(lambda: worlds["T1"].runs["T1"].starts == 2, "T1's own proof")
++    worlds["T1"].runs["T1"].end("done", verdict="passed", turns=1, reason="review-requested"); worlds["T1"].requested.add("T1")
++    _until(lambda: worlds["T2"].runs["T2"].starts, "T2 pursued")
++    assert (made["T2"].view()["structure_turns"], made["T2"].view()["pursue_structure_turns"]) == (0, 2)   # the Reader's and T1's split
++    assert pursuit.view()["budget"]["structure_spent"] == 2
++    worlds["T2"].runs["T2"].end("done", verdict="passed", turns=1, reason="review-requested"); worlds["T2"].requested.add("T2")
++    _until(lambda: not pursuit.active(), "the pursuit ended")
++    budget = pursuit.view()["budget"]
++    assert (budget["spent"], budget["structure_spent"]) == (5, 2)   # kept once it ended: the Reader 1, T1 1+1+1, T2 1
++
++
+ def test_a_host_with_no_budget_hook_fixes_the_default_total_from_the_map_the_reader_stated():
+     world = World(edges={"T1": []}, kinds={"T1": "claim"}, budget=(3, 60.0))
+     stated: list[str] = []
+@@ -206,6 +231,7 @@ def test_a_host_with_no_budget_hook_fixes_the_default_total_from_the_map_the_rea
+     _until(lambda: world.runs["T1"].starts, "T1 pursued")
+     budget = pursuit.view()["budget"]
+     assert (budget["turns_max"], budget["spent"]) == (3 * 1 + 2 + 1, 1)   # T1's node budget, a split, and the Reader's one turn
++    assert budget["structure_spent"] == 1
+     pursuit.stop()
+ 
+ 
+-- 
+2.54.0
+

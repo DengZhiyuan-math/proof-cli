@@ -1,0 +1,59 @@
+diff --git a/src/proof_agents/proof_agent.py b/src/proof_agents/proof_agent.py
+index a3e554e..23c28e0 100644
+--- a/src/proof_agents/proof_agent.py
++++ b/src/proof_agents/proof_agent.py
+@@ -81,6 +81,25 @@ def studio_settings(project_root: Path) -> dict:
+     return table if isinstance(table, dict) else {}
+ 
+ 
++STUDIO_KEYS = {"library", "agent_name", "budget", "budget_turns", "budget_minutes", "parallel", "open_command"}  # what `[studio]` is read for
++STUDIO_HINTS = {  # a key someone might expect to exist, and where that setting really lives
++    "claude_config_dir": "the Claude profile is CLAUDE_CONFIG_DIR in the environment of the process serving the page",
++}
++
++
++def unknown_studio_keys(project_root: Path) -> list[dict]:
++    """The `[studio]` keys of proof.toml that nothing reads, each {key, message}: a misspelt or
++    invented setting is otherwise silently ignored (proof-cli#197, T8 set `claude_config_dir`)."""
++    settings = studio_settings(project_root)
++    keys = [key for key in settings if key not in STUDIO_KEYS]
++    budget_table = settings.get("budget")
++    if isinstance(budget_table, dict):
++        keys += [f"budget.{key}" for key in budget_table if key not in ("turns", "minutes")]
++    return [{"key": key, "message": f"proof.toml [studio] {key} is not a setting and is ignored"
++             + (f"; {STUDIO_HINTS[key]}" if key in STUDIO_HINTS else "")
++             + f". Settings: {', '.join(sorted(STUDIO_KEYS))}."} for key in keys]
++
++
+ DEFAULT_AGENT_NAMES = {"claude": "claude-code", "codex": "codex"}  # a backend's id, as a run names itself by default
+ 
+ 
+diff --git a/tests/test_studio_settings.py b/tests/test_studio_settings.py
+new file mode 100644
+index 0000000..1b0338a
+--- /dev/null
++++ b/tests/test_studio_settings.py
+@@ -0,0 +1,23 @@
++"""`[studio]` keys that nothing reads are named, so a misspelt or invented setting isn't silently ignored (proof-cli#197)."""
++
++from proof_agents.proof_agent import unknown_studio_keys
++
++
++def test_unknown_studio_keys_are_named_with_a_hint_where_one_is_known(tmp_path):
++    (tmp_path / "proof.toml").write_text(
++        '[studio]\nlibrary = ["library"]\nparallel = 1\nclaude_config_dir = "~/.claude-other"\nbudget_turn = 4\n'
++        "[studio.budget]\nturns = 4\nminute = 5\n", encoding="utf-8")
++    found = {item["key"]: item["message"] for item in unknown_studio_keys(tmp_path)}
++    assert set(found) == {"claude_config_dir", "budget_turn", "budget.minute"}
++    assert "CLAUDE_CONFIG_DIR in the environment" in found["claude_config_dir"]
++    assert "budget_turns" in found["budget_turn"]  # the list of settings, to spot the misspelling
++
++
++def test_known_keys_a_missing_file_and_an_unreadable_one_give_nothing(tmp_path):
++    assert unknown_studio_keys(tmp_path) == []
++    (tmp_path / "proof.toml").write_text(
++        '[studio]\nlibrary = []\nagent_name = "a"\nbudget_turns = 1\nbudget_minutes = 2\nparallel = 1\nopen_command = "x"\n',
++        encoding="utf-8")
++    assert unknown_studio_keys(tmp_path) == []
++    (tmp_path / "proof.toml").write_text("[studio\n", encoding="utf-8")
++    assert unknown_studio_keys(tmp_path) == []

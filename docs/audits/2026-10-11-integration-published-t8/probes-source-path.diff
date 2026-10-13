@@ -1,0 +1,15 @@
+--- saved spec probes
++++ published-head spec probes
+@@ -1,11 +1,8 @@
+-"""Independent ADR-0021 spec probes against the archived audit heads."""
++"""Independent ADR-0021 spec probes against the published integration heads."""
+ 
+ import sys
+ from pathlib import Path
+ 
+-AUDIT = Path(__file__).parent
+-for relative in ("core/src", "agents/src", "web/src", "core/packages/latex-agent/src", "core/tests", "agents/tests", "web/tests"):
+-    sys.path.insert(0, str(AUDIT / relative))
+ 
+ from proof_agents.agent_run import AgentRun
+ from test_prove_verify_loop import _ScriptedAgent, _hooks, _until

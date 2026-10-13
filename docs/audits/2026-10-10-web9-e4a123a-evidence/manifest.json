@@ -1,0 +1,51 @@
+{
+  "web": {
+    "path": "/private/tmp/proof-web9-e4a123a-zcmsa9wd/head/zeqome-proof-web-e4a123abf8f557521fb1eb2a199a97d568c85648",
+    "head": "e4a123abf8f557521fb1eb2a199a97d568c85648"
+  },
+  "dependencies": {
+    "core": {
+      "path": "/private/tmp/proof-web9-dependencies-l3osbhij/core/DengZhiyuan-math-proof-cli-ad479f6",
+      "head": "ad479f6d69186105a934d9765a553c48f859ceca"
+    },
+    "agents": {
+      "path": "/private/tmp/proof-web9-dependencies-l3osbhij/agents/zeqome-proof-agents-9558fd0caf6eef2f80401c503a0a4549f4bbaa6f",
+      "head": "9558fd0caf6eef2f80401c503a0a4549f4bbaa6f"
+    }
+  },
+  "old_web": {
+    "path": "/private/tmp/proof-web9-de96466-0qvkwakt/zeqome-proof-web-de964662146afccca83ac88c6f5ae263c78d6360",
+    "head": "de964662146afccca83ac88c6f5ae263c78d6360"
+  },
+  "base": "864a2c29bd4f41a5344ae7be960b842a1d4aed62",
+  "web_archive": "/private/tmp/proof-web9-e4a123a-zcmsa9wd/head/zeqome-proof-web-e4a123abf8f557521fb1eb2a199a97d568c85648",
+  "review_queue_sha256": "fb2f949e5ebf028a05ba67a26213b325e9075b122685f99d7b5ab5f82028bee9",
+  "old_control_archive": "/private/tmp/proof-web9-e4a123a-zcmsa9wd/old-control/zeqome-proof-web-de964662146afccca83ac88c6f5ae263c78d6360",
+  "date": "2026-10-10",
+  "pr": "https://github.com/zeqome/proof-web/pull/13",
+  "base_ref": "feat/0021-pursue-review-queue",
+  "original_attribution_probes": "3 passed; file byte-identical to original",
+  "original_warning_probe": "1 passed",
+  "related_tests": "74 passed, including 6 import-review tests",
+  "old_source_current_regressions": "2 failed, 4 passed",
+  "remaining_clause_probes": "2 failed; checked R incorrectly gets R2 warning through service and all three API views",
+  "standards_findings": 0,
+  "spec_findings": [
+    {
+      "priority": "P2",
+      "status": "partially_fixed",
+      "finding": "same-sentence checked/unchecked clauses still misattributed",
+      "file": "src/proof_web/review_queue.py",
+      "lines": [
+        126,
+        133,
+        134
+      ]
+    }
+  ],
+  "resolved_findings": [
+    "P2: historical snapshot attribution uses frozen dependencies, including dropped edges and legacy fallback"
+  ],
+  "full_suite_rerun": false,
+  "browser_provider_acceptance": false
+}

@@ -1,0 +1,295 @@
+{
+  "ending": [
+    {
+      "pursuit_id": "4593f9be-c8d9-4275-87c6-a4f2e6d50178",
+      "status": "stuck",
+      "reason": "the Reader stated no Theorem",
+      "provider": "browser10-fixture",
+      "theorem": null,
+      "budget": null,
+      "last_phase": "end",
+      "started_at": "2026-10-10T12:20:44.847669+00:00",
+      "ended_at": "2026-10-10T12:20:45.061667+00:00",
+      "events": [
+        {
+          "id": "857c6dd1-3ea1-44cb-89cc-5b6680425bc7",
+          "phase": "start",
+          "outcome": "",
+          "reason": "",
+          "provider": "browser10-fixture",
+          "theorem": null,
+          "budget": null,
+          "created_at": "2026-10-10T12:20:44.847669+00:00"
+        },
+        {
+          "id": "4447ba9f-489d-46d3-94e9-edf70cec7e2f",
+          "phase": "reader_end",
+          "outcome": "ok",
+          "reason": "",
+          "provider": "",
+          "theorem": null,
+          "budget": null,
+          "created_at": "2026-10-10T12:20:45.059556+00:00"
+        },
+        {
+          "id": "8c60699e-261d-427c-8f15-e0bd86be0dde",
+          "phase": "end",
+          "outcome": "stuck",
+          "reason": "the Reader stated no Theorem",
+          "provider": "",
+          "theorem": null,
+          "budget": null,
+          "created_at": "2026-10-10T12:20:45.061667+00:00"
+        }
+      ]
+    }
+  ],
+  "reader-error": [
+    {
+      "pursuit_id": "05debf6f-f8b3-44f8-ac64-94364ba99701",
+      "status": "stuck",
+      "reason": "the Reader's turn failed: browser fixture: Reader failed to read the draft",
+      "provider": "browser10-fixture",
+      "theorem": null,
+      "budget": null,
+      "last_phase": "end",
+      "started_at": "2026-10-10T12:24:45.595606+00:00",
+      "ended_at": "2026-10-10T12:24:45.802919+00:00",
+      "events": [
+        {
+          "id": "de277953-555e-4671-8d7d-fa44bc65e146",
+          "phase": "start",
+          "outcome": "",
+          "reason": "",
+          "provider": "browser10-fixture",
+          "theorem": null,
+          "budget": null,
+          "created_at": "2026-10-10T12:24:45.595606+00:00"
+        },
+        {
+          "id": "27041d6c-a7cc-42ce-b338-ca5153b93aed",
+          "phase": "reader_end",
+          "outcome": "failed",
+          "reason": "browser fixture: Reader failed to read the draft",
+          "provider": "",
+          "theorem": null,
+          "budget": null,
+          "created_at": "2026-10-10T12:24:45.802002+00:00"
+        },
+        {
+          "id": "ec1276aa-8e41-4bcf-826a-392e34f492a3",
+          "phase": "end",
+          "outcome": "stuck",
+          "reason": "the Reader's turn failed: browser fixture: Reader failed to read the draft",
+          "provider": "",
+          "theorem": null,
+          "budget": null,
+          "created_at": "2026-10-10T12:24:45.802919+00:00"
+        }
+      ]
+    }
+  ],
+  "release-retry": [
+    {
+      "pursuit_id": "0524aa58-ad10-4952-ba16-dc0ac5b19818",
+      "status": "released",
+      "reason": "stopped by the researcher",
+      "provider": "browser10-fixture",
+      "theorem": "T1",
+      "budget": {
+        "turns": 3,
+        "turns_max": 40
+      },
+      "last_phase": "end",
+      "started_at": "2026-10-10T12:23:23.095509+00:00",
+      "ended_at": "2026-10-10T12:23:43.142990+00:00",
+      "events": [
+        {
+          "id": "7a9ad824-e8b3-4270-acdc-851dc4ddb173",
+          "phase": "start",
+          "outcome": "",
+          "reason": "",
+          "provider": "browser10-fixture",
+          "theorem": null,
+          "budget": null,
+          "created_at": "2026-10-10T12:23:23.095509+00:00"
+        },
+        {
+          "id": "52d1e4d0-23fa-40a8-a2be-3a1cfce078ea",
+          "phase": "reader_end",
+          "outcome": "ok",
+          "reason": "",
+          "provider": "",
+          "theorem": null,
+          "budget": null,
+          "created_at": "2026-10-10T12:23:23.314371+00:00"
+        },
+        {
+          "id": "42fc219d-2b34-4346-82ce-ca60f1162029",
+          "phase": "theorem",
+          "outcome": "",
+          "reason": "",
+          "provider": "",
+          "theorem": "T1",
+          "budget": {
+            "turns": 3,
+            "turns_max": 40
+          },
+          "created_at": "2026-10-10T12:23:23.318837+00:00"
+        },
+        {
+          "id": "a5dcf950-c955-44a9-b202-e8332b8487e1",
+          "phase": "stop",
+          "outcome": "",
+          "reason": "stopped by the researcher",
+          "provider": "",
+          "theorem": "T1",
+          "budget": {
+            "turns": 3,
+            "turns_max": 40
+          },
+          "created_at": "2026-10-10T12:23:33.235260+00:00"
+        },
+        {
+          "id": "c4419f81-7e7e-494c-974d-76fa27db015f",
+          "phase": "release_failed",
+          "outcome": "",
+          "reason": "the runs of T1 are still assigned: L1 is still claimed by claude-code; Stop again to give them back",
+          "provider": "",
+          "theorem": "T1",
+          "budget": {
+            "turns": 3,
+            "turns_max": 40
+          },
+          "created_at": "2026-10-10T12:23:33.236443+00:00"
+        },
+        {
+          "id": "1bc6a880-9b6d-4383-9f36-ca31337d8803",
+          "phase": "stop",
+          "outcome": "",
+          "reason": "stopped by the researcher",
+          "provider": "",
+          "theorem": "T1",
+          "budget": {
+            "turns": 3,
+            "turns_max": 40
+          },
+          "created_at": "2026-10-10T12:23:43.140476+00:00"
+        },
+        {
+          "id": "106e797b-90d6-47a1-9437-9e2cc0c1ff71",
+          "phase": "end",
+          "outcome": "released",
+          "reason": "stopped by the researcher",
+          "provider": "",
+          "theorem": null,
+          "budget": null,
+          "created_at": "2026-10-10T12:23:43.142990+00:00"
+        }
+      ]
+    }
+  ],
+  "release-interrupted-v2": [
+    {
+      "pursuit_id": "80bf86b6-e8c7-44e8-9fe8-f83abea3db28",
+      "status": "interrupted",
+      "reason": "no end was recorded: the process that ran it stopped; a new Start rechecks claims, snapshots and node states",
+      "provider": "browser10-fixture",
+      "theorem": "T1",
+      "budget": {
+        "turns": 3,
+        "turns_max": 40
+      },
+      "last_phase": "release_failed",
+      "started_at": "2026-10-10T12:22:31.716273+00:00",
+      "ended_at": null,
+      "events": [
+        {
+          "id": "5123030d-1629-42c3-bd9f-976b0e8ed667",
+          "phase": "start",
+          "outcome": "",
+          "reason": "",
+          "provider": "browser10-fixture",
+          "theorem": null,
+          "budget": null,
+          "created_at": "2026-10-10T12:22:31.716273+00:00"
+        },
+        {
+          "id": "33edc286-9954-4429-9de4-c4805c075ff4",
+          "phase": "reader_end",
+          "outcome": "ok",
+          "reason": "",
+          "provider": "",
+          "theorem": null,
+          "budget": null,
+          "created_at": "2026-10-10T12:22:31.931095+00:00"
+        },
+        {
+          "id": "62c6d3f5-41b2-4c7b-9107-b6e0fcaaf0ec",
+          "phase": "theorem",
+          "outcome": "",
+          "reason": "",
+          "provider": "",
+          "theorem": "T1",
+          "budget": {
+            "turns": 3,
+            "turns_max": 40
+          },
+          "created_at": "2026-10-10T12:22:31.935023+00:00"
+        },
+        {
+          "id": "6df193bc-774b-4ea8-9665-a1f782345489",
+          "phase": "stop",
+          "outcome": "",
+          "reason": "stopped by the researcher",
+          "provider": "",
+          "theorem": "T1",
+          "budget": {
+            "turns": 3,
+            "turns_max": 40
+          },
+          "created_at": "2026-10-10T12:22:46.591017+00:00"
+        },
+        {
+          "id": "383fff6e-688b-4273-af28-f0c27b18c236",
+          "phase": "release_failed",
+          "outcome": "",
+          "reason": "the runs of T1 are still assigned: L1 is still claimed by claude-code; Stop again to give them back",
+          "provider": "",
+          "theorem": "T1",
+          "budget": {
+            "turns": 3,
+            "turns_max": 40
+          },
+          "created_at": "2026-10-10T12:22:46.592431+00:00"
+        }
+      ]
+    }
+  ],
+  "record-error": [
+    {
+      "pursuit_id": "8e089dc1-d5c5-49f0-b805-d2074691103b",
+      "status": "interrupted",
+      "reason": "no end was recorded: the process that ran it stopped; a new Start rechecks claims, snapshots and node states",
+      "provider": "browser10-fixture",
+      "theorem": null,
+      "budget": null,
+      "last_phase": "start",
+      "started_at": "2026-10-10T12:24:14.592706+00:00",
+      "ended_at": null,
+      "events": [
+        {
+          "id": "08d98310-fa95-4592-8aa2-e6e5275be860",
+          "phase": "start",
+          "outcome": "",
+          "reason": "",
+          "provider": "browser10-fixture",
+          "theorem": null,
+          "budget": null,
+          "created_at": "2026-10-10T12:24:14.592706+00:00"
+        }
+      ]
+    }
+  ],
+  "start-record-error": []
+}

@@ -1,0 +1,291 @@
+{
+  "url": "https://api.github.com/repos/zeqome/proof-web/compare/feat/0021-pursue-review-queue...de964662146afccca83ac88c6f5ae263c78d6360",
+  "html_url": "https://github.com/zeqome/proof-web/compare/feat/0021-pursue-review-queue...de964662146afccca83ac88c6f5ae263c78d6360",
+  "permalink_url": "https://github.com/zeqome/proof-web/compare/zeqome:864a2c2...zeqome:de96466",
+  "diff_url": "https://github.com/zeqome/proof-web/compare/feat/0021-pursue-review-queue...de964662146afccca83ac88c6f5ae263c78d6360.diff",
+  "patch_url": "https://github.com/zeqome/proof-web/compare/feat/0021-pursue-review-queue...de964662146afccca83ac88c6f5ae263c78d6360.patch",
+  "base_commit": {
+    "sha": "864a2c29bd4f41a5344ae7be960b842a1d4aed62",
+    "node_id": "C_kwDOU7Q6FtoAKDg2NGEyYzI5YmQ0ZjQxYTUzNDRhZTdiZTk2MGI4NDJhMWQ0YWVkNjI",
+    "commit": {
+      "author": {
+        "name": "Yomathnotcool",
+        "email": "125728853+DengZhiyuan-math@users.noreply.github.com",
+        "date": "2026-10-08T09:12:37Z"
+      },
+      "committer": {
+        "name": "Yomathnotcool",
+        "email": "125728853+DengZhiyuan-math@users.noreply.github.com",
+        "date": "2026-10-08T09:12:37Z"
+      },
+      "message": "Merge the Definitions support (#6) into the ADR-0021 integration (proof-cli#198)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+      "tree": {
+        "sha": "b35064ff43f6eb76ec2abdea814fd464ea57b665",
+        "url": "https://api.github.com/repos/zeqome/proof-web/git/trees/b35064ff43f6eb76ec2abdea814fd464ea57b665"
+      },
+      "url": "https://api.github.com/repos/zeqome/proof-web/git/commits/864a2c29bd4f41a5344ae7be960b842a1d4aed62",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/zeqome/proof-web/commits/864a2c29bd4f41a5344ae7be960b842a1d4aed62",
+    "html_url": "https://github.com/zeqome/proof-web/commit/864a2c29bd4f41a5344ae7be960b842a1d4aed62",
+    "comments_url": "https://api.github.com/repos/zeqome/proof-web/commits/864a2c29bd4f41a5344ae7be960b842a1d4aed62/comments",
+    "author": {
+      "login": "DengZhiyuan-math",
+      "id": 125728853,
+      "node_id": "U_kgDOB354VQ",
+      "avatar_url": "https://avatars.githubusercontent.com/u/125728853?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/DengZhiyuan-math",
+      "html_url": "https://github.com/DengZhiyuan-math",
+      "followers_url": "https://api.github.com/users/DengZhiyuan-math/followers",
+      "following_url": "https://api.github.com/users/DengZhiyuan-math/following{/other_user}",
+      "gists_url": "https://api.github.com/users/DengZhiyuan-math/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/DengZhiyuan-math/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/DengZhiyuan-math/subscriptions",
+      "organizations_url": "https://api.github.com/users/DengZhiyuan-math/orgs",
+      "repos_url": "https://api.github.com/users/DengZhiyuan-math/repos",
+      "events_url": "https://api.github.com/users/DengZhiyuan-math/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/DengZhiyuan-math/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "DengZhiyuan-math",
+      "id": 125728853,
+      "node_id": "U_kgDOB354VQ",
+      "avatar_url": "https://avatars.githubusercontent.com/u/125728853?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/DengZhiyuan-math",
+      "html_url": "https://github.com/DengZhiyuan-math",
+      "followers_url": "https://api.github.com/users/DengZhiyuan-math/followers",
+      "following_url": "https://api.github.com/users/DengZhiyuan-math/following{/other_user}",
+      "gists_url": "https://api.github.com/users/DengZhiyuan-math/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/DengZhiyuan-math/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/DengZhiyuan-math/subscriptions",
+      "organizations_url": "https://api.github.com/users/DengZhiyuan-math/orgs",
+      "repos_url": "https://api.github.com/users/DengZhiyuan-math/repos",
+      "events_url": "https://api.github.com/users/DengZhiyuan-math/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/DengZhiyuan-math/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "0c1375a34a95ec5959578d905e4ae5a5cf0f3ed5",
+        "url": "https://api.github.com/repos/zeqome/proof-web/commits/0c1375a34a95ec5959578d905e4ae5a5cf0f3ed5",
+        "html_url": "https://github.com/zeqome/proof-web/commit/0c1375a34a95ec5959578d905e4ae5a5cf0f3ed5"
+      },
+      {
+        "sha": "b0c43b85eaf679324ed23196b1eedeecfbef4688",
+        "url": "https://api.github.com/repos/zeqome/proof-web/commits/b0c43b85eaf679324ed23196b1eedeecfbef4688",
+        "html_url": "https://github.com/zeqome/proof-web/commit/b0c43b85eaf679324ed23196b1eedeecfbef4688"
+      }
+    ]
+  },
+  "merge_base_commit": {
+    "sha": "864a2c29bd4f41a5344ae7be960b842a1d4aed62",
+    "node_id": "C_kwDOU7Q6FtoAKDg2NGEyYzI5YmQ0ZjQxYTUzNDRhZTdiZTk2MGI4NDJhMWQ0YWVkNjI",
+    "commit": {
+      "author": {
+        "name": "Yomathnotcool",
+        "email": "125728853+DengZhiyuan-math@users.noreply.github.com",
+        "date": "2026-10-08T09:12:37Z"
+      },
+      "committer": {
+        "name": "Yomathnotcool",
+        "email": "125728853+DengZhiyuan-math@users.noreply.github.com",
+        "date": "2026-10-08T09:12:37Z"
+      },
+      "message": "Merge the Definitions support (#6) into the ADR-0021 integration (proof-cli#198)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+      "tree": {
+        "sha": "b35064ff43f6eb76ec2abdea814fd464ea57b665",
+        "url": "https://api.github.com/repos/zeqome/proof-web/git/trees/b35064ff43f6eb76ec2abdea814fd464ea57b665"
+      },
+      "url": "https://api.github.com/repos/zeqome/proof-web/git/commits/864a2c29bd4f41a5344ae7be960b842a1d4aed62",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/zeqome/proof-web/commits/864a2c29bd4f41a5344ae7be960b842a1d4aed62",
+    "html_url": "https://github.com/zeqome/proof-web/commit/864a2c29bd4f41a5344ae7be960b842a1d4aed62",
+    "comments_url": "https://api.github.com/repos/zeqome/proof-web/commits/864a2c29bd4f41a5344ae7be960b842a1d4aed62/comments",
+    "author": {
+      "login": "DengZhiyuan-math",
+      "id": 125728853,
+      "node_id": "U_kgDOB354VQ",
+      "avatar_url": "https://avatars.githubusercontent.com/u/125728853?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/DengZhiyuan-math",
+      "html_url": "https://github.com/DengZhiyuan-math",
+      "followers_url": "https://api.github.com/users/DengZhiyuan-math/followers",
+      "following_url": "https://api.github.com/users/DengZhiyuan-math/following{/other_user}",
+      "gists_url": "https://api.github.com/users/DengZhiyuan-math/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/DengZhiyuan-math/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/DengZhiyuan-math/subscriptions",
+      "organizations_url": "https://api.github.com/users/DengZhiyuan-math/orgs",
+      "repos_url": "https://api.github.com/users/DengZhiyuan-math/repos",
+      "events_url": "https://api.github.com/users/DengZhiyuan-math/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/DengZhiyuan-math/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "DengZhiyuan-math",
+      "id": 125728853,
+      "node_id": "U_kgDOB354VQ",
+      "avatar_url": "https://avatars.githubusercontent.com/u/125728853?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/DengZhiyuan-math",
+      "html_url": "https://github.com/DengZhiyuan-math",
+      "followers_url": "https://api.github.com/users/DengZhiyuan-math/followers",
+      "following_url": "https://api.github.com/users/DengZhiyuan-math/following{/other_user}",
+      "gists_url": "https://api.github.com/users/DengZhiyuan-math/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/DengZhiyuan-math/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/DengZhiyuan-math/subscriptions",
+      "organizations_url": "https://api.github.com/users/DengZhiyuan-math/orgs",
+      "repos_url": "https://api.github.com/users/DengZhiyuan-math/repos",
+      "events_url": "https://api.github.com/users/DengZhiyuan-math/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/DengZhiyuan-math/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "0c1375a34a95ec5959578d905e4ae5a5cf0f3ed5",
+        "url": "https://api.github.com/repos/zeqome/proof-web/commits/0c1375a34a95ec5959578d905e4ae5a5cf0f3ed5",
+        "html_url": "https://github.com/zeqome/proof-web/commit/0c1375a34a95ec5959578d905e4ae5a5cf0f3ed5"
+      },
+      {
+        "sha": "b0c43b85eaf679324ed23196b1eedeecfbef4688",
+        "url": "https://api.github.com/repos/zeqome/proof-web/commits/b0c43b85eaf679324ed23196b1eedeecfbef4688",
+        "html_url": "https://github.com/zeqome/proof-web/commit/b0c43b85eaf679324ed23196b1eedeecfbef4688"
+      }
+    ]
+  },
+  "status": "ahead",
+  "ahead_by": 1,
+  "behind_by": 0,
+  "total_commits": 1,
+  "commits": [
+    {
+      "sha": "de964662146afccca83ac88c6f5ae263c78d6360",
+      "node_id": "C_kwDOU7Q6FtoAKGRlOTY0NjYyMTQ2YWZjY2NhODNhYzg4YzZmNWFlMjYzYzc4ZDYzNjA",
+      "commit": {
+        "author": {
+          "name": "Yomathnotcool",
+          "email": "zy@zeqome.com",
+          "date": "2026-10-09T13:22:38Z"
+        },
+        "committer": {
+          "name": "Yomathnotcool",
+          "email": "zy@zeqome.com",
+          "date": "2026-10-09T13:22:38Z"
+        },
+        "message": "feat: an agent's import shows the rules it would meet and the Verifier's unchecked marks at its Reference review (#9)\n\nADR-0022 point 3, ADR-0021 point 3: the Reference review card showed only\nthe statement and the citation, and the Verifier's \"unchecked against the\nsource\" marks stayed on the dependents' verdicts. review_queue.import_review\ngives an imported result's would_meet_trust_rule (core #199), every mark an\nEvidence check on a dependent's snapshot carries (the dependent, the\nsnapshot, whether it is current, the note; a mark is this import's when\nits note names it or the dependent rests on no other import), and the\nrationale prefilled from the rules. The review queue's Citation item, the\nHome's pending card and the node page show them; the card and the node\npage prefill the rationale. A researcher's rule-trusted import stays in\nthe rule-trusted section.\n\nCloses #9\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+        "tree": {
+          "sha": "364f00c6b74b49b729c87e023d8111aa613d1ad7",
+          "url": "https://api.github.com/repos/zeqome/proof-web/git/trees/364f00c6b74b49b729c87e023d8111aa613d1ad7"
+        },
+        "url": "https://api.github.com/repos/zeqome/proof-web/git/commits/de964662146afccca83ac88c6f5ae263c78d6360",
+        "comment_count": 0,
+        "verification": {
+          "verified": false,
+          "reason": "unsigned",
+          "signature": null,
+          "payload": null,
+          "verified_at": null
+        }
+      },
+      "url": "https://api.github.com/repos/zeqome/proof-web/commits/de964662146afccca83ac88c6f5ae263c78d6360",
+      "html_url": "https://github.com/zeqome/proof-web/commit/de964662146afccca83ac88c6f5ae263c78d6360",
+      "comments_url": "https://api.github.com/repos/zeqome/proof-web/commits/de964662146afccca83ac88c6f5ae263c78d6360/comments",
+      "author": null,
+      "committer": null,
+      "parents": [
+        {
+          "sha": "864a2c29bd4f41a5344ae7be960b842a1d4aed62",
+          "url": "https://api.github.com/repos/zeqome/proof-web/commits/864a2c29bd4f41a5344ae7be960b842a1d4aed62",
+          "html_url": "https://github.com/zeqome/proof-web/commit/864a2c29bd4f41a5344ae7be960b842a1d4aed62"
+        }
+      ]
+    }
+  ],
+  "files": [
+    {
+      "sha": "1ba2df923bc5657b1d93a2253b81770f496c0220",
+      "filename": "src/proof_web/review_queue.py",
+      "status": "modified",
+      "additions": 36,
+      "deletions": 3,
+      "changes": 39,
+      "blob_url": "https://github.com/zeqome/proof-web/blob/de964662146afccca83ac88c6f5ae263c78d6360/src%2Fproof_web%2Freview_queue.py",
+      "raw_url": "https://github.com/zeqome/proof-web/raw/de964662146afccca83ac88c6f5ae263c78d6360/src%2Fproof_web%2Freview_queue.py",
+      "contents_url": "https://api.github.com/repos/zeqome/proof-web/contents/src%2Fproof_web%2Freview_queue.py?ref=de964662146afccca83ac88c6f5ae263c78d6360",
+      "patch": "@@ -2,7 +2,8 @@\n \n The queue holds:\n - the Provisional nodes awaiting Acceptance;\n-- the unreviewed imported results;\n+- the unreviewed imported results, an agent's with the rules it would meet and the Verifier's \"unchecked against the\n+  source\" marks on what rests on it (ADR-0022 point 3);\n - the Unfixed text agents wrote (statements and Definitions), with the Reader's departures from the draft;\n - the Standing questions, answered in place;\n - the Parked nodes, with their attempts.\n@@ -14,17 +15,21 @@\n \n from __future__ import annotations\n \n+import re\n+\n from proof_cli import proof_map\n from proof_cli.definitions import all_definitions, fixed_by_definition, nodes_naming\n from proof_cli.domain import ProofMapNodeKind\n-from proof_cli.storage import ProjectStore, get_current_candidate_proof\n+from proof_cli.storage import ProjectStore, get_current_candidate_proof, list_candidate_proofs_for_node, list_evidence_checks_for_candidate_proof\n \n # a Coordinator's note on a node it parked (ADR-0021 point 9), as `StudioHub._park` records it\n PARKED_NOTE = \"parked: \"\n # the Reader records every place it departed from the draft here (ADR-0021 point 5)\n DEPARTURES = (\"scratch\", \"reader\", \"departures.md\")\n # the work-log kinds that are work on the node itself: one after a parked note means the node is worked again\n _WORK = (\"plan\", \"step\", \"verdict\", \"attempt\", \"handoff\", \"turn\")\n+# the Verifier's mark on an appeal to an unreviewed imported result whose source it could not read (ADR-0021 point 3)\n+UNCHECKED = \"unchecked against the source\"\n # the acceptance states a Review decision left the node in: a decided node is no longer where the agents could not go\n _DECIDED = (\"accepted\", \"rejected\", \"no-longer-callable\")\n \n@@ -92,6 +97,34 @@ def _settled(store: ProjectStore, node) -> bool:\n     return proof_map.get_acceptance_state(store, node.id) == \"accepted\"\n \n \n+def source_marks(store: ProjectStore, node_id: str) -> list[dict]:\n+    \"\"\"Every \"unchecked against the source\" mark a Verifier left about this imported result (ADR-0021 point 3), as the\n+    Evidence check on a dependent's snapshot that recorded it: the dependent, the snapshot, whether that snapshot is\n+    the dependent's current one, and the note. A mark is this import's when its note names it, or when the dependent\n+    rests on no other imported result.\"\"\"\n+    nodes = {node.id: node for node in proof_map.list_nodes(store)}\n+    named = re.compile(rf\"(?<![\\w.-]){re.escape(node_id)}(?![\\w.-])\")\n+    marks = []\n+    for dependent in proof_map.dependents(store, node_id):\n+        imports = [d for d in dependent.dependencies if d in nodes and nodes[d].kind == ProofMapNodeKind.imported_result]\n+        current = get_current_candidate_proof(store, dependent.id)\n+        for proof in list_candidate_proofs_for_node(store, dependent.id):\n+            for check in list_evidence_checks_for_candidate_proof(store, proof.id):\n+                if UNCHECKED in check.notes.lower() and (named.search(check.notes) or imports == [node_id]):\n+                    marks.append({\"dependent\": dependent.id, \"snapshot\": proof.version, \"current\": current is not None and current.id == proof.id,\n+                                  \"evidence_check\": check.id, \"outcome\": check.outcome.value, \"note\": check.notes})\n+    return marks\n+\n+\n+def import_review(store: ProjectStore, node_id: str) -> dict:\n+    \"\"\"What makes an imported result's own Reference review cheap (ADR-0022 point 3): the Trust rules an agent's import\n+    would meet had the researcher imported it, the Verifier's marks on what rests on it, and the rationale prefilled\n+    from those rules. It gives the node no standing; the decision is the ordinary Reference review.\"\"\"\n+    rules = proof_map.would_meet_trust_rules(store, node_id)\n+    return {\"would_meet_trust_rule\": rules, \"unchecked\": source_marks(store, node_id),\n+            \"rationale\": f\"would meet trust rule {', '.join(rules)} had the researcher imported it; read against the source\" if rules else \"\"}\n+\n+\n def review_queue(store: ProjectStore) -> dict:\n     \"\"\"{\"items\": [...], \"departures\": the Reader's departures or None}: every item has `kind`, `depth`, and the node or\n     Definition it is about. The order is the researcher's reading order:\n@@ -121,7 +154,7 @@ def review_queue(store: ProjectStore) -> dict:\n                          \"definitions\": list(node.definitions)})\n         if proof_map.is_provisional(store, node.id):\n             if imported:\n-                rest.append({**base, \"kind\": \"imported\", \"citation\": proof_map.node_citation(store, node)})\n+                rest.append({**base, \"kind\": \"imported\", \"citation\": proof_map.node_citation(store, node), **import_review(store, node.id)})\n             else:\n                 proof = get_current_candidate_proof(store, node.id)\n                 rest.append({**base, \"kind\": \"provisional\", \"conditional_on\": sorted(proof_map.conditional_on(store, node.id)),"
+    },
+    {
+      "sha": "4cc281b3593ee3e7ad519fc28a9b40cd907496cd",
+      "filename": "src/proof_web/server.py",
+      "status": "modified",
+      "additions": 6,
+      "deletions": 1,
+      "changes": 7,
+      "blob_url": "https://github.com/zeqome/proof-web/blob/de964662146afccca83ac88c6f5ae263c78d6360/src%2Fproof_web%2Fserver.py",
+      "raw_url": "https://github.com/zeqome/proof-web/raw/de964662146afccca83ac88c6f5ae263c78d6360/src%2Fproof_web%2Fserver.py",
+      "contents_url": "https://api.github.com/repos/zeqome/proof-web/contents/src%2Fproof_web%2Fserver.py?ref=de964662146afccca83ac88c6f5ae263c78d6360",
+      "patch": "@@ -54,7 +54,7 @@\n from proof_agents.agent_run import ACTIONS as RUN_ACTIONS\n from .node_status import node_status\n from proof_agents.coordinator import ACTIONS as COORDINATOR_ACTIONS\n-from .review_queue import review_queue\n+from .review_queue import import_review, review_queue\n from .studios import NoStudio, StudioHub\n \n \n@@ -699,6 +699,8 @@ def _pending(self) -> list[dict]:\n                             \"statement\": node.statement,\n                             # the linked ReferenceRecord, so the review card shows what is cited (issue #91)\n                             \"citation\": proof_map.node_citation(self.store, node),\n+                            # the rules an agent's import would meet, the Verifier's marks, the rationale (ADR-0022 point 3)\n+                            **import_review(self.store, node.id),\n                         }\n                     )\n                 continue\n@@ -761,6 +763,9 @@ def _node(self, node_id: str) -> dict:\n             \"frontier\": frontier,\n             \"status\": node_status({**axes, \"frontier\": frontier, \"assignee\": claim.claimant_id if claim else None, \"run\": run}),\n             \"trust_rule\": proof_map.trust_rules_of(store, node_id) if node.kind == ProofMapNodeKind.imported_result else [],\n+            # an imported result's own Reference review made cheap (ADR-0022 point 3): the rules an agent's import would\n+            # meet, the Verifier's \"unchecked against the source\" marks on what rests on it, the rationale prefilled\n+            \"import_review\": import_review(store, node_id) if node.kind == ProofMapNodeKind.imported_result else None,\n             # when it first met each rule (ADR-0014): an event, never a decision, listed with the history\n             \"rule_events\": [{\"rule\": event.payload.get(\"rule\"), \"at\": event.created_at.isoformat()} for event in proof_map.trust_rule_events(store, node_id)],\n             \"candidate_proof\": _proof_view(store, proof),"
+    },
+    {
+      "sha": "4bb8d3c297e54317cfc8ff2d3d644a082993e14e",
+      "filename": "src/proof_web/static/app.css",
+      "status": "modified",
+      "additions": 3,
+      "deletions": 0,
+      "changes": 3,
+      "blob_url": "https://github.com/zeqome/proof-web/blob/de964662146afccca83ac88c6f5ae263c78d6360/src%2Fproof_web%2Fstatic%2Fapp.css",
+      "raw_url": "https://github.com/zeqome/proof-web/raw/de964662146afccca83ac88c6f5ae263c78d6360/src%2Fproof_web%2Fstatic%2Fapp.css",
+      "contents_url": "https://api.github.com/repos/zeqome/proof-web/contents/src%2Fproof_web%2Fstatic%2Fapp.css?ref=de964662146afccca83ac88c6f5ae263c78d6360",
+      "patch": "@@ -501,3 +501,6 @@ td a { font-family: var(--mono); font-size: 12px; }\n #dag-svg .node .marks { font-size: 10px; font-weight: 600; fill: var(--label-3); }\n #dag-svg .node .marks .parked { fill: var(--orange); }\n @media (max-width: 760px) { .review-queue > li { grid-template-columns: 1fr; } .review-queue .queue-kind { grid-row: auto; } }\n+/* the Verifier's \"unchecked against the source\" marks on what rests on an imported result (ADR-0022 point 3) */\n+.unchecked-head { color: var(--orange); font-size: 12px; margin: 4px 0 0; }\n+.unchecked-marks { margin: 2px 0 4px; padding-left: 18px; font-size: 12px; }"
+    },
+    {
+      "sha": "661ba72beb90058af84dacb980bebb8a30e201e2",
+      "filename": "src/proof_web/static/app.js",
+      "status": "modified",
+      "additions": 28,
+      "deletions": 2,
+      "changes": 30,
+      "blob_url": "https://github.com/zeqome/proof-web/blob/de964662146afccca83ac88c6f5ae263c78d6360/src%2Fproof_web%2Fstatic%2Fapp.js",
+      "raw_url": "https://github.com/zeqome/proof-web/raw/de964662146afccca83ac88c6f5ae263c78d6360/src%2Fproof_web%2Fstatic%2Fapp.js",
+      "contents_url": "https://api.github.com/repos/zeqome/proof-web/contents/src%2Fproof_web%2Fstatic%2Fapp.js?ref=de964662146afccca83ac88c6f5ae263c78d6360",
+      "patch": "@@ -281,7 +281,10 @@ function queueItem(item) {\n     return li;\n   }\n   if (item.kind === \"provisional\") meta.textContent = `the Verifier passed snapshot v${item.snapshot}; Accept it to make what rests on it decidable` + ((item.conditional_on || []).length ? ` \u00b7 itself conditional on ${item.conditional_on.join(\", \")}` : \"\");\n-  if (item.kind === \"imported\") meta.textContent = \"an imported result no one has Reference-reviewed: the runs rely on its statement\";\n+  if (item.kind === \"imported\") {\n+    meta.textContent = \"an imported result no one has Reference-reviewed: the runs rely on its statement\";\n+    body.append(importNotes(item));\n+  }\n   if (item.kind === \"unfixed\") {\n     if (item.definition_id) {\n       body.append(el(\"b\", `${item.definition_id} \u00b7 ${item.term}`), el(\"span\", ` ${item.text}`));\n@@ -376,6 +379,10 @@ function showHome() {\n     link.append(glass, el(\"span\", item.node_id), chevron);\n     const statement = el(\"div\", item.statement);\n     if (item.citation) statement.append(citationLine(item.citation));\n+    if (item.kind === \"reference_review\") {\n+      statement.append(importNotes(item));\n+      if (rationale && item.rationale) rationale.value = item.rationale;\n+    }\n     if (item.candidate_proof && item.candidate_proof.id) {\n       // review starts from the key ideas (ADR-0013): the card shows the snapshot's \u6838\u5fc3\u601d\u8def and \u96be\u70b9;\n       // the whole summary and the decision are in the studio's review view, the frozen LaTeX on the\n@@ -572,6 +579,22 @@ function citationLine(c) {\n   return el(\"p\", `cites ${c.reference_id}: ${c.title}${who}${c.year ? ` (${c.year})` : \"\"} \u00b7 ${c.locator} \u00b7 ${c.version}`, { class: \"hint citation\" });\n }\n \n+// an imported result's own Reference review made cheap (ADR-0022 point 3): the rules an agent's import would meet, and\n+// the Verifier's \"unchecked against the source\" marks on what rests on it, each naming the dependent and its snapshot\n+function importNotes(info) {\n+  const out = el(\"div\", null, { class: \"import-notes\" });\n+  if (!info) return out;\n+  const rules = info.would_meet_trust_rule || [];\n+  if (rules.length) out.append(el(\"p\", `an agent's import: it would meet trust rule ${rules.join(\", \")} had you imported it, and counts only once you review it`, { class: \"hint\" }));\n+  const marks = info.unchecked || [];\n+  if (marks.length) {\n+    const list = el(\"ul\", null, { class: \"unchecked-marks\" });\n+    for (const m of marks) list.append(el(\"li\", `${m.dependent}, snapshot v${m.snapshot}${m.current ? \"\" : \" (superseded)\"}: ${m.note}`));\n+    out.append(el(\"p\", \"unchecked against the source by the Verifier of:\", { class: \"unchecked-head\" }), list);\n+  }\n+  return out;\n+}\n+\n function citationBlock(c) {\n   const block = el(\"div\", null, { class: \"citation-block\" });\n   block.append(el(\"h3\", \"Citation\"));\n@@ -1121,6 +1144,7 @@ async function showNode(nodeId) {\n   if (view.studio) $(\"node-folder\").append(el(\"a\", \"Open the node's studio\", { href: view.studio }), \" \u00b7 proof folder \", el(\"code\", view.folder));\n   $(\"node-source\").replaceChildren(...(view.source ? [el(\"h3\", \"Source\"), el(\"p\", `${view.source.locator} \u00b7 ${view.source.version}${view.source.trust_level ? ` \u00b7 ${view.source.trust_level}` : \"\"}`)] : []));\n   if (view.citation) $(\"node-source\").append(citationBlock(view.citation));\n+  if (view.import_review) $(\"node-source\").append(importNotes(view.import_review));\n   $(\"node-dependents\").textContent = view.dependents.length ? `Used by: ${view.dependents.join(\", \")}` : \"Nothing depends on this node yet.\";\n   showNodeFog(view);\n   const pdfs = [];\n@@ -1151,7 +1175,9 @@ async function showNode(nodeId) {\n   $(\"node-evidence\").replaceChildren(...view.evidence_checks.map(evidenceItem));\n   const decisions = $(\"node-decisions\").querySelector(\"tbody\");\n   // reviewing a node trusted by rule explicitly (ADR-0014): the ordinary Reference review, its rationale prefilled\n-  const prefill = view.acceptance_state === \"trusted-by-rule\" ? `matched trust rule ${(view.trust_rule || []).join(\", \")}; reviewed explicitly` : \"\";\n+  // an agent's import: prefilled from the rules it would meet (ADR-0022 point 3)\n+  const prefill = view.acceptance_state === \"trusted-by-rule\" ? `matched trust rule ${(view.trust_rule || []).join(\", \")}; reviewed explicitly`\n+    : (view.import_review && view.import_review.rationale) || \"\";\n   decisions.replaceChildren(...view.decisions.map((d) => decisionRow(d, proof, d.kind === \"reference_review\" && d.decision === \"reference-review\" ? prefill : \"\")));\n   // its snapshot's dependencies changed (#156): no Acceptance decision is offered; the reason and the next step are\n   if (view.review_blocked) decisions.append(row([reviewBlocked(view.review_blocked), \"\", \"\", \"\"]));"
+    },
+    {
+      "sha": "fd693539e85ba97c5db13232952106355b743672",
+      "filename": "tests/test_import_review.py",
+      "status": "added",
+      "additions": 97,
+      "deletions": 0,
+      "changes": 97,
+      "blob_url": "https://github.com/zeqome/proof-web/blob/de964662146afccca83ac88c6f5ae263c78d6360/tests%2Ftest_import_review.py",
+      "raw_url": "https://github.com/zeqome/proof-web/raw/de964662146afccca83ac88c6f5ae263c78d6360/tests%2Ftest_import_review.py",
+      "contents_url": "https://api.github.com/repos/zeqome/proof-web/contents/tests%2Ftest_import_review.py?ref=de964662146afccca83ac88c6f5ae263c78d6360",
+      "patch": "@@ -0,0 +1,97 @@\n+\"\"\"ADR-0022 point 3 on the page (proof-web#9): an agent's imported result meets no Trust rule, so it waits in the review\n+queue as unreviewed; its own Reference review is made cheap. Beside it the page shows each rule it would meet had the\n+researcher imported it, and every \"unchecked against the source\" mark a Verifier left on what rests on it, naming the\n+dependent, its snapshot and whether that snapshot is current. The rationale is prefilled from the rules.\"\"\"\n+\n+from pathlib import Path\n+\n+import pytest\n+\n+from _proofs import submit_proof\n+from _review_client import DirectClient\n+from proof_cli.proof_map import create_node, decide_trust_rule, get_reference_review_state, record_evidence_check\n+from proof_cli.references import ReferenceRecord, ReferenceSourceType\n+from proof_cli.storage import ensure_project, import_reference\n+\n+DOI = ReferenceRecord(id=\"paper\", title=\"A bound\", year=2020, source_type=ReferenceSourceType.research_paper, identifier=\"10.1000/example\")\n+MARK = \"R: unchecked against the source; the cited work cannot be reached\"\n+\n+\n+@pytest.fixture\n+def store(tmp_path: Path):\n+    store = ensure_project(tmp_path)\n+    import_reference(store, DOI)\n+    decide_trust_rule(store, \"dois\", \"declare\", conditions=[{\"kind\": \"identifier_has_doi\"}],\n+                      reviewer=\"Researcher <researcher@example.org>\", rationale=\"a DOI is a published source\")\n+    return store\n+\n+\n+def _checked(store, node_id, note, version_text=\"proof\"):\n+    proof = submit_proof(store, node_id, claimant_id=\"prover-1\", scoping_rationale=\"scoped\", content=f\"{version_text} of {node_id}\")\n+    record_evidence_check(store, proof.id, \"passed\", run_by=\"prover-1/verifier\", notes=note)\n+    return proof\n+\n+\n+def test_a_reader_import_under_a_doi_rule_waits_unreviewed_with_the_rule_it_would_meet_and_its_dependents_marks(store):\n+    create_node(store, node_id=\"R\", kind=\"imported_result\", statement=\"Bound\", reference_id=\"paper\", source_locator=\"Theorem 1\",\n+                source_version=\"v1\", created_by=\"reader-1\")\n+    create_node(store, node_id=\"R2\", kind=\"imported_result\", statement=\"Other\", source_locator=\"arXiv:other\", source_version=\"v1\", created_by=\"reader-1\")\n+    create_node(store, node_id=\"L\", kind=\"lemma\", statement=\"L\", dependencies=[\"R\"], created_by=\"reader-1\")\n+    create_node(store, node_id=\"M\", kind=\"lemma\", statement=\"M\", dependencies=[\"R\", \"R2\"], created_by=\"reader-1\")\n+    _checked(store, \"L\", MARK)                       # snapshot v1, superseded below\n+    _checked(store, \"L\", \"no objections\", \"again\")   # snapshot v2, current: no mark\n+    _checked(store, \"M\", \"R2: unchecked against the source\")   # M rests on two imports: the note names R2, not R\n+    assert get_reference_review_state(store, \"R\") == \"unreviewed\"\n+    client = DirectClient(store)\n+    try:\n+        state = client.get(\"/api/state\")[1][\"data\"]\n+        card = next(item for item in state[\"pending\"] if item[\"node_id\"] == \"R\")\n+        assert \"R\" not in [item[\"node_id\"] for item in state[\"trusted_by_rule\"]]\n+        expected = {\"would_meet_trust_rule\": [\"dois\"],\n+                    \"unchecked\": [{\"dependent\": \"L\", \"snapshot\": 1, \"current\": False, \"evidence_check\": card[\"unchecked\"][0][\"evidence_check\"],\n+                                   \"outcome\": \"passed\", \"note\": MARK}],\n+                    \"rationale\": \"would meet trust rule dois had the researcher imported it; read against the source\"}\n+        assert {key: card[key] for key in expected} == expected\n+        queued = next(item for item in client.get(\"/api/review-queue\")[1][\"data\"][\"items\"] if (item[\"kind\"], item.get(\"node_id\")) == (\"imported\", \"R\"))\n+        assert {key: queued[key] for key in expected} == expected\n+        assert client.get(\"/api/node/R\")[1][\"data\"][\"import_review\"] == expected\n+        other = client.get(\"/api/node/R2\")[1][\"data\"][\"import_review\"]\n+        assert [(m[\"dependent\"], m[\"current\"]) for m in other[\"unchecked\"]] == [(\"M\", True)] and other[\"would_meet_trust_rule\"] == []\n+    finally:\n+        client.app.close()\n+\n+\n+def test_a_researchers_rule_trusted_import_stays_in_the_rule_trusted_section(store):\n+    create_node(store, node_id=\"R\", kind=\"imported_result\", statement=\"Bound\", reference_id=\"paper\", source_locator=\"Theorem 1\", source_version=\"v1\")\n+    client = DirectClient(store)\n+    try:\n+        state = client.get(\"/api/state\")[1][\"data\"]\n+        assert [item[\"node_id\"] for item in state[\"trusted_by_rule\"]] == [\"R\"] and all(item[\"node_id\"] != \"R\" for item in state[\"pending\"])\n+        assert client.get(\"/api/node/R\")[1][\"data\"][\"import_review\"][\"would_meet_trust_rule\"] == []\n+    finally:\n+        client.app.close()\n+\n+\n+REVIEW = {\"would_meet_trust_rule\": [\"dois\"],\n+          \"unchecked\": [{\"dependent\": \"lem_bound\", \"snapshot\": 1, \"current\": False, \"evidence_check\": \"ec_1\", \"outcome\": \"passed\", \"note\": \"ref_bw: unchecked against the source\"},\n+                        {\"dependent\": \"thm_main\", \"snapshot\": 2, \"current\": True, \"evidence_check\": \"ec_2\", \"outcome\": \"passed\", \"note\": \"unchecked against the source; no access\"}],\n+          \"rationale\": \"would meet trust rule dois had the researcher imported it; read against the source\"}\n+\n+\n+def test_the_card_the_queue_and_the_node_page_show_the_rules_and_the_marks_and_prefill_the_rationale():\n+    from test_map_home import CITATION, PENDING, _home, _imported_page, _state\n+    from test_review_queue_page import MAP, _page\n+\n+    card = {**PENDING[1], \"citation\": CITATION, **REVIEW}\n+    page = {**_imported_page(CITATION), \"import_review\": REVIEW,\n+            \"decisions\": [{\"kind\": \"reference_review\", \"target_id\": \"ref_bw\", \"decision\": \"reference-review\"}]}\n+    home, shown = _home(state=_state([card]), steps=[{\"open\": \"ref_bw\"}], nodes={\"ref_bw\": page})\n+    for text in (home[\"pendingRows\"][0], shown[\"nodeSource\"]):\n+        assert \"would meet trust rule dois had you imported it\" in text and \"unchecked against the source by the Verifier of:\" in text\n+        assert \"lem_bound, snapshot v1 (superseded): ref_bw: unchecked against the source\" in text\n+        assert \"thm_main, snapshot v2: unchecked against the source; no access\" in text\n+    assert shown[\"nodeDecisionRationales\"] == [REVIEW[\"rationale\"]]\n+    queue = {\"departures\": None, \"items\": [{\"kind\": \"imported\", \"node_id\": \"R\", \"node_kind\": \"imported_result\", \"statement\": \"Bound\", \"depth\": 0,\n+                                            \"citation\": None, **REVIEW}]}\n+    (listed,) = _page(map_nodes=MAP, queue=queue)\n+    assert \"would meet trust rule dois\" in listed[\"queue\"][0][\"text\"] and \"lem_bound, snapshot v1 (superseded)\" in listed[\"queue\"][0][\"text\"]"
+    }
+  ]
+}

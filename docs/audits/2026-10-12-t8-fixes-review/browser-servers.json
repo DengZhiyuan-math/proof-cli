@@ -1,0 +1,14 @@
+{
+  "pid": 83270,
+  "sources": [
+    "/private/tmp/proof-t8-audit-px7msjct/core/src",
+    "/private/tmp/proof-t8-audit-px7msjct/core/packages/latex-agent/src",
+    "/private/tmp/proof-t8-audit-px7msjct/agents/src",
+    "/private/tmp/proof-t8-audit-px7msjct/web/src"
+  ],
+  "urls": {
+    "definition": "http://localhost:30683",
+    "reader": "http://localhost:29664"
+  },
+  "emptyProfile": "/Volumes/Codex-Workspace/live/home/zhdeng/proof-cli/docs/audits/2026-10-12-t8-fixes-review/empty-claude-profile"
+}

@@ -1,0 +1,155 @@
+diff --git a/src/proof_agents/coordinator.py b/src/proof_agents/coordinator.py
+index 5bbbce3..bf1e121 100644
+--- a/src/proof_agents/coordinator.py
++++ b/src/proof_agents/coordinator.py
+@@ -869,7 +869,7 @@ def _open(node: dict) -> bool:
+ class PursuitHooks:
+     """Pursue on a project with no map (ADR-0021 point 7), as callables: the host runs the turns and makes the Coordinators."""
+ 
+-    read: Callable[[str], dict]                  # provider -> the Reader's turn, run to its end: {} or {"error", "code"}
++    read: Callable[[str], dict]                  # provider -> Reader's ending: {"main_target"}, or {"error", "code"}; legacy {}
+     theorems: Callable[[], list[str]]            # the map's Theorems now, in the map's order
+     coordinator: Callable[[str], Coordinator]    # a Theorem's Coordinator, made on demand
+     record: Callable[[str], None] = lambda note: None
+@@ -1012,8 +1012,10 @@ class ProjectPursuit:
+     def _loop(self, provider: str, deferred: bool = False) -> None:
+         try:
+             reader_turns = 0
++            main_target = None
+             if not self.hooks.theorems():  # a map already there is pursued as it stands; the Reader only states one
+                 answer = self.hooks.read(provider) or {}
++                main_target = answer.get("main_target")
+                 # a real turn counts toward the total (#19): the host says how many it took, one when it says nothing
+                 reader_turns = int(answer.get("turns", 1))
+                 if self.budget is not None:
+@@ -1026,6 +1028,9 @@ class ProjectPursuit:
+             theorems = list(self.hooks.theorems())
+             with self._lock:
+                 self.state["theorems"] = theorems
++            if main_target is not None and theorems != [main_target]:
++                return self._end("stuck", f"the Reader's main target {main_target} is not the sole Theorem scheduled by Pursue "
++                                         f"({', '.join(theorems) or 'none'}); no node run was started")
+             if not theorems:
+                 return self._end("stuck", "the Reader stated no Theorem")
+             if deferred:   # no node budget before the map: the default total from the map the Reader stated, its turn counted
+diff --git a/src/proof_agents/reader.py b/src/proof_agents/reader.py
+index 0878f19..ab911d1 100644
+--- a/src/proof_agents/reader.py
++++ b/src/proof_agents/reader.py
+@@ -3,7 +3,7 @@
+ A node's agent works one node (proof_agent.py); the map's agent discusses the whole map and changes nothing but the fog
+ (map_agent.py). The Reader has no node either: it is started on a project, or on one library file, with nothing on the
+ map or with the researcher's partial map. It reads the draft and the works it cites, then writes what the draft states:
+-Definitions, the Theorems and Lemmas (or what the draft means to state where it leaves a statement empty), an imported
++Definitions, the main Theorem and supporting Lemmas (or what the draft means to state where it leaves a statement empty), an imported
+ result with its reference for each piece of literature the draft calls on, and fog for what the draft leaves open. It
+ runs in the project root with `PROOF_ROOT` set, and every write is a `proof` command under its own name
+ (`--created-by`). It never proves, never creates a Claim, never splits, claims, requests review or decides anything.
+@@ -28,6 +28,7 @@ READER_ROLE = "reader"   # proof-cli's reader role (`proof_cli.domain.READER_ROL
+ READER_NAME = "reader"   # the name its definitions, nodes and fog carry, unless `[studio] agent_name` says otherwise
+ READER_SCRATCH = "scratch/reader"   # under the project root: its reading notes and the departures from the draft
+ DEPARTURES_FILE = "departures.md"
++MAIN_TARGET_FILE = "main-target.json"
+ 
+ # what it reads besides the map agent's reads: the Definitions a statement is written in (ADR-0020)
+ READER_READS = (*MAP_PROOF_READS, "Bash(proof definition list *)", "Bash(proof definition show *)")
+@@ -57,9 +58,16 @@ Work this way:
+    `proof definition list`, `proof reference list`, `proof fog list`. Leave what is there as it is and add only
+    what is missing: the researcher may have started the map. Then read the draft through, and the works it cites
+    (the library{library}, the web), far enough to state what the draft uses from each.
++   A project has only one theorem-kind node: the main result the whole map exists to establish.
++   Identify the draft's main result before creating any node. Write {scratch}/{main_target} as a JSON object with
++   "node_id" (the main result's node id) and "source" (the draft path and its label or line range).
++   Supporting results are lemma-kind nodes even when the draft calls them Theorems; keep that name in --display-label.
++   Reserve theorem kind for the declared main result. Create its dependencies first, then that Theorem.
++   If an existing Theorem is a different result, leave the map as it is and report the mismatch in your closing note.
++   Never downgrade the main result to a Lemma to work around DUPLICATE_THEOREM.
+ 2. Write the Definitions the statements are written in — a model's setting, a definition, notation — each once:
+    `proof definition add <def-id> "<text, Markdown with $…$>" --term "<the name>" --created-by {name}`.
+-3. Write the Theorems and Lemmas the draft states, with their dependencies as the draft's proofs use them, and the
++3. Write the main Theorem and supporting Lemmas, with their dependencies as the draft's proofs use them, and the
+    Definitions they are written in:
+    `proof node create <id> theorem|lemma "<statement>" --definition <def-id> --dependency <id> --created-by {name}`
+    (`--assumption "<text>"` for a standing assumption). Create a node before the nodes that rest on it. Where the
+@@ -90,7 +98,10 @@ after creation, never write a proof, and never make a Review decision (accept, r
+ researcher's. You write no file but under {scratch}/. You run `proof` only as the commands above, always on this
+ project ($PROOF_ROOT); computation (Python, SageMath, …) to check what a definition says is fine, with its files
+ under {scratch}/.
+-End with a closing note: the nodes, Definitions, imported results and fog you added, by id, and every departure.
++Before ending, read `proof node list --json`: exactly one node must have kind theorem, and its id must match "node_id"
++in {scratch}/{main_target}. Report a missing or mismatched main target; Pursue will start no node run for that map.
++End with a closing note: the main target and its draft location, the nodes, Definitions, imported results and fog you
++added, by id, and every departure.
+ """
+ 
+ 
+@@ -130,7 +141,7 @@ class ReaderContext:
+         target = (f"You were started on one library file, {self.draft}: read it, and what it cites; state that draft as the map."
+                   if self.draft is not None else "You were started on the project: state every draft in its library as the map.")
+         return READER_BRIEF.format(name=self.name, target=target, library=f": {library}" if library else "",
+-                                   scratch=READER_SCRATCH, departures=DEPARTURES_FILE)
++                                   scratch=READER_SCRATCH, departures=DEPARTURES_FILE, main_target=MAIN_TARGET_FILE)
+ 
+     def claude_args(self, edit: bool, scope_rules: list[str] | None = None, tools: list[str] | tuple[str, ...] = ()) -> list[str]:
+         """Claude Code's permissions: read the project, the library and the web; `proof` as the reads and the Reader's
+@@ -157,4 +168,4 @@ class ReaderContext:
+         return ["--search"], exec_args
+ 
+ 
+-__all__ = ["DEPARTURES_FILE", "READER_NAME", "READER_READS", "READER_ROLE", "READER_SCRATCH", "READER_WRITES", "ReaderContext"]
++__all__ = ["DEPARTURES_FILE", "MAIN_TARGET_FILE", "READER_NAME", "READER_READS", "READER_ROLE", "READER_SCRATCH", "READER_WRITES", "ReaderContext"]
+diff --git a/tests/test_coordinator.py b/tests/test_coordinator.py
+index 515345e..62bd833 100644
+--- a/tests/test_coordinator.py
++++ b/tests/test_coordinator.py
+@@ -807,6 +807,28 @@ def test_a_child_sent_back_and_worked_again_has_its_parents_awaiting_snapshot_wo
+ # -- ProjectPursuit's Stop (audit P2-6) -------------------------------------------------------------------------------------
+ 
+ 
++def test_project_pursuit_checks_the_readers_declared_main_target_before_starting_nodes():
++    """#197: the Reader identified the main result, but only a supporting theorem is selected."""
++    from types import SimpleNamespace
++
++    from proof_agents.coordinator import ProjectPursuit, PursuitHooks
++
++    stated, starts = [], []
++
++    def read(provider):
++        stated.append("thm-matrix-coeff-p")
++        return {"main_target": "lem-main"}
++
++    done = SimpleNamespace(start=lambda provider, **kwargs: starts.append("thm-matrix-coeff-p") or {},
++                           active=lambda: False, view=lambda: {"status": "done", "turns": 0})
++    pursuit = ProjectPursuit(PursuitHooks(read=read, theorems=lambda: list(stated), coordinator=lambda node: done))
++    pursuit.start("offline", limits={"turns": 60, "minutes": 120})
++    _until(lambda: not pursuit.active(), "offline pursuit ended")
++    assert pursuit.view()["status"] == "stuck"
++    assert "lem-main" in pursuit.view()["reason"] and "thm-matrix-coeff-p" in pursuit.view()["reason"]
++    assert starts == []
++
++
+ def _pursuit(worlds, *, read=None, stated=None, coordinator=None, stop_read=None):
+     from proof_agents.coordinator import ProjectPursuit, PursuitHooks
+ 
+diff --git a/tests/test_reader.py b/tests/test_reader.py
+index ceb1ee7..2294b01 100644
+--- a/tests/test_reader.py
++++ b/tests/test_reader.py
+@@ -147,3 +147,17 @@ def test_the_reader_writes_the_full_bibliography(tmp_path: Path):
+                     'proof reference import ref_r "Title" 1991 --identifier=arXiv:1234.5678 --created-by reader-1',
+                     'proof reference import ref_r "Title" 1991 --source-type research_paper --created-by reader-1'):
+         assert _permitted(command, allowed, denied), command
++
++
++def test_reader_reserves_the_only_theorem_for_the_declared_main_result(tmp_path: Path):
++    brief = " ".join(ReaderContext(tmp_path).brief().split())
++    for instruction in (
++        "only one theorem-kind node",
++        "Identify the draft's main result before creating any node",
++        "scratch/reader/main-target.json",
++        '"node_id"', '"source"',
++        "Supporting results are lemma-kind nodes even when the draft calls them Theorems",
++        "Never downgrade the main result to a Lemma",
++        "proof node list --json",
++    ):
++        assert instruction in brief, instruction

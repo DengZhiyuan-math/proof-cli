@@ -1,0 +1,7 @@
+{
+  "body": "Blocked by: DengZhiyuan-math/proof-cli#198\n\n## What\n\nADR-0021 point 9: a node out of budget is Parked. In `Coordinator` (around line 289 in the audited snapshot), `turns >= turns_max` returns `budget` before `_park()`. So when the Start's total budget ends, nothing is Parked: a parent split (1 turn) and a child Claim (1 turn) end with `parked=[]` and no Parked log, and the Claim stays claimed.\n\nOrder of the scheduling step:\n\n1. Collect the turns that ended.\n2. Park the nodes that have ended and are out of budget.\n3. Only then check the total budget and what can start.\n\nAt the total budget, start no new turn. The running turns stop under the existing deadline. Then record each node's result explicitly, Parked or Interrupted. A node still running is never marked Parked.\n\n## Acceptance\n\n- [ ] The audit's spec probe (split, then one Claim turn, total budget 2) parks the Claim and logs it, and the claim is released.\n- [ ] A node running at the budget boundary is not Parked.\n\n---\nPart of DengZhiyuan-math/proof-cli#193. Source: `docs/audits/2026-10-08-adr0021-design-audit.md` on `integ/0021` (proof-cli), probes in its evidence directory. Fix on the rebuilt integration Head (DengZhiyuan-math/proof-cli#198), not on the audited snapshot.",
+  "number": 18,
+  "state": "OPEN",
+  "title": "Park out-of-budget nodes before the Start's total budget ends the schedule",
+  "url": "https://github.com/zeqome/proof-agents/issues/18"
+}

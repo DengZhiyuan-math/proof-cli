@@ -1,0 +1,14 @@
+{
+  "status": "done",
+  "reason": "every Theorem was pursued to its end",
+  "theorems": [
+    "main-theorem"
+  ],
+  "current": "main-theorem",
+  "results": {},
+  "recorded": true,
+  "pursuit_id": "fbe2fe82-6acd-440c-9852-062ec899e5a2",
+  "last_phase": "end",
+  "can_pursue": false,
+  "stopping": false
+}

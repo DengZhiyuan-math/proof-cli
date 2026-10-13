@@ -1,0 +1,1 @@
+{"ok": true, "data": {"items": [{"node_id": "A", "node_kind": "claim", "statement": "A holds", "depth": 0, "kind": "unfixed", "by": "decomposer-fixture", "assumptions": [], "definitions": []}, {"node_id": "T", "node_kind": "theorem", "statement": "T holds", "depth": 1, "kind": "unfixed", "by": "reader-fixture", "assumptions": [], "definitions": []}], "departures": null}}

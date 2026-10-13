@@ -1,0 +1,18 @@
+{
+  "tests": 754,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 1,
+  "reported_cases": [
+    {
+      "classname": "tests.test_coordinator_hub",
+      "name": "test_the_coordinator_works_the_children_then_the_root_and_the_page_and_the_map_read_it",
+      "time": "3.367"
+    },
+    {
+      "classname": "tests.test_discussion_web",
+      "name": "test_a_long_reply_is_whole_on_the_page_after_a_reload",
+      "time": "0.382"
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "baseRefOid": "af687b02b7d03dbf5bd2b60062284d8421dfa5c0",
+  "headRefOid": "5667befee615dfdbd7336affd6c069b799e84ebc",
+  "isDraft": true,
+  "state": "OPEN",
+  "statusCheckRollup": [
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-13T14:03:44Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/zeqome/proof-web/actions/runs/38410109783/job/115339871917",
+      "name": "package",
+      "startedAt": "2026-10-13T14:03:33Z",
+      "status": "COMPLETED",
+      "workflowName": "package"
+    }
+  ],
+  "title": "Persist Reader timeouts and clarify coverage and review provenance",
+  "url": "https://github.com/zeqome/proof-web/pull/25"
+}

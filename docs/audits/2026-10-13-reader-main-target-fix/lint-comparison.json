@@ -1,0 +1,12 @@
+{
+  "agents": {
+    "baseline_count": 20,
+    "candidate_count": 20,
+    "new": []
+  },
+  "web": {
+    "baseline_count": 8,
+    "candidate_count": 8,
+    "new": []
+  }
+}

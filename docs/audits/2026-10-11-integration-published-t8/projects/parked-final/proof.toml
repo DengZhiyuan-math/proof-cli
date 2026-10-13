@@ -1,0 +1,6 @@
+[studio]
+library=["library"]
+parallel=1
+agent_name="t8-controlled"
+budget_turns=1
+budget_minutes=5

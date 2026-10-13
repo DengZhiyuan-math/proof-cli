@@ -1,0 +1,15 @@
+{
+  "at": "2026-10-12T08:49:36.717272+00:00",
+  "serverStopped": 83270,
+  "ownChromeStopped": [
+    81128,
+    81142,
+    81143,
+    81144,
+    81154,
+    83107,
+    83643
+  ],
+  "fixtureState": "retained",
+  "sourceCheckouts": "retained"
+}

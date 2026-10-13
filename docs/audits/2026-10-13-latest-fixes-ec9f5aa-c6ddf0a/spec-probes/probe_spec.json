@@ -1,0 +1,209 @@
+{
+  "shared_dependency": {
+    "initial_map": [
+      {
+        "id": "D",
+        "by": "reader",
+        "deps": [],
+        "derived_from": null
+      },
+      {
+        "id": "D1",
+        "by": "decomposer",
+        "deps": [],
+        "derived_from": "old"
+      },
+      {
+        "id": "D2",
+        "by": "decomposer",
+        "deps": [],
+        "derived_from": "old"
+      },
+      {
+        "id": "T",
+        "by": "human",
+        "deps": [
+          "current"
+        ],
+        "derived_from": null
+      },
+      {
+        "id": "aside",
+        "by": "human",
+        "deps": [
+          "D"
+        ],
+        "derived_from": null
+      },
+      {
+        "id": "current",
+        "by": "decomposer",
+        "deps": [],
+        "derived_from": "T"
+      },
+      {
+        "id": "old",
+        "by": "decomposer",
+        "deps": [
+          "D1",
+          "D2",
+          "D"
+        ],
+        "derived_from": "T"
+      }
+    ],
+    "with_abandoned_shared_edge": [
+      {
+        "status": "done",
+        "reason": "every Theorem's Coordinator ended done; not pursued, outside every Theorem's subtree (the researcher's own): aside",
+        "theorems": [
+          "T"
+        ],
+        "current": null,
+        "results": {
+          "T": {
+            "status": "done",
+            "reason": "offline stand-in"
+          }
+        },
+        "outside_pursuit": [
+          "aside"
+        ],
+        "budget": {
+          "turns_max": 4,
+          "minutes_max": 1.0,
+          "deadline": 1791905206.67787,
+          "spent": 0,
+          "structure_spent": 0,
+          "failed_launches": 0
+        },
+        "spend": {
+          "turns": 0,
+          "turns_max": 4,
+          "structure_turns": 0,
+          "failed_launches": 0,
+          "minutes_max": 1.0,
+          "minutes_left": 1.0
+        },
+        "can_pursue": false,
+        "stopping": false
+      },
+      {
+        "status": "done",
+        "reason": "every Theorem's Coordinator ended done; not pursued, outside every Theorem's subtree (the researcher's own): aside",
+        "theorems": [
+          "T"
+        ],
+        "current": null,
+        "results": {
+          "T": {
+            "status": "done",
+            "reason": "offline stand-in"
+          }
+        },
+        "outside_pursuit": [
+          "aside"
+        ],
+        "budget": {
+          "turns_max": 4,
+          "minutes_max": 1.0,
+          "deadline": 1791905206.86082,
+          "spent": 0,
+          "structure_spent": 0,
+          "failed_launches": 0
+        },
+        "spend": {
+          "turns": 0,
+          "turns_max": 4,
+          "structure_turns": 0,
+          "failed_launches": 0,
+          "minutes_max": 1.0,
+          "minutes_left": 1.0
+        },
+        "can_pursue": false,
+        "stopping": false
+      }
+    ],
+    "without_abandoned_shared_edge_control": {
+      "status": "stuck",
+      "reason": "agent-made local nodes outside every Theorem's subtree; wire each under a Theorem, or park or delete it, then Start again: D",
+      "theorems": [
+        "T"
+      ],
+      "current": null,
+      "results": {},
+      "budget": {
+        "turns_max": 4,
+        "minutes_max": 1.0,
+        "deadline": 1791905207.05467,
+        "spent": 0,
+        "structure_spent": 0,
+        "failed_launches": 0
+      },
+      "spend": {
+        "turns": 0,
+        "turns_max": 4,
+        "structure_turns": 0,
+        "failed_launches": 0,
+        "minutes_max": 1.0,
+        "minutes_left": 1.0
+      },
+      "can_pursue": false,
+      "stopping": false
+    },
+    "coordinator_starts": [
+      "T",
+      "T"
+    ]
+  },
+  "root_flag_identity": {
+    "project_identity": "Rooted Researcher <rooted@example.invalid>",
+    "cwd_identity": "Yomathnotcool <125728853+DengZhiyuan-math@users.noreply.github.com>",
+    "root_flag_write": {
+      "exit": 0,
+      "out": "{\n  \"schema_version\": 1,\n  \"ok\": true,\n  \"command\": \"node.create\",\n  \"data\": {\n    \"id\": \"rooted-alias\",\n    \"kind\": \"lemma\",\n    \"display_label\": \"\",\n    \"statement\": \"Unwired supporting result\",\n    \"assumptions\": [],\n    \"definitions\": [],\n    \"dependencies\": [],\n    \"source_locator\": null,\n    \"source_version\": null,\n    \"trust_level\": null,\n    \"reference_id\": null,\n    \"derived_from\": null,\n    \"medium\": \"latex\",\n    \"created_by\": \"Rooted Researcher <rooted@example.invalid>\",\n    \"updated_by\": \"Rooted Researcher <rooted@example.invalid>\",\n    \"created_at\": \"2026-10-13T15:25:47.267020Z\",\n    \"updated_at\": \"2026-10-13T15:25:47.267024Z\"\n  }\n}\n"
+    },
+    "actual_context_control": {
+      "exit": 1,
+      "out": "{\n  \"schema_version\": 1,\n  \"ok\": false,\n  \"command\": \"node.create\",\n  \"error\": {\n    \"code\": \"AGENT_AUTHOR_REFUSED\",\n    \"message\": \"an agent may not be named 'Rooted Researcher <rooted@example.invalid>': that is the researcher's name; set another `[studio] agent_name`\"\n  }\n}\n"
+    },
+    "ending": {
+      "status": "done",
+      "reason": "every Theorem's Coordinator ended done; not pursued, outside every Theorem's subtree (the researcher's own): rooted-alias",
+      "theorems": [
+        "T"
+      ],
+      "current": null,
+      "results": {
+        "T": {
+          "status": "done",
+          "reason": "offline stand-in"
+        }
+      },
+      "outside_pursuit": [
+        "rooted-alias"
+      ],
+      "budget": {
+        "turns_max": 4,
+        "minutes_max": 1.0,
+        "deadline": 1791905207.318235,
+        "spent": 0,
+        "structure_spent": 0,
+        "failed_launches": 0
+      },
+      "spend": {
+        "turns": 0,
+        "turns_max": 4,
+        "structure_turns": 0,
+        "failed_launches": 0,
+        "minutes_max": 1.0,
+        "minutes_left": 1.0
+      },
+      "can_pursue": false,
+      "stopping": false
+    },
+    "coordinator_starts": [
+      "T"
+    ]
+  }
+}

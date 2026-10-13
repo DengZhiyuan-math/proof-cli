@@ -1,0 +1,87 @@
+FFFF                                                                     [100%]
+=================================== FAILURES ===================================
+_ test_an_unnamed_unchecked_clause_never_takes_the_import_its_sentence_calls_checked[R: checked against the source; unchecked against the source for the other import.] _
+
+store = ProjectStore(root=PosixPath('/private/tmp/claude-502/pytest-of-zhdeng/pytest-213/test_an_unnamed_unchecked_clau0'))
+note = 'R: checked against the source; unchecked against the source for the other import.'
+
+    @pytest.mark.parametrize("note", [
+        "R: checked against the source; unchecked against the source for the other import.",
+        "R checked against the source; the other import unchecked against the source.",
+        "Unchecked against the source for the other import; R: checked against the source.",
+    ])
+    def test_an_unnamed_unchecked_clause_never_takes_the_import_its_sentence_calls_checked(store, note):
+        _two_imports(store)
+        create_node(store, node_id="L", kind="lemma", statement="L", dependencies=["R", "R2"], created_by="reader-1")
+        _checked(store, "L", note)
+>       assert _marked(store, "R") == []
+E       AssertionError: assert [('L', 1, True)] == []
+E         
+E         Left contains one more item: ('L', 1, True)
+E         Use -v to get more diff
+
+tests/test_import_review.py:185: AssertionError
+_ test_an_unnamed_unchecked_clause_never_takes_the_import_its_sentence_calls_checked[R checked against the source; the other import unchecked against the source.] _
+
+store = ProjectStore(root=PosixPath('/private/tmp/claude-502/pytest-of-zhdeng/pytest-213/test_an_unnamed_unchecked_clau1'))
+note = 'R checked against the source; the other import unchecked against the source.'
+
+    @pytest.mark.parametrize("note", [
+        "R: checked against the source; unchecked against the source for the other import.",
+        "R checked against the source; the other import unchecked against the source.",
+        "Unchecked against the source for the other import; R: checked against the source.",
+    ])
+    def test_an_unnamed_unchecked_clause_never_takes_the_import_its_sentence_calls_checked(store, note):
+        _two_imports(store)
+        create_node(store, node_id="L", kind="lemma", statement="L", dependencies=["R", "R2"], created_by="reader-1")
+        _checked(store, "L", note)
+>       assert _marked(store, "R") == []
+E       AssertionError: assert [('L', 1, True)] == []
+E         
+E         Left contains one more item: ('L', 1, True)
+E         Use -v to get more diff
+
+tests/test_import_review.py:185: AssertionError
+_ test_an_unnamed_unchecked_clause_never_takes_the_import_its_sentence_calls_checked[Unchecked against the source for the other import; R: checked against the source.] _
+
+store = ProjectStore(root=PosixPath('/private/tmp/claude-502/pytest-of-zhdeng/pytest-213/test_an_unnamed_unchecked_clau2'))
+note = 'Unchecked against the source for the other import; R: checked against the source.'
+
+    @pytest.mark.parametrize("note", [
+        "R: checked against the source; unchecked against the source for the other import.",
+        "R checked against the source; the other import unchecked against the source.",
+        "Unchecked against the source for the other import; R: checked against the source.",
+    ])
+    def test_an_unnamed_unchecked_clause_never_takes_the_import_its_sentence_calls_checked(store, note):
+        _two_imports(store)
+        create_node(store, node_id="L", kind="lemma", statement="L", dependencies=["R", "R2"], created_by="reader-1")
+        _checked(store, "L", note)
+>       assert _marked(store, "R") == []
+E       AssertionError: assert [('L', 1, True)] == []
+E         
+E         Left contains one more item: ('L', 1, True)
+E         Use -v to get more diff
+
+tests/test_import_review.py:185: AssertionError
+_ test_with_several_imports_left_an_unnamed_unchecked_clause_marks_none_of_them _
+
+store = ProjectStore(root=PosixPath('/private/tmp/claude-502/pytest-of-zhdeng/pytest-213/test_with_several_imports_left0'))
+
+    def test_with_several_imports_left_an_unnamed_unchecked_clause_marks_none_of_them(store):
+        _two_imports(store)
+        create_node(store, node_id="R3", kind="imported_result", statement="R3", source_locator="source R3", source_version="v1", created_by="reader-1")
+        create_node(store, node_id="L", kind="lemma", statement="L", dependencies=["R", "R2", "R3"], created_by="reader-1")
+        _checked(store, "L", "R: checked against the source; unchecked against the source for the others.")
+>       assert _marked(store, "R") == []
+E       AssertionError: assert [('L', 1, True)] == []
+E         
+E         Left contains one more item: ('L', 1, True)
+E         Use -v to get more diff
+
+tests/test_import_review.py:194: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_import_review.py::test_an_unnamed_unchecked_clause_never_takes_the_import_its_sentence_calls_checked[R: checked against the source; unchecked against the source for the other import.]
+FAILED tests/test_import_review.py::test_an_unnamed_unchecked_clause_never_takes_the_import_its_sentence_calls_checked[R checked against the source; the other import unchecked against the source.]
+FAILED tests/test_import_review.py::test_an_unnamed_unchecked_clause_never_takes_the_import_its_sentence_calls_checked[Unchecked against the source for the other import; R: checked against the source.]
+FAILED tests/test_import_review.py::test_with_several_imports_left_an_unnamed_unchecked_clause_marks_none_of_them
+4 failed, 21 deselected in 0.42s

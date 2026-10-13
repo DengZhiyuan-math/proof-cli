@@ -1,0 +1,25 @@
+{
+  "body": "Part of #193. Blocked by #194, #195, #196, zeqome/proof-agents#12, zeqome/proof-agents#13, zeqome/proof-agents#14, zeqome/proof-web#8.\n\nPut only `library-horo/main.tex` in a fresh project and press Pursue. Record:\n- how far it gets with no researcher input;\n- what lands in the review queue;\n- how the Reader's map compares with the hand-written `setup-tier3-horo.sh`.\n",
+  "closedAt": "2026-10-12T16:37:24Z",
+  "comments": [
+    {
+      "id": "IC_kwDOTZw3DM8AAAABaPsehQ",
+      "author": {
+        "login": "DengZhiyuan-math"
+      },
+      "authorAssociation": "OWNER",
+      "body": "Blocked by the ADR-0021 audit fixes listed on #193 (starting with DengZhiyuan-math/proof-cli#198). After them, T8 runs in two stages on the new integration Head, both recorded in the same manifest:\n\n1. **Browser flow, controlled provider.** Pursue; Stop and retry; refresh; server restart; Reader with no Theorem; release failure; small-budget Parked; Standing question answered; a Definition edit and its stale cause. It checks the UI and the state machine, not mathematics.\n2. **The real trial.** A new project with only `library-horo/main.tex`. Record its SHA-256, and the `setup-tier3-horo.sh` version compared against. Use the project's real provider, recording the total turns, time limit and model first; no researcher input afterwards. Record the Reader's map against the hand-made one, departures, Provisional/Conditional, Standing questions, Parked and stop reasons. In the browser, check the queue's order and content, and that it survives a refresh. Run the restart as a separate scenario.\n\nPassing means the path runs, the marks are true, \"unchecked against the source\" is visible, the researcher's decisions are kept and every stop can be resumed. It does not mean the main theorem is proven.",
+      "createdAt": "2026-10-08T08:49:58Z",
+      "includesCreatedEdit": false,
+      "isMinimized": false,
+      "minimizedReason": "",
+      "reactionGroups": [],
+      "url": "https://github.com/DengZhiyuan-math/proof-cli/issues/197#issuecomment-6056255109",
+      "viewerDidAuthor": true
+    }
+  ],
+  "number": 197,
+  "state": "CLOSED",
+  "title": "#132 trial: Pursue the horocycle draft from main.tex alone (ADR-0021 acceptance)",
+  "url": "https://github.com/DengZhiyuan-math/proof-cli/issues/197"
+}

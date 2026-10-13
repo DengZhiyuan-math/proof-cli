@@ -1,0 +1,16 @@
+{
+  "date": "2026-10-09",
+  "head": "fddd978008e385bbbc0a1c331dc26f099ad64579",
+  "merge_base": "9558fd0caf6eef2f80401c503a0a4549f4bbaa6f",
+  "pr": "https://github.com/zeqome/proof-agents/pull/23",
+  "web_issue": "https://github.com/zeqome/proof-web/issues/12",
+  "full_suite": "160 passed in 9.13s",
+  "original_audit_probes": "2 passed in 0.03s",
+  "pending_release_probes": {
+    "probe_pending_retry.py": 1,
+    "probe_concurrent_release.py": 1
+  },
+  "coordinator_source_sha256": "21b4a352a679020684879ca65e70e48899546392f687c873cd345a8205cd8f83",
+  "interpreter": "/opt/anaconda3/bin/python (3.11.14)",
+  "scope": "Real Coordinator and ProjectPursuit with repository FakeRun fixtures; Events delay release. No real provider or browser. No implementation edits or PR comments."
+}

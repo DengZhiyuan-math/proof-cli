@@ -1,0 +1,74 @@
+FFF                                                                      [100%]
+=================================== FAILURES ===================================
+____________ test_pursued_split_preserves_a_real_human_only_blocker ____________
+
+    def test_pursued_split_preserves_a_real_human_only_blocker():
+        log, questions = [], []
+        agent = _ScriptedAgent(log, [{"entries": [
+            {"kind": "split", "nodes": ["T1"]},
+            {"kind": "step", "step": 1, "status": "needs-human", "note": "Contradiction in T: x > 0 and x <= 0; the researcher must correct the statement"},
+        ]}])
+        run = AgentRun(agent, _hooks(
+            work_log=lambda: log,
+            record_question=lambda *args: questions.append(args),
+            node_brief=lambda: {"kind": "theorem", "statement": "T", "dependencies": [], "split_children": []},
+        ))
+        run.start("claude", roles=["decomposer"], pursue=True)
+        _until(lambda: not run.active(), "run finished")
+>       assert run.view()["status"] == "needs-human", {"view": run.view(), "questions": questions}
+E       AssertionError: {'questions': [('decomposer', 'claude-code', 'the split stands and is worked; asked: Contradiction in T: x > 0 and x <...correct the statement')], 'view': {'active': False, 'deadline': 1791449496.545418, 'decision': None, 'job': None, ...}}
+E       assert 'done' == 'needs-human'
+E         
+E         - needs-human
+E         + done
+
+test_spec_probes.py:32: AssertionError
+____ test_reference_review_surfaces_the_dependents_unchecked_source_warning ____
+
+tmp_path = PosixPath('/private/var/folders/13/jgb8c061583ggg622pgv9l0c0000gp/T/pytest-of-zhdeng/pytest-30/test_reference_review_surfaces0')
+
+    def test_reference_review_surfaces_the_dependents_unchecked_source_warning(tmp_path):
+        store = ensure_project(tmp_path)
+        create_node(store, node_id="R", kind="imported_result", statement="Bound", source_locator="arXiv:example, Thm 1", source_version="v1", created_by="reader")
+        create_node(store, node_id="L", kind="lemma", statement="L", dependencies=["R"], created_by="reader")
+        warning = "R: unchecked against the source; the cited work cannot be reached"
+        record_progress(store, "L", role="verifier", by="a", verdict="passed", note=warning)
+        proof = submit_proof(store, "L", claimant_id="a", scoping_rationale="scoped", content="Proof invoking R")
+        record_evidence_check(store, proof.id, "passed", run_by="a/verifier", notes=warning)
+        client = DirectClient(store)
+        try:
+            source = client.get("/api/node/R")[1]["data"]
+            card = next(p for p in client.get("/api/state")[1]["data"]["pending"] if p["node_id"] == "R")
+>           assert warning in str(source) or warning in str(card), {"source_evidence": source["evidence_checks"], "source_dependents": source["dependents"], "card": card}
+E           AssertionError: {'card': {'bindings': {'no-longer-callable': 'b9b9097f8cd0396684b69a0354e9aa169522a66757ad95fbec4c357741a43530', 'refe...ce-review', 'no-longer-callable'], 'kind': 'reference_review', ...}, 'source_dependents': ['L'], 'source_evidence': []}
+E           assert ('R: unchecked against the source; the cited work cannot be reached' in "{'claim': None, 'node': {'id': 'R', 'kind': 'imported_result', 'display_label': '', 'statement': 'Bound', 'assumption...er-callable', 'binding': 'b9b9097f8cd0396684b69a0354e9aa169522a66757ad95fbec4c357741a43530'}], 'review_blocked': None}" or 'R: unchecked against the source; the cited work cannot be reached' in "{'node_id': 'R', 'kind': 'reference_review', 'decisions': ['reference-review', 'no-longer-callable'], 'bindings': {'r...allable': 'b9b9097f8cd0396684b69a0354e9aa169522a66757ad95fbec4c357741a43530'}, 'statement': 'Bound', 'citation': None}")
+E            +  where "{'claim': None, 'node': {'id': 'R', 'kind': 'imported_result', 'display_label': '', 'statement': 'Bound', 'assumption...er-callable', 'binding': 'b9b9097f8cd0396684b69a0354e9aa169522a66757ad95fbec4c357741a43530'}], 'review_blocked': None}" = str({'acceptance_state': 'unreviewed', 'candidate_proof': None, 'challenges': [], 'citation': None, ...})
+E            +  and   "{'node_id': 'R', 'kind': 'reference_review', 'decisions': ['reference-review', 'no-longer-callable'], 'bindings': {'r...allable': 'b9b9097f8cd0396684b69a0354e9aa169522a66757ad95fbec4c357741a43530'}, 'statement': 'Bound', 'citation': None}" = str({'bindings': {'no-longer-callable': 'b9b9097f8cd0396684b69a0354e9aa169522a66757ad95fbec4c357741a43530', 'reference-rev...3cc4a2e6'}, 'citation': None, 'decisions': ['reference-review', 'no-longer-callable'], 'kind': 'reference_review', ...})
+
+test_spec_probes.py:47: AssertionError
+_____ test_global_budget_boundary_still_records_exhausted_nodes_as_parked ______
+
+    def test_global_budget_boundary_still_records_exhausted_nodes_as_parked():
+        world = World(edges={"T": []}, budget=(1, 60.0), parallel=1)
+        coordinator = world.coordinator()
+        coordinator.start("claude")
+        try:
+            _until(lambda: world.runs["T"].starts == 1, "Decomposer started")
+            world.edges = {"T": ["A"], "A": []}
+            world.runs["A"] = FakeRun()
+            world.runs["T"].end("done", turns=1, reason="split into 1 Claim(s): A; the Coordinator works them")
+            world.runs["T"].claim = None
+            _until(lambda: world.runs["A"].starts == 1, "Claim started")
+            world.runs["A"].end("budget", turns=1, reason="out of turns")
+            _until(lambda: not coordinator.active(), "Coordinator finished")
+>           assert any(entry["node"] == "A" for entry in coordinator.view()["parked"]), coordinator.view()
+E           AssertionError: {'accepted': [], 'active': False, 'can_release': True, 'decomposed': ['T'], ...}
+E           assert False
+E            +  where False = any(<generator object test_global_budget_boundary_still_records_exhausted_nodes_as_parked.<locals>.<genexpr> at 0x11b7ca740>)
+
+test_spec_probes.py:65: AssertionError
+=========================== short test summary info ============================
+FAILED test_spec_probes.py::test_pursued_split_preserves_a_real_human_only_blocker
+FAILED test_spec_probes.py::test_reference_review_surfaces_the_dependents_unchecked_source_warning
+FAILED test_spec_probes.py::test_global_budget_boundary_still_records_exhausted_nodes_as_parked
+3 failed in 0.31s

@@ -1,0 +1,11 @@
+{
+  "baseRefName": "feat/0021-pursue-review-queue",
+  "headRefOid": "4e826fffcceb643b2baea3e736e80076cdaa674c",
+  "mergeCommit": {
+    "oid": "13db61bfe2bb5747ec0e9ea46d1fcb919f530d15"
+  },
+  "mergedAt": "2026-10-12T16:36:50Z",
+  "number": 23,
+  "state": "MERGED",
+  "url": "https://github.com/zeqome/proof-web/pull/23"
+}

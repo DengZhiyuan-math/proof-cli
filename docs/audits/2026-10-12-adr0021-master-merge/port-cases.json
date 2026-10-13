@@ -1,0 +1,97 @@
+[
+  {
+    "test": "tests/test_home.py::test_a_page_already_served_elsewhere_is_used_as_it_is",
+    "status": "passed",
+    "seconds": "0.565"
+  },
+  {
+    "test": "tests/test_home.py::test_a_project_started_again_at_the_same_path_gets_its_own_page_and_the_old_one_closes",
+    "status": "passed",
+    "seconds": "1.043"
+  },
+  {
+    "test": "tests/test_home.py::test_open_serves_the_project_on_its_own_origin_and_the_page_links_back_home",
+    "status": "passed",
+    "seconds": "0.551"
+  },
+  {
+    "test": "tests/test_home.py::test_opening_a_deleted_project_from_the_home_closes_its_old_page_and_says_so",
+    "status": "passed",
+    "seconds": "0.535"
+  },
+  {
+    "test": "tests/test_home.py::test_opening_over_http_starts_the_page_and_says_where",
+    "status": "passed",
+    "seconds": "1.034"
+  },
+  {
+    "test": "tests/test_home.py::test_the_home_page_and_its_api_answer_on_the_home_origin",
+    "status": "passed",
+    "seconds": "0.531"
+  },
+  {
+    "test": "tests/test_home.py::test_the_home_refuses_another_host_and_a_foreign_origin",
+    "status": "passed",
+    "seconds": "0.507"
+  },
+  {
+    "test": "tests/test_review_app.py::test_a_decision_over_http_counts",
+    "status": "passed",
+    "seconds": "0.541"
+  },
+  {
+    "test": "tests/test_review_app.py::test_a_node_studio_is_behind_the_pages_host_and_origin_checks",
+    "status": "passed",
+    "seconds": "0.563"
+  },
+  {
+    "test": "tests/test_review_app.py::test_a_node_studio_page_is_served_with_its_policy",
+    "status": "passed",
+    "seconds": "0.535"
+  },
+  {
+    "test": "tests/test_review_app.py::test_a_page_whose_project_was_replaced_answers_gone_except_its_health",
+    "status": "passed",
+    "seconds": "0.557"
+  },
+  {
+    "test": "tests/test_review_app.py::test_a_pdf_is_served_as_a_pdf_for_the_browsers_own_viewer",
+    "status": "passed",
+    "seconds": "0.539"
+  },
+  {
+    "test": "tests/test_review_app.py::test_host_origin_and_content_type_are_checked",
+    "status": "passed",
+    "seconds": "0.534"
+  },
+  {
+    "test": "tests/test_review_app.py::test_malformed_requests_get_an_error_response_not_a_dropped_connection[headers0--400]",
+    "status": "passed",
+    "seconds": "0.533"
+  },
+  {
+    "test": "tests/test_review_app.py::test_malformed_requests_get_an_error_response_not_a_dropped_connection[headers1--413]",
+    "status": "passed",
+    "seconds": "0.551"
+  },
+  {
+    "test": "tests/test_review_app.py::test_malformed_requests_get_an_error_response_not_a_dropped_connection[headers2-[1, 2]-400]",
+    "status": "passed",
+    "seconds": "0.542"
+  },
+  {
+    "test": "tests/test_review_app.py::test_malformed_requests_get_an_error_response_not_a_dropped_connection[headers3-{\"decisions\": [42]}-400]",
+    "status": "passed",
+    "seconds": "0.557"
+  },
+  {
+    "test": "tests/test_review_app.py::test_the_node_panel_and_node_creation_are_refused_from_another_origin",
+    "status": "passed",
+    "seconds": "0.566"
+  },
+  {
+    "test": "tests/test_review_app.py::test_the_page_and_its_script_are_served_with_a_strict_policy",
+    "status": "passed",
+    "seconds": "0.561"
+  }
+]

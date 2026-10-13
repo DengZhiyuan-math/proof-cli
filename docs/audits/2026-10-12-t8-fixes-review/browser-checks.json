@@ -1,0 +1,10 @@
+{
+  "loggedOutReader": "passed (actual Claude; zero tokens; empty logged-out profile)",
+  "definitionWarnings": "passed (own and dependent nodes; entity/by/reason shown)",
+  "studioDefinitionOldNewAndReason": "passed",
+  "studioActorDuringTurn": "failed (stored reader-1; browser Decomposer only)",
+  "unknownTopLevelAndBudgetKeys": "passed",
+  "settingsSidebarCount": "passed (5 = 2 nodes + 3 settings)",
+  "hiddenWithoutUnknownKeys": "passed (sidebar 2)",
+  "olderDependencies": "152 passed, 2 skipped, 1 deliberately deselected; explicit old Reader success fallback verified"
+}

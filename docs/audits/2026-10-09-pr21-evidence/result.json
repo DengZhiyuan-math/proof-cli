@@ -1,0 +1,8 @@
+{
+  "head": "c5d742cf20c28569726d4081012cefef71ea92df",
+  "pr": "https://github.com/zeqome/proof-agents/pull/21",
+  "scope": "Coordinator probe with synthetic map and runs; no agent provider or browser",
+  "exit_code": 1,
+  "stdout": "{\n  \"source_head\": \"c5d742cf20c28569726d4081012cefef71ea92df\",\n  \"started\": [\n    \"C1\",\n    \"C2\",\n    \"S\"\n  ],\n  \"parked\": {\n    \"T\": \"needs-human: the statement asks x > 0 and x <= 0\"\n  },\n  \"expected_started\": [\n    \"S\"\n  ]\n}\n",
+  "stderr": "Traceback (most recent call last):\n  File \"/Volumes/Codex-Workspace/live/home/zhdeng/proof-cli/docs/audits/2026-10-09-pr21-evidence/probe_split_needs_human.py\", line 36, in <module>\n    assert started == ['S'], 'The Claims of the contradictory split must wait; only the existing sibling may start.'\n           ^^^^^^^^^^^^^^^^\nAssertionError: The Claims of the contradictory split must wait; only the existing sibling may start.\n"
+}

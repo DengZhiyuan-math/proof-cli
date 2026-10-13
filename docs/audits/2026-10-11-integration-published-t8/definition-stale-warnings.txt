@@ -1,0 +1,42 @@
+t8-queue
+4 nodes · 0 on the frontier
+0
+Frontier
+2
+Awaiting you
+0
+Fog
+Y
+Yomathnotcool <125728853+DengZhiyuan-math@users.noreply.github.com>
+
+Proof map
+
+Map
+Review
+2
+Warnings
+2
+Discuss
+Warnings
+
+What may no longer hold, and review decisions that don't count as recorded.
+
+Nodes that need attention
+2
+Dependency changed
+C holds for n.
+Claim · C
+
+A dependency moved to a new accepted version: it may need a re-review or a new proof.
+
+Dependency changed
+L follows from C and R.
+Lemma · L
+
+A dependency moved to a new accepted version: it may need a re-review or a new proof.
+
+Review records
+
+Unreadable or unconfirmed records, decisions git doesn't have yet, an Acceptance that no longer describes its node, a snapshot that was never indexed.
+
+None.

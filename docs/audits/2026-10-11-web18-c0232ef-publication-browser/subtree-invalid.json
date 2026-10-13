@@ -1,0 +1,60 @@
+{
+  "requests": [
+    {
+      "body": "{\"limits\":{\"turns\":3,\"minutes\":0},\"provider\":\"browser18-fixture\"}",
+      "reply": {
+        "error": {
+          "code": "INVALID_LIMITS",
+          "message": "a Pursue's limits are at least one turn and more than no minutes: {'turns': 3, 'minutes': 0}"
+        },
+        "ok": false
+      },
+      "status": 400,
+      "url": "../../api/node/T/coordinator/start"
+    }
+  ],
+  "view": {
+    "accepted": [],
+    "active": false,
+    "can_release": false,
+    "deadline": null,
+    "decomposed": [],
+    "failed_launches": 0,
+    "held": [],
+    "interrupted": [],
+    "launch_failed": [],
+    "limits": {
+      "minutes": 8,
+      "node_minutes": 4,
+      "node_turns": 2,
+      "open_nodes": 1,
+      "structure_allowance": 2,
+      "turns": 4
+    },
+    "minutes_max": 0,
+    "name": "",
+    "needs_you": [],
+    "nodes": {},
+    "parallel": 1,
+    "parked": [],
+    "provider": "",
+    "pursue_turns": 0,
+    "reason": "",
+    "resplit": [],
+    "resplit_refused": [],
+    "root": "T",
+    "running": [],
+    "settling": false,
+    "started_at": null,
+    "status": "idle",
+    "structure_turns": 0,
+    "subtree": {
+      "accepted": 0,
+      "nodes": 1,
+      "open": 1
+    },
+    "turns": 0,
+    "turns_before": 0,
+    "turns_max": 0
+  }
+}

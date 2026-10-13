@@ -1,0 +1,67 @@
+{
+  "text": "Subtree\nstuck — nothing left to work without the researcher: T rest(s) on what no run will settle (its launches failed: A)\nTotal\nturns and\nminutes\n2 turns per node × 2 open node(s) + 2 structure turn(s) for splits. A node's budget is a ceiling, not a share: Claims a split adds spend what is left of the total.\nPursue\nturns 0/6 · failed launches 3 · 11.8 of 12 min left\nA launch failed — its launch failed 3 time(s) in this Start: the turn could not start: browser fixture: launch refused before any turn",
+  "title": "T · proof studio",
+  "url": "http://localhost:21194/studio/T/",
+  "view": {
+    "accepted": [],
+    "active": false,
+    "can_release": false,
+    "deadline": 1791673000.1726248,
+    "decomposed": [],
+    "failed_launches": 3,
+    "held": [],
+    "interrupted": [],
+    "launch_failed": [
+      {
+        "node": "A",
+        "reason": "its launch failed 3 time(s) in this Start: the turn could not start: browser fixture: launch refused before any turn"
+      }
+    ],
+    "limits": {
+      "minutes": 12,
+      "node_minutes": 4,
+      "node_turns": 2,
+      "open_nodes": 2,
+      "structure_allowance": 2,
+      "turns": 6
+    },
+    "minutes_max": 12,
+    "name": "browser18-fixture",
+    "needs_you": [],
+    "nodes": {
+      "A": {
+        "cap": 0,
+        "failed_launches": 3,
+        "last": "launch-failed",
+        "reason": "the turn could not start: browser fixture: launch refused before any turn",
+        "redirect": null,
+        "role": null,
+        "started_at": 1791672281.27322,
+        "starts": 3,
+        "turns": 0,
+        "verdict": null
+      }
+    },
+    "parallel": 1,
+    "parked": [],
+    "provider": "browser18-fixture",
+    "pursue_turns": 0,
+    "reason": "nothing left to work without the researcher: T rest(s) on what no run will settle (its launches failed: A)",
+    "resplit": [],
+    "resplit_refused": [],
+    "root": "T",
+    "running": [],
+    "settling": false,
+    "started_at": 1791672280.1727622,
+    "status": "stuck",
+    "structure_turns": 0,
+    "subtree": {
+      "accepted": 0,
+      "nodes": 2,
+      "open": 2
+    },
+    "turns": 0,
+    "turns_before": 0,
+    "turns_max": 6
+  }
+}

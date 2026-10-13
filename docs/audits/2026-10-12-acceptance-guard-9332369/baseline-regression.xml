@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1" time="11.492" timestamp="2026-10-12T12:39:40.393627+02:00" hostname="PlayStation-6.local"><testcase classname="tests.test_performance" name="test_a_decision_on_the_top_of_a_chain_grows_linearly_with_it" time="11.365"><failure message="AssertionError: ('decision review reads', 2166, 9126)&#10;assert 9126 &lt;= (2.5 * 2166)">tmp_path = PosixPath('/private/var/folders/13/jgb8c061583ggg622pgv9l0c0000gp/T/pytest-of-zhdeng/pytest-316/test_a_decision_on_the_top_of_0')
+statements = ['PRAGMA user_version', 'PRAGMA schema_version', "SELECT data FROM proof_map_nodes WHERE id = 'n39' LIMIT 1", 'PRAGMA user_version', 'PRAGMA schema_version', 'BEGIN IMMEDIATE', ...]
+review_reads = [PosixPath('/private/var/folders/13/jgb8c061583ggg622pgv9l0c0000gp/T/pytest-of-zhdeng/pytest-316/test_a_decision_on_th...gg622pgv9l0c0000gp/T/pytest-of-zhdeng/pytest-316/test_a_decision_on_the_top_of_0/large/proofs/n13/reviews.jsonl'), ...]
+
+    def test_a_decision_on_the_top_of_a_chain_grows_linearly_with_it(tmp_path: Path, statements, review_reads):
+        """Whether the node is Blocked walks everything above it: once per decision, not once per node (ADR-0021)."""
+        small = _decision_cost(tmp_path / "small", 20, statements, review_reads)
+        large = _decision_cost(tmp_path / "large", 40, statements, review_reads)
+    
+        for measure in small:
+&gt;           assert large[measure] &lt;= 2.5 * small[measure], (measure, small[measure], large[measure])
+E           AssertionError: ('decision review reads', 2166, 9126)
+E           assert 9126 &lt;= (2.5 * 2166)
+
+tests/test_performance.py:271: AssertionError</failure></testcase></testsuite></testsuites>

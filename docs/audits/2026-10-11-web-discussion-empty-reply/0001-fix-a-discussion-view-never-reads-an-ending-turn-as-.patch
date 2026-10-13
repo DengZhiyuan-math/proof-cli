@@ -1,0 +1,191 @@
+From bb9ac2960e2e9d6f2607bffd5affa96f0151d1d1 Mon Sep 17 00:00:00 2001
+From: Yomathnotcool <125728853+DengZhiyuan-math@users.noreply.github.com>
+Date: Sun, 11 Oct 2026 12:52:41 +0200
+Subject: [PATCH] fix: a discussion view never reads an ending turn as settled
+ with an empty reply
+
+discussion_view read the records, then the running turn. A turn that ended between the two reads came back with
+`running` null and its started record's empty reply, and the drawer kept that as the answer (the 0 of 9000
+characters seen in web #12's audit). The view now reads the running turn (and the pending records) first: a turn frees
+its slot only once its ended record is written or kept pending, so one ending meanwhile reads as still running.
+
+The start's failure paths freed the slot before writing the ended record, leaving the same window; a refused start now
+writes it first. A start that raised after its started record was written left that turn started for good, with no
+reply; it is now ended with the error.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/proof_web/studios.py     | 23 ++++++---
+ tests/test_discussion_web.py | 96 ++++++++++++++++++++++++++++++++++++
+ 2 files changed, 112 insertions(+), 7 deletions(-)
+
+diff --git a/src/proof_web/studios.py b/src/proof_web/studios.py
+index c6b7708..7e3d83b 100644
+--- a/src/proof_web/studios.py
++++ b/src/proof_web/studios.py
+@@ -888,6 +888,12 @@ class StudioHub:
+         when the record kept only its head), the turn running now, the providers and the agent's name. An ended turn whose
+         record could not be written is written now if it can be, else shown from memory and marked (`record_error`)."""
+         self._discussion_flush()
++        # the turn running, then the records: a turn frees its slot only once its ended record is written (or kept in
++        # pending), so one that ends between the two reads shows as still running, for the drawer to ask again — never as
++        # settled with its started record's empty reply. A pending record leaves only once it is written: kept here, or read
++        with self._lock:
++            live = dict(self._discussion_live) if self._discussion_live else None
++            pending = {turn_id: dict(record) for turn_id, record in self._discussion_pending.items()}
+         turns = proof_map.discussion_turns(self.store) if self._attached() else []
+         for turn in turns:
+             if turn.get("ended") and len(turn.get("reply") or "") >= proof_map.DISCUSSION_REPLY_KEPT and turn.get("transcript"):
+@@ -895,9 +901,6 @@ class StudioHub:
+                 texts = [str(e.get("text") or "") for e in kept.get("events") or [] if e.get("t") == "text" and e.get("text")]
+                 if texts:
+                     turn["reply"] = "\n\n".join(texts)
+-        with self._lock:
+-            live = dict(self._discussion_live) if self._discussion_live else None
+-            pending = {turn_id: dict(record) for turn_id, record in self._discussion_pending.items()}
+         for turn in turns:  # a turn ended in memory but not yet on record: shown ended, with its reply, and said to be unrecorded
+             record = pending.get(turn["turn"])
+             if record is not None and not turn.get("ended"):
+@@ -962,25 +965,31 @@ class StudioHub:
+             if self._discussion_live is not None:
+                 return 409, {"error": "the map's agent is still answering the previous message; wait, or stop it", "code": "AGENT_BUSY"}
+             self._discussion_live = {"job": None, "turn": turn, "provider": provider}  # reserved while the turn starts
++        recorded = False
+         try:
+             self._discussion_context()  # built once here first: a configuration error (a library path, say) is the answer, not a registered job
+             proof_map.record_discussion_turn(self.store, phase="started", turn=turn, by=name, provider=provider, prompt=prompt, fresh=fresh)
++            recorded = True
+             # "edit" is the manager's mode in which Claude Code runs with its default permissions and an allowlist (plan mode would
+             # refuse the `proof` reads); the context itself allows no file write (MapAgentContext), and gives the manager no file to diff
+             started = agent.start(prompt, session, "edit", body.get("model") or None, body.get("effort") or None, None, provider or None)
+-            if "error" in started:
+-                with self._lock:
+-                    self._discussion_live = None
++            if "error" in started:  # on record first, then the slot is free: no read sees the turn neither running nor ended
+                 self._discussion_record_ended(turn, by=name, provider=provider, prompt=prompt, job=None, session_id=None, events=None,
+                                               reply=str(started["error"]), is_error=True)
++                with self._lock:
++                    self._discussion_live = None
+                 status = 409 if started.get("code") in ("AGENT_BUSY", "STUDIO_CLOSED", "TURN_CALLED_OFF") else 400
+                 return status, {"error": str(started["error"]), "code": str(started.get("code") or "AGENT_REFUSED")}
+             job = agent.jobs[started["job"]]
+         except Exception as exc:  # noqa: BLE001 — the context, the record or the start failed: the slot is free again, the manager too, and the error is the answer (audit)
++            error = f"the message could not be sent: {type(exc).__name__}: {exc}"
++            if recorded:  # its started record is written: ended with the error, not left started for good with no reply
++                self._discussion_record_ended(turn, by=name, provider=provider, prompt=prompt, job=None, session_id=None, events=None,
++                                              reply=error, is_error=True)
+             with self._lock:
+                 self._discussion_live = None
+             self._discussion_abandon(agent)
+-            return 500, {"error": f"the message could not be sent: {type(exc).__name__}: {exc}", "code": "INTERNAL_ERROR"}
++            return 500, {"error": error, "code": "INTERNAL_ERROR"}
+         provider = str(started.get("provider") or provider)
+         with self._lock:
+             self._discussion_live = {"job": job.id, "turn": turn, "provider": provider}
+diff --git a/tests/test_discussion_web.py b/tests/test_discussion_web.py
+index 789754b..d7a86ac 100644
+--- a/tests/test_discussion_web.py
++++ b/tests/test_discussion_web.py
+@@ -270,3 +270,99 @@ def test_the_next_message_continues_a_session_whose_record_is_still_waiting_to_b
+     third = _turns(log)[2]
+     assert third["argv"][third["argv"].index("--resume") + 1] == "stub-session" and view["unrecorded"] == []
+     assert [t["ended"] for t in discussion_turns(store)] == [True, True, True]
++
++
++# -- a view read while the turn ends (audit, web #12 evidence): never "no turn running" with the turn's reply missing ----
++
++
++def test_a_view_read_while_the_turn_ends_never_settles_on_an_empty_reply(page, monkeypatch):
++    """The view read the records, then the live turn: a turn that ended in between read as settled (running None) with
++    its started record's empty reply, and the drawer kept that. Gated, no sleep: the ended record waits until the view
++    has read the records, the view's read waits until the turn has ended."""
++    import threading
++
++    from proof_web import studios as hub_module
++
++    store, client, log, queue = page
++    hub = client.app.studios
++    ready, go, finished = threading.Event(), threading.Event(), threading.Event()
++    real_record, real_read, real_finish = hub_module.proof_map.record_discussion_turn, hub_module.proof_map.discussion_turns, hub._discussion_finish
++    reply = "Claim " * 1500
++
++    def record(store_, **kw):
++        if kw.get("phase") == "ended":
++            ready.set()
++            assert go.wait(10), "the ending was not let through"
++        return real_record(store_, **kw)
++
++    def finish(*args, **kwargs):
++        try:
++            return real_finish(*args, **kwargs)
++        finally:
++            finished.set()
++
++    monkeypatch.setattr(hub_module.proof_map, "record_discussion_turn", record)
++    monkeypatch.setattr(hub, "_discussion_finish", finish)
++    _queue(queue, [["say", reply]])
++    try:
++        assert client.post("/api/discussion", {"prompt": "all of it", "provider": "claude"})[0] == 200
++        assert ready.wait(10), "the backend did not finish"
++
++        def read_then_end(store_):
++            turns = real_read(store_)
++            go.set()
++            assert finished.wait(10), "the turn did not end"
++            return turns
++
++        monkeypatch.setattr(hub_module.proof_map, "discussion_turns", read_then_end)
++        view = client.get("/api/discussion")[1]["data"]
++        monkeypatch.setattr(hub_module.proof_map, "discussion_turns", real_read)
++        # read before the turn ended: still running, for the drawer to ask again — never settled without its reply
++        assert view["running"] is not None or view["turns"][0]["reply"] == reply, view
++        assert _settled(client)["turns"][0]["reply"] == reply
++    finally:
++        go.set()
++        finished.wait(10)
++
++
++def test_a_refused_start_is_on_record_before_its_slot_is_free(page, monkeypatch):
++    """A start the manager refused freed the slot, then wrote the ended record: a view in between read no turn running
++    and the started record's empty reply."""
++    import threading
++
++    from proof_web import studios as hub_module
++
++    store, client, log, queue = page
++    agent = client.app.studios._discussion_agent()
++    real_record = hub_module.proof_map.record_discussion_turn
++    seen = []
++
++    def record(store_, **kw):
++        if kw.get("phase") == "ended":   # the view, as the drawer polls it while the refusal is written
++            seen.append(client.get("/api/discussion")[1]["data"])
++        return real_record(store_, **kw)
++
++    monkeypatch.setattr(agent, "start", lambda *args, **kwargs: {"error": "the studio is closed", "code": "STUDIO_CLOSED"})
++    monkeypatch.setattr(hub_module.proof_map, "record_discussion_turn", record)
++    assert client.post("/api/discussion", {"prompt": "hello", "provider": "claude"})[0] == 409
++    assert seen and all(view["running"] is not None for view in seen), seen
++    turn = client.get("/api/discussion")[1]["data"]["turns"][-1]
++    assert turn["ended"] and turn["is_error"] and turn["reply"] == "the studio is closed"
++
++
++def test_a_start_that_fails_after_its_record_is_on_record_as_failed(page, monkeypatch):
++    """A start that raised after its started record was written left that turn started for good: never running, never
++    ended, its reply empty. It is now ended with the error as its reply."""
++    store, client, log, queue = page
++    agent = client.app.studios._discussion_agent()
++
++    def broken(*args, **kwargs):
++        raise RuntimeError("library folder not found")
++
++    monkeypatch.setattr(agent, "start", broken)
++    status, refused = client.post("/api/discussion", {"prompt": "hello", "provider": "claude"})
++    assert status == 500
++    view = client.get("/api/discussion")[1]["data"]
++    assert view["running"] is None
++    turn = view["turns"][-1]
++    assert turn["ended"] and turn["is_error"] and "library folder not found" in turn["reply"]
+-- 
+2.54.0
+

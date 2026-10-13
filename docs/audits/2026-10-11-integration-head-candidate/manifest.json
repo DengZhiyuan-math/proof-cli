@@ -1,0 +1,113 @@
+{
+ "date": "2026-10-11",
+ "issue": "DengZhiyuan-math/proof-cli#198 (step 12 of docs/plans/0021-audit-fix-order.md)",
+ "interpreter": "/opt/anaconda3/bin/python",
+ "note": "A local candidate: every open ADR-0021 fix PR merged onto the integration branches. Nothing merged or pushed upstream. Run inside the Claude Code sandbox: local port binding and tectonic's network are blocked.",
+ "core": {
+  "repo": "https://github.com/DengZhiyuan-math/proof-cli.git",
+  "branch": "candidate/0021-head (local, not pushed)",
+  "head": "e50f8cdb8a6b980c44b58370ccb99adde58b67c4",
+  "base": "origin/integ/0021",
+  "base_sha": "b7f394374ce73e9a23754e12506e87e97326efd9",
+  "merge_base": "b7f394374ce73e9a23754e12506e87e97326efd9",
+  "merged": [
+   {
+    "ref": "origin/fix/199-trust-rule-researcher-imports",
+    "sha": "ad479f6d69186105a934d9765a553c48f859ceca"
+   },
+   {
+    "ref": "origin/fix/201-pursuit-events",
+    "sha": "09e64a365153650cade0579afca52a56028b0f07"
+   },
+   {
+    "ref": "origin/fix/202-reference-edit",
+    "sha": "2f7c2460bca05bc2d823403f17b05ed28766412b"
+   },
+   {
+    "ref": "origin/fix/203-reader-role",
+    "sha": "d17b48426540d6ab5fce0f3009450ff8a4a53f75"
+   },
+   {
+    "ref": "origin/fix/200-pursuit-error-codes",
+    "sha": "13370808a605a31632b9883606330183fd0fd8a3"
+   },
+   {
+    "ref": "fix/0021-pursue-budget-codes",
+    "sha": "a7a38570fb4f581531c1444cf267f26f38ad17c1"
+   }
+  ],
+  "log": [
+   "e50f8cd Merge branch 'fix/0021-pursue-budget-codes' into candidate/0021-head",
+   "a392490 Merge branch 'fix/0021-pursue-budget-codes' into candidate/0021-head",
+   "166a746 Merge remote-tracking branch 'origin/fix/200-pursuit-error-codes' into candidate/0021-head",
+   "f028039 Merge remote-tracking branch 'origin/fix/203-reader-role' into candidate/0021-head",
+   "c876efa Merge remote-tracking branch 'origin/fix/202-reference-edit' into candidate/0021-head",
+   "40afedd Merge remote-tracking branch 'origin/fix/201-pursuit-events' into candidate/0021-head",
+   "2553fb2 Merge remote-tracking branch 'origin/fix/199-trust-rule-researcher-imports' into candidate/0021-head"
+  ]
+ },
+ "agents": {
+  "repo": "https://github.com/zeqome/proof-agents.git",
+  "branch": "candidate/0021-head (local, not pushed)",
+  "head": "f06f5b84ee8cc25ef93489ba2e8ca650eaa0c324",
+  "base": "origin/integ/0021",
+  "base_sha": "36c291f6ff26bebc0720b36dcb5708c98d9b8736",
+  "merge_base": "36c291f6ff26bebc0720b36dcb5708c98d9b8736",
+  "merged": [
+   {
+    "ref": "origin/fix/19-structure-budget",
+    "sha": "ead54fe8d3480f1d4ba45a5b7b1bfb97b0f796ee"
+   },
+   {
+    "ref": "origin/fix/17-pursuit-release-failed",
+    "sha": "e2d6f9ee570f81e99ccaf69a40315ad46bb9cc96"
+   },
+   {
+    "ref": "origin/fix/16-record-failed",
+    "sha": "8340de98507a9ed38ce72276ca4b9c9791dcfa53"
+   },
+   {
+    "ref": "origin/fix/20-reader-role-bibliography",
+    "sha": "754313462607b6e1a90d9ba484794fce1a283008"
+   }
+  ],
+  "log": [
+   "f06f5b8 Merge remote-tracking branch 'origin/fix/20-reader-role-bibliography' into candidate/0021-head",
+   "e069aa1 Merge remote-tracking branch 'origin/fix/16-record-failed' into candidate/0021-head",
+   "1e8066d Merge origin/fix/17-pursuit-release-failed into candidate/0021-head",
+   "6bc5f67 Merge remote-tracking branch 'origin/fix/19-structure-budget' into candidate/0021-head"
+  ]
+ },
+ "web": {
+  "repo": "https://github.com/zeqome/proof-web.git",
+  "branch": "candidate/0021-head (local, not pushed)",
+  "head": "3b88b4b8e9c0fafd1bdd7c08ffdb0bc330109b4b",
+  "base": "origin/feat/0021-pursue-review-queue",
+  "base_sha": "864a2c29bd4f41a5344ae7be960b842a1d4aed62",
+  "merge_base": "864a2c29bd4f41a5344ae7be960b842a1d4aed62",
+  "merged": [
+   {
+    "ref": "origin/fix/18-pursue-limits",
+    "sha": "355837c333fd8189c105aa241d4e9fa8ffe50e6f"
+   },
+   {
+    "ref": "origin/fix/9-reference-review-marks",
+    "sha": "90c0377ed083fe3dc11a3f825a4716ea75a0e494"
+   },
+   {
+    "ref": "origin/fix/11-record-failed",
+    "sha": "d5df6e98088bf13d073977d072293b5eea9e4cdf"
+   },
+   {
+    "ref": "origin/fix/discussion-empty-reply",
+    "sha": "bb9ac2960e2e9d6f2607bffd5affa96f0151d1d1"
+   }
+  ],
+  "log": [
+   "3b88b4b Merge remote-tracking branch 'origin/fix/discussion-empty-reply' into candidate/0021-head",
+   "486b43f Merge remote-tracking branch 'origin/fix/11-record-failed' into candidate/0021-head",
+   "8d61773 Merge remote-tracking branch 'origin/fix/9-reference-review-marks' into candidate/0021-head",
+   "1554dbc Merge remote-tracking branch 'origin/fix/18-pursue-limits' into candidate/0021-head"
+  ]
+ }
+}

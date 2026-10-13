@@ -1,0 +1,65 @@
+{
+  "baseRefName": "feat/0021-pursue-review-queue",
+  "baseRefOid": "864a2c29bd4f41a5344ae7be960b842a1d4aed62",
+  "body": "## What\n\n`discussion_view()` now reads the running turn and the pending records *before* the turn records. A turn frees its slot only once its ended record is written (or kept pending), so a turn that ends between the reads shows as still running instead of settled with an empty reply.\n\nThe start's failure paths now write the ended record before they free the slot. A start that raises after its started record was written is now ended on record with the error as its reply, instead of staying started for good.\n\n## Tests\n\nThere are three new tests in `tests/test_discussion_web.py`, gated with Events and no sleeps. All three fail at `864a2c2`:\n\n- `test_a_view_read_while_the_turn_ends_never_settles_on_an_empty_reply`: the reported race. The view reads the records, and then the turn ends.\n- `test_a_refused_start_is_on_record_before_its_slot_is_free`: views taken while the refusal is written all show the turn running.\n- `test_a_start_that_fails_after_its_record_is_on_record_as_failed`: the turn ends with the error as its reply.\n\nResults:\n- `test_discussion_web.py`: 14 passed in each of 5 runs.\n- Full suite: 724 passed and 1 skipped. Separately, 19 local-port tests can't run in the sandbox, and there is one known `test_coordinator_hub` race, whose test fix is in #19.\n\nCloses #20\n\n\ud83e\udd16 Generated with [Claude Code](https://claude.com/claude-code)\n",
+  "closingIssuesReferences": [],
+  "commits": [
+    {
+      "authoredDate": "2026-10-11T10:52:41Z",
+      "authors": [
+        {
+          "email": "125728853+DengZhiyuan-math@users.noreply.github.com",
+          "id": "U_kgDOB354VQ",
+          "login": "DengZhiyuan-math",
+          "name": "Yomathnotcool"
+        },
+        {
+          "email": "noreply@anthropic.com",
+          "id": "MDQ6VXNlcjgxODQ3",
+          "login": "claude",
+          "name": "Claude Opus 5.5"
+        }
+      ],
+      "committedDate": "2026-10-11T10:52:41Z",
+      "messageBody": "\u2026empty reply\n\ndiscussion_view read the records, then the running turn. A turn that ended between the two reads came back with\n`running` null and its started record's empty reply, and the drawer kept that as the answer (the 0 of 9000\ncharacters seen in web #12's audit). The view now reads the running turn (and the pending records) first: a turn frees\nits slot only once its ended record is written or kept pending, so one ending meanwhile reads as still running.\n\nThe start's failure paths freed the slot before writing the ended record, leaving the same window; a refused start now\nwrites it first. A start that raised after its started record was written left that turn started for good, with no\nreply; it is now ended with the error.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+      "messageHeadline": "fix: a discussion view never reads an ending turn as settled with an \u2026",
+      "oid": "bb9ac2960e2e9d6f2607bffd5affa96f0151d1d1"
+    }
+  ],
+  "files": [
+    {
+      "path": "src/proof_web/studios.py",
+      "additions": 16,
+      "deletions": 7,
+      "changeType": "MODIFIED"
+    },
+    {
+      "path": "tests/test_discussion_web.py",
+      "additions": 96,
+      "deletions": 0,
+      "changeType": "MODIFIED"
+    }
+  ],
+  "headRefName": "fix/discussion-empty-reply",
+  "headRefOid": "bb9ac2960e2e9d6f2607bffd5affa96f0151d1d1",
+  "isDraft": false,
+  "number": 21,
+  "state": "OPEN",
+  "statusCheckRollup": [
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-11T11:23:06Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/zeqome/proof-web/actions/runs/38135343890/job/114457956233",
+      "name": "package",
+      "startedAt": "2026-10-11T11:22:57Z",
+      "status": "COMPLETED",
+      "workflowName": "package"
+    }
+  ],
+  "title": "fix: a discussion view never reads an ending turn as settled with an empty reply",
+  "url": "https://github.com/zeqome/proof-web/pull/21",
+  "verifiedAtUTC": "2026-10-11T11:24:18.630068+00:00",
+  "remoteBranchSHA": "bb9ac2960e2e9d6f2607bffd5affa96f0151d1d1",
+  "sourceSHA256": "02fedd6e906d24e912f30ec20033006e4fae76985d1ae60a2fca850d9c21a8a6"
+}

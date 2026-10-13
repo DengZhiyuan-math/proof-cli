@@ -1,0 +1,48 @@
+{
+  "baseRefOid": "6c26073d161210af4baedd7dd34737b94efa780f",
+  "headRefOid": "d4e977fa9c02a5525e0bd2b29a1f0d12639a11c5",
+  "number": 183,
+  "state": "OPEN",
+  "statusCheckRollup": [
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-12T16:36:25Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38277948101/job/114907915094",
+      "name": "core-and-studio (ubuntu-24.04, 3.11)",
+      "startedAt": "2026-10-12T16:31:09Z",
+      "status": "COMPLETED",
+      "workflowName": "tests"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-12T16:37:41Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38277948101/job/114907914373",
+      "name": "core-and-studio (ubuntu-24.04, 3.12)",
+      "startedAt": "2026-10-12T16:31:09Z",
+      "status": "COMPLETED",
+      "workflowName": "tests"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38277948101/job/114907914851",
+      "name": "core-and-studio (windows-latest, 3.11)",
+      "startedAt": "2026-10-12T16:31:09Z",
+      "status": "IN_PROGRESS",
+      "workflowName": "tests"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/DengZhiyuan-math/proof-cli/actions/runs/38277948101/job/114907914960",
+      "name": "core-and-studio (windows-latest, 3.12)",
+      "startedAt": "2026-10-12T16:31:09Z",
+      "status": "IN_PROGRESS",
+      "workflowName": "tests"
+    }
+  ]
+}

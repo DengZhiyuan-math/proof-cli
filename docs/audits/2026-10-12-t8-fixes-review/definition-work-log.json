@@ -1,0 +1,24 @@
+[
+  {
+    "at": "2026-10-12T08:41:54.053233+00:00",
+    "kind": "review-requested",
+    "by": "prover-fixture",
+    "version": 1,
+    "candidate_proof_id": "176aeea6-bc40-47f8-9b24-ca5a8a224de0",
+    "role": null
+  },
+  {
+    "at": "2026-10-12T08:41:54.083891+00:00",
+    "kind": "definition-edited",
+    "by": "reader-1",
+    "definition_id": "D",
+    "reason": "n = 1 is degenerate",
+    "from": {
+      "text": "$n \\ge 1$"
+    },
+    "to": {
+      "text": "$n \\ge 2$"
+    },
+    "role": "decomposer"
+  }
+]

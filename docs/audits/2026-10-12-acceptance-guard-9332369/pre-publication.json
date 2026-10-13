@@ -1,0 +1,11 @@
+{
+  "repo": "DengZhiyuan-math/proof-cli",
+  "branch": "fix/0021-acceptance-guard-read-scope",
+  "base": "3dd0a7bde3ad1ea9e040c02b1bff6589a9cf378c",
+  "head": "933236978fa353ba27f9151773f4ed09a6b6a401",
+  "audit": {
+    "standards_findings": 0,
+    "spec_findings": 0
+  },
+  "provider_calls": 0
+}

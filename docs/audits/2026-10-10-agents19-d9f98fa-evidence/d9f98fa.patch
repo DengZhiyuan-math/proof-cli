@@ -1,0 +1,1240 @@
+From d9f98faf76a64bc5609ea134183dc8096041257f Mon Sep 17 00:00:00 2001
+From: Yomathnotcool <125728853+DengZhiyuan-math@users.noreply.github.com>
+Date: Sat, 10 Oct 2026 17:07:07 +0200
+Subject: [PATCH] fix: structure turns apart from the proof budget, under one
+ Pursue total fixed at Start (#19)
+
+A node's proof budget covers its Prover, Verifier, Typesetter and Numerics
+turns and is a ceiling, not an allocation. Decomposer turns are structure:
+per parent one first split and one re-split; a second re-split is refused
+and noted. They spend none of the parent's proof turns.
+
+Every real turn counts toward the Pursue's total and every run toward its
+one time limit: a PursueBudget fixed at Start (the researcher's limits, or
+pursue_limits' default: node budget x max(1, open nodes at Start) + the
+structure allowance), shared by a project Pursue's Reader and each
+Theorem's Coordinator, and never raised by retries, re-splits or new
+Claims. A run's cap is what is left of its node budget and of the total
+once the running runs' caps are set aside; AgentRun.start takes a minutes
+cap the same way.
+
+A failed launch (a run that ends before any turn) spends no turn; three in
+a Start, the first attempt counted, and the node is not tried again, its
+claim given back and the failure recorded apart. The end of each Start
+notes real turns and failed launches separately. At the end of the total
+or the time limit, a parent whose re-split was due is Interrupted, saying
+the total prevented it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/proof_agents/agent_run.py   |  11 +-
+ src/proof_agents/coordinator.py | 398 ++++++++++++++++++++++++++------
+ tests/test_coordinator.py       |  98 +++++---
+ tests/test_pursue_budget.py     | 239 +++++++++++++++++++
+ 4 files changed, 638 insertions(+), 108 deletions(-)
+ create mode 100644 tests/test_pursue_budget.py
+
+diff --git a/src/proof_agents/agent_run.py b/src/proof_agents/agent_run.py
+index 92782ea..6b5d7f4 100644
+--- a/src/proof_agents/agent_run.py
++++ b/src/proof_agents/agent_run.py
+@@ -276,9 +276,10 @@ class AgentRun:
+ 
+     # ------------------------------------------------------------ the researcher's actions
+     def start(self, provider: str, *, roles: list[str] | None = None, redirect: str | None = None, model=None, effort=None,
+-              turns: int | None = None, pursue: bool = False) -> dict:
++              turns: int | None = None, minutes: float | None = None, pursue: bool = False) -> dict:
+         """Start a run. `turns` caps this Start's turn budget below `[studio] budget` — a Coordinator's retry gets the node
+-        budget's remainder, not a fresh budget (ADR-0019 point 18). `pursue` is a Coordinator's Start (ADR-0021 point 7):
++        budget's remainder, not a fresh budget (ADR-0019 point 18) — and `minutes` its time the same way: what is left of a
++        Pursue's one time limit (proof-agents#19). `pursue` is a Coordinator's Start (ADR-0021 point 7):
+         a Decomposer's split is the structure the Coordinator works next, not a stop for the researcher, and a Theorem
+         split already may be given one more Decomposer turn when a Claim of it is parked (point 9)."""
+         unknown = [role for role in (roles or []) if role not in ROLES]  # a role with no brief takes no turn
+@@ -306,9 +307,11 @@ class AgentRun:
+                 return {"error": "an agent is already working on this node; pause, redirect or release it", "code": "RUN_ACTIVE"}
+             run = self._run = _Start(RunState(status="starting"))  # holds the slot while the node is assigned, outside the lock
+         try:
+-            turns_max, minutes = self.hooks.budget()
++            turns_max, minutes_max = self.hooks.budget()
+             if turns is not None and 0 < int(turns) < turns_max:
+                 turns_max = int(turns)
++            if minutes is not None and 0 < float(minutes) < minutes_max:
++                minutes_max = float(minutes)
+             name = self.hooks.agent_name(provider)
+             self.hooks.assign(name)  # another assignee, a blocked or rejected node: refused here, and no run begins
+         except Exception:  # the node could not be assigned (the server answers with the refusal): the slot is given back
+@@ -331,7 +334,7 @@ class AgentRun:
+             else:
+                 give_back = False
+                 run.state = RunState(status="running", role=roles[0] if roles else "prover", turns_max=turns_max, started_at=time.time(),
+-                                     deadline=time.time() + minutes * 60, name=name, provider=provider, roles=roles,
++                                     deadline=time.time() + minutes_max * 60, name=name, provider=provider, roles=roles,
+                                      redirect={"text": redirect, "role": None} if redirect else None, pursue=pursue)
+                 run.model, run.effort = model, effort
+                 run.thread = threading.Thread(target=self._loop, args=(run,), name=f"agent-run-{name}", daemon=True)
+diff --git a/src/proof_agents/coordinator.py b/src/proof_agents/coordinator.py
+index 1587274..adac046 100644
+--- a/src/proof_agents/coordinator.py
++++ b/src/proof_agents/coordinator.py
+@@ -5,13 +5,21 @@ Started on a Theorem or Lemma from the map, it holds no node and takes no turn 
+ next. It starts node runs on the frontier within the subtree — the nodes whose dependencies are each Accepted or
+ Provisional — up to `[studio] parallel` at a time; a node's run briefs its own turns (point 9). A run that ends
+ without a snapshot for review (stuck, out of its turns, sent back for revision) is started again, whatever its last
+-verdict, until the node's budget (one Start's turns) is spent; then the node is **parked**, and the rest of the
++verdict, until the node's proof budget (one Start's turns) is spent; then the node is **parked**, and the rest of the
+ subtree goes on. A parked Claim gives its parent one more Decomposer turn, once per parent (ADR-0021 point 9). A
+ parent starts once every child is Accepted or Provisional; the Coordinator never waits for a Review decision. It
+ never requests review, never Accepts, and stops when the subtree's root is requested for review (or Accepted), when
+-its budget — the sum of the node budgets it may spend — is spent and the runs still going have ended (each node then
+-Parked or Interrupted), or when nothing open is left to work: every open node parked, or resting on what no run will
+-settle.
++the Pursue's total or its time limit is spent and the runs still going have ended (each node then Parked or
++Interrupted), or when nothing open is left to work: every open node parked, or resting on what no run will settle.
++
++The budget (audit section 3, proof-agents#19). A node's proof budget — the `[studio] budget` turns — covers its Prover,
++Verifier, Typesetter and Numerics turns, and is a ceiling, not an allocation. Decomposer turns are structure: per parent
++one first split (an unsplit root) and one re-split after a parked Claim, never a third, and they spend none of the
++parent's proof turns. Every real turn, structure or proof, counts toward the Pursue's total, and every run toward its
++one time limit: a `PursueBudget` fixed at Start (the researcher's, or `pursue_limits`' default), shared by a project
++Pursue's Reader and every Theorem's Coordinator, and never raised after — not by a retry, a re-split or a new Claim,
++which spend what is left of it. A launch that fails (a run that ends before any turn counts) spends no turn; a node
++gets `LAUNCH_ATTEMPTS` of them in a Start, after which it is not tried again and its claim is given back.
+ 
+ `ProjectPursuit` is Pursue on a project with no map yet: a Reader turn states the draft as a map, then each Theorem
+ the Reader stated is pursued by a Coordinator, one after another.
+@@ -42,6 +50,50 @@ ENDED_FOR_GOOD = ("needs-human", "refused")   # a node run that ended so is not:
+ SPLIT_REASON = "split into"                # how a pursued Decomposer's run that split the node ends (agent_run.py)
+ DECOMPOSABLE = ("theorem", "lemma")        # what a Decomposer turn is given to (ADR-0019 point 20)
+ TICK = 0.5                                 # seconds between the Coordinator's looks at the subtree
++STRUCTURE_TURNS = 2                        # Decomposer turns per parent in a Start: one first split, one re-split (#19)
++LAUNCH_ATTEMPTS = 3                        # failed launches a node gets in a Start, the first attempt counted (#19)
++
++
++def pursue_limits(node_turns: int, node_minutes: float, open_nodes: int, parents: int, *, reader: bool = False) -> dict:
++    """The default total of a Pursue, as the page shows it before Start (#19): the node budget once per node open at
++    Start (at least one), plus the structure allowance — `STRUCTURE_TURNS` per Theorem or Lemma open at Start (at least
++    one), and the Reader's turn when one is due. The time limit is the node budget's minutes in the same proportion.
++    Fixed once the Pursue starts: the nodes a split adds later spend what is left of it."""
++    structure = STRUCTURE_TURNS * max(1, parents) + (1 if reader else 0)
++    turns = node_turns * max(1, open_nodes) + structure
++    return {"turns": turns, "minutes": round(node_minutes * turns / max(1, node_turns), 1), "node_turns": node_turns,
++            "node_minutes": node_minutes, "open_nodes": open_nodes, "structure_allowance": structure}
++
++
++class PursueBudget:
++    """One Pursue's total turns and time limit, fixed at its Start (#19) and shared by every part of it: a project
++    Pursue's Reader turn and each Theorem's Coordinator, one after another. `spent` is what the parts that have ended
++    spent; the part working adds its own live turns to it."""
++
++    def __init__(self, turns: int, minutes: float, *, now: float | None = None) -> None:
++        self.turns_max = int(turns)
++        self.minutes_max = float(minutes)
++        self.deadline = (time.time() if now is None else now) + self.minutes_max * 60
++        self.spent = 0
++        self.failed_launches = 0
++
++    @classmethod
++    def from_limits(cls, limits: dict) -> PursueBudget:
++        """The researcher's limits, as the page submits them: {"turns": a whole number ≥ 1, "minutes": > 0}."""
++        try:
++            turns, minutes = int(limits["turns"]), float(limits["minutes"])
++        except (KeyError, TypeError, ValueError) as exc:
++            raise ValueError(f"a Pursue's limits are a whole number of turns and a number of minutes: {limits!r}") from exc
++        if turns < 1 or minutes <= 0 or turns != float(limits["turns"]):
++            raise ValueError(f"a Pursue's limits are at least one turn and more than no minutes: {limits!r}")
++        return cls(turns, minutes)
++
++    def minutes_left(self) -> float:
++        return max(0.0, (self.deadline - time.time()) / 60)
++
++    def view(self) -> dict:
++        return {"turns_max": self.turns_max, "minutes_max": self.minutes_max, "deadline": self.deadline, "spent": self.spent,
++                "failed_launches": self.failed_launches}
+ 
+ 
+ @dataclass
+@@ -72,12 +124,16 @@ class CoordinatorState:
+     root: str | None = None
+     provider: str = ""
+     name: str = ""
+-    turns: int = 0             # turns spent by the runs it started, all Starts counted
+-    turns_max: int = 0         # the sum of the node budgets it may spend
++    turns: int = 0             # real turns spent by the runs this Start started, structure and proof
++    turns_max: int = 0         # the Pursue's total, fixed at its Start (#19)
++    turns_before: int = 0      # what the Pursue spent before this Coordinator began: its Reader, earlier Theorems
++    minutes_max: float = 0.0   # the Pursue's time limit, fixed at its Start
++    deadline: float | None = None
++    failed_launches: int = 0   # launches that failed in this Start, apart from turns (#19)
+     started_at: float | None = None
+-    # node id -> {"starts", "turns" (over every Start), "idle_starts" (Starts that ended before any turn counted), "last" (the last
+-    # run's ending), "verdict", "started_at" (the run's, as its view says it: what tells this Coordinator's Start of the run from a
+-    # later owner's)}
++    # node id -> {"starts", "turns" (proof turns), "structure_turns" (Decomposer turns), "structure_starts", "failed_launches",
++    # "last" (the last run's ending), "verdict", "started_at" (the run's, as its view says it: what tells this Coordinator's
++    # Start of the run from a later owner's), "cap" (the turns the running run may take)}
+     nodes: dict = field(default_factory=dict)
+     running: list = field(default_factory=list)  # node ids whose run is active now
+     accepted: list = field(default_factory=list)  # accepted nodes of the subtree, as last seen
+@@ -91,6 +147,9 @@ class CoordinatorState:
+     # node id -> why it is Interrupted (proof-agents#18): when this Start's budget was spent, its last run had ended short
+     # of review with node budget left. The agents did not exhaust it (not Parked); the Start's budget ran out first
+     interrupted: dict = field(default_factory=dict)
++    # node id -> why it is not tried again: its launches failed `LAUNCH_ATTEMPTS` times in this Start (#19), its claim given back
++    launch_failed: dict = field(default_factory=dict)
++    resplit_refused: list = field(default_factory=list)  # parents refused a second re-split (#19): another Claim of theirs parked
+ 
+ 
+ class Coordinator:
+@@ -107,7 +166,7 @@ class Coordinator:
+         self._releasing = False  # a Stop doing its releases outside the lock: a new Start must wait for it
+         self._spent: dict[str, int] = {}     # node id -> turns of its earlier Starts (the current run's turns are read live)
+         self._seen: dict[str, int] = {}      # node id -> the current run's turns as last read
+-        self._counted: set[str] = set()      # the open nodes the Coordinator's budget is the sum over
++        self.budget: PursueBudget | None = None   # the Pursue's total and time limit, this Start's or shared (#19)
+         self._resplits: dict[str, str] = {}  # parent id -> the redirect of its further Decomposer turn, due and not started yet
+         # non-root nodes to work again though a snapshot of theirs awaits review: a dependency they were worked on was sent
+         # back and is being worked again, so their proof is Potentially stale (ADR-0021 point 4)
+@@ -123,17 +182,38 @@ class Coordinator:
+                                         "accepted": list(self.state.accepted), "redirected": list(self.state.redirected),
+                                         "parked": dict(self.state.parked), "decomposed": list(self.state.decomposed),
+                                         "resplit": list(self.state.resplit), "held": dict(self.state.held),
+-                                        "interrupted": dict(self.state.interrupted)})
++                                        "interrupted": dict(self.state.interrupted), "launch_failed": dict(self.state.launch_failed),
++                                        "resplit_refused": list(self.state.resplit_refused)})
+             settling = self._releasing or (state.status not in ACTIVE and self._thread is not None and self._thread.is_alive())
+         can_release = state.status in (*ACTIVE, "release-failed") or (
+             state.status not in ("idle", "released") and any(self._owned_run(node_id, entry.get("started_at")) for node_id, entry in state.nodes.items()))
+         return {"status": state.status, "active": state.status in ACTIVE, "reason": state.reason, "root": state.root, "provider": state.provider,
+                 "name": state.name, "turns": state.turns, "turns_max": state.turns_max, "started_at": state.started_at,
++                "turns_before": state.turns_before, "pursue_turns": state.turns_before + state.turns, "minutes_max": state.minutes_max,
++                "deadline": state.deadline, "failed_launches": state.failed_launches,
++                "structure_turns": sum(int(entry.get("structure_turns") or 0) for entry in state.nodes.values()),
+                 "running": state.running, "accepted": state.accepted, "nodes": state.nodes, "settling": settling, "can_release": can_release,
+                 "parked": [{"node": node_id, "reason": reason} for node_id, reason in state.parked.items()],
+                 "decomposed": state.decomposed, "resplit": state.resplit, "needs_you": self._needs_you(state),
+                 "held": [{"node": node_id, "reason": reason} for node_id, reason in state.held.items()],
+-                "interrupted": [{"node": node_id, "reason": reason} for node_id, reason in state.interrupted.items()]}
++                "interrupted": [{"node": node_id, "reason": reason} for node_id, reason in state.interrupted.items()],
++                "launch_failed": [{"node": node_id, "reason": reason} for node_id, reason in state.launch_failed.items()],
++                "resplit_refused": state.resplit_refused}
++
++    def open_nodes(self) -> list[dict]:
++        """The subtree's nodes a Start would work: local, not Accepted."""
++        return [node for node in self.hooks.subtree() if node.get("has_run") and not node.get("accepted")]
++
++    def default_limits(self) -> dict:
++        """The Pursue total a Start on this subtree would fix by default (#19), for the page to show and the researcher to
++        change before Start; an error when the subtree can't be read."""
++        try:
++            subtree = self.hooks.subtree()
++        except Exception as exc:  # noqa: BLE001
++            return {"error": f"{type(exc).__name__}: {exc}", "code": "NO_SUBTREE"}
++        open_nodes = [node for node in subtree if node.get("has_run") and not node.get("accepted")]
++        node_turns, node_minutes = self.hooks.budget()
++        return pursue_limits(node_turns, node_minutes, len(open_nodes), sum(1 for node in open_nodes if node.get("kind") in DECOMPOSABLE))
+ 
+     def _needs_you(self, state: CoordinatorState) -> list[dict]:
+         """The nodes this Coordinator parked (ADR-0021 point 9): stuck or out of budget once the node budget was spent, or
+@@ -142,7 +222,9 @@ class Coordinator:
+         return [{"node": node_id, "last": (state.nodes.get(node_id) or {}).get("last"), "reason": reason} for node_id, reason in state.parked.items()]
+ 
+     # ------------------------------------------------------------ the researcher's actions
+-    def start(self, provider: str) -> dict:
++    def start(self, provider: str, *, limits: dict | None = None, budget: PursueBudget | None = None) -> dict:
++        """Start on the subtree. `limits` are the researcher's total turns and minutes for this Pursue ({"turns",
++        "minutes"}; `default_limits()` when not given); `budget` is a project Pursue's, shared with its other parts."""
+         with self._lock:
+             if self.state.status in ACTIVE:
+                 return {"error": "a Coordinator is already working this subtree; pause or stop it", "code": "COORDINATOR_ACTIVE"}
+@@ -159,16 +241,26 @@ class Coordinator:
+             open_nodes = [node for node in subtree if node.get("has_run") and not node.get("accepted")]
+             if not open_nodes:
+                 return {"error": "nothing in this subtree is open: every node is Accepted, or none has a proof to write", "code": "NOTHING_OPEN"}
+-            turns, _ = self.hooks.budget()
++            node_turns, node_minutes = self.hooks.budget()
++            if budget is None:
++                try:
++                    budget = PursueBudget.from_limits(limits) if limits is not None else PursueBudget.from_limits(
++                        pursue_limits(node_turns, node_minutes, len(open_nodes), sum(1 for node in open_nodes if node.get("kind") in DECOMPOSABLE)))
++                except ValueError as exc:
++                    return {"error": str(exc), "code": "INVALID_LIMITS"}
++            if budget.spent >= budget.turns_max or budget.minutes_left() <= 0:
++                return {"error": f"the Pursue's total is spent ({budget.spent} of {budget.turns_max} turns, {budget.minutes_max:g} minutes)", "code": "BUDGET_SPENT"}
++            self.budget = budget
+             self.state = CoordinatorState(status="starting", root=self.root, provider=provider, name=self.hooks.agent_name(provider),
+-                                          turns_max=turns * len(open_nodes), started_at=time.time(),
++                                          turns_max=budget.turns_max, turns_before=budget.spent, minutes_max=budget.minutes_max,
++                                          deadline=budget.deadline, started_at=time.time(),
+                                           accepted=[node["id"] for node in subtree if node.get("accepted")])
+             self._stop = self._pause = False
+             self._spent, self._seen, self._resplits, self._redo = {}, {}, {}, set()
+-            self._counted = {node["id"] for node in open_nodes}   # the open nodes the budget counts; a split adds its Claims
+             self._thread = threading.Thread(target=self._loop, name=f"coordinator-{self.root}", daemon=True)
+             self._thread.start()
+-        self._record(f"started on {self.root}: {len(open_nodes)} open node(s), up to {self.hooks.parallel()} run(s) at a time, {turns * len(open_nodes)} turns in all")
++        self._record(f"started on {self.root}: {len(open_nodes)} open node(s), up to {self.hooks.parallel()} run(s) at a time; the Pursue's "
++                     f"total {budget.turns_max} turns ({budget.spent} spent before) and {budget.minutes_max:g} minutes, a node's proof budget {node_turns} turns")
+         return self.view()
+ 
+     def pause(self) -> dict:
+@@ -282,30 +374,29 @@ class Coordinator:
+             return ("stuck", f"{self.root} is no longer on the map")
+         self._redirect_dependents(subtree, by_id)
+         turns = self._turns(running)
+-        node_turns, _ = self.hooks.budget()
++        node_turns, node_minutes = self.hooks.budget()
+         with self._lock:
+             self.state.running, self.state.turns = running, turns
+             self.state.accepted = [node["id"] for node in subtree if node.get("accepted")]
+-            # a split adds Claims: the budget grows with the open nodes there are to work (ADR-0021 point 7)
+-            self._counted |= {node["id"] for node in subtree if node.get("has_run") and not node.get("accepted")}
+-            self.state.turns_max = max(self.state.turns_max, node_turns * len(self._counted))
+-            turns_max, provider = self.state.turns_max, self.state.provider
++            # the Pursue's total is fixed at its Start (#19): a split's Claims spend what is left of it
++            provider = self.state.provider
++        budget = self.budget
+         # the root's own run ends first (#187): a review request lands mid-turn, and the run records the verdict that
+         # gated it as the turn ends; done before that, and the host may close the run before it does
+         settled = "Accepted" if root.get("accepted") else "requested for review" if _awaiting(root) else None
+         if settled:
+             return None if self.root in running else ("done", f"{self.root} is {settled}")
+-        if turns >= turns_max:
+-            # no new turn starts (no further Decomposer turn either); the runs still going end under their own caps, the
+-            # node budget's remainder and the deadline. Each node is then Parked, as point 9 has it, or Interrupted (#18);
+-            # a node still running is neither yet
++        spent = self._spent_out(budget, turns)
++        if spent:
++            # no new turn starts (no further Decomposer turn either); the runs still going end under their own caps, what
++            # was left of the total and of the time limit when they started. Each node is then Parked, as point 9 has it,
++            # or Interrupted (#18); a node still running is neither yet
+             self._park(subtree, by_id, running, node_turns)
+-            spent = f"the budget of this Start is spent ({turns} turns over {len(self.state.nodes)} node(s))"
+             if running:
+                 with self._lock:
+                     self.state.reason = f"{spent}; no new turn starts, and the run(s) on {', '.join(running)} end on their own"
+                 return None
+-            self._interrupt(by_id)
++            self._interrupt(by_id, spent)
+             return ("budget", spent)
+         starts = [(node, "decomposer", redirect) for node, redirect in self._park(subtree, by_id, running, node_turns)]
+         if self._unsplit(root) and self.root not in running:
+@@ -316,6 +407,9 @@ class Coordinator:
+         for node, role, redirect in starts:
+             if room <= 0 or node["id"] in started:
+                 continue
++            cap = self._cap(node, role, node_turns, running)
++            if cap < 1:
++                continue  # what is left of the Pursue's total is the running runs' to spend (#19)
+             with self._lock:  # Stop or Pause meanwhile: no new node run begins (point 18)
+                 if self._stop or self._pause:
+                     break
+@@ -325,7 +419,7 @@ class Coordinator:
+                     self.state.decomposed = [*self.state.decomposed, node["id"]]
+                     if self._resplits.pop(node["id"], None) is not None:
+                         self.state.resplit = [*self.state.resplit, node["id"]]
+-            self._start_run(node, provider, node_turns, role=role, redirect=redirect)
++            self._start_run(node, provider, cap, node_minutes, role=role, redirect=redirect)
+             started.append(node["id"])
+             running = running + [node["id"]]
+             room -= 1
+@@ -336,11 +430,13 @@ class Coordinator:
+             with self._lock:
+                 parked = [node_id for node_id in open_nodes if node_id in self.state.parked]
+                 held = [node_id for node_id in open_nodes if node_id in self.state.held]
++                failed = [node_id for node_id in open_nodes if node_id in self.state.launch_failed]
+             if len(parked) == len(open_nodes):
+                 return ("parked", f"every open node in the subtree is parked: {', '.join(parked)}")
+-            waiting = [node_id for node_id in open_nodes if node_id not in parked and node_id not in held]
+-            aside = [f"parked: {', '.join(parked)}"] * bool(parked) + [f"the researcher's: {', '.join(held)}"] * bool(held)
+-            what = f"{', '.join(waiting)} rest(s) on what no run will settle" if waiting else "every open node is parked or the researcher's"
++            waiting = [node_id for node_id in open_nodes if node_id not in parked and node_id not in held and node_id not in failed]
++            aside = ([f"parked: {', '.join(parked)}"] * bool(parked) + [f"the researcher's: {', '.join(held)}"] * bool(held)
++                     + [f"its launches failed: {', '.join(failed)}"] * bool(failed))
++            what = f"{', '.join(waiting)} rest(s) on what no run will settle" if waiting else "every open node is parked, the researcher's or failed to launch"
+             return ("stuck", f"nothing left to work without the researcher: {what}" + (f" ({'; '.join(aside)})" if aside else ""))
+         return None
+ 
+@@ -360,7 +456,10 @@ class Coordinator:
+         if node.get("kind") not in DECOMPOSABLE or not node.get("has_run") or node.get("accepted") or _awaiting(node):
+             return False
+         with self._lock:
+-            if node["id"] in self.state.decomposed or node["id"] in self.state.nodes:
++            entry = self.state.nodes.get(node["id"])
++            if entry is not None and entry.get("relaunch") == "split" and node["id"] not in self.state.launch_failed:
++                return True   # its Decomposer turn failed to launch (#19): tried again while it has launches left
++            if node["id"] in self.state.decomposed or entry is not None:
+                 return False
+         children = node.get("split_children")
+         return not children if children is not None else not node.get("dependencies")
+@@ -380,9 +479,7 @@ class Coordinator:
+                 if last in ENDED_FOR_GOOD:
+                     reason = f"{last}: {entry.get('reason') or ''}".rstrip(": ")
+                 elif last in ENDED_RESTARTABLE and _used(entry) >= node_turns:
+-                    idle = int(entry.get("idle_starts") or 0)
+-                    spent = f"{entry.get('turns')} turn(s)" + (f", {idle} Start(s) that took no turn" if idle else "")
+-                    reason = f"its budget is spent ({spent}); the last run ended {last}: {entry.get('reason') or ''}".rstrip(": ")
++                    reason = f"its budget is spent ({entry.get('turns')} turn(s)); the last run ended {last}: {entry.get('reason') or ''}".rstrip(": ")
+                 else:
+                     continue
+                 self.state.parked[node["id"]] = reason
+@@ -405,10 +502,17 @@ class Coordinator:
+                 continue
+             for parent in by_id.values():
+                 if node_id in (parent.get("dependencies") or []) and _resplittable(parent):
++                    refused = False
+                     with self._lock:
+                         if parent["id"] not in self.state.resplit and parent["id"] not in self._resplits:
+                             self._resplits[parent["id"]] = (f"{node_id} is parked ({reason}); propose another structure for {parent['id']} "
+                                                             f"that does not need {node_id} as it stands")
++                        elif parent["id"] in self.state.resplit and parent["id"] not in self.state.resplit_refused:
++                            # its structure allowance (#19): one first split, one re-split; a further parked Claim gets no third
++                            self.state.resplit_refused = [*self.state.resplit_refused, parent["id"]]
++                            refused = True
++                    if refused:
++                        self._record(f"no second re-split for {parent['id']}: its one re-split in this Start was given, and {node_id} is parked too")
+         with self._lock:
+             due = list(self._resplits.items())
+         out: list[tuple[dict, str]] = []
+@@ -421,20 +525,29 @@ class Coordinator:
+                 out.append((parent, redirect))
+         return out
+ 
+-    def _interrupt(self, by_id: dict) -> None:
+-        """At the budget's end, no run going: the nodes this Start would have started again — open, their last run ended
+-        stuck or out of its turns with node budget left, or a Decomposer turn that found one argument — are Interrupted."""
++    def _interrupt(self, by_id: dict, spent: str) -> None:
++        """At the end of the total or the time limit, no run going: the nodes this Start would have started again — open,
++        their last run ended stuck or out of its turns with node budget left, a Decomposer turn that found one argument, a
++        launch that failed — and the parents whose re-split was due (#19) are Interrupted."""
+         newly: list[tuple[str, str]] = []
+         with self._lock:
++            aside = {**self.state.parked, **self.state.held, **self.state.interrupted, **self.state.launch_failed}
+             for node_id, entry in self.state.nodes.items():
+                 node = by_id.get(node_id)
+-                if node is None or not _open(node) or node_id in self.state.parked or node_id in self.state.held or node_id in self.state.interrupted:
++                if node is None or not _open(node) or node_id in aside:
+                     continue
+                 last = entry.get("last")
+-                if last in ENDED_RESTARTABLE or last == "no-split":
+-                    reason = f"the budget of this Start was spent; its last run ended {last}: {entry.get('reason') or ''}".rstrip(": ")
++                if last in ENDED_RESTARTABLE or last in ("no-split", "launch-failed"):
++                    reason = f"{spent}; its last run ended {last}: {entry.get('reason') or ''}".rstrip(": ")
+                     self.state.interrupted[node_id] = reason
+                     newly.append((node_id, reason))
++            for parent_id, redirect in self._resplits.items():
++                parent = by_id.get(parent_id)
++                if parent is None or not _resplittable(parent) or parent_id in aside or parent_id in self.state.interrupted:
++                    continue
++                reason = f"{spent}, which prevented its re-split: {redirect}"
++                self.state.interrupted[parent_id] = reason
++                newly.append((parent_id, reason))
+         for node_id, reason in newly:
+             self._record(f"interrupted {node_id}: {reason}")
+ 
+@@ -449,7 +562,7 @@ class Coordinator:
+         with self._lock:
+             done = self.state.nodes.get(node["id"])
+             name = self.state.name
+-            if node["id"] in self.state.parked or node["id"] in self.state.held:
++            if node["id"] in self.state.parked or node["id"] in self.state.held or node["id"] in self.state.launch_failed:
+                 return False
+             if any(self._split_by_running(parent, node["id"], running) for parent in by_id.values()):
+                 return False  # its split is not settled until the Decomposer turn that made it ends (#15)
+@@ -475,19 +588,40 @@ class Coordinator:
+         entry = self.state.nodes.get(parent["id"]) or {}
+         return entry.get("role") == "decomposer" and node_id not in (entry.get("split_before") or [])
+ 
+-    def _start_run(self, node: dict, provider: str, node_turns: int, *, role: str | None = None, redirect: str | None = None) -> None:
+-        """Start the node's run with what is left of the node budget (audit P4) — every role, or a Decomposer's one turn — as
+-        a Pursue (ADR-0021 point 7). The node was reserved in `running` before; a Stop or Pause that came while the run was
+-        starting reaches it here (audit P1)."""
++    def _cap(self, node: dict, role: str | None, node_turns: int, running: list[str]) -> int:
++        """The turns a run on `node` may take if it starts now (#19): a Decomposer's one turn, while the parent's structure
++        allowance lasts, or what is left of the node's proof budget — and never more than what is left of the Pursue's
++        total once the running runs' own caps are set aside for them."""
++        with self._lock:
++            entry = self.state.nodes.get(node["id"]) or {}
++            if role == "decomposer":
++                if int(entry.get("structure_starts") or 0) >= STRUCTURE_TURNS:
++                    return 0   # its first split and its re-split were given
++                want = 1
++            else:
++                want = max(1, node_turns - _used(entry))
++            caps = {node_id: int((self.state.nodes.get(node_id) or {}).get("cap") or 0) for node_id in running}
++        live = {node_id: int((self._view_of(node_id) or {}).get("turns") or 0) for node_id in running}
++        reserved = sum(max(0, caps[node_id] - live[node_id]) for node_id in running)
++        left = self.budget.turns_max - self.budget.spent - self._turns(running) - reserved
++        return max(0, min(want, left))
++
++    def _start_run(self, node: dict, provider: str, cap: int, node_minutes: float, *, role: str | None = None, redirect: str | None = None) -> None:
++        """Start the node's run with its cap (`_cap`: the node budget's remainder, audit P4, within the Pursue's total) and
++        what is left of the time limit — every role, or a Decomposer's one turn — as a Pursue (ADR-0021 point 7). The node
++        was reserved in `running` before; a Stop or Pause that came while the run was starting reaches it here (audit P1)."""
+         with self._lock:
+             entry = self.state.nodes.setdefault(node["id"], {"starts": 0, "turns": 0, "last": None, "verdict": None, "started_at": None})
+-            entry["role"] = role
++            entry["role"], entry["redirect"], entry["cap"] = role, redirect, cap
++            entry.pop("relaunch", None)
+             if role == "decomposer":  # the Claims there were before its turn: those its turn adds are told from them (#15)
+                 entry["split_before"] = list(node.get("split_children") or [])
+-            left = max(1, node_turns - _used(entry))
++            left = cap
++        minutes = max(0.1, min(node_minutes, self.budget.minutes_left()))
+         try:
+             run = self.hooks.run(node["id"])
+-            answer = run.start(provider, turns=left, pursue=True, **({"roles": [role]} if role else {}), **({"redirect": redirect} if redirect else {}))
++            answer = run.start(provider, turns=left, minutes=minutes, pursue=True, **({"roles": [role]} if role else {}),
++                               **({"redirect": redirect} if redirect else {}))
+         except Exception as exc:  # noqa: BLE001
+             answer = {"error": f"{type(exc).__name__}: {exc}", "code": "RUN_REFUSED"}
+         with self._lock:
+@@ -499,14 +633,14 @@ class Coordinator:
+                 entry["starts"] += 1
+                 entry["last"] = None
+                 entry["started_at"] = answer.get("started_at")
+-                self._spent[node["id"]] = entry["turns"]
++                self._spent[node["id"]] = int(entry.get(_field(role)) or 0)
+                 self._seen[node["id"]] = 0
+             late_stop, late_pause = self._stop, self._pause
+         if "error" in answer:
+             self._record(f"could not start a run on {node['id']}: {answer.get('error')}")
+             return
+         what = "a Decomposer turn" if role == "decomposer" else "a run"
+-        self._record(f"started {what} on {node['id']} (start {entry['starts']}, {left} turn(s) left of the node budget)")
++        self._record(f"started {what} on {node['id']} (start {entry['starts']}, up to {left} turn(s) and {minutes:g} minute(s))")
+         if late_stop:  # Stop came while this run was starting: it is released as the others were
+             answer = self._answer_of(node["id"], lambda run: run.release("the Coordinator was stopped and released", expected_started_at=entry["started_at"]))
+             with self._lock:
+@@ -536,16 +670,39 @@ class Coordinator:
+                 running.append(node_id)
+             else:
+                 ended.append((node_id, view))
++        given_up: list[tuple[str, float | None, str]] = []
+         with self._lock:
+             for node_id, view in ended:
+                 entry = self.state.nodes.setdefault(node_id, {"starts": 0, "turns": 0, "last": None, "verdict": None})
+                 took = int(view.get("turns") or 0)
+-                entry["turns"] = self._spent.get(node_id, 0) + took
+-                if not took:  # it ended before any turn counted (its turn could not start, its loop raised): it spends the
+-                    # node budget all the same, one turn's worth, or a node whose turns never start is started forever
+-                    entry["idle_starts"] = int(entry.get("idle_starts") or 0) + 1
++                entry[_field(entry.get("role"))] = self._spent.get(node_id, 0) + took
++                entry["cap"] = 0
+                 status, reason = view.get("status"), str(view.get("reason") or "")
+                 entry["last"], entry["verdict"], entry["reason"] = status, view.get("verdict"), view.get("reason")
++                if not took and status in ENDED_RESTARTABLE:
++                    # it ended before any turn counted (its turn could not start, its loop raised): a failed launch (#19), which
++                    # spends no turn; the node is tried again until `LAUNCH_ATTEMPTS` of them, then given back. One that stopped
++                    # for the researcher (needs-human) or was released is not a launch that failed
++                    entry["last"] = "launch-failed"
++                    entry["failed_launches"] = int(entry.get("failed_launches") or 0) + 1
++                    self.state.failed_launches += 1
++                    if self.budget is not None:
++                        self.budget.failed_launches += 1
++                    if entry["failed_launches"] >= LAUNCH_ATTEMPTS:
++                        why = f"its launch failed {entry['failed_launches']} time(s) in this Start: {reason}".rstrip(": ")
++                        self.state.launch_failed[node_id] = why
++                        self._resplits.pop(node_id, None)
++                        given_up.append((node_id, entry.get("started_at"), why))
++                    elif entry.get("role") == "decomposer":
++                        if node_id in self.state.resplit and entry.get("redirect"):   # its re-split, due again
++                            self.state.resplit = [n for n in self.state.resplit if n != node_id]
++                            self._resplits[node_id] = entry["redirect"]
++                        else:
++                            entry["relaunch"] = "split"   # its first split, tried again (`_unsplit`)
++                    self._seen.pop(node_id, None)
++                    continue
++                if entry.get("role") == "decomposer":
++                    entry["structure_starts"] = int(entry.get("structure_starts") or 0) + 1
+                 if entry.get("role") == "decomposer" and status == "done":
+                     # its turn is over and the node is worked next, like any open node: split, or one argument after all
+                     entry["last"] = "split" if reason.startswith(SPLIT_REASON) else "no-split"
+@@ -556,17 +713,34 @@ class Coordinator:
+                 self._seen.pop(node_id, None)
+         for node_id, view in ended:
+             self._record(f"the run on {node_id} ended: {view.get('status')} — {view.get('reason') or ''}".rstrip(" —"))
++        for node_id, started_at, why in given_up:   # not tried again: its claim is given back, its failure recorded apart
++            answer = self._answer_of(node_id, lambda run, started_at=started_at: run.release(why, expected_started_at=started_at))
++            if "error" in answer:
++                self._record(f"launch failed on {node_id}: {why}; its claim could not be given back: {answer.get('error')} — Stop releases it")
++            else:
++                self._record(f"launch failed on {node_id}: {why}; not tried again, its claim given back")
+         return running
+ 
+     def _turns(self, running: list[str]) -> int:
+         """Turns spent over every Start of every node: the ended runs' as noted, the running ones' as read now."""
+         with self._lock:
+-            total = sum(int(entry.get("turns") or 0) for node_id, entry in self.state.nodes.items() if node_id not in running)
++            total = sum(int(entry.get("turns") or 0) + int(entry.get("structure_turns") or 0) for node_id, entry in self.state.nodes.items()
++                        if node_id not in running)
++            other = {node_id: int((self.state.nodes.get(node_id) or {}).get(_field(_other_role((self.state.nodes.get(node_id) or {}).get("role")))) or 0)
++                     for node_id in running}
+         for node_id in running:
+             view = self._view_of(node_id) or {}
+-            total += self._spent.get(node_id, 0) + int(view.get("turns") or 0)
++            total += other[node_id] + self._spent.get(node_id, 0) + int(view.get("turns") or 0)
+         return total
+ 
++    def _spent_out(self, budget: PursueBudget, turns: int) -> str:
++        """Why no new turn starts, when the Pursue's total or its time limit is spent (#19); empty while neither is."""
++        if budget.spent + turns >= budget.turns_max:
++            return f"the Pursue's total is spent ({budget.spent + turns} of {budget.turns_max} turns)"
++        if time.time() >= budget.deadline:
++            return f"the Pursue's time limit is spent ({budget.minutes_max:g} minutes)"
++        return ""
++
+     def _redirect_dependents(self, subtree: list[dict], by_id: dict) -> None:
+         """A node of the subtree newly Accepted: its dependents' active runs are redirected with one line naming it and its
+         key ideas (point 19) — the only cross-node push, on the Redirect channel, read at the next turn."""
+@@ -628,7 +802,12 @@ class Coordinator:
+                 return
+             self.state.status, self.state.reason = status, reason
+             self.state.running = [] if status != "budget" else self.state.running
++            state = self.state
++            structure = sum(int(entry.get("structure_turns") or 0) for entry in state.nodes.values())
++            summary = (f"budget: {state.turns} real turn(s) in this Start ({structure} structure, {state.turns - structure} proof), "
++                       f"{state.turns_before + state.turns} of the Pursue's {state.turns_max}; {state.failed_launches} failed launch(es)")
+         self._record(f"{status}: {reason}")
++        self._record(summary)   # real turns and failed launches apart (#19)
+ 
+     def _record(self, note: str) -> None:
+         try:
+@@ -637,6 +816,15 @@ class Coordinator:
+             pass
+ 
+ 
++def _pursue_spent(budget: PursueBudget) -> str:
++    """Why a project Pursue starts no further Theorem (#19); empty while its total and time limit last."""
++    if budget.spent >= budget.turns_max:
++        return f"the Pursue's total is spent ({budget.spent} of {budget.turns_max} turns)"
++    if time.time() >= budget.deadline:
++        return f"the Pursue's time limit is spent ({budget.minutes_max:g} minutes)"
++    return ""
++
++
+ def _awaiting(node: dict) -> bool:
+     """A snapshot of the node awaits the researcher's decision (ADR-0021: Blocked hides it on the workflow axis)."""
+     return bool(node.get("awaiting_review")) or node.get("workflow") == "review-needed"
+@@ -648,8 +836,18 @@ def _resplittable(node: dict) -> bool:
+ 
+ 
+ def _used(entry: dict) -> int:
+-    """What a node has spent of its node budget: its turns, and one for each Start that ended before any turn counted."""
+-    return int(entry.get("turns") or 0) + int(entry.get("idle_starts") or 0)
++    """What a node has spent of its proof budget: its proof turns. Its Decomposer turns are structure, and a failed launch
++    spends no turn (#19)."""
++    return int(entry.get("turns") or 0)
++
++
++def _field(role: str | None) -> str:
++    """Where a run's turns count on the node's entry: a Decomposer's as structure, every other role's as proof (#19)."""
++    return "structure_turns" if role == "decomposer" else "turns"
++
++
++def _other_role(role: str | None) -> str | None:
++    return None if role == "decomposer" else "decomposer"
+ 
+ 
+ def _open(node: dict) -> bool:
+@@ -668,6 +866,9 @@ class PursuitHooks:
+     # Stop while the Reader's turn runs: the host stops that turn, so `read` returns (with an error, or with what was
+     # written so far); a no-op when no Reader turn is running
+     stop_read: Callable[[], None] = lambda: None
++    # one node run's (turns, minutes), the node budget the default total is computed from (#19); None: read from the
++    # first Theorem's Coordinator, once there is one (a host from before #19 gives none)
++    budget: Callable[[], tuple[int, float]] | None = None
+ 
+ 
+ class ProjectPursuit:
+@@ -681,20 +882,56 @@ class ProjectPursuit:
+         self._stop = False
+         self._thread: threading.Thread | None = None
+         self.state = {"status": "idle", "reason": "", "theorems": [], "current": None, "results": {}}
++        self.budget: PursueBudget | None = None   # the whole Pursue's total and time limit, fixed at Start (#19)
++        self._limits: dict | None = None          # the researcher's, when the total waits for the Reader's map (no `budget` hook)
+ 
+     def view(self) -> dict:
+         with self._lock:
+             return self._view_locked()
+ 
+-    def start(self, provider: str) -> dict:
++    def default_limits(self) -> dict:
++        """The total a Start would fix by default (#19), for the page to show and the researcher to change before Start: the
++        nodes open on the map now (every Theorem's subtree, each node once), and the Reader's turn when no map is there yet.
++        An error (NO_BUDGET) when there is neither a `budget` hook nor a Theorem to read the node budget from."""
++        theorems = list(self.hooks.theorems())
++        coordinators = [self.hooks.coordinator(theorem) for theorem in theorems]
++        if self.hooks.budget is not None:
++            node_turns, node_minutes = self.hooks.budget()
++        elif coordinators:
++            node_turns, node_minutes = coordinators[0].hooks.budget()
++        else:
++            return {"error": "no node budget to compute the total from before the Reader states the map", "code": "NO_BUDGET"}
++        open_nodes: dict[str, dict] = {}
++        for coordinator in coordinators:
++            open_nodes.update({node["id"]: node for node in coordinator.open_nodes()})
++        parents = sum(1 for node in open_nodes.values() if node.get("kind") in DECOMPOSABLE)
++        return pursue_limits(node_turns, node_minutes, len(open_nodes), parents, reader=not theorems)
++
++    def start(self, provider: str, *, limits: dict | None = None) -> dict:
++        """Start: the Reader's turn when there is no map, then each Theorem. `limits` are the researcher's total turns and
++        minutes ({"turns", "minutes"}; `default_limits()` when not given), fixed for the whole Pursue."""
+         with self._lock:
+             if self.state["status"] in ("reading", "pursuing"):
+                 return {"error": "this project is being pursued already; stop it first", "code": "PURSUIT_ACTIVE"}
+             if self._thread is not None and self._thread.is_alive():
+                 return {"error": "the stopped pursuit is still ending; Start again after it settles", "code": "PURSUIT_ACTIVE"}
++        try:
++            defaults = None if limits is not None else self.default_limits()
++            if defaults is not None and defaults.get("code") == "NO_BUDGET":
++                budget, deferred = None, True   # computed from the map the Reader states (a host with no `budget` hook)
++            else:
++                if defaults is not None and "error" in defaults:
++                    return defaults
++                budget, deferred = PursueBudget.from_limits(limits if limits is not None else defaults), False
++        except ValueError as exc:
++            return {"error": str(exc), "code": "INVALID_LIMITS"}
++        with self._lock:
++            if self.state["status"] in ("reading", "pursuing") or (self._thread is not None and self._thread.is_alive()):
++                return {"error": "this project is being pursued already; stop it first", "code": "PURSUIT_ACTIVE"}
+             self._stop = False
++            self.budget, self._started_at = budget, time.time()
+             self.state = {"status": "reading", "reason": "", "theorems": [], "current": None, "results": {}}
+-            self._thread = threading.Thread(target=self._loop, args=(provider,), name="pursuit", daemon=True)
++            self._thread = threading.Thread(target=self._loop, args=(provider, deferred), name="pursuit", daemon=True)
+             self._thread.start()
+         return self.view()
+ 
+@@ -714,7 +951,8 @@ class ProjectPursuit:
+         return self.view()
+ 
+     def _view_locked(self) -> dict:
+-        return {**self.state, "theorems": list(self.state["theorems"]), "results": dict(self.state["results"])}
++        return {**self.state, "theorems": list(self.state["theorems"]), "results": dict(self.state["results"]),
++                "budget": self.budget.view() if self.budget is not None else None}
+ 
+     def active(self) -> bool:
+         """The pursuit's thread is alive: it is reading or pursuing, or it was stopped and its Reader's turn or its
+@@ -726,10 +964,15 @@ class ProjectPursuit:
+         with self._lock:
+             return self._stop
+ 
+-    def _loop(self, provider: str) -> None:
++    def _loop(self, provider: str, deferred: bool = False) -> None:
+         try:
++            reader_turns = 0
+             if not self.hooks.theorems():  # a map already there is pursued as it stands; the Reader only states one
+                 answer = self.hooks.read(provider) or {}
++                # a real turn counts toward the total (#19): the host says how many it took, one when it says nothing
++                reader_turns = int(answer.get("turns", 1))
++                if self.budget is not None:
++                    self.budget.spent += reader_turns
+                 if self._stopped():
+                     return
+                 if "error" in answer:
+@@ -739,16 +982,30 @@ class ProjectPursuit:
+                 self.state["theorems"] = theorems
+             if not theorems:
+                 return self._end("stuck", "the Reader stated no Theorem")
+-            self._note(f"pursuing {len(theorems)} Theorem(s): {', '.join(theorems)}")
++            if deferred:   # no node budget before the map: the default total from the map the Reader stated, its turn counted
++                limits = self.default_limits()
++                budget = PursueBudget(limits["turns"] + 1, limits["minutes"], now=self._started_at)
++                budget.spent = reader_turns
++                with self._lock:
++                    self.budget = budget
++            self._note(f"pursuing {len(theorems)} Theorem(s): {', '.join(theorems)}; the Pursue's total {self.budget.turns_max} turns "
++                       f"({self.budget.spent} spent by the Reader) and {self.budget.minutes_max:g} minutes")
++            unstarted: list[str] = []
+             for theorem in theorems:
+                 with self._lock:
+                     if self._stop:
+                         return
+                     self.state["status"], self.state["current"] = "pursuing", theorem
++                spent = _pursue_spent(self.budget)
++                if spent:   # no Theorem starts once the total or the time limit is spent (#19)
++                    with self._lock:
++                        self.state["results"][theorem] = {"status": "not-started", "reason": spent}
++                    unstarted.append(theorem)
++                    continue
+                 coordinator = self.hooks.coordinator(theorem)
+                 if self._stopped():
+                     return
+-                answer = coordinator.start(provider)
++                answer = coordinator.start(provider, budget=self.budget)
+                 if "error" in answer:
+                     with self._lock:
+                         self.state["results"][theorem] = {"status": "refused", "reason": answer.get("error")}
+@@ -758,13 +1015,17 @@ class ProjectPursuit:
+                     return
+                 while coordinator.active() or coordinator.view().get("settling"):
+                     time.sleep(self.tick)   # a Stop releases it; the pursuit is active until it has settled
++                view = coordinator.view()
++                with self._lock:
++                    self.budget.spent += int(view.get("turns") or 0)   # its real turns, now the Pursue's
+                 if self._stopped():
+                     return
+-                view = coordinator.view()
+                 with self._lock:
+                     self.state["results"][theorem] = {"status": view.get("status"), "reason": view.get("reason")}
+                 if view.get("status") == "budget":  # its ended runs keep their claims: given back before the next Theorem starts
+                     coordinator.release()
++            if unstarted:
++                return self._end("budget", f"{_pursue_spent(self.budget)}: {', '.join(unstarted)} not started")
+             self._end("done", "every Theorem was pursued to its end")
+         except Exception as exc:  # noqa: BLE001 — the pursuit ends, and says why
+             self._end("stuck", f"{type(exc).__name__}: {exc}")
+@@ -783,4 +1044,5 @@ class ProjectPursuit:
+             pass
+ 
+ 
+-__all__ = ["ACTIONS", "ACTIVE", "Coordinator", "CoordinatorHooks", "CoordinatorState", "ProjectPursuit", "PursuitHooks"]
++__all__ = ["ACTIONS", "ACTIVE", "LAUNCH_ATTEMPTS", "STRUCTURE_TURNS", "Coordinator", "CoordinatorHooks", "CoordinatorState", "ProjectPursuit",
++           "PursueBudget", "PursuitHooks", "pursue_limits"]
+diff --git a/tests/test_coordinator.py b/tests/test_coordinator.py
+index 92ac9be..46cd291 100644
+--- a/tests/test_coordinator.py
++++ b/tests/test_coordinator.py
+@@ -31,7 +31,7 @@ class FakeRun:
+ 
+     def __init__(self):
+         self.status, self.turns, self.verdict, self.reason = "idle", 0, None, ""
+-        self.calls, self.redirects, self.starts, self.caps, self.kw = [], [], 0, [], []
++        self.calls, self.redirects, self.starts, self.caps, self.kw, self.minutes = [], [], 0, [], [], []
+         self.claim, self.started_at, self.gate, self.fail_release = None, None, None, False
+ 
+     def start(self, provider, turns=None, **kw):
+@@ -40,6 +40,7 @@ class FakeRun:
+         self.calls.append("start")
+         self.starts += 1
+         self.caps.append(turns)
++        self.minutes.append(kw.pop("minutes", None))   # what is left of the Pursue's time limit (#19), apart from the rest
+         self.kw.append(kw)
+         self.status, self.turns, self.verdict, self.reason = "running", 0, None, ""
+         self.claim, self.started_at = "claude-code", self.starts * 1000.0
+@@ -206,31 +207,34 @@ def test_a_node_whose_run_stops_for_a_decision_is_parked_at_once_and_when_every_
+     assert c.view()["reason"].startswith("every open node in the subtree is parked")
+ 
+ 
+-def test_the_budget_is_the_sum_of_the_node_budgets_and_its_end_starts_nothing_and_lets_the_runs_end_on_their_own():
+-    world = World(edges={"T": ["A", "B"], "A": [], "B": []}, budget=(2, 60.0))  # 3 open nodes × 2 turns
++def test_the_total_is_fixed_at_start_and_its_end_starts_nothing_and_lets_the_runs_end_on_their_own():
++    world = World(edges={"T": ["A", "B"], "A": [], "B": []}, budget=(2, 60.0))
+     c = world.coordinator()
+-    c.start("claude")
+-    assert c.view()["turns_max"] == 6
++    c.start("claude", limits={"turns": 4, "minutes": 60})   # the researcher's total, below the default
++    assert c.view()["turns_max"] == 4
+     _until(lambda: world.runs["A"].starts and world.runs["B"].starts, "A and B started")
+-    world.runs["A"].turns = 3; world.runs["B"].turns = 3   # still running, 6 turns spent between them
++    world.runs["A"].turns = 2; world.runs["B"].turns = 2   # still running, 4 turns spent between them
+     _until(lambda: "end on their own" in c.view()["reason"], "the budget's end said")
+     assert c.active() and world.runs["A"].status == "running" and "release" not in world.runs["A"].calls
+-    world.runs["A"].end("budget", turns=3, reason="out of turns"); world.runs["B"].end("budget", turns=3, reason="out of turns")
++    world.runs["A"].end("budget", turns=2, reason="out of turns"); world.runs["B"].end("budget", turns=2, reason="out of turns")
+     _until(lambda: not c.active(), "the Coordinator ended")
+     view = c.view()
+-    assert view["status"] == "budget" and sorted(entry["node"] for entry in view["parked"]) == ["A", "B"] and view["interrupted"] == []
++    assert view["status"] == "budget" and sorted(entry["node"] for entry in view["parked"]) == ["A", "B"]
++    # A's parking made T's re-split due, and the total prevented it: T is Interrupted, saying so (#19)
++    assert [entry["node"] for entry in view["interrupted"]] == ["T"]
++    assert view["interrupted"][0]["reason"].startswith("the Pursue's total is spent (4 of 4 turns), which prevented its re-split: A is parked")
+     assert "release" not in world.runs["A"].calls and world.runs["T"].starts == 0
+ 
+ 
+ def test_at_the_budgets_end_a_spent_node_is_parked_a_running_one_waited_for_and_one_with_budget_left_interrupted():
+     """proof-agents#18 (ADR-0021 point 9): the Coordinator ended at its budget before parking, so a Claim out of turns
+     never reached the review queue's Parked nodes, and a run still going had no result at all."""
+-    world = World(edges={"T": ["A", "B"], "A": [], "B": []}, budget=(2, 60.0))  # 3 open nodes × 2 turns
++    world = World(edges={"T": ["A", "B"], "A": [], "B": []}, budget=(2, 60.0))
+     c = world.coordinator()
+-    c.start("claude")
++    c.start("claude", limits={"turns": 3, "minutes": 60})
+     _until(lambda: world.runs["A"].starts and world.runs["B"].starts, "A and B started")
+     world.runs["B"].turns = 1   # still running
+-    world.runs["A"].end("budget", turns=5, reason="out of turns")   # 6 turns spent between them
++    world.runs["A"].end("budget", turns=2, reason="out of turns")   # 3 turns spent between them
+     _until(lambda: c.view()["parked"], "A parked")
+     view = c.view()
+     assert c.active() and [entry["node"] for entry in view["parked"]] == ["A"] and view["interrupted"] == []
+@@ -239,7 +243,8 @@ def test_at_the_budgets_end_a_spent_node_is_parked_a_running_one_waited_for_and_
+     _until(lambda: not c.active(), "the Coordinator ended")
+     view = c.view()
+     assert view["status"] == "budget" and [entry["node"] for entry in view["parked"]] == ["A"]
+-    assert view["interrupted"] == [{"node": "B", "reason": "the budget of this Start was spent; its last run ended stuck: the deadline came"}]
++    assert view["interrupted"][0] == {"node": "B", "reason": "the Pursue's total is spent (3 of 3 turns); its last run ended stuck: the deadline came"}
++    assert [entry["node"] for entry in view["interrupted"]] == ["B", "T"] and "prevented its re-split" in view["interrupted"][1]["reason"]
+     assert any(note.startswith("interrupted B:") for note in world.notes)
+     assert world.runs["T"].starts == 0 and world.runs["A"].starts == 1 and world.runs["B"].starts == 1   # nothing more started
+     c.release()
+@@ -490,18 +495,19 @@ def test_pursue_on_a_theorem_with_no_claims_starts_with_a_decomposer_turn_and_wo
+     c.start("claude")
+     _until(lambda: world.runs["T"].starts == 1, "the Decomposer started on T")
+     assert world.runs["T"].kw[0] == {"pursue": True, "roles": ["decomposer"]} and c.view()["decomposed"] == ["T"]
+-    assert c.view()["turns_max"] == 3
++    assert c.view()["turns_max"] == 5   # the default: one node budget for T, the only open node, and T's structure allowance
+     # its split: T rests on two Claims, and the run ends done (it gave T back)
+     world.edges.update({"T": ["A", "B"], "A": [], "B": []})
+     world.runs.update({"A": FakeRun(), "B": FakeRun()})
+     world.runs["T"].end("done", turns=1, reason="split into 2 Claim(s): A, B; the Coordinator works them")
+     world.runs["T"].claim = None
+     _until(lambda: world.runs["A"].starts == 1 and world.runs["B"].starts == 1, "the Claims are worked")
+-    assert c.view()["turns_max"] == 9  # the budget grew with the Claims
++    assert c.view()["turns_max"] == 5  # fixed at Start: the Claims spend what is left of it (#19)
++    assert world.runs["A"].caps == [3] and world.runs["B"].caps == [1]   # 4 left after the split, A's 3 set aside
+     for claim in "AB":
+         world.runs[claim].end("done", verdict="passed", turns=1, reason="review-requested"); world.requested.add(claim)
+     _until(lambda: world.runs["T"].starts == 2, "T's own proof once its Claims are Provisional")
+-    assert world.runs["T"].kw[1] == {"pursue": True} and world.runs["T"].caps[1] == 2
++    assert world.runs["T"].kw[1] == {"pursue": True} and world.runs["T"].caps[1] == 2   # what is left of the total: 5 - 3
+     world.runs["T"].end("done", verdict="passed", turns=1, reason="review-requested"); world.requested.add("T")
+     _until(lambda: not c.active(), "the Coordinator ended")
+     assert c.view()["status"] == "done"
+@@ -565,21 +571,37 @@ def test_a_dependent_started_on_a_provisional_node_is_redirected_when_the_resear
+ # -- the audit of ADR-0021's Pursue ----------------------------------------------------------------------------------------
+ 
+ 
+-def test_a_start_that_took_no_turn_counts_toward_the_node_budget_and_the_node_is_parked_in_the_end():
+-    """P1-1: a run that ends before any turn counts — its turn could not start, or its loop raised — was started again
+-    forever. Each such Start spends one of the node budget's turns, so the node is parked once they are spent."""
++def test_a_launch_that_failed_spends_no_turn_and_after_three_the_node_is_given_back_and_recorded_apart():
++    """P1-1, #19: a run that ends before any turn counts — its turn could not start, or its loop raised — was started again
++    forever, then spent a turn of the node budget each time. Now it is a failed launch: no turn spent, three in a Start
++    (the first attempt counted), then the node is not tried again, its claim is given back and why is recorded apart."""
+     world = World(edges={"T": ["A"], "A": []}, parallel=1, budget=(3, 60.0), kinds={"T": "claim"})
+     c = world.coordinator()
+     c.start("claude")
+     for start in (1, 2, 3):
+         _until(lambda start=start: world.runs["A"].starts == start, f"A's start {start}")
+         world.runs["A"].end("stuck", verdict=None, turns=0, reason="the turn could not start: no such provider")
+-    _until(lambda: c.view()["parked"], "A parked")
+-    time.sleep(0.05)
+-    assert world.runs["A"].starts == 3 and world.runs["A"].caps == [3, 2, 1]
+-    assert "its budget is spent" in c.view()["parked"][0]["reason"]
+     _until(lambda: not c.active(), "the Coordinator ended")
+-    assert c.view()["status"] == "stuck" and "(parked: A)" in c.view()["reason"]
++    view = c.view()
++    assert world.runs["A"].starts == 3 and world.runs["A"].caps == [3, 3, 3]   # no turn of the proof budget spent
++    assert view["turns"] == 0 and view["failed_launches"] == 3 and view["nodes"]["A"]["failed_launches"] == 3
++    assert view["launch_failed"] == [{"node": "A", "reason": "its launch failed 3 time(s) in this Start: the turn could not start: no such provider"}]
++    assert view["parked"] == [] and world.parked == []   # not Parked: the agents never worked it
++    assert "release" in world.runs["A"].calls and world.runs["A"].claim is None
++    assert any(note.startswith("launch failed on A:") and "claim given back" in note for note in world.notes)
++    assert view["status"] == "stuck" and "its launches failed: A" in view["reason"]
++
++
++def test_a_successful_launch_does_not_reset_the_failed_launch_count():
++    world = World(edges={"T": ["A"], "A": []}, parallel=1, budget=(5, 60.0), kinds={"T": "claim"})
++    c = world.coordinator()
++    c.start("claude")
++    for start, turns in ((1, 0), (2, 1), (3, 0), (4, 0)):
++        _until(lambda start=start: world.runs["A"].starts == start, f"A's start {start}")
++        world.runs["A"].end("stuck", verdict=None, turns=turns, reason="no change" if turns else "the turn could not start")
++    _until(lambda: c.view()["launch_failed"], "A given up after its third failed launch")
++    time.sleep(0.05)
++    assert world.runs["A"].starts == 4 and world.runs["A"].caps == [5, 5, 4, 4] and c.view()["nodes"]["A"]["turns"] == 1
+ 
+ 
+ def test_a_node_whose_run_the_researcher_released_or_that_ended_done_short_of_review_is_left_to_the_researcher():
+@@ -613,16 +635,14 @@ def test_a_decomposer_turn_that_split_nothing_is_not_noted_as_a_split_and_the_th
+             world.edges.update({"T": ["A"], "A": []}); world.runs["A"] = FakeRun()
+         world.runs["T"].end("done", turns=1, reason="split into 1 Claim(s): A; the Coordinator works them" if split else "turn-finished")
+         world.runs["T"].claim = None
+-        if budget == 1:   # no turn left to work it: what the Decomposer's turn ended as stays on the record
+-            _until(lambda: not c.active(), "the Coordinator ended")
+-            assert c.view()["nodes"]["T"]["last"] == "no-split" and c.view()["held"] == []
+-            continue
+         if split:
+             _until(lambda: world.runs["A"].starts == 1, "the Claim worked")
+             assert c.view()["nodes"]["T"]["last"] == "split"
+         else:
++            # the Decomposer's turn was structure (#19): T is worked as one argument with its whole proof budget, even of one turn
+             _until(lambda: world.runs["T"].starts == 2, "T worked as one argument")
+-            assert world.runs["T"].kw[1] == {"pursue": True} and c.view()["held"] == []
++            assert world.runs["T"].kw[1] == {"pursue": True} and world.runs["T"].caps[1] == budget and c.view()["held"] == []
++            assert c.view()["nodes"]["T"]["last"] is None and c.view()["nodes"]["T"]["structure_turns"] == 1
+         c.release()
+ 
+ 
+@@ -844,18 +864,24 @@ def test_a_stop_before_the_theorems_coordinator_started_leaves_no_coordinator_ru
+     assert pursuit.view()["status"] == "released"
+ 
+ 
+-def test_a_coordinator_that_spent_its_budget_has_its_runs_stopped_before_the_next_theorem():
+-    worlds = {"T1": World(edges={"T1": []}, kinds={"T1": "claim"}, budget=(1, 60.0)), "T2": World(edges={"T2": []}, kinds={"T2": "claim"})}
++def test_a_pursue_whose_total_one_theorem_spent_releases_its_runs_and_starts_no_other_theorem():
++    """#19: one total for the whole Pursue, shared by every Theorem's Coordinator: the Theorem that spends it is waited for
++    and its runs given back, and no further Theorem starts."""
++    worlds = {"T1": World(edges={"T1": []}, kinds={"T1": "claim"}, budget=(3, 60.0)), "T2": World(edges={"T2": []}, kinds={"T2": "claim"})}
+     pursuit, made = _pursuit(worlds)
+-    pursuit.start("claude")
++    pursuit.start("claude", limits={"turns": 2, "minutes": 60})
+     _until(lambda: worlds["T1"].runs["T1"].starts == 1, "T1 pursued")
+-    worlds["T1"].runs["T1"].turns = 1   # still running, the Coordinator's budget spent: nothing more starts, it is waited for
++    assert worlds["T1"].runs["T1"].caps == [2] and made["T1"].view()["turns_max"] == 2
++    worlds["T1"].runs["T1"].turns = 2   # still running, the Pursue's total spent: nothing more starts, it is waited for
+     time.sleep(0.05)
+     assert worlds["T2"].runs["T2"].starts == 0
+-    worlds["T1"].runs["T1"].end("budget", turns=1, reason="out of turns")   # ended, keeping its claim
+-    _until(lambda: worlds["T2"].runs["T2"].starts == 1, "T2 pursued next")
+-    assert worlds["T1"].runs["T1"].status == "released" and pursuit.view()["results"]["T1"]["status"] == "budget"
+-    pursuit.stop()
++    worlds["T1"].runs["T1"].end("budget", turns=2, reason="out of turns")   # ended, keeping its claim
++    _until(lambda: not pursuit.active(), "the pursuit ended")
++    view = pursuit.view()
++    assert worlds["T1"].runs["T1"].status == "released" and view["results"]["T1"]["status"] == "budget"
++    assert view["results"]["T2"] == {"status": "not-started", "reason": "the Pursue's total is spent (2 of 2 turns)"}
++    assert (view["status"], view["budget"]["spent"], view["budget"]["turns_max"]) == ("budget", 2, 2)
++    assert worlds["T2"].runs["T2"].starts == 0
+ 
+ 
+ def test_stop_on_a_finished_pursuit_leaves_its_ending_as_it_was():
+diff --git a/tests/test_pursue_budget.py b/tests/test_pursue_budget.py
+new file mode 100644
+index 0000000..b2758cb
+--- /dev/null
++++ b/tests/test_pursue_budget.py
+@@ -0,0 +1,239 @@
++"""proof-agents#19 (ADR-0021 audit section 3): structure turns apart from the proof budget, under one total fixed at Start.
++
++A node's proof budget covers its Prover, Verifier, Typesetter and Numerics turns and is a ceiling; Decomposer turns are
++structure (per parent one first split and one re-split) and spend none of it. Every real turn counts toward the Pursue's
++total and every run toward its one time limit, fixed at Start for the whole Pursue — the Reader and each Theorem's
++Coordinator — and never raised. A failed launch spends no turn; three in a Start and the node is given back.
++"""
++
++import time
++
++import pytest
++
++from proof_agents.coordinator import Coordinator, CoordinatorHooks, ProjectPursuit, PursueBudget, PursuitHooks, pursue_limits
++from test_coordinator import FakeRun, World, _until
++
++
++def _split(world, parent, claims):
++    world.edges.update({parent: list(claims), **{claim: [] for claim in claims}})
++    world.runs.update({claim: FakeRun() for claim in claims})
++    world.runs[parent].end("done", turns=1, reason=f"split into {len(claims)} Claim(s): {', '.join(claims)}; the Coordinator works them")
++    world.runs[parent].claim = None
++
++
++# -- the default total, shown before Start ------------------------------------------------------------------------------
++
++
++def test_the_default_total_is_the_node_budget_per_open_node_plus_the_structure_allowance():
++    assert pursue_limits(5, 30.0, 3, 1) == {"turns": 17, "minutes": 102.0, "node_turns": 5, "node_minutes": 30.0, "open_nodes": 3,
++                                            "structure_allowance": 2}
++    assert pursue_limits(5, 30.0, 0, 0, reader=True)["turns"] == 5 + 2 + 1   # no map yet: one node budget, a split, the Reader
++    world = World(edges={"T": ["A", "B"], "A": [], "B": [], "L": []}, budget=(4, 20.0), kinds={"L": "lemma"})
++    c = world.coordinator()
++    limits = c.default_limits()
++    assert (limits["turns"], limits["open_nodes"], limits["structure_allowance"]) == (4 * 4 + 2 * 2, 4, 4)   # T and L may split
++    assert c.start("claude")["turns_max"] == limits["turns"] and c.view()["minutes_max"] == limits["minutes"]
++    c.release()
++
++
++@pytest.mark.parametrize("limits", [{"turns": 0, "minutes": 10}, {"turns": 2.5, "minutes": 10}, {"turns": 3, "minutes": 0}, {"turns": "x", "minutes": 1}, {"turns": 3}])
++def test_limits_that_are_not_a_total_are_refused_and_nothing_starts(limits):
++    world = World(edges={"T": []})
++    c = world.coordinator()
++    answer = c.start("claude", limits=limits)
++    assert answer["code"] == "INVALID_LIMITS" and world.runs["T"].starts == 0 and not c.active()
++
++
++# -- the acceptance ---------------------------------------------------------------------------------------------------------
++
++
++def test_a_parent_that_split_still_has_its_full_proof_budget():
++    world = World(edges={"T": []}, parallel=2, budget=(3, 60.0))
++    c = world.coordinator()
++    c.start("claude", limits={"turns": 20, "minutes": 60})
++    _until(lambda: world.runs["T"].starts == 1, "the Decomposer on T")
++    _split(world, "T", ["A", "B"])
++    _until(lambda: world.runs["A"].starts and world.runs["B"].starts, "the Claims worked")
++    for claim in "AB":
++        world.runs[claim].end("done", verdict="passed", turns=1, reason="review-requested"); world.requested.add(claim)
++    _until(lambda: world.runs["T"].starts == 2, "T's own proof")
++    view = c.view()
++    assert world.runs["T"].caps[1] == 3   # its whole proof budget: the Decomposer's turn was structure
++    assert (view["nodes"]["T"]["turns"], view["nodes"]["T"]["structure_turns"], view["structure_turns"]) == (0, 1, 1)
++    world.runs["T"].end("stuck", turns=2, reason="no change")
++    _until(lambda: world.runs["T"].starts == 3, "T again, with what is left of its proof budget")
++    assert world.runs["T"].caps[2] == 1
++    c.release()
++
++
++def test_a_second_re_split_on_the_same_parent_is_refused():
++    world = World(edges={"T": ["A", "B"], "A": [], "B": []}, parallel=2, budget=(2, 60.0))
++    c = world.coordinator()
++    c.start("claude", limits={"turns": 30, "minutes": 60})
++    _until(lambda: world.runs["A"].starts and world.runs["B"].starts, "A and B started")
++    world.runs["A"].end("needs-human", turns=1, reason="cannot be stated as is")
++    _until(lambda: world.runs["T"].starts == 1, "T's one re-split")
++    _split(world, "T", ["A2", "B"])
++    world.edges.pop("A")
++    world.runs["B"].end("needs-human", turns=1, reason="also stuck")   # another Claim of T parks
++    _until(lambda: c.view()["resplit_refused"], "the second re-split refused")
++    time.sleep(0.1)
++    view = c.view()
++    assert world.runs["T"].starts == 1 and view["resplit"] == ["T"] and view["resplit_refused"] == ["T"]
++    assert view["decomposed"] == ["T"] and view["nodes"]["T"]["structure_starts"] == 1
++    assert sum(note.startswith("no second re-split for T:") for note in world.notes) == 1
++    c.release()
++
++
++def test_the_total_never_rises_after_start_not_for_new_claims_retries_or_a_re_split():
++    world = World(edges={"T": []}, parallel=3, budget=(2, 60.0))
++    c = world.coordinator()
++    c.start("claude")
++    total = c.view()["turns_max"]
++    assert total == 2 * 1 + 2
++    seen = []
++    _until(lambda: world.runs["T"].starts == 1, "the Decomposer on T")
++    _split(world, "T", ["A", "B", "C"])   # three Claims: the old budget grew by three node budgets here
++    _until(lambda: world.runs["A"].starts, "the Claims worked")
++    seen.append(c.view()["turns_max"])
++    assert world.runs["A"].caps == [2] and world.runs["B"].caps == [1] and world.runs["C"].starts == 0   # 3 left: A's 2, B's 1
++    world.runs["A"].end("stuck", turns=2, reason="no change")
++    world.runs["B"].end("stuck", turns=1, reason="no change")   # 1 + 2 + 1: the total is spent: no retry, no C, no re-split
++    _until(lambda: not c.active(), "the Coordinator ended at its total")
++    seen.append(c.view()["turns_max"])
++    view = c.view()
++    assert seen == [total, total] and view["status"] == "budget" and view["turns"] == total
++    assert world.runs["C"].starts == 0 and world.runs["A"].starts == 1 and world.runs["T"].starts == 1
++    assert [entry["node"] for entry in view["parked"]] == ["A"]   # its proof budget spent
++    assert [entry["node"] for entry in view["interrupted"]] == ["B", "T"]   # B had budget left; T's re-split was due
++    assert any(note.startswith(f"budget: {total} real turn(s) in this Start (1 structure, {total - 1} proof)") for note in world.notes)
++
++
++def test_failed_launches_are_counted_apart_from_turns():
++    world = World(edges={"T": ["A", "B"], "A": [], "B": []}, parallel=2, budget=(2, 60.0))
++    c = world.coordinator()
++    c.start("claude", limits={"turns": 3, "minutes": 60})
++    _until(lambda: world.runs["A"].starts and world.runs["B"].starts, "A and B started")
++    world.runs["A"].end("stuck", turns=0, reason="the turn could not start")   # a failed launch: no turn of the total
++    _until(lambda: world.runs["A"].starts == 2, "A launched again")
++    assert world.runs["B"].caps == [1] and world.runs["A"].caps == [2, 2]   # 3 in all, B's 1 set aside: the failed launch spent none
++    view = c.view()
++    assert view["turns"] == 0 and view["failed_launches"] == 1 and view["nodes"]["A"]["turns"] == 0
++    world.runs["A"].end("budget", turns=1, reason="out of turns"); world.runs["B"].end("budget", turns=2, reason="out of turns")
++    _until(lambda: not c.active(), "ended")
++    assert any(note.endswith("of the Pursue's 3; 1 failed launch(es)") for note in world.notes)
++
++
++# -- the edges -------------------------------------------------------------------------------------------------------------
++
++
++def test_a_first_split_whose_launch_failed_is_tried_again_as_a_split_and_given_up_after_three():
++    world = World(edges={"T": []}, parallel=1, budget=(3, 60.0))
++    c = world.coordinator()
++    c.start("claude")
++    for start in (1, 2, 3):
++        _until(lambda start=start: world.runs["T"].starts == start, f"T's start {start}")
++        assert world.runs["T"].kw[-1]["roles"] == ["decomposer"]   # a split each time, not T's proof
++        world.runs["T"].end("stuck", turns=0, reason="the provider did not start")
++    _until(lambda: not c.active(), "ended")
++    view = c.view()
++    assert [entry["node"] for entry in view["launch_failed"]] == ["T"] and view["turns"] == 0 and world.runs["T"].claim is None
++
++
++def test_a_re_split_whose_launch_failed_is_due_again():
++    world = World(edges={"T": ["A", "B"], "A": [], "B": []}, parallel=2, budget=(2, 60.0))
++    c = world.coordinator()
++    c.start("claude", limits={"turns": 30, "minutes": 60})
++    _until(lambda: world.runs["A"].starts and world.runs["B"].starts, "A and B started")
++    world.runs["A"].end("needs-human", turns=1, reason="cannot be stated as is")
++    _until(lambda: world.runs["T"].starts == 1, "T's re-split")
++    world.runs["T"].end("stuck", turns=0, reason="the provider did not start")
++    _until(lambda: world.runs["T"].starts == 2, "T's re-split again")
++    assert world.runs["T"].kw[1]["roles"] == ["decomposer"] and world.runs["T"].kw[1]["redirect"].startswith("A is parked")
++    assert c.view()["resplit"] == ["T"] and c.view()["failed_launches"] == 1
++    c.release()
++
++
++def test_the_time_limit_starts_no_new_turn_and_caps_each_run_by_what_is_left_of_it():
++    world = World(edges={"T": ["A", "B"], "A": [], "B": []}, parallel=1, budget=(5, 60.0))
++    c = world.coordinator()
++    c.start("claude", limits={"turns": 50, "minutes": 0.02})   # 1.2 seconds
++    _until(lambda: world.runs["A"].starts, "A started")
++    assert world.runs["A"].minutes[0] <= 0.1 + 1e-9   # what is left of the Pursue's time, not the node budget's hour
++    time.sleep(1.3)
++    world.runs["A"].end("stuck", turns=1, reason="no change")
++    _until(lambda: not c.active(), "ended at the time limit")
++    view = c.view()
++    assert view["status"] == "budget" and view["reason"] == "the Pursue's time limit is spent (0.02 minutes)"
++    assert world.runs["B"].starts == 0 and world.runs["A"].starts == 1
++    assert [entry["node"] for entry in view["interrupted"]] == ["A"]
++
++
++def test_a_project_pursue_shares_one_total_with_its_reader_and_every_theorem():
++    worlds = {"T1": World(edges={"T1": []}, kinds={"T1": "claim"}, budget=(3, 60.0)), "T2": World(edges={"T2": []}, kinds={"T2": "claim"}, budget=(3, 60.0))}
++    stated: list[str] = []
++    made = {name: Coordinator(CoordinatorHooks(subtree=w.subtree, run=lambda node, w=w: w.runs[node], budget=lambda w=w: w._budget,
++                                               parallel=lambda: 1), name, tick=0.01) for name, w in worlds.items()}
++
++    def read(provider):
++        stated.extend(["T1", "T2"])
++        return {"turns": 2}
++
++    pursuit = ProjectPursuit(PursuitHooks(read=read, theorems=lambda: list(stated), coordinator=made.__getitem__, budget=lambda: (3, 60.0)), tick=0.01)
++    limits = pursuit.default_limits()
++    assert limits["turns"] == 3 * 1 + 2 + 1 and limits["structure_allowance"] == 3   # before the map: the Reader's turn and one split
++    pursuit.start("claude", limits={"turns": 7, "minutes": 60})
++    _until(lambda: worlds["T1"].runs["T1"].starts, "T1 pursued")
++    assert made["T1"].view()["turns_before"] == 2 and worlds["T1"].runs["T1"].caps == [3]   # the Reader's 2 of the 7 spent
++    worlds["T1"].runs["T1"].end("done", verdict="passed", turns=3, reason="review-requested"); worlds["T1"].requested.add("T1")
++    _until(lambda: worlds["T2"].runs["T2"].starts, "T2 pursued")
++    assert made["T2"].view()["turns_before"] == 5 and worlds["T2"].runs["T2"].caps == [2]   # what is left of the same total
++    assert made["T2"].view()["deadline"] == made["T1"].view()["deadline"] == pursuit.view()["budget"]["deadline"]
++    worlds["T2"].runs["T2"].end("budget", turns=2, reason="out of turns")
++    _until(lambda: not pursuit.active(), "the pursuit ended")
++    assert pursuit.view()["budget"]["spent"] == 7 and pursuit.view()["budget"]["turns_max"] == 7
++
++
++def test_a_host_with_no_budget_hook_fixes_the_default_total_from_the_map_the_reader_stated():
++    world = World(edges={"T1": []}, kinds={"T1": "claim"}, budget=(3, 60.0))
++    stated: list[str] = []
++    coordinator = Coordinator(CoordinatorHooks(subtree=world.subtree, run=lambda node: world.runs[node], budget=lambda: (3, 60.0),
++                                               parallel=lambda: 1), "T1", tick=0.01)
++    pursuit = ProjectPursuit(PursuitHooks(read=lambda provider: stated.append("T1") or {}, theorems=lambda: list(stated),
++                                          coordinator=lambda name: coordinator), tick=0.01)
++    assert pursuit.default_limits()["code"] == "NO_BUDGET"
++    pursuit.start("claude")
++    _until(lambda: world.runs["T1"].starts, "T1 pursued")
++    budget = pursuit.view()["budget"]
++    assert (budget["turns_max"], budget["spent"]) == (3 * 1 + 2 + 1, 1)   # T1's node budget, a split, and the Reader's one turn
++    pursuit.stop()
++
++
++def test_a_start_on_a_spent_shared_total_is_refused():
++    world = World(edges={"T": []})
++    budget = PursueBudget(2, 60.0)
++    budget.spent = 2
++    answer = world.coordinator().start("claude", budget=budget)
++    assert answer["code"] == "BUDGET_SPENT" and world.runs["T"].starts == 0
++
++
++def test_agent_run_caps_its_time_by_minutes_as_it_caps_its_turns():
++    from proof_agents.agent_run import AgentRun
++    from test_run_state_machine import _hooks
++
++    class Agent:
++        jobs = {}
++
++        def start(self, *args, **kwargs):
++            return {"error": "The studio is closed."}
++
++        def stop(self, jid):
++            pass
++
++    run = AgentRun(Agent(), _hooks(budget=lambda: (40, 60.0)))
++    before = time.time()
++    view = run.start("claude", turns=3, minutes=1.5)
++    assert view["turns_max"] == 3 and before + 89 <= view["deadline"] <= time.time() + 91
++    run.release()
++    longer = AgentRun(Agent(), _hooks(budget=lambda: (40, 1.0))).start("claude", minutes=5)
++    assert longer["deadline"] <= time.time() + 61   # never longer than the node budget's own minutes
+-- 
+2.54.0
+

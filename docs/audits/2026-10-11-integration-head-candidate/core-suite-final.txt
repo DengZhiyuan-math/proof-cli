@@ -1,0 +1,4 @@
+FAILED tests/test_latex_snapshots.py::test_the_working_file_compiles_standalone
+FAILED tests/test_latex_snapshots.py::test_a_real_build_is_archived_with_the_snapshot
+FAILED packages/latex-agent/tests/test_studio_server.py::SyncTeX::test_source_to_pdf_and_back
+3 failed, 1150 passed, 15 skipped in 463.71s (0:07:43)

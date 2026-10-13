@@ -1,0 +1,60 @@
+[
+  {
+    "node": "burger-integral-formula",
+    "unchecked": []
+  },
+  {
+    "node": "burger-operator-bounds",
+    "unchecked": []
+  },
+  {
+    "node": "chh-tempered-bound",
+    "unchecked": [
+      {
+        "dependent": "matrix-coefficient-decay-p",
+        "snapshot": 1,
+        "current": true,
+        "evidence_check": "18cb6dac-b1fb-420f-bb55-80051d13720f",
+        "outcome": "passed",
+        "note": "Read proof.tex in full. Steps 0-3: zero vectors; case split by the statement of unitary-dual-sl2-qp; trivial case by Cauchy-Schwarz with dim H=1, d_K=1; tempered case is chh-tempered-bound with L=G_p, g=a_n, and varpi=Xi_p by definition. Step 4 (gamma^s, model from the statement of complementary-series-model, used by statement only): (b) positivity |pi(g)f(k)|<=||f||_inf pi(g)1(k) from kg=bk', checked for I_{+s} and I_{-s}. (c) <pi_s(g)1,1>_s = int pi_{-s}(g)1 by M1=1 and intertwining; the +s version uses L2(K)-symmetry of M from (f); 1 is a K-fixed unit vector, and the K-fixed space is the constants. (d) restriction to P^1(Z_p), levels F_j, L_j = F_j minus F_{j-1}; the K-invariant measure is GL2(Z_p)-invariant, so the L_j are invariant. (e) K(p^i)-orbits are the fibres over P^1(Z/p^i); K(p^{j-1})-fixed vectors separate L_j from lower levels; normality makes this an isomorphism invariant, so each H_tau lies in one L_j. (f) recomputed t_eps w t_eps^{-1} = diag(eps,eps^{-1}) w and t_eps h(x) t_eps^{-1} = h(eps x), so M commutes with GL2(Z_p) acting on P^1(Z_p). Gelfand lemma (flagged by the Typesetter), checked: with base point [1:0], B_j-orbits are the affine chart (v=0), v(c)=1..j-1 and the base point (v=j), so j+1 orbits. v(det(x,y)) for primitive representatives is GL2-invariant (det(g) is a unit) and symmetric, so the orbitals are self-paired and F_j is multiplicity-free with j+1 constituents. The L_0..L_j are nonzero, so each L_i is irreducible; M preserves F_j (it commutes with K(p^j)), so M|L_i = lambda_i, and lambda_i > 0 by positivity of <,>_s. This gives (eq:norms). (g) P_tau H = H_tau, so K-finite vectors lie in I_s; (h) additivity of d_K holds. Step 5: Theta = sum |e_i|^2 is right-K-invariant, hence constant = d, so ||u||_inf <= sqrt(d)||u||_L2; dim<K Mf> <= d_K(f). Step 6: rechecked both placements of M and the exponents (lambda_sigma/lambda_tau)^{1/2} and (lambda_tau/lambda_sigma)^{1/2}; their minimum is <= 1. Step 7: Cauchy-Schwarz, additivity of d_K, <,>_s-orthogonality of the isotypic pieces, and unitary equivalence preserves d_K, norms and varpi. Background: Gelfand's lemma (symmetric orbitals give a commutative Hecke algebra; number of constituents = number of orbitals) and Schur's lemma. The appeals to unitary-dual-sl2-qp and chh-tempered-bound are to their statements and match them exactly; they are unchecked against the sources (Cowling-Haagerup-Howe 1988; dual classification), which are not readable from the project. complementary-series-model is unaccepted and is used by its statement only. tree-spherical-asymptotics is not used."
+      }
+    ]
+  },
+  {
+    "node": "emmv-uniform-decay",
+    "unchecked": []
+  },
+  {
+    "node": "local-sobolev-inequality",
+    "unchecked": []
+  },
+  {
+    "node": "sobolev-cuspidal-real",
+    "unchecked": []
+  },
+  {
+    "node": "sobolev-residual-real",
+    "unchecked": []
+  },
+  {
+    "node": "spectral-structure-real",
+    "unchecked": []
+  },
+  {
+    "node": "tree-spherical-asymptotics",
+    "unchecked": []
+  },
+  {
+    "node": "unitary-dual-sl2-qp",
+    "unchecked": [
+      {
+        "dependent": "matrix-coefficient-decay-p",
+        "snapshot": 1,
+        "current": true,
+        "evidence_check": "18cb6dac-b1fb-420f-bb55-80051d13720f",
+        "outcome": "passed",
+        "note": "Read proof.tex in full. Steps 0-3: zero vectors; case split by the statement of unitary-dual-sl2-qp; trivial case by Cauchy-Schwarz with dim H=1, d_K=1; tempered case is chh-tempered-bound with L=G_p, g=a_n, and varpi=Xi_p by definition. Step 4 (gamma^s, model from the statement of complementary-series-model, used by statement only): (b) positivity |pi(g)f(k)|<=||f||_inf pi(g)1(k) from kg=bk', checked for I_{+s} and I_{-s}. (c) <pi_s(g)1,1>_s = int pi_{-s}(g)1 by M1=1 and intertwining; the +s version uses L2(K)-symmetry of M from (f); 1 is a K-fixed unit vector, and the K-fixed space is the constants. (d) restriction to P^1(Z_p), levels F_j, L_j = F_j minus F_{j-1}; the K-invariant measure is GL2(Z_p)-invariant, so the L_j are invariant. (e) K(p^i)-orbits are the fibres over P^1(Z/p^i); K(p^{j-1})-fixed vectors separate L_j from lower levels; normality makes this an isomorphism invariant, so each H_tau lies in one L_j. (f) recomputed t_eps w t_eps^{-1} = diag(eps,eps^{-1}) w and t_eps h(x) t_eps^{-1} = h(eps x), so M commutes with GL2(Z_p) acting on P^1(Z_p). Gelfand lemma (flagged by the Typesetter), checked: with base point [1:0], B_j-orbits are the affine chart (v=0), v(c)=1..j-1 and the base point (v=j), so j+1 orbits. v(det(x,y)) for primitive representatives is GL2-invariant (det(g) is a unit) and symmetric, so the orbitals are self-paired and F_j is multiplicity-free with j+1 constituents. The L_0..L_j are nonzero, so each L_i is irreducible; M preserves F_j (it commutes with K(p^j)), so M|L_i = lambda_i, and lambda_i > 0 by positivity of <,>_s. This gives (eq:norms). (g) P_tau H = H_tau, so K-finite vectors lie in I_s; (h) additivity of d_K holds. Step 5: Theta = sum |e_i|^2 is right-K-invariant, hence constant = d, so ||u||_inf <= sqrt(d)||u||_L2; dim<K Mf> <= d_K(f). Step 6: rechecked both placements of M and the exponents (lambda_sigma/lambda_tau)^{1/2} and (lambda_tau/lambda_sigma)^{1/2}; their minimum is <= 1. Step 7: Cauchy-Schwarz, additivity of d_K, <,>_s-orthogonality of the isotypic pieces, and unitary equivalence preserves d_K, norms and varpi. Background: Gelfand's lemma (symmetric orbitals give a commutative Hecke algebra; number of constituents = number of orbitals) and Schur's lemma. The appeals to unitary-dual-sl2-qp and chh-tempered-bound are to their statements and match them exactly; they are unchecked against the sources (Cowling-Haagerup-Howe 1988; dual classification), which are not readable from the project. complementary-series-model is unaccepted and is used by its statement only. tree-spherical-asymptotics is not used."
+      }
+    ]
+  }
+]

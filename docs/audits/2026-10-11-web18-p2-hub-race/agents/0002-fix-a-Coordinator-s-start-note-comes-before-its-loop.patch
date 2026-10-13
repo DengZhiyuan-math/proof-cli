@@ -1,0 +1,36 @@
+From ead54fe8d3480f1d4ba45a5b7b1bfb97b0f796ee Mon Sep 17 00:00:00 2001
+From: Yomathnotcool <125728853+DengZhiyuan-math@users.noreply.github.com>
+Date: Sun, 11 Oct 2026 10:18:56 +0200
+Subject: [PATCH 2/2] fix: a Coordinator's start note comes before its loop's
+ first note on the root's work log
+
+Coordinator.start noted "started on <root>" after starting its loop's thread; under load the loop's first note
+("started a run on A") could be written first. The note is now recorded before the thread starts. A Stop or Pause
+in between is honoured by the loop as it begins; a second Start sees the Coordinator starting and is refused.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/proof_agents/coordinator.py | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/src/proof_agents/coordinator.py b/src/proof_agents/coordinator.py
+index 92891c9..b0f5375 100644
+--- a/src/proof_agents/coordinator.py
++++ b/src/proof_agents/coordinator.py
+@@ -261,10 +261,11 @@ class Coordinator:
+                                           accepted=[node["id"] for node in subtree if node.get("accepted")])
+             self._stop = self._pause = False
+             self._spent, self._seen, self._resplits, self._redo = {}, {}, {}, set()
+-            self._thread = threading.Thread(target=self._loop, name=f"coordinator-{self.root}", daemon=True)
+-            self._thread.start()
++            thread = self._thread = threading.Thread(target=self._loop, name=f"coordinator-{self.root}", daemon=True)
++        # noted before the loop runs: its first run's note comes after this one on the root's work log
+         self._record(f"started on {self.root}: {len(open_nodes)} open node(s), up to {self.hooks.parallel()} run(s) at a time; the Pursue's "
+                      f"total {budget.turns_max} turns ({budget.spent} spent before) and {budget.minutes_max:g} minutes, a node's proof budget {node_turns} turns")
++        thread.start()
+         return self.view()
+ 
+     def pause(self) -> dict:
+-- 
+2.54.0
+

@@ -1,0 +1,40 @@
+t8-lifecycle
+0 nodes · 0 on the frontier
+Graph
+Tree
+/
+0
+Frontier
+0
+Awaiting you
+0
+Fog
+Y
+Yomathnotcool <125728853+DengZhiyuan-math@users.noreply.github.com>
+
+Proof map
+
+Map
+Review
+Warnings
+Discuss
+
+Your library has a draft and the map is empty. Pursue reads the draft, states it as a map, and works every Theorem as far as the agents can go. What it leaves you is the review queue; nothing it does is trust until you Accept it.
+
+interrupted — stopped with the server after its start. no end was recorded: the process that ran it stopped; a new Start rechecks claims, snapshots and node states
+Total  turns
+and  minutes
+4 turns per node × 1 open node(s) + 3 structure turn(s) (splits and the Reader). A node's budget is a ceiling, not a share: Claims a split adds spend what is left of the total.
+Pursue
+Right-click anywhere to create the first node, or run `proof node create`.
+Ready to start
+In progress
+Blocked
+Awaiting review
+Accepted
+Rejected
+Needs attention
+Open
+100%
+Fit
+Tidy

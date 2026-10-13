@@ -1,0 +1,20 @@
+Blocked by: DengZhiyuan-math/proof-cli#201, zeqome/proof-agents#17
+
+## What
+
+`StudioHub` (`studios.py` around line 545 in the audited snapshot) passes the project Pursue `record=lambda note: None`. Wire it to core's pursuit events.
+
+- The hub reads the last pursuit from the events. A new hub shows its recorded ending (`stuck` / `done` / `released`) and reason, or `interrupted` for an unfinished one, never `idle` when a pursuit was recorded.
+- In the same live hub, `release-failed` shows with a retry Stop (web #12). A release failure records only `release_failed`; after Stop retries successfully, record `end released`.
+- After a restart, an unfinished pursuit shows `interrupted`, retaining the last step and its reason, including a release failure. The new hub offers no Stop and does not retry release. A new Start rechecks claims, snapshots and node states.
+- A recording failure shows as an error, not as success. If the start cannot be recorded, return 500 `PURSUIT_RECORD_FAILED` before any Reader or provider starts. Later failures show as `History not saved: …`.
+
+Recovery requirement corrected on 2026-10-10 (Europe/Zurich) to the researcher's decision: release retry applies only to the same live hub; restart recovery reads history and does not resume the old pursuit.
+
+## Acceptance
+
+- [ ] The audit probe `test_project_pursuit_ending_survives_a_new_hub` passes.
+- [ ] Browser check: Pursue, refresh, restart the server; the ending and its reason stay.
+
+---
+Part of DengZhiyuan-math/proof-cli#193. Source: `docs/audits/2026-10-08-adr0021-design-audit.md` on `integ/0021` (proof-cli), probes in its evidence directory. Fix on the rebuilt integration Head (DengZhiyuan-math/proof-cli#198), not on the audited snapshot.

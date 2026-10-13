@@ -1,0 +1,23 @@
+{
+  "root": "/Volumes/Codex-Workspace/live/home/zhdeng/proof-cli/docs/audits/2026-10-11-integration-published-t8/projects/real-trial-profile",
+  "input": {
+    "source": "/Volumes/Codex-Workspace/live/home/zhdeng/proof-cli/.claude/worktrees/trial-132/library-horo/main.tex",
+    "copy": "/Volumes/Codex-Workspace/live/home/zhdeng/proof-cli/docs/audits/2026-10-11-integration-published-t8/projects/real-trial-profile/library-horo/main.tex",
+    "sha256": "147afc8d0a3f69cddd4c35c768ade58c8e3719a0d8be35a01d6c4d7ee4c47333",
+    "bytes": 48974
+  },
+  "comparison": {
+    "source": "/Volumes/Codex-Workspace/live/home/zhdeng/proof-cli/.claude/worktrees/trial-132/setup-tier3-horo.sh",
+    "copy": "/Volumes/Codex-Workspace/live/home/zhdeng/proof-cli/docs/audits/2026-10-11-integration-published-t8/setup-tier3-horo.sh",
+    "sha256": "34f5be25ef8e2904aa876164207e865a15a6d5385b739fca92770a4a9ecdacfd"
+  },
+  "provider": "claude",
+  "modelAlias": "opus",
+  "profile": "~/.claude-Zeqome",
+  "totalTurns": 60,
+  "timeLimitMinutes": 120,
+  "parallel": 2,
+  "researcherInputAfterStart": false,
+  "serverEnvironmentProfile": "/Users/zhdeng/.claude-Zeqome",
+  "startingAt": "2026-10-11T19:57:43.467541+00:00"
+}
