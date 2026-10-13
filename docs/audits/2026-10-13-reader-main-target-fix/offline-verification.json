@@ -1,0 +1,37 @@
+{
+  "repo": "core",
+  "base_sha": "d433159214156239e31094d1eaea3b7b991b927f",
+  "source_patch_sha256": "50ceb5b2f4a82467677785d59d51867a84d502c5e6ebc29b1e2b71cdb208ae13",
+  "combined_source_bases": {
+    "core": "d433159214156239e31094d1eaea3b7b991b927f",
+    "agents": "7d3f312269b9868415e06302b97637db1a490220",
+    "web": "af687b02b7d03dbf5bd2b60062284d8421dfa5c0"
+  },
+  "verification_kind": "offline Python 3.11.14 tests in an isolated venv with all four packages loaded from the development checkouts",
+  "command": "python -m pytest -q -ra",
+  "result": {
+    "tests": 1173,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 15,
+    "passed": 1158
+  },
+  "combined_result": {
+    "passed": 2192,
+    "skipped": 16,
+    "failures": 0,
+    "errors": 0
+  },
+  "new_regression_count_combined": 13,
+  "package_regressions": [],
+  "skipped_categories": [
+    "TeX distribution unavailable",
+    "Windows-only checks",
+    "opt-in wall-clock benchmarks"
+  ],
+  "wheel_build": "passed",
+  "python_compileall": "passed",
+  "javascript_syntax": "not applicable",
+  "provider_calls_added": 0,
+  "limits": "Offline evidence verifies target consistency and dispatch. No new real Reader/provider trial and no mathematical Acceptance were performed."
+}

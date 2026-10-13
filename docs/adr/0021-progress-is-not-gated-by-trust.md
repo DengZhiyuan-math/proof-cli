@@ -7,6 +7,8 @@
 
 ADR-0004, ADR-0009, ADR-0010 and ADR-0014 stand untouched: only the researcher changes acceptance, and no node is Accepted on anything unaccepted.
 
+**Proposed corrections (2026-10-13)** are separate in [ADR-0023](0023-reader-pursue-and-review-corrections.md). The accepted historical decision below is retained.
+
 ## Context
 
 The third #132 tier 3 trial put the researcher's own half-finished draft in the library: effective equidistribution of horocycle orbits on $\Gamma\backslash(SL_2(\mathbb R)\times SL_2(\mathbb Q_p))$. The main theorem had no statement, the height lemma had no proof, and the height's definition was wrong as written. Nothing in the system could start on it.

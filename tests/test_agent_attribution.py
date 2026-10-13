@@ -3,7 +3,8 @@
 Agent-written text is unfixed and restatable by agents, the researcher's is fixed for agents from the start; so what a
 create command records as its author decides who may later restate it. An agent's runtime sets PROOF_AGENT_NAME: a
 create command without `--created-by`, and an edit without `--by`, are that agent's, and the researcher's ("human")
-only outside an agent's runtime. An explicit flag always wins.
+only outside an agent's runtime. Inside it, an explicit flag may only repeat the agent's own name (ADR-0023 point 2):
+written as "human", an agent's import would meet the researcher's Trust rules.
 """
 
 import json
@@ -31,8 +32,8 @@ def _run(tmp_path: Path, *args: str, env: dict | None = None) -> dict:
 @pytest.mark.parametrize(("env", "flag", "expected"), [
     (AGENT, (), "reader-1"),
     ({"PROOF_AGENT_NAME": ""}, (), "human"),
-    (AGENT, ("--created-by", "human"), "human"),
-    (AGENT, ("--created-by", "dec-2"), "dec-2"),
+    (AGENT, ("--created-by", "reader-1"), "reader-1"),
+    ({"PROOF_AGENT_NAME": ""}, ("--created-by", "dec-2"), "dec-2"),
 ])
 def test_a_create_command_s_author_is_the_flag_then_the_agent_s_runtime_then_the_researcher(tmp_path: Path, env, flag, expected):
     store = ensure_project(tmp_path)
