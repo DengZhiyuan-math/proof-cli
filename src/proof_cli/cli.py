@@ -147,6 +147,7 @@ from .references import ReferenceSourceType
 from .reference_edit import edit_reference
 from .proof_map import (
     ProofMapError,
+    get_node,
     add_dependency,
     claim_node,
     create_node,
@@ -504,6 +505,12 @@ def node_create(
         if refused:
             _emit_error(refused, json_output, command="node.create")
             raise typer.Exit(code=1)
+    if os.environ.get("PROOF_AGENT_ROLE") in ("prover", "decomposer") and os.environ.get("PROOF_AGENT_NODE") and (
+        kind != "imported_result" or not parent or parent != os.environ.get("PROOF_AGENT_NODE") or reassign
+    ):
+        _emit_error(ProofMapError("AGENT_IMPORT_REFUSED", "this role creates only an imported result attached to its current node, without --reassign"),
+                    json_output, command="node.create")
+        raise typer.Exit(code=1)
     if reassign and not parent:
         raise click.UsageError("--reassign goes with --parent: it takes the parent's claim over")
     store = get_store(_root(root))
@@ -1066,7 +1073,7 @@ def node_request_review(
         if gates and (len(gates) != 1 or not re.fullmatch(r"[0-9a-f]{64}", gates[0])):  # given once: a repeat, equal or not, is refused
             raise ProofMapError("GATE_MALFORMED", "--gated-by is the passing verdict's SHA-256 (64 hex digits), given once; repeated, empty or malformed, the request is refused")
         record = request_review(store, node_id, requested_by=requested_by, rationale=rationale, gated_by=gates[0] if gates else None,
-                                requester_role=os.environ.get("PROOF_AGENT_ROLE") or None)
+                                requester_role=os.environ.get("PROOF_AGENT_ROLE") or ("agent" if os.environ.get("PROOF_AGENT_NAME") else None))
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.request_review")
         raise typer.Exit(code=1)
@@ -1278,6 +1285,10 @@ def node_depend(
     store = get_store(_root(root))
     by = _author(by)
     try:
+        if os.environ.get("PROOF_AGENT_ROLE") == "decomposer" and node_id == os.environ.get("PROOF_AGENT_NODE") and add:
+            target = get_node(store, add)
+            if target is None or target.kind != ProofMapNodeKind.imported_result or reassign:
+                raise ProofMapError("AGENT_IMPORT_REFUSED", "a Decomposer adds only an imported result to its current node, without --reassign")
         if add:
             edit = add_dependency(store, node_id, add, edited_by=by, reassign=reassign)
         elif remove:

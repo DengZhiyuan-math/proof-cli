@@ -1,0 +1,20 @@
+# ADR-0023 — Reader, Pursue and review provenance corrections
+
+**Status**: proposed (2026-10-13). Implementation is under review in core #220, agents #30 and web #25. The accepted historical text of ADR-0021 is retained.
+
+Amends ADR-0021 points 5, 7 and 10, and ADR-0013 provenance. Autonomous literature retrieval was explicitly requested by the researcher in this chat; it is additional to agents #31/#32.
+
+## Reason
+
+A trial run showed that the Reader could make a supporting result the project's only Theorem and downgrade the main result, that Project Pursue could claim done while work was unscheduled, and that agent requests could claim author confirmation.
+
+## Proposed corrections
+
+1. Reader identifies the main result before creating any node and reserves theorem kind for it. Supporting local results are Lemmas; located applicable results are imported results. A duplicate Theorem stops node creation and is reported. Supplied incomplete statements and conflicting targets remain departures. A one-file turn keeps an existing target and reports unattached proposals; several drafts of one work share a target, while independent drafts without a unique target are reported.
+2. Before making supporting results local proof tasks, agents retrieve by mathematical content even without draft citations. They read original sources and check hypotheses, quantifiers, constants, losses and normalisation. Queries, locators, mismatches and access failures are recorded. Not finding a source does not establish novelty. Prover and Decomposer may import an applicable source and attach an unreviewed imported result to their current node only; they gain no Reference-review authority and no general node-creation permission.
+3. Reader has at most one quarter of the existing total minutes, reserving three quarters for proof work. At its limit the host cancels it, records Budget, preserves partial work and starts no automatic retry. Reader and proof turns still share the unchanged total turns/time limit.
+4. After a fresh Reader turn, Pursue requires its active local map to be covered by the selected Theorem roots before proof runs. Parked, Rejected and detached split Claims remain historical records and are not coverage blockers. Existing standalone work on an existing map is reported as outside this pursuit, without blocking the target. New uncovered active work causes Stuck. Done requires every selected Coordinator to end Done; roots changed mid-run cause Stuck. Mixed Stuck/Budget results retain both causes and end Stuck. A missing Theorem is reported before coverage.
+5. Coverage checks do not identify the mathematical main result. An omitted result or inverted dependency direction may pass. Main-result recognition depends on Reader's instructions and must be tested in a fresh real trial; offline structural tests cannot establish it. A project from a failed run is kept as local evidence and does not enter Human Review.
+6. Agent identity includes role and agent-name markers, including Ask without a role. Such requests, and verifier-gated requests, cannot record author confirmation. With no draft record authorship stays unknown; changed agent drafts record the change without inventing who edited them. Review-now freezes work without confirming its summary. Only a researcher request confirming the summary can retain the author-confirmed provenance. Old bound records are not rewritten; their old confirmation label carries a legacy caveat.
+
+Acceptance and Reference review remain the researcher's decisions. No result of a failed run, green CI, or offline test marks macOS mature. #197 and #132 remain open until their required research workflow and human decisions are completed.

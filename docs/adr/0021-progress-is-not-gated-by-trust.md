@@ -7,7 +7,7 @@
 
 ADR-0004, ADR-0009, ADR-0010 and ADR-0014 stand untouched: only the researcher changes acceptance, and no node is Accepted on anything unaccepted.
 
-**Proposed amendment (2026-10-13)**: the researcher judged the first [#197](https://github.com/DengZhiyuan-math/proof-cli/issues/197) run failed because its main target was wrong. [agents #31](https://github.com/zeqome/proof-agents/issues/31) clarifies the Reader's single main Theorem; [agents #32](https://github.com/zeqome/proof-agents/issues/32) requires actual map coverage and truthful project endings; [core #221](https://github.com/DengZhiyuan-math/proof-cli/issues/221) separates an agent's request for review from author confirmation. The unreleased target-file self-check proposed in PRs core #220 / agents #30 / web #25 is replaced by the map check below. The failed project remains unchanged evidence; a rerun uses a new project.
+**Proposed corrections (2026-10-13)** are separate in [ADR-0023](0023-reader-pursue-and-review-corrections.md). The accepted historical decision below is retained.
 
 ## Context
 
@@ -38,10 +38,10 @@ The guarantee that has to survive is narrower than the gates. An Accepted node r
 
 ### B. The draft to the map, by an agent
 
-5. **A new role, the Reader**, turns the library into a map. It is started on a project, or on a library file, with nothing on the map, or with the researcher's partial map. It identifies the main result and searches for the literature its proof needs, including supporting results the draft does not cite. Before making one a local proof task, it searches by the statement's mathematical content, reads the original theorem, and checks assumptions, conclusion and normalisation. It records actual queries, source locators, applicability, mismatches and access failures; a missing match does not establish novelty. Then it writes:
+5. **A new role, the Reader**, turns the library into a map. It is started on a project, or on a library file, with nothing on the map, or with the researcher's partial map. It reads the draft and the works it cites, then writes:
    - Definitions;
-   - the project's one main Theorem and the supporting local Lemmas its proof uses, or means to state where the draft leaves a statement empty; a supporting local result is a Lemma even when the draft calls it a Theorem;
-   - imported results for applicable literature it cites or discovers, each with its reference;
+   - the Theorems and Lemmas the draft states, or means to state where the draft leaves a statement empty;
+   - imported results for the literature it calls on, each with its reference;
    - fog for what the draft leaves open.
 
    It may run `proof definition add`, `proof node create` (any kind but Claim), `proof reference import` and `proof fog add`, with `--created-by <agent>`. It records, in its closing note and in `scratch/reader/`, every place it departed from the draft and why (for example, a quantity defined in a way the draft cannot mean, or an object the draft leaves unspecified and the Reader fixes). It never proves anything.
@@ -55,8 +55,7 @@ The guarantee that has to survive is narrower than the gates. An Accepted node r
 
 7. **Pursue** is the researcher's one action on a Theorem: a Coordinator that runs everything below.
    - **No Claims yet.** It starts with a Decomposer turn.
-   - **No map yet.** Started on a project, it starts with a Reader turn and pursues the draft's main result as the project's single Theorem. The Reader identifies it before creating nodes, reserves theorem kind for it, and records its draft location and any supplied statement as a departure. Dependency-first creation does not allocate theorem kind to a supporting result. On `DUPLICATE_THEOREM`, the Reader stops and reports; it never downgrades the main result. A single-file Reader run keeps an existing project target. Several drafts of one work share that target; independent drafts without a unique project target are reported before nodes are created.
-   - **Check the map before node runs.** Project Pursue reads the actual map after the Reader, or at a Start on an existing map. Every local non-imported node must lie in a Theorem's dependency closure. Otherwise Pursue ends `stuck`, names the uncovered nodes, and starts no node run. It does not gate a researcher's edits on a Reader scratch file. Project `done` requires every Theorem's Coordinator to end `done` and no local node to remain uncovered; another ending names the Theorem and its result. This checks map coverage and progress, not mathematical correctness; Fog, Unfixed text and imported results remain ungated.
+   - **No map yet.** Started on a project, it starts with a Reader turn and pursues each Theorem the Reader states.
 
    The Decomposer's turn no longer stops for the researcher. Its split is the structure the Coordinator works. It adds the edges between its own Claims itself (`proof node depend <claim> --add <claim> --by <agent>`), since an edge between unaccepted Claims decides nothing. The researcher may edit the structure at any time, and the Coordinator rereads it at every turn boundary. Starting the Decomposer alone, without a Coordinator, still stops after the split, for a researcher who wants to read first.
 8. **A choice is made and recorded, not asked.** Where a role would end with `needs-human` because the statement admits two readings, a constant is unspecified or a case split is a judgement call, it instead does the following:
@@ -75,7 +74,6 @@ The guarantee that has to survive is narrower than the gates. An Accepted node r
     - the unfixed statements and Definitions agents wrote, with what the Reader departed from;
     - the standing questions;
     - the parked nodes.
-    An agent's own request for review records the key-ideas summary as unconfirmed by the author. Only the researcher's request may confirm a recorded agent draft. Existing snapshot provenance is kept; this change applies to new snapshots.
 
     Nothing in the queue stops the agents while it waits.
 
