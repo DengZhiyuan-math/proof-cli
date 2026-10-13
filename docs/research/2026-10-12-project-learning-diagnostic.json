@@ -1,0 +1,26 @@
+{
+  "observed_date": "2026-10-12",
+  "source": "/Volumes/Codex-Workspace/live/home/zhdeng/proof-cli/docs/audits/2026-10-11-integration-published-t8/projects/real-trial-profile/.proof/project.sqlite3",
+  "source_sha256": "0968b5c0d1984fcd5ce1f1dbdd4cf6898dbab61164f6009a9b51278ef40ee823",
+  "access": "SQLite URI mode=ro; PRAGMA query_only=ON; no ProjectStore or migration",
+  "memory_count": 12,
+  "layers": {
+    "semantic": 1,
+    "episodic": 3,
+    "procedural": 8
+  },
+  "statuses": {
+    "tentative": 1,
+    "failed": 3,
+    "tactic": 8
+  },
+  "candidate_proof_links": 0,
+  "review_links": 0,
+  "entries_with_tags": 0,
+  "limitations": [
+    "Archived T8 state, not live project state",
+    "Memory content is model-reported and not independently mathematically reviewed",
+    "Missing candidate/review links can be legitimate before a candidate or review exists",
+    "No cross-node causal benefit or human review time was measured"
+  ]
+}
