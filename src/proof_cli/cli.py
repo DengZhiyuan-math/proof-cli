@@ -147,6 +147,7 @@ from .references import ReferenceSourceType
 from .reference_edit import edit_reference
 from .proof_map import (
     ProofMapError,
+    get_node,
     add_dependency,
     claim_node,
     create_node,
@@ -275,11 +276,32 @@ def _root(path: str | None) -> Path:
     return Path(path or ".")
 
 
-def _author(flag: str | None) -> str:
+def _author(flag: str | None, root: str | None = None) -> str:
     """Who writes or edits (ADR-0021 points 5–6): the explicit flag, else the agent whose runtime this is
     (PROOF_AGENT_NAME), else the researcher. Agent-written text is restatable by agents; the researcher's is not, so
-    an agent's write must never fall back to "human"."""
-    return (flag or "").strip() or os.environ.get("PROOF_AGENT_NAME") or "human"
+    an agent's write must never fall back to "human".
+
+    In an agent's runtime the flag may only repeat the agent's own name, and that name may not be one the researcher
+    writes under ("human", the CLI's, or the project's git identity, the page's): an agent written as the researcher
+    would meet the researcher's Trust rules and skip Reference review (ADR-0022, ADR-0023 point 2), and its unwired
+    node would pass as the researcher's standalone work in Pursue's coverage (point 4)."""
+    flag = (flag or "").strip()
+    agent = os.environ.get("PROOF_AGENT_NAME") or os.environ.get("PROOF_AGENT_ROLE")
+    if not agent:
+        return flag or "human"
+    if flag and flag != agent:
+        raise ProofMapError("AGENT_AUTHOR_REFUSED", f"this agent's runtime writes as {agent!r}, not as {flag!r}")
+    if agent in _researcher_names(_root(root)):
+        raise ProofMapError("AGENT_AUTHOR_REFUSED", f"an agent may not be named {agent!r}: that is the researcher's name; set another `[studio] agent_name`")
+    return agent
+
+
+def _researcher_names(root: Path) -> set[str]:
+    """The names the researcher's own writes carry in the project at ROOT, the command's own: the CLI's "human", and
+    that project's git identity (the page's, proof-web)."""
+    from .reviews import git_identity
+
+    return {"human", git_identity(root)}
 
 
 CREATED_BY_HELP = "Who writes it (default: PROOF_AGENT_NAME from an agent's runtime, else human)"
@@ -504,6 +526,12 @@ def node_create(
         if refused:
             _emit_error(refused, json_output, command="node.create")
             raise typer.Exit(code=1)
+    if os.environ.get("PROOF_AGENT_ROLE") in ("prover", "decomposer") and os.environ.get("PROOF_AGENT_NODE") and (
+        kind != "imported_result" or not parent or parent != os.environ.get("PROOF_AGENT_NODE") or reassign
+    ):
+        _emit_error(ProofMapError("AGENT_IMPORT_REFUSED", "this role creates only an imported result attached to its current node, without --reassign"),
+                    json_output, command="node.create")
+        raise typer.Exit(code=1)
     if reassign and not parent:
         raise click.UsageError("--reassign goes with --parent: it takes the parent's claim over")
     store = get_store(_root(root))
@@ -521,7 +549,7 @@ def node_create(
             trust_level=trust_level or None,
             reference_id=reference_id or None,
             medium=medium or None,
-            created_by=_author(created_by),
+            created_by=_author(created_by, root),
         )
         node = create_node_under_parent(store, parent, reassign=reassign, **fields) if parent else create_node(store, **fields)
     except ProofMapError as exc:
@@ -545,7 +573,7 @@ def node_restate(
     Every verdict on the node and on what rests on it goes stale; fixed text is refused (TEXT_FIXED)."""
     store = get_store(_root(root))
     try:
-        node = restate_node(store, node_id, statement=statement, assumptions=assumption, definitions=definition, reason=reason, by=_author(by))
+        node = restate_node(store, node_id, statement=statement, assumptions=assumption, definitions=definition, reason=reason, by=_author(by, root))
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.restate")
         raise typer.Exit(code=1)
@@ -754,7 +782,7 @@ def definition_add(
     """Add a definition: TEXT is Markdown with $…$ maths, as a statement is. Name it from a node with `--definition`."""
     store = get_store(_root(root))
     try:
-        definition = add_definition(store, definition_id, term=term, text=text, created_by=_author(created_by))
+        definition = add_definition(store, definition_id, term=term, text=text, created_by=_author(created_by, root))
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="definition.add")
         raise typer.Exit(code=1)
@@ -774,7 +802,7 @@ def definition_edit(
     """Change a definition while no Review decision relies on it (ADR-0021; DEFINITION_FIXED otherwise: add a corrected one under a new id)."""
     store = get_store(_root(root))
     try:
-        definition = edit_definition(store, definition_id, term=term, text=text, edited_by=_author(edited_by), reason=reason)
+        definition = edit_definition(store, definition_id, term=term, text=text, edited_by=_author(edited_by, root), reason=reason)
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="definition.edit")
         raise typer.Exit(code=1)
@@ -791,7 +819,7 @@ def definition_remove(
     """Remove a definition no node names."""
     store = get_store(_root(root))
     try:
-        removed = remove_definition(store, definition_id, removed_by=_author(removed_by))
+        removed = remove_definition(store, definition_id, removed_by=_author(removed_by, root))
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="definition.remove")
         raise typer.Exit(code=1)
@@ -835,7 +863,7 @@ def fog_add(
     """Add a fog item: a difficulty you can't state precisely yet."""
     store = get_store(_root(root))
     try:
-        item = add_fog(store, text, near=near, notes=notes, created_by=_author(created_by))
+        item = add_fog(store, text, near=near, notes=notes, created_by=_author(created_by, root))
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="fog.add")
         raise typer.Exit(code=1)
@@ -883,7 +911,7 @@ def fog_edit(
     try:
         if clear_near and near:
             raise ProofMapError("FOG_FLAG_CONFLICT", "fog edit takes either --near or --clear-near, not both")
-        item = edit_fog(store, fog_id, text=text, near=[] if clear_near else (near or None), notes=notes, edited_by=_author(edited_by))
+        item = edit_fog(store, fog_id, text=text, near=[] if clear_near else (near or None), notes=notes, edited_by=_author(edited_by, root))
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="fog.edit")
         raise typer.Exit(code=1)
@@ -901,7 +929,7 @@ def fog_drop(
     """Give an item up, saying why. Reversible with `fog reopen`."""
     store = get_store(_root(root))
     try:
-        item = drop_fog(store, fog_id, reason=reason, dropped_by=_author(dropped_by))
+        item = drop_fog(store, fog_id, reason=reason, dropped_by=_author(dropped_by, root))
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="fog.drop")
         raise typer.Exit(code=1)
@@ -913,7 +941,7 @@ def fog_reopen(fog_id: str, root: str = ROOT_OPTION, by: str = typer.Option("", 
     """Take a dropped item back."""
     store = get_store(_root(root))
     try:
-        item = reopen_fog(store, fog_id, by=_author(by))
+        item = reopen_fog(store, fog_id, by=_author(by, root))
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="fog.reopen")
         raise typer.Exit(code=1)
@@ -940,7 +968,7 @@ def fog_crystallize(
     try:
         made = crystallize_fog(
             store, fog_id, node_id, statement, parent=parent, no_parent=no_parent, reassign=reassign,
-            assumptions=assumption, display_label=display_label, created_by=_author(created_by),
+            assumptions=assumption, display_label=display_label, created_by=_author(created_by, root),
             medium=medium or None,
         )
     except ProofMapError as exc:
@@ -1065,7 +1093,8 @@ def node_request_review(
         gates = list(gated_by or [])
         if gates and (len(gates) != 1 or not re.fullmatch(r"[0-9a-f]{64}", gates[0])):  # given once: a repeat, equal or not, is refused
             raise ProofMapError("GATE_MALFORMED", "--gated-by is the passing verdict's SHA-256 (64 hex digits), given once; repeated, empty or malformed, the request is refused")
-        record = request_review(store, node_id, requested_by=requested_by, rationale=rationale, gated_by=gates[0] if gates else None)
+        record = request_review(store, node_id, requested_by=requested_by, rationale=rationale, gated_by=gates[0] if gates else None,
+                                requester_role=os.environ.get("PROOF_AGENT_ROLE") or ("agent" if os.environ.get("PROOF_AGENT_NAME") else None))
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.request_review")
         raise typer.Exit(code=1)
@@ -1148,7 +1177,7 @@ def node_split(
             child_id, statement = entry.split("=", 1)
             specs.append({"id": child_id, "statement": statement, "assumptions": list(assumption or []), "display_label": display_label,
                           "definitions": list(definition or [])})
-        children = split_node(store, parent_id, specs, created_by=_author(created_by), reassign=reassign)
+        children = split_node(store, parent_id, specs, created_by=_author(created_by, root), reassign=reassign)
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.split")
         raise typer.Exit(code=1)
@@ -1179,7 +1208,7 @@ def node_progress(
     coordinator: str = typer.Option("", "--coordinator", help="What a Coordinator did on this Theorem or Lemma's subtree: a run it started, a redirect, a stop (ADR-0019 point 18); no role"),
     question: str = typer.Option("", "--question", help="A judgement call made instead of stopping: \"<the choice made; the alternative>\", a Standing question the researcher answers later (ADR-0021)"),
     role: str = typer.Option("", "--role", help=f"{_ROLES_HELP} (default: PROOF_AGENT_ROLE, set in the agent's runtime)"),
-    by: str = typer.Option("", "--by", help="Who reports; empty means PROOF_AGENT_NAME from the agent's runtime, else human"),
+    by: str = typer.Option("", "--by", help="Who reports (default: PROOF_AGENT_NAME from an agent's runtime, else human; an agent reports only as itself)"),
     root: str = ROOT_OPTION,
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
@@ -1196,7 +1225,7 @@ def node_progress(
                 typer.echo(render_work_log(node_id, log))
             return
         entry = record_progress(
-            store, node_id, role=role or os.environ.get("PROOF_AGENT_ROLE") or None, by=by or os.environ.get("PROOF_AGENT_NAME") or "human",
+            store, node_id, role=role or os.environ.get("PROOF_AGENT_ROLE") or None, by=_author(by, root),
             plan=plan or None, step=step, status=status or None, note=note, handoff=handoff or None,
             verdict=verdict or None, attempt=attempt or None, method=method or None, failed_on=failed_on or None, coordinator=coordinator or None,
             question=question or None,
@@ -1246,7 +1275,7 @@ def node_medium_set(
     """Switch a node's medium. Allowed at any time: files stay, the missing entry (run.sh or proof.tex) is scaffolded, an Acceptance stands."""
     store = get_store(_root(root))
     try:
-        node = set_medium(store, node_id, medium, edited_by=_author(by))
+        node = set_medium(store, node_id, medium, edited_by=_author(by, root))
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.medium.set")
         raise typer.Exit(code=1)
@@ -1275,8 +1304,12 @@ def node_depend(
     if bool(to) != bool(move):
         raise click.UsageError("--move and --to go together: --move <dependency> --to <child>")
     store = get_store(_root(root))
-    by = _author(by)
     try:
+        by = _author(by, root)
+        if os.environ.get("PROOF_AGENT_ROLE") == "decomposer" and node_id == os.environ.get("PROOF_AGENT_NODE") and add:
+            target = get_node(store, add)
+            if target is None or target.kind != ProofMapNodeKind.imported_result or reassign:
+                raise ProofMapError("AGENT_IMPORT_REFUSED", "a Decomposer adds only an imported result to its current node, without --reassign")
         if add:
             edit = add_dependency(store, node_id, add, edited_by=by, reassign=reassign)
         elif remove:
@@ -1820,7 +1853,7 @@ def reference_import(
                 identifier=identifier,
                 url=url,
                 notes=notes,
-                created_by=_author(created_by),
+                created_by=_author(created_by, root),
             )
         )
     except ProofMapError as exc:
@@ -1864,7 +1897,7 @@ def reference_edit(
     store = get_store(_root(root))
     try:
         reference = edit_reference(store, reference_id, {field: value for field, value in given.items() if value is not None},
-                                   edited_by=_author(edited_by), reason=reason)
+                                   edited_by=_author(edited_by, root), reason=reason)
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="reference.edit")
         raise typer.Exit(code=1)

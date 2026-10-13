@@ -38,7 +38,7 @@ def write_key_ideas(store_or_root, node_id: str, text: str = KEY_IDEAS) -> Path:
     root = store_or_root if isinstance(store_or_root, Path) else store_or_root.root
     path = node_folder(root, node_id) / "key-ideas.md"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+    path.write_text(text, encoding="utf-8", newline="")  # the same bytes on Windows: a read-back and rewrite stays "\n"
     return path
 
 

@@ -7,6 +7,8 @@
 
 ADR-0004, ADR-0009, ADR-0010 and ADR-0014 stand untouched: only the researcher changes acceptance, and no node is Accepted on anything unaccepted.
 
+**Proposed corrections (2026-10-13)** are separate in [ADR-0023](0023-reader-pursue-and-review-corrections.md). The accepted historical decision below is retained.
+
 ## Context
 
 A trial put a half-finished research draft in the library. Its main theorem had no statement, a lemma had no proof, and a definition was wrong as written. Nothing in the system could start on it.
