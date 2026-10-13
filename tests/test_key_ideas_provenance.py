@@ -28,6 +28,19 @@ def test_agent_role_request_review_records_unconfirmed_summary(tmp_path):
     assert json.loads(result.output)["data"]["key_ideas_drafted_by"] == "agent (not confirmed by author)"
 
 
+def test_ask_agent_without_role_cannot_confirm_an_author_draft(tmp_path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="L", kind="lemma", statement="A bound")
+    working_proof_path(store.root, "L").write_text("A proof")
+    summary = write_key_ideas(store, "L").read_bytes()
+    record_key_ideas_draft(store, "L", agent="ask-agent", content=summary)
+    result = CliRunner().invoke(app, ["node", "request-review", "L", "--root", str(tmp_path),
+                                    "--rationale", "scoped", "--requested-by", "ask-agent", "--json"],
+                                env={"PROOF_AGENT_NAME": "ask-agent", "PROOF_AGENT_ROLE": ""})
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["data"]["key_ideas_drafted_by"] == "agent (not confirmed by author)"
+
+
 def test_human_request_confirms_draft_and_later_agent_request_keeps_old_snapshot(tmp_path):
     store = ensure_project(tmp_path)
     create_node(store, node_id="L", kind="lemma", statement="A bound")
@@ -50,4 +63,25 @@ def test_agent_changed_summary_never_claims_an_author_edit(tmp_path):
     record_key_ideas_draft(store, "L", agent="typesetter", content=summary)
     write_key_ideas(store, "L", summary.decode().replace("compactness", "continuity"))
     record = request_review(store, "L", requested_by="prover", requester_role="prover", rationale="scoped")
+    assert record.key_ideas_drafted_by == "agent draft changed (not confirmed by author)"
+
+
+def test_agent_request_without_a_draft_does_not_invent_authorship(tmp_path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="L", kind="lemma", statement="A bound")
+    working_proof_path(store.root, "L").write_text("A proof")
+    write_key_ideas(store, "L")
+    record = request_review(store, "L", requested_by="ask", requester_role="agent", rationale="scoped")
+    assert record.key_ideas_drafted_by == "unrecorded authorship (not confirmed by author)"
+
+
+def test_gated_request_without_a_role_is_still_unconfirmed(tmp_path):
+    from proof_cli.proof_map import record_progress
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="L", kind="lemma", statement="A bound")
+    working_proof_path(store.root, "L").write_text("A proof")
+    summary = write_key_ideas(store, "L").read_bytes()
+    record_key_ideas_draft(store, "L", agent="worker", content=summary)
+    verdict = record_progress(store, "L", role="verifier", by="worker", verdict="passed")
+    record = request_review(store, "L", requested_by="worker", gated_by=verdict["inputs_sha256"], rationale="scoped")
     assert record.key_ideas_drafted_by == "agent (not confirmed by author)"

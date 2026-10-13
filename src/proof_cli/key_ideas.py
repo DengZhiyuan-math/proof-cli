@@ -48,7 +48,9 @@ AUTHOR = "author"
 AGENT_CONFIRMED = "agent (confirmed by author at request-review)"
 AGENT_EDITED = "agent draft, edited by author"
 AGENT_UNCONFIRMED = "agent (not confirmed by author)"
-PROVENANCES = (AUTHOR, AGENT_CONFIRMED, AGENT_EDITED, AGENT_UNCONFIRMED)
+AGENT_CHANGED_UNCONFIRMED = "agent draft changed (not confirmed by author)"
+UNRECORDED_UNCONFIRMED = "unrecorded authorship (not confirmed by author)"
+PROVENANCES = (AUTHOR, AGENT_CONFIRMED, AGENT_EDITED, AGENT_UNCONFIRMED, AGENT_CHANGED_UNCONFIRMED, UNRECORDED_UNCONFIRMED)
 
 
 def digest(data: bytes) -> str:
@@ -61,7 +63,9 @@ def provenance(frozen: bytes, drafted_sha256: str | None, *, author_requested: b
     requesting review); an agent draft the author edited, otherwise. An agent's
     own request never confirms authorship or an author edit."""
     if not author_requested:
-        return AGENT_UNCONFIRMED
+        if drafted_sha256 is None:
+            return UNRECORDED_UNCONFIRMED
+        return AGENT_UNCONFIRMED if digest(frozen) == drafted_sha256 else AGENT_CHANGED_UNCONFIRMED
     if drafted_sha256 is None:
         return AUTHOR
     return AGENT_CONFIRMED if digest(frozen) == drafted_sha256 else AGENT_EDITED
