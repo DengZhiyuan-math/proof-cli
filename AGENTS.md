@@ -27,6 +27,13 @@ The CLI should help a researcher manage a proof map of nodes (theorems, lemmas, 
 
 Development follows the Pocock engineering skills (`/wayfinder`, `/to-spec`, `/to-tickets`, `/implement`, `/tdd`, ...), with work tracked in GitHub Issues. The GSD workflow has been retired: `.planning/` is kept as a read-only archive of milestones v1.0–v1.3 and earlier research, and is not a source of current plans.
 
+### Current platform priority
+
+- macOS is the active development and acceptance target. Prioritize a complete local workflow and a mature system across the four packages.
+- Windows and Linux development are low-priority Wayfinder Fog. Do not plan synchronous delivery, platform-specific implementation, or CI performance work until the researcher explicitly promotes that Fog.
+- Keep existing cross-platform code. The GitHub Actions workflows of all three repositories (they run on Linux and Windows only) are disabled while that Fog is parked, by the researcher's decision on 2026-10-13; the workflow files stay, and re-enabling them is part of promoting the Fog. Until then the gate is the full test suites run locally on macOS. Neither CI nor local tests establish platform acceptance.
+- The platform plan [macOS 成熟度与后续平台开发地图](https://github.com/DengZhiyuan-math/proof-cli/issues/215) is closed; its Windows/Linux Fog stays there as an archive (development planning, not a research project's Proof fog). macOS maturity is decided in [#197](https://github.com/DengZhiyuan-math/proof-cli/issues/197): the researcher's own unfinished draft runs through the full automated flow on pinned package versions, the researcher checks the result by hand, and only the researcher's explicit approval marks macOS mature.
+
 ## Agent skills
 
 ### Issue tracker
