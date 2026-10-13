@@ -1720,7 +1720,7 @@ def release_node(
     return claim.model_copy(update={"released_by": claimant_id, "release_reason": release_reason, "released_at": released_at})
 
 
-def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rationale: str, unassign: bool = False, gated_by: str | None = None) -> CandidateProofRecord:
+def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rationale: str, unassign: bool = False, gated_by: str | None = None, requester_role: str | None = None) -> CandidateProofRecord:
     """Snapshot a node's working `proof.tex` for review (ADR-0010).
 
     The working sources are edited freely — in the node's studio, by agents —
@@ -1734,7 +1734,8 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
     Human Review — decisions on the lost snapshot stay unverifiable.
     Needs the node's key-ideas summary, `key-ideas.md`, with its required fields filled in
     (KEY_IDEAS_REQUIRED): it is frozen with the proof, and a change to it alone is a new
-    version (ADR-0013). Requesting review is how its author confirms a draft the agent wrote.
+    version (ADR-0013). The researcher's request confirms a draft the agent wrote;
+    an agent role or agent-gated request records it as unconfirmed (#221).
     Needs no claim. A node someone has claimed is theirs to hand over, and
     their claim ends here, as a wayfinder ticket's does when its work is.
     `unassign` is the researcher's request on a node someone else holds (the studio's
@@ -1822,7 +1823,8 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
         resnapshot_of = current.version if lost else None
         # who wrote the summary being frozen, from the drafts the studio recorded (not from the file)
         draft = latest_event(store, KEY_IDEAS_DRAFTED, node_id, conn=conn)
-        drafted_by = key_ideas.provenance(contents[key_ideas.KEY_IDEAS_FILE], draft.payload.get("sha256") if draft else None)
+        drafted_by = key_ideas.provenance(contents[key_ideas.KEY_IDEAS_FILE], draft.payload.get("sha256") if draft else None,
+                                         author_requested=not requester_role and gated_by is None)
 
         # past any snapshot already on disk too: one the index never got is an orphan, reported
         # by list_integrity_warnings, and never overwritten

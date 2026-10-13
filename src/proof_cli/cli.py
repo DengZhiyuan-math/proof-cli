@@ -1065,7 +1065,8 @@ def node_request_review(
         gates = list(gated_by or [])
         if gates and (len(gates) != 1 or not re.fullmatch(r"[0-9a-f]{64}", gates[0])):  # given once: a repeat, equal or not, is refused
             raise ProofMapError("GATE_MALFORMED", "--gated-by is the passing verdict's SHA-256 (64 hex digits), given once; repeated, empty or malformed, the request is refused")
-        record = request_review(store, node_id, requested_by=requested_by, rationale=rationale, gated_by=gates[0] if gates else None)
+        record = request_review(store, node_id, requested_by=requested_by, rationale=rationale, gated_by=gates[0] if gates else None,
+                                requester_role=os.environ.get("PROOF_AGENT_ROLE") or None)
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.request_review")
         raise typer.Exit(code=1)
