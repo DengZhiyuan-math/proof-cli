@@ -164,10 +164,12 @@ Starts alone on a Theorem or Lemma with no children created by Split; ordinary d
 
 **Reader** (a Proof agent role):
 States a draft in the library as a map: Definitions, Theorems and Lemmas, imported results with their references, and fog. It records where it departed from the draft and why, and proves nothing (ADR-0021). Its runtime sets the reader role (`PROOF_AGENT_ROLE=reader`, no node role), under which `proof node create` refuses, on the parsed arguments, a Claim, `--parent` and `--reassign` (READER_ROLE_REFUSED); a statement's text is never searched (#203).
+Before creating nodes, it records the draft's main result in `scratch/reader/main-target.json`, with `node_id` and `source` (draft path and label or line range). The main result gets the project's only theorem-kind node. Supporting results are lemma-kind nodes even when the draft calls them Theorems. A missing or conflicting main target is reported, never worked around by downgrading the main result to a Lemma.
 _Avoid_: importer, parser, formalizer
 
 **Pursue**:
 The researcher's one action that sets the agents working to the end: a Coordinator on a Theorem, preceded by a Decomposer turn when it has no Claims, or by a Reader turn when started on a project with no map (ADR-0021). A project Pursue's steps are recorded as `pursuit` events, read by `proof project progress`; one with no recorded end reads interrupted, and nothing resumes it (issue #201).
+After a Reader turn, project Pursue checks that the declared main target is its sole scheduled Theorem before starting any node run. A missing, unreadable or mismatched target report ends the Reader phase as failed and Pursue as stuck. An existing Reader map is checked again before Start, also after restart; a failure refuses Start before any provider or new pursuit event. This is a target consistency check, not Human Review. Fog, Unfixed text and unreviewed imports remain ungated. A researcher's existing map with no Reader scratch folder needs no Reader report.
 _Avoid_: autopilot, auto mode
 
 **Standing question**:
