@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
@@ -105,3 +106,18 @@ def test_an_agents_work_log_entry_is_never_the_researchers(tmp_path):
         assert result.exit_code == 0, result.output
         by.append(json.loads(result.output)["data"]["by"])
     assert by == ["worker", "prover"]   # a role without a name is still not the researcher
+
+
+def test_the_researchers_name_is_read_from_the_project_the_command_writes(tmp_path, monkeypatch):
+    """`--root target` without PROOF_ROOT: the name checked is target's researcher's, not the current folder's."""
+    import proof_cli.reviews as reviews
+
+    target, elsewhere = tmp_path / "target", tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    store = ensure_project(target)
+    monkeypatch.setattr(reviews, "git_identity", lambda root: "A <a@example.org>" if Path(root).resolve() == target.resolve() else "B <b@example.org>")
+    monkeypatch.chdir(elsewhere)
+    result = CliRunner().invoke(app, ["node", "create", "X", "lemma", "Unwired", "--root", str(target), "--json"],
+                                env={"PROOF_AGENT_ROLE": "reader", "PROOF_AGENT_NAME": "A <a@example.org>", "PROOF_ROOT": None})
+    assert result.exit_code == 1 and json.loads(result.output)["error"]["code"] == "AGENT_AUTHOR_REFUSED", result.output
+    assert list_nodes(store) == []
