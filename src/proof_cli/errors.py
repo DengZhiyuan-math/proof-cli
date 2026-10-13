@@ -25,7 +25,7 @@ ERROR_CODES: dict[str, str] = {
     "NODE_ALREADY_EXISTS": "a proof map node with this id already exists",
     "INVALID_NODE_ID": "a node id must be a plain folder name: letters, digits, '.', '_' or '-'",
     "INVALID_KIND": "not a proof map node kind",
-    "AGENT_AUTHOR_REFUSED": "in an agent's runtime (PROOF_AGENT_NAME or PROOF_AGENT_ROLE set), --created-by / --by / --edited-by may only name that agent; an agent never writes as the researcher",
+    "AGENT_AUTHOR_REFUSED": "in an agent's runtime (PROOF_AGENT_NAME or PROOF_AGENT_ROLE set), --created-by / --by / --edited-by may only name that agent, and the agent may not be named as the researcher (\"human\" or the project's git identity)",
     "AGENT_IMPORT_REFUSED": "a Prover or Decomposer may create only an imported result attached to its current node, without taking another claim over",
     "INVALID_TRUST_LEVEL": "not a trust level",
     "DUPLICATE_THEOREM": "the project already has its one theorem-kind node",
