@@ -1654,7 +1654,8 @@ cm.setOption("extraKeys", { ...cm.getOption("extraKeys"), "Cmd-L": askAboutSelec
     const p = prov();
     if (!p.available) return chatAppend(`<div class="err">${esc(p.reason || "No AI provider is set up.")}</div>`, "card");
     const known = p.rate || store.get("chat.rate", null);
-    if (p.usage_limits && (!known || !known.at || Date.now() / 1000 - known.at > 600)) checkUsage(true);
+    // Opening a hosted proof agent must not spend model usage; probing remains an explicit refresh.
+    if (!r.proof_agent && p.usage_limits && (!known || !known.at || Date.now() / 1000 - known.at > 600)) checkUsage(true);
   });
 }
 
