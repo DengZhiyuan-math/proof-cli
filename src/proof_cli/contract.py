@@ -16,14 +16,14 @@ from __future__ import annotations
 
 import os
 import sys
-from contextlib import nullcontext
+from contextlib import AbstractContextManager, nullcontext
 
 import click
 import typer
 from typer.core import TyperGroup
 
 from .envelope import dump_envelope, error_envelope
-from .storage import ProjectNotFoundError, acting_as, read_only
+from .storage import ProjectNotFoundError, acting_as, not_acting, read_only
 
 # Commands that may start a project in an empty folder, by their path from `proof`:
 # the ones that create content. Everything else needs an existing project.
@@ -70,12 +70,13 @@ def command_path(group: click.Group, args: list[str], prog_name: str) -> list[st
     return path
 
 
-def _agent_turn():
+def _agent_turn() -> AbstractContextManager[None]:
     """The agent turn this invocation writes for (#227), from the runtime a Proof agent's turn gets: PROOF_AGENT_NODE
     and PROOF_AGENT_ROLE (a Reader's names no node, the map's agent only PROOF_AGENT_NAME). Read here, at the CLI's
-    edge, once per invocation, and left when it ends; none outside an agent's runtime."""
+    edge, once per invocation, and left when it ends. Outside an agent's runtime the invocation is explicitly not
+    acting, so it never inherits a turn an enclosing block in the same process acts as."""
     name, role, node = (os.environ.get(key, "").strip() for key in ("PROOF_AGENT_NAME", "PROOF_AGENT_ROLE", "PROOF_AGENT_NODE"))
-    return acting_as(node or None, role or None) if (name or role or node) else nullcontext()
+    return acting_as(node or None, role or None) if (name or role or node) else not_acting()
 
 
 class ProofGroup(TyperGroup):
