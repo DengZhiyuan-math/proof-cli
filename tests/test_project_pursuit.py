@@ -156,3 +156,20 @@ def test_a_pursuit_recorded_without_results_reads_them_as_unknown_not_empty(tmp_
 
     [view] = _progress_json(tmp_path)
     assert view["results"] is None and view["budget"] is None
+
+
+def test_plain_progress_says_when_a_recorded_spend_is_incomplete(tmp_path: Path):
+    """A host that could not count every turn says so in the budget it records; the plain view says it, JSON keeps it."""
+    store = ensure_project(tmp_path)
+    counted = _start(store)
+    P.record_pursuit(store, "end", pursuit_id=counted, outcome="done", reason="ended", budget={"turns_max": 12, "spent": 4})
+    partial = _start(store)
+    P.record_pursuit(store, "end", pursuit_id=partial, outcome="stuck", reason="the Reader could not start",
+                     budget={"turns_max": 12, "spent": 0, "spend_incomplete": True})
+
+    first, second = _progress_json(tmp_path)
+    assert first["budget"] == {"turns_max": 12, "spent": 4}
+    assert second["budget"] == {"turns_max": 12, "spent": 0, "spend_incomplete": True}
+    text = runner.invoke(app, ["project", "progress", "--root", str(tmp_path)]).output
+    assert text.count("spend: incomplete — not every turn was counted") == 1
+    assert text.index("spend: incomplete") > text.index(partial)
