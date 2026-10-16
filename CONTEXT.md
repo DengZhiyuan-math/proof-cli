@@ -182,7 +182,7 @@ A node whose run budget is spent under a Coordinator. The Coordinator goes on wi
 _Avoid_: stuck (a run's state), failed
 
 **Review queue**:
-Everything waiting on the researcher, ordered bottom-up, none of which holds the agents back: Provisional nodes, unreviewed imported results, Unfixed agent-written text, Standing questions and Parked nodes (ADR-0021).
+Everything waiting on the researcher, ordered bottom-up, none of which holds the agents back: Provisional nodes and other nodes with a Candidate proof requested for review and still awaiting a Review decision, unreviewed imported results, Unfixed agent-written text, Standing questions and Parked nodes (ADR-0021).
 _Avoid_: inbox, approvals
 
 **Decidable now**:
