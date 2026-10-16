@@ -442,6 +442,11 @@ def render_work_log(node_id: str, log: list[dict]) -> str:
     for entry in log:
         when = str(entry.get("at", ""))[:16].replace("T", " ")
         who = f"{entry.get('role') or ''}{'·' if entry.get('role') and entry.get('by') else ''}{entry.get('by') or ''}"
+        # whose turn did it (#227): another node's, or none a record ties it to — said, as the page says it
+        if entry.get("from_node"):
+            who += f" · from {entry['from_node']}"
+        elif entry.get("role_unknown"):
+            who += " · role unknown"
         console.print(f"{when}  {who:<24} {_work_log_body(entry)}")
     return console.export_text()
 
@@ -484,7 +489,9 @@ def render_project_progress(pursuits: list[dict]) -> str:
             if event["budget"] is not None:
                 line += f" (budget {event['budget']})"
             console.print(line)
-        if (pursuit.get("budget") or {}).get("spend_incomplete") is True:  # the host could not count every turn
+        if pursuit.get("budget") is None:  # history from before the total was kept (#223): unknown, never nothing spent
+            console.print("  budget: not recorded")
+        elif pursuit["budget"].get("spend_incomplete") is True:  # the host could not count every turn
             console.print("  spend: incomplete — not every turn was counted")
         results = pursuit.get("results")
         if results is None:

@@ -173,3 +173,17 @@ def test_plain_progress_says_when_a_recorded_spend_is_incomplete(tmp_path: Path)
     text = runner.invoke(app, ["project", "progress", "--root", str(tmp_path)]).output
     assert text.count("spend: incomplete — not every turn was counted") == 1
     assert text.index("spend: incomplete") > text.index(partial)
+
+
+def test_plain_progress_says_when_a_pursuits_budget_was_not_recorded(tmp_path: Path):
+    """#223: history from before the Pursue's total was kept read `null` as JSON, and plain progress said nothing of it: an
+    unrecorded budget is said as that, never left out or read as nothing spent."""
+    store = ensure_project(tmp_path)
+    older = _start(store)
+    P.record_pursuit(store, "end", pursuit_id=older, outcome="stuck", reason="the Reader stated no Theorem")
+    counted = _start(store)
+    P.record_pursuit(store, "end", pursuit_id=counted, outcome="done", reason="ended", budget={"turns_max": 12, "spent": 4})
+
+    text = runner.invoke(app, ["project", "progress", "--root", str(tmp_path)]).output
+    assert text.count("budget: not recorded") == 1
+    assert text.index(older) < text.index("budget: not recorded") < text.index(counted)
