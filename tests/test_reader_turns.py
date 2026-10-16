@@ -21,9 +21,9 @@ runner = CliRunner()
 
 CONVERSATION = [
     {"t": "init", "session_id": "s-1", "model": "claude-opus-5-5"},
-    {"t": "tool", "id": "u1", "name": "Bash", "summary": "pdftotext draft.pdf"},
-    {"t": "tool_result", "id": "u1", "error": True, "preview": "Exit code 127: command not found: pdftotext"},
-    {"t": "text", "text": "Reading the PDF pages instead."},
+    {"t": "tool", "id": "u1", "name": "Bash", "summary": "cat notes/absent.txt"},
+    {"t": "tool_result", "id": "u1", "error": True, "preview": "Exit code 1: no such file: notes/absent.txt"},
+    {"t": "text", "text": "Going on without that file."},
     {"t": "done", "exit": 0, "is_error": False, "session_id": "s-1"},
 ]
 
@@ -61,16 +61,16 @@ def test_a_reader_turn_that_ends_is_kept_with_its_conversation_and_read_back_by_
 def test_a_reader_turn_that_failed_after_it_began_and_one_stopped_say_so(tmp_path: Path):
     store = ensure_project(tmp_path)
     pid = _pursuit(store)
-    failed = [{"t": "init", "session_id": "s-2"}, {"t": "done", "exit": 23, "is_error": True, "stderr": "provider failure"}]
+    failed = [{"t": "init", "session_id": "s-2"}, {"t": "done", "exit": 2, "is_error": True, "stderr": "the provider stopped"}]
     P.record_reader_turn(store, phase="started", turn="r2", by="claude-code", provider="claude", pursuit_id=pid)
     P.record_reader_turn(store, phase="ended", turn="r2", by="claude-code", provider="claude", pursuit_id=pid,
-                         job=4, session_id="s-2", outcome="failed", reason="provider failure", exit=23, is_error=True, events=failed)
+                         job=4, session_id="s-2", outcome="failed", reason="the provider stopped", exit=2, is_error=True, events=failed)
     P.record_reader_turn(store, phase="started", turn="r3", by="claude-code", provider="claude", pursuit_id=pid)
     P.record_reader_turn(store, phase="ended", turn="r3", by="claude-code", provider="claude", pursuit_id=pid,
                          job=5, outcome="stopped", reason="stopped by the researcher", events=[])
 
     by_turn = {t["turn"]: t for t in P.reader_turns(store)}
-    assert (by_turn["r2"]["outcome"], by_turn["r2"]["exit"], by_turn["r2"]["is_error"], by_turn["r2"]["reason"]) == ("failed", 23, True, "provider failure")
+    assert (by_turn["r2"]["outcome"], by_turn["r2"]["exit"], by_turn["r2"]["is_error"], by_turn["r2"]["reason"]) == ("failed", 2, True, "the provider stopped")
     assert P.reader_turn_transcript(store, "r2")["events"] == failed
     assert (by_turn["r3"]["outcome"], by_turn["r3"]["reason"]) == ("stopped", "stopped by the researcher")
 
@@ -131,7 +131,7 @@ def test_a_reader_refused_before_its_job_existed_has_no_turn_to_keep(tmp_path: P
     """A refusal before launch is no turn: its pursuit lists no Reader turn, not an unknown one (#224)."""
     store = ensure_project(tmp_path)
     pid = _pursuit(store)
-    P.record_pursuit(store, "reader_end", pursuit_id=pid, outcome="failed", reason="claude: command not found", launched=False)
+    P.record_pursuit(store, "reader_end", pursuit_id=pid, outcome="failed", reason="the provider's executable is missing", launched=False)
     P.record_pursuit(store, "end", pursuit_id=pid, outcome="stuck", reason="the Reader could not start")
 
     [view] = _progress_json(tmp_path)
@@ -294,19 +294,19 @@ def test_the_cli_reads_a_reader_turn_and_its_conversation_back(tmp_path: Path):
     text = shown.output
     assert "turn outcome: ok, exit 0" in text
     assert "1 tool-call failure(s) in the turn" in text
-    assert "tool result u1: FAILED — Exit code 127: command not found: pdftotext" in text
-    assert "Reading the PDF pages instead." in text and "nothing shortened" not in text and "whole" not in text
+    assert "tool result u1: FAILED — Exit code 1: no such file: notes/absent.txt" in text
+    assert "Going on without that file." in text and "nothing shortened" not in text and "whole" not in text
 
 
 def test_a_long_text_is_shown_whole_in_plain_output(tmp_path: Path):
     store = ensure_project(tmp_path)
     pid = _pursuit(store)
-    long_text = "a bound " * 400
+    long_text = "a sentence of the reply " * 400
     P.record_reader_turn(store, phase="started", turn="r9", by="claude-code", provider="claude", pursuit_id=pid)
     _ended(store, pid, "r9", events=[{"t": "text", "text": long_text}, {"t": "done", "exit": 0}])
 
     shown = runner.invoke(app, ["project", "reader-turn", "r9", "--root", str(tmp_path)])
-    assert shown.exit_code == 0 and " ".join(shown.output.split()).count("a bound") == 400
+    assert shown.exit_code == 0 and " ".join(shown.output.split()).count("a sentence of the reply") == 400
 
 
 def test_an_unknown_reader_turn_is_refused_with_a_code(tmp_path: Path):

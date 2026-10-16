@@ -52,7 +52,7 @@ def test_a_fog_item_one_turn_adds_near_two_nodes_carries_that_turns_role_in_both
     store = _two_nodes(tmp_path)
     _turn(store, "A", "verifier", "started", "ta")
     _turn(store, "B", "prover", "started", "tb")
-    _run(tmp_path, "fog", "add", "the two estimates may need the same constant", "--near", "A", "--near", "B", env=_runtime("B", "prover"))
+    _run(tmp_path, "fog", "add", "both proofs may use one lemma", "--near", "A", "--near", "B", env=_runtime("B", "prover"))
 
     [in_a] = _fog(store, "A")
     [in_b] = _fog(store, "B")
@@ -80,15 +80,15 @@ def test_an_experiment_and_a_definition_edit_by_one_turn_keep_its_role_in_every_
     from proof_cli.fog import add_fog
 
     store = ensure_project(tmp_path)
-    add_definition(store, "D", term="height", text="$\\operatorname{ht}(z)$", created_by=AGENT)
+    add_definition(store, "D", term="weight", text="$w(x) = x^2$", created_by=AGENT)
     create_node(store, node_id="A", kind="lemma", statement="lemma A", definitions=["D"], created_by=AGENT)
     create_node(store, node_id="B", kind="lemma", statement="lemma B", definitions=["D"], created_by=AGENT)
-    fog = add_fog(store, "is the constant uniform?", near=["A", "B"], created_by="ada")
+    fog = add_fog(store, "does the bound hold for every n?", near=["A", "B"], created_by="ada")
     _turn(store, "A", "verifier", "started", "ta")
     _turn(store, "B", "numerics", "started", "tb")
-    _run(tmp_path, "fog", "experiment", "record", fog.id, "supports", "--summary", "checked up to 10^4", "--run-by", AGENT,
+    _run(tmp_path, "fog", "experiment", "record", fog.id, "supports", "--summary", "checked for n up to 100", "--run-by", AGENT,
          env=_runtime("B", "numerics"))
-    _run(tmp_path, "definition", "edit", "D", "--text", "$\\sup_\\gamma \\operatorname{Im}(\\gamma z)$", "--reason", "the sup was of the wrong quantity",
+    _run(tmp_path, "definition", "edit", "D", "--text", "$w(x) = |x|^2$", "--reason", "the absolute value was missing",
          env=_runtime("B", "numerics"))
 
     for node, from_node in (("A", "B"), ("B", None)):
