@@ -618,3 +618,30 @@ class ClaudeBilling(unittest.TestCase):
         st = self.result("ANTHROPIC_API_KEY")
         self.assertEqual(st["cost"], 5.353)
         self.assertEqual(st["billing"], "api")
+
+
+class PreviewLimits(unittest.TestCase):
+    """proof-cli#224: a turn's events keep previews of its tool calls, cut at each backend's stated lengths with no
+    mark of the cut, so a host can say what form a kept conversation has."""
+
+    def test_each_backend_states_how_much_of_a_tool_call_its_events_keep(self):
+        from latex_agent import backend_claude, backend_codex
+
+        self.assertEqual((backend_claude.COMMAND_PREVIEW_CHARS, backend_claude.INPUT_PREVIEW_CHARS, backend_claude.RESULT_PREVIEW_CHARS), (200, 120, 300))
+        self.assertEqual((backend_codex.SUMMARY_PREVIEW_CHARS, backend_codex.RESULT_PREVIEW_CHARS), (200, 300))
+        self.assertEqual(ClaudeCode.preview_limits["tool.summary[Bash]"], 200)
+        self.assertEqual(ClaudeCode.preview_limits["tool.summary"], 120)
+        self.assertIsNone(ClaudeCode.preview_limits["tool.summary[Read]"], "a path is kept whole")
+        self.assertEqual(ClaudeCode.preview_limits["tool_result.preview"], 300)
+        self.assertEqual(Codex.preview_limits, {"tool.summary": 200, "tool_result.preview": 300})
+        self.assertEqual(backends.Backend.preview_limits, {}, "a backend that states nothing")
+
+    def test_the_cut_is_at_the_stated_length_and_unmarked(self):
+        cc, j, st = ClaudeCode("claude", {"bin": "claude"}), job_for(root=Path(tempfile.gettempdir()).resolve()), {}
+        cc.handle({"type": "assistant", "parent_tool_use_id": None, "message": {"content": [
+            {"type": "tool_use", "id": "u1", "name": "Bash", "input": {"command": "x" * 500}},
+            {"type": "tool_use", "id": "u2", "name": "WebFetch", "input": {"url": "y" * 500}}]}}, j, st)
+        cc.handle({"type": "user", "parent_tool_use_id": None, "message": {"content": [
+            {"type": "tool_result", "tool_use_id": "u1", "content": "z" * 900}]}}, j, st)
+        bash, fetch, result = [e for e in j.events if e["t"] in ("tool", "tool_result")]
+        self.assertEqual((bash["summary"], fetch["summary"], result["preview"]), ("x" * 200, "y" * 120, "z" * 300))

@@ -158,6 +158,21 @@ def _tool_place(name: str, inp: dict, root: Path) -> dict:
     return place
 
 
+# How much of a tool call a turn's events keep (proof-cli#224): previews, cut at these lengths with no mark of the cut.
+COMMAND_PREVIEW_CHARS = 200    # a Bash call's command
+INPUT_PREVIEW_CHARS = 120      # another tool's first text input, when it has no field of its own below
+RESULT_PREVIEW_CHARS = 300     # a tool result's text
+_WHOLE_SUMMARY_TOOLS = ("Read", "Edit", "Write", "MultiEdit", "NotebookEdit", "Grep", "Glob", "Skill", "Agent", "Task")
+# The same, per event field, for a host to keep with what it records: `<event>.<field>[<tool>]` before `<event>.<field>`;
+# None: that field is kept whole.
+PREVIEW_LIMITS: dict[str, int | None] = {
+    "tool.summary[Bash]": COMMAND_PREVIEW_CHARS,
+    **{f"tool.summary[{name}]": None for name in _WHOLE_SUMMARY_TOOLS},
+    "tool.summary": INPUT_PREVIEW_CHARS,
+    "tool_result.preview": RESULT_PREVIEW_CHARS,
+}
+
+
 def _summarize_tool(name: str, inp: dict, root: Path) -> str:
     def rel(p):
         try:
@@ -167,7 +182,7 @@ def _summarize_tool(name: str, inp: dict, root: Path) -> str:
     if name in ("Read", "Edit", "Write", "MultiEdit", "NotebookEdit"):
         return rel(inp.get("file_path") or inp.get("notebook_path") or "")
     if name == "Bash":
-        return inp.get("command", "")[:200]
+        return inp.get("command", "")[:COMMAND_PREVIEW_CHARS]
     if name in ("Grep", "Glob"):
         return (inp.get("pattern") or "") + (f"  in {rel(inp['path'])}" if inp.get("path") else "")
     if name == "Skill":
@@ -176,7 +191,7 @@ def _summarize_tool(name: str, inp: dict, root: Path) -> str:
         return inp.get("description", "")
     for v in inp.values():
         if isinstance(v, str):
-            return v[:120]
+            return v[:INPUT_PREVIEW_CHARS]
     return ""
 
 
@@ -261,6 +276,7 @@ class LiveInput:
 class ClaudeCode(CliBackend):
     kind = "claude"
     label = "Claude Code"
+    preview_limits = PREVIEW_LIMITS
     models = ["opus", "sonnet", "haiku", "fable", "best", "opusplan", "sonnet[1m]", "opus[1m]"]
     efforts = ("low", "medium", "high", "xhigh", "max")
     skills = True
@@ -414,7 +430,7 @@ class ClaudeCode(CliBackend):
                                            if isinstance(c, dict))
                     job.emit({"t": "tool_result", "id": block.get("tool_use_id"),
                               "error": bool(block.get("is_error")),
-                              "preview": str(content or "")[:300]})
+                              "preview": str(content or "")[:RESULT_PREVIEW_CHARS]})
         elif t == "rate_limit_event" and d.get("rate_limit_info"):
             self.rate = {**d["rate_limit_info"], "at": time.time()}
             job.emit({"t": "rate", "rate": self.rate})

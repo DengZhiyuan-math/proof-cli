@@ -201,6 +201,8 @@ class Backend:
     enforces_scope = True
     skills = False                    # offers skills / slash commands (/api/agent/commands)
     usage_limits = False              # reports subscription usage limits (/api/agent/usage)
+    # how much of a tool call its events keep, per event field (proof-cli#224); empty: this backend states nothing
+    preview_limits: dict[str, int | None] = {}
 
 
     def __init__(self, pid: str, spec: dict | None = None):
