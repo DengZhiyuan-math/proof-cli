@@ -3,6 +3,7 @@ from __future__ import annotations
 import functools
 import hashlib
 import json
+import os
 import sqlite3
 import threading
 import uuid
@@ -677,6 +678,43 @@ def on_rollback(store: ProjectStore, callback) -> None:
         active.on_rollback.append(callback)
 
 
+def put_turn_transcript(store: ProjectStore, relative: Path, record: dict) -> str:
+    """Put a turn's transcript (`record`, as JSON) at `relative` under the project, inside the open
+    `store.transaction()` that records the turn's end — a node's turn, a discussion turn, the Reader's.
+    Write-then-rename, so no reader sees half a file. If that transaction rolls back (its event or its
+    commit failing), the file this attempt put there is removed and anything it moved aside is put back.
+    A file already there is an orphan a crash left before an end was recorded (the caller refuses a turn
+    whose end is recorded): it is moved aside, and removed only once the end commits. Returns the path
+    as the event names it."""
+    if active_transaction(store) is None:
+        raise RuntimeError("a turn's transcript is put in place inside the transaction that records its end")
+    target = store.root / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_name(f"{target.name}.{uuid.uuid4().hex}.tmp")
+    aside = target.with_name(f"{target.name}.{uuid.uuid4().hex}.orphan") if target.exists() else None
+    try:
+        tmp.write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
+        if aside is not None:
+            os.replace(target, aside)
+        os.replace(tmp, target)
+    except BaseException:
+        if aside is not None and aside.exists() and not target.exists():
+            os.replace(aside, target)  # the orphan as it was
+        raise
+    finally:
+        tmp.unlink(missing_ok=True)  # gone already once it was put in place
+
+    def undo() -> None:
+        target.unlink(missing_ok=True)
+        if aside is not None and aside.exists():
+            os.replace(aside, target)
+
+    on_rollback(store, undo)
+    if aside is not None:
+        after_commit(store, lambda: aside.unlink(missing_ok=True))
+    return relative.as_posix()
+
+
 def _run_rollback_callbacks(callbacks: list, start: int) -> None:
     """Run `callbacks[start:]`, latest first, and drop them; each runs even if one before it raised."""
     pending = callbacks[start:]
@@ -1027,6 +1065,39 @@ def write_state(store: ProjectStore, state: ProjectState) -> None:
         )
 
 
+# the event payload field naming the agent turn an event was written for (#227): {"node": ..., "role": ...}
+ACTING_TURN_FIELD = "acting_turn"
+# the context's acting turn, which append_event writes into that field; None: not acting for any (the researcher, the
+# host's own writes) — not to be confused with acting_as(None, None), an agent acting for no turn (the map's agent)
+_ACTING_CONTEXT: ContextVar[dict | None] = ContextVar("proof_acting_context", default=None)
+
+
+@contextmanager
+def acting_as(node: str | None, role: str | None) -> Iterator[None]:
+    """Make every event appended inside this block name the agent turn it was written for (#227): the node a turn
+    works and its role (a Reader's turn names no node; the map's agent names neither, and is still an agent's).
+    Several runs act under one agent name at once, so the name alone can't say which turn did something. The CLI
+    enters it for an agent's runtime; the host enters it for what it records of a run's turn. Per thread and task,
+    as a ContextVar is: a turn never reaches another thread, and leaving the block restores what was before."""
+    token = _ACTING_CONTEXT.set({"node": node or None, "role": role or None})
+    try:
+        yield
+    finally:
+        _ACTING_CONTEXT.reset(token)
+
+
+@contextmanager
+def not_acting() -> Iterator[None]:
+    """Make the writes inside this block name no agent turn, whatever an enclosing `acting_as` set (#227): the CLI
+    enters it for an invocation outside any agent's runtime, so the researcher's own command is never stamped as a
+    turn's. Leaving the block restores what was before."""
+    token = _ACTING_CONTEXT.set(None)
+    try:
+        yield
+    finally:
+        _ACTING_CONTEXT.reset(token)
+
+
 def append_event(
     store: ProjectStore,
     kind: str,
@@ -1036,12 +1107,16 @@ def append_event(
     payload: dict | None = None,
     conn: sqlite3.Connection | None = None,
 ) -> EventRecord:
+    payload = dict(payload or {})
+    turn = _ACTING_CONTEXT.get()
+    if turn is not None and ACTING_TURN_FIELD not in payload:  # written for an agent's turn: which one, whatever node it is about
+        payload[ACTING_TURN_FIELD] = dict(turn)
     event = EventRecord(
         id=str(uuid.uuid4()),
         kind=kind,
         entity_id=entity_id,
         message=message,
-        payload=payload or {},
+        payload=payload,
     )
     with _writing(store, conn) as conn:
         conn.execute(

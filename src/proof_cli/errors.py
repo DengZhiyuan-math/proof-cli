@@ -239,6 +239,7 @@ ERROR_CODES: dict[str, str] = {
     "AGENT_UNAVAILABLE": "the agent's CLI can't run a turn here: not installed, not logged in, or it refused; the message says why",
     "AGENT_INVALID_OPTION": "the model or effort asked for is not one the agent's CLI accepts",
     "AGENT_NO_USAGE_LIMITS": "this agent backend reports no usage limits to probe",
+    "TURN_ENDED": "this turn (a node's, or a discussion turn) has ended already; its record is kept as it is and a second end is not recorded",
     "TURN_CALLED_OFF": "the run was stopped while its turn was being prepared, so no turn started",
     # -- a project Pursue's history: the `pursuit` events (ADR-0021 audit section 1, issue #201) --
     "INVALID_PURSUIT_PHASE": "not a pursuit phase (start, reader_end, theorem, stop, release_failed, end), or a start given an id: a start makes its own",
@@ -246,6 +247,9 @@ ERROR_CODES: dict[str, str] = {
     "PURSUIT_ENDED": "the pursuit has ended; nothing more is recorded for it",
     "PURSUIT_OUTCOME_REQUIRED": "a pursuit's end names its outcome",
     "PURSUIT_RECORD_FAILED": "the pursuit event could not be written; on a start, no provider is started",
+    "READER_TURN_RECORD_FAILED": "the Reader's turn could not be recorded with the project; its conversation is not kept there",
+    "READER_TURN_NOT_FOUND": "no Reader turn is kept with the project under this id; `proof project progress` lists the kept ones",
+    "READER_TURN_ENDED": "the Reader's turn has ended already; its record is kept as it is and a second end is not recorded",
     # -- the project's Pursue: a Reader states its Theorems, then each is pursued (ADR-0021) --
     "PURSUIT_ACTIVE": "the project is being pursued already, or a stopped pursuit is still ending: stop it, or Start again once it settles",
     "NO_PURSUIT": "no pursuit is running on this project to stop; the answer carries how the last one ended",

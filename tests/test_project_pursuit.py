@@ -128,3 +128,48 @@ def test_progress_without_json_lists_each_pursuit_and_its_events(tmp_path: Path)
     assert result.exit_code == 0
     assert pid in result.output and "interrupted" in result.output
     assert "release_failed T1: still assigned" in result.output
+
+
+def test_the_pursuits_total_and_each_theorems_result_are_kept_and_read_back(tmp_path: Path):
+    """#223: the Pursue's whole budget and its results per Theorem live in the project, not only in the host's memory."""
+    store = ensure_project(tmp_path)
+    pid = _start(store)
+    total = {"turns_max": 12, "minutes_max": 90.0, "spent": 1, "structure_spent": 1, "failed_launches": 0}
+    P.record_pursuit(store, "reader_end", pursuit_id=pid, outcome="ok", budget=total)
+    P.record_pursuit(store, "theorem", pursuit_id=pid, theorem="T1", budget={**total, "spent": 3})
+    done = {"T1": {"status": "done", "reason": "T1 is requested for review"}}
+    P.record_pursuit(store, "end", pursuit_id=pid, outcome="done", reason="every Theorem's Coordinator ended done",
+                     budget={**total, "spent": 9, "structure_spent": 2}, results=done)
+
+    for pursuits in (P.project_progress(store), _progress_json(tmp_path)):
+        [view] = pursuits
+        assert view["budget"] == {"turns_max": 12, "minutes_max": 90.0, "spent": 9, "structure_spent": 2, "failed_launches": 0}
+        assert view["results"] == {"T1": {"status": "done", "reason": "T1 is requested for review"}}
+        assert view["events"][-1]["results"] == done and view["events"][1]["results"] is None
+
+
+def test_a_pursuit_recorded_without_results_reads_them_as_unknown_not_empty(tmp_path: Path):
+    """#223: history written before results were kept says nothing about them; it is not read as 'no results'."""
+    store = ensure_project(tmp_path)
+    pid = _start(store)
+    P.record_pursuit(store, "end", pursuit_id=pid, outcome="done", reason="every Theorem's Coordinator ended done")
+
+    [view] = _progress_json(tmp_path)
+    assert view["results"] is None and view["budget"] is None
+
+
+def test_plain_progress_says_when_a_recorded_spend_is_incomplete(tmp_path: Path):
+    """A host that could not count every turn says so in the budget it records; the plain view says it, JSON keeps it."""
+    store = ensure_project(tmp_path)
+    counted = _start(store)
+    P.record_pursuit(store, "end", pursuit_id=counted, outcome="done", reason="ended", budget={"turns_max": 12, "spent": 4})
+    partial = _start(store)
+    P.record_pursuit(store, "end", pursuit_id=partial, outcome="stuck", reason="the Reader could not start",
+                     budget={"turns_max": 12, "spent": 0, "spend_incomplete": True})
+
+    first, second = _progress_json(tmp_path)
+    assert first["budget"] == {"turns_max": 12, "spent": 4}
+    assert second["budget"] == {"turns_max": 12, "spent": 0, "spend_incomplete": True}
+    text = runner.invoke(app, ["project", "progress", "--root", str(tmp_path)]).output
+    assert text.count("spend: incomplete — not every turn was counted") == 1
+    assert text.index("spend: incomplete") > text.index(partial)

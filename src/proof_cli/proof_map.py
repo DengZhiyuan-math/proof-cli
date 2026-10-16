@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 import shutil
 import sqlite3
@@ -52,8 +51,11 @@ from .domain import (
 )
 from .reviews import TRUST_RULES_FILE, DecisionKind, DecisionPayload, PinnedDependency, git_identity
 from .storage import (
+    ACTING_TURN_FIELD,
     get_definition,
     append_event,
+    list_events_of_kind,
+    put_turn_transcript,
     delete_dependency_pin,
     get_active_claim,
     get_candidate_proof as _get_candidate_proof,
@@ -396,6 +398,7 @@ PROGRESS_EVENT = "agent_progress"
 TURN_EVENT = "agent_turn"
 # a turn's raw conversation, kept with the project's state (never the node folder, which a snapshot freezes)
 TURNS_DIR = Path(".proof") / "agent-turns"
+READER_TURN_EVENT = "reader_turn"  # the Reader's turn in a project Pursue, kept by `pursuit` (#224): no node's
 _TURN_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 
 
@@ -631,16 +634,14 @@ def record_agent_turn(
         payload.update(job=job, session_id=session_id, step=step)
         if changed is not None:  # the files it changed, each with the first line it changed (spec #145, story 18)
             payload["changed"] = [{"path": str(c.get("path")), "line": int(c.get("line") or 1)} for c in changed]
-        if events is not None:
-            path = TURNS_DIR / node_id / f"{turn}.json"
-            target = store.root / path
-            target.parent.mkdir(parents=True, exist_ok=True)
-            # write-then-rename, as the project's own side files are: a reader never sees half a transcript
-            tmp = target.with_name(f"{target.name}.{uuid.uuid4().hex}.tmp")
-            tmp.write_text(json.dumps({**payload, "prompt": prompt, "events": events}, ensure_ascii=False), encoding="utf-8")
-            os.replace(tmp, target)
-            payload["transcript"] = path.as_posix()
     with store.transaction() as conn:
+        if phase == "ended":
+            if any(e.entity_id == node_id and e.payload.get("turn") == turn and e.payload.get("phase") == "ended"
+                   for e in list_events_of_kind(store, TURN_EVENT, conn=conn)):
+                raise ProofMapError("TURN_ENDED", f"turn {turn} on {node_id} has ended already; its record is kept as it is")
+            if events is not None:  # kept only with the recorded end: see put_turn_transcript
+                payload["transcript"] = put_turn_transcript(store, TURNS_DIR / node_id / f"{turn}.json",
+                                                            {**payload, "prompt": prompt, "events": events})
         append_event(store, TURN_EVENT, f"{role} on {node_id}: turn {turn} {phase}", entity_id=node_id, payload=payload, conn=conn)
 
 
@@ -678,15 +679,14 @@ def record_discussion_turn(
         payload.update(prompt=str(prompt or ""), fresh=bool(fresh))
     else:
         payload.update(job=job, session_id=session_id, reply=str(reply or "")[:DISCUSSION_REPLY_KEPT], is_error=bool(is_error))
-        if events is not None:
-            path = DISCUSSION_DIR / f"{turn}.json"
-            target = store.root / path
-            target.parent.mkdir(parents=True, exist_ok=True)
-            tmp = target.with_name(f"{target.name}.{uuid.uuid4().hex}.tmp")  # write-then-rename: never half a transcript
-            tmp.write_text(json.dumps({**payload, "prompt": prompt, "events": events}, ensure_ascii=False), encoding="utf-8")
-            os.replace(tmp, target)
-            payload["transcript"] = path.as_posix()
     with store.transaction() as conn:
+        if phase == "ended":
+            if any(e.payload.get("turn") == turn and e.payload.get("phase") == "ended"
+                   for e in list_events_of_kind(store, DISCUSSION_EVENT, conn=conn)):
+                raise ProofMapError("TURN_ENDED", f"discussion turn {turn} has ended already; its record is kept as it is")
+            if events is not None:  # kept only with the recorded end: see put_turn_transcript
+                payload["transcript"] = put_turn_transcript(store, DISCUSSION_DIR / f"{turn}.json",
+                                                            {**payload, "prompt": prompt, "events": events})
         append_event(store, DISCUSSION_EVENT, f"discussion with {by}: turn {turn} {phase}", payload=payload, conn=conn)
 
 
@@ -733,22 +733,37 @@ def agent_turn_transcript(store: ProjectStore, node_id: str, turn: str) -> dict 
 
 def work_log(store: ProjectStore, node_id: str) -> list[dict]:
     """The node's work log: the agent's reports merged, in time order, with what it did through `proof` and its turns.
-    What the run's agent did during one of its turns carries that turn's role; anything else — outside a turn, or by
-    someone else while a turn runs (the researcher's own split, a fog item from the map) — keeps its own actor and has none."""
+    What an agent's turn did carries that turn's role, read from the event (#227), the same in every node's log that
+    shows it, with `from_node` when that turn was on another node; anything else — outside a turn, or by someone else
+    while a turn runs (the researcher's own split, a fog item from the map) — keeps its own actor and has none. History
+    written before events named their turn, or by the host outside `acting_as`, takes a role only when a record ties it
+    to one turn: it is about this node itself (its claim, its proofs' Evidence checks, its edges) and this node's turn is
+    the only running turn under its actor's name. Otherwise, while a running turn acts under that name, its role is
+    unknown (`role_unknown`), never guessed; with none, it keeps its own actor and has no role."""
     named = set(require_node(store, node_id).definitions)
     proof_ids = {proof.id for proof in list_candidate_proofs(store, node_id)}
     fog = {item.id: item for item in list_fog_items(store)}
     near_fog = {fog_id for fog_id, item in fog.items() if node_id in item.near}  # the fog about this node: its Experiments belong here
     entries: list[dict] = []
-    turn: dict | None = None  # the run's turn running at this point of the log: its role, and the agent name it acts as
+    running: dict[str, dict] = {}  # every turn running at this point of the log (each node's, the Reader's): its role and agent name
     for event in list_events(store):
         at = event.created_at.isoformat()
-        payload = event.payload or {}
-        if event.kind == TURN_EVENT and event.entity_id == node_id:
+        payload = dict(event.payload or {})
+        acting = payload.pop(ACTING_TURN_FIELD, None)  # the agent turn it was written for (#227); history from before names none
+        if event.kind == READER_TURN_EVENT:  # the Reader's turn runs under its agent's name too (#227)
+            key = f"reader turn {payload.get('turn')}"  # no node's id: never this node's own turn
             if payload.get("phase") == "started":
-                turn = payload
+                running[key] = {"by": payload.get("by"), "role": "reader"}
+            else:
+                running.pop(key, None)
+            continue
+        if event.kind == TURN_EVENT:
+            if payload.get("phase") == "started":
+                running[event.entity_id] = payload
+            else:
+                running.pop(event.entity_id, None)
+            if event.entity_id != node_id or payload.get("phase") == "started":
                 continue
-            turn = None
             if payload.get("job") is not None:  # a turn that never began (stopped before it existed) has nothing to show
                 entries.append({"at": at, "kind": "turn", **{key: value for key, value in payload.items() if key != "phase"}})
             continue
@@ -777,8 +792,24 @@ def work_log(store: ProjectStore, node_id: str) -> list[dict]:
                             "reason": payload.get("reason"), "from": payload.get("from"), "to": payload.get("to") or changed})
         elif event.kind in ("proof_map_node_claimed", "proof_map_claim_reassigned") and event.entity_id == node_id:
             entries.append({"at": at, "kind": "claimed", "by": payload.get("claimant_id") or payload.get("assignee")})
-        for entry in entries[before:]:  # an automatic entry: the role of the turn it happened in, when the run's agent did it
-            entry.setdefault("role", turn.get("role") if turn is not None and entry.get("by") == turn.get("by") else None)
+        for entry in entries[before:]:  # an automatic entry: the role of the turn that did it
+            if "role" in entry:
+                continue
+            if isinstance(acting, dict):  # the turn that wrote it is named: the same in every node's log that shows it
+                entry["role"] = acting.get("role")
+                if acting.get("node") and acting["node"] != node_id:
+                    entry["from_node"] = acting["node"]
+                continue
+            # no turn named: a role only where a record ties it to one turn — about this node, whose turn alone runs as its actor
+            entry["role"] = None
+            under_name = [other for other, turn in running.items() if entry.get("by") and turn.get("by") == entry.get("by")]
+            if not under_name:
+                continue  # no running turn acts as its actor: its own actor, no role
+            about_node = event.entity_id == node_id or event.entity_id in proof_ids  # the node's own claim, proofs, edges
+            if about_node and under_name == [node_id]:
+                entry["role"] = running[node_id].get("role")
+            else:
+                entry["role_unknown"] = True  # shared, or several turns could have written it: never a guess
     return entries
 
 
