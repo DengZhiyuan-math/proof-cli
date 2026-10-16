@@ -399,6 +399,7 @@ PROGRESS_EVENT = "agent_progress"
 TURN_EVENT = "agent_turn"
 # a turn's raw conversation, kept with the project's state (never the node folder, which a snapshot freezes)
 TURNS_DIR = Path(".proof") / "agent-turns"
+READER_TURN_EVENT = "reader_turn"  # the Reader's turn in a project Pursue, kept by `pursuit` (#224): no node's
 _TURN_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 
 
@@ -745,11 +746,18 @@ def work_log(store: ProjectStore, node_id: str) -> list[dict]:
     fog = {item.id: item for item in list_fog_items(store)}
     near_fog = {fog_id for fog_id, item in fog.items() if node_id in item.near}  # the fog about this node: its Experiments belong here
     entries: list[dict] = []
-    running: dict[str, dict] = {}  # every node's turn running at this point of the log: its role, and the agent name it acts as
+    running: dict[str, dict] = {}  # every turn running at this point of the log (each node's, the Reader's): its role and agent name
     for event in list_events(store):
         at = event.created_at.isoformat()
         payload = dict(event.payload or {})
         acting = payload.pop(ACTING_TURN_FIELD, None)  # the agent turn it was written for (#227); history from before names none
+        if event.kind == READER_TURN_EVENT:  # the Reader's turn runs under its agent's name too (#227)
+            key = f"reader turn {payload.get('turn')}"  # no node's id: never this node's own turn
+            if payload.get("phase") == "started":
+                running[key] = {"by": payload.get("by"), "role": "reader"}
+            else:
+                running.pop(key, None)
+            continue
         if event.kind == TURN_EVENT:
             if payload.get("phase") == "started":
                 running[event.entity_id] = payload
