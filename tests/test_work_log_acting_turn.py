@@ -133,7 +133,7 @@ def test_the_researchers_own_commands_name_no_turn(tmp_path: Path):
     _run(tmp_path, "fog", "add", "the researcher's hunch", "--near", "A", "--near", "B")
 
     [event] = [e for e in list_events(store) if e.kind == "proof_fog_added"]
-    assert "from_turn" not in event.payload
+    assert "acting_turn" not in event.payload   # no runtime named a turn
     assert [(e["by"], e["role"]) for e in _fog(store, "B")] == [("human", None)]
 
 
@@ -221,3 +221,35 @@ def test_a_running_reader_turn_is_a_running_turn_for_an_entry_that_names_none(tm
 
     shown = {e.get("text") or e["kind"]: (e["role"], e.get("role_unknown", False)) for e in work_log(store, "A") if e["kind"] in ("fog", "claimed")}
     assert shown == {"while the Reader reads": (None, True), "claimed": (None, True), "after the Reader ended": (None, True)}
+
+
+def test_plain_node_progress_says_which_node_a_role_came_from_and_when_it_is_unknown(tmp_path: Path):
+    """The plain work log printed neither: an action from B's turn read as plain `prover·claude-code` in A's log, and a
+    shared one no turn named as bare `claude-code`, as if it had no role to know. It now says both, as the page does."""
+    from proof_cli.fog import add_fog
+
+    store = _two_nodes(tmp_path)
+    _turn(store, "A", "verifier", "started", "ta")
+    _turn(store, "B", "prover", "started", "tb")
+    _run(tmp_path, "fog", "add", "from the prover on B", "--near", "A", "--near", "B", env=_runtime("B", "prover"))
+    add_fog(store, "no turn named", near=["A", "B"], created_by=AGENT)
+
+    result = runner.invoke(app, ["node", "progress", "A", "--root", str(tmp_path)])
+    assert result.exit_code == 0, result.output
+    lines = {line.split("fog ", 1)[0].split("  ", 1)[1].strip(): line for line in result.output.splitlines() if " fog " in line}
+    assert "prover·claude-code · from B" in lines and "claude-code · role unknown" in lines, result.output
+
+
+def test_two_agents_each_acting_from_its_own_turn_are_each_named_with_their_role_in_both_logs(tmp_path: Path):
+    """Different actors, both naming their turn: each shared action carries its own turn's role in every log that shows it,
+    and the node it came from wherever that is another node's log."""
+    store = _two_nodes(tmp_path)
+    record_agent_turn(store, "A", phase="started", turn="ta", role="verifier", by="codex", provider="codex")
+    _turn(store, "B", "prover", "started", "tb")
+    _run(tmp_path, "fog", "add", "the verifier on A", "--near", "A", "--near", "B",
+         env={"PROOF_AGENT_NAME": "codex", "PROOF_AGENT_ROLE": "verifier", "PROOF_AGENT_NODE": "A"})
+    _run(tmp_path, "fog", "add", "the prover on B", "--near", "A", "--near", "B", env=_runtime("B", "prover"))
+
+    shown = {node: [(e["by"], e["role"], e.get("from_node")) for e in _fog(store, node)] for node in ("A", "B")}
+    assert shown["A"] == [("codex", "verifier", None), (AGENT, "prover", "B")]
+    assert shown["B"] == [("codex", "verifier", "A"), (AGENT, "prover", None)]
