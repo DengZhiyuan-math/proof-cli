@@ -55,6 +55,8 @@ from .storage import (
     ACTING_TURN_FIELD,
     get_definition,
     append_event,
+    list_events_of_kind,
+    put_turn_transcript,
     delete_dependency_pin,
     get_active_claim,
     get_candidate_proof as _get_candidate_proof,
@@ -632,16 +634,14 @@ def record_agent_turn(
         payload.update(job=job, session_id=session_id, step=step)
         if changed is not None:  # the files it changed, each with the first line it changed (spec #145, story 18)
             payload["changed"] = [{"path": str(c.get("path")), "line": int(c.get("line") or 1)} for c in changed]
-        if events is not None:
-            path = TURNS_DIR / node_id / f"{turn}.json"
-            target = store.root / path
-            target.parent.mkdir(parents=True, exist_ok=True)
-            # write-then-rename, as the project's own side files are: a reader never sees half a transcript
-            tmp = target.with_name(f"{target.name}.{uuid.uuid4().hex}.tmp")
-            tmp.write_text(json.dumps({**payload, "prompt": prompt, "events": events}, ensure_ascii=False), encoding="utf-8")
-            os.replace(tmp, target)
-            payload["transcript"] = path.as_posix()
     with store.transaction() as conn:
+        if phase == "ended":
+            if any(e.entity_id == node_id and e.payload.get("turn") == turn and e.payload.get("phase") == "ended"
+                   for e in list_events_of_kind(store, TURN_EVENT, conn=conn)):
+                raise ProofMapError("TURN_ENDED", f"turn {turn} on {node_id} has ended already; its record is kept as it is")
+            if events is not None:  # kept only with the recorded end: see put_turn_transcript
+                payload["transcript"] = put_turn_transcript(store, TURNS_DIR / node_id / f"{turn}.json",
+                                                            {**payload, "prompt": prompt, "events": events})
         append_event(store, TURN_EVENT, f"{role} on {node_id}: turn {turn} {phase}", entity_id=node_id, payload=payload, conn=conn)
 
 
@@ -679,15 +679,14 @@ def record_discussion_turn(
         payload.update(prompt=str(prompt or ""), fresh=bool(fresh))
     else:
         payload.update(job=job, session_id=session_id, reply=str(reply or "")[:DISCUSSION_REPLY_KEPT], is_error=bool(is_error))
-        if events is not None:
-            path = DISCUSSION_DIR / f"{turn}.json"
-            target = store.root / path
-            target.parent.mkdir(parents=True, exist_ok=True)
-            tmp = target.with_name(f"{target.name}.{uuid.uuid4().hex}.tmp")  # write-then-rename: never half a transcript
-            tmp.write_text(json.dumps({**payload, "prompt": prompt, "events": events}, ensure_ascii=False), encoding="utf-8")
-            os.replace(tmp, target)
-            payload["transcript"] = path.as_posix()
     with store.transaction() as conn:
+        if phase == "ended":
+            if any(e.payload.get("turn") == turn and e.payload.get("phase") == "ended"
+                   for e in list_events_of_kind(store, DISCUSSION_EVENT, conn=conn)):
+                raise ProofMapError("TURN_ENDED", f"discussion turn {turn} has ended already; its record is kept as it is")
+            if events is not None:  # kept only with the recorded end: see put_turn_transcript
+                payload["transcript"] = put_turn_transcript(store, DISCUSSION_DIR / f"{turn}.json",
+                                                            {**payload, "prompt": prompt, "events": events})
         append_event(store, DISCUSSION_EVENT, f"discussion with {by}: turn {turn} {phase}", payload=payload, conn=conn)
 
 
