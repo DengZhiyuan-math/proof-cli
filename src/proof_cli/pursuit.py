@@ -12,12 +12,21 @@ spent; a new Start rechecks claims, snapshots and node states itself.
 
 A recording failure is a visible error (PURSUIT_RECORD_FAILED). The host starts no provider when
 the `start` event can't be written.
+
+The Reader's turn has no node either, so it is kept here (#224): `record_reader_turn` writes a
+`reader_turn` event when it starts and when it ends, the ended one with its whole conversation under
+.proof/reader-turns/, as a node's turns are kept under .proof/agent-turns/. A launch refused before
+any job exists is no turn and leaves none.
 """
 
 from __future__ import annotations
 
+import json
+import os
+import re
 import sqlite3
 import uuid
+from pathlib import Path
 from typing import Any
 
 from .domain import EventRecord
@@ -31,6 +40,11 @@ PURSUIT_EVENT = "pursuit"
 # stop: the researcher stopped it; release_failed: releasing the claims failed (a retry may follow);
 # end: the pursuit ended, outcome its final status (done, stuck, released, budget, ...)
 PHASES = ("start", "reader_end", "theorem", "stop", "release_failed", "end")
+
+READER_TURN_EVENT = "reader_turn"
+READER_TURNS_DIR = Path(".proof") / "reader-turns"
+READER_OUTCOMES = ("ok", "failed", "stopped")
+_TURN_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")   # as a node's turn ids are (proof_map)
 
 INTERRUPTED = "interrupted"
 RUNNING = "running"
@@ -107,6 +121,7 @@ def project_progress(store: ProjectStore, *, live: str | None = None) -> list[di
     one with no end reads `interrupted`, except `live`, the pursuit the calling process runs now,
     which reads `running`."""
     pursuits: dict[str, list[dict[str, Any]]] = {}
+    reader = reader_turns(store)
     for event in list_events_of_kind(store, PURSUIT_EVENT):
         pursuits.setdefault(event.payload.get("pursuit_id", ""), []).append(_event_view(event))
     views = []
@@ -122,6 +137,8 @@ def project_progress(store: ProjectStore, *, live: str | None = None) -> list[di
         theorems = [e["theorem"] for e in events if e["theorem"]]
         budgets = [e["budget"] for e in events if e["budget"] is not None]
         results = [e["results"] for e in events if e["results"] is not None]  # none recorded: unknown, not empty
+        read = any(e["phase"] == "reader_end" for e in events)
+        kept = [turn for turn in reader if turn["pursuit_id"] == pursuit_id]
         views.append(
             {
                 "pursuit_id": pursuit_id,
@@ -134,7 +151,91 @@ def project_progress(store: ProjectStore, *, live: str | None = None) -> list[di
                 "last_phase": events[-1]["phase"],
                 "started_at": events[0]["created_at"],
                 "ended_at": end["created_at"] if end else None,
+                # the Reader's turns kept with it; None when a Reader ended and nothing was kept (history from before #224)
+                "reader_turns": kept if kept or not read else None,
                 "events": events,
             }
         )
     return views
+
+
+def record_reader_turn(
+    store: ProjectStore,
+    *,
+    phase: str,
+    turn: str,
+    by: str,
+    pursuit_id: str,
+    provider: str = "",
+    prompt: str | None = None,
+    job: int | None = None,
+    session_id: str | None = None,
+    outcome: str | None = None,
+    reason: str = "",
+    exit: int | None = None,
+    is_error: bool | None = None,
+    events: list[dict] | None = None,
+) -> None:
+    """The Reader's turn in a project Pursue (#224): `started` once its job exists, `ended` with its job, its backend
+    session, its outcome (ok, failed, stopped), the provider's exit and its whole conversation (`events`), kept under
+    .proof/reader-turns/. Project state, no node's; never a decision. A record that can't be written raises
+    READER_TURN_RECORD_FAILED, so the host can say the turn is not kept rather than take it as kept."""
+    if phase not in ("started", "ended"):
+        raise ProofMapError("INVALID_REQUEST", f"a Reader turn is started or ended, not {phase!r}")
+    if not _TURN_ID.fullmatch(turn or ""):
+        raise ProofMapError("INVALID_REQUEST", f"not a turn id: {turn!r}")
+    if phase == "ended" and outcome not in READER_OUTCOMES:
+        raise ProofMapError("INVALID_REQUEST", f"a Reader turn ends {', '.join(READER_OUTCOMES)}, not {outcome!r}",
+                            details={"outcomes": list(READER_OUTCOMES)})
+    payload: dict[str, Any] = {"phase": phase, "turn": turn, "by": by, "provider": provider, "pursuit_id": pursuit_id}
+    if phase == "ended":
+        payload.update(job=job, session_id=session_id, outcome=outcome, reason=reason.strip(), exit=exit, is_error=is_error)
+    try:
+        with store.transaction() as conn:
+            if not any(e.payload.get("pursuit_id") == pursuit_id for e in list_events_of_kind(store, PURSUIT_EVENT, conn=conn)):
+                raise ProofMapError("PURSUIT_NOT_FOUND", f"no pursuit has the id {pursuit_id}")
+            if phase == "ended" and events is not None:
+                if prompt is None:  # the transcript holds the turn's prompt too, as its start recorded it
+                    prompt = next((e.payload.get("prompt") for e in list_events_of_kind(store, READER_TURN_EVENT, conn=conn)
+                                   if e.payload.get("turn") == turn and e.payload.get("phase") == "started"), None)
+                path = READER_TURNS_DIR / f"{turn}.json"
+                target = store.root / path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                tmp = target.with_name(f"{target.name}.{uuid.uuid4().hex}.tmp")  # write-then-rename: never half a transcript
+                tmp.write_text(json.dumps({**payload, "prompt": prompt, "events": events}, ensure_ascii=False), encoding="utf-8")
+                os.replace(tmp, target)
+                payload["transcript"] = path.as_posix()
+            elif phase == "started":
+                payload["prompt"] = str(prompt or "")
+            append_event(store, READER_TURN_EVENT, f"the Reader's turn {turn} {phase}", entity_id=None, payload=payload, conn=conn)
+    except (sqlite3.Error, OSError) as exc:
+        raise ProofMapError(
+            "READER_TURN_RECORD_FAILED", f"the Reader's turn {turn} could not be recorded ({phase}): {exc}", details={"phase": phase}
+        ) from exc
+
+
+def reader_turns(store: ProjectStore) -> list[dict[str, Any]]:
+    """The Reader's turns kept with the project, oldest first, one entry per turn. A turn with no recorded end reads
+    `ended: False` and no outcome: it is not taken for one that ended ok."""
+    turns: dict[str, dict[str, Any]] = {}
+    for event in list_events_of_kind(store, READER_TURN_EVENT):
+        p = event.payload or {}
+        entry = turns.setdefault(str(p.get("turn") or ""), {
+            "turn": p.get("turn"), "pursuit_id": p.get("pursuit_id"), "by": p.get("by"), "provider": p.get("provider", ""),
+            "at": event.created_at.isoformat(), "ended": False, "ended_at": None, "job": None, "session_id": None,
+            "outcome": None, "reason": "", "exit": None, "is_error": None, "transcript": None})
+        if p.get("phase") == "ended":
+            entry.update(ended=True, ended_at=event.created_at.isoformat(), job=p.get("job"), session_id=p.get("session_id"),
+                         outcome=p.get("outcome"), reason=p.get("reason", ""), exit=p.get("exit"), is_error=p.get("is_error"),
+                         transcript=p.get("transcript"))
+    return list(turns.values())
+
+
+def reader_turn_transcript(store: ProjectStore, turn: str) -> dict | None:
+    """A Reader turn's record with its conversation (`events`), as record_reader_turn kept it; None when there is none."""
+    if not _TURN_ID.fullmatch(turn or ""):
+        return None
+    try:
+        return json.loads((store.root / READER_TURNS_DIR / f"{turn}.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
