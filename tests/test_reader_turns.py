@@ -20,7 +20,7 @@ from proof_cli.storage import ensure_project, list_events
 runner = CliRunner()
 
 CONVERSATION = [
-    {"t": "init", "session_id": "s-1", "model": "claude-opus-5-5"},
+    {"t": "init", "session_id": "s-1", "model": "model-a"},
     {"t": "tool", "id": "u1", "name": "Bash", "summary": "cat notes/absent.txt"},
     {"t": "tool_result", "id": "u1", "error": True, "preview": "Exit code 1: no such file: notes/absent.txt"},
     {"t": "text", "text": "Going on without that file."},
