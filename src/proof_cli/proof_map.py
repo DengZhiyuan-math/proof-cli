@@ -52,7 +52,7 @@ from .domain import (
 )
 from .reviews import TRUST_RULES_FILE, DecisionKind, DecisionPayload, PinnedDependency, git_identity
 from .storage import (
-    FROM_TURN,
+    ACTING_TURN,
     get_definition,
     append_event,
     delete_dependency_pin,
@@ -749,7 +749,7 @@ def work_log(store: ProjectStore, node_id: str) -> list[dict]:
     for event in list_events(store):
         at = event.created_at.isoformat()
         payload = dict(event.payload or {})
-        source = payload.pop(FROM_TURN, None)  # the agent turn that wrote it (#227); history from before names none
+        acting = payload.pop(ACTING_TURN, None)  # the agent turn it was written for (#227); history from before names none
         if event.kind == TURN_EVENT:
             if payload.get("phase") == "started":
                 running[event.entity_id] = payload
@@ -788,10 +788,10 @@ def work_log(store: ProjectStore, node_id: str) -> list[dict]:
         for entry in entries[before:]:  # an automatic entry: the role of the turn that did it
             if "role" in entry:
                 continue
-            if isinstance(source, dict):  # the turn that wrote it is named: the same in every node's log that shows it
-                entry["role"] = source.get("role")
-                if source.get("node") and source["node"] != node_id:
-                    entry["from_node"] = source["node"]
+            if isinstance(acting, dict):  # the turn that wrote it is named: the same in every node's log that shows it
+                entry["role"] = acting.get("role")
+                if acting.get("node") and acting["node"] != node_id:
+                    entry["from_node"] = acting["node"]
                 continue
             entry["role"] = None
             turn = running.get(node_id)
