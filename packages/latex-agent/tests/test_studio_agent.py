@@ -1,7 +1,8 @@
 """Unit tests for the agent manager and its backends (latex_agent/agent.py, backend_*.py).
 
-No real CLI is started: the Claude Code and Codex backends are checked through the
-command they would run and the events they make from sample output.
+No model CLI is started: the Claude Code and Codex backends are checked through the
+command they would run and the events they make from sample output. A local gh
+credential-isolation test uses only synthetic configuration and makes no API call.
 """
 import json
 import os
@@ -508,6 +509,94 @@ class DisplayMathRule(unittest.TestCase):
 
     def bullets(self, text):
         return ["- " + b for b in text.split("\n- ")[1:]]
+
+class ClaudeContext(unittest.TestCase):
+    """How full the context window is: each message's usage, the window from modelUsage (upstream d000c82)."""
+
+    def test_used_and_window(self):
+        cc, j, st = ClaudeCode("claude", {"bin": "claude"}), job_for(), {}
+        msg = lambda inp, read, out: {"type": "assistant", "parent_tool_use_id": None, "message": {  # noqa: E731
+            "content": [], "usage": {"input_tokens": inp, "cache_creation_input_tokens": 0,
+                                     "cache_read_input_tokens": read, "output_tokens": out}}}
+        cc.handle({"type": "system", "subtype": "init", "model": "claude-sonnet-5-5"}, j, st)
+        cc.handle(msg(10, 1000, 50), j, st)
+        self.assertEqual(j.events[-1], {"t": "context", "used": 1060, "window": None})
+        cc.handle({"type": "result", "usage": {}, "modelUsage": {
+            "claude-haiku-4-5": {"contextWindow": 200000, "inputTokens": 5},
+            "claude-sonnet-5-5": {"contextWindow": 1000000, "inputTokens": 10}}}, j, st)
+        self.assertEqual(st["context"], {"used": 1060, "window": 1000000})
+        # The next turn knows the window from its first message on.
+        j2, st2 = job_for(), {}
+        cc.handle({"type": "system", "subtype": "init", "model": "claude-sonnet-5-5"}, j2, st2)
+        cc.handle(msg(5, 2000, 10), j2, st2)
+        self.assertEqual(j2.events[-1], {"t": "context", "used": 2015, "window": 1000000})
+
+
+class AgentEnvironment(unittest.TestCase):
+    """Agent child commands inherit disabled git transports and gh credential lookup."""
+
+    def test_no_remote_and_no_login_and_the_context_kept(self):
+        base = {"PATH": "/bin", "PROOF_ROOT": "/p", "GH_TOKEN": "t", "GITHUB_TOKEN": "t",
+                "GH_ENTERPRISE_TOKEN": "t", "GITHUB_ENTERPRISE_TOKEN": "t",
+                "CLAUDE_CONFIG_DIR": "/c", "ANTHROPIC_MODEL": "claude-opus-5-5"}
+        env = backends.agent_env(base)
+        self.assertEqual((env["PROOF_ROOT"], env["CLAUDE_CONFIG_DIR"], env["PATH"]), ("/p", "/c", "/bin"))
+        self.assertNotIn("GH_TOKEN", env)
+        self.assertNotIn("GITHUB_TOKEN", env)
+        self.assertNotIn("GH_ENTERPRISE_TOKEN", env)
+        self.assertNotIn("GITHUB_ENTERPRISE_TOKEN", env)
+        self.assertEqual(env["ANTHROPIC_MODEL"], "claude-opus-5-5")
+        self.assertEqual(env["GIT_TERMINAL_PROMPT"], "0")
+        self.assertNotIn(env["GIT_ALLOW_PROTOCOL"], ("", "https", "ssh", "file"))
+        self.assertIn("GH_CONFIG_DIR", env)
+        self.assertNotIn("GIT_ALLOW_PROTOCOL", base)    # the context's own environment is not changed
+
+    def test_gh_cannot_reuse_a_saved_login(self):
+        import shutil
+        import subprocess
+        from unittest import mock
+
+        gh = shutil.which("gh")
+        if gh is None:
+            self.skipTest("GitHub CLI is not installed")
+        with tempfile.TemporaryDirectory() as d:
+            # A previous process can leave a login in the old shared path.
+            config = Path(d) / "proof-agents-no-gh-login"
+            config.mkdir()
+            (config / "hosts.yml").write_text(
+                "github.com:\n    oauth_token: synthetic-saved-token\n    user: synthetic\n"
+            )
+            with mock.patch("tempfile.gettempdir", return_value=d):
+                env = backends.agent_env({"PATH": os.environ.get("PATH", "")})
+            result = subprocess.run(
+                [gh, "auth", "token", "--hostname", "github.com"],
+                env=env, capture_output=True, text=True, timeout=10,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse(result.stdout.strip())
+
+    def test_a_turn_starts_with_it(self):
+        from unittest import mock
+        seen = {}
+
+        class Proc:
+            returncode, stdout, stderr = 0, iter(()), iter(())
+
+            def __init__(self):
+                self.stdin = mock.MagicMock()
+
+            def wait(self):
+                return 0
+
+        def popen(cmd, **kw):
+            seen.update(kw.get("env") or {})
+            return Proc()
+
+        backend = ClaudeCode("claude", {"bin": "claude"})
+        with mock.patch("latex_agent.backends.subprocess.Popen", popen):
+            backend.run(job_for(prompt="hi", root=Path(".")))
+        self.assertIn("GIT_ALLOW_PROTOCOL", seen)
+
 
 class ClaudeBilling(unittest.TestCase):
     """total_cost_usd is a list price: it is a real cost only with an API key (upstream 2938c05)."""
