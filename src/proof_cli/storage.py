@@ -3,7 +3,6 @@ from __future__ import annotations
 import functools
 import hashlib
 import json
-import os
 import sqlite3
 import threading
 import uuid
@@ -1028,18 +1027,30 @@ def write_state(store: ProjectStore, state: ProjectState) -> None:
         )
 
 
-# the payload key naming the agent turn an event was written in (#227)
-FROM_TURN = "from_turn"
+# the payload key naming the agent turn an event was written in (#227): {"node": ..., "role": ...}
+ACTING_TURN = "acting_turn"
+# the agent turn the writes in this context are made for; None outside any (the researcher's, the host's own)
+_ACTING_TURN: ContextVar[dict | None] = ContextVar("proof_acting_turn", default=None)
 
 
-def agent_turn_source() -> dict | None:
-    """The agent turn this process writes in (#227): the node and role a Proof agent's runtime names
-    (PROOF_AGENT_NODE, PROOF_AGENT_ROLE; a Reader's names no node, the map's agent neither), or None outside any
-    agent's runtime. Several runs act under one agent name at once, so the name alone can't say which turn did it."""
-    name, role, node = (os.environ.get(key, "").strip() for key in ("PROOF_AGENT_NAME", "PROOF_AGENT_ROLE", "PROOF_AGENT_NODE"))
-    if not (name or role or node):
-        return None
-    return {"node": node or None, "role": role or None}
+@contextmanager
+def acting_as(node: str | None, role: str | None) -> Iterator[None]:
+    """Make every event appended inside this block name the agent turn it was written for (#227): the node a turn
+    works and its role (a Reader's turn names no node; the map's agent names neither, and is still an agent's).
+    Several runs act under one agent name at once, so the name alone can't say which turn did something. The CLI
+    enters it for an agent's runtime; the host enters it for what it records of a run's turn. Per thread and task,
+    as a ContextVar is: a turn never reaches another thread, and leaving the block restores what was before."""
+    token = _ACTING_TURN.set({"node": node or None, "role": role or None})
+    try:
+        yield
+    finally:
+        _ACTING_TURN.reset(token)
+
+
+def acting_turn() -> dict | None:
+    """The agent turn this context's writes are made for (see `acting_as`), or None."""
+    current = _ACTING_TURN.get()
+    return dict(current) if current is not None else None
 
 
 def append_event(
@@ -1052,9 +1063,9 @@ def append_event(
     conn: sqlite3.Connection | None = None,
 ) -> EventRecord:
     payload = dict(payload or {})
-    source = agent_turn_source()
-    if source is not None and FROM_TURN not in payload:  # written by an agent's turn: which one, whatever node it is about
-        payload[FROM_TURN] = source
+    turn = _ACTING_TURN.get()
+    if turn is not None and ACTING_TURN not in payload:  # written for an agent's turn: which one, whatever node it is about
+        payload[ACTING_TURN] = dict(turn)
     event = EventRecord(
         id=str(uuid.uuid4()),
         kind=kind,
