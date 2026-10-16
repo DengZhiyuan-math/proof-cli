@@ -48,7 +48,6 @@ import os
 import shutil
 import subprocess
 import sys
-import tempfile
 import threading
 from pathlib import Path
 from typing import Callable
@@ -172,18 +171,19 @@ class Job:
 
 
 def agent_env(base: dict | None = None) -> dict:
-    """The environment of an agent's turn and of every command it starts (upstream prism-local 624bff0): git may
-    reach no remote — GIT_ALLOW_PROTOCOL names no protocol, so push, fetch and clone fail, --force and --no-verify
-    included — and the GitHub CLI has no login. A proof project's history is its decisions (ADR-0004, ADR-0010);
-    an agent never needs a remote, so it can never rewrite or delete that history there, whatever it is told.
-    Local git (a commit, a log, a diff) is untouched: it uses no transport."""
+    """Default environment for agent turns and their child commands (upstream prism-local 624bff0).
+
+    Disable git transports and gh configuration loading while preserving local git and provider settings.
+    These inherited settings are not an OS sandbox: a command that replaces its environment can bypass them.
+    """
     env = dict(os.environ if base is None else base)
     env["GIT_ALLOW_PROTOCOL"] = "proof-agents-do-not-reach-remotes"
     env["GIT_TERMINAL_PROMPT"] = "0"
     for key in ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"):
         env.pop(key, None)
-    # an empty gh configuration: gh finds no login (it keeps its token there, or in the keyring that configuration names)
-    env["GH_CONFIG_DIR"] = os.path.join(tempfile.gettempdir(), "proof-agents-no-gh-login")
+    # An empty directory still lets gh read the OS keychain. A non-directory config path makes gh fail
+    # before credential lookup, including when an old temporary directory contains a saved login.
+    env["GH_CONFIG_DIR"] = os.devnull
     return env
 
 
