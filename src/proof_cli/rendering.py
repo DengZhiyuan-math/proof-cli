@@ -484,6 +484,8 @@ def render_project_progress(pursuits: list[dict]) -> str:
             if event["budget"] is not None:
                 line += f" (budget {event['budget']})"
             console.print(line)
+        if (pursuit.get("budget") or {}).get("spend_incomplete") is True:  # the host could not count every turn
+            console.print("  spend: incomplete — not every turn was counted")
         results = pursuit.get("results")
         if results is None:
             console.print("  results: not recorded")
