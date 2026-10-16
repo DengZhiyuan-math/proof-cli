@@ -497,17 +497,34 @@ def render_project_progress(pursuits: list[dict]) -> str:
     return console.export_text()
 
 
+def _turn_ending(turn: dict) -> tuple[str, str]:
+    """A Reader turn's ending and, apart from it, its failed tool calls: ("ok, exit 0", "1 tool-call failure(s)")."""
+    ending = f"{turn['outcome']}, exit {turn['exit'] if turn['exit'] is not None else '—'}"
+    failures = "tool-call failures unknown" if turn["tool_failures"] is None else f"{turn['tool_failures']} tool-call failure(s)"
+    return ending, failures
+
+
 def _reader_turn_ending(turn: dict) -> str:
     """How a Reader turn ended, apart from the tool calls that failed in it."""
     if not turn["ended"]:
         return "no recorded end"
-    failures = "tool-call failures unknown" if turn["tool_failures"] is None else f"{turn['tool_failures']} tool-call failure(s)"
-    kept = "conversation kept" if turn["transcript"] else "conversation not kept"
-    return f"{turn['outcome']}, exit {turn['exit'] if turn['exit'] is not None else '—'}, {failures}, {kept}"
+    ending, failures = _turn_ending(turn)
+    conversation = "conversation kept" if turn["transcript"] else "conversation not kept"
+    return f"{ending}, {failures}, {conversation}"
+
+
+def _record_form(view: dict) -> str:
+    """What form a kept conversation has: its backend's events, and the lengths that backend cuts previews at."""
+    limits = view.get("preview_limits")
+    if limits is None:
+        return "form: the events as the backend reported them; the backend's preview limits were not recorded; tool previews may be shortened"
+    cut = ", ".join(f"{field} {chars}" for field, chars in limits.items() if isinstance(chars, int))
+    return (f"form: the events as the {view.get('backend') or 'unnamed'} backend reported them; it keeps at most "
+            f"{cut or 'no limit on any field'} characters of a preview, other fields whole, and marks no cut")
 
 
 def _conversation_line(event: dict) -> str:
-    """One event of a turn's conversation, in full: nothing shortened (the --json output is the raw record)."""
+    """One event of a turn's conversation, as its backend reported it (the --json output is the raw record)."""
     kind = event.get("t")
     if kind == "text":
         return f"text: {event.get('text', '')}"
@@ -526,17 +543,17 @@ def _conversation_line(event: dict) -> str:
 
 
 def render_reader_turn(view: dict) -> str:
-    """A Reader turn kept with the project (`proof project reader-turn`): its record, the whole turn's ending and its
-    failed tool calls apart, then its whole conversation, nothing shortened."""
+    """A Reader turn kept with the project (`proof project reader-turn`): its record, the turn's own ending and its
+    failed tool calls apart, the form its conversation was kept in, then its events as the backend reported them, each
+    field that reached the backend's preview limit marked as possibly shortened."""
     console = _console()
     console.rule(f"Reader turn {view['turn']}")
     console.print(f"pursuit {view['pursuit_id']} · by {view['by']} · provider {view['provider'] or '—'}")
     console.print(f"started {view['at']}" + (f" · ended {view['ended_at']}" if view["ended"] else " · no recorded end"))
     if view["ended"]:
-        console.print(f"turn outcome: {view['outcome']}, exit {view['exit'] if view['exit'] is not None else '—'}, "
-                      f"is_error {str(bool(view['is_error'])).lower()}" + (f" — {view['reason']}" if view["reason"] else ""))
-        console.print("tool-call failures: " + ("unknown" if view["tool_failures"] is None else str(view["tool_failures"]))
-                      + " (each is shown below; they are not the turn's outcome)")
+        ending, failures = _turn_ending(view)
+        console.print(f"turn outcome: {ending}, is_error {str(bool(view['is_error'])).lower()}" + (f" — {view['reason']}" if view["reason"] else ""))
+        console.print(f"{failures} in the turn (each is shown below; they are not the turn's outcome)")
         console.print(f"job {view['job']} · session {view['session_id'] or '—'}")
     if view.get("prompt"):
         console.print(f"prompt: {view['prompt']}")
@@ -544,9 +561,13 @@ def render_reader_turn(view: dict) -> str:
     if events is None:
         console.print("conversation: not kept with the project")
         return console.export_text()
-    console.print(f"conversation, {len(events)} event(s), nothing shortened (--json gives the raw record):")
+    console.print(_record_form(view))
+    at_limit = {(mark["event"], mark["field"]): mark["limit"] for mark in view.get("possibly_shortened") or []}
+    console.print(f"conversation, {len(events)} event(s) (--json gives the raw record):")
     for number, event in enumerate(events, 1):
-        console.print(f"  {number}. {_conversation_line(event)}")
+        marks = [f"[{field} possibly shortened by the backend (its {limit}-character limit)]"
+                 for (at, field), limit in at_limit.items() if at == number]
+        console.print(f"  {number}. {_conversation_line(event)}" + "".join(f" {mark}" for mark in marks))
     return console.export_text()
 
 

@@ -269,7 +269,7 @@ def test_an_ended_turn_counts_its_failed_tool_calls_apart_from_its_own_outcome(t
     assert (turn["tool_failures"], turn["outcome"], turn["exit"]) == (1, "ok", 0)
 
 
-def test_the_cli_reads_a_reader_turn_and_its_whole_conversation_back(tmp_path: Path):
+def test_the_cli_reads_a_reader_turn_and_its_conversation_back(tmp_path: Path):
     _kept_reader_turn(tmp_path)
 
     result = runner.invoke(app, ["project", "reader-turn", "r1", "--root", str(tmp_path), "--json"])
@@ -284,9 +284,9 @@ def test_the_cli_reads_a_reader_turn_and_its_whole_conversation_back(tmp_path: P
     assert shown.exit_code == 0, shown.output
     text = shown.output
     assert "turn outcome: ok, exit 0" in text
-    assert "tool-call failures: 1" in text
+    assert "1 tool-call failure(s) in the turn" in text
     assert "tool result u1: FAILED — Exit code 127: command not found: pdftotext" in text
-    assert "Reading the PDF pages instead." in text and "nothing shortened" in text
+    assert "Reading the PDF pages instead." in text and "nothing shortened" not in text and "whole" not in text
 
 
 def test_a_long_text_is_shown_whole_in_plain_output(tmp_path: Path):
@@ -327,3 +327,52 @@ def test_plain_progress_shows_each_pursuits_results_and_reader_turns(tmp_path: P
     assert "results: T1 done — T1 is requested for review" in text
     assert "Reader turn r1: ok, exit 0, 1 tool-call failure(s), conversation kept" in text
     assert "Reader turns: not kept with the project (unknown)" in text and "results: not recorded" in text
+
+
+# -- the form a kept conversation has: the backend's previews (#224) ---------------------------------------------------
+
+LIMITS = {"tool.summary[Bash]": 50, "tool.summary[Read]": None, "tool.summary": 30, "tool_result.preview": 40}
+
+
+def _with_limits(root: Path, events, **ended):
+    store = ensure_project(root)
+    pid = _pursuit(store)
+    P.record_reader_turn(store, phase="started", turn="r7", by="agent-x", provider="claude", pursuit_id=pid)
+    P.record_reader_turn(store, phase="ended", turn="r7", by="agent-x", provider="claude", pursuit_id=pid,
+                         job=1, outcome="ok", exit=0, is_error=False, events=events, **ended)
+    return store
+
+
+def test_a_field_that_reached_its_backends_limit_is_marked_possibly_shortened_and_no_other(tmp_path: Path):
+    events = [
+        {"t": "tool", "id": "a", "name": "Bash", "summary": "c" * 50},      # at the command's limit
+        {"t": "tool", "id": "b", "name": "Read", "summary": "p" * 30},      # a path: kept whole
+        {"t": "tool", "id": "c", "name": "Fetch", "summary": "u" * 29},     # under the input's limit
+        {"t": "tool_result", "id": "a", "error": False, "preview": "o" * 40},
+        {"t": "text", "text": "t" * 500},                                   # text is never cut
+    ]
+    store = _with_limits(tmp_path, events, backend="claude", preview_limits=LIMITS)
+
+    view = P.reader_turn(store, "r7")
+    assert (view["backend"], view["preview_limits"]) == ("claude", LIMITS)
+    assert view["possibly_shortened"] == [{"event": 1, "field": "summary", "limit": 50}, {"event": 4, "field": "preview", "limit": 40}]
+
+    text = " ".join(runner.invoke(app, ["project", "reader-turn", "r7", "--root", str(tmp_path)]).output.split())
+    assert "the events as the claude backend reported them" in text
+    assert "tool.summary[Bash] 50, tool.summary 30, tool_result.preview 40 characters" in text
+    assert text.count("possibly shortened by the backend") == 2
+    assert "(its 50-character limit)" in text and "(its 40-character limit)" in text
+    assert text.count("shortened") == text.count("possibly shortened")  # never a cut it did not record
+
+
+def test_a_record_without_the_backends_limits_says_so_and_that_previews_may_be_shortened(tmp_path: Path):
+    store = _with_limits(tmp_path, [{"t": "tool_result", "id": "a", "error": False, "preview": "o" * 300}])
+
+    view = P.reader_turn(store, "r7")
+    assert (view["backend"], view["preview_limits"], view["possibly_shortened"]) == (None, None, None)
+    text = " ".join(runner.invoke(app, ["project", "reader-turn", "r7", "--root", str(tmp_path)]).output.split())
+    assert "the backend's preview limits were not recorded; tool previews may be shortened" in text
+
+
+def test_reader_turn_reads_none_for_an_unknown_turn(tmp_path: Path):
+    assert P.reader_turn(ensure_project(tmp_path), "nope") is None

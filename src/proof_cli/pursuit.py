@@ -14,7 +14,8 @@ A recording failure is a visible error (PURSUIT_RECORD_FAILED). The host starts 
 the `start` event can't be written.
 
 The Reader's turn has no node either, so it is kept here (#224): `record_reader_turn` writes a
-`reader_turn` event when it starts and when it ends, the ended one with its whole conversation under
+`reader_turn` event when it starts and when it ends, the ended one with its conversation (its events, as its
+backend reported them, previews cut at the backend's limits, which the host records with it) under
 .proof/reader-turns/, as a node's turns are kept under .proof/agent-turns/. A launch refused before
 any job exists is no turn and leaves none.
 """
@@ -178,9 +179,13 @@ def record_reader_turn(
     exit: int | None = None,
     is_error: bool | None = None,
     events: list[dict] | None = None,
+    backend: str | None = None,
+    preview_limits: dict[str, int | None] | None = None,
 ) -> None:
     """The Reader's turn in a project Pursue (#224): `started` once its job exists, `ended` with its job, its backend
-    session, its outcome (ok, failed, stopped), the provider's exit and its whole conversation (`events`), kept under
+    session, its outcome (ok, failed, stopped), the provider's exit and its conversation (`events`, as the `backend`
+    reported them: previews of tool calls cut at its `preview_limits`, `<event>.<field>[<tool>]` or `<event>.<field>`
+    to a length, None for a field kept whole; the host passes the backend's own, e.g. latex_agent's), kept under
     .proof/reader-turns/. Project state, no node's; never a decision. A record that can't be written raises
     READER_TURN_RECORD_FAILED, so the host can say the turn is not kept rather than take it as kept; the transcript is
     put in place only with its `ended` event, and removed again when that event or its commit fails. A second end of
@@ -196,7 +201,8 @@ def record_reader_turn(
     if phase == "ended":
         payload.update(job=job, session_id=session_id, outcome=outcome, reason=reason.strip(), exit=exit, is_error=is_error,
                        # its failed tool calls, apart from how the whole turn ended; unknown without its conversation
-                       tool_failures=None if events is None else sum(1 for e in events if e.get("t") == "tool_result" and e.get("error")))
+                       tool_failures=None if events is None else sum(1 for e in events if e.get("t") == "tool_result" and e.get("error")),
+                       backend=backend, preview_limits=preview_limits)
     try:
         with store.transaction() as conn:
             if not any(e.payload.get("pursuit_id") == pursuit_id for e in list_events_of_kind(store, PURSUIT_EVENT, conn=conn)):
@@ -238,12 +244,13 @@ def reader_turns(store: ProjectStore) -> list[dict[str, Any]]:
         entry = turns.setdefault(str(p.get("turn") or ""), {
             "turn": p.get("turn"), "pursuit_id": p.get("pursuit_id"), "by": p.get("by"), "provider": p.get("provider", ""),
             "at": event.created_at.isoformat(), "ended": False, "ended_at": None, "job": None, "session_id": None,
-            "outcome": None, "reason": "", "exit": None, "is_error": None, "tool_failures": None, "transcript": None})
+            "outcome": None, "reason": "", "exit": None, "is_error": None, "tool_failures": None,
+            "backend": None, "preview_limits": None, "transcript": None})
         if p.get("phase") == "ended":
             transcript = p.get("transcript")
             entry.update(ended=True, ended_at=event.created_at.isoformat(), job=p.get("job"), session_id=p.get("session_id"),
                          outcome=p.get("outcome"), reason=p.get("reason", ""), exit=p.get("exit"), is_error=p.get("is_error"),
-                         tool_failures=p.get("tool_failures"),
+                         tool_failures=p.get("tool_failures"), backend=p.get("backend"), preview_limits=p.get("preview_limits"),
                          transcript=transcript if transcript and (store.root / transcript).is_file() else None)  # only while its file is there
     return list(turns.values())
 
@@ -256,3 +263,35 @@ def reader_turn_transcript(store: ProjectStore, turn: str) -> dict | None:
         return json.loads((store.root / READER_TURNS_DIR / f"{turn}.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
+
+
+def reader_turn(store: ProjectStore, turn: str) -> dict | None:
+    """One Reader turn kept with the project, read back (#224): its record (as `reader_turns` gives it), its prompt,
+    its events as its backend reported them (None when its conversation is not kept), and the event fields whose length
+    reached that backend's preview limit (`possibly_shortened`: event number from 1, field, limit; None when the
+    limits were not recorded). The backends mark no cut, so a field at its limit may or may not have been shortened.
+    None when no such turn is kept."""
+    record = next((entry for entry in reader_turns(store) if entry["turn"] == turn), None)
+    if record is None:
+        return None
+    transcript = reader_turn_transcript(store, turn) if record["transcript"] else None
+    events = transcript.get("events") if transcript else None
+    return {**record, "prompt": (transcript or {}).get("prompt"), "events": events,
+            "possibly_shortened": _at_preview_limit(events, record["preview_limits"])}
+
+
+def _at_preview_limit(events: list[dict] | None, limits: dict[str, int | None] | None) -> list[dict] | None:
+    """The fields of `events` whose length reached their backend's limit; None when the limits are unknown."""
+    if limits is None:
+        return None
+    reached = []
+    for number, event in enumerate(events or [], 1):
+        for field, value in event.items():
+            if not isinstance(value, str):
+                continue
+            key = f"{event.get('t')}.{field}"
+            named = f"{key}[{event.get('name')}]"
+            limit = limits[named] if named in limits else limits.get(key)
+            if isinstance(limit, int) and len(value) >= limit:
+                reached.append({"event": number, "field": field, "limit": limit})
+    return reached
