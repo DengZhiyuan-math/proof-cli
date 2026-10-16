@@ -98,7 +98,7 @@ def test_an_experiment_and_a_definition_edit_by_one_turn_keep_its_role_in_every_
             ("experiment", "numerics", from_node), ("definition-edited", "numerics", from_node)]
 
 
-def test_the_source_stays_when_turns_end_the_same_agent_works_again_or_the_logs_are_read_in_another_order(tmp_path: Path):
+def test_the_acting_turn_stays_when_turns_end_the_same_agent_works_again_or_the_logs_are_read_in_another_order(tmp_path: Path):
     store = _two_nodes(tmp_path)
     _turn(store, "A", "verifier", "started", "ta")
     _turn(store, "B", "prover", "started", "tb")
