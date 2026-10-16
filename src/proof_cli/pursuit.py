@@ -61,10 +61,12 @@ def record_pursuit(
     theorem: str | None = None,
     budget: dict[str, Any] | None = None,
     results: dict[str, Any] | None = None,
+    launched: bool | None = None,
 ) -> EventRecord:
     """Append one `pursuit` event. `start` makes the pursuit's id (read it from the event's payload);
     every other phase names a started pursuit that has not ended, and `end` names its outcome. `budget` is the
-    pursuit's whole total and what it has spent so far, `results` each Theorem's result so far (#223)."""
+    pursuit's whole total and what it has spent so far, `results` each Theorem's result so far (#223). On a
+    `reader_end`, `launched` says whether the Reader's turn began (its job existed) or was refused before (#224)."""
     if phase not in PHASES:
         raise ProofMapError("INVALID_PURSUIT_PHASE", f"not a pursuit phase: {phase!r}", details={"phases": list(PHASES)})
     if phase == "start":
@@ -84,6 +86,7 @@ def record_pursuit(
         "theorem": theorem,
         "budget": budget,
         "results": results,
+        "launched": launched,
     }
     message = f"pursuit {pursuit_id}: {phase}" + (f" {payload['outcome']}" if payload["outcome"] else "") + (f": {payload['reason']}" if payload["reason"] else "")
     try:
@@ -112,6 +115,7 @@ def _event_view(event: EventRecord) -> dict[str, Any]:
         "theorem": p.get("theorem"),
         "budget": p.get("budget"),
         "results": p.get("results"),
+        "launched": p.get("launched"),
         "created_at": event.created_at.isoformat(),
     }
 
@@ -137,7 +141,8 @@ def project_progress(store: ProjectStore, *, live: str | None = None) -> list[di
         theorems = [e["theorem"] for e in events if e["theorem"]]
         budgets = [e["budget"] for e in events if e["budget"] is not None]
         results = [e["results"] for e in events if e["results"] is not None]  # none recorded: unknown, not empty
-        read = any(e["phase"] == "reader_end" for e in events)
+        # a Reader that may have begun: a reader_end that did not say it was refused before its job existed
+        reader_may_have_run = any(e["phase"] == "reader_end" and e["launched"] is not False for e in events)
         kept = [turn for turn in reader if turn["pursuit_id"] == pursuit_id]
         views.append(
             {
@@ -152,7 +157,7 @@ def project_progress(store: ProjectStore, *, live: str | None = None) -> list[di
                 "started_at": events[0]["created_at"],
                 "ended_at": end["created_at"] if end else None,
                 # the Reader's turns kept with it; None when a Reader ended and nothing was kept (history from before #224)
-                "reader_turns": kept if kept or not read else None,
+                "reader_turns": kept if kept or not reader_may_have_run else None,
                 "events": events,
             }
         )

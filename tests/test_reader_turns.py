@@ -125,3 +125,23 @@ def test_what_is_no_reader_turn_is_refused_and_an_unknown_transcript_is_none(tmp
     assert orphan.value.code == "PURSUIT_NOT_FOUND"
     assert P.reader_turns(store) == []
     assert P.reader_turn_transcript(store, "nope") is None and P.reader_turn_transcript(store, "../../etc") is None
+
+
+def test_a_reader_refused_before_its_job_existed_has_no_turn_to_keep(tmp_path: Path):
+    """A refusal before launch is no turn: its pursuit lists no Reader turn, not an unknown one (#224)."""
+    store = ensure_project(tmp_path)
+    pid = _pursuit(store)
+    P.record_pursuit(store, "reader_end", pursuit_id=pid, outcome="failed", reason="claude: command not found", launched=False)
+    P.record_pursuit(store, "end", pursuit_id=pid, outcome="stuck", reason="the Reader could not start")
+
+    [view] = _progress_json(tmp_path)
+    assert view["reader_turns"] == [] and view["events"][1]["launched"] is False
+
+
+def test_a_reader_turn_that_began_but_whose_record_was_lost_reads_unknown(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    pid = _pursuit(store)
+    P.record_pursuit(store, "reader_end", pursuit_id=pid, outcome="ok", launched=True)
+
+    [view] = _progress_json(tmp_path)
+    assert view["reader_turns"] is None and view["events"][1]["launched"] is True
