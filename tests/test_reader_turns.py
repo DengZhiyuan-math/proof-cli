@@ -246,3 +246,84 @@ def test_a_transcript_is_reported_only_while_its_file_is_there(tmp_path: Path):
 
     [r1] = [t for t in P.reader_turns(store) if t["turn"] == "r1"]
     assert (r1["ended"], r1["transcript"]) == (True, None)
+
+
+# -- reading a Reader turn back (#224) ------------------------------------------------------------------------------
+
+
+def _kept_reader_turn(root: Path):
+    store = ensure_project(root)
+    pid = _pursuit(store)
+    P.record_reader_turn(store, phase="started", turn="r1", by="claude-code", provider="claude", pursuit_id=pid, prompt="Read the draft")
+    _ended(store, pid, "r1")
+    P.record_pursuit(store, "reader_end", pursuit_id=pid, outcome="ok", launched=True)
+    P.record_pursuit(store, "end", pursuit_id=pid, outcome="done", reason="every Theorem's Coordinator ended done",
+                     results={"T1": {"status": "done", "reason": "T1 is requested for review"}})
+    return store, pid
+
+
+def test_an_ended_turn_counts_its_failed_tool_calls_apart_from_its_own_outcome(tmp_path: Path):
+    store, _ = _kept_reader_turn(tmp_path)
+
+    [turn] = P.reader_turns(store)
+    assert (turn["tool_failures"], turn["outcome"], turn["exit"]) == (1, "ok", 0)
+
+
+def test_the_cli_reads_a_reader_turn_and_its_whole_conversation_back(tmp_path: Path):
+    _kept_reader_turn(tmp_path)
+
+    result = runner.invoke(app, ["project", "reader-turn", "r1", "--root", str(tmp_path), "--json"])
+    assert result.exit_code == 0, result.output
+    envelope = json.loads(result.output)
+    assert envelope["ok"] is True and envelope["command"] == "project.reader_turn"
+    data = envelope["data"]
+    assert (data["turn"], data["outcome"], data["exit"], data["tool_failures"], data["prompt"]) == ("r1", "ok", 0, 1, "Read the draft")
+    assert data["events"] == CONVERSATION
+
+    shown = runner.invoke(app, ["project", "reader-turn", "r1", "--root", str(tmp_path)])
+    assert shown.exit_code == 0, shown.output
+    text = shown.output
+    assert "turn outcome: ok, exit 0" in text
+    assert "tool-call failures: 1" in text
+    assert "tool result u1: FAILED — Exit code 127: command not found: pdftotext" in text
+    assert "Reading the PDF pages instead." in text and "nothing shortened" in text
+
+
+def test_a_long_text_is_shown_whole_in_plain_output(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    pid = _pursuit(store)
+    long_text = "a bound " * 400
+    P.record_reader_turn(store, phase="started", turn="r9", by="claude-code", provider="claude", pursuit_id=pid)
+    _ended(store, pid, "r9", events=[{"t": "text", "text": long_text}, {"t": "done", "exit": 0}])
+
+    shown = runner.invoke(app, ["project", "reader-turn", "r9", "--root", str(tmp_path)])
+    assert shown.exit_code == 0 and " ".join(shown.output.split()).count("a bound") == 400
+
+
+def test_an_unknown_reader_turn_is_refused_with_a_code(tmp_path: Path):
+    ensure_project(tmp_path)
+    result = runner.invoke(app, ["project", "reader-turn", "nope", "--root", str(tmp_path), "--json"])
+    assert result.exit_code == 1 and json.loads(result.output)["error"]["code"] == "READER_TURN_NOT_FOUND"
+
+
+def test_a_project_copied_elsewhere_reads_its_reader_turn_back_without_the_providers_profile(tmp_path: Path):
+    import shutil
+
+    _kept_reader_turn(tmp_path / "here")
+    shutil.copytree(tmp_path / "here", tmp_path / "there")
+    shutil.rmtree(tmp_path / "here")
+
+    result = runner.invoke(app, ["project", "reader-turn", "r1", "--root", str(tmp_path / "there"), "--json"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["data"]["events"] == CONVERSATION
+
+
+def test_plain_progress_shows_each_pursuits_results_and_reader_turns(tmp_path: Path):
+    store, _ = _kept_reader_turn(tmp_path)
+    old = _pursuit(store)
+    P.record_pursuit(store, "reader_end", pursuit_id=old, outcome="ok")  # history from before: nothing kept, launched unsaid
+
+    text = " ".join(runner.invoke(app, ["project", "progress", "--root", str(tmp_path)]).output.split())
+    assert "results: T1 done — T1 is requested for review" in text
+    assert "Reader turn r1: ok, exit 0, 1 tool-call failure(s), conversation kept" in text
+    assert "Reader turns: not kept with the project (unknown)" in text and "results: not recorded" in text

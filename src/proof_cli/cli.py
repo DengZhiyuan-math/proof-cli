@@ -195,12 +195,13 @@ from .trust_rules import get_trust_rule, list_trust_rules, trust_rule_history
 from .authority import candidate_proof_sha256
 from .vault import working_entry_path
 from .definitions import add_definition, all_definitions, definitions_of, edit_definition, fixed_by_definition, nodes_naming, remove_definition, require_definition
-from .pursuit import project_progress
+from .pursuit import project_progress, reader_turn_transcript, reader_turns
 from .rendering import (
     render_definition,
     render_definition_list,
     render_node_check,
     render_project_progress,
+    render_reader_turn,
     render_candidate_proof,
     render_challenge,
     render_challenge_list,
@@ -1690,6 +1691,21 @@ def project_progress_command(root: str = ROOT_OPTION, json_output: bool = typer.
     """The project Pursue history, oldest first: each pursuit's status and events. One with no recorded end reads interrupted."""
     pursuits = project_progress(get_store(_root(root)))
     typer.echo(dump_envelope(success_envelope("project.progress", pursuits)) if json_output else render_project_progress(pursuits))
+
+
+@project_app.command("reader-turn")
+@read_scoped
+def project_reader_turn_command(turn: str, root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
+    """A Reader turn kept with the project (#224): its record — outcome, exit, failed tool calls — and its whole conversation."""
+    store = get_store(_root(root))
+    record = next((t for t in reader_turns(store) if t["turn"] == turn), None)
+    if record is None:
+        _emit_error(ProofMapError("READER_TURN_NOT_FOUND", f"no Reader turn {turn!r} is kept with this project"), json_output,
+                    command="project.reader_turn")
+        raise typer.Exit(code=1)
+    kept = reader_turn_transcript(store, turn) if record["transcript"] else None
+    view = {**record, "prompt": (kept or {}).get("prompt"), "events": (kept or {}).get("events")}
+    typer.echo(dump_envelope(success_envelope("project.reader_turn", view)) if json_output else render_reader_turn(view))
 
 
 @goal_app.command("set")
