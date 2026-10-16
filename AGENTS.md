@@ -47,3 +47,14 @@ Uses the default five-role vocabulary (needs-triage, needs-info, ready-for-agent
 ### Domain docs
 
 Single-context: one root `CONTEXT.md` plus `docs/adr/`. See `docs/agents/domain.md`.
+
+## Audit evidence and publication
+
+Use these four publication layers:
+
+1. **Raw audit evidence stays local.** Logs, JSON readbacks, database excerpts, provider sessions, screenshots, and mathematical reviews must not be committed to any repository. Keep local audit archives in `docs/audits/` and trial worktrees in `.claude/worktrees/`.
+2. **Redacted reports require review.** Write a report only when a decision needs public evidence. Publish it as an issue comment only after the researcher reviews each paragraph.
+3. **Synthetic reproductions may be published directly.** Minimal synthetic inputs and outputs may be included in issues and tests without prior review, provided they contain no research content.
+4. **System progress summaries require confirmation.** Follow the format of the 2026-10-15 progress comment on #197. Publish only after the researcher confirms the summary.
+
+Do not copy contents from private `zeqome` repositories into public `proof-cli`. Link to the private source instead. The ignore rules for `docs/audits/` and `.claude/worktrees/` guard against accidental staging; they do not authorize publication of files stored elsewhere.

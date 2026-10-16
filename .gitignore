@@ -13,3 +13,7 @@ venv/
 
 # test fixtures carry a real project database (e.g. one built by pre-ADR-0009 master)
 !tests/fixtures/**/.proof/
+
+# Local audit evidence and unpublished trial inputs must not be committed.
+/docs/audits/
+/.claude/worktrees/
