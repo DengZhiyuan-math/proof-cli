@@ -368,8 +368,12 @@ def test_a_field_that_reached_its_backends_limit_is_marked_possibly_shortened_an
                                           {"event": 4, "field": "preview", "limit": 40, "keeps": "start"}]
 
     text = " ".join(runner.invoke(app, ["project", "reader-turn", "r7", "--root", str(tmp_path)]).output.split())
-    assert "the events as the claude backend reported them" in text
-    assert "tool.summary[Bash] 50, tool.summary 30, tool_result.preview 40 characters" in text
+    assert "the events as the claude backend reported them, with no mark of a cut" in text
+    assert "it keeps at most: tool.summary[Bash] 50, tool.summary 30, tool_result.preview 40 characters from the start" in text
+    assert "kept whole: tool.summary[Read]" in text
+    assert "the backend did not state whether it shortens: text.text, tool.id, tool.name, tool_result.id" in text
+    assert view["unstated_fields"] == ["text.text", "tool.id", "tool.name", "tool_result.id"]
+    assert "no limit" not in text
     assert text.count("possibly shortened by the backend") == 2
     assert "(its 50-character limit)" in text and "(its 40-character limit)" in text
     assert text.count("shortened") == text.count("possibly shortened")  # never a cut it did not record
@@ -397,4 +401,20 @@ def test_a_field_whose_end_the_backend_keeps_is_marked_with_that_direction(tmp_p
         {"event": 1, "field": "preview", "limit": 40, "keeps": "start"}, {"event": 2, "field": "stderr", "limit": 20, "keeps": "end"}]
     text = " ".join(runner.invoke(app, ["project", "reader-turn", "r7", "--root", str(tmp_path)]).output.split())
     assert "[stderr possibly shortened by the backend (it keeps the last 20 characters)]" in text
+    assert "it keeps only the last: done.stderr 20 characters" in text
     assert "[preview possibly shortened by the backend (its 40-character limit)]" in text
+
+
+def test_a_backend_that_states_nothing_leaves_every_field_unknown_never_whole(tmp_path: Path):
+    store = _with_limits(tmp_path, [{"t": "text", "text": "t" * 10}, {"t": "done", "exit": 0, "stderr": "e"}], backend="other", preview_limits={})
+
+    view = P.reader_turn(store, "r7")
+    assert (view["possibly_shortened"], view["unstated_fields"]) == ([], ["done.stderr", "text.text"])
+    text = " ".join(runner.invoke(app, ["project", "reader-turn", "r7", "--root", str(tmp_path)]).output.split())
+    assert "the backend did not state whether it shortens any field" in text
+    assert "whole" not in text and "no limit" not in text and "keeps at most" not in text
+
+
+def test_a_record_without_limits_names_no_unstated_fields_its_limits_are_unknown(tmp_path: Path):
+    store = _with_limits(tmp_path, [{"t": "text", "text": "a reply"}])
+    assert P.reader_turn(store, "r7")["unstated_fields"] is None
