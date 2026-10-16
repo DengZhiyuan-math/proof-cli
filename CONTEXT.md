@@ -185,6 +185,9 @@ _Avoid_: stuck (a run's state), failed
 Everything waiting on the researcher, ordered bottom-up, none of which holds the agents back: Provisional nodes, unreviewed imported results, Unfixed agent-written text, Standing questions and Parked nodes (ADR-0021).
 _Avoid_: inbox, approvals
 
+**Decidable now**:
+The part of the Review queue on which the researcher can make a Review decision now. It is a view of the queue, not a separate queue or a workflow state. Inclusion does not mean that a decision has been made.
+
 **Work log**:
 A node's record of what its Proof agent did, in time order: the plan, each step, Verdicts, Attempts and Coordinator notes reported with `proof node progress`, merged with what they did through other `proof` commands — a split, a review request, an Evidence check, a fog item, a dependency edit — each with the role of the turn that did it, saying when that turn worked another node, and saying the role is unknown when no record ties the entry to one turn — and the turns themselves, each with its job, its backend session and the step it belongs to. Project state (events), never a file in the node folder; a turn's raw conversation is kept beside it under `.proof/agent-turns/`. What the studio's centre shows.
 _Avoid_: transcript (the raw conversation, folded under a step), chat history
