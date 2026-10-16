@@ -379,13 +379,14 @@ def test_a_field_that_reached_its_backends_limit_is_marked_possibly_shortened_an
     assert text.count("shortened") == text.count("possibly shortened")  # never a cut it did not record
 
 
-def test_a_record_without_the_backends_limits_says_so_and_that_previews_may_be_shortened(tmp_path: Path):
+def test_a_record_without_the_backends_limits_says_so_and_that_any_field_was_possibly_shortened(tmp_path: Path):
     store = _with_limits(tmp_path, [{"t": "tool_result", "id": "a", "error": False, "preview": "o" * 300}])
 
     view = P.reader_turn(store, "r7")
     assert (view["backend"], view["preview_limits"], view["possibly_shortened"]) == (None, None, None)
     text = " ".join(runner.invoke(app, ["project", "reader-turn", "r7", "--root", str(tmp_path)]).output.split())
-    assert "the backend's preview limits were not recorded; tool previews may be shortened" in text
+    assert "the backend's preview limits were not recorded, so any field was possibly shortened by the backend" in text
+    assert "tool previews" not in text and text.count("shortened") == text.count("possibly shortened")
 
 
 def test_reader_turn_reads_none_for_an_unknown_turn(tmp_path: Path):

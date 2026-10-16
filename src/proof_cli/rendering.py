@@ -525,7 +525,8 @@ def _record_form(view: dict) -> str:
     the fields it stated nothing about, whose shortening is unknown — never taken as whole."""
     limits = view.get("preview_limits")
     if limits is None:
-        return "form: the events as the backend reported them; the backend's preview limits were not recorded; tool previews may be shortened"
+        return ("form: the events as the backend reported them; the backend's preview limits were not recorded, "
+                "so any field was possibly shortened by the backend")
     said = f"form: the events as the {view.get('backend') or 'unnamed'} backend reported them"
     if not limits:
         return f"{said}; the backend did not state whether it shortens any field"
