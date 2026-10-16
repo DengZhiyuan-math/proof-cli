@@ -52,6 +52,7 @@ from .domain import (
 )
 from .reviews import TRUST_RULES_FILE, DecisionKind, DecisionPayload, PinnedDependency, git_identity
 from .storage import (
+    FROM_TURN,
     get_definition,
     append_event,
     delete_dependency_pin,
@@ -733,22 +734,28 @@ def agent_turn_transcript(store: ProjectStore, node_id: str, turn: str) -> dict 
 
 def work_log(store: ProjectStore, node_id: str) -> list[dict]:
     """The node's work log: the agent's reports merged, in time order, with what it did through `proof` and its turns.
-    What the run's agent did during one of its turns carries that turn's role; anything else — outside a turn, or by
-    someone else while a turn runs (the researcher's own split, a fog item from the map) — keeps its own actor and has none."""
+    What an agent's turn did carries that turn's role, read from the event (#227), the same in every node's log that
+    shows it, with `from_node` when that turn was on another node; anything else — outside a turn, or by someone else
+    while a turn runs (the researcher's own split, a fog item from the map) — keeps its own actor and has none. History
+    written before events named their turn takes the running turn's role only when no other running turn acts under
+    the same name; otherwise its role is unknown (`role_unknown`), never guessed."""
     named = set(require_node(store, node_id).definitions)
     proof_ids = {proof.id for proof in list_candidate_proofs(store, node_id)}
     fog = {item.id: item for item in list_fog_items(store)}
     near_fog = {fog_id for fog_id, item in fog.items() if node_id in item.near}  # the fog about this node: its Experiments belong here
     entries: list[dict] = []
-    turn: dict | None = None  # the run's turn running at this point of the log: its role, and the agent name it acts as
+    running: dict[str, dict] = {}  # every node's turn running at this point of the log: its role, and the agent name it acts as
     for event in list_events(store):
         at = event.created_at.isoformat()
-        payload = event.payload or {}
-        if event.kind == TURN_EVENT and event.entity_id == node_id:
+        payload = dict(event.payload or {})
+        source = payload.pop(FROM_TURN, None)  # the agent turn that wrote it (#227); history from before names none
+        if event.kind == TURN_EVENT:
             if payload.get("phase") == "started":
-                turn = payload
+                running[event.entity_id] = payload
+            else:
+                running.pop(event.entity_id, None)
+            if event.entity_id != node_id or payload.get("phase") == "started":
                 continue
-            turn = None
             if payload.get("job") is not None:  # a turn that never began (stopped before it existed) has nothing to show
                 entries.append({"at": at, "kind": "turn", **{key: value for key, value in payload.items() if key != "phase"}})
             continue
@@ -777,8 +784,22 @@ def work_log(store: ProjectStore, node_id: str) -> list[dict]:
                             "reason": payload.get("reason"), "from": payload.get("from"), "to": payload.get("to") or changed})
         elif event.kind in ("proof_map_node_claimed", "proof_map_claim_reassigned") and event.entity_id == node_id:
             entries.append({"at": at, "kind": "claimed", "by": payload.get("claimant_id") or payload.get("assignee")})
-        for entry in entries[before:]:  # an automatic entry: the role of the turn it happened in, when the run's agent did it
-            entry.setdefault("role", turn.get("role") if turn is not None and entry.get("by") == turn.get("by") else None)
+        for entry in entries[before:]:  # an automatic entry: the role of the turn that did it
+            if "role" in entry:
+                continue
+            if isinstance(source, dict):  # the turn that wrote it is named: the same in every node's log that shows it
+                entry["role"] = source.get("role")
+                if source.get("node") and source["node"] != node_id:
+                    entry["from_node"] = source["node"]
+                continue
+            entry["role"] = None
+            turn = running.get(node_id)
+            if turn is None or entry.get("by") != turn.get("by"):
+                continue
+            if sum(1 for other in running.values() if other.get("by") == turn.get("by")) == 1:
+                entry["role"] = turn.get("role")  # the only turn acting under that name: it did it
+            else:
+                entry["role_unknown"] = True  # several turns act under that name and the event names none: never a guess
     return entries
 
 
