@@ -23,7 +23,6 @@ any job exists is no turn and leaves none.
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
 import uuid
 from pathlib import Path
@@ -31,7 +30,7 @@ from typing import Any
 
 from .domain import EventRecord
 from .proof_map import _TURN_ID, ProofMapError  # a Reader turn's id is a node turn's
-from .storage import ProjectStore, append_event, list_events_of_kind, on_rollback
+from .storage import ProjectStore, append_event, list_events_of_kind, put_turn_transcript
 
 PURSUIT_EVENT = "pursuit"
 
@@ -208,23 +207,14 @@ def record_reader_turn(
             if not any(e.payload.get("pursuit_id") == pursuit_id for e in list_events_of_kind(store, PURSUIT_EVENT, conn=conn)):
                 raise ProofMapError("PURSUIT_NOT_FOUND", f"no pursuit has the id {pursuit_id}")
             this_turn = [e.payload for e in list_events_of_kind(store, READER_TURN_EVENT, conn=conn) if e.payload.get("turn") == turn]
-            path = READER_TURNS_DIR / f"{turn}.json"
-            target = store.root / path
-            if phase == "ended" and (any(p.get("phase") == "ended" for p in this_turn) or target.exists()):
+            if phase == "ended" and any(p.get("phase") == "ended" for p in this_turn):
                 raise ProofMapError("READER_TURN_ENDED", f"the Reader's turn {turn} has ended already; its record is kept as it is")
             if phase == "ended" and events is not None:
                 if prompt is None:  # the transcript holds the turn's prompt too, as its start recorded it
                     prompt = next((p.get("prompt") for p in this_turn if p.get("phase") == "started"), None)
-                target.parent.mkdir(parents=True, exist_ok=True)
-                tmp = target.with_name(f"{target.name}.{uuid.uuid4().hex}.tmp")  # write-then-rename: never half a transcript
-                try:
-                    tmp.write_text(json.dumps({**payload, "prompt": prompt, "events": events}, ensure_ascii=False), encoding="utf-8")
-                    os.replace(tmp, target)
-                finally:
-                    tmp.unlink(missing_ok=True)  # gone already once it was put in place
-                # this attempt's transcript only: if the event or the commit fails, no transcript looks kept
-                on_rollback(store, lambda: target.unlink(missing_ok=True))
-                payload["transcript"] = path.as_posix()
+                # kept only with the recorded end: see put_turn_transcript
+                payload["transcript"] = put_turn_transcript(store, READER_TURNS_DIR / f"{turn}.json",
+                                                            {**payload, "prompt": prompt, "events": events})
             elif phase == "started":
                 payload["prompt"] = str(prompt or "")
             append_event(store, READER_TURN_EVENT, f"the Reader's turn {turn} {phase}", entity_id=None, payload=payload, conn=conn)

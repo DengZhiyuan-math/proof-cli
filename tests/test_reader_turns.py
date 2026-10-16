@@ -203,6 +203,13 @@ def test_an_end_whose_transaction_cannot_commit_leaves_no_transcript(tmp_path: P
         def commit(self):
             raise sqlite3.OperationalError("disk I/O error")
 
+        def __enter__(self):  # `with store.connect() as conn`, as the reads use it: the real connection's own handling
+            self._conn.__enter__()
+            return self
+
+        def __exit__(self, *exc):
+            return self._conn.__exit__(*exc)
+
         def __getattr__(self, name):
             return getattr(self._conn, name)
 
@@ -221,7 +228,9 @@ def test_an_end_whose_transcript_cannot_be_put_in_place_leaves_no_half_file(tmp_
     def no_rename(*args, **kwargs):
         raise OSError("read-only file system")
 
-    monkeypatch.setattr(P.os, "replace", no_rename)
+    import proof_cli.storage as storage
+
+    monkeypatch.setattr(storage.os, "replace", no_rename)
     with pytest.raises(ProofMapError) as caught:
         _ended(store, pid, "r2")
     monkeypatch.undo()

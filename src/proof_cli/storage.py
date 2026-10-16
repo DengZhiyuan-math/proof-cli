@@ -3,6 +3,7 @@ from __future__ import annotations
 import functools
 import hashlib
 import json
+import os
 import sqlite3
 import threading
 import uuid
@@ -675,6 +676,43 @@ def on_rollback(store: ProjectStore, callback) -> None:
     active = _ACTIVE_TRANSACTION.get()
     if active is not None and active.thread_id == threading.get_ident() and active.db_path == store.db_path.resolve():
         active.on_rollback.append(callback)
+
+
+def put_turn_transcript(store: ProjectStore, relative: Path, record: dict) -> str:
+    """Put a turn's transcript (`record`, as JSON) at `relative` under the project, inside the open
+    `store.transaction()` that records the turn's end — a node's turn, a discussion turn, the Reader's.
+    Write-then-rename, so no reader sees half a file. If that transaction rolls back (its event or its
+    commit failing), the file this attempt put there is removed and anything it moved aside is put back.
+    A file already there is an orphan a crash left before an end was recorded (the caller refuses a turn
+    whose end is recorded): it is moved aside, and removed only once the end commits. Returns the path
+    as the event names it."""
+    if active_transaction(store) is None:
+        raise RuntimeError("a turn's transcript is put in place inside the transaction that records its end")
+    target = store.root / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_name(f"{target.name}.{uuid.uuid4().hex}.tmp")
+    aside = target.with_name(f"{target.name}.{uuid.uuid4().hex}.orphan") if target.exists() else None
+    try:
+        tmp.write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
+        if aside is not None:
+            os.replace(target, aside)
+        os.replace(tmp, target)
+    except BaseException:
+        if aside is not None and aside.exists() and not target.exists():
+            os.replace(aside, target)  # the orphan as it was
+        raise
+    finally:
+        tmp.unlink(missing_ok=True)  # gone already once it was put in place
+
+    def undo() -> None:
+        target.unlink(missing_ok=True)
+        if aside is not None and aside.exists():
+            os.replace(aside, target)
+
+    on_rollback(store, undo)
+    if aside is not None:
+        after_commit(store, lambda: aside.unlink(missing_ok=True))
+    return relative.as_posix()
 
 
 def _run_rollback_callbacks(callbacks: list, start: int) -> None:

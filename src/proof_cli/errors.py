@@ -239,6 +239,7 @@ ERROR_CODES: dict[str, str] = {
     "AGENT_UNAVAILABLE": "the agent's CLI can't run a turn here: not installed, not logged in, or it refused; the message says why",
     "AGENT_INVALID_OPTION": "the model or effort asked for is not one the agent's CLI accepts",
     "AGENT_NO_USAGE_LIMITS": "this agent backend reports no usage limits to probe",
+    "TURN_ENDED": "this turn (a node's, or a discussion turn) has ended already; its record is kept as it is and a second end is not recorded",
     "TURN_CALLED_OFF": "the run was stopped while its turn was being prepared, so no turn started",
     # -- a project Pursue's history: the `pursuit` events (ADR-0021 audit section 1, issue #201) --
     "INVALID_PURSUIT_PHASE": "not a pursuit phase (start, reader_end, theorem, stop, release_failed, end), or a start given an id: a start makes its own",
