@@ -128,3 +128,31 @@ def test_progress_without_json_lists_each_pursuit_and_its_events(tmp_path: Path)
     assert result.exit_code == 0
     assert pid in result.output and "interrupted" in result.output
     assert "release_failed T1: still assigned" in result.output
+
+
+def test_the_pursuits_total_and_each_theorems_result_are_kept_and_read_back(tmp_path: Path):
+    """#223: the Pursue's whole budget and its results per Theorem live in the project, not only in the host's memory."""
+    store = ensure_project(tmp_path)
+    pid = _start(store)
+    total = {"turns_max": 43, "minutes_max": 240.0, "spent": 1, "structure_spent": 1, "failed_launches": 0}
+    P.record_pursuit(store, "reader_end", pursuit_id=pid, outcome="ok", budget=total)
+    P.record_pursuit(store, "theorem", pursuit_id=pid, theorem="T1", budget={**total, "spent": 3})
+    done = {"T1": {"status": "done", "reason": "T1 is requested for review"}}
+    P.record_pursuit(store, "end", pursuit_id=pid, outcome="done", reason="every Theorem's Coordinator ended done",
+                     budget={**total, "spent": 30, "structure_spent": 2}, results=done)
+
+    for pursuits in (P.project_progress(store), _progress_json(tmp_path)):
+        [view] = pursuits
+        assert view["budget"] == {"turns_max": 43, "minutes_max": 240.0, "spent": 30, "structure_spent": 2, "failed_launches": 0}
+        assert view["results"] == {"T1": {"status": "done", "reason": "T1 is requested for review"}}
+        assert view["events"][-1]["results"] == done and view["events"][1]["results"] is None
+
+
+def test_a_pursuit_recorded_without_results_reads_them_as_unknown_not_empty(tmp_path: Path):
+    """#223: history written before results were kept says nothing about them; it is not read as 'no results'."""
+    store = ensure_project(tmp_path)
+    pid = _start(store)
+    P.record_pursuit(store, "end", pursuit_id=pid, outcome="done", reason="every Theorem's Coordinator ended done")
+
+    [view] = _progress_json(tmp_path)
+    assert view["results"] is None and view["budget"] is None
