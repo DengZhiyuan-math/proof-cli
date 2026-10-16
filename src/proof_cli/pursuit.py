@@ -23,14 +23,13 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import sqlite3
 import uuid
 from pathlib import Path
 from typing import Any
 
 from .domain import EventRecord
-from .proof_map import ProofMapError
+from .proof_map import _TURN_ID, ProofMapError  # a Reader turn's id is a node turn's
 from .storage import ProjectStore, append_event, list_events_of_kind, on_rollback
 
 PURSUIT_EVENT = "pursuit"
@@ -44,7 +43,6 @@ PHASES = ("start", "reader_end", "theorem", "stop", "release_failed", "end")
 READER_TURN_EVENT = "reader_turn"
 READER_TURNS_DIR = Path(".proof") / "reader-turns"
 READER_OUTCOMES = ("ok", "failed", "stopped")
-_TURN_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")   # as a node's turn ids are (proof_map)
 
 INTERRUPTED = "interrupted"
 RUNNING = "running"
@@ -125,7 +123,7 @@ def project_progress(store: ProjectStore, *, live: str | None = None) -> list[di
     one with no end reads `interrupted`, except `live`, the pursuit the calling process runs now,
     which reads `running`."""
     pursuits: dict[str, list[dict[str, Any]]] = {}
-    reader = reader_turns(store)
+    kept_reader_turns = reader_turns(store)
     for event in list_events_of_kind(store, PURSUIT_EVENT):
         pursuits.setdefault(event.payload.get("pursuit_id", ""), []).append(_event_view(event))
     views = []
@@ -143,7 +141,7 @@ def project_progress(store: ProjectStore, *, live: str | None = None) -> list[di
         results = [e["results"] for e in events if e["results"] is not None]  # none recorded: unknown, not empty
         # a Reader that may have begun: a reader_end that did not say it was refused before its job existed
         reader_may_have_run = any(e["phase"] == "reader_end" and e["launched"] is not False for e in events)
-        kept = [turn for turn in reader if turn["pursuit_id"] == pursuit_id]
+        its_reader_turns = [turn for turn in kept_reader_turns if turn["pursuit_id"] == pursuit_id]
         views.append(
             {
                 "pursuit_id": pursuit_id,
@@ -157,7 +155,7 @@ def project_progress(store: ProjectStore, *, live: str | None = None) -> list[di
                 "started_at": events[0]["created_at"],
                 "ended_at": end["created_at"] if end else None,
                 # the Reader's turns kept with it; None when a Reader ended and nothing was kept (history from before #224)
-                "reader_turns": kept if kept or not reader_may_have_run else None,
+                "reader_turns": its_reader_turns if its_reader_turns or not reader_may_have_run else None,
                 "events": events,
             }
         )
@@ -242,11 +240,11 @@ def reader_turns(store: ProjectStore) -> list[dict[str, Any]]:
             "at": event.created_at.isoformat(), "ended": False, "ended_at": None, "job": None, "session_id": None,
             "outcome": None, "reason": "", "exit": None, "is_error": None, "tool_failures": None, "transcript": None})
         if p.get("phase") == "ended":
-            kept = p.get("transcript")
+            transcript = p.get("transcript")
             entry.update(ended=True, ended_at=event.created_at.isoformat(), job=p.get("job"), session_id=p.get("session_id"),
                          outcome=p.get("outcome"), reason=p.get("reason", ""), exit=p.get("exit"), is_error=p.get("is_error"),
                          tool_failures=p.get("tool_failures"),
-                         transcript=kept if kept and (store.root / kept).is_file() else None)  # only while its file is there
+                         transcript=transcript if transcript and (store.root / transcript).is_file() else None)  # only while its file is there
     return list(turns.values())
 
 
