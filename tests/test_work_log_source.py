@@ -145,3 +145,26 @@ def test_the_maps_agent_or_the_reader_under_the_runs_name_is_never_taken_for_the
 
     assert [(e["text"], e["role"], e.get("from_node")) for e in _fog(store, "B")] == [
         ("from the map's discussion", None, None), ("a departure the Reader noted", "reader", None)]
+
+
+def test_what_the_host_records_about_the_node_itself_is_its_running_turns_even_beside_a_same_named_turn(tmp_path: Path):
+    """An unstamped event about the viewed node (its claim, its proof's Evidence check) belongs to that node's turn
+    when the actor matches; the ambiguity only concerns what is about another entity, such as a fog item near both."""
+    from _proofs import submit_proof
+
+    from proof_cli.fog import add_fog
+    from proof_cli.proof_map import claim_node, record_evidence_check
+
+    store = _two_nodes(tmp_path)
+    proof = submit_proof(store, "A", claimant_id=AGENT, scoping_rationale="scoped", content="proof of A")
+    _turn(store, "A", "verifier", "started", "ta")
+    _turn(store, "B", "prover", "started", "tb")
+    claim_node(store, "A", claimant_id=AGENT)  # the host's writes: no agent runtime, no turn named
+    record_evidence_check(store, proof.id, "passed", run_by=AGENT, notes="no objections")
+    add_fog(store, "near both, written with no turn named", near=["A", "B"], created_by=AGENT)
+
+    def read(node):
+        return {e["kind"]: (e["role"], e.get("role_unknown", False)) for e in work_log(store, node) if e["kind"] in ("claimed", "evidence", "fog")}
+
+    assert read("A") == {"claimed": ("verifier", False), "evidence": ("verifier", False), "fog": (None, True)}
+    assert read("B") == {"fog": (None, True)}
