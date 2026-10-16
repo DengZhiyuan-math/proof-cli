@@ -737,8 +737,9 @@ def work_log(store: ProjectStore, node_id: str) -> list[dict]:
     What an agent's turn did carries that turn's role, read from the event (#227), the same in every node's log that
     shows it, with `from_node` when that turn was on another node; anything else — outside a turn, or by someone else
     while a turn runs (the researcher's own split, a fog item from the map) — keeps its own actor and has none. History
-    written before events named their turn takes the running turn's role only when no other running turn acts under
-    the same name; otherwise its role is unknown (`role_unknown`), never guessed."""
+    written before events named their turn — or by the host, which runs in no agent's runtime — takes the running
+    turn's role when it is about this node itself (its claim, its proofs' Evidence checks, its edges) or when no other
+    running turn acts under the same name; a shared one otherwise reads role unknown (`role_unknown`), never guessed."""
     named = set(require_node(store, node_id).definitions)
     proof_ids = {proof.id for proof in list_candidate_proofs(store, node_id)}
     fog = {item.id: item for item in list_fog_items(store)}
@@ -796,10 +797,11 @@ def work_log(store: ProjectStore, node_id: str) -> list[dict]:
             turn = running.get(node_id)
             if turn is None or entry.get("by") != turn.get("by"):
                 continue
-            if sum(1 for other in running.values() if other.get("by") == turn.get("by")) == 1:
-                entry["role"] = turn.get("role")  # the only turn acting under that name: it did it
+            about_node = event.entity_id == node_id or event.entity_id in proof_ids  # the node's own claim, proofs, edges
+            if about_node or sum(1 for other in running.values() if other.get("by") == turn.get("by")) == 1:
+                entry["role"] = turn.get("role")  # about this node, or the only turn acting under that name: it did it
             else:
-                entry["role_unknown"] = True  # several turns act under that name and the event names none: never a guess
+                entry["role_unknown"] = True  # shared, several turns act under that name, the event names none: never a guess
     return entries
 
 
