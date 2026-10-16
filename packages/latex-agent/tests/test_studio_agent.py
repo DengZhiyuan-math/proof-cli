@@ -1,7 +1,8 @@
 """Unit tests for the agent manager and its backends (latex_agent/agent.py, backend_*.py).
 
-No real CLI is started: the Claude Code and Codex backends are checked through the
-command they would run and the events they make from sample output.
+No model CLI is started: the Claude Code and Codex backends are checked through the
+command they would run and the events they make from sample output. A local gh
+credential-isolation test uses only synthetic configuration and makes no API call.
 """
 import json
 import os
@@ -532,19 +533,47 @@ class ClaudeContext(unittest.TestCase):
 
 
 class AgentEnvironment(unittest.TestCase):
-    """Upstream 624bff0: an agent's turn reaches no git remote and has no GitHub login, so it can never push over,
-    rewrite or delete the project's history there."""
+    """Agent child commands inherit disabled git transports and gh credential lookup."""
 
     def test_no_remote_and_no_login_and_the_context_kept(self):
-        base = {"PATH": "/bin", "PROOF_ROOT": "/p", "GH_TOKEN": "t", "GITHUB_TOKEN": "t", "CLAUDE_CONFIG_DIR": "/c"}
+        base = {"PATH": "/bin", "PROOF_ROOT": "/p", "GH_TOKEN": "t", "GITHUB_TOKEN": "t",
+                "GH_ENTERPRISE_TOKEN": "t", "GITHUB_ENTERPRISE_TOKEN": "t",
+                "CLAUDE_CONFIG_DIR": "/c", "ANTHROPIC_MODEL": "claude-opus-5-5"}
         env = backends.agent_env(base)
         self.assertEqual((env["PROOF_ROOT"], env["CLAUDE_CONFIG_DIR"], env["PATH"]), ("/p", "/c", "/bin"))
         self.assertNotIn("GH_TOKEN", env)
         self.assertNotIn("GITHUB_TOKEN", env)
+        self.assertNotIn("GH_ENTERPRISE_TOKEN", env)
+        self.assertNotIn("GITHUB_ENTERPRISE_TOKEN", env)
+        self.assertEqual(env["ANTHROPIC_MODEL"], "claude-opus-5-5")
         self.assertEqual(env["GIT_TERMINAL_PROMPT"], "0")
         self.assertNotIn(env["GIT_ALLOW_PROTOCOL"], ("", "https", "ssh", "file"))
         self.assertIn("GH_CONFIG_DIR", env)
         self.assertNotIn("GIT_ALLOW_PROTOCOL", base)    # the context's own environment is not changed
+
+    def test_gh_cannot_reuse_a_saved_login(self):
+        import shutil
+        import subprocess
+        from unittest import mock
+
+        gh = shutil.which("gh")
+        if gh is None:
+            self.skipTest("GitHub CLI is not installed")
+        with tempfile.TemporaryDirectory() as d:
+            # A previous process can leave a login in the old shared path.
+            config = Path(d) / "proof-agents-no-gh-login"
+            config.mkdir()
+            (config / "hosts.yml").write_text(
+                "github.com:\n    oauth_token: synthetic-saved-token\n    user: synthetic\n"
+            )
+            with mock.patch("tempfile.gettempdir", return_value=d):
+                env = backends.agent_env({"PATH": os.environ.get("PATH", "")})
+            result = subprocess.run(
+                [gh, "auth", "token", "--hostname", "github.com"],
+                env=env, capture_output=True, text=True, timeout=10,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse(result.stdout.strip())
 
     def test_a_turn_starts_with_it(self):
         from unittest import mock
