@@ -227,7 +227,7 @@ class AgentManager:
                   "reverted": reverted,
                   "session_id": res.get("session_id") or job.session_id,
                   "duration": res.get("duration") or int((time.time() - t0) * 1000)}
-            for k in ("cost", "billing", "usage", "is_error", "subtype", "denials", "denied", "stderr"):
+            for k in ("cost", "billing", "usage", "context", "is_error", "subtype", "denials", "denied", "stderr"):
                 if res.get(k) is not None:
                     ev[k] = res[k]
             job.emit(ev)

@@ -32,6 +32,7 @@ Events a backend emits through ``job.emit`` (the panel understands exactly these
                                                 a tool call, with the file (and lines) a file tool works on
     {"t": "tool_result", "id": str, "error": bool, "preview": str}
     {"t": "build", "result": dict}              a build the agent ran (agent.py, not backends)
+    {"t": "context", "used": int, "window": int|None}   how full the context window is
     {"t": "rate", "rate": dict}                 Claude usage limits
     {"t": "error", "message": str}
 
@@ -169,6 +170,23 @@ class Job:
             return self.events[after:], self.done
 
 
+def agent_env(base: dict | None = None) -> dict:
+    """Default environment for agent turns and their child commands (upstream prism-local 624bff0).
+
+    Disable git transports and gh configuration loading while preserving local git and provider settings.
+    These inherited settings are not an OS sandbox: a command that replaces its environment can bypass them.
+    """
+    env = dict(os.environ if base is None else base)
+    env["GIT_ALLOW_PROTOCOL"] = "proof-agents-do-not-reach-remotes"
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    for key in ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"):
+        env.pop(key, None)
+    # An empty directory still lets gh read the OS keychain. A non-directory config path makes gh fail
+    # before credential lookup, including when an old temporary directory contains a saved login.
+    env["GH_CONFIG_DIR"] = os.devnull
+    return env
+
+
 class Backend:
     """Base class. Subclasses set the class attributes and implement `run`."""
 
@@ -183,6 +201,7 @@ class Backend:
     enforces_scope = True
     skills = False                    # offers skills / slash commands (/api/agent/commands)
     usage_limits = False              # reports subscription usage limits (/api/agent/usage)
+
 
     def __init__(self, pid: str, spec: dict | None = None):
         spec = spec or {}
@@ -253,7 +272,8 @@ class CliBackend(Backend):
         # The prompt goes through stdin so it can never be parsed as a flag. TREE: Stop
         # also ends the commands the CLI started.
         job.proc = subprocess.Popen(cmd, cwd=job.root, stdin=subprocess.PIPE,
-                                    env=job.context.env() if job.context else None,   # PROOF_ROOT, `proof` on PATH
+                                    # PROOF_ROOT, `proof` on PATH; and no git remote, no GitHub login (upstream 624bff0)
+                                    env=agent_env(job.context.env() if job.context else None),
                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                     text=True, encoding="utf-8", errors="replace", bufsize=1,
                                     **TREE)

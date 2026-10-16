@@ -128,6 +128,14 @@ def account_problem(info: dict, allowed: str) -> str | None:
 COMPILE_TOOL = f"mcp__{MCP_SERVER}__compile"       # the compile tool (backends.compile_tool_server), as Claude Code names it
 
 
+def context_tokens(usage: dict | None) -> int:
+    """How much of the context window a message used: what it read plus what it wrote."""
+    if not isinstance(usage, dict):
+        return 0
+    return sum(int(usage.get(k) or 0) for k in ("input_tokens", "cache_creation_input_tokens",
+                                                "cache_read_input_tokens", "output_tokens"))
+
+
 def _loads_compile_tool(block: dict) -> bool:
     """Claude Code loading the compile tool before its first use: not a step to show."""
     q = str((block.get("input") or {}).get("query") or "")
@@ -266,6 +274,8 @@ class ClaudeCode(CliBackend):
         # Skills and slash commands Claude Code offers in this project, from its init event.
         self.catalog: dict | None = None
         self.catalog_lock = threading.Lock()
+        # Each model's context window, from the last turn's result (modelUsage).
+        self.windows: dict[str, int] = {}
 
     def bin(self) -> str | None:
         return self.bin_override or claude_bin()
@@ -328,6 +338,7 @@ class ClaudeCode(CliBackend):
             # "none": the claude.ai login, whose turns count against the plan's usage
             # limits; anything else is an API key, billed per token.
             st["api_key_source"] = d.get("apiKeySource")
+            st["model"] = d.get("model")
             self._remember_catalog(d)
             job.emit({"t": "init", "session_id": st["session_id"], "model": d.get("model")})
         elif t == "stream_event" and d.get("parent_tool_use_id") is None:
@@ -378,6 +389,10 @@ class ClaudeCode(CliBackend):
                 st["live"] = {}
                 job.emit({"t": "message_start"})
         elif t == "assistant" and d.get("parent_tool_use_id") is None:
+            used = context_tokens((d.get("message") or {}).get("usage"))
+            if used:
+                st["context"] = {"used": used, "window": self.windows.get(st.get("model") or "")}
+                job.emit({"t": "context", **st["context"]})
             for block in (d.get("message") or {}).get("content", []):
                 if block.get("type") == "text" and block.get("text"):
                     job.emit({"t": "text", "text": block["text"]})
@@ -408,6 +423,9 @@ class ClaudeCode(CliBackend):
             # claude.ai login nothing is billed, so report the tokens instead of a price.
             u = d.get("usage") or {}
             subscription = st.get("api_key_source") in (None, "none")
+            window = self._remember_window(d.get("modelUsage") or {}, st.get("model"))
+            if st.get("context"):
+                st["context"] = {**st["context"], "window": window or st["context"].get("window")}
             st.update(session_id=d.get("session_id") or st.get("session_id"),
                       cost=None if subscription else d.get("total_cost_usd"),
                       billing="subscription" if subscription else "api",
@@ -423,6 +441,20 @@ class ClaudeCode(CliBackend):
                                "what": _summarize_tool(p.get("tool_name") or "",
                                                        p.get("tool_input") or {}, job.root)}
                               for p in d.get("permission_denials") or []])
+
+    def _remember_window(self, model_usage: dict, model: str | None) -> int | None:
+        """The context window of the turn's model (modelUsage also lists side calls, e.g.
+        Haiku: take the turn's model, or else the one that read the most)."""
+        entries = {k: v for k, v in model_usage.items() if isinstance(v, dict) and v.get("contextWindow")}
+        if not entries:
+            return None
+        key = next((k for k in entries if model and (k == model or model.startswith(k))), None) \
+            or max(entries, key=lambda k: (entries[k].get("inputTokens") or 0)
+                   + (entries[k].get("cacheReadInputTokens") or 0))
+        window = int(entries[key]["contextWindow"])
+        if model:
+            self.windows[model] = window
+        return window
 
     def _remember_catalog(self, init: dict) -> None:
         skills = [s for s in init.get("skills") or [] if isinstance(s, str)]
