@@ -7,7 +7,6 @@ anything the host writes for itself.
 """
 
 import contextvars
-import json
 import threading
 from pathlib import Path
 
