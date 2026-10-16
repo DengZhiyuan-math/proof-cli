@@ -46,9 +46,11 @@ def record_pursuit(
     reason: str = "",
     theorem: str | None = None,
     budget: dict[str, Any] | None = None,
+    results: dict[str, Any] | None = None,
 ) -> EventRecord:
     """Append one `pursuit` event. `start` makes the pursuit's id (read it from the event's payload);
-    every other phase names a started pursuit that has not ended, and `end` names its outcome."""
+    every other phase names a started pursuit that has not ended, and `end` names its outcome. `budget` is the
+    pursuit's whole total and what it has spent so far, `results` each Theorem's result so far (#223)."""
     if phase not in PHASES:
         raise ProofMapError("INVALID_PURSUIT_PHASE", f"not a pursuit phase: {phase!r}", details={"phases": list(PHASES)})
     if phase == "start":
@@ -67,6 +69,7 @@ def record_pursuit(
         "provider": provider,
         "theorem": theorem,
         "budget": budget,
+        "results": results,
     }
     message = f"pursuit {pursuit_id}: {phase}" + (f" {payload['outcome']}" if payload["outcome"] else "") + (f": {payload['reason']}" if payload["reason"] else "")
     try:
@@ -94,6 +97,7 @@ def _event_view(event: EventRecord) -> dict[str, Any]:
         "provider": p.get("provider", ""),
         "theorem": p.get("theorem"),
         "budget": p.get("budget"),
+        "results": p.get("results"),
         "created_at": event.created_at.isoformat(),
     }
 
@@ -117,6 +121,7 @@ def project_progress(store: ProjectStore, *, live: str | None = None) -> list[di
             reason = "no end was recorded: the process that ran it stopped; a new Start rechecks claims, snapshots and node states"
         theorems = [e["theorem"] for e in events if e["theorem"]]
         budgets = [e["budget"] for e in events if e["budget"] is not None]
+        results = [e["results"] for e in events if e["results"] is not None]  # none recorded: unknown, not empty
         views.append(
             {
                 "pursuit_id": pursuit_id,
@@ -125,6 +130,7 @@ def project_progress(store: ProjectStore, *, live: str | None = None) -> list[di
                 "provider": events[0]["provider"],
                 "theorem": theorems[-1] if theorems else None,
                 "budget": budgets[-1] if budgets else None,
+                "results": results[-1] if results else None,
                 "last_phase": events[-1]["phase"],
                 "started_at": events[0]["created_at"],
                 "ended_at": end["created_at"] if end else None,
