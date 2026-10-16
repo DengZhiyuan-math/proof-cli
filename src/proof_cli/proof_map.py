@@ -737,9 +737,10 @@ def work_log(store: ProjectStore, node_id: str) -> list[dict]:
     What an agent's turn did carries that turn's role, read from the event (#227), the same in every node's log that
     shows it, with `from_node` when that turn was on another node; anything else — outside a turn, or by someone else
     while a turn runs (the researcher's own split, a fog item from the map) — keeps its own actor and has none. History
-    written before events named their turn — or by the host, which runs in no agent's runtime — takes the running
-    turn's role when it is about this node itself (its claim, its proofs' Evidence checks, its edges) or when no other
-    running turn acts under the same name; a shared one otherwise reads role unknown (`role_unknown`), never guessed."""
+    written before events named their turn, or by the host outside `acting_as`, takes a role only when a record ties it
+    to one turn: it is about this node itself (its claim, its proofs' Evidence checks, its edges) and this node's turn is
+    the only running turn under its actor's name. Otherwise, while a running turn acts under that name, its role is
+    unknown (`role_unknown`), never guessed; with none, it keeps its own actor and has no role."""
     named = set(require_node(store, node_id).definitions)
     proof_ids = {proof.id for proof in list_candidate_proofs(store, node_id)}
     fog = {item.id: item for item in list_fog_items(store)}
@@ -793,15 +794,16 @@ def work_log(store: ProjectStore, node_id: str) -> list[dict]:
                 if acting.get("node") and acting["node"] != node_id:
                     entry["from_node"] = acting["node"]
                 continue
+            # no turn named: a role only where a record ties it to one turn — about this node, whose turn alone runs as its actor
             entry["role"] = None
-            turn = running.get(node_id)
-            if turn is None or entry.get("by") != turn.get("by"):
-                continue
+            under_name = [other for other, turn in running.items() if entry.get("by") and turn.get("by") == entry.get("by")]
+            if not under_name:
+                continue  # no running turn acts as its actor: its own actor, no role
             about_node = event.entity_id == node_id or event.entity_id in proof_ids  # the node's own claim, proofs, edges
-            if about_node or sum(1 for other in running.values() if other.get("by") == turn.get("by")) == 1:
-                entry["role"] = turn.get("role")  # about this node, or the only turn acting under that name: it did it
+            if about_node and under_name == [node_id]:
+                entry["role"] = running[node_id].get("role")
             else:
-                entry["role_unknown"] = True  # shared, several turns act under that name, the event names none: never a guess
+                entry["role_unknown"] = True  # shared, or several turns could have written it: never a guess
     return entries
 
 
