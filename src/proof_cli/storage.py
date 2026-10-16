@@ -1027,10 +1027,11 @@ def write_state(store: ProjectStore, state: ProjectState) -> None:
         )
 
 
-# the payload key naming the agent turn an event was written in (#227): {"node": ..., "role": ...}
-ACTING_TURN = "acting_turn"
-# the agent turn the writes in this context are made for; None outside any (the researcher's, the host's own)
-_ACTING_TURN: ContextVar[dict | None] = ContextVar("proof_acting_turn", default=None)
+# the event payload field naming the agent turn an event was written for (#227): {"node": ..., "role": ...}
+ACTING_TURN_FIELD = "acting_turn"
+# the context's acting turn, which append_event writes into that field; None: not acting for any (the researcher, the
+# host's own writes) — not to be confused with acting_as(None, None), an agent acting for no turn (the map's agent)
+_ACTING_CONTEXT: ContextVar[dict | None] = ContextVar("proof_acting_context", default=None)
 
 
 @contextmanager
@@ -1040,17 +1041,23 @@ def acting_as(node: str | None, role: str | None) -> Iterator[None]:
     Several runs act under one agent name at once, so the name alone can't say which turn did something. The CLI
     enters it for an agent's runtime; the host enters it for what it records of a run's turn. Per thread and task,
     as a ContextVar is: a turn never reaches another thread, and leaving the block restores what was before."""
-    token = _ACTING_TURN.set({"node": node or None, "role": role or None})
+    token = _ACTING_CONTEXT.set({"node": node or None, "role": role or None})
     try:
         yield
     finally:
-        _ACTING_TURN.reset(token)
+        _ACTING_CONTEXT.reset(token)
 
 
-def acting_turn() -> dict | None:
-    """The agent turn this context's writes are made for (see `acting_as`), or None."""
-    current = _ACTING_TURN.get()
-    return dict(current) if current is not None else None
+@contextmanager
+def not_acting() -> Iterator[None]:
+    """Make the writes inside this block name no agent turn, whatever an enclosing `acting_as` set (#227): the CLI
+    enters it for an invocation outside any agent's runtime, so the researcher's own command is never stamped as a
+    turn's. Leaving the block restores what was before."""
+    token = _ACTING_CONTEXT.set(None)
+    try:
+        yield
+    finally:
+        _ACTING_CONTEXT.reset(token)
 
 
 def append_event(
@@ -1063,9 +1070,9 @@ def append_event(
     conn: sqlite3.Connection | None = None,
 ) -> EventRecord:
     payload = dict(payload or {})
-    turn = _ACTING_TURN.get()
-    if turn is not None and ACTING_TURN not in payload:  # written for an agent's turn: which one, whatever node it is about
-        payload[ACTING_TURN] = dict(turn)
+    turn = _ACTING_CONTEXT.get()
+    if turn is not None and ACTING_TURN_FIELD not in payload:  # written for an agent's turn: which one, whatever node it is about
+        payload[ACTING_TURN_FIELD] = dict(turn)
     event = EventRecord(
         id=str(uuid.uuid4()),
         kind=kind,

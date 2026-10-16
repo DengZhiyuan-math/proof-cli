@@ -52,7 +52,7 @@ from .domain import (
 )
 from .reviews import TRUST_RULES_FILE, DecisionKind, DecisionPayload, PinnedDependency, git_identity
 from .storage import (
-    ACTING_TURN,
+    ACTING_TURN_FIELD,
     get_definition,
     append_event,
     delete_dependency_pin,
@@ -750,7 +750,7 @@ def work_log(store: ProjectStore, node_id: str) -> list[dict]:
     for event in list_events(store):
         at = event.created_at.isoformat()
         payload = dict(event.payload or {})
-        acting = payload.pop(ACTING_TURN, None)  # the agent turn it was written for (#227); history from before names none
+        acting = payload.pop(ACTING_TURN_FIELD, None)  # the agent turn it was written for (#227); history from before names none
         if event.kind == TURN_EVENT:
             if payload.get("phase") == "started":
                 running[event.entity_id] = payload
