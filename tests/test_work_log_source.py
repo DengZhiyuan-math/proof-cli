@@ -4,7 +4,9 @@ Several runs may act under one agent name at once (Pursue keeps two going). A sh
 nodes, an Experiment on it, a Definition both name — shows in each of their work logs; its role must be the role of
 the turn that did it, never the role of the turn running on the node being viewed. The agent's runtime names its
 node and role (PROOF_AGENT_NODE, PROOF_AGENT_ROLE); `proof` writes them into the event. History written before
-says nothing of it: there the role is unknown whenever more than one running turn acts under that name.
+says nothing of it, nor does what the host writes outside `acting_as`: such an entry takes a role only when a
+record ties it to one turn — it is about the viewed node and that node's turn is the only one running under the name.
+A shared one, or one several running turns could have written, reads unknown; one whose actor no turn runs as, none.
 """
 
 import json
@@ -58,7 +60,7 @@ def test_a_fog_item_one_turn_adds_near_two_nodes_carries_that_turns_role_in_both
     assert (in_b["by"], in_b["role"]) == (AGENT, "prover") and "from_node" not in in_b
 
 
-def test_history_that_names_no_turn_reads_unknown_while_two_turns_act_under_the_name_never_the_viewed_ones_role(tmp_path: Path):
+def test_a_shared_entry_naming_no_turn_reads_unknown_in_every_log_whenever_a_running_turn_acts_under_its_name(tmp_path: Path):
     from proof_cli.fog import add_fog
 
     store = _two_nodes(tmp_path)
@@ -66,11 +68,11 @@ def test_history_that_names_no_turn_reads_unknown_while_two_turns_act_under_the_
     add_fog(store, "only A's turn runs", near=["A"], created_by=AGENT)  # written before #227: no turn named
     _turn(store, "B", "prover", "started", "tb")
     add_fog(store, "both turns run", near=["A", "B"], created_by=AGENT)
-    add_fog(store, "the researcher's note", near=["A", "B"], created_by="ada")
+    add_fog(store, "the researcher's hunch", near=["A", "B"], created_by="ada")
 
     shown = {node: [(e["text"], e["role"], e.get("role_unknown", False)) for e in _fog(store, node)] for node in ("A", "B")}
-    assert shown["A"] == [("only A's turn runs", "verifier", False), ("both turns run", None, True), ("the researcher's note", None, False)]
-    assert shown["B"] == [("both turns run", None, True), ("the researcher's note", None, False)]
+    assert shown["A"] == [("only A's turn runs", None, True), ("both turns run", None, True), ("the researcher's hunch", None, False)]
+    assert shown["B"] == [("both turns run", None, True), ("the researcher's hunch", None, False)]
 
 
 def test_an_experiment_and_a_definition_edit_by_one_turn_keep_its_role_in_every_log_that_shows_them(tmp_path: Path):
@@ -111,7 +113,7 @@ def test_the_source_stays_when_turns_end_the_same_agent_works_again_or_the_logs_
     assert [(e["role"], e.get("from_node")) for e in later[1]] == [("prover", "B")]
 
 
-def test_turns_under_different_agent_names_keep_todays_reading_of_history_that_names_no_turn(tmp_path: Path):
+def test_a_shared_entry_naming_no_turn_reads_unknown_even_when_only_another_nodes_turn_has_its_name(tmp_path: Path):
     from proof_cli.fog import add_fog
 
     store = _two_nodes(tmp_path)
@@ -119,10 +121,8 @@ def test_turns_under_different_agent_names_keep_todays_reading_of_history_that_n
     _turn(store, "B", "prover", "started", "tb")
     add_fog(store, "written by the claude-code run", near=["A", "B"], created_by=AGENT)
 
-    [in_a] = _fog(store, "A")
-    [in_b] = _fog(store, "B")
-    assert (in_a["role"], in_a.get("role_unknown", False)) == (None, False)  # not A's agent: its own actor, no role
-    assert (in_b["role"], in_b.get("role_unknown", False)) == ("prover", False)  # the only turn acting under that name
+    in_a, in_b = (_fog(store, node) for node in ("A", "B"))
+    assert in_a == in_b and [(e["role"], e.get("role_unknown", False)) for e in in_a] == [(None, True)]
 
 
 def test_the_researchers_own_commands_name_no_turn(tmp_path: Path):
@@ -141,30 +141,65 @@ def test_the_maps_agent_or_the_reader_under_the_runs_name_is_never_taken_for_the
     store = _two_nodes(tmp_path)
     _turn(store, "B", "prover", "started", "tb")
     _run(tmp_path, "fog", "add", "from the map's discussion", "--near", "B", env={"PROOF_AGENT_NAME": AGENT})
-    _run(tmp_path, "fog", "add", "a departure the Reader noted", "--near", "B", env={"PROOF_AGENT_NAME": AGENT, "PROOF_AGENT_ROLE": "reader"})
+    _run(tmp_path, "fog", "add", "a departure the Reader found", "--near", "B", env={"PROOF_AGENT_NAME": AGENT, "PROOF_AGENT_ROLE": "reader"})
 
     assert [(e["text"], e["role"], e.get("from_node")) for e in _fog(store, "B")] == [
-        ("from the map's discussion", None, None), ("a departure the Reader noted", "reader", None)]
+        ("from the map's discussion", None, None), ("a departure the Reader found", "reader", None)]
 
 
-def test_what_the_host_records_about_the_node_itself_is_its_running_turns_even_beside_a_same_named_turn(tmp_path: Path):
-    """An unstamped event about the viewed node (its claim, its proof's Evidence check) belongs to that node's turn
-    when the actor matches; the ambiguity only concerns what is about another entity, such as a fog item near both."""
+def _about_a(store) -> dict:
+    return {e["kind"]: (e["role"], e.get("role_unknown", False)) for e in work_log(store, "A") if e["kind"] in ("claimed", "evidence")}
+
+
+def _a_with_a_proof(tmp_path: Path):
     from _proofs import submit_proof
 
-    from proof_cli.fog import add_fog
+    store = _two_nodes(tmp_path)
+    return store, submit_proof(store, "A", claimant_id=AGENT, scoping_rationale="scoped", content="proof of A")
+
+
+def test_an_entry_about_the_node_naming_no_turn_is_its_turns_when_that_turn_alone_runs_under_the_name(tmp_path: Path):
     from proof_cli.proof_map import claim_node, record_evidence_check
 
-    store = _two_nodes(tmp_path)
-    proof = submit_proof(store, "A", claimant_id=AGENT, scoping_rationale="scoped", content="proof of A")
+    store, proof = _a_with_a_proof(tmp_path)
+    _turn(store, "A", "verifier", "started", "ta")
+    claim_node(store, "A", claimant_id=AGENT)  # the host's writes outside acting_as: no turn named
+    record_evidence_check(store, proof.id, "passed", run_by=AGENT, notes="no objections")
+
+    assert _about_a(store) == {"claimed": ("verifier", False), "evidence": ("verifier", False)}
+
+
+def test_an_entry_about_the_node_naming_no_turn_reads_unknown_while_another_turn_runs_under_the_name(tmp_path: Path):
+    from proof_cli.proof_map import claim_node, record_evidence_check
+
+    store, proof = _a_with_a_proof(tmp_path)
     _turn(store, "A", "verifier", "started", "ta")
     _turn(store, "B", "prover", "started", "tb")
-    claim_node(store, "A", claimant_id=AGENT)  # the host's writes: no agent runtime, no turn named
+    claim_node(store, "A", claimant_id=AGENT)
     record_evidence_check(store, proof.id, "passed", run_by=AGENT, notes="no objections")
-    add_fog(store, "near both, written with no turn named", near=["A", "B"], created_by=AGENT)
 
-    def read(node):
-        return {e["kind"]: (e["role"], e.get("role_unknown", False)) for e in work_log(store, node) if e["kind"] in ("claimed", "evidence", "fog")}
+    assert _about_a(store) == {"claimed": (None, True), "evidence": (None, True)}
 
-    assert read("A") == {"claimed": ("verifier", False), "evidence": ("verifier", False), "fog": (None, True)}
-    assert read("B") == {"fog": (None, True)}
+
+def test_an_entry_about_the_node_naming_no_turn_reads_unknown_when_only_another_nodes_turn_has_the_name(tmp_path: Path):
+    from proof_cli.proof_map import claim_node
+
+    store, _ = _a_with_a_proof(tmp_path)
+    _turn(store, "B", "prover", "started", "tb")
+    claim_node(store, "A", claimant_id=AGENT)
+
+    assert _about_a(store) == {"claimed": (None, True)}
+
+
+def test_what_the_host_records_inside_acting_as_is_that_turns_beside_a_same_named_turn(tmp_path: Path):
+    from proof_cli.proof_map import claim_node, record_evidence_check
+    from proof_cli.storage import acting_as
+
+    store, proof = _a_with_a_proof(tmp_path)
+    _turn(store, "A", "verifier", "started", "ta")
+    _turn(store, "B", "prover", "started", "tb")
+    with acting_as("A", "verifier"):
+        claim_node(store, "A", claimant_id=AGENT)
+        record_evidence_check(store, proof.id, "passed", run_by=AGENT, notes="no objections")
+
+    assert _about_a(store) == {"claimed": ("verifier", False), "evidence": ("verifier", False)}
