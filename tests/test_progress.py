@@ -146,19 +146,21 @@ def test_a_step_that_needs_a_human_decision_names_it(tmp_path: Path):
 def test_automatic_entries_take_the_role_of_the_turn_that_made_them_and_a_turn_keeps_its_conversation(tmp_path: Path):
     from proof_cli.fog import add_fog
     from proof_cli.proof_map import agent_turn_transcript, record_agent_turn
+    from proof_cli.storage import acting_as
 
     store = ensure_project(tmp_path)
     create_node(store, node_id="N", kind="claim", statement="a claim")
     add_fog(store, "the researcher's own hunch", near=["N"], created_by="ada")  # outside any turn: no role
     record_agent_turn(store, "N", phase="started", turn="t1", role="numerics", by="claude-code", provider="claude")
-    add_fog(store, "the ratio may stay below 2", near=["N"], created_by="claude-code")
-    add_fog(store, "ada's note during the turn", near=["N"], created_by="ada")  # the researcher's, though a turn is running
+    with acting_as("N", "numerics"):  # the turn's own write, as its runtime's `proof` makes it (#227)
+        add_fog(store, "the ratio may stay below 2", near=["N"], created_by="claude-code")
+    add_fog(store, "ada's own item during the turn", near=["N"], created_by="ada")  # the researcher's, though a turn is running
     record_agent_turn(store, "N", phase="ended", turn="t1", role="numerics", by="claude-code", provider="claude",
                       job=3, session_id="s-1", step=2, events=[{"t": "init", "session_id": "s-1"}, {"t": "text", "text": "checked n ≤ 100"}])
     log = work_log(store, "N")
     fog = [entry for entry in log if entry["kind"] == "fog"]
     assert [(entry["role"], entry["text"]) for entry in fog] == [
-        (None, "the researcher's own hunch"), ("numerics", "the ratio may stay below 2"), (None, "ada's note during the turn")]
+        (None, "the researcher's own hunch"), ("numerics", "the ratio may stay below 2"), (None, "ada's own item during the turn")]
     (turn,) = [entry for entry in log if entry["kind"] == "turn"]
     assert (turn["role"], turn["job"], turn["session_id"], turn["step"], turn["turn"]) == ("numerics", 3, "s-1", 2, "t1")
     kept = agent_turn_transcript(store, "N", "t1")

@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .backends import MCP_SERVER, CliBackend, Job, compile_tool_server, find_bin, has_compile_tool, system_append, tool_name
+from .backends import CLI_PREVIEW_LIMITS, MCP_SERVER, CliBackend, Job, compile_tool_server, find_bin, has_compile_tool, system_append, tool_name
 
 SANDBOX = {"edit": "workspace-write", "ask": "read-only"}
 
@@ -37,9 +37,18 @@ def _rel(p: str, root: Path) -> str:
         return p
 
 
+# How much of a tool call a turn's events keep (#224): previews, cut at these lengths with no mark of the cut.
+SUMMARY_PREVIEW_CHARS = 200    # a tool call's summary: a command, the changed paths, a query
+RESULT_PREVIEW_CHARS = 300     # a command's output
+# The same, per event field, for a host to keep with what it records (see backend_claude.PREVIEW_LIMITS).
+PREVIEW_LIMITS: dict[str, int | dict | None] = {"tool.summary": SUMMARY_PREVIEW_CHARS, "tool_result.preview": RESULT_PREVIEW_CHARS,
+                                                **CLI_PREVIEW_LIMITS}
+
+
 class Codex(CliBackend):
     kind = "codex"
     label = "Codex CLI"
+    preview_limits = PREVIEW_LIMITS
     models: list[str] = []
     efforts = ("minimal", "low", "medium", "high", "xhigh")
     enforces_scope = False
@@ -109,7 +118,7 @@ class Codex(CliBackend):
         def tool(name: str, summary: str) -> None:
             if iid not in seen:
                 seen.add(iid)
-                job.emit({"t": "tool", "id": iid, "name": name, "summary": summary[:200]})
+                job.emit({"t": "tool", "id": iid, "name": name, "summary": summary[:SUMMARY_PREVIEW_CHARS]})
 
         if kind == "agent_message" and completed and item.get("text"):
             job.emit({"t": "message_start"})
@@ -120,7 +129,7 @@ class Codex(CliBackend):
                 code = item.get("exit_code")
                 job.emit({"t": "tool_result", "id": iid,
                           "error": item.get("status") == "failed" or code not in (0, None),
-                          "preview": str(item.get("aggregated_output") or "")[:300]})
+                          "preview": str(item.get("aggregated_output") or "")[:RESULT_PREVIEW_CHARS]})
         elif kind == "file_change":
             paths = [_rel(c.get("path", ""), job.root) for c in item.get("changes") or []]
             tool("Edit", ", ".join(paths))

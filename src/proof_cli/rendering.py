@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 
 from rich.console import Console
 from rich.table import Table
@@ -483,6 +484,114 @@ def render_project_progress(pursuits: list[dict]) -> str:
             if event["budget"] is not None:
                 line += f" (budget {event['budget']})"
             console.print(line)
+        if (pursuit.get("budget") or {}).get("spend_incomplete") is True:  # the host could not count every turn
+            console.print("  spend: incomplete — not every turn was counted")
+        results = pursuit.get("results")
+        if results is None:
+            console.print("  results: not recorded")
+        for theorem, result in (results or {}).items():
+            console.print(f"  results: {theorem} {result.get('status')}" + (f" — {result['reason']}" if result.get("reason") else ""))
+        turns = pursuit.get("reader_turns")
+        if turns is None:
+            console.print("  Reader turns: not kept with the project (unknown)")
+        for turn in turns or []:
+            console.print(f"  Reader turn {turn['turn']}: {_reader_turn_ending(turn)}")
+    return console.export_text()
+
+
+def _turn_ending(turn: dict) -> tuple[str, str]:
+    """A Reader turn's ending and, apart from it, its failed tool calls: ("ok, exit 0", "1 tool-call failure(s)")."""
+    ending = f"{turn['outcome']}, exit {turn['exit'] if turn['exit'] is not None else '—'}"
+    failures = "tool-call failures unknown" if turn["tool_failures"] is None else f"{turn['tool_failures']} tool-call failure(s)"
+    return ending, failures
+
+
+def _reader_turn_ending(turn: dict) -> str:
+    """How a Reader turn ended, apart from the tool calls that failed in it."""
+    if not turn["ended"]:
+        return "no recorded end"
+    ending, failures = _turn_ending(turn)
+    conversation = "conversation kept" if turn["transcript"] else "conversation not kept"
+    return f"{ending}, {failures}, {conversation}"
+
+
+def _kept_part(mark: dict) -> str:
+    """What of a field at its limit the backend keeps: "its 300-character limit" / "it keeps the last 2000 characters"."""
+    if mark.get("keeps") == "end":
+        return f"it keeps the last {mark['limit']} characters"
+    return f"its {mark['limit']}-character limit"
+
+
+def _record_form(view: dict) -> str:
+    """What form a kept conversation has: its backend's events, what that backend stated it keeps of each field, and
+    the fields it stated nothing about, whose shortening is unknown — never taken as whole."""
+    limits = view.get("preview_limits")
+    if limits is None:
+        return ("form: the events as the backend reported them; the backend's preview limits were not recorded, "
+                "so any field was possibly shortened by the backend")
+    said = f"form: the events as the {view.get('backend') or 'unnamed'} backend reported them"
+    if not limits:
+        return f"{said}; the backend did not state whether it shortens any field"
+    start = [f"{field} {chars}" for field, chars in limits.items() if isinstance(chars, int)]
+    end = [f"{field} {chars['chars']}" for field, chars in limits.items() if isinstance(chars, dict) and chars.get("keeps") == "end"]
+    whole = [field for field, chars in limits.items() if chars is None]
+    parts = []
+    if start:
+        parts.append(f"it keeps at most: {', '.join(start)} characters from the start")
+    if end:
+        parts.append(f"it keeps only the last: {', '.join(end)} characters")
+    if whole:
+        parts.append(f"kept whole: {', '.join(whole)}")
+    if view.get("unstated_fields"):
+        parts.append(f"the backend did not state whether it shortens: {', '.join(view['unstated_fields'])}")
+    return f"{said}, with no mark of a cut; " + "; ".join(parts)
+
+
+def _conversation_line(event: dict) -> str:
+    """One event of a turn's conversation, as its backend reported it (the --json output is the raw record)."""
+    kind = event.get("t")
+    if kind == "text":
+        return f"text: {event.get('text', '')}"
+    if kind == "tool":
+        return f"tool {event.get('name', '')} ({event.get('id', '')}): {event.get('summary', '')}"
+    if kind == "tool_result":
+        state = "FAILED" if event.get("error") else "ok"
+        return f"tool result {event.get('id', '')}: {state} — {event.get('preview', '')}"
+    if kind == "done":
+        return f"done: exit {event.get('exit')}, is_error {str(bool(event.get('is_error'))).lower()}" + (f", {event['stderr']}" if event.get("stderr") else "")
+    if kind == "init":
+        return f"init: session {event.get('session_id')}" + (f", model {event['model']}" if event.get("model") else "")
+    if kind == "error":
+        return f"error: {event.get('message', '')}"
+    return json.dumps(event, ensure_ascii=False)  # any other kind, as recorded
+
+
+def render_reader_turn(view: dict) -> str:
+    """A Reader turn kept with the project (`proof project reader-turn`): its record, the turn's own ending and its
+    failed tool calls apart, the form its conversation was kept in, then its events as the backend reported them, each
+    field that reached the backend's preview limit marked as possibly shortened."""
+    console = _console()
+    console.rule(f"Reader turn {view['turn']}")
+    console.print(f"pursuit {view['pursuit_id']} · by {view['by']} · provider {view['provider'] or '—'}")
+    console.print(f"started {view['at']}" + (f" · ended {view['ended_at']}" if view["ended"] else " · no recorded end"))
+    if view["ended"]:
+        ending, failures = _turn_ending(view)
+        console.print(f"turn outcome: {ending}, is_error {str(bool(view['is_error'])).lower()}" + (f" — {view['reason']}" if view["reason"] else ""))
+        console.print(f"{failures} in the turn (each is shown below; they are not the turn's outcome)")
+        console.print(f"job {view['job']} · session {view['session_id'] or '—'}")
+    if view.get("prompt"):
+        console.print(f"prompt: {view['prompt']}")
+    events = view.get("events")
+    if events is None:
+        console.print("conversation: not kept with the project")
+        return console.export_text()
+    console.print(_record_form(view))
+    at_limit = {(mark["event"], mark["field"]): mark for mark in view.get("possibly_shortened") or []}
+    console.print(f"conversation, {len(events)} event(s) (--json gives the raw record):")
+    for number, event in enumerate(events, 1):
+        marks = [f"[{field} possibly shortened by the backend ({_kept_part(mark)})]"
+                 for (at, field), mark in at_limit.items() if at == number]
+        console.print(f"  {number}. {_conversation_line(event)}" + "".join(f" {mark}" for mark in marks))
     return console.export_text()
 
 
