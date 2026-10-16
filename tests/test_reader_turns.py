@@ -145,3 +145,104 @@ def test_a_reader_turn_that_began_but_whose_record_was_lost_reads_unknown(tmp_pa
 
     [view] = _progress_json(tmp_path)
     assert view["reader_turns"] is None and view["events"][1]["launched"] is True
+
+
+# -- a transcript is kept only with its recorded end (#224) -----------------------------------------------------------
+
+
+def _ended(store, pid: str, turn: str, events=CONVERSATION):
+    P.record_reader_turn(store, phase="ended", turn=turn, by="claude-code", provider="claude", pursuit_id=pid,
+                         job=3, session_id="s-1", outcome="ok", exit=0, is_error=False, events=events)
+
+
+def _kept_files(root: Path) -> list[str]:
+    folder = root / P.READER_TURNS_DIR
+    return sorted(path.name for path in folder.iterdir()) if folder.is_dir() else []
+
+
+def _one_kept_and_another_started(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    pid = _pursuit(store)
+    P.record_reader_turn(store, phase="started", turn="r1", by="claude-code", provider="claude", pursuit_id=pid)
+    _ended(store, pid, "r1")
+    P.record_reader_turn(store, phase="started", turn="r2", by="claude-code", provider="claude", pursuit_id=pid)
+    return store, pid, (tmp_path / P.READER_TURNS_DIR / "r1.json").read_bytes()
+
+
+def _nothing_more_kept(store, tmp_path: Path, r1: bytes):
+    assert _kept_files(tmp_path) == ["r1.json"] and (tmp_path / P.READER_TURNS_DIR / "r1.json").read_bytes() == r1
+    by_turn = {t["turn"]: t for t in P.reader_turns(store)}
+    assert by_turn["r1"]["ended"] and by_turn["r1"]["transcript"] == ".proof/reader-turns/r1.json"
+    assert (by_turn["r2"]["ended"], by_turn["r2"]["transcript"]) == (False, None)
+    assert P.reader_turn_transcript(store, "r2") is None
+
+
+def test_an_end_whose_event_cannot_be_written_leaves_no_transcript_and_the_earlier_one_untouched(tmp_path: Path, monkeypatch):
+    store, pid, r1 = _one_kept_and_another_started(tmp_path)
+
+    def locked(*args, **kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(P, "append_event", locked)
+    with pytest.raises(ProofMapError) as caught:
+        _ended(store, pid, "r2")
+    monkeypatch.undo()
+    assert caught.value.code == "READER_TURN_RECORD_FAILED"
+    _nothing_more_kept(store, tmp_path, r1)
+
+
+def test_an_end_whose_transaction_cannot_commit_leaves_no_transcript(tmp_path: Path, monkeypatch):
+    from proof_cli.storage import ProjectStore
+
+    store, pid, r1 = _one_kept_and_another_started(tmp_path)
+
+    class CommitFails:
+        def __init__(self, conn):
+            self._conn = conn
+
+        def commit(self):
+            raise sqlite3.OperationalError("disk I/O error")
+
+        def __getattr__(self, name):
+            return getattr(self._conn, name)
+
+    real = ProjectStore.connect
+    monkeypatch.setattr(ProjectStore, "connect", lambda self: CommitFails(real(self)))
+    with pytest.raises(ProofMapError) as caught:
+        _ended(store, pid, "r2")
+    monkeypatch.undo()
+    assert caught.value.code == "READER_TURN_RECORD_FAILED"
+    _nothing_more_kept(store, tmp_path, r1)
+
+
+def test_an_end_whose_transcript_cannot_be_put_in_place_leaves_no_half_file(tmp_path: Path, monkeypatch):
+    store, pid, r1 = _one_kept_and_another_started(tmp_path)
+
+    def no_rename(*args, **kwargs):
+        raise OSError("read-only file system")
+
+    monkeypatch.setattr(P.os, "replace", no_rename)
+    with pytest.raises(ProofMapError) as caught:
+        _ended(store, pid, "r2")
+    monkeypatch.undo()
+    assert caught.value.code == "READER_TURN_RECORD_FAILED"
+    _nothing_more_kept(store, tmp_path, r1)
+
+
+def test_a_second_end_for_a_turn_already_ended_is_refused_and_touches_nothing(tmp_path: Path):
+    store, pid, r1 = _one_kept_and_another_started(tmp_path)
+    events_before = len(list_events(store))
+
+    with pytest.raises(ProofMapError) as caught:
+        _ended(store, pid, "r1", events=[{"t": "text", "text": "a different conversation"}])
+    assert caught.value.code == "READER_TURN_ENDED"
+    assert len(list_events(store)) == events_before
+    _nothing_more_kept(store, tmp_path, r1)
+
+
+def test_a_transcript_is_reported_only_while_its_file_is_there(tmp_path: Path):
+    store, _, _ = _one_kept_and_another_started(tmp_path)
+    (tmp_path / P.READER_TURNS_DIR / "r1.json").unlink()
+
+    [r1] = [t for t in P.reader_turns(store) if t["turn"] == "r1"]
+    assert (r1["ended"], r1["transcript"]) == (True, None)
