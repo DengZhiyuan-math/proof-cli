@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from .domain import EventRecord
-from .proof_map import _TURN_ID, ProofMapError  # a Reader turn's id is a node turn's
+from .proof_map import _TURN_ID, READER_TURN_EVENT, ProofMapError  # a Reader turn's id is a node turn's
 from .storage import ProjectStore, append_event, list_events_of_kind, put_turn_transcript
 
 PURSUIT_EVENT = "pursuit"
@@ -40,7 +40,6 @@ PURSUIT_EVENT = "pursuit"
 # end: the pursuit ended, outcome its final status (done, stuck, released, budget, ...)
 PHASES = ("start", "reader_end", "theorem", "stop", "release_failed", "end")
 
-READER_TURN_EVENT = "reader_turn"
 READER_TURNS_DIR = Path(".proof") / "reader-turns"
 READER_OUTCOMES = ("ok", "failed", "stopped")
 

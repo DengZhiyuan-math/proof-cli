@@ -203,3 +203,21 @@ def test_what_the_host_records_inside_acting_as_is_that_turns_beside_a_same_name
         record_evidence_check(store, proof.id, "passed", run_by=AGENT, notes="no objections")
 
     assert _about_a(store) == {"claimed": ("verifier", False), "evidence": ("verifier", False)}
+
+
+def test_a_running_reader_turn_is_a_running_turn_for_an_entry_that_names_none(tmp_path: Path):
+    from proof_cli import pursuit
+    from proof_cli.fog import add_fog
+    from proof_cli.proof_map import claim_node
+
+    store = _two_nodes(tmp_path)
+    pursuit_id = pursuit.record_pursuit(store, "start", provider="claude").payload["pursuit_id"]
+    pursuit.record_reader_turn(store, phase="started", turn="r1", by=AGENT, pursuit_id=pursuit_id)
+    add_fog(store, "while the Reader reads", near=["A"], created_by=AGENT)  # no turn named
+    _turn(store, "A", "verifier", "started", "ta")
+    claim_node(store, "A", claimant_id=AGENT)  # about A, but the Reader runs under the same name too
+    pursuit.record_reader_turn(store, phase="ended", turn="r1", by=AGENT, pursuit_id=pursuit_id, outcome="ok", events=[])
+    add_fog(store, "after the Reader ended", near=["A"], created_by=AGENT)
+
+    shown = {e.get("text") or e["kind"]: (e["role"], e.get("role_unknown", False)) for e in work_log(store, "A") if e["kind"] in ("fog", "claimed")}
+    assert shown == {"while the Reader reads": (None, True), "claimed": (None, True), "after the Reader ended": (None, True)}
