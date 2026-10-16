@@ -31,7 +31,7 @@ from typing import Any
 
 from .domain import EventRecord
 from .proof_map import ProofMapError
-from .storage import ProjectStore, append_event, list_events_of_kind
+from .storage import ProjectStore, append_event, list_events_of_kind, on_rollback
 
 PURSUIT_EVENT = "pursuit"
 
@@ -184,7 +184,9 @@ def record_reader_turn(
     """The Reader's turn in a project Pursue (#224): `started` once its job exists, `ended` with its job, its backend
     session, its outcome (ok, failed, stopped), the provider's exit and its whole conversation (`events`), kept under
     .proof/reader-turns/. Project state, no node's; never a decision. A record that can't be written raises
-    READER_TURN_RECORD_FAILED, so the host can say the turn is not kept rather than take it as kept."""
+    READER_TURN_RECORD_FAILED, so the host can say the turn is not kept rather than take it as kept; the transcript is
+    put in place only with its `ended` event, and removed again when that event or its commit fails. A second end of
+    a turn already ended is refused (READER_TURN_ENDED) and touches nothing."""
     if phase not in ("started", "ended"):
         raise ProofMapError("INVALID_REQUEST", f"a Reader turn is started or ended, not {phase!r}")
     if not _TURN_ID.fullmatch(turn or ""):
@@ -199,16 +201,23 @@ def record_reader_turn(
         with store.transaction() as conn:
             if not any(e.payload.get("pursuit_id") == pursuit_id for e in list_events_of_kind(store, PURSUIT_EVENT, conn=conn)):
                 raise ProofMapError("PURSUIT_NOT_FOUND", f"no pursuit has the id {pursuit_id}")
+            this_turn = [e.payload for e in list_events_of_kind(store, READER_TURN_EVENT, conn=conn) if e.payload.get("turn") == turn]
+            path = READER_TURNS_DIR / f"{turn}.json"
+            target = store.root / path
+            if phase == "ended" and (any(p.get("phase") == "ended" for p in this_turn) or target.exists()):
+                raise ProofMapError("READER_TURN_ENDED", f"the Reader's turn {turn} has ended already; its record is kept as it is")
             if phase == "ended" and events is not None:
                 if prompt is None:  # the transcript holds the turn's prompt too, as its start recorded it
-                    prompt = next((e.payload.get("prompt") for e in list_events_of_kind(store, READER_TURN_EVENT, conn=conn)
-                                   if e.payload.get("turn") == turn and e.payload.get("phase") == "started"), None)
-                path = READER_TURNS_DIR / f"{turn}.json"
-                target = store.root / path
+                    prompt = next((p.get("prompt") for p in this_turn if p.get("phase") == "started"), None)
                 target.parent.mkdir(parents=True, exist_ok=True)
                 tmp = target.with_name(f"{target.name}.{uuid.uuid4().hex}.tmp")  # write-then-rename: never half a transcript
-                tmp.write_text(json.dumps({**payload, "prompt": prompt, "events": events}, ensure_ascii=False), encoding="utf-8")
-                os.replace(tmp, target)
+                try:
+                    tmp.write_text(json.dumps({**payload, "prompt": prompt, "events": events}, ensure_ascii=False), encoding="utf-8")
+                    os.replace(tmp, target)
+                finally:
+                    tmp.unlink(missing_ok=True)  # gone already once it was put in place
+                # this attempt's transcript only: if the event or the commit fails, no transcript looks kept
+                on_rollback(store, lambda: target.unlink(missing_ok=True))
                 payload["transcript"] = path.as_posix()
             elif phase == "started":
                 payload["prompt"] = str(prompt or "")
@@ -221,7 +230,8 @@ def record_reader_turn(
 
 def reader_turns(store: ProjectStore) -> list[dict[str, Any]]:
     """The Reader's turns kept with the project, oldest first, one entry per turn. A turn with no recorded end reads
-    `ended: False` and no outcome: it is not taken for one that ended ok."""
+    `ended: False` and no outcome: it is not taken for one that ended ok. A transcript is named only while its file
+    is there."""
     turns: dict[str, dict[str, Any]] = {}
     for event in list_events_of_kind(store, READER_TURN_EVENT):
         p = event.payload or {}
@@ -230,9 +240,10 @@ def reader_turns(store: ProjectStore) -> list[dict[str, Any]]:
             "at": event.created_at.isoformat(), "ended": False, "ended_at": None, "job": None, "session_id": None,
             "outcome": None, "reason": "", "exit": None, "is_error": None, "transcript": None})
         if p.get("phase") == "ended":
+            kept = p.get("transcript")
             entry.update(ended=True, ended_at=event.created_at.isoformat(), job=p.get("job"), session_id=p.get("session_id"),
                          outcome=p.get("outcome"), reason=p.get("reason", ""), exit=p.get("exit"), is_error=p.get("is_error"),
-                         transcript=p.get("transcript"))
+                         transcript=kept if kept and (store.root / kept).is_file() else None)  # only while its file is there
     return list(turns.values())
 
 
