@@ -201,8 +201,9 @@ class Backend:
     enforces_scope = True
     skills = False                    # offers skills / slash commands (/api/agent/commands)
     usage_limits = False              # reports subscription usage limits (/api/agent/usage)
-    # how much of a tool call its events keep, per event field (proof-cli#224); empty: this backend states nothing
-    preview_limits: dict[str, int | None] = {}
+    # how much of each event field its events keep (#224): characters kept from the start, {"chars", "keeps": "end"} for
+    # a field whose end is kept, None for a field kept whole; a field not listed, or an empty map: not stated
+    preview_limits: dict[str, int | dict | None] = {}
 
 
     def __init__(self, pid: str, spec: dict | None = None):
@@ -254,8 +255,15 @@ class Backend:
                 "usage_limits": self.usage_limits, "enforces_scope": self.enforces_scope}
 
 
+# A failed turn's stderr, as its `done` event carries it: the last characters only (#224).
+STDERR_KEPT_CHARS = 2000
+CLI_PREVIEW_LIMITS: dict[str, int | dict | None] = {"done.stderr": {"chars": STDERR_KEPT_CHARS, "keeps": "end"}}
+
+
 class CliBackend(Backend):
     """A local CLI that takes the prompt on stdin and prints one JSON object per line."""
+
+    preview_limits = CLI_PREVIEW_LIMITS
 
     def command(self, job: Job) -> tuple[list[str], str]:
         """The argv to start and the text to write to its stdin."""
@@ -294,7 +302,7 @@ class CliBackend(Backend):
         job.proc.wait()
         st["exit"] = job.proc.returncode
         if st["exit"] != 0 or st.get("is_error"):
-            st["stderr"] = "".join(stderr_lines)[-2000:]
+            st["stderr"] = "".join(stderr_lines)[-STDERR_KEPT_CHARS:]
         return st
 
 

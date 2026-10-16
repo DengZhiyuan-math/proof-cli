@@ -24,7 +24,7 @@ import time
 from pathlib import Path
 
 from .fsutil import read_json
-from .backends import MCP_SERVER, NO_WINDOW, TREE, CliBackend, Job, compile_tool_server, find_bin, has_compile_tool, tool_name, kill_tree, system_append
+from .backends import CLI_PREVIEW_LIMITS, MCP_SERVER, NO_WINDOW, TREE, CliBackend, Job, compile_tool_server, find_bin, has_compile_tool, tool_name, kill_tree, system_append
 
 MODES = {"edit": "acceptEdits", "ask": "plan"}
 
@@ -158,18 +158,19 @@ def _tool_place(name: str, inp: dict, root: Path) -> dict:
     return place
 
 
-# How much of a tool call a turn's events keep (proof-cli#224): previews, cut at these lengths with no mark of the cut.
+# How much of a tool call a turn's events keep (#224): previews, cut at these lengths with no mark of the cut.
 COMMAND_PREVIEW_CHARS = 200    # a Bash call's command
 INPUT_PREVIEW_CHARS = 120      # another tool's first text input, when it has no field of its own below
 RESULT_PREVIEW_CHARS = 300     # a tool result's text
 _WHOLE_SUMMARY_TOOLS = ("Read", "Edit", "Write", "MultiEdit", "NotebookEdit", "Grep", "Glob", "Skill", "Agent", "Task")
 # The same, per event field, for a host to keep with what it records: `<event>.<field>[<tool>]` before `<event>.<field>`;
-# None: that field is kept whole.
-PREVIEW_LIMITS: dict[str, int | None] = {
+# None: that field is kept whole; with the CLI backends' own (a failed turn's stderr) — see Backend.preview_limits.
+PREVIEW_LIMITS: dict[str, int | dict | None] = {
     "tool.summary[Bash]": COMMAND_PREVIEW_CHARS,
     **{f"tool.summary[{name}]": None for name in _WHOLE_SUMMARY_TOOLS},
     "tool.summary": INPUT_PREVIEW_CHARS,
     "tool_result.preview": RESULT_PREVIEW_CHARS,
+    **CLI_PREVIEW_LIMITS,
 }
 
 

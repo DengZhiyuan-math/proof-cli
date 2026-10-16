@@ -178,12 +178,13 @@ def record_reader_turn(
     is_error: bool | None = None,
     events: list[dict] | None = None,
     backend: str | None = None,
-    preview_limits: dict[str, int | None] | None = None,
+    preview_limits: dict[str, int | dict | None] | None = None,
 ) -> None:
     """The Reader's turn in a project Pursue (#224): `started` once its job exists, `ended` with its job, its backend
     session, its outcome (ok, failed, stopped), the provider's exit and its conversation (`events`, as the `backend`
-    reported them: previews of tool calls cut at its `preview_limits`, `<event>.<field>[<tool>]` or `<event>.<field>`
-    to a length, None for a field kept whole; the host passes the backend's own, e.g. latex_agent's), kept under
+    reported them: previews cut at its `preview_limits`, `<event>.<field>[<tool>]` or `<event>.<field>` to the
+    characters kept from the start, `{"chars": N, "keeps": "end"}` for a field whose end is kept, None for a field
+    kept whole; the host passes the backend's own, e.g. latex_agent's), kept under
     .proof/reader-turns/. Project state, no node's; never a decision. A record that can't be written raises
     READER_TURN_RECORD_FAILED, so the host can say the turn is not kept rather than take it as kept; the transcript is
     put in place only with its `ended` event, and removed again when that event or its commit fails. A second end of
@@ -257,8 +258,8 @@ def reader_turn_transcript(store: ProjectStore, turn: str) -> dict | None:
 def reader_turn(store: ProjectStore, turn: str) -> dict | None:
     """One Reader turn kept with the project, read back (#224): its record (as `reader_turns` gives it), its prompt,
     its events as its backend reported them (None when its conversation is not kept), and the event fields whose length
-    reached that backend's preview limit (`possibly_shortened`: event number from 1, field, limit; None when the
-    limits were not recorded). The backends mark no cut, so a field at its limit may or may not have been shortened.
+    reached that backend's preview limit (`possibly_shortened`: event number from 1, field, limit, and which end the
+    backend keeps; None when the limits were not recorded). The backends mark no cut, so a field at its limit may or may not have been shortened.
     None when no such turn is kept."""
     record = next((entry for entry in reader_turns(store) if entry["turn"] == turn), None)
     if record is None:
@@ -269,7 +270,23 @@ def reader_turn(store: ProjectStore, turn: str) -> dict | None:
             "possibly_shortened": _at_preview_limit(events, record["preview_limits"])}
 
 
-def _at_preview_limit(events: list[dict] | None, limits: dict[str, int | None] | None) -> list[dict] | None:
+def _field_limit(limits: dict, event: dict, field: str) -> tuple[bool, int | None, str]:
+    """What the backend stated of one event field: (stated at all, the characters it keeps or None when it keeps the
+    field whole, which end it keeps)."""
+    key = f"{event.get('t')}.{field}"
+    named = f"{key}[{event.get('name')}]"
+    if named in limits:
+        stated = limits[named]
+    elif key in limits:
+        stated = limits[key]
+    else:
+        return False, None, "start"
+    if isinstance(stated, dict):
+        return True, stated.get("chars"), "end" if stated.get("keeps") == "end" else "start"
+    return True, stated, "start"
+
+
+def _at_preview_limit(events: list[dict] | None, limits: dict[str, int | dict | None] | None) -> list[dict] | None:
     """The fields of `events` whose length reached their backend's limit; None when the limits are unknown."""
     if limits is None:
         return None
@@ -278,9 +295,7 @@ def _at_preview_limit(events: list[dict] | None, limits: dict[str, int | None] |
         for field, value in event.items():
             if not isinstance(value, str):
                 continue
-            key = f"{event.get('t')}.{field}"
-            named = f"{key}[{event.get('name')}]"
-            limit = limits[named] if named in limits else limits.get(key)
+            _, limit, keeps = _field_limit(limits, event, field)
             if isinstance(limit, int) and len(value) >= limit:
-                reached.append({"event": number, "field": field, "limit": limit})
+                reached.append({"event": number, "field": field, "limit": limit, "keeps": keeps})
     return reached

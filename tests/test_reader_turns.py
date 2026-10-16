@@ -364,7 +364,8 @@ def test_a_field_that_reached_its_backends_limit_is_marked_possibly_shortened_an
 
     view = P.reader_turn(store, "r7")
     assert (view["backend"], view["preview_limits"]) == ("claude", LIMITS)
-    assert view["possibly_shortened"] == [{"event": 1, "field": "summary", "limit": 50}, {"event": 4, "field": "preview", "limit": 40}]
+    assert view["possibly_shortened"] == [{"event": 1, "field": "summary", "limit": 50, "keeps": "start"},
+                                          {"event": 4, "field": "preview", "limit": 40, "keeps": "start"}]
 
     text = " ".join(runner.invoke(app, ["project", "reader-turn", "r7", "--root", str(tmp_path)]).output.split())
     assert "the events as the claude backend reported them" in text
@@ -385,3 +386,15 @@ def test_a_record_without_the_backends_limits_says_so_and_that_previews_may_be_s
 
 def test_reader_turn_reads_none_for_an_unknown_turn(tmp_path: Path):
     assert P.reader_turn(ensure_project(tmp_path), "nope") is None
+
+
+def test_a_field_whose_end_the_backend_keeps_is_marked_with_that_direction(tmp_path: Path):
+    limits = {"done.stderr": {"chars": 20, "keeps": "end"}, "tool_result.preview": 40}
+    events = [{"t": "tool_result", "id": "a", "error": True, "preview": "o" * 40}, {"t": "done", "exit": 1, "is_error": True, "stderr": "e" * 20}]
+    store = _with_limits(tmp_path, events, backend="claude", preview_limits=limits)
+
+    assert P.reader_turn(store, "r7")["possibly_shortened"] == [
+        {"event": 1, "field": "preview", "limit": 40, "keeps": "start"}, {"event": 2, "field": "stderr", "limit": 20, "keeps": "end"}]
+    text = " ".join(runner.invoke(app, ["project", "reader-turn", "r7", "--root", str(tmp_path)]).output.split())
+    assert "[stderr possibly shortened by the backend (it keeps the last 20 characters)]" in text
+    assert "[preview possibly shortened by the backend (its 40-character limit)]" in text

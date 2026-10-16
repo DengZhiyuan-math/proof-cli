@@ -513,6 +513,13 @@ def _reader_turn_ending(turn: dict) -> str:
     return f"{ending}, {failures}, {conversation}"
 
 
+def _kept_part(mark: dict) -> str:
+    """What of a field at its limit the backend keeps: "its 300-character limit" / "it keeps the last 2000 characters"."""
+    if mark.get("keeps") == "end":
+        return f"it keeps the last {mark['limit']} characters"
+    return f"its {mark['limit']}-character limit"
+
+
 def _record_form(view: dict) -> str:
     """What form a kept conversation has: its backend's events, and the lengths that backend cuts previews at."""
     limits = view.get("preview_limits")
@@ -562,11 +569,11 @@ def render_reader_turn(view: dict) -> str:
         console.print("conversation: not kept with the project")
         return console.export_text()
     console.print(_record_form(view))
-    at_limit = {(mark["event"], mark["field"]): mark["limit"] for mark in view.get("possibly_shortened") or []}
+    at_limit = {(mark["event"], mark["field"]): mark for mark in view.get("possibly_shortened") or []}
     console.print(f"conversation, {len(events)} event(s) (--json gives the raw record):")
     for number, event in enumerate(events, 1):
-        marks = [f"[{field} possibly shortened by the backend (its {limit}-character limit)]"
-                 for (at, field), limit in at_limit.items() if at == number]
+        marks = [f"[{field} possibly shortened by the backend ({_kept_part(mark)})]"
+                 for (at, field), mark in at_limit.items() if at == number]
         console.print(f"  {number}. {_conversation_line(event)}" + "".join(f" {mark}" for mark in marks))
     return console.export_text()
 
