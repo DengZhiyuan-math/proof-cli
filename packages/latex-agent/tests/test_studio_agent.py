@@ -621,7 +621,7 @@ class ClaudeBilling(unittest.TestCase):
 
 
 class PreviewLimits(unittest.TestCase):
-    """proof-cli#224: a turn's events keep previews of its tool calls, cut at each backend's stated lengths with no
+    """#224: a turn's events keep previews of its tool calls, cut at each backend's stated lengths with no
     mark of the cut, so a host can say what form a kept conversation has."""
 
     def test_each_backend_states_how_much_of_a_tool_call_its_events_keep(self):

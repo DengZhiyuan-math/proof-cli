@@ -49,9 +49,9 @@ def test_a_reader_turn_that_ends_is_kept_with_its_conversation_and_read_back_by_
     assert (turn["turn"], turn["pursuit_id"], turn["by"], turn["provider"]) == ("r1", pid, "claude-code", "claude")
     assert (turn["ended"], turn["outcome"], turn["job"], turn["session_id"], turn["exit"], turn["is_error"]) == (True, "ok", 3, "s-1", 0, False)
     assert turn["transcript"] == ".proof/reader-turns/r1.json" and (tmp_path / turn["transcript"]).is_file()
-    kept = P.reader_turn_transcript(store, "r1")
-    assert kept["events"] == CONVERSATION and kept["prompt"] == "Read the draft"
-    assert kept["events"][2]["error"] is True  # the failed tool call is kept, not only the final success
+    transcript = P.reader_turn_transcript(store, "r1")
+    assert transcript["events"] == CONVERSATION and transcript["prompt"] == "Read the draft"
+    assert transcript["events"][2]["error"] is True  # the failed tool call is kept, not only the final success
 
     [view] = _progress_json(tmp_path)
     assert [t["turn"] for t in view["reader_turns"]] == ["r1"] and view["reader_turns"][0]["outcome"] == "ok"
