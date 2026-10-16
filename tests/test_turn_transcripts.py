@@ -145,3 +145,15 @@ def test_a_turn_whose_end_is_recorded_is_refused_a_second_and_nothing_changes(tu
         kind.end(store, "t1", [{"t": "text", "text": "another conversation"}])
     assert refused.value.code == kind.ended_code
     assert len(list_events(store)) == before and _files(folder) == ["t1.json"] and (folder / "t1.json").read_bytes() == t1
+
+
+def test_an_orphan_is_put_back_when_the_retrys_commit_fails(turns, monkeypatch):
+    kind, store, folder, _ = turns
+    (folder / "t2.json").write_text("half of an earlier attempt", encoding="utf-8")
+    real = ProjectStore.connect
+    monkeypatch.setattr(ProjectStore, "connect", lambda self: CommitFails(real(self)))
+    with pytest.raises(Exception):
+        kind.end(store, "t2", EVENTS)
+    monkeypatch.undo()
+    assert _files(folder) == ["t1.json", "t2.json"] and (folder / "t2.json").read_text(encoding="utf-8") == "half of an earlier attempt"
+    assert _ended(store, "t2") == 0

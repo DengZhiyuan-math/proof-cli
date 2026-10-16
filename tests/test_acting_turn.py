@@ -6,6 +6,7 @@ records a run's work wraps those writes in it. Outside it nothing is marked: the
 anything the host writes for itself.
 """
 
+import contextvars
 import json
 import threading
 from pathlib import Path
@@ -121,3 +122,27 @@ def test_a_cli_invocation_in_one_thread_never_takes_the_turn_another_thread_acts
 
     assert failures == []
     assert _fog_events(store) == {"a command meanwhile": None, "the host's write": {"node": "A", "role": "verifier"}}
+
+
+def test_a_cli_invocation_in_a_thread_that_inherited_an_acting_context_names_no_turn(tmp_path: Path):
+    """A thread can start with a copy of a context in which a turn acts: the CLI's edge must say "not acting" itself."""
+    store = _store(tmp_path)
+    with acting_as("A", "verifier"):
+        inherited = contextvars.copy_context()
+    failures: list[BaseException] = []
+
+    def command():
+        try:
+            result = runner.invoke(app, ["fog", "add", "a command in an inherited context", "--near", "A", "--root", str(tmp_path), "--json"], env={})
+            assert result.exit_code == 0, result.output
+            add_fog(store, "the thread's own write after it", near=["A"], created_by=AGENT)  # the inherited turn is back
+        except BaseException as exc:  # noqa: BLE001 — reported below
+            failures.append(exc)
+
+    thread = threading.Thread(target=inherited.run, args=(command,))
+    thread.start()
+    thread.join(timeout=60)
+
+    assert failures == []
+    assert _fog_events(store) == {"a command in an inherited context": None,
+                                  "the thread's own write after it": {"node": "A", "role": "verifier"}}
