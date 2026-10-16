@@ -521,13 +521,27 @@ def _kept_part(mark: dict) -> str:
 
 
 def _record_form(view: dict) -> str:
-    """What form a kept conversation has: its backend's events, and the lengths that backend cuts previews at."""
+    """What form a kept conversation has: its backend's events, what that backend stated it keeps of each field, and
+    the fields it stated nothing about, whose shortening is unknown — never taken as whole."""
     limits = view.get("preview_limits")
     if limits is None:
         return "form: the events as the backend reported them; the backend's preview limits were not recorded; tool previews may be shortened"
-    cut = ", ".join(f"{field} {chars}" for field, chars in limits.items() if isinstance(chars, int))
-    return (f"form: the events as the {view.get('backend') or 'unnamed'} backend reported them; it keeps at most "
-            f"{cut or 'no limit on any field'} characters of a preview, other fields whole, and marks no cut")
+    said = f"form: the events as the {view.get('backend') or 'unnamed'} backend reported them"
+    if not limits:
+        return f"{said}; the backend did not state whether it shortens any field"
+    start = [f"{field} {chars}" for field, chars in limits.items() if isinstance(chars, int)]
+    end = [f"{field} {chars['chars']}" for field, chars in limits.items() if isinstance(chars, dict) and chars.get("keeps") == "end"]
+    whole = [field for field, chars in limits.items() if chars is None]
+    parts = []
+    if start:
+        parts.append(f"it keeps at most: {', '.join(start)} characters from the start")
+    if end:
+        parts.append(f"it keeps only the last: {', '.join(end)} characters")
+    if whole:
+        parts.append(f"kept whole: {', '.join(whole)}")
+    if view.get("unstated_fields"):
+        parts.append(f"the backend did not state whether it shortens: {', '.join(view['unstated_fields'])}")
+    return f"{said}, with no mark of a cut; " + "; ".join(parts)
 
 
 def _conversation_line(event: dict) -> str:

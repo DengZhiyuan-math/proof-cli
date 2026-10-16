@@ -259,15 +259,26 @@ def reader_turn(store: ProjectStore, turn: str) -> dict | None:
     """One Reader turn kept with the project, read back (#224): its record (as `reader_turns` gives it), its prompt,
     its events as its backend reported them (None when its conversation is not kept), and the event fields whose length
     reached that backend's preview limit (`possibly_shortened`: event number from 1, field, limit, and which end the
-    backend keeps; None when the limits were not recorded). The backends mark no cut, so a field at its limit may or may not have been shortened.
+    backend keeps; None when the limits were not recorded), and the fields its events have that the backend stated
+    nothing about (`unstated_fields`, `<event>.<field>`: whether those were shortened is unknown; None when the limits
+    were not recorded). The backends mark no cut, so a field at its limit may or may not have been shortened.
     None when no such turn is kept."""
     record = next((entry for entry in reader_turns(store) if entry["turn"] == turn), None)
     if record is None:
         return None
     transcript = reader_turn_transcript(store, turn) if record["transcript"] else None
     events = transcript.get("events") if transcript else None
+    limits = record["preview_limits"]
     return {**record, "prompt": (transcript or {}).get("prompt"), "events": events,
-            "possibly_shortened": _at_preview_limit(events, record["preview_limits"])}
+            "possibly_shortened": _at_preview_limit(events, limits), "unstated_fields": _unstated_fields(events, limits)}
+
+
+def _unstated_fields(events: list[dict] | None, limits: dict | None) -> list[str] | None:
+    """The `<event>.<field>`s of `events` the backend's limits say nothing of; None when the limits are unknown."""
+    if limits is None:
+        return None
+    return sorted({f"{event.get('t')}.{field}" for event in events or [] for field, value in event.items()
+                   if field != "t" and isinstance(value, str) and not _field_limit(limits, event, field)[0]})
 
 
 def _field_limit(limits: dict, event: dict, field: str) -> tuple[bool, int | None, str]:
