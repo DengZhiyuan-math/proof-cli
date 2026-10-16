@@ -34,7 +34,7 @@ from .storage import ProjectStore, append_event, list_events_of_kind, put_turn_t
 
 PURSUIT_EVENT = "pursuit"
 
-# start: the researcher started it; reader_end: the Reader's turn ended (outcome ok or failed);
+# start: the researcher started it; reader_end: the Reader's turn ended (outcome ok, failed, or unknown);
 # theorem: work moved to a Theorem (or a Theorem's Coordinator ended: outcome is its status);
 # stop: the researcher stopped it; release_failed: releasing the claims failed (a retry may follow);
 # end: the pursuit ended, outcome its final status (done, stuck, released, budget, ...)
