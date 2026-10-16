@@ -247,6 +247,7 @@ ERROR_CODES: dict[str, str] = {
     "PURSUIT_OUTCOME_REQUIRED": "a pursuit's end names its outcome",
     "PURSUIT_RECORD_FAILED": "the pursuit event could not be written; on a start, no provider is started",
     "READER_TURN_RECORD_FAILED": "the Reader's turn could not be recorded with the project; its conversation is not kept there",
+    "READER_TURN_NOT_FOUND": "no Reader turn is kept with the project under this id; `proof project progress` lists the kept ones",
     "READER_TURN_ENDED": "the Reader's turn has ended already; its record is kept as it is and a second end is not recorded",
     # -- the project's Pursue: a Reader states its Theorems, then each is pursued (ADR-0021) --
     "PURSUIT_ACTIVE": "the project is being pursued already, or a stopped pursuit is still ending: stop it, or Start again once it settles",

@@ -196,7 +196,9 @@ def record_reader_turn(
                             details={"outcomes": list(READER_OUTCOMES)})
     payload: dict[str, Any] = {"phase": phase, "turn": turn, "by": by, "provider": provider, "pursuit_id": pursuit_id}
     if phase == "ended":
-        payload.update(job=job, session_id=session_id, outcome=outcome, reason=reason.strip(), exit=exit, is_error=is_error)
+        payload.update(job=job, session_id=session_id, outcome=outcome, reason=reason.strip(), exit=exit, is_error=is_error,
+                       # its failed tool calls, apart from how the whole turn ended; unknown without its conversation
+                       tool_failures=None if events is None else sum(1 for e in events if e.get("t") == "tool_result" and e.get("error")))
     try:
         with store.transaction() as conn:
             if not any(e.payload.get("pursuit_id") == pursuit_id for e in list_events_of_kind(store, PURSUIT_EVENT, conn=conn)):
@@ -238,11 +240,12 @@ def reader_turns(store: ProjectStore) -> list[dict[str, Any]]:
         entry = turns.setdefault(str(p.get("turn") or ""), {
             "turn": p.get("turn"), "pursuit_id": p.get("pursuit_id"), "by": p.get("by"), "provider": p.get("provider", ""),
             "at": event.created_at.isoformat(), "ended": False, "ended_at": None, "job": None, "session_id": None,
-            "outcome": None, "reason": "", "exit": None, "is_error": None, "transcript": None})
+            "outcome": None, "reason": "", "exit": None, "is_error": None, "tool_failures": None, "transcript": None})
         if p.get("phase") == "ended":
             kept = p.get("transcript")
             entry.update(ended=True, ended_at=event.created_at.isoformat(), job=p.get("job"), session_id=p.get("session_id"),
                          outcome=p.get("outcome"), reason=p.get("reason", ""), exit=p.get("exit"), is_error=p.get("is_error"),
+                         tool_failures=p.get("tool_failures"),
                          transcript=kept if kept and (store.root / kept).is_file() else None)  # only while its file is there
     return list(turns.values())
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 
 from rich.console import Console
 from rich.table import Table
@@ -483,6 +484,69 @@ def render_project_progress(pursuits: list[dict]) -> str:
             if event["budget"] is not None:
                 line += f" (budget {event['budget']})"
             console.print(line)
+        results = pursuit.get("results")
+        if results is None:
+            console.print("  results: not recorded")
+        for theorem, result in (results or {}).items():
+            console.print(f"  results: {theorem} {result.get('status')}" + (f" — {result['reason']}" if result.get("reason") else ""))
+        turns = pursuit.get("reader_turns")
+        if turns is None:
+            console.print("  Reader turns: not kept with the project (unknown)")
+        for turn in turns or []:
+            console.print(f"  Reader turn {turn['turn']}: {_reader_turn_ending(turn)}")
+    return console.export_text()
+
+
+def _reader_turn_ending(turn: dict) -> str:
+    """How a Reader turn ended, apart from the tool calls that failed in it."""
+    if not turn["ended"]:
+        return "no recorded end"
+    failures = "tool-call failures unknown" if turn["tool_failures"] is None else f"{turn['tool_failures']} tool-call failure(s)"
+    kept = "conversation kept" if turn["transcript"] else "conversation not kept"
+    return f"{turn['outcome']}, exit {turn['exit'] if turn['exit'] is not None else '—'}, {failures}, {kept}"
+
+
+def _conversation_line(event: dict) -> str:
+    """One event of a turn's conversation, in full: nothing shortened (the --json output is the raw record)."""
+    kind = event.get("t")
+    if kind == "text":
+        return f"text: {event.get('text', '')}"
+    if kind == "tool":
+        return f"tool {event.get('name', '')} ({event.get('id', '')}): {event.get('summary', '')}"
+    if kind == "tool_result":
+        state = "FAILED" if event.get("error") else "ok"
+        return f"tool result {event.get('id', '')}: {state} — {event.get('preview', '')}"
+    if kind == "done":
+        return f"done: exit {event.get('exit')}, is_error {str(bool(event.get('is_error'))).lower()}" + (f", {event['stderr']}" if event.get("stderr") else "")
+    if kind == "init":
+        return f"init: session {event.get('session_id')}" + (f", model {event['model']}" if event.get("model") else "")
+    if kind == "error":
+        return f"error: {event.get('message', '')}"
+    return json.dumps(event, ensure_ascii=False)  # any other kind, as recorded
+
+
+def render_reader_turn(view: dict) -> str:
+    """A Reader turn kept with the project (`proof project reader-turn`): its record, the whole turn's ending and its
+    failed tool calls apart, then its whole conversation, nothing shortened."""
+    console = _console()
+    console.rule(f"Reader turn {view['turn']}")
+    console.print(f"pursuit {view['pursuit_id']} · by {view['by']} · provider {view['provider'] or '—'}")
+    console.print(f"started {view['at']}" + (f" · ended {view['ended_at']}" if view["ended"] else " · no recorded end"))
+    if view["ended"]:
+        console.print(f"turn outcome: {view['outcome']}, exit {view['exit'] if view['exit'] is not None else '—'}, "
+                      f"is_error {str(bool(view['is_error'])).lower()}" + (f" — {view['reason']}" if view["reason"] else ""))
+        console.print("tool-call failures: " + ("unknown" if view["tool_failures"] is None else str(view["tool_failures"]))
+                      + " (each is shown below; they are not the turn's outcome)")
+        console.print(f"job {view['job']} · session {view['session_id'] or '—'}")
+    if view.get("prompt"):
+        console.print(f"prompt: {view['prompt']}")
+    events = view.get("events")
+    if events is None:
+        console.print("conversation: not kept with the project")
+        return console.export_text()
+    console.print(f"conversation, {len(events)} event(s), nothing shortened (--json gives the raw record):")
+    for number, event in enumerate(events, 1):
+        console.print(f"  {number}. {_conversation_line(event)}")
     return console.export_text()
 
 
