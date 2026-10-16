@@ -134,16 +134,16 @@ def test_the_pursuits_total_and_each_theorems_result_are_kept_and_read_back(tmp_
     """#223: the Pursue's whole budget and its results per Theorem live in the project, not only in the host's memory."""
     store = ensure_project(tmp_path)
     pid = _start(store)
-    total = {"turns_max": 43, "minutes_max": 240.0, "spent": 1, "structure_spent": 1, "failed_launches": 0}
+    total = {"turns_max": 12, "minutes_max": 90.0, "spent": 1, "structure_spent": 1, "failed_launches": 0}
     P.record_pursuit(store, "reader_end", pursuit_id=pid, outcome="ok", budget=total)
     P.record_pursuit(store, "theorem", pursuit_id=pid, theorem="T1", budget={**total, "spent": 3})
     done = {"T1": {"status": "done", "reason": "T1 is requested for review"}}
     P.record_pursuit(store, "end", pursuit_id=pid, outcome="done", reason="every Theorem's Coordinator ended done",
-                     budget={**total, "spent": 30, "structure_spent": 2}, results=done)
+                     budget={**total, "spent": 9, "structure_spent": 2}, results=done)
 
     for pursuits in (P.project_progress(store), _progress_json(tmp_path)):
         [view] = pursuits
-        assert view["budget"] == {"turns_max": 43, "minutes_max": 240.0, "spent": 30, "structure_spent": 2, "failed_launches": 0}
+        assert view["budget"] == {"turns_max": 12, "minutes_max": 90.0, "spent": 9, "structure_spent": 2, "failed_launches": 0}
         assert view["results"] == {"T1": {"status": "done", "reason": "T1 is requested for review"}}
         assert view["events"][-1]["results"] == done and view["events"][1]["results"] is None
 
