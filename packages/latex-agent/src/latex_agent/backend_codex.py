@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .backends import MCP_SERVER, CliBackend, Job, compile_tool_server, find_bin, has_compile_tool, system_append, tool_name
+from .backends import CLI_PREVIEW_LIMITS, MCP_SERVER, CliBackend, Job, compile_tool_server, find_bin, has_compile_tool, system_append, tool_name
 
 SANDBOX = {"edit": "workspace-write", "ask": "read-only"}
 
@@ -37,11 +37,12 @@ def _rel(p: str, root: Path) -> str:
         return p
 
 
-# How much of a tool call a turn's events keep (proof-cli#224): previews, cut at these lengths with no mark of the cut.
+# How much of a tool call a turn's events keep (#224): previews, cut at these lengths with no mark of the cut.
 SUMMARY_PREVIEW_CHARS = 200    # a tool call's summary: a command, the changed paths, a query
 RESULT_PREVIEW_CHARS = 300     # a command's output
 # The same, per event field, for a host to keep with what it records (see backend_claude.PREVIEW_LIMITS).
-PREVIEW_LIMITS: dict[str, int | None] = {"tool.summary": SUMMARY_PREVIEW_CHARS, "tool_result.preview": RESULT_PREVIEW_CHARS}
+PREVIEW_LIMITS: dict[str, int | dict | None] = {"tool.summary": SUMMARY_PREVIEW_CHARS, "tool_result.preview": RESULT_PREVIEW_CHARS,
+                                                **CLI_PREVIEW_LIMITS}
 
 
 class Codex(CliBackend):

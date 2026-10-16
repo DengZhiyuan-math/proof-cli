@@ -633,8 +633,14 @@ class PreviewLimits(unittest.TestCase):
         self.assertEqual(ClaudeCode.preview_limits["tool.summary"], 120)
         self.assertIsNone(ClaudeCode.preview_limits["tool.summary[Read]"], "a path is kept whole")
         self.assertEqual(ClaudeCode.preview_limits["tool_result.preview"], 300)
-        self.assertEqual(Codex.preview_limits, {"tool.summary": 200, "tool_result.preview": 300})
+        self.assertEqual(Codex.preview_limits, {"tool.summary": 200, "tool_result.preview": 300,
+                                                "done.stderr": {"chars": 2000, "keeps": "end"}})
         self.assertEqual(backends.Backend.preview_limits, {}, "a backend that states nothing")
+
+    def test_a_failed_turns_stderr_keeps_its_last_characters_and_says_so(self):
+        self.assertEqual(backends.STDERR_KEPT_CHARS, 2000)
+        for backend in (backends.CliBackend, ClaudeCode, Codex):
+            self.assertEqual(backend.preview_limits["done.stderr"], {"chars": 2000, "keeps": "end"}, backend.__name__)
 
     def test_the_cut_is_at_the_stated_length_and_unmarked(self):
         cc, j, st = ClaudeCode("claude", {"bin": "claude"}), job_for(root=Path(tempfile.gettempdir()).resolve()), {}
