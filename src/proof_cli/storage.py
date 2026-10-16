@@ -3,6 +3,7 @@ from __future__ import annotations
 import functools
 import hashlib
 import json
+import os
 import sqlite3
 import threading
 import uuid
@@ -1027,6 +1028,20 @@ def write_state(store: ProjectStore, state: ProjectState) -> None:
         )
 
 
+# the payload key naming the agent turn an event was written in (#227)
+FROM_TURN = "from_turn"
+
+
+def agent_turn_source() -> dict | None:
+    """The agent turn this process writes in (#227): the node and role a Proof agent's runtime names
+    (PROOF_AGENT_NODE, PROOF_AGENT_ROLE; a Reader's names no node, the map's agent neither), or None outside any
+    agent's runtime. Several runs act under one agent name at once, so the name alone can't say which turn did it."""
+    name, role, node = (os.environ.get(key, "").strip() for key in ("PROOF_AGENT_NAME", "PROOF_AGENT_ROLE", "PROOF_AGENT_NODE"))
+    if not (name or role or node):
+        return None
+    return {"node": node or None, "role": role or None}
+
+
 def append_event(
     store: ProjectStore,
     kind: str,
@@ -1036,12 +1051,16 @@ def append_event(
     payload: dict | None = None,
     conn: sqlite3.Connection | None = None,
 ) -> EventRecord:
+    payload = dict(payload or {})
+    source = agent_turn_source()
+    if source is not None and FROM_TURN not in payload:  # written by an agent's turn: which one, whatever node it is about
+        payload[FROM_TURN] = source
     event = EventRecord(
         id=str(uuid.uuid4()),
         kind=kind,
         entity_id=entity_id,
         message=message,
-        payload=payload or {},
+        payload=payload,
     )
     with _writing(store, conn) as conn:
         conn.execute(
