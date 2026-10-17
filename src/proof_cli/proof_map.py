@@ -1060,22 +1060,14 @@ def restate_node(
     """Change a node's statement, assumptions or named definitions while they are Unfixed (ADR-0021 point 6).
 
     The researcher may restate any unfixed text, an agent only a node an agent created (RESEARCHER_TEXT). Fixed text
-    is refused (TEXT_FIXED, naming the decision that fixed it). An imported result is never restated, by anyone, before
-    its Reference review as after (IMMUTABLE_NODE): immutable once created, it is never Unfixed text, and a corrected
-    statement is a new imported result (ADR-0005 Rule 1). Recorded in the work
-    log with the reason; every verdict on the node and on what rests on it goes stale (`verdicts`), and the snapshots
-    there awaiting a decision read Potentially stale. The working proof is the role's, and is left as it is."""
+    is refused (TEXT_FIXED, naming the decision that fixed it). Recorded in the work log with the reason; every
+    verdict on the node and on what rests on it goes stale (`verdicts`), and the snapshots there awaiting a decision
+    read Potentially stale. The working proof is the role's, and is left as it is."""
+    if not (reason or "").strip():
+        raise ProofMapError("RESTATE_REASON_REQUIRED", "a restatement says why: --reason \"<what was wrong or unclear>\"")
     update: dict[str, Any] = {}
     with store.transaction() as conn:
         node = require_node(store, node_id)
-        if node.kind == ProofMapNodeKind.imported_result:
-            raise ProofMapError(
-                "IMMUTABLE_NODE",
-                f"imported_result node {node_id} is never restated: its statement, assumptions and source never change in place "
-                "(ADR-0005 Rule 1). Cite the corrected statement as a new imported result; what rests on this one moves onto it deliberately",
-            )
-        if not (reason or "").strip():
-            raise ProofMapError("RESTATE_REASON_REQUIRED", "a restatement says why: --reason \"<what was wrong or unclear>\"")
         if statement is not None and statement.strip() and statement.strip() != node.statement:
             update["statement"] = statement.strip()
         if assumptions is not None and [a.strip() for a in assumptions if a.strip()] != node.assumptions:

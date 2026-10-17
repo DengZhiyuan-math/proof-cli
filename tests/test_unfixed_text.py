@@ -1,9 +1,8 @@
 """ADR-0021 point 6: text is unfixed until a Review decision relies on it.
 
 A node's statement, assumptions and named definitions, and a Definition's text, may be restated until the first
-Review decision on the node or on a node resting on it (an imported result: its Reference review, which fixes the
-Definitions it names; the imported result itself is never restated, ADR-0005 Rule 1). The researcher may restate any
-unfixed text, an agent only text an agent created. A restatement is a work-log event and makes stale
+Review decision on the node or on a node resting on it (an imported result: its Reference review). The researcher
+may restate any unfixed text, an agent only text an agent created. A restatement is a work-log event and makes stale
 every verdict on what rests on the text, and the snapshots awaiting a decision there read Potentially stale.
 """
 
@@ -189,22 +188,32 @@ def test_a_restatement_upstream_makes_a_snapshot_awaiting_a_decision_potentially
     assert get_integrity_state(store, "L") == "current"
 
 
-def test_an_imported_result_is_never_restated_its_correction_is_a_new_imported_result(tmp_path: Path):
-    """CONTEXT.md, Imported result; ADR-0005 Rule 1: immutable once created — its statement never changes in place, by
-    anyone, before its Reference review as after; a corrected statement is a new imported result, onto which what rests
-    on it moves deliberately. An attempted restatement of a fixed import must be refused."""
+def test_an_imported_result_is_restated_while_unfixed_and_refused_once_a_decision_relies_on_it(tmp_path: Path):
+    """ADR-0021 point 6, "the same Review decision on an imported result fixes it": its statement is Unfixed until its
+    Reference review, or the first Review decision on a node resting on it, relies on it; from then on it is immutable
+    (TEXT_FIXED, naming that decision), and a correction is a new imported result (ADR-0005 Rule 1, ADR-0020 point 4)."""
+    from proof_cli.references import ReferenceRecord, ReferenceSourceType
+    from proof_cli.storage import import_reference
+
     store = ensure_project(tmp_path)
     create_node(store, node_id="ref", kind="imported_result", statement="Known", source_locator="Thm 1", source_version="v1", created_by="reader-1")
-    for by in ("reader-1", "human"):
-        assert _code(lambda: restate_node(store, "ref", statement="Known, corrected", assumptions=["a"], reason="misread", by=by)) == "IMMUTABLE_NODE"
-    assert _code(lambda: restate_node(store, "ref", statement="Known, corrected", reason=" ", by="human")) == "IMMUTABLE_NODE"
-    result = runner.invoke(app, ["node", "restate", "ref", "--statement", "Known, corrected", "--reason", "misread", "--by", "human",
-                                 "--root", str(tmp_path), "--json"])
-    envelope = json.loads(result.output)
-    assert result.exit_code == 1 and envelope["error"]["code"] == "IMMUTABLE_NODE"
-    assert "new imported result" in envelope["error"]["message"]
-    assert (get_node(store, "ref").statement, get_node(store, "ref").assumptions) == ("Known", [])
-    assert not [e for e in list_events(store) if e.kind == "proof_map_node_restated"]
+    assert restate_node(store, "ref", statement="Known, as Thm 1 states it", reason="misread", by="reader-1").statement == "Known, as Thm 1 states it"
+    review = researcher(store).decide_reference_review("ref")
+    with pytest.raises(ProofMapError) as caught:
+        restate_node(store, "ref", statement="Known again", reason="r", by="human")
+    assert caught.value.code == "TEXT_FIXED" and caught.value.details["fixed_by"]["review_id"] == review.id
+    result = runner.invoke(app, ["node", "restate", "ref", "--statement", "Known again", "--reason", "r", "--by", "human", "--root", str(tmp_path), "--json"])
+    assert result.exit_code == 1 and json.loads(result.output)["error"]["code"] == "TEXT_FIXED"
+
+    # a rule-trusted citation has no decision of its own: the first decision on what rests on it fixes it
+    import_reference(store, ReferenceRecord(id="rudin", title="Principles", authors=["W. Rudin"], year=1976, source_type=ReferenceSourceType.textbook))
+    researcher(store).declare_trust_rule("textbooks", conditions=[{"kind": "source_type_in", "values": ["textbook"]}], rationale="standard")
+    create_node(store, node_id="used", kind="imported_result", statement="Used", source_locator="Thm 4.19", source_version="3rd", reference_id="rudin")
+    create_node(store, node_id="L", kind="lemma", statement="l", dependencies=["used"], created_by="reader-1")
+    assert restate_node(store, "used", statement="Used, as 4.19 states it", reason="misread", by="human").statement == "Used, as 4.19 states it"
+    _accepted(store, "L")
+    assert _code(lambda: restate_node(store, "used", statement="Used again", reason="r", by="human")) == "TEXT_FIXED"
+    assert (get_node(store, "ref").statement, get_node(store, "used").statement) == ("Known, as Thm 1 states it", "Used, as 4.19 states it")
 
 
 def test_the_cli_restates_and_edits_with_a_reason(tmp_path: Path):
