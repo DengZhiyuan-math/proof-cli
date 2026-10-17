@@ -112,6 +112,7 @@ from .vault import (
     archived_pdf_path,
     preamble_path,
     build_is_current,
+    build_status,
     build_pdf_path,
     NodeFolderLinks,
     frozen_output_bytes,
@@ -1903,9 +1904,15 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
         ours = [p for p in (folder, pdf) if not p.exists()]
         on_rollback(store, lambda: [remove_snapshot(p) for p in ours])
         write_snapshot_folder(folder, snapshot)
+        build = None  # what the studio's build of these very inputs logged, recorded with the snapshot; none if no build is current
         if build_is_current(store.root, node_id):
-            # a PDF compiled from these very inputs (the studio's build): archived beside the snapshot
-            shutil.copyfile(build_pdf_path(store.root, node_id), pdf)
+            logged = build_status(store.root, node_id) or {"errors": None, "warnings": None, "first_error": None}
+            # a PDF compiled from these very inputs (the studio's build): archived beside the snapshot, unless its log has
+            # errors: an engine that goes on past them (Tectonic's `-Z continue-on-errors`) writes a PDF that is not what
+            # the sources say. A build with no log to read is archived, as before (SNAPSHOT_PDF_NOT_ARCHIVED otherwise)
+            build = {**logged, "pdf_archived": not logged["errors"]}
+            if build["pdf_archived"]:
+                shutil.copyfile(build_pdf_path(store.root, node_id), pdf)
         record = CandidateProofRecord(
             id=str(uuid.uuid4()),
             node_id=node_id,
@@ -1945,6 +1952,8 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
                 "key_ideas_drafted_by": drafted_by,
                 # what the snapshot left out, by path only (ADR-0015): reported, never read
                 "skipped_hidden": list(snapshot.skipped_hidden),
+                # the current build's errors and warnings, and whether its PDF was archived; None without a current build
+                "build": build,
             },
             conn=conn,
         )
@@ -1980,18 +1989,31 @@ def review_notices(store: ProjectStore, record: CandidateProofRecord) -> list[di
     """What requesting review has to tell the researcher about the snapshot it froze, never a
     refusal: each a registered notice code (`errors.NOTICE_CODES`) with its message and data.
     SNAPSHOT_SKIPPED_HIDDEN when it left hidden files or folders out (by path, as the request
-    recorded them; never their contents). SNAPSHOT_LARGE_OUTPUT when a computation froze more of
-    `out/` than `[snapshot] large_output_mb` (default 50 MB), measured on the snapshot as stored
-    (spec #145)."""
+    recorded them; never their contents). SNAPSHOT_PDF_NOT_ARCHIVED when the studio's current
+    build had errors, so its PDF was not archived (the request recorded the counts). SNAPSHOT_LARGE_OUTPUT
+    when a computation froze more of `out/` than `[snapshot] large_output_mb` (default 50 MB),
+    measured on the snapshot as stored (spec #145)."""
     notices: list[dict] = []
     requested = latest_event(store, "proof_map_review_requested", record.node_id)
-    skipped = (requested.payload.get("skipped_hidden") or []) if requested and requested.payload.get("candidate_proof_id") == record.id else []
+    payload = requested.payload if requested and requested.payload.get("candidate_proof_id") == record.id else {}
+    skipped = payload.get("skipped_hidden") or []
     if skipped:
         notices.append(notice(
             "SNAPSHOT_SKIPPED_HIDDEN",
             f"snapshot v{record.version} left out {len(skipped)} hidden path(s): {', '.join(skipped)}. Secrets (.env, .env.*, .envrc, "
             ".netrc), hidden folders and dotfiles other than the allowlisted environment files are never frozen",
             paths=list(skipped),
+        ))
+    build = payload.get("build") or {}
+    if build.get("pdf_archived") is False:
+        notices.append(notice(
+            "SNAPSHOT_PDF_NOT_ARCHIVED",
+            f"snapshot v{record.version} was frozen without its PDF: the studio's build logged {build.get('errors')} error(s) "
+            f"(the first: {build.get('first_error')}) and {build.get('warnings')} warning(s), and a PDF built past errors does not "
+            "show what the sources say. The snapshot is reviewable from its sources; fix the errors and request review again to "
+            "archive a PDF with the next one",
+            errors=build.get("errors"),
+            warnings=build.get("warnings"),
         ))
     node = get_proof_map_node(store, record.node_id)
     if node is None or not is_computation(node) or not record.file_path.endswith("/" + SNAPSHOT_MANIFEST):

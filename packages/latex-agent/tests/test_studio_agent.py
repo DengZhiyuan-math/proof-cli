@@ -502,6 +502,17 @@ class CompileTool(unittest.TestCase):
         self.assertFalse(failed)
         self.assertTrue(text.startswith("Build OK."))
 
+    def test_report_names_the_builder_that_ran(self):
+        """Run4: a Tectonic build reported itself as "(pdflatex · …)", the engine the document asks for, not the program that
+        built it (Tectonic runs its own engine, and continues past errors). The label follows the studio's own Output panel."""
+        from latex_agent import mcp_compile
+        line = lambda **r: mcp_compile.report({"exit": 0, "diagnostics": [], "engine": "pdflatex", "seconds": 1.5, **r})[0].splitlines()[0]  # noqa: E731
+        self.assertEqual(line(builder="tectonic"), "Build OK. (tectonic · 1.5s)")
+        self.assertEqual(line(builder="latexmk"), "Build OK. (latexmk · pdflatex · 1.5s)")
+        self.assertEqual(line(builder="custom"), "Build OK. (custom · 1.5s)")
+        self.assertEqual(line(builder="builtin"), "Build OK. (pdflatex · 1.5s)")
+        self.assertEqual(line(), "Build OK. (pdflatex · 1.5s)")  # a result that names no builder: the engine, as before
+
 
 class DisplayMathRule(unittest.TestCase):
     """Seventh review: the rule against $$ is LaTeX's; key-ideas.md is Markdown and is typeset only from $…$ and
