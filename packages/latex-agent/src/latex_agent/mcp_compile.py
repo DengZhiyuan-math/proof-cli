@@ -79,6 +79,15 @@ def refusal(e: urllib.error.HTTPError) -> str:
     return f"HTTP {e.code}"
 
 
+def built_by(r: dict) -> tuple:
+    """What built, as the Output panel names it: the TeX engine when the built-in builder ran it, otherwise the builder —
+    Tectonic runs its own engine, whatever the document asks for (and goes on past errors); latexmk runs the engine."""
+    builder, engine = r.get("builder"), r.get("engine")
+    if builder in (None, "", "builtin"):
+        return (engine,)
+    return (builder, engine) if builder == "latexmk" else (builder,)
+
+
 def report(r: dict) -> tuple[str, bool]:
     """The build result as text for the model, and whether it failed."""
     if r.get("busy"):
@@ -96,7 +105,7 @@ def report(r: dict) -> tuple[str, bool]:
         head = "The PDF was built, but with errors."
     else:
         head = f"Build FAILED (exit {r.get('exit')})."
-    how = " · ".join(str(x) for x in (r.get("engine"), r.get("seconds") and f"{r['seconds']}s") if x)
+    how = " · ".join(str(x) for x in (*built_by(r), r.get("seconds") and f"{r['seconds']}s") if x)
     lines = [head + (f" ({how})" if how else ""),
              f"{len(errors)} error(s), {len(diags) - len(errors)} warning(s)."]
     for d in diags[:MAX_DIAGNOSTICS]:
