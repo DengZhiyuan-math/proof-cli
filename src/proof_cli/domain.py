@@ -294,9 +294,12 @@ class DependencyPin(BaseModel):
     moved on but its interface didn't" from "the target's interface itself
     changed" without re-deriving anything. `pinned_version` and
     `pinned_fingerprint` are `None` for an `imported_result` target (it's
-    immutable, so there's nothing to have moved on) and also `None` if the
-    target wasn't yet Accepted at pin time. One row per (node_id,
-    target_node_id) — always the most recent pin, not a history.
+    immutable, so there's nothing to have moved on). A target not yet
+    Accepted at pin time pins no version and the interface it offered then
+    (ADR-0021: a Provisional node's statement is used, never its proof); the
+    node's own Acceptance pins the version. Pins written before that kept the
+    interface have `None` for both. One row per (node_id, target_node_id) —
+    always the most recent pin, not a history.
     """
 
     id: str
