@@ -2,10 +2,12 @@
 
 import hashlib
 import json
+import os
 import re
 import shutil
 import sqlite3
 import subprocess
+import time
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -350,6 +352,59 @@ def test_a_stray_pdf_is_never_adopted_by_a_new_snapshot(tmp_path: Path):
     assert not (store.root / "proofs" / record.node_id / "snapshots" / f"v{record.version}.pdf").exists()
     (warning,) = [w for w in list_integrity_warnings(store) if w.code == "ORPHAN_SNAPSHOT"]
     assert warning.details == {"node_id": "clm_1", "file_path": "proofs/clm_1/snapshots/v1.pdf"}
+
+
+def _studio_build(store, node_id: str, log: str) -> Path:
+    """The studio's build of the node as it stands: a PDF and its log, newer than every input."""
+    build = store.root / "proofs" / node_id / "build"
+    build.mkdir(exist_ok=True)
+    (build / "proof.log").write_text(log)
+    (build / "proof.pdf").write_bytes(b"%PDF-1.4 " + log[:20].encode())
+    later = time.time() + 5
+    for name in ("proof.log", "proof.pdf"):
+        os.utime(build / name, (later, later))
+    return build / "proof.pdf"
+
+
+def test_a_pdf_built_with_errors_is_not_archived_and_the_request_says_so(tmp_path: Path):
+    """Run4: Tectonic continues past errors (`-Z continue-on-errors`) and still writes a PDF, and request-review archived any
+    PDF newer than the inputs as the snapshot's own, unflagged, on the researcher's path (the agent's is gated by
+    CHECK_COMPILE_ERRORS). A PDF whose log has errors is not what the sources say, so it is not archived: the request
+    records the build's errors and warnings with the snapshot and says why there is no PDF; a clean build is archived."""
+    from proof_cli.storage import latest_event
+
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_1", kind="claim", statement="s")
+    _write_proof(store, "clm_1", "work")
+    _studio_build(store, "clm_1", "! Undefined control sequence.\nl.7 $\\mathscr\n  A$\nLaTeX Warning: Reference `x' on page 1 undefined on input line 9.\n! Missing $ inserted.\n")
+
+    result = runner.invoke(app, ["node", "request-review", "clm_1", "--rationale", "r", "--root", str(tmp_path), "--json"])
+
+    assert result.exit_code == 0, result.stdout  # never a refusal: the snapshot is taken
+    assert not (tmp_path / "proofs" / "clm_1" / "snapshots" / "v1.pdf").exists()
+    (notice,) = [n for n in json.loads(result.stdout)["data"]["notices"] if n["code"] == "SNAPSHOT_PDF_NOT_ARCHIVED"]
+    assert (notice["errors"], notice["warnings"]) == (2, 1) and "! Undefined control sequence." in notice["message"]
+    assert latest_event(store, "proof_map_review_requested", "clm_1").payload["build"] == {"errors": 2, "warnings": 1, "first_error": "! Undefined control sequence.", "pdf_archived": False}
+
+    _working(store, "clm_1").write_text(_working(store, "clm_1").read_text() + "% fixed\n")
+    built = _studio_build(store, "clm_1", "Output written on proof.pdf (1 page).\nPackage hyperref Warning: Token not allowed on input line 3.\n")
+    record = request_review(store, "clm_1", requested_by="agent_a", rationale="r")
+    assert (tmp_path / "proofs" / "clm_1" / "snapshots" / "v2.pdf").read_bytes() == built.read_bytes()
+    assert latest_event(store, "proof_map_review_requested", "clm_1").payload["build"] == {"errors": 0, "warnings": 1, "first_error": None, "pdf_archived": True}
+    from proof_cli.proof_map import review_notices
+
+    assert review_notices(store, record) == []
+    # a build without a log to read is archived as before, its counts unknown; no current build records none
+    _working(store, "clm_1").write_text(_working(store, "clm_1").read_text() + "% again\n")
+    _studio_build(store, "clm_1", "").with_suffix(".log").unlink()
+    request_review(store, "clm_1", requested_by="agent_a", rationale="r")
+    assert (tmp_path / "proofs" / "clm_1" / "snapshots" / "v3.pdf").exists()
+    assert latest_event(store, "proof_map_review_requested", "clm_1").payload["build"] == {"errors": None, "warnings": None, "first_error": None, "pdf_archived": True}
+    _working(store, "clm_1").write_text(_working(store, "clm_1").read_text() + "% and again\n")
+    later = time.time() + 60
+    os.utime(_working(store, "clm_1"), (later, later))
+    request_review(store, "clm_1", requested_by="agent_a", rationale="r")
+    assert latest_event(store, "proof_map_review_requested", "clm_1").payload["build"] is None
 
 
 def test_an_imported_result_has_nothing_to_review_this_way(tmp_path: Path):
