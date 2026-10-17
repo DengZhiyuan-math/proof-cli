@@ -143,7 +143,7 @@ Execution split: wave 1 establishes publication models, export surfaces, provena
   <name>Validate real project delivery and bundle round-tripping</name>
   <files>tests/test_publication.py, tests/test_export.py, tests/test_exchange.py, tests/test_cli.py</files>
   <read_first>/Users/zhdeng/Proof CLI /.planning/milestones/1.0-phases/07-publication-grade-proof-pipelines/07-CONTEXT.md</read_first>
-  <action>Build an end-to-end validation on a real mathematical section or theorem cluster, ideally the higher-rank radial system section or a similarly rich project slice. Verify that the project can produce a paper-facing export, a supplement-facing export, and a reproducible bundle; that internal-only artifacts remain suppressed; and that the bundle can be inspected or handed off without losing provenance or release state.</action>
+  <action>Build an end-to-end validation on a real mathematical section or theorem cluster, ideally an unfinished research section or a similarly rich project slice. Verify that the project can produce a paper-facing export, a supplement-facing export, and a reproducible bundle; that internal-only artifacts remain suppressed; and that the bundle can be inspected or handed off without losing provenance or release state.</action>
   <verify>pytest tests/test_publication.py tests/test_export.py tests/test_exchange.py tests/test_cli.py -q</verify>
   <acceptance_criteria>
     - a real project section can be moved from internal proof workspace to publication package

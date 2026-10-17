@@ -1,6 +1,6 @@
 ---
 phase: 9
-slug: radial-system-validation
+slug: research-section-validation
 status: complete
 nyquist_compliant: true
 wave_0_complete: true
@@ -28,4 +28,4 @@ created: 2026-04-29
 - The validation slice used a smaller theorem cluster than the full section.
 - The cluster was partitioned by proof logic and complexity rather than article order.
 - Retrieval, diagnostics, snapshots, and exchange preserved the latest local proof-work context.
-- The workflow clarified the Jacquet bridge and exposed a small scalar-to-vector lift gap.
+- The workflow helped expose small gaps in the cluster.

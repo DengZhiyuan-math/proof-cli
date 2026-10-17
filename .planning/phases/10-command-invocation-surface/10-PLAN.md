@@ -6,7 +6,7 @@ wave: 1
 depends_on:
   - phase: 08-retrieval-and-snapshots
     provides: JSON-first retrieval and analysis outputs that a Codex wrapper can expose
-  - phase: 09-radial-system-validation
+  - phase: 09-research-section-validation
     provides: a small theorem workflow that later validation can reuse through the command layer
 files_modified:
   - src/proof_cli/cli.py

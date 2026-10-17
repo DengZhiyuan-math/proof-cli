@@ -1,5 +1,5 @@
 ---
-phase: 09-radial-system-validation
+phase: 09-research-section-validation
 status: passed
 requirements_completed:
   - PVAL-01
@@ -11,7 +11,7 @@ completed: 2026-04-29
 
 ## Summary
 
-Phase 9 validated the radial-system workflow on a smaller theorem cluster partitioned by proof logic and complexity. The workflow improved continuation, clarified a Jacquet bridge, and exposed a small scalar-to-vector lift gap.
+Phase 9 validated the research-section workflow on a smaller theorem cluster partitioned by proof logic and complexity. The workflow improved continuation and helped expose small gaps.
 
 ## Evidence
 

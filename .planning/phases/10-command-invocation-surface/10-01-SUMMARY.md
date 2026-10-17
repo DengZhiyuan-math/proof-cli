@@ -8,7 +8,7 @@ tags: [codex, wrapper, command-routing, skills, usability]
 requires:
   - phase: 08-retrieval-and-snapshots
     provides: JSON-first retrieval and analysis outputs that a wrapper can expose directly
-  - phase: 09-radial-system-validation
+  - phase: 09-research-section-validation
     provides: a realistic proof-work inspection slice for wrapper smoke tests
 provides:
   - a hard `proof codex` wrapper surface for guided read-only command routing

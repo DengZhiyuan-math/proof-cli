@@ -1,6 +1,6 @@
 # A Trust rule covers the researcher's imports: an agent's imported result needs its own Reference review
 
-**Status**: accepted (2026-10-08; the researcher's decision after the ADR-0021 design audit, `docs/audits/2026-10-08-adr0021-design-audit.md`). Amends:
+**Status**: accepted (2026-10-08; the researcher's decision after the ADR-0021 design audit; the audit evidence is kept locally). Amends:
 - ADR-0014 points 2 and 3 and its first consequence: a Trust rule is met only by an imported result the researcher created.
 - ADR-0021's preamble: ADR-0014 no longer stands untouched. ADR-0004, ADR-0009 and ADR-0010 still do.
 
@@ -8,7 +8,7 @@
 
 ADR-0014 lets the researcher declare in advance that a class of citations is trustworthy. Its conditions read the citation: `source_type`, `identifier`, and whether the same source at the same version was already Reference-reviewed. Nothing in it reads the node's statement, by design: free text is never a condition.
 
-That was safe while the researcher typed most imported results. A rule vouches for the *source*. The statement and source locator that say *what* the source proves were the researcher's own. ADR-0021 point 5 changed who writes them: the Reader imports the literature a draft calls on, and its statement of each result is its own paraphrase. A paraphrase that drifts from the source is the Reader's most likely mistake. The trial's departures show it rewrites what it reads.
+That was safe while the researcher typed most imported results. A rule vouches for the *source*. The statement and source locator that say *what* the source proves were the researcher's own. ADR-0021 point 5 changed who writes them: the Reader imports the literature a draft calls on, and its statement of each result is its own paraphrase. A paraphrase that drifts from the source is the Reader's most likely mistake. A trial showed that it rewrites what it reads.
 
 The audit found that both ways a Reader import meets a rule are ADR-0014 working as written:
 - the researcher declared a rule on `source_type in {other}`, and the Reader's citation had the default type;

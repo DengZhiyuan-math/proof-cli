@@ -1,6 +1,6 @@
 # Progress is not gated by trust: the agents pursue a draft to the end, and the researcher's decisions come after
 
-**Status**: accepted (2026-10-07; the researcher's decision after setting up the #132 tier 3 horocycle trial). Amended by ADR-0022: ADR-0014 no longer stands untouched; a Trust rule does not cover an imported result an agent created, so the Reader's imports reach the review queue unreviewed. Amends:
+**Status**: accepted (2026-10-07; the researcher's decision after setting up a trial on a research draft). Amended by ADR-0022: ADR-0014 no longer stands untouched; a Trust rule does not cover an imported result an agent created, so the Reader's imports reach the review queue unreviewed. Amends:
 - ADR-0019 points 10, 11, 17, 18 and 20: a parent is worked on its children's passing verdicts; the Decomposer does not stop; the Coordinator does not wait.
 - ADR-0020 points 4 and 7: an agent may write Definitions, and a statement or definition is fixed at the first Review decision that relies on it, not at creation.
 - CONTEXT.md's Blocked: it holds back a Review decision, not work.
@@ -11,15 +11,15 @@ ADR-0004, ADR-0009, ADR-0010 and ADR-0014 stand untouched: only the researcher c
 
 ## Context
 
-The third #132 tier 3 trial put the researcher's own half-finished draft in the library: effective equidistribution of horocycle orbits on $\Gamma\backslash(SL_2(\mathbb R)\times SL_2(\mathbb Q_p))$. The main theorem had no statement, the height lemma had no proof, and the height's definition was wrong as written. Nothing in the system could start on it.
-- **The draft to the map.** No role may create a Definition, a Theorem or an imported result, or import a reference. The map agent only gives commands "for the researcher to run". The trial's whole map was written by hand: six Definitions, MAIN, two Lemmas, three imported results and five fog items.
+A trial put a half-finished research draft in the library. Its main theorem had no statement, a lemma had no proof, and a definition was wrong as written. Nothing in the system could start on it.
+- **The draft to the map.** No role may create a Definition, a Theorem or an imported result, or import a reference. The map agent only gives commands "for the researcher to run". The whole map had to be written by hand: the Definitions, the Theorem, the Lemmas, the imported results and the fog items.
 - **The Decomposer.** After the map existed, the Decomposer still ends with `needs-human` "structure proposed; the researcher decides", and the Coordinator waits for the researcher's Start.
 - **Edges between Claims.** The Decomposer only names them, as commands for the researcher to copy.
 - **The Coordinator.** It waits at every `review-requested` Claim until the researcher Accepts. It cannot start the parent before, because a parent with an unaccepted dependency is Blocked, and a Blocked node cannot be claimed.
 - **Stuck runs.** A run that stops without a failing verdict waits for the researcher to release it (needs_you).
-- **Definitions.** A Definition worded slightly wrong (A9, the second trial) is fixed forever once a node names it.
+- **Definitions.** A Definition worded slightly wrong is fixed forever once a node names it.
 
-Of these, only the Acceptance of a node and the Reference review of an imported result decide trust. The others are progress gates, put where they are because each was the most cautious place, not because trust needed them. The researcher's verdict on the trial is that this makes the system unable to move on hard problems by itself: every step waits for an input. The point of the system is that the researcher reads what was done, not that they drive each step.
+Of these, only the Acceptance of a node and the Reference review of an imported result decide trust. The others are progress gates, put where they are because each was the most cautious place, not because trust needed them. The researcher's judgement is that this makes the system unable to move on hard problems by itself: every step waits for an input. The point of the system is that the researcher reads what was done, not that they drive each step.
 
 The guarantee that has to survive is narrower than the gates. An Accepted node rests only on Accepted nodes and Reference-reviewed (or rule-trusted) imported results. What it says never changed after a Review decision relied on it. And only the researcher makes that decision. Nothing in the guarantee requires work to wait.
 
@@ -44,7 +44,7 @@ The guarantee that has to survive is narrower than the gates. An Accepted node r
    - imported results for the literature it calls on, each with its reference;
    - fog for what the draft leaves open.
 
-   It may run `proof definition add`, `proof node create` (any kind but Claim), `proof reference import` and `proof fog add`, with `--created-by <agent>`. It records, in its closing note and in `scratch/reader/`, every place it departed from the draft and why (in the trial: the height's $\sup 1/\operatorname{Im}$, which is infinite; Γ fixed to $SL_2(\mathbb Z[1/p])$). It never proves anything.
+   It may run `proof definition add`, `proof node create` (any kind but Claim), `proof reference import` and `proof fog add`, with `--created-by <agent>`. It records, in its closing note and in `scratch/reader/`, every place it departed from the draft and why (for example, a quantity defined in a way the draft cannot mean, or an object the draft leaves unspecified and the Reader fixes). It never proves anything.
 6. **Agent-written text is unfixed until a decision relies on it.** A Definition, or a node's statement, assumptions and named definitions, may be restated while it is **unfixed**. It becomes fixed at the first Review decision on it, or on any node that rests on it. The same Review decision on an imported result fixes it. After that, ADR-0020 point 4 applies unchanged: a correction is a new Definition or a new node.
    - **Who may restate.** The researcher may restate any unfixed text. An agent may restate only unfixed text an agent created (`proof node restate`, `proof definition edit`), with a reason, recorded as an event in the work log.
    - **Effects of a restatement.** Every verdict on the node, and on the nodes resting on it, goes stale. Their snapshots become Potentially stale.
@@ -81,7 +81,7 @@ The guarantee that has to survive is narrower than the gates. An Accepted node r
 
 - **Keep the gates and add an "auto-approve" switch.** The switch would let the system Accept on a passing verdict. That breaks ADR-0004, the one rule the system exists for: a machine verdict would become trust. Rejected.
 - **Let runs read unaccepted sibling proofs.** This is faster than waiting for a Claim to pass, but it is what ADR-0019 point 11 rejected on good evidence (PatchBoard: unverified repair attempts read as facts). Relying on a statement whose proof passed the Verifier gives most of the speed without that.
-- **Leave statements immutable and make the Reader's map a proposal the researcher confirms before any run.** This is safe, but it is the gate this decision removes. The trial's own setup shows the cost: the researcher had to approve six Definitions and five nodes before a single turn ran. Unfixed-until-relied-on keeps the guarantee and drops the wait.
+- **Leave statements immutable and make the Reader's map a proposal the researcher confirms before any run.** This is safe, but it is the gate this decision removes. Setting up the trial showed the cost: the researcher had to approve every Definition and node before a single turn ran. Unfixed-until-relied-on keeps the guarantee and drops the wait.
 
 ## Consequences
 

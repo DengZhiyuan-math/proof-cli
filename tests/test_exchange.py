@@ -70,17 +70,17 @@ def test_exchange_round_trips_collaboration_state_across_two_users(tmp_path: Pat
 
     review_request = cmd_review_request("theorem_contract", "thm_main", root=source_root, reviewer_id="advisor", rationale="check the bridge")
     review_id = json.loads(review_request)["id"]
-    cmd_review_decide(review_id, "disputed", root=source_root, reviewer_id="advisor", rationale="need a better lift")
-    cmd_comment_add("theorem_contract", "thm_main", "This route still needs the scalar-to-vector lift.", root=source_root, author_id="bob")
-    cmd_branch_create("theorem_contract", "scalar_route", root=source_root, created_by="alice", downstream_asset_id=["asset_family"])
+    cmd_review_decide(review_id, "disputed", root=source_root, reviewer_id="advisor", rationale="need a better extension")
+    cmd_comment_add("theorem_contract", "thm_main", "This route still needs the base-to-general extension.", root=source_root, author_id="bob")
+    cmd_branch_create("theorem_contract", "base_route", root=source_root, created_by="alice", downstream_asset_id=["asset_family"])
 
     asset = ReusableAsset(
         id="asset_family_bridge",
         kind=ReusableAssetKind.proof_pattern,
         name="Family bridge pattern",
-        summary="Shared team pattern for lifting family lemmas",
-        team_scope="team_radial",
-        payload=ReusableAssetPayload(pattern_steps=["inspect family lemma", "lift scalar case", "bridge to vector case"]),
+        summary="Shared team pattern for extending family lemmas",
+        team_scope="team_alpha",
+        payload=ReusableAssetPayload(pattern_steps=["inspect family lemma", "extend the base case", "bridge to general case"]),
         provenance=ReusableAssetProvenance(origin_project_id="proj_alpha", source_contract_ids=["thm_family", "thm_main"], notes="published by alice"),
         reuse_status=ReusableAssetReuseStatus.project_local,
         trust_level=ReusableAssetTrustLevel.project_verified,
@@ -114,8 +114,8 @@ def test_exchange_round_trips_collaboration_state_across_two_users(tmp_path: Pat
 
     assert "alice" in cmd_contributor_list(root=target_root)
     assert "theorem_contract/thm_main" in cmd_review_list(root=target_root, object_type="theorem_contract", object_id="thm_main")
-    assert "This route still needs the scalar-to-vector lift." in cmd_comment_list(root=target_root, object_type="theorem_contract", object_id="thm_main")
-    assert "scalar_route" in cmd_export(root=target_root)
+    assert "This route still needs the base-to-general extension." in cmd_comment_list(root=target_root, object_type="theorem_contract", object_id="thm_main")
+    assert "base_route" in cmd_export(root=target_root)
     assert "Publication workspace:" in cmd_publication_view(root=target_root)
 
     cmd_comment_add("theorem_contract", "thm_main", "Bob can continue from the imported handoff.", root=target_root, author_id="bob")

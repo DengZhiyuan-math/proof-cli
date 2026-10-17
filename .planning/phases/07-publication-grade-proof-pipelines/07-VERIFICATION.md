@@ -19,7 +19,7 @@ completed: 2026-04-29
 
 ## Summary
 
-Phase 7 validated the publication pipeline on a real mixed-provenance radial-system slice. Paper-facing, supplement-facing, and bundle outputs preserved trust distinctions and round-tripped cleanly.
+Phase 7 validated the publication pipeline on a real mixed-provenance research-section slice. Paper-facing, supplement-facing, and bundle outputs preserved trust distinctions and round-tripped cleanly.
 
 ## Evidence
 
