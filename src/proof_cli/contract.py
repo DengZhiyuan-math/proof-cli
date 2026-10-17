@@ -3,9 +3,10 @@
 `proof`, the one agent entry (ADR-0011), builds its root command from `ProofGroup`:
 
 - Under `--json`, exactly one envelope on stdout whatever happens: a usage
-  error (USAGE_ERROR, exit 2), a missing project (PROJECT_NOT_FOUND) or an
-  unexpected exception (INTERNAL_ERROR, never a traceback), exit 1. `--help`
-  is the one exception: it prints help.
+  error (USAGE_ERROR, exit 2), a missing project (PROJECT_NOT_FOUND), a
+  project state it may not write (PROJECT_STATE_READ_ONLY) or an unexpected
+  exception (INTERNAL_ERROR, never a traceback), exit 1. `--help` is the one
+  exception: it prints help.
 - Only a command in STARTS_A_PROJECT may create a project. Any other one,
   pointed at a folder with no project, fails with PROJECT_NOT_FOUND and
   creates nothing. A command left off the list fails safe: it refuses a
@@ -15,6 +16,7 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 import sys
 from contextlib import AbstractContextManager, nullcontext
 
@@ -24,6 +26,21 @@ from typer.core import TyperGroup
 
 from .envelope import dump_envelope, error_envelope
 from .storage import ProjectNotFoundError, acting_as, not_acting, read_only
+
+# What a command that may not write the project's state is told: in an agent's runtime that is `proof` joined with
+# another command in one Bash call, which Claude Code runs inside its sandbox, where .proof/ is not writable; run alone,
+# `proof` runs outside it under the role's own rules
+STATE_READ_ONLY = ("the project's state (.proof/) can't be written from here, so proof can't open it, even to read. In an "
+                   "agent's Bash call, run proof as a command of its own, never joined with another (|, &&, ;); to filter "
+                   "its output, redirect it to a file in your scratch folder and read that")
+
+
+def _state_read_only(exc: BaseException) -> bool:
+    """Whether SQLite refused because the project's state may not be written here (SQLITE_READONLY and its kinds)."""
+    if not isinstance(exc, sqlite3.OperationalError):
+        return False
+    return str(getattr(exc, "sqlite_errorname", "")).startswith("SQLITE_READONLY") or "readonly database" in str(exc)
+
 
 # Commands that may start a project in an empty folder, by their path from `proof`:
 # the ones that create content. Everything else needs an existing project.
@@ -121,10 +138,17 @@ class ProofGroup(TyperGroup):
                 typer.echo(f"Error: {exc}")
             code = 1
         except Exception as exc:  # noqa: BLE001 — the contract: an envelope, not a traceback
-            if not json_output:
+            if _state_read_only(exc):  # SQLite cannot write .proof/ here, so it cannot open the state even to read
+                if json_output:
+                    typer.echo(dump_envelope(error_envelope(command, "PROJECT_STATE_READ_ONLY", STATE_READ_ONLY)))
+                else:
+                    typer.echo(f"Error: {STATE_READ_ONLY}")
+                code = 1
+            elif not json_output:
                 raise
-            typer.echo(dump_envelope(error_envelope(command, "INTERNAL_ERROR", f"{type(exc).__name__}: {exc}")))
-            code = 1
+            else:
+                typer.echo(dump_envelope(error_envelope(command, "INTERNAL_ERROR", f"{type(exc).__name__}: {exc}")))
+                code = 1
         if standalone_mode:
             sys.exit(code)
         return code
