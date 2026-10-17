@@ -61,7 +61,7 @@ This phase should prove that a user can drive a realistic miniature proof workfl
 - `.planning/phases/12-bootstrap-and-wrapper-hardening/12-01-SUMMARY.md` — diagnostics and canonical global-skill hardening
 
 ### Validation precedent
-- `.planning/phases/09-radial-system-validation/09-SUMMARY.md` — small theorem-cluster validation pattern closer to the user's research style
+- `.planning/phases/09-research-section-validation/09-SUMMARY.md` — small theorem-cluster validation pattern closer to the user's research style
 
 ### Current implementation surface
 - `src/proof_cli/codex_router.py` — hardened wrapper surface

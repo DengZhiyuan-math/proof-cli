@@ -15,169 +15,169 @@ from proof_cli.theorems import add_theorem
 
 
 
-def _seed_radial_cluster(tmp_path: Path):
+def _seed_alpha_cluster(tmp_path: Path):
     store = ensure_project(tmp_path)
 
     add_theorem(
         store,
-        theorem_id="thm_radial_main",
+        theorem_id="thm_alpha_main",
         kind="theorem",
-        name="Radial Main Result",
-        statement="The higher-rank radial section closes once the Jacquet bridge and scalar lift align.",
-        assumptions=["Jacquet bridge", "scalar-to-vector lift"],
-        exports=["radial conclusion"],
+        name="Alpha Main Result",
+        statement="The sample alpha section closes once the Beta bridge and base extension align.",
+        assumptions=["Beta bridge", "base-to-general extension"],
+        exports=["alpha conclusion"],
         status=TheoremStatus.blocked,
         trust_level=TrustLevel.temporary_admit,
-        dependencies=["lem_radial_bridge", "lem_vector_support", "thm_jacquet_gap", "thm_scalar_lift"],
+        dependencies=["lem_alpha_bridge", "lem_general_support", "thm_beta_gap", "thm_base_extension"],
     )
     add_theorem(
         store,
-        theorem_id="thm_jacquet_gap",
+        theorem_id="thm_beta_gap",
         kind="theorem",
-        name="Jacquet Compression Gap",
-        statement="The compression step needs an explicit bridge before the main theorem can finish.",
-        assumptions=["Jacquet compression"],
-        exports=["explicit compression bridge"],
+        name="Beta Reduction Gap",
+        statement="The reduction step needs an explicit bridge before the main theorem can finish.",
+        assumptions=["Beta reduction"],
+        exports=["explicit reduction bridge"],
         status=TheoremStatus.blocked,
         trust_level=TrustLevel.temporary_admit,
-        dependencies=["lem_radial_bridge"],
+        dependencies=["lem_alpha_bridge"],
     )
     add_theorem(
         store,
-        theorem_id="thm_scalar_lift",
+        theorem_id="thm_base_extension",
         kind="theorem",
-        name="Scalar Lift Step",
-        statement="The scalar-to-vector lift needs the support lemma to stay stable.",
-        assumptions=["scalar lift", "vector support"],
-        exports=["vectorized lift"],
+        name="Base Extension Step",
+        statement="The base-to-general extension needs the support lemma to stay stable.",
+        assumptions=["base extension", "general support"],
+        exports=["generalized extension"],
         status=TheoremStatus.blocked,
         trust_level=TrustLevel.temporary_admit,
-        dependencies=["lem_vector_support"],
+        dependencies=["lem_general_support"],
     )
     add_theorem(
         store,
-        theorem_id="lem_radial_bridge",
+        theorem_id="lem_alpha_bridge",
         kind="lemma",
-        name="Radial Bridge Lemma",
-        statement="A local bridge reduces the compression gap to a named step.",
-        assumptions=["radial consistency"],
+        name="Alpha Bridge Lemma",
+        statement="A local bridge turns the reduction gap into a named step.",
+        assumptions=["alpha consistency"],
         exports=["bridge step"],
         status=TheoremStatus.verified,
         trust_level=TrustLevel.project_verified,
     )
     add_theorem(
         store,
-        theorem_id="lem_vector_support",
+        theorem_id="lem_general_support",
         kind="lemma",
-        name="Vector Support Lemma",
-        statement="A support lemma controls the scalar-to-vector lift.",
-        assumptions=["vector stability"],
+        name="General Support Lemma",
+        statement="A support lemma controls the base-to-general extension.",
+        assumptions=["general stability"],
         exports=["support estimate"],
         status=TheoremStatus.verified,
         trust_level=TrustLevel.project_verified,
     )
 
-    set_current_theorem(store, "thm_radial_main")
-    set_current_context(store, ["Jacquet", "compression", "scalar", "vector", "bridge"])
+    set_current_theorem(store, "thm_alpha_main")
+    set_current_context(store, ["Beta", "reduction", "base", "general", "bridge"])
 
     add_obligation(
         store,
         ProofObligation(
-            id="obl_jacquet_gap",
-            goal_statement="close the Jacquet compression gap",
-            required_for="thm_radial_main",
-            blocking_reason="the compression bridge is still implicit",
+            id="obl_beta_gap",
+            goal_statement="close the Beta reduction gap",
+            required_for="thm_alpha_main",
+            blocking_reason="the reduction bridge is still implicit",
         ),
     )
     add_blocker(
         store,
         BlockerRecord(
-            id="blk_scalar_lift",
-            scope="thm_radial_main",
-            description="scalar-to-vector lift stalls without the bridge",
+            id="blk_base_extension",
+            scope="thm_alpha_main",
+            description="base-to-general extension stalls without the bridge",
             failure_type="missing_bridge",
-            related_contracts=["thm_scalar_lift"],
+            related_contracts=["thm_base_extension"],
         ),
     )
     record_failed_route(
         store,
-        "try the scalar lift before closing the Jacquet bridge",
+        "try the base extension before closing the Beta bridge",
         target_kind="obligation",
-        target_id="obl_jacquet_gap",
-        notes="the lift becomes brittle until the compression gap is named",
+        target_id="obl_beta_gap",
+        notes="the extension becomes brittle until the reduction gap is named",
     )
     record_memory(
         store,
         "working",
-        "the radial section is easier once the proof is split by bridge and lift",
-        theorem_id="thm_radial_main",
+        "the alpha section is easier once the proof is split by bridge and extension",
+        theorem_id="thm_alpha_main",
     )
     record_memory(
         store,
         "semantic",
-        "the Jacquet bridge looks like the first explicit gap",
-        theorem_id="thm_radial_main",
+        "the Beta bridge looks like the first explicit gap",
+        theorem_id="thm_alpha_main",
         importance="high",
     )
     record_memory(
         store,
         "episodic",
-        "the scalar lift stalled until the bridge was isolated",
-        theorem_id="thm_radial_main",
-        route_id="route_scalar_lift",
+        "the base extension stalled until the bridge was isolated",
+        theorem_id="thm_alpha_main",
+        route_id="route_base_extension",
     )
     record_memory(
         store,
         "procedural",
         "organize the section by proof logic and complexity",
-        theorem_id="thm_radial_main",
+        theorem_id="thm_alpha_main",
     )
 
     return store
 
 
-def test_radial_cluster_validation_slice_is_structure_first(tmp_path: Path):
-    store = _seed_radial_cluster(tmp_path)
+def test_alpha_cluster_validation_slice_is_structure_first(tmp_path: Path):
+    store = _seed_alpha_cluster(tmp_path)
 
-    report = retrieve_candidates(store, query="Jacquet compression scalar vector bridge")
-    assert report.candidates[0].id == "thm_radial_main"
-    assert report.project_context.current_theorem == "thm_radial_main"
-    assert "theorem:thm_radial_main" in report.project_context.explicit_neighborhood
-    assert "obligation:obl_jacquet_gap" in report.project_context.explicit_neighborhood
-    assert "blocker:blk_scalar_lift" in report.project_context.explicit_neighborhood
+    report = retrieve_candidates(store, query="Beta reduction base general bridge")
+    assert report.candidates[0].id == "thm_alpha_main"
+    assert report.project_context.current_theorem == "thm_alpha_main"
+    assert "theorem:thm_alpha_main" in report.project_context.explicit_neighborhood
+    assert "obligation:obl_beta_gap" in report.project_context.explicit_neighborhood
+    assert "blocker:blk_base_extension" in report.project_context.explicit_neighborhood
 
-    retrieve_json = json.loads(cmd_proof_retrieve("Jacquet compression scalar vector bridge", tmp_path, limit=5))
-    assert retrieve_json["project_context"]["current_theorem"] == "thm_radial_main"
-    assert "theorem:thm_radial_main" in retrieve_json["project_context"]["explicit_neighborhood"]
-    assert "obligation:obl_jacquet_gap" in retrieve_json["project_context"]["explicit_neighborhood"]
-    assert "blocker:blk_scalar_lift" in retrieve_json["project_context"]["explicit_neighborhood"]
+    retrieve_json = json.loads(cmd_proof_retrieve("Beta reduction base general bridge", tmp_path, limit=5))
+    assert retrieve_json["project_context"]["current_theorem"] == "thm_alpha_main"
+    assert "theorem:thm_alpha_main" in retrieve_json["project_context"]["explicit_neighborhood"]
+    assert "obligation:obl_beta_gap" in retrieve_json["project_context"]["explicit_neighborhood"]
+    assert "blocker:blk_base_extension" in retrieve_json["project_context"]["explicit_neighborhood"]
 
     analyze_json = json.loads(cmd_project_analyze(tmp_path, limit=5))
-    assert analyze_json["current_theorem"] == "thm_radial_main"
+    assert analyze_json["current_theorem"] == "thm_alpha_main"
     assert analyze_json["bottleneck_kind"] in {"blocker", "obligation"}
-    assert "obl_jacquet_gap" in analyze_json["bottleneck_summary"] or "blk_scalar_lift" in analyze_json["bottleneck_summary"]
+    assert "obl_beta_gap" in analyze_json["bottleneck_summary"] or "blk_base_extension" in analyze_json["bottleneck_summary"]
     assert analyze_json["promising_next_steps"]
-    assert any("thm_radial_main" in step or "blk_scalar_lift" in step or "obl_jacquet_gap" in step for step in analyze_json["promising_next_steps"])
+    assert any("thm_alpha_main" in step or "blk_base_extension" in step or "obl_beta_gap" in step for step in analyze_json["promising_next_steps"])
 
 
-def test_radial_cluster_snapshot_and_exchange_round_trip_preserve_diagnostics(tmp_path: Path):
+def test_alpha_cluster_snapshot_and_exchange_round_trip_preserve_diagnostics(tmp_path: Path):
     source_root = tmp_path / "source"
     target_root = tmp_path / "target"
-    store = _seed_radial_cluster(source_root)
+    store = _seed_alpha_cluster(source_root)
 
-    snapshot = create_snapshot(store, note="handoff on the radial cluster")
+    snapshot = create_snapshot(store, note="handoff on the alpha cluster")
     restored = restore_snapshot(store)
     assert snapshot.latest_diagnostic_report is not None
-    assert snapshot.latest_diagnostic_report["current_theorem"] == "thm_radial_main"
+    assert snapshot.latest_diagnostic_report["current_theorem"] == "thm_alpha_main"
     assert restored is not None
-    assert restored.project_snapshot.active_theorem == "thm_radial_main"
+    assert restored.project_snapshot.active_theorem == "thm_alpha_main"
     assert restored.project_snapshot.latest_diagnostic_report is not None
-    assert restored.project_snapshot.latest_diagnostic_report["current_theorem"] == "thm_radial_main"
-    assert restored.handoff_note == "handoff on the radial cluster"
-    assert "obl_jacquet_gap" in restored.project_snapshot.open_obligations
-    assert "blk_scalar_lift" in restored.project_snapshot.active_blockers
+    assert restored.project_snapshot.latest_diagnostic_report["current_theorem"] == "thm_alpha_main"
+    assert restored.handoff_note == "handoff on the alpha cluster"
+    assert "obl_beta_gap" in restored.project_snapshot.open_obligations
+    assert "blk_base_extension" in restored.project_snapshot.active_blockers
 
-    bundle_json = cmd_exchange_export(source_root, note="handoff on the radial cluster")
+    bundle_json = cmd_exchange_export(source_root, note="handoff on the alpha cluster")
     bundle_payload = json.loads(bundle_json)
     assert bundle_payload["latest_snapshot"]["latest_diagnostic_report"] is not None
     assert bundle_payload["handoff_snapshot"]["latest_diagnostic_report"] is not None
@@ -189,4 +189,4 @@ def test_radial_cluster_snapshot_and_exchange_round_trip_preserve_diagnostics(tm
     round_tripped = json.loads(cmd_exchange_export(target_root, note="after import"))
     assert round_tripped["latest_snapshot"]["latest_diagnostic_report"] is not None
     assert round_tripped["handoff_snapshot"]["latest_diagnostic_report"] is not None
-    assert round_tripped["project_state"]["current_theorem"] == "thm_radial_main"
+    assert round_tripped["project_state"]["current_theorem"] == "thm_alpha_main"

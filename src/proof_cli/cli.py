@@ -482,6 +482,61 @@ def _emit_claim(claim, json_output: bool, *, command: str) -> None:
         typer.echo(render_claim(claim))
 
 
+# -- free text from a file ------------------------------------------------------------------------------
+# A Proof agent's text reaches `proof` through a shell, which is no place for mathematics: zsh expands `$$` (to its
+# process id) and `$name` inside double quotes, and Claude Code's Bash validator refuses `|=` before a letter or a
+# backslash before a space however they are quoted. So
+# each option or argument a role writes mathematics into has a `--…-file` twin that carries the text past the shell,
+# under the same envelope and codes (ADR-0006).
+
+
+FILE_TEXT = "a path from the current folder; UTF-8 text taken as written, past any shell, so `$`, `|=` and backslashes arrive intact; its final line end is the file's"
+
+
+def _from_file(what: str) -> str:
+    return f"{what}, read from this file instead ({FILE_TEXT})"
+
+
+def _file_text(path: str, option: str) -> str:
+    """The text of the file `option` names: its UTF-8 bytes as written — no shell, no newline translation — less the one
+    final line end an editor leaves, which is the file's and not the text's. A file missing, a folder, unreadable or not
+    UTF-8 is TEXT_FILE_UNREADABLE, naming the option and the path as given."""
+    try:
+        text = Path(path).read_bytes().decode("utf-8")
+    except UnicodeDecodeError:
+        problem = "is not UTF-8 text"
+    except FileNotFoundError:
+        problem = "does not exist"
+    except IsADirectoryError:
+        problem = "is a folder"
+    except OSError as exc:
+        problem = f"can't be read: {exc.strerror or exc}"
+    else:
+        return text.removesuffix("\n").removesuffix("\r") if text.endswith("\n") else text
+    raise ProofMapError("TEXT_FILE_UNREADABLE", f"{option} {path} {problem}; nothing was written", details={"option": option, "path": path})
+
+
+def _text(value: str | None, path: str | None, *, option: str, given: str = "", command: str, json_output: bool) -> str | None:
+    """The text given inline (`value`, by `given`) or in the file `path` its twin `option` names, read before anything
+    is written; given both ways, a usage error. An unreadable file is the command's error envelope, exit 1."""
+    if path is None:
+        return value
+    if value:
+        raise click.UsageError(f"{given} and {option} both give the text: pass one")
+    try:
+        return _file_text(path, option)
+    except ProofMapError as exc:
+        _emit_error(exc, json_output, command=command)
+        raise typer.Exit(code=1)
+
+
+def _texts(values: list[str] | None, paths: list[str] | None, *, option: str, command: str, json_output: bool) -> list[str] | None:
+    """A repeatable option's texts: those given inline, then those its file twin's files hold, in order; None if neither."""
+    if not paths:
+        return values
+    return [*(values or []), *(_text(None, path, option=option, command=command, json_output=json_output) for path in paths)]
+
+
 def _reader_refuses(kind: str, parent: str, reassign: bool) -> ProofMapError | None:
     """The reader role's limits on `node create`, read from the parsed arguments (#203): the statement's text is
     never searched, so a statement quoting `claim "` is the Reader's to write."""
@@ -500,10 +555,12 @@ def _reader_refuses(kind: str, parent: str, reassign: bool) -> ProofMapError | N
 def node_create(
     node_id: str,
     kind: str,
-    statement: str,
+    statement: str | None = typer.Argument(None, show_default=False, help="The statement (or --statement-file)"),
     root: str = ROOT_OPTION,
+    statement_file: str | None = typer.Option(None, "--statement-file", help=_from_file("The statement")),
     display_label: str = "",
     assumption: list[str] = typer.Option(None, "--assumption"),
+    assumption_file: list[str] = typer.Option(None, "--assumption-file", help=_from_file("Repeatable: an assumption, after any --assumption")),
     dependency: list[str] = typer.Option(None, "--dependency"),
     definition: list[str] = typer.Option(None, "--definition", help="Repeatable: a definition the statement is written in (`proof definition list`); restated with `proof node restate` until a Review decision fixes it"),
     created_by: str = typer.Option("", "--created-by", help=CREATED_BY_HELP),
@@ -522,6 +579,10 @@ def node_create(
 ) -> None:
     """Create a proof map node. With --parent, the parent rests on it too: one transaction, and a refused
     parent leaves no node and no folder (issue #154)."""
+    statement = _text(statement, statement_file, option="--statement-file", given="STATEMENT", command="node.create", json_output=json_output)
+    if statement is None:
+        raise click.UsageError("Missing argument 'STATEMENT' (or --statement-file).")
+    assumption = _texts(assumption, assumption_file, option="--assumption-file", command="node.create", json_output=json_output)
     if os.environ.get("PROOF_AGENT_ROLE") == READER_ROLE:
         refused = _reader_refuses(kind, parent, reassign)
         if refused:
@@ -563,7 +624,9 @@ def node_create(
 def node_restate(
     node_id: str,
     statement: str = typer.Option(None, "--statement"),
+    statement_file: str | None = typer.Option(None, "--statement-file", help=_from_file("The statement as it now reads")),
     assumption: list[str] = typer.Option(None, "--assumption", help="Repeatable: the assumptions as they now read (all of them)"),
+    assumption_file: list[str] = typer.Option(None, "--assumption-file", help=_from_file("Repeatable: an assumption as it now reads, after any --assumption")),
     definition: list[str] = typer.Option(None, "--definition", help="Repeatable: the definitions the statement is now written in (all of them)"),
     reason: str = typer.Option("", "--reason", help="Why: what was wrong or unclear in the text as it stood"),
     by: str = typer.Option("", "--by", help="Who restates: the researcher (human) any unfixed text, an agent only what an agent wrote (default: PROOF_AGENT_NAME, else human)"),
@@ -572,6 +635,8 @@ def node_restate(
 ) -> None:
     """Restate a node's statement, assumptions or definitions while no Review decision relies on them (ADR-0021).
     Every verdict on the node and on what rests on it goes stale; fixed text is refused (TEXT_FIXED)."""
+    statement = _text(statement, statement_file, option="--statement-file", given="--statement", command="node.restate", json_output=json_output)
+    assumption = _texts(assumption, assumption_file, option="--assumption-file", command="node.restate", json_output=json_output)
     store = get_store(_root(root))
     try:
         node = restate_node(store, node_id, statement=statement, assumptions=assumption, definitions=definition, reason=reason, by=_author(by, root))
@@ -774,13 +839,17 @@ def _emit_definition(store, definition, json_output: bool, *, command: str) -> N
 @definition_app.command("add")
 def definition_add(
     definition_id: str,
-    text: str,
-    term: str = typer.Option(..., "--term", help="The name the page and the node show it under, e.g. \"Stochastic release unit\""),
+    text: str | None = typer.Argument(None, show_default=False, help="The text (or --text-file)"),
+    term: str = typer.Option(..., "--term", help="The name the page and the node show it under, e.g. \"Simple graph\""),
+    text_file: str | None = typer.Option(None, "--text-file", help=_from_file("The text")),
     root: str = ROOT_OPTION,
     created_by: str = typer.Option("", "--created-by", help=CREATED_BY_HELP),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Add a definition: TEXT is Markdown with $…$ maths, as a statement is. Name it from a node with `--definition`."""
+    text = _text(text, text_file, option="--text-file", given="TEXT", command="definition.add", json_output=json_output)
+    if text is None:
+        raise click.UsageError("Missing argument 'TEXT' (or --text-file).")
     store = get_store(_root(root))
     try:
         definition = add_definition(store, definition_id, term=term, text=text, created_by=_author(created_by, root))
@@ -794,6 +863,7 @@ def definition_add(
 def definition_edit(
     definition_id: str,
     text: str = typer.Option(None, "--text"),
+    text_file: str | None = typer.Option(None, "--text-file", help=_from_file("The text as it now reads")),
     term: str = typer.Option(None, "--term"),
     root: str = ROOT_OPTION,
     edited_by: str = typer.Option("", "--by", help="The researcher (human) may edit any unfixed definition, an agent only one an agent wrote (default: PROOF_AGENT_NAME, else human)"),
@@ -801,6 +871,7 @@ def definition_edit(
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Change a definition while no Review decision relies on it (ADR-0021; DEFINITION_FIXED otherwise: add a corrected one under a new id)."""
+    text = _text(text, text_file, option="--text-file", given="--text", command="definition.edit", json_output=json_output)
     store = get_store(_root(root))
     try:
         definition = edit_definition(store, definition_id, term=term, text=text, edited_by=_author(edited_by, root), reason=reason)
@@ -854,14 +925,18 @@ def definition_show(definition_id: str, root: str = ROOT_OPTION, json_output: bo
 
 @fog_app.command("add")
 def fog_add(
-    text: str,
+    text: str | None = typer.Argument(None, show_default=False, help="The difficulty (or --text-file)"),
     root: str = ROOT_OPTION,
+    text_file: str | None = typer.Option(None, "--text-file", help=_from_file("The difficulty")),
     near: list[str] = typer.Option([], "--near", help="A node this is about (repeatable); never a dependency"),
     notes: str = typer.Option("", "--notes"),
     created_by: str = typer.Option("", "--created-by", help=CREATED_BY_HELP),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Add a fog item: a difficulty you can't state precisely yet."""
+    text = _text(text, text_file, option="--text-file", given="TEXT", command="fog.add", json_output=json_output)
+    if text is None:
+        raise click.UsageError("Missing argument 'TEXT' (or --text-file).")
     store = get_store(_root(root))
     try:
         item = add_fog(store, text, near=near, notes=notes, created_by=_author(created_by, root))
@@ -1152,8 +1227,9 @@ def node_promote(node_id: str, root: str = ROOT_OPTION, json_output: bool = type
 def node_split(
     parent_id: str,
     child: list[str] = typer.Option(
-        ..., "--child", help="Repeatable, one per child: <child-id>=<statement>"
+        None, "--child", help="Repeatable, one per child: <child-id>=<statement>"
     ),
+    child_file: list[str] = typer.Option(None, "--child-file", help=f"Repeatable, one per child after any --child: <child-id>=<path>, the statement read from the file at <path> ({FILE_TEXT})"),
     assumption: list[str] = typer.Option(None, "--assumption", help="Repeatable: an assumption of the one --child (as the page's split gives it)"),
     display_label: str = typer.Option("", "--display-label", help="The one --child's display label"),
     definition: list[str] = typer.Option(None, "--definition", help="Repeatable: a definition the one --child is written in, beside the parent's, which every child names"),
@@ -1164,18 +1240,25 @@ def node_split(
 ) -> None:
     """Decompose parent_id into new claim-kind children. Ungated — no researcher approval needed.
     All or nothing; a node someone else holds is theirs to split unless --reassign.
-    With a single --child, --assumption and --display-label give it those, as the page's split does (issue #154)."""
-    if (assumption or display_label or definition) and len(child) != 1:
+    With a single --child, --assumption and --display-label give it those, as the page's split does (issue #154).
+    A --child-file child's statement is its file's text, read before anything is written."""
+    entries = [*(child or []), *(child_file or [])]
+    if not entries:
+        raise click.UsageError("Missing option '--child' (or --child-file).")
+    if (assumption or display_label or definition) and len(entries) != 1:
         raise click.UsageError("--assumption, --display-label and --definition go with a single --child")
     store = get_store(_root(root))
     try:
         specs = []
-        for entry in child:
+        for number, entry in enumerate(entries):
+            from_file = number >= len(child or [])
             if "=" not in entry:
                 raise ProofMapError(
-                    "INVALID_CHILD_SPEC", f"'{entry}' is not in the form <child-id>=<statement>"
+                    "INVALID_CHILD_SPEC", f"'{entry}' is not in the form <child-id>={'<path>' if from_file else '<statement>'}"
                 )
             child_id, statement = entry.split("=", 1)
+            if from_file:
+                statement = _file_text(statement, "--child-file")
             specs.append({"id": child_id, "statement": statement, "assumptions": list(assumption or []), "display_label": display_label,
                           "definitions": list(definition or [])})
         children = split_node(store, parent_id, specs, created_by=_author(created_by, root), reassign=reassign)
@@ -1208,6 +1291,11 @@ def node_progress(
     failed_on: str = typer.Option("", "--failed-on", help="With --attempt: the objection or obstruction it failed on"),
     coordinator: str = typer.Option("", "--coordinator", help="What a Coordinator did on this Theorem or Lemma's subtree: a run it started, a redirect, a stop (ADR-0019 point 18); no role"),
     question: str = typer.Option("", "--question", help="A judgement call made instead of stopping: \"<the choice made; the alternative>\", a Standing question the researcher answers later (ADR-0021)"),
+    note_file: str | None = typer.Option(None, "--note-file", help=_from_file("The --note")),
+    question_file: str | None = typer.Option(None, "--question-file", help=_from_file("The --question")),
+    attempt_file: str | None = typer.Option(None, "--attempt-file", help=_from_file("The --attempt")),
+    method_file: str | None = typer.Option(None, "--method-file", help=_from_file("The --method")),
+    failed_on_file: str | None = typer.Option(None, "--failed-on-file", help=_from_file("The --failed-on")),
     role: str = typer.Option("", "--role", help=f"{_ROLES_HELP} (default: PROOF_AGENT_ROLE, set in the agent's runtime)"),
     by: str = typer.Option("", "--by", help="Who reports (default: PROOF_AGENT_NAME from an agent's runtime, else human; an agent reports only as itself)"),
     root: str = ROOT_OPTION,
@@ -1215,7 +1303,13 @@ def node_progress(
 ) -> None:
     """A Proof agent's report on this node — the studio's work log (spec #145): its plan, a step, a handoff,
     the Verifier's verdict, an abandoned attempt (ADR-0019) or a choice made (ADR-0021). Without any of them: the node's
-    work log so far."""
+    work log so far. Each text may come from a file instead (--note-file, --question-file, …): mathematics, past the shell."""
+    texts = {"command": "node.progress", "json_output": json_output}
+    note = _text(note, note_file, option="--note-file", given="--note", **texts) or ""
+    question = _text(question, question_file, option="--question-file", given="--question", **texts) or ""
+    attempt = _text(attempt, attempt_file, option="--attempt-file", given="--attempt", **texts) or ""
+    method = _text(method, method_file, option="--method-file", given="--method", **texts) or ""
+    failed_on = _text(failed_on, failed_on_file, option="--failed-on-file", given="--failed-on", **texts) or ""
     store = get_store(_root(root))
     try:
         if not plan and step is None and not handoff and not verdict and not attempt and not failed_on and not coordinator and not question:
@@ -1347,9 +1441,11 @@ def challenge_open(
     root: str = ROOT_OPTION,
     opened_by: str = "human",
     rationale: str = "",
+    rationale_file: str | None = typer.Option(None, "--rationale-file", help=_from_file("The --rationale")),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Raise a Challenge against an already-Accepted (or Reference-reviewed) node. Ungated."""
+    rationale = _text(rationale, rationale_file, option="--rationale-file", given="--rationale", command="challenge.open", json_output=json_output) or ""
     store = get_store(_root(root))
     try:
         challenge = open_challenge(store, target_id, opened_by=opened_by, rationale=rationale)
@@ -1960,8 +2056,9 @@ def memory_show(artifact_id: str, root: str = ROOT_OPTION) -> None:
 
 @memory_app.command("add")
 def memory_add(
-    content: str,
+    content: str | None = typer.Argument(None, show_default=False, help="What was learned (or --content-file)"),
     root: str = ROOT_OPTION,
+    content_file: str | None = typer.Option(None, "--content-file", help=_from_file("What was learned")),
     layer: str = "working",
     node_id: list[str] = typer.Option(None, "--node-id", help="The node this is about; once. A run's role may name only its own node (ADR-0019 point 12)"),
     project: list[str] = typer.Option(None, "--project", help="The project's instance id this entry is for; once. Refused when the project opened is another: a run's role writes its own project's memory and no other's"),
@@ -1987,6 +2084,9 @@ def memory_add(
     a permission that admits `proof memory add --node-id <node>` admits that
     node's memory and no other's.
     """
+    content = _text(content, content_file, option="--content-file", given="CONTENT", command="memory.add", json_output=json_output)
+    if content is None:
+        raise click.UsageError("Missing argument 'CONTENT' (or --content-file).")
     given = list(node_id or [])
     projects = list(project or [])
     refused = None

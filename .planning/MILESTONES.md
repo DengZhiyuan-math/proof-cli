@@ -21,7 +21,7 @@
 - Collaborative proof infrastructure shipped with explicit authorship, review, governance, branching, reusable assets, and exchange bundles.
 - Publication-grade proof pipelines preserved trust boundaries between paper-facing, supplement-facing, and internal output.
 - Retrieval and snapshots became project-aware, with JSON diagnostics and bounded recovery context.
-- The radial-system validation workflow proved useful on a smaller theorem cluster organized by proof logic and complexity.
+- The research-section validation workflow proved useful on a smaller theorem cluster organized by proof logic and complexity.
 
 ## v1.2 (Shipped: 2026-04-30)
 

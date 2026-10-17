@@ -1,4 +1,4 @@
-# Phase 9 Research: Radial System Validation
+# Phase 9 Research: Research Section Validation
 
 **Gathered:** 2026-04-29
 **Status:** Complete
@@ -14,7 +14,7 @@
 
 ## Missing Pieces
 
-- There is no dedicated validation slice for the higher-rank radial-system area yet.
+- There is no dedicated validation slice for a research area yet.
 - There is no phase-specific fixture that models a smaller theorem cluster partitioned by proof logic and complexity instead of article order.
 - There is no explicit validation artifact that proves the workflow helps the user continue the proof, reorganize reasoning, or discover small gaps on this concrete cluster.
 - The current codebase has no separate graph storage subsystem, so any neighborhood behavior must continue to come from existing theorem, obligation, blocker, memory, and route links.
@@ -22,9 +22,9 @@
 ## Recommended Workstreams
 
 1. **Build a smaller theorem-cluster validation slice**
-   - Use a section fragment rather than the full higher-rank radial-system section.
+   - Use a section fragment rather than the full research section.
    - Partition by proof logic and complexity, not by prose order.
-   - Include the main theorem, the Jacquet compression gap, the scalar-to-vector lifting problem, completed lemmas and propositions, failed routes, and the explicit structural gap.
+   - Include the main theorem, its central gap, a secondary open problem, completed lemmas and propositions, failed routes, and the explicit structural gap.
 
 2. **Exercise the workflow end to end on that slice**
    - Run retrieval, analysis, snapshot creation, and handoff-style round-tripping against the same cluster.
@@ -59,5 +59,5 @@
 - **Manual observation:** whether the validation cluster makes the proof structure easier to navigate and exposes a small missing bridge or gap that was not obvious before.
 
 ---
-*Phase: 09-radial-system-validation*
+*Phase: 09-research-section-validation*
 *Context gathered: 2026-04-29*

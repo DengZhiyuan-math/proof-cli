@@ -151,7 +151,7 @@ def test_an_experiment_is_recorded_against_an_open_item_and_never_changes_its_st
     script.write_text("print(1)\n")
 
     first = record_experiment(store, "fog-1", "supports", summary="checked n ≤ 10^6; the ratio tends to 1", run_by="agent_a", path="proofs/L1/scratch/constant.py")
-    second = record_experiment(store, "fog-1", "refutes", summary="the p-adic case breaks", run_by="human")
+    second = record_experiment(store, "fog-1", "refutes", summary="the odd case breaks", run_by="human")
 
     assert (first.seq, first.outcome.value, first.path) == (1, "supports", "proofs/L1/scratch/constant.py")
     assert (second.seq, second.outcome.value, second.path) == (2, "refutes", None)
