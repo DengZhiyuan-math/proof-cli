@@ -113,6 +113,27 @@ def test_the_cli_adds_lists_shows_and_names_definitions(tmp_path: Path):
     assert text.index("Definition unit") < text.index("Statement") and "Simple graph." in text
 
 
+def test_a_definition_looked_up_under_an_id_there_is_none_of_names_the_ids_there_are(tmp_path: Path):
+    """Looking a definition up (show, edit, remove) under an id there is none of names the ids there are and where to
+    read them, so a guessed id is not answered with `proof definition add`; a statement naming a missing definition is
+    still told to add it first."""
+    ensure_project(tmp_path)
+
+    def refused(*args: str) -> str:
+        result = runner.invoke(app, [*args, "--root", str(tmp_path), "--json"])
+        envelope = json.loads(result.output)
+        assert result.exit_code == 1 and envelope["error"]["code"] == "DEFINITION_NOT_FOUND", result.output
+        return envelope["error"]["message"]
+
+    assert "has no definitions" in refused("definition", "show", "unit") and "definition add" not in refused("definition", "show", "unit")
+    runner.invoke(app, ["definition", "add", "unit", UNIT, "--term", "Simple graph", "--root", str(tmp_path)])
+    runner.invoke(app, ["definition", "add", "edge", "Two vertices joined.", "--term", "Edge", "--root", str(tmp_path)])
+    for lookup in (("definition", "show", "units"), ("definition", "edit", "units", "--text", "x"), ("definition", "remove", "units")):
+        message = refused(*lookup)
+        assert "unit, edge" in message and "proof definition list --json" in message and "definition add" not in message, message
+    assert "proof definition add" in refused("node", "create", "T", "theorem", "s", "--definition", "units")
+
+
 def test_an_export_carries_the_definitions_and_an_import_refuses_one_that_says_otherwise(tmp_path: Path):
     source = ensure_project(tmp_path / "source")
     D.add_definition(source, "unit", term="Simple graph", text=UNIT)

@@ -1172,6 +1172,25 @@ def siblings(store: ProjectStore, node_id: str) -> list[ProofMapNode]:
     return [node for node in list_nodes(store) if node.id in wanted]
 
 
+def dropped_nodes(store: ProjectStore) -> dict[str, dict]:
+    """The local nodes a dependency removal left with nothing resting on them, each with the newest removal that did
+    it: the node that stopped resting on it (`from`), who edited (`by`), the role of the turn that did it (`role`, None
+    outside a turn) and when (`at`). Such a node is a historical route, as a detached split Claim is (ADR-0023 point
+    4): Project Pursue's coverage does not count it a blocker, and a Done ending names it. A node nothing ever rested
+    on (the Reader's unwired proposal) is not here, nor is an imported result, which coverage never counts."""
+    nodes = list_nodes(store)
+    rested_on = {dependency_id for node in nodes for dependency_id in node.dependencies}
+    candidates = {node.id for node in nodes if node.kind != ProofMapNodeKind.imported_result and node.id not in rested_on}
+    dropped: dict[str, dict] = {}
+    for event in list_events_of_kind(store, "proof_map_dependency_removed"):
+        dependency_id = event.payload.get("dependency_id")
+        if dependency_id in candidates:
+            acting = event.payload.get(ACTING_TURN_FIELD)
+            dropped[dependency_id] = {"from": event.entity_id, "by": event.payload.get("edited_by"),
+                                      "role": acting.get("role") if isinstance(acting, dict) else None, "at": event.created_at.isoformat()}
+    return dropped
+
+
 def split_node(
     store: ProjectStore,
     parent_id: str,
