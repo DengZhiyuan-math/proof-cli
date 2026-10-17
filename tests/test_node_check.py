@@ -206,3 +206,76 @@ def test_the_re_reviews_tex_cases_unreadable_sub_file_double_backslash_dotted_na
     (folder / "proof.tex").write_text(tex)
     _build(project, "N")
     assert check_node(project, "N") == []
+
+
+GROWS = "\\mathscr A_k \\subseteq \\mathscr A_{k+1}."
+
+
+def test_a_display_in_the_statement_is_the_same_display_however_latex_writes_it(tmp_path):
+    """A statement is Markdown, so its displays are $$…$$; the studio's rule and the Typesetter's brief ask for a named
+    environment in a .tex file; and the check wanted the statement verbatim, so converting the displays read as a
+    mismatch. The scaffold now writes a statement's $$…$$ as equation*, and the check reads $$…$$,
+    \\[…\\], equation*, displaymath and equation (a \\label in it says nothing) as one display — but a change to what the
+    display or the words around it say is still a mismatch."""
+    store = ensure_project(tmp_path / "project")
+    create_node(store, node_id="N", kind="claim", statement=f"For every $k$ the set $X_k$ satisfies $${GROWS}$$ Hence the chain grows.")
+    folder = node_folder(store.root, "N")
+    (folder / "key-ideas.md").write_text(IDEAS)
+    tex = (folder / "proof.tex").read_text()
+    display = f"\\begin{{equation*}}\n{GROWS}\n\\end{{equation*}}"
+    assert "$$" not in tex and f"satisfies {display} Hence" in tex  # the named environment, as the studio's rule asks
+    _build(store, "N")
+    assert check_node(store, "N") == []
+    for form in (f"$${GROWS}$$", f"\\[ {GROWS} \\]", f"\\begin{{displaymath}}{GROWS}\\end{{displaymath}}",
+                 f"\n\\begin{{equation}}\\label{{eq:grows}}\n  {GROWS}\n\\end{{equation}}\n"):
+        (folder / "proof.tex").write_text(tex.replace(display, form))
+        _build(store, "N")
+        assert "CHECK_STATEMENT_MISMATCH" not in _codes(check_node(store, "N")), form
+    for edit in (tex.replace("\\subseteq", "\\subsetneq"), tex.replace("the chain grows", "the chain stops"),
+                 tex.replace(display, f"\\[ {GROWS} \\] \\[ X_k \\ne \\emptyset \\]"), tex.replace(display, f"$\\mathscr A_k$")):
+        (folder / "proof.tex").write_text(edit)
+        _build(store, "N")
+        assert "CHECK_STATEMENT_MISMATCH" in _codes(check_node(store, "N")), edit
+    # a line break's spacing, `\\[2pt]`, is no display
+    assert "CHECK_STATEMENT_MISMATCH" in _codes(_check_with(store, "N", tex.replace(display, f"\\\\[2pt] {GROWS} \\\\[2pt]")))
+
+
+def _check_with(store, node_id, text):
+    (node_folder(store.root, node_id) / "proof.tex").write_text(text)
+    _build(store, node_id)
+    return check_node(store, node_id)
+
+
+def test_the_definitions_proof_tex_gives_must_be_the_ones_the_map_has(tmp_path):
+    """The scaffold's Definitions block is the map's text, as the statement environment is, but nothing compared it with
+    the definition records: a Typesetter could rewrite it, and a restated definition (ADR-0021 point 6) left the document
+    behind unnoticed. The check names each definition the node names whose text proof.tex (or a file it inputs) no
+    longer gives, as it does for the statement; the heading, the term's rendering, is not compared."""
+    from proof_cli import definitions as D
+
+    store = ensure_project(tmp_path / "project")
+    D.add_definition(store, "idx", term="Index set I_k", text=f"An index set $I_k$ has $k$ members and $${GROWS}$$")
+    D.add_definition(store, "fam", term="Family", text="$\\mathscr A$ contains $X_k$.")
+    create_node(store, node_id="N", kind="claim", statement="$\\mathscr A$ is closed.", definitions=["idx", "fam"])
+    folder = node_folder(store.root, "N")
+    (folder / "key-ideas.md").write_text(IDEAS)
+    tex = (folder / "proof.tex").read_text()
+    assert _check_with(store, "N", tex) == []  # the scaffold gives them as the map has them
+    # the heading rewritten, the display written another way, the block moved to a file of its own: still given
+    block = tex[tex.index("\\section*{Definitions}"):tex.index("% Proof map node")]
+    (folder / "defs.tex").write_text(block.replace("\\paragraph{Index set I\\_k.}", "\\paragraph{Index set $I_k$.}")
+                                     .replace(f"\\begin{{equation*}}\n{GROWS}\n\\end{{equation*}}", f"\\[{GROWS}\\]"))
+    assert _check_with(store, "N", tex.replace(block, "\\input{defs}\n")) == []
+    (folder / "defs.tex").unlink()
+    # a definition's text rewritten, or left only in a comment: an error naming it, and only it
+    for broken in (tex.replace("has $k$ members", "has $k+1$ members"), tex.replace("An index set", "% An index set")):
+        found = [f for f in _check_with(store, "N", broken) if f["code"] == "CHECK_DEFINITIONS_MISMATCH"]
+        assert len(found) == 1 and found[0]["level"] == "error" and found[0]["path"] == "proof.tex"
+        assert found[0]["message"].startswith("proof.tex does not give the definition idx as the map has it")
+    # an unfixed definition the map restates leaves the document behind: the check says so
+    D.edit_definition(store, "fam", text="$\\mathscr A$ contains $X_{k+1}$.", reason="the index")
+    found = [f for f in _check_with(store, "N", tex) if f["code"] == "CHECK_DEFINITIONS_MISMATCH"]
+    assert len(found) == 1 and "definition fam " in found[0]["message"]
+    from proof_cli import errors
+
+    assert "CHECK_DEFINITIONS_MISMATCH" in errors.NOTICE_CODES
