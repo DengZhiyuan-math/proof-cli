@@ -266,6 +266,7 @@ NOTICE_CODES: dict[str, str] = {
     # --json it is `data.notices`, a list of {code, message, …}; the code is stable like an error's.
     "SNAPSHOT_LARGE_OUTPUT": "the Review snapshot froze more of a computation's out/ than `[snapshot] large_output_mb` in proof.toml (default 50); `output_bytes` and `threshold_bytes` say how much (spec #145)",
     "SNAPSHOT_SKIPPED_HIDDEN": "the Review snapshot left hidden files or folders out (secrets, dotfiles not on the allowlist, hidden folders); `paths` lists them by path, never their contents (ADR-0015)",
+    "SNAPSHOT_PDF_NOT_ARCHIVED": "the studio's current build logged errors, so its PDF, built past them, was not archived with the Review snapshot; `errors` and `warnings` say how many (the request records them with the snapshot)",
     "SNAPSHOT_EXPORTED_UNVERIFIABLE": "an exchange export left frozen files out of a snapshot (secrets, or hidden or cache files an older rule froze), so it no longer verifies where it is imported; `node_id`, `version` and `paths` say which (ADR-0015)",
     # the mechanical checks of a node's working proof (`proof node check`, issue #180): findings, never refusals
     "CHECK_PROOF_MISSING": "the node's working proof.tex is not there (node check)",

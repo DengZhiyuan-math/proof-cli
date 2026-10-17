@@ -19,7 +19,7 @@ from pathlib import Path
 from .domain import ProofMapNodeKind, is_computation
 from .key_ideas import FIELDS, KEY_IDEAS_FILE, parse
 from .storage import ProjectStore, get_definition
-from .vault import build_is_current, build_pdf_path, latex_text, node_folder, preamble_path, run_script_path, working_entry_path
+from .vault import build_is_current, build_pdf_path, latex_text, log_errors, node_folder, preamble_path, run_script_path, working_entry_path
 
 ERROR, NOTE = "error", "note"
 # \input{file}, \input {file}, \input⏎{file}, and TeX's own \input file␣ (no braces); \include{file} too — not \includegraphics, \inputencoding
@@ -179,7 +179,7 @@ def check_node(store: ProjectStore, node_id: str) -> list[dict]:
                 findings.append(_finding("CHECK_BUILD_STALE", ERROR, "an input changed after the last build: compile again so the PDF and the log are of the proof as it stands", "build/proof.pdf"))
             if log.is_file():
                 log_text = log.read_text(encoding="utf-8", errors="replace")
-                bangs = [line.strip() for line in log_text.splitlines() if line.startswith("!")]
+                bangs = log_errors(log_text)
                 if bangs:
                     findings.append(_finding("CHECK_COMPILE_ERRORS", ERROR, f"the build log has {len(bangs)} error line(s); the first: {bangs[0][:160]}", "build/proof.log"))
                 if _UNDEFINED.search(log_text):

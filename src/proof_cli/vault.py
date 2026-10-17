@@ -547,6 +547,29 @@ def build_is_current(root: Path, node_id: str) -> bool:
     return all(source.stat().st_mtime <= built for source in inputs.values() if source.exists())
 
 
+# a LaTeX, package or class warning, as a TeX log begins its line (`Package hyperref Warning: …`)
+_LOG_WARNING = re.compile(r"^(?:LaTeX|Package \S+|Class \S+) Warning\b")
+
+
+def log_errors(log_text: str) -> list[str]:
+    """A TeX log's error lines, each beginning with `!`. An engine that goes on past errors (Tectonic's
+    `-Z continue-on-errors`, latexmk's `-f`) writes them too, and a PDF besides."""
+    return [line.strip() for line in log_text.splitlines() if line.startswith("!")]
+
+
+def build_status(root: Path, node_id: str) -> dict | None:
+    """What the studio's last build of proof.tex logged (`build/proof.log`, beside its PDF): `{"errors", "warnings",
+    "first_error"}`, the count of `!` lines, of LaTeX, package and class warnings, and the first `!` line (None
+    without one). None when there is no log to read."""
+    try:
+        text = build_pdf_path(root, node_id).with_suffix(".log").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    errors = log_errors(text)
+    warnings = sum(1 for line in text.splitlines() if _LOG_WARNING.match(line))
+    return {"errors": len(errors), "warnings": warnings, "first_error": errors[0] if errors else None}
+
+
 # -- the scaffold's text: a node's statement and definitions, written into its proof.tex ---------------------
 
 # maths as the map's pages find it (proof-web's mathtext.js): $$…$$ first, then $…$ on one line; `\$` is a dollar sign
