@@ -222,7 +222,7 @@ def render_node_check(node_id: str, findings: list[dict]) -> str:
     console = _console()
     console.rule(f"Node check: {node_id}")
     if not findings:
-        console.print("All checks passed: the proof builds cleanly, key-ideas.md has its four headings, the statement is the node's.")
+        console.print("All checks passed: the proof builds cleanly, key-ideas.md has its four headings, the statement and definitions are the node's.")
         return console.export_text()
     table = Table()
     table.add_column("level")
