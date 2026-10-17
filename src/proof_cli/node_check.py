@@ -18,7 +18,7 @@ from pathlib import Path
 from .domain import ProofMapNodeKind, is_computation
 from .key_ideas import FIELDS, KEY_IDEAS_FILE, parse
 from .storage import ProjectStore
-from .vault import build_is_current, build_pdf_path, node_folder, preamble_path, run_script_path, working_entry_path
+from .vault import build_is_current, build_pdf_path, latex_text, node_folder, preamble_path, run_script_path, working_entry_path
 
 ERROR, NOTE = "error", "note"
 # \input{file}, \input {file}, \input⏎{file}, and TeX's own \input file␣ (no braces); \include{file} too — not \includegraphics, \inputencoding
@@ -31,6 +31,12 @@ _ID_LIKE = re.compile(r"[A-Za-z][A-Za-z0-9_.-]*")
 # Not (id): (i), (ii), (a_n) are math, and can't be told from a name (#188).
 _NAMED = re.compile(r"`([^`\s]+)`|\\(?:eq|c|auto)?ref\{([^}]+)\}")
 MAX_INPUT_FILES = 50   # files read through \input, at most
+# One display however it is written: the map's Markdown $$…$$, LaTeX's \[…\], and the unnumbered and numbered named
+# environments the studio's rule asks for. The scaffold writes a statement's $$…$$ as equation* (vault.latex_text), and the
+# form says nothing about what is stated (run4: a Typesetter converted the displays, and a later turn reverted them). Not
+# `\\[2pt]`, a line break; and a \label in a display says nothing either.
+_DISPLAY = re.compile(r"(?<!\\)\$\$(.+?)(?<!\\)\$\$|(?<!\\)\\\[(.+?)(?<!\\)\\\]|\\begin\{(equation\*?|displaymath)\}(.*?)\\end\{\3\}", re.S)
+_LABEL = re.compile(r"\\label\{[^}]*\}")
 
 
 def _finding(code: str, level: str, message: str, path: str | None = None) -> dict:
@@ -42,6 +48,15 @@ def _finding(code: str, level: str, message: str, path: str | None = None) -> di
 
 def _normal(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
+
+
+def _comparable(text: str) -> str:
+    """`text` as the statement check compares it: whitespace runs as one space, and each display as `\\[…\\]`."""
+    def display(match: re.Match) -> str:
+        inner = next(group for group in (match.group(1), match.group(2), match.group(4)) if group is not None)
+        return " \\[" + _normal(_LABEL.sub("", inner)) + "\\] "
+
+    return _normal(_DISPLAY.sub(display, text))
 
 
 def _mentions(node_id: str, *texts: str) -> bool:
@@ -138,11 +153,11 @@ def check_node(store: ProjectStore, node_id: str) -> list[dict]:
         else:
             sources = _sources(folder, proof, preamble_path(root), findings)
             texts.extend(sources.values())
-            stated = [_normal(body) for _, body in _ENV.findall(sources.get(proof.name, ""))]
+            stated = [_comparable(body) for _, body in _ENV.findall(sources.get(proof.name, ""))]
             if not stated:
                 findings.append(_finding("CHECK_STATEMENT_MISMATCH", ERROR,
                                          "proof.tex has no theorem, lemma or claim environment stating the node's statement (a comment does not count)", proof.name))
-            elif not any(_normal(node.statement) in body for body in stated):
+            elif not any(_comparable(latex_text(node.statement)) in body for body in stated):
                 findings.append(_finding("CHECK_STATEMENT_MISMATCH", ERROR,
                                          "the node's statement is not what proof.tex's theorem environment states; it must state exactly what the map has", proof.name))
             pdf = build_pdf_path(root, node.id)

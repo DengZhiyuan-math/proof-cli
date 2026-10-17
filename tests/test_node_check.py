@@ -206,3 +206,42 @@ def test_the_re_reviews_tex_cases_unreadable_sub_file_double_backslash_dotted_na
     (folder / "proof.tex").write_text(tex)
     _build(project, "N")
     assert check_node(project, "N") == []
+
+
+GROWS = "\\mathscr A_N \\subseteq \\mathscr A_{N+1}."
+
+
+def test_a_display_in_the_statement_is_the_same_display_however_latex_writes_it(tmp_path):
+    """Run4: a statement is Markdown, so its displays are $$…$$; the studio's rule and the Typesetter's brief ask for a named
+    environment in a .tex file; and the check wanted the statement verbatim. A Typesetter converted the displays and a later
+    turn spent itself reverting them. The scaffold now writes a statement's $$…$$ as equation*, and the check reads $$…$$,
+    \\[…\\], equation*, displaymath and equation (a \\label in it says nothing) as one display — but a change to what the
+    display or the words around it say is still a mismatch."""
+    store = ensure_project(tmp_path / "project")
+    create_node(store, node_id="N", kind="claim", statement=f"For every $N$ the tree $T_N$ satisfies $${GROWS}$$ Hence the chain grows.")
+    folder = node_folder(store.root, "N")
+    (folder / "key-ideas.md").write_text(IDEAS)
+    tex = (folder / "proof.tex").read_text()
+    display = f"\\begin{{equation*}}\n{GROWS}\n\\end{{equation*}}"
+    assert "$$" not in tex and f"satisfies {display} Hence" in tex  # the named environment, as the studio's rule asks
+    _build(store, "N")
+    assert check_node(store, "N") == []
+    for form in (f"$${GROWS}$$", f"\\[ {GROWS} \\]", f"\\begin{{displaymath}}{GROWS}\\end{{displaymath}}",
+                 f"\n\\begin{{equation}}\\label{{eq:grows}}\n  {GROWS}\n\\end{{equation}}\n"):
+        (folder / "proof.tex").write_text(tex.replace(display, form))
+        _build(store, "N")
+        assert "CHECK_STATEMENT_MISMATCH" not in _codes(check_node(store, "N")), form
+    for edit in (tex.replace("\\subseteq", "\\subsetneq"), tex.replace("the chain grows", "the chain stops"),
+                 tex.replace(display, f"\\[ {GROWS} \\] \\[ T_N \\ne \\emptyset \\]"), tex.replace(display, f"$\\mathscr A_N$")):
+        (folder / "proof.tex").write_text(edit)
+        _build(store, "N")
+        assert "CHECK_STATEMENT_MISMATCH" in _codes(check_node(store, "N")), edit
+    # a line break's spacing, `\\[2pt]`, is no display
+    assert "CHECK_STATEMENT_MISMATCH" in _codes(_check_with(store, "N", tex.replace(display, f"\\\\[2pt] {GROWS} \\\\[2pt]")))
+
+
+def _check_with(store, node_id, text):
+    (node_folder(store.root, node_id) / "proof.tex").write_text(text)
+    _build(store, node_id)
+    return check_node(store, node_id)
+

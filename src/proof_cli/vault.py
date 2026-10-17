@@ -551,6 +551,7 @@ def build_is_current(root: Path, node_id: str) -> bool:
 
 # maths as the map's pages find it (proof-web's mathtext.js): $$…$$ first, then $…$ on one line; `\$` is a dollar sign
 _MATH = re.compile(r"(?<!\\)\$\$(.+?)(?<!\\)\$\$|(?<!\\)\$((?:\\\$|[^$\n])+?)\$", re.S)
+_DISPLAY_DOLLARS = re.compile(r"(?<!\\)\$\$(.+?)(?<!\\)\$\$", re.S)
 # what LaTeX reads as markup in text, each as the character it is
 _TEXT_SPECIALS = {"\\": r"\textbackslash{}", "{": r"\{", "}": r"\}", "$": r"\$", "&": r"\&", "#": r"\#", "%": r"\%",
                   "_": r"\_", "^": r"\textasciicircum{}", "~": r"\textasciitilde{}"}
@@ -576,6 +577,13 @@ def _escaped(text: str) -> str:
     return "".join(_TEXT_SPECIALS.get(char, char) for char in text)
 
 
+def latex_text(markdown: str) -> str:
+    """A statement's or a definition's text as the scaffold writes it into proof.tex: as written, but each $$…$$ display as
+    an equation* environment, the named environment the studio's rule asks for in a .tex file ($$ is plain TeX's). So no
+    role has to rewrite the map's text to follow that rule, and the statement check (node_check) reads both as one display."""
+    return _DISPLAY_DOLLARS.sub(lambda match: f"\\begin{{equation*}}\n{match.group(1).strip()}\n\\end{{equation*}}", markdown)
+
+
 def _packages_lacking(preamble: Path, texts: list[str]) -> list[str]:
     """The packages the node's statement and definitions use that the project's preamble does not load. The preamble is the
     researcher's, and every snapshot freezes it: an existing one is never rewritten, which would change every node's inputs
@@ -590,8 +598,8 @@ def _packages_lacking(preamble: Path, texts: list[str]) -> list[str]:
 
 def write_working_proof(root: Path, *, node_id: str, kind: str, statement: str, definitions: list[tuple[str, str]] = ()) -> None:
     """Create the project preamble and a node's working `proof.tex`, if missing. Never overwrites. A statement written in
-    Definitions (ADR-0020) is preceded by them, each `(term, text)`, so the document says what its symbols are. A term
-    goes in as `heading_text` writes it, so the untouched document builds."""
+    Definitions (ADR-0020) is preceded by them, each `(term, text)`, so the document says what its symbols are. The map's
+    text goes in as `latex_text` writes it, a term as `heading_text` does: the untouched document builds."""
     preamble = preamble_path(root)
     if not preamble.exists():
         preamble.parent.mkdir(parents=True, exist_ok=True)
@@ -608,9 +616,9 @@ def write_working_proof(root: Path, *, node_id: str, kind: str, statement: str, 
         "\\input{../preamble}\n"
         + "".join(f"\\usepackage{{{package}}} % the statement or a definition uses it, and ../preamble.tex does not load it\n" for package in lacking)
         + "\\begin{document}\n\n"
-        + ("\\section*{Definitions}\n" + "".join(f"\\paragraph{{{heading_text(term)}.}} {text}\n\n" for term, text in definitions) if definitions else "")
+        + ("\\section*{Definitions}\n" + "".join(f"\\paragraph{{{heading_text(term)}.}} {latex_text(text)}\n\n" for term, text in definitions) if definitions else "")
         + f"% Proof map node {node_id} ({kind}).\n"
-        f"\\begin{{{environment}}}\n{statement}\n\\end{{{environment}}}\n\n"
+        f"\\begin{{{environment}}}\n{latex_text(statement)}\n\\end{{{environment}}}\n\n"
         "\\begin{proof}\n% Write the proof here.\n\\end{proof}\n\n"
         "\\end{document}\n",
         encoding="utf-8",
