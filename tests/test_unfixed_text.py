@@ -1,8 +1,9 @@
 """ADR-0021 point 6: text is unfixed until a Review decision relies on it.
 
 A node's statement, assumptions and named definitions, and a Definition's text, may be restated until the first
-Review decision on the node or on a node resting on it (an imported result: its Reference review). The researcher
-may restate any unfixed text, an agent only text an agent created. A restatement is a work-log event and makes stale
+Review decision on the node or on a node resting on it (an imported result: its Reference review, which fixes the
+Definitions it names; the imported result itself is never restated, ADR-0005 Rule 1). The researcher may restate any
+unfixed text, an agent only text an agent created. A restatement is a work-log event and makes stale
 every verdict on what rests on the text, and the snapshots awaiting a decision there read Potentially stale.
 """
 
@@ -186,6 +187,24 @@ def test_a_restatement_upstream_makes_a_snapshot_awaiting_a_decision_potentially
     assert get_integrity_state(store, "C") == "current"  # nothing of C's awaits a decision
     submit_proof(store, "L", claimant_id="prover-1", scoping_rationale="scoped", content="proof, reread")
     assert get_integrity_state(store, "L") == "current"
+
+
+def test_an_imported_result_is_never_restated_its_correction_is_a_new_imported_result(tmp_path: Path):
+    """CONTEXT.md, Imported result; ADR-0005 Rule 1: immutable once created — its statement never changes in place, by
+    anyone, before its Reference review as after; a corrected statement is a new imported result, onto which what rests
+    on it moves deliberately. The run4 audit restated one on a copy; nothing refused it."""
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="ref", kind="imported_result", statement="Known", source_locator="Thm 1", source_version="v1", created_by="reader-1")
+    for by in ("reader-1", "human"):
+        assert _code(lambda: restate_node(store, "ref", statement="Known, corrected", assumptions=["a"], reason="misread", by=by)) == "IMMUTABLE_NODE"
+    assert _code(lambda: restate_node(store, "ref", statement="Known, corrected", reason=" ", by="human")) == "IMMUTABLE_NODE"
+    result = runner.invoke(app, ["node", "restate", "ref", "--statement", "Known, corrected", "--reason", "misread", "--by", "human",
+                                 "--root", str(tmp_path), "--json"])
+    envelope = json.loads(result.output)
+    assert result.exit_code == 1 and envelope["error"]["code"] == "IMMUTABLE_NODE"
+    assert "new imported result" in envelope["error"]["message"]
+    assert (get_node(store, "ref").statement, get_node(store, "ref").assumptions) == ("Known", [])
+    assert not [e for e in list_events(store) if e.kind == "proof_map_node_restated"]
 
 
 def test_the_cli_restates_and_edits_with_a_reason(tmp_path: Path):

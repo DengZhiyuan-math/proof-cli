@@ -182,7 +182,7 @@ A node whose run budget is spent under a Coordinator. The Coordinator goes on wi
 _Avoid_: stuck (a run's state), failed
 
 **Review queue**:
-Everything waiting on the researcher, ordered bottom-up, none of which holds the agents back: Provisional nodes and other nodes with a Candidate proof requested for review and still awaiting a Review decision, unreviewed imported results, Unfixed agent-written text, Standing questions and Parked nodes (ADR-0021).
+Everything waiting on the researcher, ordered bottom-up, none of which holds the agents back: Provisional nodes and other nodes with a Candidate proof requested for review and still awaiting a Review decision, unreviewed imported results, Unfixed agent-written text, Standing questions and Parked nodes (ADR-0021). What nothing on a live route rests on — a node a dependency removal dropped from every route, what only such nodes rest on, an imported result nothing rests on — comes last, each item saying why: history, kept and never hidden, that no route waits on (ADR-0023 point 4).
 _Avoid_: inbox, approvals
 
 **Decidable now**:
@@ -229,7 +229,7 @@ A node whose proof rests, directly or through others, on a Provisional node: it 
 _Avoid_: tentative, unproven
 
 **Unfixed**:
-A statement or Definition no Review decision has yet relied on. The researcher may restate any unfixed text, an agent only what an agent wrote (never a Definition a node of the researcher's names); a restatement is a work-log event and makes the verdicts on it and on what rests on it stale. The first Review decision on it, or on a node whose decided snapshot rested on it, fixes it (ADR-0021).
+A statement or Definition no Review decision has yet relied on. The researcher may restate any unfixed text, an agent only what an agent wrote (never a Definition a node of the researcher's names); a restatement is a work-log event and makes the verdicts on it and on what rests on it stale. The first Review decision on it, or on a node whose decided snapshot rested on it, fixes it (ADR-0021). An Imported result's statement is never Unfixed: it is immutable once created, and a corrected one is a new Imported result.
 _Avoid_: draft (a draft is the researcher's LaTeX), editable
 
 **Accepted** (an acceptance state):
