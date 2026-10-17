@@ -16,6 +16,7 @@ ERROR_CODES: dict[str, str] = {
     "INVALID_INPUT": "a legacy command (`theorem add`, `reference import`) refused its input under --json, or the page's new reference (POST /api/references) was refused; the message says why",
     "TEXT_FILE_UNREADABLE": "a `--…-file` option (`--note-file`, `--statement-file`, `--child-file <id>=<path>`, …) names a file that can't be read as UTF-8 text — missing, a folder, unreadable or not UTF-8; `option` and `path` name it, and nothing was written",
     "PROJECT_NOT_FOUND": "a read was pointed at a folder with no proof project; nothing was created",
+    "PROJECT_STATE_READ_ONLY": "the project's state (.proof/) can't be written where proof ran, so it can't be opened even to read — in an agent's runtime, `proof` joined with another command in one Bash call runs in the sandbox; run it on its own and redirect its output to a scratch file to filter it",
     "HUMAN_REVIEW_REQUIRED": "a Human Review decision, made only by the researcher on the proof map page; the error carries its URL",
     "REVIEW_PORT_IN_USE": "`map serve` couldn't bind the project's review port because it is taken, likely by the page already running (`proof map open`); `errno` names the cause",
     "REVIEW_PORT_NOT_PERMITTED": "`map serve` isn't permitted to bind a local port: a permission or sandbox restriction; `errno` names the cause",
