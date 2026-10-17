@@ -31,7 +31,7 @@ ERROR_CODES: dict[str, str] = {
     "DUPLICATE_THEOREM": "the project already has its one theorem-kind node",
     "DEPENDENCY_NOT_FOUND": "a named dependency doesn't exist yet",
     "DERIVED_FROM_NOT_FOUND": "the node a split child derives from doesn't exist",
-    "IMMUTABLE_NODE": "an imported result has no proof, claim or split; it enters the map through Reference review",
+    "IMMUTABLE_NODE": "an imported result has no proof, claim or split, and is never restated; it enters the map through Reference review, and a corrected statement is a new imported result",
     "IMPORTED_RESULT_REQUIRES_SOURCE": "an imported result needs a source locator and a source version",
     "IMPORTED_RESULT_HAS_NO_DEPENDENCIES": "an imported result is established elsewhere and takes no dependencies",
     "NOT_IMPORTED_RESULT": "the operation applies only to an imported result",
@@ -105,7 +105,7 @@ ERROR_CODES: dict[str, str] = {
     "TRUST_RULE_RATIONALE_REQUIRED": "a trust-rule decision needs a rationale",
     "TRUST_RULES_FILE_BLOCKED": "a node folder from before ADR-0014 stands where proofs/trust-rules.jsonl goes; no rule can be recorded",
     # -- Definitions (ADR-0020) -----------------------------------------------------------------
-    "DEFINITION_NOT_FOUND": "no definition has this id; add it with `proof definition add` first",
+    "DEFINITION_NOT_FOUND": "no definition has this id: a lookup (show, edit, remove) names the ids there are; a statement naming it needs `proof definition add` first",
     "DEFINITION_ALREADY_EXISTS": "a definition with this id exists; choose another id",
     "DEFINITION_IN_USE": "a node names this definition, so it can't be removed; edit it while it is unfixed, or add a corrected one under a new id",
     "DEFINITION_FIXED": "a Review decision relied on this definition (details.fixed_by names it): add a corrected one under a new id",
