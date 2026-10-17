@@ -2351,8 +2351,8 @@ def pin_dependencies(store: ProjectStore, node: ProofMapNode) -> list[Dependency
             pinned_fingerprint = get_accepted_interface_fingerprint(store, target_id)
             accepted = _accepted_proof(store, target_id) if pinned_fingerprint is not None else None
             pinned_version = accepted.version if accepted else None
-            if pinned_fingerprint is None:  # Provisional at most: its statement as it stands, no version
-                pinned_fingerprint = _interface_of(target)
+            if pinned_fingerprint is None:  # Provisional at most: its statement and Definitions as they stand, no version
+                pinned_fingerprint = _provisional_interface(store, target)
         pin = DependencyPin(
             id=str(uuid.uuid4()),
             node_id=node.id,
@@ -2393,12 +2393,16 @@ def get_dependency_pin(store: ProjectStore, node_id: str, target_node_id: str) -
     signed = (_signed_pins(store, node_id) or {}).get(target_node_id)
     if signed is None:
         return stored
+    # a signed pin carries no time of its own; it was taken when the snapshot its Acceptance names was requested, which
+    # is what a pin with neither version nor fingerprint is read against (`dependency_pin_is_current`)
+    accepted = _accepted_proof(store, node_id)
     return DependencyPin(
         id=stored.id if stored else f"signed:{node_id}:{target_node_id}",
         node_id=node_id,
         target_node_id=target_node_id,
         pinned_version=signed.pinned_version,
         pinned_fingerprint=signed.pinned_fingerprint,
+        created_at=accepted.created_at if accepted is not None else stored.created_at if stored else utc_now(),
     )
 
 
@@ -2414,9 +2418,10 @@ def dependency_pin_is_current(store: ProjectStore, pin: DependencyPin) -> bool:
     a new Accepted version whose interface fingerprint is unchanged (a
     proof-only revision), and that must read as still current, not stale.
     A pin taken before the target was Accepted (no version) was checked
-    against its statement alone: it stays current while the target offers
-    that interface, Accepted since or not, and reads changed once the target
-    is restated. One from before such pins kept the interface (neither a
+    against its statement alone, as its Definitions then read: it stays
+    current while the target offers that text, Accepted since or not, and
+    reads changed once the target is restated or a Definition it names is
+    edited (`_provisional_interface`). One from before such pins kept the interface (neither a
     version nor a fingerprint) is current unless the target's text changed
     after it was taken.
     """
@@ -2428,8 +2433,16 @@ def dependency_pin_is_current(store: ProjectStore, pin: DependencyPin) -> bool:
         if pin.pinned_fingerprint is None:
             change = _own_text_change(store, target)
             return change is None or change.created_at <= pin.created_at
-        return _same_interface(store, pin.target_node_id, pin.pinned_fingerprint, current_fingerprint or _interface_of(target))
+        return pin.pinned_fingerprint == _provisional_interface(store, target)
     return _same_interface(store, pin.target_node_id, pin.pinned_fingerprint, current_fingerprint)
+
+
+def _provisional_interface(store: ProjectStore, node: ProofMapNode) -> str:
+    """What a dependent checked against `node` before it was Accepted relied on: its interface and the text of each
+    Definition it names. Those Definitions are editable until a decision relies on them (ADR-0021 point 6), and an
+    Accepted interface's fingerprint names them by id only, so an edit there must read as a change here."""
+    named = [get_definition(store, definition_id) for definition_id in node.definitions]
+    return _digest([_interface_of(node), *(f"{d.id}\x00{d.term}\x00{d.text}" for d in named if d is not None)])
 
 
 def dependency_pin_lags(store: ProjectStore, pin: DependencyPin) -> bool:

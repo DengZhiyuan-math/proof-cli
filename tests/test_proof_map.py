@@ -1152,7 +1152,7 @@ def test_pin_dependencies_leaves_pinned_version_none_for_submitted_but_unaccepte
     pin = get_dependency_pin(store, "clm_1", "lem_base")
     assert pin is not None
     assert pin.pinned_version is None
-    assert pin.pinned_fingerprint == compute_interface_fingerprint("Base lemma", [])
+    assert pin.pinned_fingerprint is not None and dependency_pin_is_current(store, pin)
 
 
 def test_claim_on_rejected_node_is_refused(tmp_path: Path):
