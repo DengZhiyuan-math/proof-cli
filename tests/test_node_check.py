@@ -245,3 +245,37 @@ def _check_with(store, node_id, text):
     _build(store, node_id)
     return check_node(store, node_id)
 
+
+def test_the_definitions_proof_tex_gives_must_be_the_ones_the_map_has(tmp_path):
+    """The scaffold's Definitions block is the map's text, as the statement environment is, but nothing compared it with
+    the definition records: a Typesetter could rewrite it, and a restated definition (ADR-0021 point 6) left the document
+    behind unnoticed. The check names each definition the node names whose text proof.tex (or a file it inputs) no
+    longer gives, as it does for the statement; the heading, the term's rendering, is not compared."""
+    from proof_cli import definitions as D
+
+    store = ensure_project(tmp_path / "project")
+    D.add_definition(store, "idx", term="Index set I_k", text=f"An index set $I_k$ has $k$ members and $${GROWS}$$")
+    D.add_definition(store, "fam", term="Family", text="$\\mathscr A$ contains $X_k$.")
+    create_node(store, node_id="N", kind="claim", statement="$\\mathscr A$ is closed.", definitions=["idx", "fam"])
+    folder = node_folder(store.root, "N")
+    (folder / "key-ideas.md").write_text(IDEAS)
+    tex = (folder / "proof.tex").read_text()
+    assert _check_with(store, "N", tex) == []  # the scaffold gives them as the map has them
+    # the heading rewritten, the display written another way, the block moved to a file of its own: still given
+    block = tex[tex.index("\\section*{Definitions}"):tex.index("% Proof map node")]
+    (folder / "defs.tex").write_text(block.replace("\\paragraph{Index set I\\_k.}", "\\paragraph{Index set $I_k$.}")
+                                     .replace(f"\\begin{{equation*}}\n{GROWS}\n\\end{{equation*}}", f"\\[{GROWS}\\]"))
+    assert _check_with(store, "N", tex.replace(block, "\\input{defs}\n")) == []
+    (folder / "defs.tex").unlink()
+    # a definition's text rewritten, or left only in a comment: an error naming it, and only it
+    for broken in (tex.replace("has $k$ members", "has $k+1$ members"), tex.replace("An index set", "% An index set")):
+        found = [f for f in _check_with(store, "N", broken) if f["code"] == "CHECK_DEFINITIONS_MISMATCH"]
+        assert len(found) == 1 and found[0]["level"] == "error" and found[0]["path"] == "proof.tex"
+        assert found[0]["message"].startswith("proof.tex does not give the definition idx as the map has it")
+    # an unfixed definition the map restates leaves the document behind: the check says so
+    D.edit_definition(store, "fam", text="$\\mathscr A$ contains $X_{k+1}$.", reason="the index")
+    found = [f for f in _check_with(store, "N", tex) if f["code"] == "CHECK_DEFINITIONS_MISMATCH"]
+    assert len(found) == 1 and "definition fam " in found[0]["message"]
+    from proof_cli import errors
+
+    assert "CHECK_DEFINITIONS_MISMATCH" in errors.NOTICE_CODES
