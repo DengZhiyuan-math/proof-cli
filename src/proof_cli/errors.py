@@ -14,7 +14,9 @@ ERROR_CODES: dict[str, str] = {
     "USAGE_ERROR": "the command line didn't parse: a missing argument, an unknown option or command (exit 2)",
     "INTERNAL_ERROR": "an unexpected failure inside proof-cli; the message names it",
     "INVALID_INPUT": "a legacy command (`theorem add`, `reference import`) refused its input under --json, or the page's new reference (POST /api/references) was refused; the message says why",
+    "TEXT_FILE_UNREADABLE": "a `--…-file` option (`--note-file`, `--statement-file`, `--child-file <id>=<path>`, …) names a file that can't be read as UTF-8 text — missing, a folder, unreadable or not UTF-8; `option` and `path` name it, and nothing was written",
     "PROJECT_NOT_FOUND": "a read was pointed at a folder with no proof project; nothing was created",
+    "PROJECT_STATE_READ_ONLY": "the project's state (.proof/) can't be written where proof ran, so it can't be opened even to read — in an agent's runtime, `proof` joined with another command in one Bash call runs in the sandbox; run it on its own and redirect its output to a scratch file to filter it",
     "HUMAN_REVIEW_REQUIRED": "a Human Review decision, made only by the researcher on the proof map page; the error carries its URL",
     "REVIEW_PORT_IN_USE": "`map serve` couldn't bind the project's review port because it is taken, likely by the page already running (`proof map open`); `errno` names the cause",
     "REVIEW_PORT_NOT_PERMITTED": "`map serve` isn't permitted to bind a local port: a permission or sandbox restriction; `errno` names the cause",
@@ -105,7 +107,7 @@ ERROR_CODES: dict[str, str] = {
     "TRUST_RULE_RATIONALE_REQUIRED": "a trust-rule decision needs a rationale",
     "TRUST_RULES_FILE_BLOCKED": "a node folder from before ADR-0014 stands where proofs/trust-rules.jsonl goes; no rule can be recorded",
     # -- Definitions (ADR-0020) -----------------------------------------------------------------
-    "DEFINITION_NOT_FOUND": "no definition has this id; add it with `proof definition add` first",
+    "DEFINITION_NOT_FOUND": "no definition has this id: a lookup (show, edit, remove) names the ids there are; a statement naming it needs `proof definition add` first",
     "DEFINITION_ALREADY_EXISTS": "a definition with this id exists; choose another id",
     "DEFINITION_IN_USE": "a node names this definition, so it can't be removed; edit it while it is unfixed, or add a corrected one under a new id",
     "DEFINITION_FIXED": "a Review decision relied on this definition (details.fixed_by names it): add a corrected one under a new id",
@@ -266,6 +268,7 @@ NOTICE_CODES: dict[str, str] = {
     # --json it is `data.notices`, a list of {code, message, …}; the code is stable like an error's.
     "SNAPSHOT_LARGE_OUTPUT": "the Review snapshot froze more of a computation's out/ than `[snapshot] large_output_mb` in proof.toml (default 50); `output_bytes` and `threshold_bytes` say how much (spec #145)",
     "SNAPSHOT_SKIPPED_HIDDEN": "the Review snapshot left hidden files or folders out (secrets, dotfiles not on the allowlist, hidden folders); `paths` lists them by path, never their contents (ADR-0015)",
+    "SNAPSHOT_PDF_NOT_ARCHIVED": "the studio's current build logged errors, so its PDF, built past them, was not archived with the Review snapshot; `errors` and `warnings` say how many (the request records them with the snapshot)",
     "SNAPSHOT_EXPORTED_UNVERIFIABLE": "an exchange export left frozen files out of a snapshot (secrets, or hidden or cache files an older rule froze), so it no longer verifies where it is imported; `node_id`, `version` and `paths` say which (ADR-0015)",
     # the mechanical checks of a node's working proof (`proof node check`, issue #180): findings, never refusals
     "CHECK_PROOF_MISSING": "the node's working proof.tex is not there (node check)",
@@ -275,6 +278,7 @@ NOTICE_CODES: dict[str, str] = {
     "CHECK_COMPILE_ERRORS": "the last build's log has errors (`!` lines); the first is in the message (node check)",
     "CHECK_UNDEFINED_REFERENCES": "the last build's log reports undefined references or citations (node check)",
     "CHECK_STATEMENT_MISMATCH": "the node's statement, as the map has it, does not appear in proof.tex (node check)",
+    "CHECK_DEFINITIONS_MISMATCH": "a definition the node names, as the map has it, does not appear in proof.tex or a file it inputs (node check)",
     "CHECK_INPUT_OUTSIDE": "proof.tex \\input's a file outside the node folder and the shared preamble (node check)",
     "CHECK_INPUT_UNREADABLE": "a file proof.tex \\input's could not be read, so the checks cannot see it (node check)",
     "CHECK_KEY_IDEAS_MISSING": "key-ideas.md is not there; request-review needs it (node check)",

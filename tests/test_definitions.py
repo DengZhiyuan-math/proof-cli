@@ -46,6 +46,24 @@ def test_a_node_names_its_definitions_and_its_document_opens_with_them(tmp_path:
     assert get_node(store, "X") is None and not (tmp_path / "proofs" / "X").exists()  # refused: no node, no folder
 
 
+def test_a_term_reads_as_written_in_its_latex_heading_and_keeps_its_maths(tmp_path: Path):
+    """A term is a name, and the scaffold put it into `\\paragraph{<term>.}` as it was. A bare `_` there ("Index set I_k")
+    stops the untouched document's build ("Missing $ inserted", then amsart's "Improper \\spacefactor"), and a Typesetter,
+    who must leave that block alone, would have to rewrite it. Outside the term's own `$…$` maths, every character LaTeX
+    reads as markup is escaped, so the heading shows the term exactly as the map does."""
+    store = ensure_project(tmp_path)
+    D.add_definition(store, "idx", term="Index set I_k", text="$I_k$ is an index set.")
+    D.add_definition(store, "marks", term="Label L_{k,j} & 50% #1 ~^\\", text="$L$ is a label.")
+    D.add_definition(store, "fam", term="Family $\\mathscr A_k$ of I_k", text="$\\mathscr A_k$ is a family.")
+    D.add_definition(store, "shown", term="Display $$\\mathscr B$$", text="$\\mathscr B$ is a set.")
+    create_node(store, node_id="T", kind="theorem", statement="$\\mathscr A_k$ covers $I_k$.", definitions=["idx", "marks", "fam", "shown"])
+    tex = working_proof_path(tmp_path, "T").read_text()
+    assert "\\paragraph{Index set I\\_k.} $I_k$ is an index set." in tex
+    assert "\\paragraph{Label L\\_\\{k,j\\} \\& 50\\% \\#1 \\textasciitilde{}\\textasciicircum{}\\textbackslash{}.}" in tex
+    assert "\\paragraph{Family $\\mathscr A_k$ of I\\_k.}" in tex  # its maths as written, the rest escaped
+    assert "\\paragraph{Display $\\mathscr B$.}" in tex  # a heading holds no display: its maths go inline
+
+
 def test_a_definition_is_editable_until_a_decision_relies_on_it_and_removable_until_a_node_names_it(tmp_path: Path):
     store = ensure_project(tmp_path)
     D.add_definition(store, "unit", term="Simple graph", text=UNIT)
@@ -111,6 +129,27 @@ def test_the_cli_adds_lists_shows_and_names_definitions(tmp_path: Path):
     assert child["definitions"] == ["unit", "pair"]
     text = runner.invoke(app, ["node", "show", "T", "--root", str(tmp_path)]).output
     assert text.index("Definition unit") < text.index("Statement") and "Simple graph." in text
+
+
+def test_a_definition_looked_up_under_an_id_there_is_none_of_names_the_ids_there_are(tmp_path: Path):
+    """Looking a definition up (show, edit, remove) under an id there is none of names the ids there are and where to
+    read them, so a guessed id is not answered with `proof definition add`; a statement naming a missing definition is
+    still told to add it first."""
+    ensure_project(tmp_path)
+
+    def refused(*args: str) -> str:
+        result = runner.invoke(app, [*args, "--root", str(tmp_path), "--json"])
+        envelope = json.loads(result.output)
+        assert result.exit_code == 1 and envelope["error"]["code"] == "DEFINITION_NOT_FOUND", result.output
+        return envelope["error"]["message"]
+
+    assert "has no definitions" in refused("definition", "show", "unit") and "definition add" not in refused("definition", "show", "unit")
+    runner.invoke(app, ["definition", "add", "unit", UNIT, "--term", "Simple graph", "--root", str(tmp_path)])
+    runner.invoke(app, ["definition", "add", "edge", "Two vertices joined.", "--term", "Edge", "--root", str(tmp_path)])
+    for lookup in (("definition", "show", "units"), ("definition", "edit", "units", "--text", "x"), ("definition", "remove", "units")):
+        message = refused(*lookup)
+        assert "unit, edge" in message and "proof definition list --json" in message and "definition add" not in message, message
+    assert "proof definition add" in refused("node", "create", "T", "theorem", "s", "--definition", "units")
 
 
 def test_an_export_carries_the_definitions_and_an_import_refuses_one_that_says_otherwise(tmp_path: Path):

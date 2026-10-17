@@ -31,6 +31,7 @@ A node's studio starts its agent in `proofs/<id>/` with `PROOF_ROOT` set to the 
 ## Working conventions
 
 - Change project state through `proof`; the files under `.proof/` and `reviews.jsonl` are its record, not a place to edit.
+- Mathematical text goes to `proof` in a file, not on the command line: a shell expands `$` inside double quotes, and an agent's Bash validator refuses `|=` before a letter or a backslash before a space. Write the text to a file in your scratch folder and pass it with the option's `-file` twin (`--note-file`, `--question-file`, `--statement-file`, `--text-file`, `--content-file`, `--child-file <id>=<path>`, …); `proof` takes the file's UTF-8 text as written. Plain prose may go inline in single quotes.
 - When a command is unavailable or fails, report the error and the next command to run.
 
 ## Developing the CLI

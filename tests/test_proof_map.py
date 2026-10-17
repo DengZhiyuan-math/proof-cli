@@ -1111,17 +1111,24 @@ def test_dependency_pin_is_current_true_for_imported_result_target(tmp_path: Pat
     assert dependency_pin_is_current(store, pin) is True
 
 
-def test_dependency_pin_is_current_false_when_never_pinned_a_fingerprint(tmp_path: Path):
+def test_a_pin_with_neither_version_nor_fingerprint_is_current_until_its_target_is_restated(tmp_path: Path):
+    """What core pinned on an unaccepted target before pins kept its interface: nothing to compare, so the target's
+    own text changing after the pin is what makes it changed (a never-Accepted target is no changed interface)."""
+    from proof_cli.proof_map import restate_node
+
     store = ensure_project(tmp_path)
     create_node(store, node_id="lem_base", kind="lemma", statement="A implies B")
     unpinned = DependencyPin(id="pin_none", node_id="clm_x", target_node_id="lem_base", pinned_version=None, pinned_fingerprint=None)
+    assert dependency_pin_is_current(store, unpinned) is True
+
+    restate_node(store, "lem_base", statement="A implies B for every n", reason="the quantifier was missing")
     assert dependency_pin_is_current(store, unpinned) is False
 
 
 def test_pin_dependencies_leaves_pinned_version_none_for_submitted_but_unaccepted_target(tmp_path: Path):
-    """A target with a *current* candidate proof that isn't yet Accepted must
-    pin neither a version nor a fingerprint (ADR-0005 Rule 2: a pin captures
-    a version that was current AND Accepted)."""
+    """A target with a *current* candidate proof that isn't yet Accepted pins
+    no version (ADR-0005 Rule 2: a pin captures a version that was current AND
+    Accepted), only the interface the dependent was checked against."""
     store = ensure_project(tmp_path)
     create_node(store, node_id="lem_base", kind="lemma", statement="Base lemma")
     claim_node(store, "lem_base", claimant_id="agent_a", session_id="sess_1")
@@ -1145,7 +1152,7 @@ def test_pin_dependencies_leaves_pinned_version_none_for_submitted_but_unaccepte
     pin = get_dependency_pin(store, "clm_1", "lem_base")
     assert pin is not None
     assert pin.pinned_version is None
-    assert pin.pinned_fingerprint is None
+    assert pin.pinned_fingerprint is not None and dependency_pin_is_current(store, pin)
 
 
 def test_claim_on_rejected_node_is_refused(tmp_path: Path):
