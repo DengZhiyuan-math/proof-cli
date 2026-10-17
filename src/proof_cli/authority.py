@@ -46,6 +46,7 @@ from .reviews import (
 )
 from .trust_rules import unreadable_trust_rule_lines
 from .storage import (
+    REVIEWS_JSONL_MIGRATED_KEY,
     ProjectStore,
     memoized_read,
     active_transaction,
@@ -312,7 +313,7 @@ def record_decision(
 
 # -- the one-time move out of review_history ----------------------------------------------
 
-_MIGRATED_KEY = "reviews_jsonl_migrated"
+_MIGRATED_KEY = REVIEWS_JSONL_MIGRATED_KEY
 _MIGRATED: set[str] = set()
 _MIGRATING_KINDS = {kind.value for kind in DecisionKind}
 

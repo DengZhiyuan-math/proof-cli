@@ -893,6 +893,8 @@ def collaboration_state_path(store: ProjectStore) -> Path:
 
 
 REVIEW_HISTORY_MIGRATED_KEY = "review_history_migrated"
+# review_history's pre-ADR-0010 decisions moved into reviews.jsonl, once (authority._migrate_review_history)
+REVIEWS_JSONL_MIGRATED_KEY = "reviews_jsonl_migrated"
 
 
 def is_review_history_migrated(conn: sqlite3.Connection) -> bool:
@@ -1027,6 +1029,10 @@ def create_project(root: str | Path, project_id: str) -> ProjectStore:
                 # a brand-new project has no JSON-era review records, so its
                 # one-shot migration is done before it ever starts
                 mark_review_history_migrated(conn)
+                # nor decisions from before reviews.jsonl to move into it: its first read then writes nothing, so it can be
+                # read where the state is read-only (an agent's `proof` joined with another command runs in the sandbox).
+                # A folder with a JSON-era collaboration.json migrates both on first use, as before.
+                conn.execute("INSERT OR IGNORE INTO project_meta(key, value) VALUES (?, ?)", (REVIEWS_JSONL_MIGRATED_KEY, "1"))
             for name, file_name in SIDE_DOCUMENT_FILES.items():
                 if not (project_proof_dir(store) / file_name).exists():
                     _mark_side_document_migrated(conn, name)  # nothing to move, so it's done
