@@ -1023,6 +1023,22 @@ def _text_changes(store: ProjectStore) -> tuple[dict[str, EventRecord], dict[str
     return restated, edited
 
 
+def _own_text_change(store: ProjectStore, node: ProofMapNode) -> EventRecord | None:
+    """The newest change to the node's own text: its restatement, or an edit of a Definition it names. Never what it
+    rests on: that is its proof's support, not what a dependent was checked against."""
+    memo = scoped_memo(store, _TEXT_CHANGES)
+    if "changes" not in memo:
+        memo["changes"] = _text_changes(store)
+    restated, edited = memo["changes"]
+    newest = restated.get(node.id)
+    for definition_id in node.definitions:
+        newest = _later(newest, edited.get(definition_id))
+    return newest
+
+
+_TEXT_CHANGES = "text_changes"
+
+
 def _reachable_text_change(store: ProjectStore, node_id: str) -> EventRecord | None:
     """`newest_text_change` by plain reachability: for a map with a cycle."""
     restated, edited = _text_changes(store)
@@ -2292,9 +2308,12 @@ def pin_dependencies(store: ProjectStore, node: ProofMapNode) -> list[Dependency
     reflect what this particular submission was actually checked against.
     An `imported_result` target pins no version/fingerprint — it's
     immutable, so there's nothing to have moved on. A local target not yet
-    Accepted pins `None` for both: nothing confirmed exists yet to check
-    against. A pin whose edge is gone (a dependency removed or moved, #96)
-    goes too, so the pins are exactly the node's dependencies.
+    Accepted pins no version and the interface it offers now: a Provisional
+    node's statement may be used, its proof never (ADR-0021), so that is all
+    the submission was checked against; the node's own Acceptance later pins
+    the version (`_pins_accepted_against`). A pin whose edge is gone (a
+    dependency removed or moved, #96) goes too, so the pins are exactly the
+    node's dependencies.
     """
     for stale in list_dependency_pins_for_node(store, node.id):
         if stale.target_node_id not in node.dependencies:
@@ -2310,6 +2329,8 @@ def pin_dependencies(store: ProjectStore, node: ProofMapNode) -> list[Dependency
             pinned_fingerprint = get_accepted_interface_fingerprint(store, target_id)
             accepted = _accepted_proof(store, target_id) if pinned_fingerprint is not None else None
             pinned_version = accepted.version if accepted else None
+            if pinned_fingerprint is None:  # Provisional at most: its statement as it stands, no version
+                pinned_fingerprint = _interface_of(target)
         pin = DependencyPin(
             id=str(uuid.uuid4()),
             node_id=node.id,
@@ -2370,11 +2391,22 @@ def dependency_pin_is_current(store: ProjectStore, pin: DependencyPin) -> bool:
     Compared by fingerprint, never by version number: a target can move to
     a new Accepted version whose interface fingerprint is unchanged (a
     proof-only revision), and that must read as still current, not stale.
+    A pin taken before the target was Accepted (no version) was checked
+    against its statement alone: it stays current while the target offers
+    that interface, Accepted since or not, and reads changed once the target
+    is restated. One from before such pins kept the interface (neither a
+    version nor a fingerprint) is current unless the target's text changed
+    after it was taken.
     """
     target = get_node(store, pin.target_node_id)
     if target is None or target.kind == ProofMapNodeKind.imported_result:
         return True
     current_fingerprint = get_accepted_interface_fingerprint(store, pin.target_node_id)
+    if pin.pinned_version is None:
+        if pin.pinned_fingerprint is None:
+            change = _own_text_change(store, target)
+            return change is None or change.created_at <= pin.created_at
+        return _same_interface(store, pin.target_node_id, pin.pinned_fingerprint, current_fingerprint or _interface_of(target))
     return _same_interface(store, pin.target_node_id, pin.pinned_fingerprint, current_fingerprint)
 
 
@@ -2382,9 +2414,10 @@ def dependency_pin_lags(store: ProjectStore, pin: DependencyPin) -> bool:
     """Whether a pin is behind its target's accepted version (#23): the target has moved on to
     a new Accepted version since the dependent was checked against it, even with the same
     interface. The same rule as the page's Lightweight re-review remedy; an imported result
-    has no versions, so it never lags."""
+    has no versions, so it never lags, and neither does a pin taken before the target was
+    Accepted: it was checked against no version (the node's own Acceptance pins one)."""
     target = get_node(store, pin.target_node_id)
-    if target is None or target.kind == ProofMapNodeKind.imported_result:
+    if target is None or target.kind == ProofMapNodeKind.imported_result or pin.pinned_version is None:
         return False
     accepted = get_accepted_version(store, pin.target_node_id)
     return accepted is not None and pin.pinned_version != accepted
@@ -2419,7 +2452,7 @@ def _pin_remedy(pin: DependencyPin | None, *, current: bool | None, accepted_ver
         return None
     if current is False:
         return "new-candidate-proof"
-    if accepted_version is not None and pin.pinned_version != accepted_version:
+    if pin.pinned_version is not None and accepted_version is not None and pin.pinned_version != accepted_version:
         return "lightweight-re-review"
     return None
 
@@ -2591,6 +2624,13 @@ def decide_acceptance(
             if resolved_decision == AcceptanceDecision.accept:
                 fingerprint = compute_interface_fingerprint(node.statement, node.assumptions, node.definitions)
                 set_candidate_proof_interface_fingerprint(store, current_proof.id, fingerprint, conn=conn)
+        if resolved_decision == AcceptanceDecision.accept:  # the pins are what it was made against (`_pins_accepted_against`)
+            stored = {pin.target_node_id: pin for pin in list_dependency_pins_for_node(store, node_id)}
+            for pinned in decided.payload.dependency_pins:
+                pin = stored.get(pinned.target_node_id)
+                if pin is not None and (pin.pinned_version, pin.pinned_fingerprint) != (pinned.pinned_version, pinned.pinned_fingerprint):
+                    upsert_dependency_pin(store, pin.model_copy(update={"pinned_version": pinned.pinned_version, "pinned_fingerprint": pinned.pinned_fingerprint,
+                                                                        "created_at": utc_now()}), conn=conn)
 
         _resolve_open_challenges(
             store,
@@ -2619,6 +2659,21 @@ def _pins_of(store: ProjectStore, node_id: str) -> list[PinnedDependency]:
         )
         for pin in list_dependency_pins_for_node(store, node_id)
     ]
+
+
+def _pins_accepted_against(store: ProjectStore, node_id: str) -> list[PinnedDependency]:
+    """The pins an Acceptance of `node_id` is made against: each as it stands, except one taken before its target
+    was Accepted, which the target's Acceptance since now answers with the version and interface accepted — while
+    that interface is still the one the node was checked against. A restated target's pin stays as it was, and reads
+    changed. A node is only decided once what it rests on is (NODE_BLOCKED), so this is what bottom-up Acceptance
+    clears (ADR-0021), and a later proof-only revision of a target lags the pin (ADR-0005)."""
+    pins = []
+    for pin in list_dependency_pins_for_node(store, node_id):
+        if pin.pinned_version is None and get_accepted_version(store, pin.target_node_id) is not None and dependency_pin_is_current(store, pin):
+            pins.append(_refreshed_pin(store, pin.target_node_id))
+        else:
+            pins.append(PinnedDependency(target_node_id=pin.target_node_id, pinned_version=pin.pinned_version, pinned_fingerprint=pin.pinned_fingerprint))
+    return pins
 
 
 def _refreshed_pin(store: ProjectStore, target_node_id: str) -> PinnedDependency:
@@ -2657,7 +2712,7 @@ def decision_binding(
         return {
             "candidate_proof_id": _current_proof_id(store, target_id),
             "interface_fingerprint": _interface_of(node),
-            "dependency_pins": _pins_of(store, target_id),
+            "dependency_pins": _pins_accepted_against(store, target_id) if kind == DecisionKind.acceptance else _pins_of(store, target_id),
             "resolves_challenges": _open_challenge_ids(store, target_id) if kind == DecisionKind.acceptance else [],
         }
     if kind == DecisionKind.reference_review:

@@ -1,0 +1,137 @@
+"""A pin taken while its dependency was not yet Accepted (ADR-0021: work runs ahead of review).
+
+A Pursue works a chain bottom-up before the researcher reviews any of it, so every snapshot pins dependencies that
+are only Provisional: what the dependent was checked against is the dependency's statement, never a version of its
+proof. Such a pin is current while that interface stands, and lags nothing; it changes only when the dependency is
+restated. The researcher then Accepts bottom-up (CONTEXT, Conditional: "cleared as the researcher Accepts
+bottom-up"), and each Acceptance pins the accepted versions it was made against, so a later proof-only revision of
+a dependency still asks for a Lightweight re-review (ADR-0005). run4 showed the opposite: every such edge read
+"interface changed", six nodes read dependency-stale, and a three-level chain could not be Accepted past its middle.
+"""
+
+from pathlib import Path
+
+import pytest
+
+from _proofs import submit_proof
+from _researcher import researcher
+
+from proof_cli.proof_map import (
+    create_node,
+    dependency_details,
+    dependency_pin_is_current,
+    dependency_pin_lags,
+    get_accepted_version,
+    get_acceptance_state,
+    get_blocked_reason,
+    get_dependency_pin,
+    get_integrity_state,
+    record_evidence_check,
+    restate_node,
+)
+from proof_cli.storage import ensure_project, upsert_dependency_pin
+
+
+def _passed_by_verifier(store, node_id: str, content: str | None = None):
+    proof = submit_proof(store, node_id, claimant_id="agent", scoping_rationale="scoped", content=content or f"proof of {node_id}")
+    record_evidence_check(store, proof.id, "passed", run_by="prover-1/verifier", notes="no objections")
+
+
+def _chain(tmp_path: Path):
+    """leaf → mid → top, each passed by the Verifier while nothing is Accepted: what a Pursue leaves."""
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="leaf", kind="claim", statement="A holds", created_by="dec-1")
+    create_node(store, node_id="mid", kind="claim", statement="B holds, given A", dependencies=["leaf"], created_by="dec-1")
+    create_node(store, node_id="top", kind="theorem", statement="T holds, given B", dependencies=["mid"], created_by="reader")
+    for node_id in ("leaf", "mid", "top"):
+        _passed_by_verifier(store, node_id)
+    return store
+
+
+def _accept(store, node_id: str) -> None:
+    researcher(store).decide_acceptance(node_id, "accept")
+
+
+def test_a_chain_worked_ahead_of_review_reads_no_changed_interface(tmp_path: Path):
+    store = _chain(tmp_path)
+
+    for node_id in ("mid", "top"):
+        [edge] = dependency_details(store, node_id)
+        assert (edge["current"], edge["remedy"]) == (True, None), (node_id, edge)
+    assert get_blocked_reason(store, "top") == "not-accepted"  # waiting for decisions, not stale
+    assert not dependency_pin_lags(store, get_dependency_pin(store, "mid", "leaf"))
+
+
+def test_the_researcher_accepts_it_bottom_up(tmp_path: Path):
+    store = _chain(tmp_path)
+
+    for node_id in ("leaf", "mid", "top"):
+        _accept(store, node_id)
+        assert get_acceptance_state(store, node_id) == "accepted"
+        assert get_integrity_state(store, node_id) == "current", node_id
+
+    assert [edge["current"] for node_id in ("mid", "top") for edge in dependency_details(store, node_id)] == [True, True]
+
+
+def test_an_acceptance_pins_the_accepted_versions_it_was_made_against(tmp_path: Path):
+    store = _chain(tmp_path)
+    _accept(store, "leaf")
+    _accept(store, "mid")
+
+    pin = get_dependency_pin(store, "mid", "leaf")
+    assert pin.pinned_version == get_accepted_version(store, "leaf") == 1
+
+    # a proof-only revision of leaf: mid was Accepted against v1, so it asks for a Lightweight re-review (ADR-0005)
+    submit_proof(store, "leaf", claimant_id="agent", scoping_rationale="scoped", content="proof of leaf, v2, shorter")
+    _accept(store, "leaf")
+    assert get_integrity_state(store, "mid") == "potentially-stale"
+    assert dependency_details(store, "mid")[0]["remedy"] == "lightweight-re-review"
+    researcher(store).revalidate_dependency("mid", "leaf")
+    assert get_integrity_state(store, "mid") == "current"
+
+
+def test_a_pin_taken_before_acceptance_still_sees_its_dependency_restated(tmp_path: Path):
+    store = _chain(tmp_path)
+
+    restate_node(store, "leaf", statement="A holds for every n", reason="the quantifier was missing")
+
+    [edge] = dependency_details(store, "mid")
+    assert (edge["current"], edge["remedy"]) == (False, "new-candidate-proof")
+    assert get_blocked_reason(store, "top") == "dependency-stale"
+
+
+def test_a_restated_dependency_is_not_pinned_away_by_the_dependents_acceptance(tmp_path: Path):
+    store = _chain(tmp_path)
+    restate_node(store, "leaf", statement="A holds for every n", reason="the quantifier was missing")
+    _passed_by_verifier(store, "leaf", content="proof of leaf for every n")
+    _accept(store, "leaf")
+
+    _accept(store, "mid")  # its snapshot was checked against the old statement
+
+    assert get_dependency_pin(store, "mid", "leaf").pinned_version is None
+    assert get_integrity_state(store, "mid") == "potentially-stale"
+
+
+@pytest.fixture
+def legacy(tmp_path: Path):
+    """The chain with the pins core wrote before this fix: neither a version nor a fingerprint."""
+    store = _chain(tmp_path)
+    for node_id, target in (("mid", "leaf"), ("top", "mid")):
+        pin = get_dependency_pin(store, node_id, target)
+        upsert_dependency_pin(store, pin.model_copy(update={"pinned_version": None, "pinned_fingerprint": None}))
+    return store
+
+
+def test_an_old_pin_reads_current_and_the_chain_is_accepted_bottom_up(legacy):
+    assert dependency_pin_is_current(legacy, get_dependency_pin(legacy, "mid", "leaf"))
+
+    for node_id in ("leaf", "mid", "top"):
+        _accept(legacy, node_id)
+        assert get_integrity_state(legacy, node_id) == "current", node_id
+    assert get_dependency_pin(legacy, "top", "mid").pinned_version == 1
+
+
+def test_an_old_pin_still_sees_its_dependency_restated_after_it_was_taken(legacy):
+    restate_node(legacy, "leaf", statement="A holds for every n", reason="the quantifier was missing")
+
+    assert not dependency_pin_is_current(legacy, get_dependency_pin(legacy, "mid", "leaf"))
