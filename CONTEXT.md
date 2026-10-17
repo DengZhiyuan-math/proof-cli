@@ -170,7 +170,7 @@ _Avoid_: importer, parser, formalizer
 
 **Pursue**:
 The researcher's one action that sets the agents working to the end: a Coordinator on a Theorem, preceded by a Decomposer turn when it has no Claims, or by a Reader turn when started on a project with no map (ADR-0021). A project Pursue's steps are recorded as `pursuit` events, read by `proof project progress`; one with no recorded end reads interrupted, and nothing resumes it (issue #201).
-Its budget is one total of turns and one time limit, fixed at Start and shared by its Reader, Decomposers and node runs: each turn takes one unit of the total as it starts, so parallel runs share it turn by turn and none is starved by another's cap; a node's budget is a ceiling on its own turns, never an allocation; a turn whose backend never started gives its unit back and is recorded as a failed launch (proof-agents#19).
+A Pursue has one total turn budget and one time limit, fixed at Start and shared by its Reader, Decomposers and node runs. Each node turn reserves one unit as it starts, so parallel runs share the total turn by turn; a node's own budget is a ceiling on its turns, never an allocation. The Reader runs alone before the node runs, and its actual turns are counted when that phase ends. A turn whose backend started consumes its unit even if Stop follows. A failed launch returns its reserved unit and is recorded separately. Cancellation before backend startup returns the unit without counting a turn or a failed launch (proof-agents#19).
 On every Start, Project Pursue checks active local coverage before node runs. Parked, Rejected and detached split Claims, and nodes a dependency removal dropped from every route (nothing rests on them any more), with what only they rest on, are historical routes, not coverage blockers; a Done ending names the dropped ones and the removal that dropped each. An agent's local node outside every chosen Theorem's subtree ends the pursuit as Stuck, naming it, on every Start until someone wires, parks or deletes it. The researcher's own standalone work does not block: it is left outside this pursuit, and a Done ending names it. Done means the selected Theorem Coordinators ended Done, with no uncovered agent-made local nodes; another ending names the result that did not finish. This checks coverage and progress, not Human Review, and does not gate map edits on a Reader's notes.
 _Avoid_: autopilot, auto mode
 
@@ -226,7 +226,7 @@ An unaccepted node another node may rest on for work: a Theorem, Lemma or Claim 
 _Avoid_: verified, accepted, trusted
 
 **Conditional**:
-A node whose proof rests, directly or through others, on a Provisional node: it stands only if they do. Derived, and cleared as the researcher Accepts bottom-up (ADR-0021). Its edges onto Provisional nodes pin no version, only the statement interface it was checked against: they lag nothing and read changed only if that node is restated, and its own Acceptance pins the accepted versions it was made against (ADR-0005).
+A node whose proof rests, directly or through others, on a Provisional node: it stands only if they do. Derived, and cleared as the researcher Accepts bottom-up (ADR-0021). Its edges onto Provisional nodes pin no version, only the statement interface it was checked against, with the text of the Definitions that node names: they lag nothing and read changed only if that node is restated or one of those Definitions is edited, and its own Acceptance pins the accepted versions it was made against (ADR-0005).
 _Avoid_: tentative, unproven
 
 **Unfixed**:
