@@ -225,7 +225,7 @@ An unaccepted node another node may rest on for work: a Theorem, Lemma or Claim 
 _Avoid_: verified, accepted, trusted
 
 **Conditional**:
-A node whose proof rests, directly or through others, on a Provisional node: it stands only if they do. Derived, and cleared as the researcher Accepts bottom-up (ADR-0021).
+A node whose proof rests, directly or through others, on a Provisional node: it stands only if they do. Derived, and cleared as the researcher Accepts bottom-up (ADR-0021). Its edges onto Provisional nodes pin no version, only the statement interface it was checked against: they lag nothing and read changed only if that node is restated, and its own Acceptance pins the accepted versions it was made against (ADR-0005).
 _Avoid_: tentative, unproven
 
 **Unfixed**:

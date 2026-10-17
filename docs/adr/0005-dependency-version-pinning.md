@@ -1,6 +1,6 @@
 # Pin dependency edges to accepted versions; gate revalidation on interface, not text
 
-**Status**: accepted. Rule 1 is amended by ADR-0012: a `ReferenceRecord` is a citation, trusted only through its Imported result's Reference review.
+**Status**: accepted. Rule 1 is amended by ADR-0012: a `ReferenceRecord` is a citation, trusted only through its Imported result's Reference review. Rule 2 is refined for work ahead of review (ADR-0021, 2026-10-17): an edge checked while its target is only Provisional pins no version, only the interface it was checked against; that pin lags nothing and reads changed only if the target is restated, and the dependent's own Acceptance pins the accepted version it was made against.
 
 ADR-0004 established that `potentially-stale` propagates through the dependency graph whenever an ancestor's accepted version moves on, but left open how a dependency edge knows which version it was checked against, and what a downstream node must do once it has. Answering that (issue #12) fixes four rules.
 
