@@ -16,7 +16,7 @@ provides:
   - bounded diagnostic payloads stored in recovery snapshots
 affects:
   - phase 08 completion status
-  - phase 09 readiness for radial-system validation
+  - phase 09 readiness for research-section validation
 
 # Tech tracking
 tech-stack:

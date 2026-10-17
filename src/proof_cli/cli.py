@@ -775,7 +775,7 @@ def _emit_definition(store, definition, json_output: bool, *, command: str) -> N
 def definition_add(
     definition_id: str,
     text: str,
-    term: str = typer.Option(..., "--term", help="The name the page and the node show it under, e.g. \"Stochastic release unit\""),
+    term: str = typer.Option(..., "--term", help="The name the page and the node show it under, e.g. \"Simple graph\""),
     root: str = ROOT_OPTION,
     created_by: str = typer.Option("", "--created-by", help=CREATED_BY_HELP),
     json_output: bool = typer.Option(False, "--json"),

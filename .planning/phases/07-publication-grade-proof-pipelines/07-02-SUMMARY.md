@@ -53,7 +53,7 @@ completed: 2026-04-28
 - **Files modified:** 0
 
 ## Accomplishments
-- Validated the higher-rank radial system publication slice with a project-original claim, an imported result, a verification artifact, and an internal-only artifact.
+- Validated the research-section publication slice with a project-original claim, an imported result, a verification artifact, and an internal-only artifact.
 - Confirmed paper, supplement, and bundle exports all succeed on the same slice.
 - Confirmed internal-only material stays suppressed in paper-facing output.
 - Confirmed bundle round-tripping preserves provenance and release history.

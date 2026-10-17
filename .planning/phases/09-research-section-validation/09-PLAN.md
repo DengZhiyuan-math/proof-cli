@@ -1,5 +1,5 @@
 ---
-phase: 09-radial-system-validation
+phase: 09-research-section-validation
 plan: 01
 type: execute
 wave: 1
@@ -12,7 +12,7 @@ depends_on:
     provides: JSON-first retrieval, project diagnostics, and bounded recovery snapshots
 files_modified:
   - tests/test_phase9_validation.py
-  - .planning/phases/09-radial-system-validation/09-SUMMARY.md
+  - .planning/phases/09-research-section-validation/09-SUMMARY.md
 autonomous: true
 requirements:
   - PVAL-01
@@ -21,19 +21,19 @@ must_haves:
   truths:
     - the validation slice must be a smaller theorem cluster, not the full section
     - the cluster must be partitioned by proof logic and complexity, not by article writing order
-    - the validation must preserve the full structural picture: main theorem, Jacquet compression gap, scalar-to-vector lifting problem, completed lemmas and propositions, failed routes, and the explicit structural gap
+    - the validation must preserve the full structural picture: main theorem, central gap, secondary open problem, completed lemmas and propositions, failed routes, and the explicit structural gap
     - the workflow must demonstrate practical value by making it easier to continue the proof, reorganize the reasoning, or discover a small gap
     - validation artifacts must stay compatible with the existing JSON-first retrieval, analysis, snapshot, and exchange surfaces
   artifacts:
     - tests/test_phase9_validation.py
-    - .planning/phases/09-radial-system-validation/09-SUMMARY.md
+    - .planning/phases/09-research-section-validation/09-SUMMARY.md
   key_links:
     - keep the validation fixture close to the existing retrieval, diagnostic, snapshot, and exchange helpers
     - keep the summary bounded so it records the proof-work benefit without turning into a new proof repository
 ---
 
 <objective>
-Validate the radial-system workflow on a smaller theorem cluster that represents the proof logic of the unfinished section more faithfully than article order would.
+Validate the research-section workflow on a smaller theorem cluster that represents the proof logic of the unfinished section more faithfully than article order would.
 
 Purpose: prove that the current retrieval, diagnostic, snapshot, and exchange stack can help organize a real proof cluster, expose a small missing bridge or gap, and make continued proof work easier.
 
@@ -72,7 +72,7 @@ Execution split:
 <task type="auto">
   <name>Build the smaller theorem-cluster validation fixture</name>
   <files>tests/test_phase9_validation.py, tests/test_retrieval.py, tests/test_snapshot.py, tests/test_exchange.py, tests/test_cli.py</files>
-  <read_first>/Users/zhdeng/Proof CLI /.planning/phases/09-radial-system-validation/09-CONTEXT.md</read_first>
+  <read_first>/Users/zhdeng/Proof CLI /.planning/phases/09-research-section-validation/09-CONTEXT.md</read_first>
   <read_first>/Users/zhdeng/Proof CLI /src/proof_cli/retrieval.py</read_first>
   <read_first>/Users/zhdeng/Proof CLI /src/proof_cli/analysis.py</read_first>
   <read_first>/Users/zhdeng/Proof CLI /src/proof_cli/proof_state.py</read_first>
@@ -84,24 +84,24 @@ Execution split:
   <read_first>/Users/zhdeng/Proof CLI /tests/test_snapshot.py</read_first>
   <read_first>/Users/zhdeng/Proof CLI /tests/test_exchange.py</read_first>
   <read_first>/Users/zhdeng/Proof CLI /tests/test_cli.py</read_first>
-  <action>Create a dedicated regression test file that seeds a smaller theorem cluster with the exact roles `thm_radial_main`, `thm_jacquet_gap`, `thm_scalar_lift`, `lem_radial_bridge`, `lem_vector_support`, `obl_jacquet_gap`, `blk_scalar_lift`, a failed route note, and a few memory artifacts. Assert that `retrieve_candidates` ranks `thm_radial_main` first, `cmd_proof_retrieve` JSON exposes the explicit neighborhood entries, `cmd_project_analyze` reports a blocker or obligation bottleneck with cluster-aware next steps, and `create_snapshot` / `restore_snapshot` preserve `latest_diagnostic_report` and the handoff context.</action>
+  <action>Create a dedicated regression test file that seeds a smaller theorem cluster with the exact roles `thm_alpha_main`, `thm_beta_gap`, `thm_base_extension`, `lem_alpha_bridge`, `lem_general_support`, `obl_beta_gap`, `blk_base_extension`, a failed route note, and a few memory artifacts. Assert that `retrieve_candidates` ranks `thm_alpha_main` first, `cmd_proof_retrieve` JSON exposes the explicit neighborhood entries, `cmd_project_analyze` reports a blocker or obligation bottleneck with cluster-aware next steps, and `create_snapshot` / `restore_snapshot` preserve `latest_diagnostic_report` and the handoff context.</action>
   <verify>pytest tests/test_phase9_validation.py tests/test_retrieval.py tests/test_snapshot.py tests/test_cli.py -q</verify>
   <acceptance_criteria>
     - `tests/test_phase9_validation.py` exists
-    - the file contains the ids `thm_radial_main`, `thm_jacquet_gap`, `thm_scalar_lift`, `lem_radial_bridge`, `lem_vector_support`, `obl_jacquet_gap`, and `blk_scalar_lift`
-    - `retrieve_candidates` asserts `thm_radial_main` is first for the validation slice
+    - the file contains the ids `thm_alpha_main`, `thm_beta_gap`, `thm_base_extension`, `lem_alpha_bridge`, `lem_general_support`, `obl_beta_gap`, and `blk_base_extension`
+    - `retrieve_candidates` asserts `thm_alpha_main` is first for the validation slice
     - `cmd_proof_retrieve` JSON checks the explicit neighborhood and the current theorem
     - `cmd_project_analyze` JSON checks the bottleneck and next-step output
     - snapshot restore checks preserve `latest_diagnostic_report`
   </acceptance_criteria>
-  <done>Radial-system validation fixture and regression coverage are in place</done>
+  <done>Research-section validation fixture and regression coverage are in place</done>
 </task>
 
 <task type="auto">
   <name>Run the end-to-end workflow and record the validation result</name>
-  <files>.planning/phases/09-radial-system-validation/09-SUMMARY.md, tests/test_phase9_validation.py</files>
-  <read_first>/Users/zhdeng/Proof CLI /.planning/phases/09-radial-system-validation/09-VALIDATION.md</read_first>
-  <read_first>/Users/zhdeng/Proof CLI /.planning/phases/09-radial-system-validation/09-CONTEXT.md</read_first>
+  <files>.planning/phases/09-research-section-validation/09-SUMMARY.md, tests/test_phase9_validation.py</files>
+  <read_first>/Users/zhdeng/Proof CLI /.planning/phases/09-research-section-validation/09-VALIDATION.md</read_first>
+  <read_first>/Users/zhdeng/Proof CLI /.planning/phases/09-research-section-validation/09-CONTEXT.md</read_first>
   <read_first>/Users/zhdeng/Proof CLI /src/proof_cli/retrieval.py</read_first>
   <read_first>/Users/zhdeng/Proof CLI /src/proof_cli/analysis.py</read_first>
   <read_first>/Users/zhdeng/Proof CLI /src/proof_cli/proof_state.py</read_first>
@@ -112,7 +112,7 @@ Execution split:
   <read_first>/Users/zhdeng/Proof CLI /tests/test_phase9_validation.py</read_first>
   <read_first>/Users/zhdeng/Proof CLI /tests/test_exchange.py</read_first>
   <read_first>/Users/zhdeng/Proof CLI /tests/test_cli.py</read_first>
-  <action>Exercise the same validation cluster through `cmd_proof_retrieve`, `cmd_project_analyze`, snapshot creation, snapshot restore, and exchange bundle round-tripping, then write `.planning/phases/09-radial-system-validation/09-SUMMARY.md` with the smaller theorem-cluster boundary, the proof-logic partitioning, the observed workflow benefit, and any small gap discovered. Keep the summary bounded and explicit about whether the workflow made the proof easier to continue, clarified reasoning, or exposed a small missing bridge.</action>
+  <action>Exercise the same validation cluster through `cmd_proof_retrieve`, `cmd_project_analyze`, snapshot creation, snapshot restore, and exchange bundle round-tripping, then write `.planning/phases/09-research-section-validation/09-SUMMARY.md` with the smaller theorem-cluster boundary, the proof-logic partitioning, the observed workflow benefit, and any small gap discovered. Keep the summary bounded and explicit about whether the workflow made the proof easier to continue, clarified reasoning, or exposed a small missing bridge.</action>
   <verify>pytest tests/test_phase9_validation.py tests/test_snapshot.py tests/test_exchange.py tests/test_cli.py -q</verify>
   <acceptance_criteria>
     - `09-SUMMARY.md` exists
@@ -138,7 +138,7 @@ Before declaring this plan complete:
 
 <success_criteria>
 
-- The unfinished higher-rank radial-system work can be represented with the main theorem, the Jacquet compression gap, the scalar-to-vector lifting problem, completed lemmas and propositions, failed routes, and an explicit structural gap.
+- The unfinished research work can be represented with the main theorem, its central gap, a secondary open problem, completed lemmas and propositions, failed routes, and an explicit structural gap.
 - The validation slice is smaller than the full section and is organized by proof logic and complexity rather than article order.
 - The workflow makes it easier to continue the proof, reorganize the reasoning, or discover a small gap.
 - Retrieval, diagnostics, snapshots, and exchange all preserve the validation cluster’s structure.

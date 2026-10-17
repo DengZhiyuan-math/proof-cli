@@ -243,7 +243,7 @@ def git_identity(root: Path) -> str:
 def in_git_repo(root: Path) -> bool:
     """Whether the project is its own git repository: `root` is the work tree's top level.
 
-    A project inside some other repository (a trial under a checkout, say) is
+    A project inside some other repository (a scratch project under a checkout, say) is
     treated as outside git, so its decisions never land in that repository's history (#185).
     """
     try:

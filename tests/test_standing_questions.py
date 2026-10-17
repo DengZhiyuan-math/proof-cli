@@ -32,7 +32,7 @@ from proof_cli.storage import ensure_project
 runner = CliRunner()
 
 
-def _ask(store, node_id: str = "thm", text: str = "read H as the sup over the cusp; the alternative: over a compact set"):
+def _ask(store, node_id: str = "thm", text: str = "read H as the best constant; the alternative: any constant that works"):
     return record_progress(store, node_id, role="prover", by="prover-1", question=text)
 
 
@@ -74,9 +74,9 @@ def test_an_answer_that_differs_is_a_redirect(tmp_path: Path):
     create_node(store, node_id="thm", kind="theorem", statement="T")
     asked = _ask(store)
 
-    answered = answer_question(store, "thm", asked["id"], answer="over a compact set: the cusp is handled in Lemma 3", by="human")
+    answered = answer_question(store, "thm", asked["id"], answer="any constant that works: the best one is handled in Lemma 3", by="human")
 
-    assert answered["redirect"] == "over a compact set: the cusp is handled in Lemma 3"
+    assert answered["redirect"] == "any constant that works: the best one is handled in Lemma 3"
     [question] = questions(store, "thm")
     assert question["answer"]["by"] == "human" and question["answer"]["keep"] is False
 
@@ -93,9 +93,9 @@ def test_only_the_researcher_answers_a_question(tmp_path: Path):
 
 
 @pytest.mark.parametrize("same", [
-    "read H as the sup over the cusp",
-    "  Read H as the sup over the cusp  ",
-    "read H as the sup over the cusp; the alternative: over a compact set",
+    "read H as the best constant",
+    "  Read H as the best constant  ",
+    "read H as the best constant; the alternative: any constant that works",
 ])
 def test_an_answer_that_repeats_the_choice_is_no_redirect(tmp_path: Path, same):
     store = ensure_project(tmp_path)

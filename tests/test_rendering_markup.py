@@ -1,4 +1,4 @@
-"""The renderers print a statement as it is: square brackets are mathematics, not Rich markup (issue #132's trial fixtures)."""
+"""The renderers print a statement as it is: square brackets are mathematics, not Rich markup (issue #132)."""
 
 from proof_cli.domain import ProofMapNode, ProofMapNodeKind
 from proof_cli.rendering import render_frontier, render_proof_map_node, render_proof_map_node_list

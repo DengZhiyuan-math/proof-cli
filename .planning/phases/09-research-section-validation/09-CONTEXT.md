@@ -1,4 +1,4 @@
-# Phase 9: Radial System Validation - Context
+# Phase 9: Research Section Validation - Context
 
 **Gathered:** 2026-04-29
 **Status:** Ready for planning
@@ -6,11 +6,11 @@
 <domain>
 ## Phase Boundary
 
-This phase validates the new memory, retrieval, snapshot, and publication workflow on a real unfinished proof cluster from the higher-rank radial-system area.
+This phase validates the new memory, retrieval, snapshot, and publication workflow on a real unfinished proof cluster from a research area.
 
 The validation slice should be smaller than the full section: it should be organized around a theorem cluster that reflects proof logic and complexity, not necessarily the article's writing order. The goal is to prove that the workflow helps organize the proof, expose small gaps, and make continued progress easier.
 
-This phase is not about completing the entire radial-system section, inventing a new graph model, or replacing mathematical judgment. It is about proving that the existing local-first proof OS can meaningfully support a hard section-level proof task.
+This phase is not about completing the entire research section, inventing a new graph model, or replacing mathematical judgment. It is about proving that the existing local-first proof OS can meaningfully support a hard section-level proof task.
 
 </domain>
 
@@ -23,7 +23,7 @@ This phase is not about completing the entire radial-system section, inventing a
 - **D-03:** The slice should still be representative of the real section, so it can expose genuine proof-work behavior rather than a toy example.
 
 ### Structural depth
-- **D-04:** Represent the slice with full structure: the main theorem, the Jacquet compression gap, the scalar-to-vector lifting problem, completed lemmas and propositions, failed routes, and the explicit structural gap.
+- **D-04:** Represent the slice with full structure: the main theorem, its central gap, a secondary open problem, completed lemmas and propositions, failed routes, and the explicit structural gap.
 - **D-05:** Include intermediate methods, insights, dependencies, and any other explicit links needed to make the cluster navigable and auditable.
 - **D-06:** Do not collapse the cluster into a minimal summary-only view; the point is to preserve enough structure to reason about the proof.
 
@@ -33,7 +33,7 @@ This phase is not about completing the entire radial-system section, inventing a
 - **D-09:** The validation should support both project-level understanding and section-level progress, so it can be reused for ongoing proof work after the phase ends.
 
 ### the agent's Discretion
-- Exact choice of theorem cluster inside the radial-system section.
+- Exact choice of theorem cluster inside the research section.
 - Exact granularity of explicit nodes and links beyond the required core structure.
 - Whether the phase validation artifacts are captured as a reusable section bundle, a working snapshot, or both.
 
@@ -107,11 +107,11 @@ This phase is not about completing the entire radial-system section, inventing a
 
 - Building a new graph storage subsystem would be a separate capability if the current explicit links are not enough.
 - Automatic graph inference from prose remains out of scope; the graph source of truth must stay explicit and auditable.
-- Replacing the higher-rank radial-system validation with a fully different mathematical section would be a scope change for a later phase.
+- Replacing the research-section validation with a fully different mathematical section would be a scope change for a later phase.
 
 </deferred>
 
 ---
 
-*Phase: 09-radial-system-validation*
+*Phase: 09-research-section-validation*
 *Context gathered: 2026-04-29*
