@@ -105,7 +105,7 @@ ERROR_CODES: dict[str, str] = {
     "TRUST_RULE_RATIONALE_REQUIRED": "a trust-rule decision needs a rationale",
     "TRUST_RULES_FILE_BLOCKED": "a node folder from before ADR-0014 stands where proofs/trust-rules.jsonl goes; no rule can be recorded",
     # -- Definitions (ADR-0020) -----------------------------------------------------------------
-    "DEFINITION_NOT_FOUND": "no definition has this id; add it with `proof definition add` first",
+    "DEFINITION_NOT_FOUND": "no definition has this id: a lookup (show, edit, remove) names the ids there are; a statement naming it needs `proof definition add` first",
     "DEFINITION_ALREADY_EXISTS": "a definition with this id exists; choose another id",
     "DEFINITION_IN_USE": "a node names this definition, so it can't be removed; edit it while it is unfixed, or add a corrected one under a new id",
     "DEFINITION_FIXED": "a Review decision relied on this definition (details.fixed_by names it): add a corrected one under a new id",

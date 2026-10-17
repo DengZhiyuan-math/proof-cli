@@ -51,9 +51,19 @@ def _clean(value: str, field: str) -> str:
 
 
 def require_definition(store: ProjectStore, definition_id: str, *, conn=None) -> Definition:
+    """The definition under this id, for a caller looking it up (show, edit, remove). Under an id there is none of
+    (DEFINITION_NOT_FOUND) it names the ids there are, oldest first, and where to read them: the run4 Verifier, reading
+    `proof definition list`'s table cut to its first row, guessed an id and was told to add a definition. A statement
+    naming a missing definition is told to add it first (`proof_map.create_node`, `restate_node`)."""
     definition = get_definition(store, definition_id, conn=conn)
     if definition is None:
-        raise ProofMapError("DEFINITION_NOT_FOUND", f"no definition is named {definition_id}; add it with `proof definition add`")
+        ids = [known.id for known in list_definitions(store, conn=conn)]
+        raise ProofMapError(
+            "DEFINITION_NOT_FOUND",
+            f"no definition is named {definition_id}; the project's definitions are {', '.join(ids)}"
+            " (`proof definition list --json` gives each with its term and text)" if ids
+            else f"no definition is named {definition_id}: the project has no definitions",
+        )
     return definition
 
 
