@@ -3,7 +3,8 @@
 A Proof agent's run spent turns on `ls`, `cat`, `grep error build/*.log` and reading `--help`: discovering the folder and
 checking what needs no judgment. These checks are that work, done once, deterministically and read-only — does the
 proof build and build cleanly, is the summary there with its four headings, does proof.tex's theorem environment state
-what the node states, do its `\\input`s (and theirs) stay in the folder, is each dependency at least mentioned. The run
+what the node states and does the document give the definitions it names as the map has them, do its `\\input`s (and
+theirs) stay in the folder, is each dependency at least mentioned. The run
 gates the Verifier on them (an error sends the work back to the role that owns the files; the Verifier is briefed that
 they passed and reads only the mathematics), and `proof node check` shows them to anyone. Nothing here is a
 verification: whether a step holds is the Verifier's and the researcher's. A finding is a notice (`CHECK_*` in
@@ -17,7 +18,7 @@ from pathlib import Path
 
 from .domain import ProofMapNodeKind, is_computation
 from .key_ideas import FIELDS, KEY_IDEAS_FILE, parse
-from .storage import ProjectStore
+from .storage import ProjectStore, get_definition
 from .vault import build_is_current, build_pdf_path, latex_text, node_folder, preamble_path, run_script_path, working_entry_path
 
 ERROR, NOTE = "error", "note"
@@ -51,7 +52,7 @@ def _normal(text: str) -> str:
 
 
 def _comparable(text: str) -> str:
-    """`text` as the statement check compares it: whitespace runs as one space, and each display as `\\[…\\]`."""
+    """`text` as the statement and definition checks compare it: whitespace runs as one space, and each display as `\\[…\\]`."""
     def display(match: re.Match) -> str:
         inner = next(group for group in (match.group(1), match.group(2), match.group(4)) if group is not None)
         return " \\[" + _normal(_LABEL.sub("", inner)) + "\\] "
@@ -160,6 +161,17 @@ def check_node(store: ProjectStore, node_id: str) -> list[dict]:
             elif not any(_comparable(latex_text(node.statement)) in body for body in stated):
                 findings.append(_finding("CHECK_STATEMENT_MISMATCH", ERROR,
                                          "the node's statement is not what proof.tex's theorem environment states; it must state exactly what the map has", proof.name))
+            # the Definitions the statement is written in (ADR-0020), as the scaffold wrote them: the map's text, like the
+            # statement, wherever proof.tex or a file it inputs gives it; the heading (the term's rendering) is not compared.
+            # A restated definition (ADR-0021 point 6) leaves the document behind, and this is where that shows
+            given = [_comparable(text) for text in sources.values()]
+            named = [definition for definition in (get_definition(store, definition_id) for definition_id in node.definitions) if definition is not None]
+            absent = [definition.id for definition in named if not any(_comparable(latex_text(definition.text)) in text for text in given)]
+            if absent:
+                many = len(absent) > 1
+                findings.append(_finding("CHECK_DEFINITIONS_MISMATCH", ERROR,
+                                         f"proof.tex does not give the definition{'s' if many else ''} {', '.join(absent)} as the map has {'them' if many else 'it'}: "
+                                         "its Definitions section carries each definition the node names, word for word (`proof definition show <id>`)", proof.name))
             pdf = build_pdf_path(root, node.id)
             log = pdf.with_suffix(".log")
             if not pdf.is_file():
@@ -204,7 +216,7 @@ def errors_of(findings: list[dict]) -> list[dict]:
 def summary(findings: list[dict]) -> str:
     """One line for a work log or a briefing: the codes and messages, errors first."""
     if not findings:
-        return "mechanical checks passed: the proof builds cleanly, the summary has its four headings, the statement is the node's"
+        return "mechanical checks passed: the proof builds cleanly, the summary has its four headings, the statement and definitions are the node's"
     return "; ".join(f"{f['code']}: {f['message']}" for f in findings)
 
 
