@@ -135,3 +135,40 @@ def test_an_old_pin_still_sees_its_dependency_restated_after_it_was_taken(legacy
     restate_node(legacy, "leaf", statement="A holds for every n", reason="the quantifier was missing")
 
     assert not dependency_pin_is_current(legacy, get_dependency_pin(legacy, "mid", "leaf"))
+
+
+def test_a_definition_edited_under_a_pinned_dependency_is_not_pinned_away(tmp_path: Path):
+    """top's snapshot was checked against leaf while leaf's Definition said one thing; it says another when leaf is
+    Accepted. Accepting the old top must leave its pin reading changed, as a restatement would (independent audit)."""
+    from proof_cli.definitions import add_definition, edit_definition
+
+    store = ensure_project(tmp_path)
+    add_definition(store, "d", term="D", text="d is 1", created_by="reader")
+    create_node(store, node_id="leaf", kind="claim", statement="D holds", definitions=["d"], created_by="reader")
+    create_node(store, node_id="top", kind="theorem", statement="T holds, given D", dependencies=["leaf"], created_by="reader")
+    for node_id in ("leaf", "top"):
+        _passed_by_verifier(store, node_id)
+
+    edit_definition(store, "d", text="d is 2", edited_by="reader", reason="the value was wrong")
+    [edge] = dependency_details(store, "top")
+    assert (edge["current"], edge["remedy"]) == (False, "new-candidate-proof")
+
+    _passed_by_verifier(store, "leaf", content="proof of leaf under the corrected d")
+    _accept(store, "leaf")
+    _accept(store, "top")
+
+    assert get_dependency_pin(store, "top", "leaf").pinned_version is None
+    assert get_integrity_state(store, "top") == "potentially-stale"
+
+
+def test_an_old_pin_keeps_its_time_once_an_acceptance_signs_it(legacy):
+    """The pin an Acceptance signs is read back from the decision; an old pin's time must still be its snapshot's,
+    or a restatement after the snapshot reads as one before it (independent audit)."""
+    restate_node(legacy, "leaf", statement="A holds for every n", reason="the quantifier was missing")
+    _passed_by_verifier(legacy, "leaf", content="proof of leaf for every n")
+    _accept(legacy, "leaf")
+
+    _accept(legacy, "mid")  # its snapshot was checked against the old statement
+
+    assert not dependency_pin_is_current(legacy, get_dependency_pin(legacy, "mid", "leaf"))
+    assert get_integrity_state(legacy, "mid") == "potentially-stale"
