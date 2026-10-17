@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import stat
 import tomllib
@@ -20,8 +21,10 @@ def vault_dir(root: Path) -> Path:
 
 # -- ADR-0010: a node's proof is a standalone LaTeX document ----------------------------
 
+# A statement and a definition are Markdown whose maths the map's pages typeset with KaTeX, and the scaffold writes them
+# into proof.tex: the preamble loads what that maths uses beyond amsmath and amssymb (`\mathscr`: mathrsfs).
 PREAMBLE = r"""% Shared by every node's proof.tex (\input{../preamble}): packages, macros, theorem environments.
-\usepackage{amsmath,amssymb,amsthm}
+\usepackage{amsmath,amssymb,amsthm,mathrsfs}
 \newtheorem{theorem}{Theorem}
 \newtheorem{lemma}[theorem]{Lemma}
 \newtheorem{claim}[theorem]{Claim}
@@ -544,9 +547,51 @@ def build_is_current(root: Path, node_id: str) -> bool:
     return all(source.stat().st_mtime <= built for source in inputs.values() if source.exists())
 
 
+# -- the scaffold's text: a node's statement and definitions, written into its proof.tex ---------------------
+
+# maths as the map's pages find it (proof-web's mathtext.js): $$…$$ first, then $…$ on one line; `\$` is a dollar sign
+_MATH = re.compile(r"(?<!\\)\$\$(.+?)(?<!\\)\$\$|(?<!\\)\$((?:\\\$|[^$\n])+?)\$", re.S)
+# what LaTeX reads as markup in text, each as the character it is
+_TEXT_SPECIALS = {"\\": r"\textbackslash{}", "{": r"\{", "}": r"\}", "$": r"\$", "&": r"\&", "#": r"\#", "%": r"\%",
+                  "_": r"\_", "^": r"\textasciicircum{}", "~": r"\textasciitilde{}"}
+# what the map's maths may use beyond amsmath and amssymb, by the package LaTeX needs for it: PREAMBLE loads each
+_PACKAGES_USED = {"mathrsfs": re.compile(r"\\mathscr(?![A-Za-z])")}
+_LOADS = re.compile(r"\\(?:usepackage|RequirePackage)\s*(?:\[[^\]]*\])?\s*\{([^}]*)\}")
+
+
+def heading_text(term: str) -> str:
+    """A definition's term as the LaTeX of its heading. A term is a name, shown as the map shows it: its maths as written
+    (a display made inline: a heading holds none), and every other character LaTeX reads as markup escaped. A bare `_`
+    ("Index set I_k") or `{` in a `\\paragraph` heading would stop the untouched document's build."""
+    out, last = [], 0
+    for match in _MATH.finditer(term):
+        out.append(_escaped(term[last:match.start()]))
+        out.append(f"${match.group(1).strip()}$" if match.group(1) is not None else match.group(0))
+        last = match.end()
+    out.append(_escaped(term[last:]))
+    return "".join(out)
+
+
+def _escaped(text: str) -> str:
+    return "".join(_TEXT_SPECIALS.get(char, char) for char in text)
+
+
+def _packages_lacking(preamble: Path, texts: list[str]) -> list[str]:
+    """The packages the node's statement and definitions use that the project's preamble does not load. The preamble is the
+    researcher's, and every snapshot freezes it: an existing one is never rewritten, which would change every node's inputs
+    at once (and stale every verdict on them), so a new node's own document loads what it lacks."""
+    try:
+        source = re.sub(r"(?<!\\)%.*", "", preamble.read_text(encoding="utf-8", errors="replace"))
+    except OSError:
+        return []
+    loaded = {name.strip() for match in _LOADS.finditer(source) for name in match.group(1).split(",")}
+    return [package for package, used in _PACKAGES_USED.items() if package not in loaded and any(used.search(text) for text in texts)]
+
+
 def write_working_proof(root: Path, *, node_id: str, kind: str, statement: str, definitions: list[tuple[str, str]] = ()) -> None:
     """Create the project preamble and a node's working `proof.tex`, if missing. Never overwrites. A statement written in
-    Definitions (ADR-0020) is preceded by them, each `(term, text)`, so the document says what its symbols are."""
+    Definitions (ADR-0020) is preceded by them, each `(term, text)`, so the document says what its symbols are. A term
+    goes in as `heading_text` writes it, so the untouched document builds."""
     preamble = preamble_path(root)
     if not preamble.exists():
         preamble.parent.mkdir(parents=True, exist_ok=True)
@@ -557,11 +602,13 @@ def write_working_proof(root: Path, *, node_id: str, kind: str, statement: str, 
         return
     path.parent.mkdir(parents=True, exist_ok=True)
     environment = _ENVIRONMENTS.get(kind, "claim")
+    lacking = _packages_lacking(preamble, [statement, *(part for pair in definitions for part in pair)])
     path.write_text(
         "\\documentclass{amsart}\n"
         "\\input{../preamble}\n"
-        "\\begin{document}\n\n"
-        + ("\\section*{Definitions}\n" + "".join(f"\\paragraph{{{term}.}} {text}\n\n" for term, text in definitions) if definitions else "")
+        + "".join(f"\\usepackage{{{package}}} % the statement or a definition uses it, and ../preamble.tex does not load it\n" for package in lacking)
+        + "\\begin{document}\n\n"
+        + ("\\section*{Definitions}\n" + "".join(f"\\paragraph{{{heading_text(term)}.}} {text}\n\n" for term, text in definitions) if definitions else "")
         + f"% Proof map node {node_id} ({kind}).\n"
         f"\\begin{{{environment}}}\n{statement}\n\\end{{{environment}}}\n\n"
         "\\begin{proof}\n% Write the proof here.\n\\end{proof}\n\n"

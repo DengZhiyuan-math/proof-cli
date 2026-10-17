@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -51,6 +52,43 @@ def test_a_local_node_gets_a_standalone_latex_working_file(tmp_path: Path):
     assert (store.root / "proofs" / "preamble.tex").is_file()
     # prism-local takes the only top-level .tex as the folder's main file
     assert [p.name for p in (store.root / "proofs" / "clm_1").glob("*.tex")] == ["proof.tex"]
+
+
+def test_the_shared_preamble_loads_what_statements_and_definitions_use(tmp_path: Path):
+    """Statements and definitions are Markdown whose maths the map's pages typeset with KaTeX, which has `\\mathscr`; a
+    preamble loading only amsmath, amssymb and amsthm stops an untouched scaffold using it at "Undefined control
+    sequence", and a Typesetter, who cannot edit ../preamble.tex, would have to add `\\usepackage{mathrsfs}` to proof.tex."""
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="clm_1", kind="claim", statement=r"$\mathscr A$ is closed under $X_k$.")
+    preamble = (store.root / "proofs" / "preamble.tex").read_text()
+    assert re.search(r"\\usepackage\{[^}]*\bmathrsfs\b[^}]*\}", preamble)
+    assert "\\usepackage" not in _working(store, "clm_1").read_text()  # the shared preamble has it: the node's document adds nothing
+
+
+def test_an_existing_preamble_is_never_rewritten_and_a_new_node_loads_what_it_lacks(tmp_path: Path):
+    """A project's preamble is the researcher's to edit, and every snapshot freezes it: rewriting it would change every
+    node's inputs (and stale every verdict) at once. It is left as it is; a new node whose statement or definitions use
+    what it does not load loads that itself, in its own document's preamble."""
+    from proof_cli import definitions as D
+
+    store = ensure_project(tmp_path)
+    preamble = store.root / "proofs" / "preamble.tex"
+    preamble.parent.mkdir(parents=True)
+    mine = "% my macros\n\\usepackage{amsmath,amssymb,amsthm}\n% \\usepackage{mathrsfs}\n\\newtheorem{theorem}{Theorem}\n\\newtheorem{lemma}[theorem]{Lemma}\n\\newtheorem{claim}[theorem]{Claim}\n"
+    preamble.write_text(mine)
+    D.add_definition(store, "fam", term="Family", text=r"$\mathscr A$ contains $X_k$.")
+    create_node(store, node_id="clm_1", kind="claim", statement=r"$\mathscr A_k$ is closed.")
+    create_node(store, node_id="clm_2", kind="claim", statement="$X_k$ is finite.", definitions=["fam"])
+    create_node(store, node_id="clm_3", kind="claim", statement="$X_k$ is plain.")
+
+    assert preamble.read_text() == mine  # never rewritten
+    for node_id in ("clm_1", "clm_2"):  # the statement, or a definition, uses \mathscr
+        text = _working(store, node_id).read_text()
+        assert text.index("\\input{../preamble}") < text.index("\\usepackage{mathrsfs}") < text.index("\\begin{document}")
+    assert "\\usepackage" not in _working(store, "clm_3").read_text()  # nothing it uses is missing
+    preamble.write_text(mine.replace("amsthm}", "amsthm,mathrsfs}"))
+    create_node(store, node_id="clm_4", kind="claim", statement=r"$\mathscr A$ is open.")
+    assert "\\usepackage" not in _working(store, "clm_4").read_text()  # the researcher's preamble loads it now
 
 
 def test_an_imported_result_gets_no_working_file(tmp_path: Path):

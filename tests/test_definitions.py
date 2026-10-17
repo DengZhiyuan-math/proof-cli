@@ -46,6 +46,24 @@ def test_a_node_names_its_definitions_and_its_document_opens_with_them(tmp_path:
     assert get_node(store, "X") is None and not (tmp_path / "proofs" / "X").exists()  # refused: no node, no folder
 
 
+def test_a_term_reads_as_written_in_its_latex_heading_and_keeps_its_maths(tmp_path: Path):
+    """A term is a name, and the scaffold put it into `\\paragraph{<term>.}` as it was. A bare `_` there ("Index set I_k")
+    stops the untouched document's build ("Missing $ inserted", then amsart's "Improper \\spacefactor"), and a Typesetter,
+    who must leave that block alone, would have to rewrite it. Outside the term's own `$…$` maths, every character LaTeX
+    reads as markup is escaped, so the heading shows the term exactly as the map does."""
+    store = ensure_project(tmp_path)
+    D.add_definition(store, "idx", term="Index set I_k", text="$I_k$ is an index set.")
+    D.add_definition(store, "marks", term="Label L_{k,j} & 50% #1 ~^\\", text="$L$ is a label.")
+    D.add_definition(store, "fam", term="Family $\\mathscr A_k$ of I_k", text="$\\mathscr A_k$ is a family.")
+    D.add_definition(store, "shown", term="Display $$\\mathscr B$$", text="$\\mathscr B$ is a set.")
+    create_node(store, node_id="T", kind="theorem", statement="$\\mathscr A_k$ covers $I_k$.", definitions=["idx", "marks", "fam", "shown"])
+    tex = working_proof_path(tmp_path, "T").read_text()
+    assert "\\paragraph{Index set I\\_k.} $I_k$ is an index set." in tex
+    assert "\\paragraph{Label L\\_\\{k,j\\} \\& 50\\% \\#1 \\textasciitilde{}\\textasciicircum{}\\textbackslash{}.}" in tex
+    assert "\\paragraph{Family $\\mathscr A_k$ of I\\_k.}" in tex  # its maths as written, the rest escaped
+    assert "\\paragraph{Display $\\mathscr B$.}" in tex  # a heading holds no display: its maths go inline
+
+
 def test_a_definition_is_editable_until_a_decision_relies_on_it_and_removable_until_a_node_names_it(tmp_path: Path):
     store = ensure_project(tmp_path)
     D.add_definition(store, "unit", term="Simple graph", text=UNIT)
