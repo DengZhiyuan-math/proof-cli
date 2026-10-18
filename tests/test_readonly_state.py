@@ -52,7 +52,8 @@ def test_a_command_that_must_write_the_state_says_so_and_how_to_run_proof(read_o
     assert envelope["error"]["code"] == "PROJECT_STATE_READ_ONLY", envelope
     message = envelope["error"]["message"]
     # a redirected command runs in the sandbox too: only a read may be redirected (a trial's `proof search … > file`)
-    assert "a command of its own" in message and "no pipe, redirection" in message and "only a read may be redirected" in message, message
+    assert "a command of its own" in message and "no pipe, redirection" in message and "read may be redirected" in message, message
+    assert "only a read" not in message   # a read that must first finish a one-time update of the state fails redirected too
 
 
 def test_a_search_answers_from_a_read_only_state_and_only_its_history_entry_is_skipped(read_only_state):

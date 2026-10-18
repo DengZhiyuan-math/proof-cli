@@ -32,8 +32,8 @@ from .storage import ProjectNotFoundError, acting_as, not_acting, read_only
 # `proof` runs outside it under the role's own rules
 STATE_READ_ONLY = ("the project's state (.proof/) can't be written from here, and what proof was asked has to write it. In an "
                    "agent's Bash call, run a proof command that writes the project's state as a command of its own: no pipe, "
-                   "redirection or other command joined to it (|, >, &&, ;), which would run it in the sandbox; only a read may "
-                   "be redirected to a file in your scratch folder to filter its output")
+                   "redirection or other command joined to it (|, >, &&, ;), which would run it in the sandbox. A read may be "
+                   "redirected to a file in your scratch folder to filter its output; if even that fails, run it once on its own")
 
 
 def state_read_only(exc: BaseException) -> bool:
@@ -139,7 +139,7 @@ class ProofGroup(TyperGroup):
                 typer.echo(f"Error: {exc}")
             code = 1
         except Exception as exc:  # noqa: BLE001 — the contract: an envelope, not a traceback
-            if state_read_only(exc):  # SQLite cannot write .proof/ here, so it cannot open the state even to read
+            if state_read_only(exc):  # SQLite cannot write .proof/ here, and the command (or a pending one-time update) had to
                 if json_output:
                     typer.echo(dump_envelope(error_envelope(command, "PROJECT_STATE_READ_ONLY", STATE_READ_ONLY)))
                 else:

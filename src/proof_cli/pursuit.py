@@ -144,6 +144,8 @@ def project_progress(store: ProjectStore, *, live: str | None = None) -> list[di
             reason = "no end was recorded: the process that ran it stopped; a new Start rechecks claims, snapshots and node states"
         theorems = [e["theorem"] for e in events if e["theorem"]]
         budgets = [e["budget"] for e in events if e["budget"] is not None]
+        if status == INTERRUPTED and budgets:   # its last record may predate turns it spent: a floor, not the whole
+            budgets[-1] = {**budgets[-1], "spend_incomplete": True}
         results = [e["results"] for e in events if e["results"] is not None]  # none recorded: unknown, not empty
         # a Reader that may have begun: a reader_end that did not say it was refused before its job existed
         reader_may_have_run = any(e["phase"] == "reader_end" and e["launched"] is not False for e in events)

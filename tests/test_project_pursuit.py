@@ -198,8 +198,11 @@ def test_a_spend_checkpoint_keeps_what_an_interrupted_pursuit_had_spent(tmp_path
     P.record_pursuit(store, "spend", pursuit_id=pid, budget={"turns_max": 60, "spent": 7})
     P.record_pursuit(store, "spend", pursuit_id=pid, budget={"turns_max": 60, "spent": 9})
     (view,) = P.project_progress(store)
-    assert view["status"] == P.INTERRUPTED and view["budget"] == {"turns_max": 60, "spent": 9} and view["theorem"] == "T1"
-    assert view["last_phase"] == "spend"
+    # what an interrupted pursuit spent is what it last recorded: a floor, so it reads as incomplete (the page and the CLI)
+    assert view["status"] == P.INTERRUPTED and view["budget"] == {"turns_max": 60, "spent": 9, "spend_incomplete": True}
+    assert view["theorem"] == "T1" and view["last_phase"] == "spend"
+    plain = runner.invoke(app, ["project", "progress", "--root", str(tmp_path)]).output
+    assert "spend: incomplete" in plain and plain.count(" spend ") == 1   # its last spend, not one line per turn
 
 
 def test_an_audit_start_is_kept_with_the_pursuit(tmp_path: Path):
