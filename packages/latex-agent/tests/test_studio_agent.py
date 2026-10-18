@@ -4,6 +4,7 @@ No model CLI is started: the Claude Code and Codex backends are checked through 
 command they would run and the events they make from sample output. A local gh
 credential-isolation test uses only synthetic configuration and makes no API call.
 """
+import io
 import json
 import os
 import sys
@@ -591,10 +592,11 @@ class AgentEnvironment(unittest.TestCase):
         seen = {}
 
         class Proc:
-            returncode, stdout, stderr = 0, iter(()), iter(())
+            returncode = 0
 
             def __init__(self):
                 self.stdin = mock.MagicMock()
+                self.stdout, self.stderr = io.StringIO(), io.StringIO()
 
             def wait(self):
                 return 0
@@ -607,6 +609,37 @@ class AgentEnvironment(unittest.TestCase):
         with mock.patch("latex_agent.backends.subprocess.Popen", popen):
             backend.run(job_for(prompt="hi", root=Path(".")))
         self.assertIn("GIT_ALLOW_PROTOCOL", seen)
+
+
+class TurnPipes(unittest.TestCase):
+    """The manager keeps its last turns (MAX_TURNS) for their events and Undo: a kept turn whose process pipes stayed
+    open would hold two file descriptors for the server's life."""
+
+    class Script(backends.CliBackend):
+        def __init__(self, code):
+            super().__init__("script")
+            self.code = code
+
+        def command(self, job):
+            return [sys.executable, "-c", self.code], "hi"
+
+        def handle(self, d, job, st):
+            st["seen"] = d
+
+    def test_a_finished_turn_closes_its_process_pipes(self):
+        job = job_for(root=Path(tempfile.gettempdir()).resolve())
+        st = self.Script("import sys; sys.stdin.read(); print('{\"ok\": 1}')").run(job)
+        self.assertEqual((st["exit"], st["seen"]), (0, {"ok": 1}))
+        self.assertTrue(job.proc.stdout.closed)
+        self.assertTrue(job.proc.stderr.closed)
+
+    def test_a_failed_turns_stderr_is_read_to_its_end_before_the_pipe_closes(self):
+        job = job_for(root=Path(tempfile.gettempdir()).resolve())
+        st = self.Script("import sys; sys.stdin.read(); sys.stderr.write('x' * 50000 + 'end'); sys.exit(3)").run(job)
+        self.assertEqual(st["exit"], 3)
+        self.assertTrue(st["stderr"].endswith("end"))
+        self.assertEqual(len(st["stderr"]), backends.STDERR_KEPT_CHARS)
+        self.assertTrue(job.proc.stderr.closed)
 
 
 class ClaudeBilling(unittest.TestCase):

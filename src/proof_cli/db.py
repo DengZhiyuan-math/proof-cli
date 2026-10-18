@@ -67,12 +67,25 @@ CREATE TABLE IF NOT EXISTS state (
 """
 
 
+class _Connection(sqlite3.Connection):
+    """Closed when its `with` block ends. sqlite3's own `with` only commits or rolls back, and from Python 3.11 a
+    connection and its statement cache refer to each other, so one left open is closed only by the cyclic garbage
+    collector, holding its file descriptors until then: in a long-running server, enough of them to reach the open
+    file limit."""
+
+    def __exit__(self, *exc):
+        try:
+            return super().__exit__(*exc)
+        finally:
+            self.close()
+
+
 def connect(db_path: str | Path) -> sqlite3.Connection:
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     # generous busy timeout: several CLI/agent processes may write the same
     # project concurrently, and a writer should wait its turn, not fail.
-    conn = sqlite3.connect(path, timeout=30.0)
+    conn = sqlite3.connect(path, timeout=30.0, factory=_Connection)
     conn.row_factory = sqlite3.Row
     return conn
 
