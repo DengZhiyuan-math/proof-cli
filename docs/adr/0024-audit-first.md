@@ -72,5 +72,5 @@ A review of the records of the first two audit-first runs found the following. T
   - `audit` on both Starts;
   - the run's `awaiting_snapshot` hook;
   - the subtree card's "Audit first, then Pursue" and what the audit found.
-- **proof-cli:** registers the error codes `AUDIT_ROLES` and `INVALID_AUDIT`. Nothing else changes: an Evidence check's failed outcome already ends a pass.
+- **proof-cli:** registers the error codes `AUDIT_ROLES` and `INVALID_AUDIT`. In an audit's runtime (`PROOF_AGENT_AUDIT`, point 13), `proof node show --json` withholds every node's Evidence checks and `proof node progress <node>` reads only the Standing questions and their answers. Nothing else changes: an Evidence check's failed outcome already ends a pass.
 - **CONTEXT.md gains** Audit first.
