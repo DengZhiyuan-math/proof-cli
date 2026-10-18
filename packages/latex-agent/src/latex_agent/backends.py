@@ -291,7 +291,8 @@ class CliBackend(Backend):
             kill_tree(job.proc)         # it couldn't see this process, so end it here
         job.proc.stdin.write(stdin)
         job.proc.stdin.close()
-        threading.Thread(target=lambda: stderr_lines.extend(job.proc.stderr), daemon=True).start()
+        stderr_reader = threading.Thread(target=lambda: stderr_lines.extend(job.proc.stderr), daemon=True)
+        stderr_reader.start()
         for line in job.proc.stdout:
             try:
                 d = json.loads(line)
@@ -300,6 +301,13 @@ class CliBackend(Backend):
             if isinstance(d, dict):
                 self.handle(d, job, st)
         job.proc.wait()
+        # Its stderr read to the end, then both pipes closed: the manager keeps finished turns (MAX_TURNS), and each
+        # kept turn's open pipes would hold two file descriptors for the server's life. A command the CLI left running
+        # can hold stderr open: that pipe is left to it.
+        stderr_reader.join(timeout=5)
+        job.proc.stdout.close()
+        if not stderr_reader.is_alive():
+            job.proc.stderr.close()
         st["exit"] = job.proc.returncode
         if st["exit"] != 0 or st.get("is_error"):
             st["stderr"] = "".join(stderr_lines)[-STDERR_KEPT_CHARS:]
