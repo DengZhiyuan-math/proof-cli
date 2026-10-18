@@ -420,6 +420,7 @@ def record_progress(
     failed_on: str | None = None,
     coordinator: str | None = None,
     question: str | None = None,
+    suggestion: str | None = None,
 ) -> dict:
     """Report a plan (the steps the run means to take), one step's status, a handoff to another role, the
     Verifier's verdict on the working proof, an attempt the role abandoned (ADR-0019), or — on a Theorem or Lemma
@@ -434,7 +435,10 @@ def record_progress(
 
     A question is a Standing question (ADR-0021 point 8): a judgement call the role made itself instead of stopping,
     worded as the choice made and the alternative. It gets an id and stays open until the researcher answers it
-    (`answer_question`)."""
+    (`answer_question`).
+
+    A suggestion is a redirect the run suggests to the researcher, from what the record repeats (ADR-0019 point 17): an
+    entry of its own under the role whose record it reads, no step of that role's and no status."""
     node = require_node(store, node_id)
     if coordinator is not None:
         if not coordinator.strip():
@@ -448,7 +452,12 @@ def record_progress(
     if role not in AGENT_ROLES:
         raise ProofMapError("INVALID_ROLE", f"'{role}' is not a Proof agent role; expected one of: {', '.join(AGENT_ROLES)}")
     steps = [str(item).strip() for item in (plan or []) if str(item).strip()]
-    if question is not None:
+    if suggestion is not None:
+        if not suggestion.strip():
+            raise ProofMapError("PROGRESS_EMPTY", "say what the run suggests to the researcher")
+        payload = {"kind": "suggestion", "role": role, "by": by, "note": suggestion.strip()}
+        message = f"{role} on {node_id}: suggested redirect — {suggestion.strip()}"
+    elif question is not None:
         if not question.strip():
             raise ProofMapError("PROGRESS_EMPTY", "say what was chosen and the alternative: --question \"<the choice made; the alternative>\"")
         payload = {"kind": "question", "id": f"q_{uuid.uuid4().hex[:10]}", "role": role, "by": by, "question": question.strip()}

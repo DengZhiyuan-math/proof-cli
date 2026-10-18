@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 
+from .contract import state_read_only
 from .domain import (
     BlockerRecord,
     ProofObligation,
@@ -781,7 +783,13 @@ def _retrieval_report(
     limit: int,
 ):
     store = get_store(root)
-    _append_history(store, f"{verb}:{query}", message=f"{_RETRIEVAL_PAST[verb]} {query}")
+    try:
+        _append_history(store, f"{verb}:{query}", message=f"{_RETRIEVAL_PAST[verb]} {query}")
+    except sqlite3.OperationalError as exc:
+        # a search is a read; its own history entry is skipped where the state can't be written (an agent's redirected
+        # `proof search … > scratch/x.txt` runs in the sandbox), rather than failing the read
+        if not state_read_only(exc):
+            raise
     return retrieve_candidates(store, query=query, external_candidates=external_candidates, limit=limit)
 
 

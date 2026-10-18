@@ -187,3 +187,30 @@ def test_plain_progress_says_when_a_pursuits_budget_was_not_recorded(tmp_path: P
     text = runner.invoke(app, ["project", "progress", "--root", str(tmp_path)]).output
     assert text.count("budget: not recorded") == 1
     assert text.index(older) < text.index("budget: not recorded") < text.index(counted)
+
+
+def test_a_spend_checkpoint_keeps_what_an_interrupted_pursuit_had_spent(tmp_path: Path):
+    """The budget was recorded only at start, at each Theorem and at the end: a pursuit interrupted mid-Theorem read back
+    as nothing spent. A `spend` checkpoint, recorded as turns end, is the last budget an interrupted pursuit reads."""
+    store = ensure_project(tmp_path)
+    pid = _start(store)
+    P.record_pursuit(store, "theorem", pursuit_id=pid, theorem="T1", budget={"turns_max": 60, "spent": 0})
+    P.record_pursuit(store, "spend", pursuit_id=pid, budget={"turns_max": 60, "spent": 7})
+    P.record_pursuit(store, "spend", pursuit_id=pid, budget={"turns_max": 60, "spent": 9})
+    (view,) = P.project_progress(store)
+    # what an interrupted pursuit spent is what it last recorded: a floor, so it reads as incomplete (the page and the CLI)
+    assert view["status"] == P.INTERRUPTED and view["budget"] == {"turns_max": 60, "spent": 9, "spend_incomplete": True}
+    assert view["theorem"] == "T1" and view["last_phase"] == "spend"
+    plain = runner.invoke(app, ["project", "progress", "--root", str(tmp_path)]).output
+    assert "spend: incomplete" in plain and plain.count(" spend ") == 1   # its last spend, not one line per turn
+
+
+def test_an_audit_start_is_kept_with_the_pursuit(tmp_path: Path):
+    """ADR-0024: whether a Pursue audited first is part of its history, read back after a restart."""
+    store = ensure_project(tmp_path)
+    audited = P.record_pursuit(store, "start", provider="claude", audit=True).payload["pursuit_id"]
+    plain = _start(store)
+    views = {view["pursuit_id"]: view for view in P.project_progress(store)}
+    assert views[audited]["audit"] is True and views[plain]["audit"] is False
+    with pytest.raises(ProofMapError):
+        P.record_pursuit(store, "end", pursuit_id=audited, outcome="done", audit=True)   # only a start says it

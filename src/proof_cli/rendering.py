@@ -480,7 +480,10 @@ def render_project_progress(pursuits: list[dict]) -> str:
         console.print(f"{pursuit['pursuit_id']}  {pursuit['status']}  provider {pursuit['provider'] or '—'}  started {pursuit['started_at']}")
         if pursuit["reason"]:
             console.print(f"  {pursuit['reason']}")
-        for event in pursuit["events"]:
+        last_spend = max((i for i, e in enumerate(pursuit["events"]) if e["phase"] == "spend"), default=None)
+        for index, event in enumerate(pursuit["events"]):
+            if event["phase"] == "spend" and index != last_spend:
+                continue   # a checkpoint per turn: its last says what was spent
             parts = [event["created_at"], event["phase"]]
             parts += [x for x in (event["outcome"], event["theorem"]) if x]
             line = "  · " + " ".join(parts)
