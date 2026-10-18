@@ -22,7 +22,7 @@ Resuming the project after a break then gives the agents nothing to do. The brea
    **The mechanical checks first (issue #180).** As in any run, the Verifier is not called while the node folder's checks report an error. A snapshot frozen before a check existed, or under an older rule, can fail one now. Its audit then fails on the findings, without a turn, and the failure is recorded as the audit's failed reading (point 3). Checks that cannot run conclude nothing: the node is left as it is.
 3. **How the verdict is recorded.** It becomes an Evidence check on that snapshot, passed or failed. This happens only when the verdict's inputs digest is the snapshot's own, ADR-0019 point 4's rule. The check is advisory, as every Evidence check is (ADR-0004).
 4. **What is audited, and when.**
-   - **The nodes awaiting review as the Start begins.** Work requested for review during the Start is not audited by it. A node two Theorems rest on is audited once in a project Pursue.
+   - **The nodes awaiting review as the Start begins.** Work requested for review during the Start is not audited by it. A node two Theorems rest on is audited once in a project Pursue. One whose snapshot passed an audit already, with nothing it rests on changed since, is audited again only when the Start asks (point 15).
    - **Leaves first.** A node is audited once every dependency of it that the Start audits has been audited.
    - **Audits first.** Nothing else starts while an audit may start or is going.
 5. **A failed audit returns the node to the agents.** This happens only when the failed reading was recorded on the snapshot. The failed reading ends the snapshot's pass. The node is no longer Provisional, and neither is anything resting on it (ADR-0021 point 2).
@@ -56,6 +56,16 @@ A review of the records of the first two audit-first runs found the following. T
     - **What the pursuit's history keeps.** Its history keeps whether it audited first, and what it has spent as each turn ends.
     - **After a stop.** One the server stopped reads back what it spent, as incomplete.
 
+## Amendment: what a third audit-first trial showed (2026-10-18)
+
+A review of a third audit-first run's records found that its audit Start re-read 13 snapshots of 15 that had passed an audit already, on the same files, with nothing they rest on changed since: most of its turns, finding nothing new. Its audits also read the earlier record their briefing left out (point 13). These amendments are the researcher's decisions.
+
+15. **A snapshot whose audit passed is not audited again by default** (amends point 4).
+    - **What is skipped.** A node whose snapshot awaiting review passed an audit, with nothing it rests on changed since: no restatement and no Definition edit under it (`restated_at`), and no change to its dependencies. What tells an audit's pass from the Prover's gate check on the same snapshot is the audit's closing note in the work log, after the snapshot's review request, its verdict recorded on the snapshot.
+    - **Auditing them again is a choice of its own.** A Start may ask for it (`reaudit`); the page offers "Audit all again, then Pursue" beside "Audit first, then Pursue" when such snapshots await review.
+    - **The ending names what it skipped,** and the default total counts only the nodes the Start audits.
+16. **An audit's runtime keeps the earlier record out of reach** (point 13). `proof node show --json` withholds every node's Evidence checks, the work log read gives only the Standing questions and their answers, and the audit works in a scratch folder of its own, made empty.
+
 ## Considered options
 
 - **Audit on every Start.** This is wasteful when the work was checked moments ago. Making it a choice keeps it to the occasions when the researcher wants it.
@@ -72,5 +82,5 @@ A review of the records of the first two audit-first runs found the following. T
   - `audit` on both Starts;
   - the run's `awaiting_snapshot` hook;
   - the subtree card's "Audit first, then Pursue" and what the audit found.
-- **proof-cli:** registers the error codes `AUDIT_ROLES` and `INVALID_AUDIT`. Nothing else changes: an Evidence check's failed outcome already ends a pass.
+- **proof-cli:** registers the error codes `AUDIT_ROLES` and `INVALID_AUDIT`. In an audit's runtime (`PROOF_AGENT_AUDIT`, point 13), `proof node show --json` withholds every node's Evidence checks and `proof node progress <node>` reads only the Standing questions and their answers. Nothing else changes: an Evidence check's failed outcome already ends a pass.
 - **CONTEXT.md gains** Audit first.

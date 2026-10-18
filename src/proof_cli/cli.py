@@ -297,6 +297,18 @@ def _author(flag: str | None, root: str | None = None) -> str:
     return agent
 
 
+# An audit reads the proof afresh (ADR-0024 point 13): the run sets PROOF_AGENT_AUDIT in the runtime of an audit's one
+# Verifier turn, and the reads that would show it the earlier record — `node show`'s Evidence checks, the work log's
+# verdicts and attempts — leave it out. A trial's audits, briefed with no earlier verdict, still read every earlier
+# check's notes in `node show --json`, the passing audits of the very snapshot among them.
+AUDIT_ENV = "PROOF_AGENT_AUDIT"
+AUDIT_WITHHELD = "withheld: this turn is an audit, which reads the proof afresh (ADR-0024)"
+
+
+def _auditing() -> bool:
+    return bool(os.environ.get(AUDIT_ENV, "").strip())
+
+
 def _researcher_names(root: Path) -> set[str]:
     """The names the researcher's own writes carry in the project at ROOT, the command's own: the CLI's "human", and
     that project's git identity (the page's, proof-web)."""
@@ -736,12 +748,16 @@ def node_show(
         payload["questions"] = questions(store, node_id)
         payload["working_proof"] = working_proof
         payload["snapshots"] = snapshots
-        # each Evidence check with its own bound hash, read against its snapshot as it is now (PR #147)
-        payload["evidence_checks"] = [
-            {**check.model_dump(mode="json"), "snapshot_version": proof.version, "binding": evidence_binding(check, now)}
-            for proof in list_candidate_proofs(store, node_id) for now in [candidate_proof_sha256(store, proof.id)]
-            for check in list_evidence_checks(store, proof.id)
-        ]
+        # each Evidence check with its own bound hash, read against its snapshot as it is now (PR #147); none in an audit's
+        # runtime, which reads the proof afresh (AUDIT_ENV), whichever node it shows
+        if _auditing():
+            payload["evidence_checks"], payload["evidence_checks_withheld"] = [], AUDIT_WITHHELD
+        else:
+            payload["evidence_checks"] = [
+                {**check.model_dump(mode="json"), "snapshot_version": proof.version, "binding": evidence_binding(check, now)}
+                for proof in list_candidate_proofs(store, node_id) for now in [candidate_proof_sha256(store, proof.id)]
+                for check in list_evidence_checks(store, proof.id)
+            ]
         # what the node page shows of each dependency: its pin, whether current, the remedy (#97)
         payload["dependency_details"] = dependency_details(store, node_id)
         payload["definition_details"] = definition_details
@@ -1314,10 +1330,14 @@ def node_progress(
     try:
         if not plan and step is None and not handoff and not verdict and not attempt and not failed_on and not coordinator and not question:
             log = work_log(store, node_id)
+            if _auditing():  # an audit reads the choices made on the node and their answers, nothing else of its record
+                log = [entry for entry in log if entry.get("kind") in ("question", "answer")]
             if json_output:
                 typer.echo(dump_envelope(success_envelope("node.progress", log)))
             else:
                 typer.echo(render_work_log(node_id, log))
+                if _auditing():
+                    typer.echo(f"The rest of the work log is {AUDIT_WITHHELD}.")
             return
         entry = record_progress(
             store, node_id, role=role or os.environ.get("PROOF_AGENT_ROLE") or None, by=_author(by, root),

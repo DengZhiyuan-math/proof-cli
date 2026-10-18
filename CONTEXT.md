@@ -176,7 +176,9 @@ _Avoid_: autopilot, auto mode
 
 **Audit first**:
 A choice on a Pursue's Start (ADR-0024). Before anything else, each node whose snapshot awaits review gets one independent Verifier turn, briefed as an audit, leaves first. Its verdict is recorded as an Evidence check on that snapshot.
+An audit reads the proof afresh: its runtime (`PROOF_AGENT_AUDIT`) shows it no earlier Evidence check and, of the work log, only the Standing questions and their answers.
 A node whose dependency failed its audit is audited once that dependency's rework is up for review again.
+A snapshot whose audit passed, with nothing it rests on changed since, is not audited again unless the Start asks to (`reaudit`, "Audit all again, then Pursue").
 A failed audit ends the node's Provisional standing and returns it to the agents until a new snapshot is up for review. A passed audit leaves the node as it is. An audit is advisory evidence, never Acceptance.
 A proof never restates a dependency's standing: Accepted, Provisional and Conditional are the map's, derived.
 _Avoid_: re-review, second review

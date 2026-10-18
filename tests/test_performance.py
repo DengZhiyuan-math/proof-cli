@@ -509,3 +509,85 @@ def test_a_map_read_folds_the_trust_rules_once(tmp_path: Path, review_reads):
 
     assert all(n["acceptance_state"] == "trusted-by-rule" for n in nodes)
     assert [path.name for path in review_reads].count("trust-rules.jsonl") <= 1
+
+
+# -- the event log, read once per read ---------------------------------------------------------------------------------
+
+# the statement `list_events` reads the whole log with; a read of one kind (`list_events_of_kind`) filters in SQL
+_WHOLE_LOG = "FROM events ORDER BY created_at"
+
+
+def _log_scans(statements: list[str]) -> int:
+    return sum(_WHOLE_LOG in statement for statement in statements)
+
+
+def _worked_map(root: Path, claims: int = 6):
+    """A Theorem resting on `claims` Claims an agent wrote, each with a plan on its work log; one parked by a
+    Coordinator, two with a snapshot the Verifier passed (Provisional), one restated since."""
+    from proof_cli.proof_map import record_evidence_check, record_progress, restate_node
+
+    store = ensure_project(root)
+    for index in range(claims):
+        create_node(store, node_id=f"c{index}", kind="claim", statement=f"s{index}", created_by="dec-1")
+        record_progress(store, f"c{index}", role="prover", by="agent_a/prover", plan=["first", "second"])
+    create_node(store, node_id="top", kind="theorem", statement="t", dependencies=[f"c{index}" for index in range(claims)])
+    record_progress(store, "c1", role=None, by="coordinator", coordinator="parked: out of budget")
+    for node_id in ("c2", "c3"):
+        proof = submit_proof(store, node_id, claimant_id="agent_a", scoping_rationale="r", content=f"proof of {node_id}")
+        record_evidence_check(store, proof.id, "passed", run_by="prover-1/verifier", notes="no objections")
+    restate_node(store, "c4", statement="s4, restated", reason="clearer", by="dec-1")
+    return store
+
+
+def test_a_read_scope_reads_the_event_log_once_however_many_nodes_ask(tmp_path: Path, statements):
+    """Every node's work log, verdicts and restatement are read off the event log: once per read, not once per node
+    asking. A page asks each node's work log; a 1,639-event log was read and decoded 17 times per map request."""
+    from proof_cli.proof_map import restated_at, verdicts, work_log
+
+    store = _worked_map(tmp_path)
+    node_ids = [node.id for node in list_nodes(store)]
+
+    def read() -> dict:
+        return {node_id: (work_log(store, node_id), verdicts(store, node_id), restated_at(store, node_id)) for node_id in node_ids}
+
+    unscoped = read()  # no scope: each asks the log itself
+    statements.clear()
+    with read_scope():
+        scoped = read()
+
+    assert _log_scans(statements) == 1
+    assert scoped == unscoped
+
+
+def test_an_event_written_inside_a_read_scope_is_seen_by_the_reads_after_it(tmp_path: Path):
+    """The log read once is dropped on any write: one committed on its own connection, a transaction's once it commits."""
+    from proof_cli.proof_map import record_progress, work_log
+    from proof_cli.storage import append_event, list_events
+
+    store = _worked_map(tmp_path)
+    with read_scope():
+        count, entries = len(list_events(store)), len(work_log(store, "c0"))
+        append_event(store, "synthetic_note", "written on its own connection")
+        assert len(list_events(store)) == count + 1
+        record_progress(store, "c0", role="prover", by="agent_a/prover", plan=["third"])  # in its own transaction
+        assert len(list_events(store)) == count + 2
+        assert len(work_log(store, "c0")) == entries + 1
+        with store.transaction() as conn:
+            append_event(store, "synthetic_note", "written in a transaction", conn=conn)
+        assert len(list_events(store)) == count + 3
+
+
+@pytest.mark.parametrize("read", ["map", "review_queue"])
+def test_a_page_read_reads_the_event_log_once(tmp_path: Path, statements, read):
+    """`/api/map` and `/api/review-queue` ask every node whether it is parked, off its work log: one read of the log."""
+    ReviewApp = pytest.importorskip("proof_web.server").ReviewApp  # the page (proof-web), when it is installed
+
+    store = _worked_map(tmp_path)
+    app = ReviewApp(store)
+    try:
+        statements.clear()
+        getattr(app, read)()
+    finally:
+        app.close()
+
+    assert _log_scans(statements) == 1
