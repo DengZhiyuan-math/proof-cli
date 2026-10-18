@@ -1,6 +1,6 @@
 # ADR-0024 — Audit first: a Pursue may audit the work awaiting review before it goes on
 
-**Status**: accepted (2026-10-18; the researcher's decision, after a trial project's proofs all awaited review and a new Pursue found nothing to do). Amends ADR-0021 points 4, 7 and 9 for a Start that asks for it. ADR-0004 stands: only the researcher changes acceptance.
+**Status**: accepted (2026-10-18; the researcher's decision, after a trial project's proofs all awaited review and a new Pursue found nothing to do). Amends ADR-0021 points 4, 7 and 9 for a Start that asks for it. ADR-0004 stands: only the researcher changes acceptance. Amended the same day (point 2's mechanical checks, and ADR-0019 point 3's gate), after a trial's audit ended with no verdict on a check added since the snapshot.
 
 ## Context
 
@@ -18,6 +18,8 @@ Resuming the project after a break then gives the agents nothing to do. The brea
    - each Standing question's choice.
 
    It records one verdict and changes no file.
+
+   **The mechanical checks first (issue #180).** As in any run, the Verifier is not called while the node folder's checks report an error. A snapshot frozen before a check existed, or under an older rule, can fail one now. Its audit then fails on the findings, without a turn, and the failure is recorded as the audit's failed reading (point 3). Checks that cannot run conclude nothing: the node is left as it is.
 3. **How the verdict is recorded.** It becomes an Evidence check on that snapshot, passed or failed. This happens only when the verdict's inputs digest is the snapshot's own, ADR-0019 point 4's rule. The check is advisory, as every Evidence check is (ADR-0004).
 4. **What is audited, and when.**
    - **The nodes awaiting review as the Start begins.** Work requested for review during the Start is not audited by it. A node two Theorems rest on is audited once in a project Pursue.
@@ -31,7 +33,8 @@ Resuming the project after a break then gives the agents nothing to do. The brea
    - **While the root awaits review,** only a failed audit's node is worked; a plain Start would have ended there.
    - **It does not end while an audit or a rework is still due.** It then ends in one of two ways: Done, saying what the audit found; or Stuck, naming each node whose failed audit no rework fixed.
    - **If the total runs out first,** it ends Budget, as any Start does, and names the nodes it did not reach.
-8. **Budget.** Each audit is a real turn of the Pursue's total (proof-agents#19). It is not a turn of the node's own proof budget, so a rework has that budget whole. The default total of an audit Start adds one turn per node awaiting review.
+8. **The Prover's gate holds the checks too** (amends ADR-0019 point 3). A passing verdict on the files as they stand opens the gate only while the mechanical checks pass. Otherwise a rework after a failed audit, or any run after a check was added, could request review on the old pass.
+9. **Budget.** Each audit is a real turn of the Pursue's total (proof-agents#19). It is not a turn of the node's own proof budget, so a rework has that budget whole. The default total of an audit Start adds one turn per node awaiting review.
 
 ## Considered options
 
