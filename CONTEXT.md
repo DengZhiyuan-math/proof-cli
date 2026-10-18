@@ -169,14 +169,16 @@ The Reader phase uses at most one quarter of the total minutes; cancellation pre
 _Avoid_: importer, parser, formalizer
 
 **Pursue**:
-The researcher's one action that sets the agents working to the end: a Coordinator on a Theorem, preceded by a Decomposer turn when it has no Claims, or by a Reader turn when started on a project with no map (ADR-0021). A project Pursue's steps are recorded as `pursuit` events, read by `proof project progress`; one with no recorded end reads interrupted, and nothing resumes it (issue #201).
+The researcher's one action that sets the agents working to the end: a Coordinator on a Theorem, preceded by a Decomposer turn when it has no Claims, or by a Reader turn when started on a project with no map (ADR-0021). A project Pursue's steps are recorded as `pursuit` events, read by `proof project progress`; one with no recorded end reads interrupted, and nothing resumes it (issue #201). What it has spent is recorded as each turn ends, so an interrupted one reads back what it spent, as incomplete. On a map that is already there, the page offers it once the map has a Theorem, with audit first when nodes await review (ADR-0024).
 A Pursue has one total turn budget and one time limit, fixed at Start and shared by its Reader, Decomposers and node runs. Each node turn reserves one unit as it starts, so parallel runs share the total turn by turn; a node's own budget is a ceiling on its turns, never an allocation. The Reader runs alone before the node runs, and its actual turns are counted when that phase ends. A turn whose backend started consumes its unit even if Stop follows. A failed launch returns its reserved unit and is recorded separately. Cancellation before backend startup returns the unit without counting a turn or a failed launch (proof-agents#19).
 On every Start, Project Pursue checks active local coverage before node runs. Parked, Rejected and detached split Claims, and nodes a dependency removal dropped from every route (nothing rests on them any more), with what only they rest on, are historical routes, not coverage blockers; a Done ending names the dropped ones and the removal that dropped each. An agent's local node outside every chosen Theorem's subtree ends the pursuit as Stuck, naming it, on every Start until someone wires, parks or deletes it. The researcher's own standalone work does not block: it is left outside this pursuit, and a Done ending names it. Done means the selected Theorem Coordinators ended Done, with no uncovered agent-made local nodes; another ending names the result that did not finish. This checks coverage and progress, not Human Review, and does not gate map edits on a Reader's notes.
 _Avoid_: autopilot, auto mode
 
 **Audit first**:
 A choice on a Pursue's Start (ADR-0024). Before anything else, each node whose snapshot awaits review gets one independent Verifier turn, briefed as an audit, leaves first. Its verdict is recorded as an Evidence check on that snapshot.
+A node whose dependency failed its audit is audited once that dependency's rework is up for review again.
 A failed audit ends the node's Provisional standing and returns it to the agents until a new snapshot is up for review. A passed audit leaves the node as it is. An audit is advisory evidence, never Acceptance.
+A proof never restates a dependency's standing: Accepted, Provisional and Conditional are the map's, derived.
 _Avoid_: re-review, second review
 
 **Standing question**:

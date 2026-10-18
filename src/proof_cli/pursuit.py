@@ -37,8 +37,9 @@ PURSUIT_EVENT = "pursuit"
 # start: the researcher started it; reader_end: the Reader's turn ended (outcome ok, failed, or unknown);
 # theorem: work moved to a Theorem (or a Theorem's Coordinator ended: outcome is its status);
 # stop: the researcher stopped it; release_failed: releasing the claims failed (a retry may follow);
+# spend: what it has spent so far, recorded as its turns end, so an interrupted pursuit reads its last spend, not its Start's;
 # end: the pursuit ended, outcome its final status (done, stuck, released, budget, ...)
-PHASES = ("start", "reader_end", "theorem", "stop", "release_failed", "end")
+PHASES = ("start", "reader_end", "theorem", "spend", "stop", "release_failed", "end")
 
 READER_TURNS_DIR = Path(".proof") / "reader-turns"
 READER_OUTCOMES = ("ok", "failed", "stopped")
@@ -59,11 +60,13 @@ def record_pursuit(
     budget: dict[str, Any] | None = None,
     results: dict[str, Any] | None = None,
     launched: bool | None = None,
+    audit: bool | None = None,
 ) -> EventRecord:
     """Append one `pursuit` event. `start` makes the pursuit's id (read it from the event's payload);
     every other phase names a started pursuit that has not ended, and `end` names its outcome. `budget` is the
     pursuit's whole total and what it has spent so far, `results` each Theorem's result so far (#223). On a
-    `reader_end`, `launched` says whether the Reader's turn began (its job existed) or was refused before (#224)."""
+    `reader_end`, `launched` says whether the Reader's turn began (its job existed) or was refused before (#224). On a
+    `start`, `audit` says the Pursue audits first (ADR-0024)."""
     if phase not in PHASES:
         raise ProofMapError("INVALID_PURSUIT_PHASE", f"not a pursuit phase: {phase!r}", details={"phases": list(PHASES)})
     if phase == "start":
@@ -74,6 +77,8 @@ def record_pursuit(
         raise ProofMapError("PURSUIT_NOT_FOUND", f"a {phase} names the pursuit it belongs to")
     if phase == "end" and not outcome.strip():
         raise ProofMapError("PURSUIT_OUTCOME_REQUIRED", "a pursuit's end names its outcome")
+    if audit is not None and phase != "start":
+        raise ProofMapError("INVALID_PURSUIT_PHASE", "only a start says whether the Pursue audits first")
     payload = {
         "pursuit_id": pursuit_id,
         "phase": phase,
@@ -84,6 +89,7 @@ def record_pursuit(
         "budget": budget,
         "results": results,
         "launched": launched,
+        "audit": audit,
     }
     message = f"pursuit {pursuit_id}: {phase}" + (f" {payload['outcome']}" if payload["outcome"] else "") + (f": {payload['reason']}" if payload["reason"] else "")
     try:
@@ -113,6 +119,7 @@ def _event_view(event: EventRecord) -> dict[str, Any]:
         "budget": p.get("budget"),
         "results": p.get("results"),
         "launched": p.get("launched"),
+        "audit": p.get("audit"),
         "created_at": event.created_at.isoformat(),
     }
 
@@ -147,6 +154,7 @@ def project_progress(store: ProjectStore, *, live: str | None = None) -> list[di
                 "status": status,
                 "reason": reason,
                 "provider": events[0]["provider"],
+                "audit": bool(events[0]["audit"]),   # ADR-0024: whether it audited first; a start from before says nothing
                 "theorem": theorems[-1] if theorems else None,
                 "budget": budgets[-1] if budgets else None,
                 "results": results[-1] if results else None,

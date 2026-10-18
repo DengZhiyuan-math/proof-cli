@@ -67,6 +67,21 @@ def test_a_plan_and_its_steps_are_events_on_the_node(tmp_path: Path):
     assert log[2]["note"] == "nothing in the project settles it" and all(entry["by"] == "claude-code" for entry in log)
 
 
+def test_a_suggested_redirect_is_its_own_entry_and_leaves_the_roles_step_as_it_was(tmp_path: Path):
+    """A run surfaces what the record repeats as a suggested redirect for the researcher (ADR-0019 point 17). Recorded as
+    the role's step, done, it read as the role's own report and closed the step it had open (a trial's work log)."""
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="N", kind="claim", statement="a claim")
+    record_progress(store, "N", role="prover", by="claude-code", step=2, status="started")
+    record_progress(store, "N", role="prover", by="claude-code", suggestion="the same objection came back 3 times — the researcher decides")
+    log = work_log(store, "N")
+    assert [(e["kind"], e.get("step"), e.get("status")) for e in log] == [("step", 2, "started"), ("suggestion", None, None)]
+    assert log[1]["note"] == "the same objection came back 3 times — the researcher decides" and log[1]["role"] == "prover"
+    with pytest.raises(proof_map.ProofMapError) as refused:
+        record_progress(store, "N", role="prover", by="claude-code", suggestion="  ")
+    assert refused.value.code == "PROGRESS_EMPTY"
+
+
 def test_the_work_log_merges_what_the_agent_did_through_proof(tmp_path: Path):
     from proof_cli.fog import add_fog
     from proof_cli.proof_map import split_node

@@ -36,6 +36,26 @@ Resuming the project after a break then gives the agents nothing to do. The brea
 8. **The Prover's gate holds the checks too** (amends ADR-0019 point 3). A passing verdict on the files as they stand opens the gate only while the mechanical checks pass. Otherwise a rework after a failed audit, or any run after a check was added, could request review on the old pass.
 9. **Budget.** Each audit is a real turn of the Pursue's total (proof-agents#19). It is not a turn of the node's own proof budget, so a rework has that budget whole. The default total of an audit Start adds one turn per node awaiting review.
 
+## Amendment: what two audit-first trials showed (2026-10-18)
+
+A review of the records of the first two audit-first runs found the following. These amendments are the researcher's decisions.
+
+10. **A proof does not restate standing.** A dependency's standing is the map's. Accepted, Provisional and Conditional are derived (CONTEXT.md), and the page shows what a proof rests on.
+    - **What went wrong.** The Verifier's checklist asked the proof text to keep reliance on Provisional statements "explicit as Conditional support". A failed audit ends the node's and its dependents' Provisional standing (point 5). So the dependents audited next failed on wording that had just gone stale, in a cascade.
+    - **What changes.** No brief makes standing part of the proof, and wording about standing is no objection.
+11. **A failed dependency is fixed first.** A node one of whose dependencies failed its audit is audited once that dependency's rework is requested for review, on its standing as it then is. While audits wait on such a rework, the failed nodes are worked; point 4's "audits first" otherwise stands.
+12. **What the ending says.**
+    - A failed audit of a node that rested on something neither Accepted nor Provisional at the time says so.
+    - A node whose audit recorded no verdict is named.
+    - Audit turns are counted apart from proof turns.
+13. **What an audit is briefed with.**
+    - **No earlier record.** An audit's briefing carries no earlier verdict and no attempts. Its reading is fresh, and nothing anchors it.
+    - **A no-turn failure counts as the newest verdict.** An audit that failed on the mechanical checks, with no turn, leaves only its closing note. Later runs read that note as the newest verdict, failed: neither their briefing nor the Prover's gate reads the older pass as current.
+14. **The project's Pursue on a map that is already there.**
+    - **Offered on the page.** The page offers it once the map has a Theorem, with "Audit first, then Pursue" when nodes await review. It is recorded as a project pursuit.
+    - **What the pursuit's history keeps.** Its history keeps whether it audited first, and what it has spent as each turn ends.
+    - **After a stop.** One the server stopped reads back what it spent, as incomplete.
+
 ## Considered options
 
 - **Audit on every Start.** This is wasteful when the work was checked moments ago. Making it a choice keeps it to the occasions when the researcher wants it.

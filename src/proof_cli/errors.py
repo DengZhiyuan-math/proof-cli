@@ -16,7 +16,7 @@ ERROR_CODES: dict[str, str] = {
     "INVALID_INPUT": "a legacy command (`theorem add`, `reference import`) refused its input under --json, or the page's new reference (POST /api/references) was refused; the message says why",
     "TEXT_FILE_UNREADABLE": "a `--…-file` option (`--note-file`, `--statement-file`, `--child-file <id>=<path>`, …) names a file that can't be read as UTF-8 text — missing, a folder, unreadable or not UTF-8; `option` and `path` name it, and nothing was written",
     "PROJECT_NOT_FOUND": "a read was pointed at a folder with no proof project; nothing was created",
-    "PROJECT_STATE_READ_ONLY": "the project's state (.proof/) can't be written where proof ran, so it can't be opened even to read — in an agent's runtime, `proof` joined with another command in one Bash call runs in the sandbox; run it on its own and redirect its output to a scratch file to filter it",
+    "PROJECT_STATE_READ_ONLY": "the project's state (.proof/) can't be written where proof ran, and the command has to write it — in an agent's runtime, a `proof` command with a pipe, a redirection or another command joined to it runs in the sandbox; run a writing command on its own (only a read may be redirected to a scratch file)",
     "HUMAN_REVIEW_REQUIRED": "a Human Review decision, made only by the researcher on the proof map page; the error carries its URL",
     "REVIEW_PORT_IN_USE": "`map serve` couldn't bind the project's review port because it is taken, likely by the page already running (`proof map open`); `errno` names the cause",
     "REVIEW_PORT_NOT_PERMITTED": "`map serve` isn't permitted to bind a local port: a permission or sandbox restriction; `errno` names the cause",
@@ -244,7 +244,7 @@ ERROR_CODES: dict[str, str] = {
     "TURN_ENDED": "this turn (a node's, or a discussion turn) has ended already; its record is kept as it is and a second end is not recorded",
     "TURN_CALLED_OFF": "the run was stopped while its turn was being prepared, so no turn started",
     # -- a project Pursue's history: the `pursuit` events (ADR-0021 audit section 1, issue #201) --
-    "INVALID_PURSUIT_PHASE": "not a pursuit phase (start, reader_end, theorem, stop, release_failed, end), or a start given an id: a start makes its own",
+    "INVALID_PURSUIT_PHASE": "not a pursuit phase (start, reader_end, theorem, spend, stop, release_failed, end), a start given an id (a start makes its own), or audit given to a phase other than start",
     "PURSUIT_NOT_FOUND": "no pursuit was started under this id",
     "PURSUIT_ENDED": "the pursuit has ended; nothing more is recorded for it",
     "PURSUIT_OUTCOME_REQUIRED": "a pursuit's end names its outcome",

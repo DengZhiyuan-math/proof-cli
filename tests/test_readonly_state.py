@@ -43,7 +43,7 @@ def test_a_read_of_a_fresh_project_needs_no_write(read_only_state, args):
     assert result.exit_code == 0 and json.loads(result.output)["ok"] is True, result.output
 
 
-@pytest.mark.parametrize("args", [["search", "Synthetic"], ["fog", "add", "an open point", "--near", "A", "--created-by", "human"]])
+@pytest.mark.parametrize("args", [["fog", "add", "an open point", "--near", "A", "--created-by", "human"]])
 def test_a_command_that_must_write_the_state_says_so_and_how_to_run_proof(read_only_state, args):
     result = runner.invoke(app, [*args, "--root", str(read_only_state), "--json"])
 
@@ -51,11 +51,24 @@ def test_a_command_that_must_write_the_state_says_so_and_how_to_run_proof(read_o
     assert result.exit_code == 1 and envelope["ok"] is False
     assert envelope["error"]["code"] == "PROJECT_STATE_READ_ONLY", envelope
     message = envelope["error"]["message"]
-    assert "a command of its own" in message and "redirect" in message, message
+    # a redirected command runs in the sandbox too: only a read may be redirected (a trial's `proof search … > file`)
+    assert "a command of its own" in message and "no pipe, redirection" in message and "only a read may be redirected" in message, message
+
+
+def test_a_search_answers_from_a_read_only_state_and_only_its_history_entry_is_skipped(read_only_state):
+    """A search is a read; it also logs itself in the project's session history. Under a read-only state (an agent's
+    `proof search … > scratch/x.txt` runs in the sandbox) the search failed on that log alone."""
+    result = runner.invoke(app, ["search", "Synthetic", "--root", str(read_only_state), "--json"])
+
+    envelope = json.loads(result.output)
+    assert result.exit_code == 0 and envelope["ok"] is True and "candidates" in envelope["data"], result.output
+    from proof_cli.storage import ProjectStore, read_state
+
+    assert not any(entry.startswith("search:") for entry in read_state(ProjectStore(read_only_state)).session_history)
 
 
 def test_without_json_it_is_an_error_line_not_a_traceback(read_only_state):
-    result = runner.invoke(app, ["search", "Synthetic", "--root", str(read_only_state)])
+    result = runner.invoke(app, ["fog", "add", "an open point", "--near", "A", "--created-by", "human", "--root", str(read_only_state)])
 
     assert result.exit_code == 1
     assert result.output.startswith("Error: ") and "a command of its own" in result.output

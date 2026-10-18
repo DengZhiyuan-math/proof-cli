@@ -30,12 +30,13 @@ from .storage import ProjectNotFoundError, acting_as, not_acting, read_only
 # What a command that may not write the project's state is told: in an agent's runtime that is `proof` joined with
 # another command in one Bash call, which Claude Code runs inside its sandbox, where .proof/ is not writable; run alone,
 # `proof` runs outside it under the role's own rules
-STATE_READ_ONLY = ("the project's state (.proof/) can't be written from here, so proof can't open it, even to read. In an "
-                   "agent's Bash call, run proof as a command of its own, never joined with another (|, &&, ;); to filter "
-                   "its output, redirect it to a file in your scratch folder and read that")
+STATE_READ_ONLY = ("the project's state (.proof/) can't be written from here, and what proof was asked has to write it. In an "
+                   "agent's Bash call, run a proof command that writes the project's state as a command of its own: no pipe, "
+                   "redirection or other command joined to it (|, >, &&, ;), which would run it in the sandbox; only a read may "
+                   "be redirected to a file in your scratch folder to filter its output")
 
 
-def _state_read_only(exc: BaseException) -> bool:
+def state_read_only(exc: BaseException) -> bool:
     """Whether SQLite refused because the project's state may not be written here (SQLITE_READONLY and its kinds)."""
     if not isinstance(exc, sqlite3.OperationalError):
         return False
@@ -138,7 +139,7 @@ class ProofGroup(TyperGroup):
                 typer.echo(f"Error: {exc}")
             code = 1
         except Exception as exc:  # noqa: BLE001 — the contract: an envelope, not a traceback
-            if _state_read_only(exc):  # SQLite cannot write .proof/ here, so it cannot open the state even to read
+            if state_read_only(exc):  # SQLite cannot write .proof/ here, so it cannot open the state even to read
                 if json_output:
                     typer.echo(dump_envelope(error_envelope(command, "PROJECT_STATE_READ_ONLY", STATE_READ_ONLY)))
                 else:
