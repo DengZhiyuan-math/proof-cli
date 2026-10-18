@@ -174,6 +174,11 @@ A Pursue has one total turn budget and one time limit, fixed at Start and shared
 On every Start, Project Pursue checks active local coverage before node runs. Parked, Rejected and detached split Claims, and nodes a dependency removal dropped from every route (nothing rests on them any more), with what only they rest on, are historical routes, not coverage blockers; a Done ending names the dropped ones and the removal that dropped each. An agent's local node outside every chosen Theorem's subtree ends the pursuit as Stuck, naming it, on every Start until someone wires, parks or deletes it. The researcher's own standalone work does not block: it is left outside this pursuit, and a Done ending names it. Done means the selected Theorem Coordinators ended Done, with no uncovered agent-made local nodes; another ending names the result that did not finish. This checks coverage and progress, not Human Review, and does not gate map edits on a Reader's notes.
 _Avoid_: autopilot, auto mode
 
+**Audit first**:
+A choice on a Pursue's Start (ADR-0024). Before anything else, each node whose snapshot awaits review gets one independent Verifier turn, briefed as an audit, leaves first. Its verdict is recorded as an Evidence check on that snapshot.
+A failed audit ends the node's Provisional standing and returns it to the agents until a new snapshot is up for review. A passed audit leaves the node as it is. An audit is advisory evidence, never Acceptance.
+_Avoid_: re-review, second review
+
 **Standing question**:
 A choice a role made itself where the text admits more than one reading, recorded in the Work log with the alternative, and answered by the researcher later from the Review queue; an answer that differs is a redirect (ADR-0021).
 _Avoid_: blocker, needs-human (which is for what no choice settles)
