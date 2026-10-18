@@ -1248,7 +1248,15 @@ def latest_event(store: ProjectStore, kind: str, entity_id: str, *, conn: sqlite
     )
 
 
+@memoized_read
 def list_events(store: ProjectStore) -> list[EventRecord]:
+    """The whole event log, oldest first, read and decoded in one pass.
+
+    Read once per read scope (#43): a page asks every node for its work log, its verdicts and its restatements, each a
+    pass over the whole log, and the log grows with every turn (a 1,639-event log was read and decoded 17 times per
+    map request). Any write drops it with the scope's other reads. It reads on a connection of its own, as it always
+    has, so inside a write transaction it never held the transaction's uncommitted events: remembering it there
+    changes nothing. Callers treat the list and its events as read-only: they are shared with the whole scope."""
     with store.connect() as conn:
         rows = conn.execute("SELECT id, kind, entity_id, message, payload, created_at FROM events ORDER BY created_at").fetchall()
     events: list[EventRecord] = []
