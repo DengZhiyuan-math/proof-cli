@@ -260,6 +260,9 @@ ERROR_CODES: dict[str, str] = {
     "INVALID_LIMITS": "a Pursue's limits are a whole number of turns (at least one) and a number of minutes (more than none)",
     "BUDGET_SPENT": "the Pursue's total turns or its time limit is spent; no new part of it starts",
     "NO_BUDGET": "no node budget to compute a Pursue's default total from before the Reader states the map",
+    # -- audit first: a Pursue that audits the work awaiting review before it goes on (ADR-0024) --
+    "AUDIT_ROLES": "an audit is the Verifier's one turn: it takes no other role",
+    "INVALID_AUDIT": "audit is true or false, and true needs a proof-agents that can audit first",
 }
 
 
