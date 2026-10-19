@@ -80,6 +80,11 @@ A fourth audit-first run, on one Theorem's subtree, ended Stuck on a parked node
 21. **A Pursue on one node's subtree is kept with the project** (extends point 14). It is recorded as a pursuit that names its root: its start, its spend as each turn ends, and its end or failed release. A restarted page reads its ending on that node's Coordinator. The project's Pursue view does not take it for the project's own; it says the Pursue came since.
 22. **No role's turn reads the project's own state** (extends point 16). The project's `.proof/` holds the earlier turns' conversations and the record an audit is not to read. A role reads the map through `proof`, which withholds what an audit may not see.
 
+A fifth audit-first run, on the subtree of a Claim resting on the main Theorem, ended Done. A review of its records found two gaps. A Typesetter turn that rewrote only key-ideas.md, the one file a failed audit faulted, was followed by a Prover turn that did nothing but hand it to the Verifier. And the briefing cut the node's own definitions in 17 turns of 21, and some part of the briefing in 19, so the turns read the node back with `proof node show` 39 times. These amendments are the researcher's decisions.
+
+23. **A Typesetter turn that changed key-ideas.md brings the Verifier back** (amends ADR-0019 point 6). The Verifier follows every Typesetter turn that changed a `.tex` file or key-ideas.md. The LaTeX is no longer all that will be frozen: a snapshot freezes the summary with the proof, the mechanical checks read it, and an audit can fail on it alone. A Typesetter turn that changed neither goes back to the Prover, as before.
+24. **The node's own statement and definitions have a cap of their own** (amends ADR-0019 point 9). Like its dependencies' statements, they are what the proof is checked against, and they are never cut to fit the rest of the briefing. Together they have 16,000 characters. Past that, the statement keeps what it needs first, and each definition keeps its head and says where to read it whole (`proof node show <node> --json`).
+
 ## Considered options
 
 - **Audit on every Start.** This is wasteful when the work was checked moments ago. Making it a choice keeps it to the occasions when the researcher wants it.
@@ -102,3 +107,4 @@ A fourth audit-first run, on one Theorem's subtree, ended Stuck on a parked node
   - proof-agents: the Coordinator's `audit_outcomes` hook, read at Start and for the totals rather than on every look at the subtree, and its `ended` hook; the run's `request_review` hook; a role's turn given its tools alone (`--tools`), no skills and no MCP server but the studio's compile tool, and no read of `.proof/`.
   - proof-web: implements the three hooks; records a subtree's Pursue; the subtree card shows its last recorded ending and the failed audits.
   - proof-cli: `record_pursuit(root=…)`, read back by `project_progress` and named by `proof project progress`.
+- **The fifth amendment (points 23–24):** proof-agents alone: the run's choice of the role after a Typesetter turn, and the briefing's own cap for the node's statement and definitions (`NODE_SHOWN`).

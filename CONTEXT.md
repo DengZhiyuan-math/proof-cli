@@ -154,7 +154,7 @@ A passed or failed adversarial reading in the Work log, bound to the SHA-256 of 
 An insert-only Work log entry naming what a proof approach tried to establish, its method and the obstruction. Failed Verdict objections and stuck steps also enter the next Briefing as attempts (ADR-0019).
 
 **Briefing**:
-The bounded context the run builds for each turn from statements, the researcher's redirect, hand-off, Verdict objections, Attempts and shared Memory. Shared observations stay unverified. The researcher's working-input diff comes first when the inputs changed since the previous turn ended (ADR-0019).
+The bounded context the run builds for each turn from statements, the researcher's redirect, hand-off, Verdict objections, Attempts and shared Memory. Shared observations stay unverified. The researcher's working-input diff comes first when the inputs changed since the previous turn ended (ADR-0019). The node's own statement and definitions, and its dependencies' statements, have caps of their own and are never cut to fit the rest (ADR-0024 point 24).
 
 **Coordinator**:
 A subtree controller started by the researcher on a Theorem or Lemma. It holds no claim and takes no turn. It starts frontier node runs within the parallel limit, retries within each node's remaining budget, and redirects dependents after Acceptance. It starts a parent once every child is Accepted or Provisional, restarts stuck runs and parks a node whose budget is spent; it never waits for Human Review and never makes a Review decision. Pause holds its runs at turn boundaries; Stop and release releases the runs it still owns (ADR-0019, ADR-0021).
