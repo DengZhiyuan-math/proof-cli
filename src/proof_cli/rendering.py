@@ -477,7 +477,8 @@ def render_project_progress(pursuits: list[dict]) -> str:
         console.print("No project Pursue was recorded here.")
         return console.export_text()
     for pursuit in pursuits:
-        console.print(f"{pursuit['pursuit_id']}  {pursuit['status']}  provider {pursuit['provider'] or '—'}  started {pursuit['started_at']}")
+        where = f"  on {pursuit['root']}'s subtree" if pursuit.get("root") else ""
+        console.print(f"{pursuit['pursuit_id']}  {pursuit['status']}{where}  provider {pursuit['provider'] or '—'}  started {pursuit['started_at']}")
         if pursuit["reason"]:
             console.print(f"  {pursuit['reason']}")
         last_spend = max((i for i, e in enumerate(pursuit["events"]) if e["phase"] == "spend"), default=None)

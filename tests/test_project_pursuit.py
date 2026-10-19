@@ -214,3 +214,22 @@ def test_an_audit_start_is_kept_with_the_pursuit(tmp_path: Path):
     assert views[audited]["audit"] is True and views[plain]["audit"] is False
     with pytest.raises(ProofMapError):
         P.record_pursuit(store, "end", pursuit_id=audited, outcome="done", audit=True)   # only a start says it
+
+
+def test_a_start_on_one_nodes_subtree_is_kept_with_its_root(tmp_path: Path):
+    """A Pursue on one Theorem's or Lemma's subtree (its Coordinator's Start) is kept as a pursuit too, naming its root: a
+    trial's subtree Start lived in memory only, so a restarted page read the project's older Pursue, done, as the last."""
+    store = ensure_project(tmp_path)
+    project = _start(store)
+    P.record_pursuit(store, "end", pursuit_id=project, outcome="done")
+    subtree = P.record_pursuit(store, "start", provider="claude", root="T", audit=True).payload["pursuit_id"]
+    P.record_pursuit(store, "end", pursuit_id=subtree, outcome="stuck", reason="T rests on parked L")
+    views = {view["pursuit_id"]: view for view in P.project_progress(store)}
+    assert views[project]["root"] is None
+    assert views[subtree]["root"] == "T" and views[subtree]["status"] == "stuck" and views[subtree]["audit"] is True
+    with pytest.raises(ProofMapError):
+        P.record_pursuit(store, "end", pursuit_id=project, outcome="done", root="T")   # only a start names it
+    with pytest.raises(ProofMapError):
+        P.record_pursuit(store, "start", provider="claude", root=" ")
+    plain = runner.invoke(app, ["project", "progress", "--root", str(tmp_path)]).output
+    assert "on T's subtree" in plain and plain.count("on T's subtree") == 1

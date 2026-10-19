@@ -745,11 +745,43 @@ def active_transaction(store: ProjectStore) -> sqlite3.Connection | None:
 
 # -- one read, one pass (#43) --------------------------------------------------------
 
-# The read scope this thread is in, if any: its memo {(function, root, args): result},
-# and the write transaction it was opened in (None outside one).
-class _ReadScope(NamedTuple):
-    memo: dict
-    transaction: _ActiveTransaction | None
+class _ScopeReader:
+    """The one read connection a read scope opens on a project's database, on its first read there.
+
+    A page read asks every node for its claim, proofs, pins, Challenges and work log, and a connection per read,
+    each checking the schema with two PRAGMAs, came to ~390 connections, 0.10 s of a 0.21 s map on a 2,311-event
+    trial log. `users` counts the `_reading` blocks on it now; `retired`, that a write or the scope's end retired it:
+    it is closed once they are done, and the scope's next read, if any, opens another."""
+
+    __slots__ = ("conn", "users", "retired")
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn, self.users, self.retired = conn, 0, False
+
+
+class _ReadScope:
+    """The read scope this thread is in: its memo {(function, root, args): result}, the write transaction it was
+    opened in (None outside one), the thread that opened it, and its read connections by project root."""
+
+    __slots__ = ("memo", "transaction", "thread_id", "readers", "open")
+
+    def __init__(self, transaction: _ActiveTransaction | None) -> None:
+        self.memo: dict = {}
+        self.transaction = transaction
+        self.thread_id = threading.get_ident()
+        self.readers: dict[Path, _ScopeReader] = {}
+        self.open = True
+
+    def retire_readers(self) -> None:
+        """Close the scope's read connections, each once no read is using it; a later read opens a fresh one.
+        Only the scope's own thread does: a connection is closed on the thread that opened it, and no other uses it."""
+        if threading.get_ident() != self.thread_id:
+            return
+        readers, self.readers = list(self.readers.values()), {}
+        for reader in readers:
+            reader.retired = True
+            if reader.users == 0:
+                reader.conn.close()
 
 
 _READ_SCOPE: ContextVar[_ReadScope | None] = ContextVar("proof_cli_read_scope", default=None)
@@ -757,7 +789,7 @@ _READ_SCOPE: ContextVar[_ReadScope | None] = ContextVar("proof_cli_read_scope", 
 
 @contextmanager
 def read_scope() -> Iterator[None]:
-    """Answer each `memoized_read` once for the duration, however many nodes ask.
+    """Answer each `memoized_read` once for the duration, however many nodes ask, and read on one connection.
 
     For one read of the project (the frontier, a node's axes, the map, a
     decision's precondition check): nothing is written during it, so a
@@ -766,24 +798,34 @@ def read_scope() -> Iterator[None]:
     opened outside a transaction does nothing inside a later one, which
     sees what it writes. Any write inside the scope drops what was
     remembered. A nested scope in the same transaction joins the outer one.
+
+    Its reads share one connection (`_reading`), opened on the first and
+    closed when the scope ends, or when this thread writes.
     """
     transaction = _ACTIVE_TRANSACTION.get()
     current = _READ_SCOPE.get()
     if current is not None and current.transaction is transaction:
         yield
         return
-    token = _READ_SCOPE.set(_ReadScope({}, transaction))
+    scope = _ReadScope(transaction)
+    token = _READ_SCOPE.set(scope)
     try:
         yield
     finally:
         _READ_SCOPE.reset(token)
+        scope.open = False  # a context copied from inside it (a task, a worker) reads on its own connections from now
+        scope.retire_readers()
 
 
 def forget_reads() -> None:
-    """Drop what the current read scope remembered: something was just written."""
+    """Drop what the current read scope remembered: something was just written.
+
+    Its read connection goes too: a write by this thread, before it begins and once it has committed, never waits on
+    a read of this scope's, and the next read starts afresh."""
     scope = _READ_SCOPE.get()
     if scope is not None:
         scope.memo.clear()
+        scope.retire_readers()
 
 
 def memoized_read(func):
@@ -873,15 +915,46 @@ def _writing(store: ProjectStore, conn: sqlite3.Connection | None) -> Iterator[s
 @contextmanager
 def _reading(store: ProjectStore, conn: sqlite3.Connection | None) -> Iterator[sqlite3.Connection]:
     """The connection a read helper should use: the caller's, which sees its own uncommitted
-    writes and holds its write lock, or else a fresh one, closed afterwards."""
+    writes and holds its write lock; else, inside a read scope, the scope's one read connection
+    (#43); or else a fresh one, closed afterwards. Writes never go through here.
+
+    The scope's connection is opened as a fresh one is (`store.connect()`: the schema check, the busy
+    timeout, `read_only()`), on the scope's first read, and serves only the thread and the write
+    transaction the scope was opened in. It runs no transaction of its own: Python's sqlite3 begins
+    one implicitly only before an INSERT, UPDATE, DELETE or REPLACE, so each SELECT reads what is
+    committed when it runs, and with its statement done holds no lock a writer would wait on."""
     if conn is not None:
         yield conn
         return
-    own = store.connect()
+    reader = _scope_reader(store)
+    if reader is None:
+        own = store.connect()
+        try:
+            yield own
+        finally:
+            own.close()
+        return
+    reader.users += 1
     try:
-        yield own
+        yield reader.conn
     finally:
-        own.close()
+        reader.users -= 1
+        if reader.conn.in_transaction:  # written on, which no read helper does: undone, as closing a fresh one would
+            reader.conn.rollback()
+        if reader.retired and reader.users == 0:
+            reader.conn.close()
+
+
+def _scope_reader(store: ProjectStore) -> _ScopeReader | None:
+    """The current read scope's read connection to `store`'s database, opened on first use; None outside a scope,
+    on another thread than the scope's, or inside a write transaction the scope wasn't opened in."""
+    scope = _READ_SCOPE.get()
+    if scope is None or not scope.open or scope.thread_id != threading.get_ident() or scope.transaction is not _ACTIVE_TRANSACTION.get():
+        return None
+    reader = scope.readers.get(store.root)
+    if reader is None:
+        reader = scope.readers[store.root] = _ScopeReader(store.connect())
+    return reader
 
 
 def project_proof_dir(store: ProjectStore) -> Path:
@@ -1056,7 +1129,7 @@ def load_project(root: str | Path) -> ProjectStore:
 
 
 def read_state(store: ProjectStore) -> ProjectState:
-    with store.connect() as conn:
+    with _reading(store, None) as conn:
         row = conn.execute("SELECT data FROM state LIMIT 1").fetchone()
         if row is None:
             raise ValueError("project state not found")
@@ -1207,7 +1280,7 @@ def update_contract(store: ProjectStore, contract: TheoremContract) -> TheoremCo
 
 
 def list_contracts(store: ProjectStore) -> list[TheoremContract]:
-    with store.connect() as conn:
+    with _reading(store, None) as conn:
         rows = conn.execute(
             """
             SELECT data FROM theorem_contracts
@@ -1219,7 +1292,7 @@ def list_contracts(store: ProjectStore) -> list[TheoremContract]:
 
 
 def get_contract(store: ProjectStore, contract_id: str) -> TheoremContract | None:
-    with store.connect() as conn:
+    with _reading(store, None) as conn:
         row = conn.execute(
             """
             SELECT data FROM theorem_contracts
@@ -1254,10 +1327,11 @@ def list_events(store: ProjectStore) -> list[EventRecord]:
 
     Read once per read scope (#43): a page asks every node for its work log, its verdicts and its restatements, each a
     pass over the whole log, and the log grows with every turn (a 1,639-event log was read and decoded 17 times per
-    map request). Any write drops it with the scope's other reads. It reads on a connection of its own, as it always
-    has, so inside a write transaction it never held the transaction's uncommitted events: remembering it there
-    changes nothing. Callers treat the list and its events as read-only: they are shared with the whole scope."""
-    with store.connect() as conn:
+    map request). Any write drops it with the scope's other reads. It reads on a connection of its own (or the read
+    scope's), as it always has, so inside a write transaction it never held the transaction's uncommitted events:
+    remembering it there changes nothing. Callers treat the list and its events as read-only: they are shared with the
+    whole scope."""
+    with _reading(store, None) as conn:
         rows = conn.execute("SELECT id, kind, entity_id, message, payload, created_at FROM events ORDER BY created_at").fetchall()
     events: list[EventRecord] = []
     for row in rows:
@@ -1400,13 +1474,13 @@ def get_reference(store: ProjectStore, reference_id: str, *, conn: sqlite3.Conne
 
 
 def list_references(store: ProjectStore) -> list[ReferenceRecord]:
-    with store.connect() as conn:
+    with _reading(store, None) as conn:
         rows = conn.execute("SELECT data FROM reference_records ORDER BY updated_at, id").fetchall()
     return [REFERENCE_ADAPTER.validate_json(row["data"]) for row in rows]
 
 
 def list_reference_reviews(store: ProjectStore) -> list[ReferenceReviewRecord]:
-    with store.connect() as conn:
+    with _reading(store, None) as conn:
         rows = conn.execute("SELECT data FROM reference_reviews ORDER BY created_at, id").fetchall()
     return [REFERENCE_REVIEW_ADAPTER.validate_json(row["data"]) for row in rows]
 
@@ -1421,7 +1495,7 @@ def store_obligation(store: ProjectStore, obligation: ProofObligation) -> ProofO
 
 
 def list_obligations(store: ProjectStore) -> list[ProofObligation]:
-    with store.connect() as conn:
+    with _reading(store, None) as conn:
         rows = conn.execute("SELECT data FROM obligations ORDER BY id").fetchall()
     return [OBLIGATION_ADAPTER.validate_json(row["data"]) for row in rows]
 
@@ -1436,7 +1510,7 @@ def store_blocker(store: ProjectStore, blocker: BlockerRecord) -> BlockerRecord:
 
 
 def list_blockers(store: ProjectStore) -> list[BlockerRecord]:
-    with store.connect() as conn:
+    with _reading(store, None) as conn:
         rows = conn.execute("SELECT data FROM blockers ORDER BY id").fetchall()
     return [BLOCKER_ADAPTER.validate_json(row["data"]) for row in rows]
 
@@ -1474,7 +1548,7 @@ def update_proof_map_node(store: ProjectStore, node: ProofMapNode, *, conn: sqli
 
 
 def get_proof_map_node(store: ProjectStore, node_id: str) -> ProofMapNode | None:
-    with store.connect() as conn:
+    with _reading(store, None) as conn:
         row = conn.execute(
             "SELECT data FROM proof_map_nodes WHERE id = ? LIMIT 1",
             (node_id,),
@@ -1483,7 +1557,7 @@ def get_proof_map_node(store: ProjectStore, node_id: str) -> ProofMapNode | None
 
 
 def list_proof_map_nodes(store: ProjectStore) -> list[ProofMapNode]:
-    with store.connect() as conn:
+    with _reading(store, None) as conn:
         rows = conn.execute("SELECT data FROM proof_map_nodes ORDER BY id").fetchall()
     return [PROOF_MAP_NODE_ADAPTER.validate_json(row["data"]) for row in rows]
 
@@ -1535,7 +1609,7 @@ def get_active_claim(store: ProjectStore, node_id: str, *, conn: sqlite3.Connect
 
 def list_all_claims(store: ProjectStore) -> list[ClaimRecord]:
     """Every claim in the project — active and released — for a full-fidelity export (issue #31)."""
-    with store.connect() as conn:
+    with _reading(store, None) as conn:
         rows = conn.execute("SELECT * FROM claims ORDER BY claimed_at").fetchall()
     return [_row_to_claim(row) for row in rows]
 
@@ -1652,7 +1726,7 @@ def set_candidate_proof_review_record_id(
 
 @memoized_read
 def get_candidate_proof(store: ProjectStore, candidate_proof_id: str) -> CandidateProofRecord | None:
-    with store.connect() as conn:
+    with _reading(store, None) as conn:
         row = conn.execute(
             "SELECT * FROM candidate_proofs WHERE id = ? LIMIT 1",
             (candidate_proof_id,),
@@ -1661,7 +1735,7 @@ def get_candidate_proof(store: ProjectStore, candidate_proof_id: str) -> Candida
 
 
 def list_candidate_proofs_for_node(store: ProjectStore, node_id: str) -> list[CandidateProofRecord]:
-    with store.connect() as conn:
+    with _reading(store, None) as conn:
         rows = conn.execute(
             "SELECT * FROM candidate_proofs WHERE node_id = ? ORDER BY version",
             (node_id,),
@@ -1688,7 +1762,7 @@ def list_all_candidate_proofs(store: ProjectStore) -> list[CandidateProofRecord]
     themselves live in the Proof vault (`proofs/<node-id>/snapshots/`); an
     exchange bundle carries them beside this index (`ExchangeBundle.vault_files`).
     """
-    with store.connect() as conn:
+    with _reading(store, None) as conn:
         rows = conn.execute("SELECT * FROM candidate_proofs ORDER BY node_id, version").fetchall()
     return [_row_to_candidate_proof(row) for row in rows]
 
@@ -1738,7 +1812,7 @@ def upsert_dependency_pin(store: ProjectStore, pin: DependencyPin, *, conn: sqli
 
 
 def get_dependency_pin(store: ProjectStore, node_id: str, target_node_id: str) -> DependencyPin | None:
-    with store.connect() as conn:
+    with _reading(store, None) as conn:
         row = conn.execute(
             "SELECT * FROM dependency_pins WHERE node_id = ? AND target_node_id = ? LIMIT 1",
             (node_id, target_node_id),
@@ -1752,7 +1826,7 @@ def delete_dependency_pin(store: ProjectStore, node_id: str, target_node_id: str
 
 
 def list_dependency_pins_for_node(store: ProjectStore, node_id: str) -> list[DependencyPin]:
-    with store.connect() as conn:
+    with _reading(store, None) as conn:
         rows = conn.execute(
             "SELECT * FROM dependency_pins WHERE node_id = ? ORDER BY target_node_id",
             (node_id,),
@@ -1762,7 +1836,7 @@ def list_dependency_pins_for_node(store: ProjectStore, node_id: str) -> list[Dep
 
 def list_all_dependency_pins(store: ProjectStore) -> list[DependencyPin]:
     """Every dependency pin across the whole project, for a full-fidelity export (issue #31)."""
-    with store.connect() as conn:
+    with _reading(store, None) as conn:
         rows = conn.execute("SELECT * FROM dependency_pins ORDER BY node_id, target_node_id").fetchall()
     return [_row_to_dependency_pin(row) for row in rows]
 
@@ -1803,7 +1877,7 @@ def insert_challenge(store: ProjectStore, challenge: Challenge, *, conn: sqlite3
 
 
 def get_challenge(store: ProjectStore, challenge_id: str) -> Challenge | None:
-    with store.connect() as conn:
+    with _reading(store, None) as conn:
         row = conn.execute("SELECT * FROM challenges WHERE id = ? LIMIT 1", (challenge_id,)).fetchone()
     return _row_to_challenge(row) if row else None
 
@@ -1821,7 +1895,7 @@ def list_challenges(store: ProjectStore, *, target_node_id: str = "", status: st
     if conditions:
         query += " WHERE " + " AND ".join(conditions)
     query += " ORDER BY created_at"
-    with store.connect() as conn:
+    with _reading(store, None) as conn:
         rows = conn.execute(query, params).fetchall()
     return [_row_to_challenge(row) for row in rows]
 
@@ -1879,13 +1953,13 @@ def insert_evidence_check(store: ProjectStore, check: EvidenceCheck) -> Evidence
 
 
 def get_evidence_check(store: ProjectStore, check_id: str) -> EvidenceCheck | None:
-    with store.connect() as conn:
+    with _reading(store, None) as conn:
         row = conn.execute("SELECT * FROM evidence_checks WHERE id = ? LIMIT 1", (check_id,)).fetchone()
     return _row_to_evidence_check(row) if row else None
 
 
 def list_evidence_checks_for_candidate_proof(store: ProjectStore, candidate_proof_id: str) -> list[EvidenceCheck]:
-    with store.connect() as conn:
+    with _reading(store, None) as conn:
         rows = conn.execute(
             "SELECT * FROM evidence_checks WHERE candidate_proof_id = ? ORDER BY created_at",
             (candidate_proof_id,),
@@ -1895,7 +1969,7 @@ def list_evidence_checks_for_candidate_proof(store: ProjectStore, candidate_proo
 
 def list_all_evidence_checks(store: ProjectStore) -> list[EvidenceCheck]:
     """Every evidence check across the whole project, for a full-fidelity export (issue #31)."""
-    with store.connect() as conn:
+    with _reading(store, None) as conn:
         rows = conn.execute("SELECT * FROM evidence_checks ORDER BY candidate_proof_id, created_at").fetchall()
     return [_row_to_evidence_check(row) for row in rows]
 
@@ -1916,7 +1990,7 @@ def insert_governance_record(store: ProjectStore, *, kind: str, data: str) -> No
 
 
 def list_governance_records(store: ProjectStore, *, kind: str) -> list[str]:
-    with store.connect() as conn:
+    with _reading(store, None) as conn:
         rows = conn.execute(
             "SELECT data FROM governance_records WHERE kind = ? ORDER BY created_at, rowid",
             (kind,),
@@ -1935,7 +2009,7 @@ def store_snapshot(store: ProjectStore, snapshot: ProjectSnapshot, *, replace: b
 
 
 def read_latest_snapshot(store: ProjectStore) -> ProjectSnapshot | None:
-    with store.connect() as conn:
+    with _reading(store, None) as conn:
         row = conn.execute("SELECT data FROM snapshots ORDER BY created_at DESC LIMIT 1").fetchone()
     return SNAPSHOT_ADAPTER.validate_json(row["data"]) if row else None
 
@@ -1950,7 +2024,7 @@ def store_publication_state(store: ProjectStore, project_id: str, data: str, *, 
 
 
 def read_publication_state(store: ProjectStore) -> str | None:
-    with store.connect() as conn:
+    with _reading(store, None) as conn:
         row = conn.execute("SELECT data FROM publication_state ORDER BY updated_at DESC LIMIT 1").fetchone()
     return row["data"] if row else None
 
@@ -1973,13 +2047,13 @@ def store_publication_bundle_snapshot(
 
 
 def list_publication_bundle_snapshots(store: ProjectStore) -> list[str]:
-    with store.connect() as conn:
+    with _reading(store, None) as conn:
         rows = conn.execute("SELECT data FROM publication_bundle_snapshots ORDER BY created_at, id").fetchall()
     return [row["data"] for row in rows]
 
 
 def read_latest_publication_bundle_snapshot(store: ProjectStore) -> str | None:
-    with store.connect() as conn:
+    with _reading(store, None) as conn:
         row = conn.execute("SELECT data FROM publication_bundle_snapshots ORDER BY created_at DESC LIMIT 1").fetchone()
     return row["data"] if row else None
 
@@ -2038,7 +2112,7 @@ def insert_review_history_row(conn: sqlite3.Connection, row: dict) -> None:
 
 def read_project_instance_id(store: ProjectStore) -> str:
     """The instance id, created (once, on the caller's transaction if one is open) for a pre-#35 project."""
-    with store.connect() as conn:
+    with _reading(store, None) as conn:
         row = conn.execute("SELECT value FROM project_meta WHERE key = ?", (INSTANCE_ID_KEY,)).fetchone()
     if row is not None:
         return row["value"]
@@ -2095,11 +2169,8 @@ def list_review_history_rows(
     if conditions:
         query += " WHERE " + " AND ".join(conditions)
     query += " ORDER BY seq"
-    if conn is not None:
-        rows = conn.execute(query, params).fetchall()
-    else:
-        with store.connect() as own:
-            rows = own.execute(query, params).fetchall()
+    with _reading(store, conn) as reader:
+        rows = reader.execute(query, params).fetchall()
     return [_row_to_review_history(row) for row in rows]
 
 

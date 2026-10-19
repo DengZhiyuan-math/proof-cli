@@ -66,6 +66,20 @@ A review of a third audit-first run's records found that its audit Start re-read
     - **The ending names what it skipped,** and the default total counts only the nodes the Start audits.
 16. **An audit's runtime keeps the earlier record out of reach** (point 13). `proof node show --json` withholds every node's Evidence checks, the work log read gives only the Standing questions and their answers, and the audit works in a scratch folder of its own, made empty.
 
+## Amendment: what a fourth audit-first trial showed (2026-10-19)
+
+A fourth audit-first run, on one Theorem's subtree, ended Stuck on a parked node. A review of its records found three gaps. A node was audited while a failed node further down was still being worked. The outcome of a failed audit, and the Start's own ending, lived only in the hub's memory, so a restarted page read the project's older Pursue, Done, as the last. And Prover turns were spent only on requesting review once the Verifier had passed the files. These amendments are the researcher's decisions.
+
+17. **Leaves first, through everything beneath** (amends points 4 and 11). A node is audited once every node beneath it, not only its direct dependencies, that the Start audits has been audited. It is not audited while a node beneath it failed its audit and no rework has fixed it yet.
+18. **A failed audit stands across Starts** (amends points 4 and 5).
+    - **Read off the record.** How the newest audit of each snapshot awaiting review ended, passed or failed, is read off the node's work log when a Start begins. A pass counts only while nothing the node rests on has changed since (point 15). A failure stands until the node is worked again.
+    - **Any Start works the failed nodes again first.** A plain Start does as an audit Start does: the failed nodes are reworked before the others. An audit Start does not audit them again.
+    - **The ending names the cause.** A failed audit that no rework fixed because its node rests on a parked node names that node.
+19. **The run requests review itself** (amends ADR-0019 point 3). Once the Verifier passed the files as they stand and the mechanical checks pass, the run requests review under its own name, by the verdict's hash. Its rationale is the hand-off to the Verifier. The request is refused on the same grounds as the Prover's: a stale verdict, a failing check, no key ideas. A refused request is left to the Prover's next turn, as before.
+20. **A re-split that keeps the parked Claim holds its new Claims** (amends ADR-0021 point 9). The Decomposer's further turn on a parked Claim's parent goes ahead as before. While the parent still rests on the parked Claim, the Claims the re-split made are not started: the structure they serve waits on the researcher's decision about the parked Claim. They start once the parent no longer rests on a parked node.
+21. **A Pursue on one node's subtree is kept with the project** (extends point 14). It is recorded as a pursuit that names its root: its start, its spend as each turn ends, and its end or failed release. A restarted page reads its ending on that node's Coordinator. The project's Pursue view does not take it for the project's own; it says the Pursue came since.
+22. **No role's turn reads the project's own state** (extends point 16). The project's `.proof/` holds the earlier turns' conversations and the record an audit is not to read. A role reads the map through `proof`, which withholds what an audit may not see.
+
 ## Considered options
 
 - **Audit on every Start.** This is wasteful when the work was checked moments ago. Making it a choice keeps it to the occasions when the researcher wants it.
@@ -84,3 +98,7 @@ A review of a third audit-first run's records found that its audit Start re-read
   - the subtree card's "Audit first, then Pursue" and what the audit found.
 - **proof-cli:** registers the error codes `AUDIT_ROLES` and `INVALID_AUDIT`. In an audit's runtime (`PROOF_AGENT_AUDIT`, point 13), `proof node show --json` withholds every node's Evidence checks and `proof node progress <node>` reads only the Standing questions and their answers. Nothing else changes: an Evidence check's failed outcome already ends a pass.
 - **CONTEXT.md gains** Audit first.
+- **The fourth amendment (points 17–22):**
+  - proof-agents: the Coordinator's `audit_outcomes` hook, read at Start and for the totals rather than on every look at the subtree, and its `ended` hook; the run's `request_review` hook; a role's turn given its tools alone (`--tools`), no skills and no MCP server but the studio's compile tool, and no read of `.proof/`.
+  - proof-web: implements the three hooks; records a subtree's Pursue; the subtree card shows its last recorded ending and the failed audits.
+  - proof-cli: `record_pursuit(root=…)`, read back by `project_progress` and named by `proof project progress`.
