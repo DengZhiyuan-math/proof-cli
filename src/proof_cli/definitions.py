@@ -34,6 +34,7 @@ from .storage import (
     get_definition,
     insert_definition,
     list_definitions,
+    list_proof_map_nodes,
     update_definition,
 )
 
@@ -79,8 +80,7 @@ def _nodes_naming(store: ProjectStore, definition_id: str, *, conn=None) -> list
 
     if conn is not None:
         return scan(conn)
-    with store.connect() as own:
-        return scan(own)
+    return [node for node in list_proof_map_nodes(store) if definition_id in node.definitions]  # a read scope's one connection (#43)
 
 
 def definitions_of(store: ProjectStore, node: ProofMapNode, *, conn=None) -> list[Definition]:
