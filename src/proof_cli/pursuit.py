@@ -1,7 +1,8 @@
 """A project Pursue's history: the `pursuit` events (ADR-0021 audit section 1, issue #201).
 
 A project Pursue (proof-agents' `ProjectPursuit`) runs a Reader turn and then one Coordinator per
-Theorem. The host that runs it records each step here, through `record_pursuit`, as an
+Theorem; a Pursue on one node's subtree runs that node's Coordinator alone, and is kept here too,
+naming its `root`. The host that runs it records each step here, through `record_pursuit`, as an
 append-only event in the project's own SQLite events (`entity_id` None: a pursuit is no node, and
 no node is borrowed to hold a Reader's failure). `project_progress` reads them back, for
 `proof project progress` and for the page after a restart.
@@ -61,12 +62,14 @@ def record_pursuit(
     results: dict[str, Any] | None = None,
     launched: bool | None = None,
     audit: bool | None = None,
+    root: str | None = None,
 ) -> EventRecord:
     """Append one `pursuit` event. `start` makes the pursuit's id (read it from the event's payload);
     every other phase names a started pursuit that has not ended, and `end` names its outcome. `budget` is the
     pursuit's whole total and what it has spent so far, `results` each Theorem's result so far (#223). On a
     `reader_end`, `launched` says whether the Reader's turn began (its job existed) or was refused before (#224). On a
-    `start`, `audit` says the Pursue audits first (ADR-0024)."""
+    `start`, `audit` says the Pursue audits first (ADR-0024), and `root` names the node whose subtree it pursues — a
+    Theorem's or Lemma's own Start, by its Coordinator, rather than the project's Pursue (None)."""
     if phase not in PHASES:
         raise ProofMapError("INVALID_PURSUIT_PHASE", f"not a pursuit phase: {phase!r}", details={"phases": list(PHASES)})
     if phase == "start":
@@ -79,6 +82,8 @@ def record_pursuit(
         raise ProofMapError("PURSUIT_OUTCOME_REQUIRED", "a pursuit's end names its outcome")
     if audit is not None and phase != "start":
         raise ProofMapError("INVALID_PURSUIT_PHASE", "only a start says whether the Pursue audits first")
+    if root is not None and (phase != "start" or not root.strip()):
+        raise ProofMapError("INVALID_PURSUIT_PHASE", "only a start names the node whose subtree it pursues, by its id")
     payload = {
         "pursuit_id": pursuit_id,
         "phase": phase,
@@ -90,6 +95,7 @@ def record_pursuit(
         "results": results,
         "launched": launched,
         "audit": audit,
+        "root": root.strip() if root is not None else None,
     }
     message = f"pursuit {pursuit_id}: {phase}" + (f" {payload['outcome']}" if payload["outcome"] else "") + (f": {payload['reason']}" if payload["reason"] else "")
     try:
@@ -120,6 +126,7 @@ def _event_view(event: EventRecord) -> dict[str, Any]:
         "results": p.get("results"),
         "launched": p.get("launched"),
         "audit": p.get("audit"),
+        "root": p.get("root"),
         "created_at": event.created_at.isoformat(),
     }
 
@@ -157,6 +164,7 @@ def project_progress(store: ProjectStore, *, live: str | None = None) -> list[di
                 "reason": reason,
                 "provider": events[0]["provider"],
                 "audit": bool(events[0]["audit"]),   # ADR-0024: whether it audited first; a start from before says nothing
+                "root": events[0]["root"],   # the node whose subtree it pursued; None: the project's Pursue
                 "theorem": theorems[-1] if theorems else None,
                 "budget": budgets[-1] if budgets else None,
                 "results": results[-1] if results else None,

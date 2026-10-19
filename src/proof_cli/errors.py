@@ -244,7 +244,7 @@ ERROR_CODES: dict[str, str] = {
     "TURN_ENDED": "this turn (a node's, or a discussion turn) has ended already; its record is kept as it is and a second end is not recorded",
     "TURN_CALLED_OFF": "the run was stopped while its turn was being prepared, so no turn started",
     # -- a project Pursue's history: the `pursuit` events (ADR-0021 audit section 1, issue #201) --
-    "INVALID_PURSUIT_PHASE": "not a pursuit phase (start, reader_end, theorem, spend, stop, release_failed, end), a start given an id (a start makes its own), or audit given to a phase other than start",
+    "INVALID_PURSUIT_PHASE": "not a pursuit phase (start, reader_end, theorem, spend, stop, release_failed, end), a start given an id (a start makes its own), audit or root given to a phase other than start, or an empty root",
     "PURSUIT_NOT_FOUND": "no pursuit was started under this id",
     "PURSUIT_ENDED": "the pursuit has ended; nothing more is recorded for it",
     "PURSUIT_OUTCOME_REQUIRED": "a pursuit's end names its outcome",
