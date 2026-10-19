@@ -133,7 +133,7 @@ The agent run a node's studio starts and the researcher watches: one run holds t
 _Avoid_: assistant, chat, agent panel (the panel is where it is watched), prompt-driven
 
 **Prover** (a Proof agent role):
-Finds the proof — retrieval first, then reasoning — and writes its structure as a draft in `scratch/`; decides when to split the node and requests review only after the newest Verifier verdict passes the current working inputs; may open a Challenge on a dependency that may no longer hold (`proof challenge open`; dismissing or resolving one stays the researcher's); hands work to the Typesetter or Numerics and takes it back.
+Finds the proof — retrieval first, then reasoning — and writes its structure as a draft in `scratch/`; decides when to split the node; review is requested only after the newest Verifier verdict passes the current working inputs — by the run itself, under its name, the moment that verdict stands with the checks passing, or by the Prover when the run's request is refused (ADR-0024 point 19); may open a Challenge on a dependency that may no longer hold (`proof challenge open`; dismissing or resolving one stays the researcher's); hands work to the Typesetter or Numerics and takes it back.
 _Avoid_: solver, assistant
 
 **Typesetter** (a Proof agent role):
@@ -169,7 +169,7 @@ The Reader phase uses at most one quarter of the total minutes; cancellation pre
 _Avoid_: importer, parser, formalizer
 
 **Pursue**:
-The researcher's one action that sets the agents working to the end: a Coordinator on a Theorem, preceded by a Decomposer turn when it has no Claims, or by a Reader turn when started on a project with no map (ADR-0021). A project Pursue's steps are recorded as `pursuit` events, read by `proof project progress`; one with no recorded end reads interrupted, and nothing resumes it (issue #201). What it has spent is recorded as each turn ends, so an interrupted one reads back what it spent, as incomplete. On a map that is already there, the page offers it once the map has a Theorem, with audit first when nodes await review (ADR-0024).
+The researcher's one action that sets the agents working to the end: a Coordinator on a Theorem, preceded by a Decomposer turn when it has no Claims, or by a Reader turn when started on a project with no map (ADR-0021). A project Pursue's steps are recorded as `pursuit` events, read by `proof project progress`; one with no recorded end reads interrupted, and nothing resumes it (issue #201). What it has spent is recorded as each turn ends, so an interrupted one reads back what it spent, as incomplete. A Pursue on one node's subtree is recorded the same way, naming its root: a restarted page reads its ending on that node, never as the project's own Pursue (ADR-0024 point 21). On a map that is already there, the page offers it once the map has a Theorem, with audit first when nodes await review (ADR-0024).
 A Pursue has one total turn budget and one time limit, fixed at Start and shared by its Reader, Decomposers and node runs. Each node turn reserves one unit as it starts, so parallel runs share the total turn by turn; a node's own budget is a ceiling on its turns, never an allocation. The Reader runs alone before the node runs, and its actual turns are counted when that phase ends. A turn whose backend started consumes its unit even if Stop follows. A failed launch returns its reserved unit and is recorded separately. Cancellation before backend startup returns the unit without counting a turn or a failed launch (proof-agents#19).
 On every Start, Project Pursue checks active local coverage before node runs. Parked, Rejected and detached split Claims, and nodes a dependency removal dropped from every route (nothing rests on them any more), with what only they rest on, are historical routes, not coverage blockers; a Done ending names the dropped ones and the removal that dropped each. An agent's local node outside every chosen Theorem's subtree ends the pursuit as Stuck, naming it, on every Start until someone wires, parks or deletes it. The researcher's own standalone work does not block: it is left outside this pursuit, and a Done ending names it. Done means the selected Theorem Coordinators ended Done, with no uncovered agent-made local nodes; another ending names the result that did not finish. This checks coverage and progress, not Human Review, and does not gate map edits on a Reader's notes.
 _Avoid_: autopilot, auto mode
@@ -177,7 +177,8 @@ _Avoid_: autopilot, auto mode
 **Audit first**:
 A choice on a Pursue's Start (ADR-0024). Before anything else, each node whose snapshot awaits review gets one independent Verifier turn, briefed as an audit, leaves first. Its verdict is recorded as an Evidence check on that snapshot.
 An audit reads the proof afresh: its runtime (`PROOF_AGENT_AUDIT`) shows it no earlier Evidence check and, of the work log, only the Standing questions and their answers.
-A node whose dependency failed its audit is audited once that dependency's rework is up for review again.
+A node is audited once every node beneath it that the Start audits has been, and not while a failed one beneath it is still being reworked.
+A failed audit stands across Starts: any Start, read off the record, works the failed nodes again first, and an audit Start does not audit them again (ADR-0024 points 17 and 18).
 A snapshot whose audit passed, with nothing it rests on changed since, is not audited again unless the Start asks to (`reaudit`, "Audit all again, then Pursue").
 A failed audit ends the node's Provisional standing and returns it to the agents until a new snapshot is up for review. A passed audit leaves the node as it is. An audit is advisory evidence, never Acceptance.
 A proof never restates a dependency's standing: Accepted, Provisional and Conditional are the map's, derived.
@@ -188,7 +189,7 @@ A choice a role made itself where the text admits more than one reading, recorde
 _Avoid_: blocker, needs-human (which is for what no choice settles)
 
 **Parked**:
-A node whose run budget is spent under a Coordinator. The Coordinator goes on with the rest of the subtree; a parked node waits in the Review queue with its Attempts (ADR-0021).
+A node whose run budget is spent under a Coordinator. The Coordinator goes on with the rest of the subtree; a parked node waits in the Review queue with its Attempts (ADR-0021). A re-split of a parked Claim's parent goes ahead, but while the parent still rests on the parked Claim the new Claims it made are not started (ADR-0024 point 20).
 _Avoid_: stuck (a run's state), failed
 
 **Review queue**:
