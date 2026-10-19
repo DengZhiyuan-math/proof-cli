@@ -591,3 +591,220 @@ def test_a_page_read_reads_the_event_log_once(tmp_path: Path, statements, read):
         app.close()
 
     assert _log_scans(statements) == 1
+
+
+# -- a node's work log: its own events formatted, once per read ---------------------------------------------------------
+
+AGENT = "claude-code"
+
+
+def _turn(store, node_id: str, role: str, phase: str, turn: str, job: int | None = 1) -> None:
+    from proof_cli.proof_map import record_agent_turn
+
+    extra = {"job": job, "session_id": f"s-{turn}"} if phase == "ended" else {}
+    record_agent_turn(store, node_id, phase=phase, turn=turn, role=role, by=AGENT, provider="claude", **extra)
+
+
+def _reader_turn(store, phase: str, turn: str) -> None:
+    """The Reader's turn under the agent's name: no node's (#224); its record, as `pursuit` writes it."""
+    from proof_cli.storage import append_event
+
+    append_event(store, proof_map.READER_TURN_EVENT, f"the Reader's turn {turn} {phase}", payload={"phase": phase, "turn": turn, "by": AGENT})
+
+
+def _busy_map(root: Path):
+    """Turns of several nodes and the Reader's under one agent name, overlapping; what they did through `proof` (shared
+    fog, an Experiment, a Definition edit, a plan) and what the host and the researcher did outside any turn; claims,
+    review requests, Evidence checks, dependency edits, a restatement, a Split, and a turn that never began."""
+    from proof_cli.definitions import add_definition, edit_definition
+    from proof_cli.fog import add_fog, record_experiment
+    from proof_cli.proof_map import add_dependency, claim_node, record_evidence_check, record_progress, remove_dependency, restate_node, split_node
+    from proof_cli.storage import acting_as
+
+    store = ensure_project(root)
+    add_definition(store, "D", term="weight", text="w", created_by=AGENT)
+    for node_id in ("A", "B", "C"):
+        create_node(store, node_id=node_id, kind="lemma", statement=f"lemma {node_id}", definitions=["D"] if node_id != "C" else None, created_by=AGENT)
+    create_node(store, node_id="top", kind="theorem", statement="t", dependencies=["A", "B"])
+    proof_a = submit_proof(store, "A", claimant_id=AGENT, scoping_rationale="r", content="proof of A")
+    _turn(store, "A", "verifier", "started", "ta")
+    _reader_turn(store, "started", "r1")
+    _turn(store, "B", "prover", "started", "tb")
+    with acting_as("B", "prover"):
+        fog = add_fog(store, "both proofs may use one lemma", near=["A", "B"], created_by=AGENT)
+        record_experiment(store, fog.id, "supports", summary="checked for n up to 100", run_by=AGENT)
+        edit_definition(store, "D", text="w'", edited_by=AGENT, reason="the square was missing")
+        record_progress(store, "B", role="prover", by=AGENT, plan=["first", "second"])
+    add_fog(store, "named no turn", near=["A"], created_by=AGENT)
+    add_fog(store, "the researcher's hunch", near=["B", "C"], created_by="ada")
+    record_evidence_check(store, proof_a.id, "passed", run_by=AGENT, notes="while two turns run")
+    _reader_turn(store, "ended", "r1")
+    _turn(store, "B", "prover", "ended", "tb")
+    record_evidence_check(store, proof_a.id, "passed", run_by=AGENT, notes="A's turn alone")
+    claim_node(store, "C", claimant_id=AGENT)
+    add_dependency(store, "C", "A", edited_by=AGENT)
+    remove_dependency(store, "C", "A", edited_by=AGENT)
+    restate_node(store, "C", statement="lemma C, restated", reason="clearer", by="human")
+    split_node(store, "C", [{"id": "C1", "statement": "a piece of C"}], created_by=AGENT)
+    record_progress(store, "A", role="verifier", by=AGENT, step=1, status="done", note="checked")
+    _turn(store, "A", "verifier", "ended", "ta")
+    _turn(store, "A", "prover", "started", "ta2")
+    _turn(store, "A", "prover", "ended", "ta2", job=None)  # stopped before it existed: nothing to show
+    submit_proof(store, "B", claimant_id=AGENT, scoping_rationale="r", content="proof of B")
+    return store
+
+
+def _work_log_formatting_every_event(store, node_id: str) -> list[dict]:
+    """The work log as it was read before only its own events were formatted: every event of the log, each turned into
+    an entry's fields before its kind was looked at. The reference the filtered read must agree with."""
+    from proof_cli.proof_map import (
+        DEFINITION_EDITED_EVENT, PROGRESS_EVENT, READER_TURN_EVENT, RESTATED_EVENT, TURN_EVENT, list_candidate_proofs, list_fog_items,
+        require_node,
+    )
+    from proof_cli.storage import ACTING_TURN_FIELD, list_events
+
+    named = set(require_node(store, node_id).definitions)
+    proof_ids = {proof.id for proof in list_candidate_proofs(store, node_id)}
+    fog = {item.id: item for item in list_fog_items(store)}
+    near_fog = {fog_id for fog_id, item in fog.items() if node_id in item.near}
+    entries: list[dict] = []
+    running: dict[str, dict] = {}
+    for event in list_events(store):
+        at = event.created_at.isoformat()
+        payload = dict(event.payload or {})
+        acting = payload.pop(ACTING_TURN_FIELD, None)
+        if event.kind == READER_TURN_EVENT:
+            key = f"reader turn {payload.get('turn')}"
+            if payload.get("phase") == "started":
+                running[key] = {"by": payload.get("by"), "role": "reader"}
+            else:
+                running.pop(key, None)
+            continue
+        if event.kind == TURN_EVENT:
+            if payload.get("phase") == "started":
+                running[event.entity_id] = payload
+            else:
+                running.pop(event.entity_id, None)
+            if event.entity_id != node_id or payload.get("phase") == "started":
+                continue
+            if payload.get("job") is not None:
+                entries.append({"at": at, "kind": "turn", **{key: value for key, value in payload.items() if key != "phase"}})
+            continue
+        before = len(entries)
+        if event.kind == PROGRESS_EVENT and event.entity_id == node_id:
+            entries.append({"at": at, **payload})
+        elif event.kind == "proof_map_node_split" and event.entity_id == node_id:
+            entries.append({"at": at, "kind": "split", "by": payload.get("created_by"), "nodes": list(payload.get("child_ids") or [])})
+        elif event.kind == "proof_map_review_requested" and event.entity_id == node_id:
+            entries.append({"at": at, "kind": "review-requested", "by": payload.get("requested_by"), "version": payload.get("version"), "candidate_proof_id": payload.get("candidate_proof_id")})
+        elif event.kind == "proof_map_evidence_check_recorded" and event.entity_id in proof_ids:
+            entries.append({"at": at, "kind": "evidence", "by": payload.get("run_by"), "outcome": payload.get("outcome"), "evidence_check_id": payload.get("evidence_check_id")})
+        elif event.kind == "proof_fog_added" and node_id in (payload.get("near") or []):
+            text = payload.get("text") or (fog[event.entity_id].text if event.entity_id in fog else None)
+            entries.append({"at": at, "kind": "fog", "by": payload.get("created_by"), "fog_id": event.entity_id, "text": text})
+        elif event.kind == "proof_fog_experiment_recorded" and event.entity_id in near_fog:
+            entries.append({"at": at, "kind": "experiment", "by": payload.get("run_by"), "fog_id": event.entity_id, "outcome": payload.get("outcome"), "seq": payload.get("seq")})
+        elif event.kind in ("proof_map_dependency_added", "proof_map_dependency_removed", "proof_map_dependency_moved") and event.entity_id == node_id:
+            entries.append({"at": at, "kind": "dependencies", "by": payload.get("edited_by") or payload.get("by"), "change": event.kind.rsplit("_", 1)[1], "dependency": payload.get("dependency_id") or payload.get("dependency"),
+                            "resplit": bool(payload.get("resplit"))})
+        elif event.kind == RESTATED_EVENT and event.entity_id == node_id:
+            entries.append({"at": at, "kind": "restated", "by": payload.get("by"), "reason": payload.get("reason"), "from": payload.get("from"), "to": payload.get("to")})
+        elif event.kind == DEFINITION_EDITED_EVENT and event.entity_id in named:
+            changed = {key: payload[key] for key in ("term", "text") if key in payload}
+            entries.append({"at": at, "kind": "definition-edited", "by": payload.get("by"), "definition_id": event.entity_id,
+                            "reason": payload.get("reason"), "from": payload.get("from"), "to": payload.get("to") or changed})
+        elif event.kind in ("proof_map_node_claimed", "proof_map_claim_reassigned") and event.entity_id == node_id:
+            entries.append({"at": at, "kind": "claimed", "by": payload.get("claimant_id") or payload.get("assignee")})
+        for entry in entries[before:]:
+            if "role" in entry:
+                continue
+            if isinstance(acting, dict):
+                entry["role"] = acting.get("role")
+                if acting.get("node") and acting["node"] != node_id:
+                    entry["from_node"] = acting["node"]
+                continue
+            entry["role"] = None
+            under_name = [other for other, turn in running.items() if entry.get("by") and turn.get("by") == entry.get("by")]
+            if not under_name:
+                continue
+            about_node = event.entity_id == node_id or event.entity_id in proof_ids
+            if about_node and under_name == [node_id]:
+                entry["role"] = running[node_id].get("role")
+            else:
+                entry["role_unknown"] = True
+    return entries
+
+
+def test_a_work_log_is_the_one_read_off_every_event(tmp_path: Path):
+    """Filtering on kind and subject first changes nothing a log shows: the same entries, in the same order, each with the
+    role of the turn that did it, or unknown, or none, as when every event was formatted."""
+    from proof_cli.proof_map import work_log
+
+    store = _busy_map(tmp_path)
+    node_ids = [node.id for node in list_nodes(store)]
+
+    expected = {node_id: _work_log_formatting_every_event(store, node_id) for node_id in node_ids}
+    assert {node_id: work_log(store, node_id) for node_id in node_ids} == expected
+    with read_scope():
+        assert {node_id: work_log(store, node_id) for node_id in node_ids} == expected
+    # the busy map exercises what the log shows and how it attributes it
+    shown = [entry for log in expected.values() for entry in log]
+    assert {entry["kind"] for entry in shown} >= {
+        "turn", "plan", "step", "split", "review-requested", "evidence", "fog", "experiment", "dependencies", "restated", "definition-edited", "claimed"}
+    assert any(entry.get("from_node") for entry in shown) and any(entry.get("role_unknown") for entry in shown)
+    assert any(entry["kind"] == "evidence" and entry["role"] == "verifier" for entry in shown)
+    assert any(entry["role"] is None and not entry.get("role_unknown") for entry in shown if entry["kind"] != "turn")
+
+
+def test_a_work_log_formats_only_the_events_it_shows(tmp_path: Path, monkeypatch):
+    """A page asks every node of a subtree for its work log: formatting every event of the whole log for each (its time,
+    a copy of its payload) cost 289k `isoformat` calls and 0.61 s per idle Pursue view on a 2,311-event trial log. Every
+    turn's start and end is still followed in order, for the turns running when an entry was written."""
+    from datetime import datetime
+
+    from proof_cli.proof_map import work_log
+
+    formatted = [0]
+
+    class CountedTime(datetime):
+        def isoformat(self, *args, **kwargs):
+            formatted[0] += 1
+            return super().isoformat(*args, **kwargs)
+
+    store = _busy_map(tmp_path)
+    real_list_events = proof_map.list_events
+    counted_events = [event.model_copy(update={"created_at": CountedTime.combine(event.created_at.date(), event.created_at.timetz())})
+                      for event in real_list_events(store)]
+    monkeypatch.setattr(proof_map, "list_events", lambda store: counted_events)
+
+    for node_id in ("A", "B", "C"):
+        formatted[0] = 0
+        log = work_log(store, node_id)
+        assert 0 < formatted[0] == len(log) < len(counted_events) / 2, (node_id, formatted[0], len(log), len(counted_events))
+
+
+def test_a_read_scope_works_out_each_nodes_log_once(tmp_path: Path, monkeypatch):
+    """A Coordinator's look asks each node of its subtree for its log twice (whether it is parked, whether its audit
+    passed); the page asks again: inside one read scope each node's log is worked out once."""
+    from collections import Counter
+
+    from proof_cli.proof_map import work_log
+
+    store = _busy_map(tmp_path)
+    node_ids = [node.id for node in list_nodes(store)]
+    worked: Counter = Counter()
+    real_list_candidate_proofs = proof_map.list_candidate_proofs
+
+    def counted(store, node_id):
+        worked[node_id] += 1
+        return real_list_candidate_proofs(store, node_id)
+
+    monkeypatch.setattr(proof_map, "list_candidate_proofs", counted)
+    unscoped = {node_id: work_log(store, node_id) for node_id in node_ids}
+    worked.clear()
+    with read_scope():
+        for _ in range(3):
+            scoped = {node_id: work_log(store, node_id) for node_id in node_ids}
+
+    assert worked == Counter(node_ids)
+    assert scoped == unscoped

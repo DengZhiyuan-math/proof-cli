@@ -741,6 +741,7 @@ def agent_turn_transcript(store: ProjectStore, node_id: str, turn: str) -> dict 
         return None
 
 
+@memoized_read  # a page asks every node of a subtree for its log, some twice (parked? audited?): once per node per read (#43)
 def work_log(store: ProjectStore, node_id: str) -> list[dict]:
     """The node's work log: the agent's reports merged, in time order, with what it did through `proof` and its turns.
     What an agent's turn did carries that turn's role, read from the event (#227), the same in every node's log that
@@ -749,34 +750,54 @@ def work_log(store: ProjectStore, node_id: str) -> list[dict]:
     written before events named their turn, or by the host outside `acting_as`, takes a role only when a record ties it
     to one turn: it is about this node itself (its claim, its proofs' Evidence checks, its edges) and this node's turn is
     the only running turn under its actor's name. Otherwise, while a running turn acts under that name, its role is
-    unknown (`role_unknown`), never guessed; with none, it keeps its own actor and has no role."""
+    unknown (`role_unknown`), never guessed; with none, it keeps its own actor and has no role.
+
+    Remembered for the read scope, so callers treat the log and its entries as read-only."""
     named = set(require_node(store, node_id).definitions)
     proof_ids = {proof.id for proof in list_candidate_proofs(store, node_id)}
     fog = {item.id: item for item in list_fog_items(store)}
     near_fog = {fog_id for fog_id, item in fog.items() if node_id in item.near}  # the fog about this node: its Experiments belong here
+    # Which events can enter this log, by kind: those about what the kind's entry below is matched on (a fog item's
+    # nodes are in its payload). Every other event is passed over before it is formatted, apart from the turns it starts
+    # or ends: formatting each event of the whole log (its time, a copy of its payload) for every node a page asks
+    # about cost 289k `isoformat` calls, 0.61 s of an idle Pursue view, on a 2,311-event trial log.
+    about: dict[str, set[str]] = {
+        kind: {node_id}
+        for kind in (PROGRESS_EVENT, "proof_map_node_split", "proof_map_review_requested", "proof_map_dependency_added", "proof_map_dependency_removed",
+                     "proof_map_dependency_moved", RESTATED_EVENT, "proof_map_node_claimed", "proof_map_claim_reassigned")
+    }
+    about.update({"proof_map_evidence_check_recorded": proof_ids, "proof_fog_experiment_recorded": near_fog, DEFINITION_EDITED_EVENT: named})
     entries: list[dict] = []
     running: dict[str, dict] = {}  # every turn running at this point of the log (each node's, the Reader's): its role and agent name
     for event in list_events(store):
-        at = event.created_at.isoformat()
-        payload = dict(event.payload or {})
-        acting = payload.pop(ACTING_TURN_FIELD, None)  # the agent turn it was written for (#227); history from before names none
         if event.kind == READER_TURN_EVENT:  # the Reader's turn runs under its agent's name too (#227)
-            key = f"reader turn {payload.get('turn')}"  # no node's id: never this node's own turn
-            if payload.get("phase") == "started":
-                running[key] = {"by": payload.get("by"), "role": "reader"}
+            record = event.payload or {}
+            key = f"reader turn {record.get('turn')}"  # no node's id: never this node's own turn
+            if record.get("phase") == "started":
+                running[key] = {"by": record.get("by"), "role": "reader"}
             else:
                 running.pop(key, None)
             continue
-        if event.kind == TURN_EVENT:
-            if payload.get("phase") == "started":
-                running[event.entity_id] = payload
+        if event.kind == TURN_EVENT:  # every node's, in order: which turns run when an entry below was written
+            record = event.payload or {}
+            if record.get("phase") == "started":
+                running[event.entity_id] = record  # read for its agent name and role only
             else:
                 running.pop(event.entity_id, None)
-            if event.entity_id != node_id or payload.get("phase") == "started":
+            if event.entity_id != node_id or record.get("phase") == "started":
                 continue
-            if payload.get("job") is not None:  # a turn that never began (stopped before it existed) has nothing to show
-                entries.append({"at": at, "kind": "turn", **{key: value for key, value in payload.items() if key != "phase"}})
+            if record.get("job") is not None:  # a turn that never began (stopped before it existed) has nothing to show
+                entries.append({"at": event.created_at.isoformat(), "kind": "turn",
+                                **{key: value for key, value in record.items() if key not in ("phase", ACTING_TURN_FIELD)}})
             continue
+        if event.kind == "proof_fog_added":
+            if node_id not in ((event.payload or {}).get("near") or []):
+                continue
+        elif event.entity_id not in about.get(event.kind, ()):
+            continue
+        at = event.created_at.isoformat()
+        payload = dict(event.payload or {})
+        acting = payload.pop(ACTING_TURN_FIELD, None)  # the agent turn it was written for (#227); history from before names none
         before = len(entries)
         if event.kind == PROGRESS_EVENT and event.entity_id == node_id:
             entries.append({"at": at, **payload})
