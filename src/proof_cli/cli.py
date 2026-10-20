@@ -188,6 +188,7 @@ from .proof_map import (
     trust_rule_view,
     trust_rules_of,
     would_meet_trust_rules,
+    withdraw_challenge,
     work_log,
     answer_question,
 )
@@ -195,7 +196,7 @@ from .trust_rules import get_trust_rule, list_trust_rules, trust_rule_history
 from .authority import candidate_proof_sha256
 from .vault import working_entry_path
 from .definitions import add_definition, all_definitions, definitions_of, edit_definition, fixed_by_definition, nodes_naming, remove_definition, require_definition
-from .node_states import node_states
+from .node_states import node_states, stopped_by
 from .pursuit import project_progress, reader_turn
 from .rendering import (
     render_definition,
@@ -389,6 +390,7 @@ def _with_state_axes(store, node) -> dict:
     return {
         **node.model_dump(mode="json"),
         **node_states(store, node.id).model_dump(mode="json"),
+        "stopped_by": stopped_by(store, node.id),  # the statement Challenges that stop work on it (ADR-0025)
         "workflow_state": get_workflow_state(store, node.id),
         "acceptance_state": _acceptance_axis(store, node),
         "integrity_state": get_integrity_state(store, node.id),
@@ -738,6 +740,7 @@ def node_show(
         if is_computation(node):  # the entry is run.sh, under its own key: `working_proof` means proof.tex
             payload["run_script"], working_proof = working_proof, None
         payload.update(states.model_dump(mode="json"))
+        payload["stopped_by"] = stopped_by(store, node_id)  # the statement Challenges that stop work on it (ADR-0025)
         payload["workflow_state"] = workflow_state
         payload["acceptance_state"] = acceptance_state
         payload["integrity_state"] = integrity_state
@@ -1486,13 +1489,15 @@ def challenge_open(
     opened_by: str = "human",
     rationale: str = "",
     rationale_file: str | None = typer.Option(None, "--rationale-file", help=_from_file("The --rationale")),
+    kind: str = typer.Option("proof", "--kind", help="proof (only this node is reworked) or statement (work stops under every node using it directly)"),
+    counterexample: str | None = typer.Option(None, "--counterexample", help="A statement Challenge's counterexample, a node of the map; an agent's needs one"),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
-    """Raise a Challenge against an already-Accepted (or Reference-reviewed) node. Ungated."""
+    """Raise a Challenge against a node's proof or its statement (ADR-0025): on any unsealed node, at once."""
     rationale = _text(rationale, rationale_file, option="--rationale-file", given="--rationale", command="challenge.open", json_output=json_output) or ""
     store = get_store(_root(root))
     try:
-        challenge = open_challenge(store, target_id, opened_by=opened_by, rationale=rationale)
+        challenge = open_challenge(store, target_id, kind=kind, counterexample=counterexample, opened_by=opened_by, rationale=rationale)
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="challenge.open")
         raise typer.Exit(code=1)
@@ -1529,6 +1534,26 @@ def challenge_show(
         _emit_error(exc, json_output, command="challenge.show")
         raise typer.Exit(code=1)
     _emit_challenge(challenge, json_output, command="challenge.show")
+
+
+@challenge_app.command("withdraw")
+def challenge_withdraw(
+    challenge_id: str,
+    root: str = ROOT_OPTION,
+    reason: str = typer.Option("", "--reason", help="Why: the next role is briefed with it"),
+    reason_file: str | None = typer.Option(None, "--reason-file", help=_from_file("The --reason")),
+    by: str = typer.Option("", "--by", help=CREATED_BY_HELP),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Withdraw a Challenge with a reason (ADR-0025): your own, or as an agent any agent's; the researcher's only the researcher."""
+    reason = _text(reason, reason_file, option="--reason-file", given="--reason", command="challenge.withdraw", json_output=json_output) or ""
+    store = get_store(_root(root))
+    try:
+        challenge = withdraw_challenge(store, challenge_id, by=_author(by, root), reason=reason)
+    except ProofMapError as exc:
+        _emit_error(exc, json_output, command="challenge.withdraw")
+        raise typer.Exit(code=1)
+    _emit_challenge(challenge, json_output, command="challenge.withdraw")
 
 
 @challenge_app.command("dismiss")

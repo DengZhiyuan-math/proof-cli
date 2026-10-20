@@ -1411,16 +1411,15 @@ def test_open_challenge_requires_no_permission_check(tmp_path: Path):
     assert has_open_challenge(store, "lem_1") is True
 
 
-def test_open_challenge_against_unaccepted_node_is_rejected(tmp_path: Path):
+def test_open_challenge_against_an_unaccepted_node_is_raised_at_once(tmp_path: Path):
+    # ADR-0025 point 6: on any unsealed node, Accepted or not, with no review first
     store = ensure_project(tmp_path)
     create_node(store, node_id="lem_1", kind="lemma", statement="Base lemma")
 
-    with pytest.raises(ProofMapError) as exc_info:
-        open_challenge(store, "lem_1", opened_by="agent_a")
-    assert exc_info.value.code == "TARGET_NOT_ACCEPTED"
+    assert open_challenge(store, "lem_1", opened_by="agent_a").status.value == "open"
 
 
-def test_open_challenge_against_imported_result_requires_reference_review(tmp_path: Path):
+def test_open_challenge_against_an_imported_result_needs_no_reference_review(tmp_path: Path):
     store = ensure_project(tmp_path)
     create_node(
         store,
@@ -1431,10 +1430,7 @@ def test_open_challenge_against_imported_result_requires_reference_review(tmp_pa
         source_version="v1",
     )
 
-    with pytest.raises(ProofMapError) as exc_info:
-        open_challenge(store, "ref_1", opened_by="agent_a")
-    assert exc_info.value.code == "TARGET_NOT_REVIEWED"
-
+    assert open_challenge(store, "ref_1", opened_by="agent_a").target_node_id == "ref_1"  # unreviewed (ADR-0025 point 6)
     researcher(store).decide_reference_review("ref_1", "reference-review")
     challenge = open_challenge(store, "ref_1", opened_by="agent_a")
     assert challenge.target_node_id == "ref_1"

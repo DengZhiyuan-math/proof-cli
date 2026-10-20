@@ -452,13 +452,14 @@ def test_challenge_open_requires_no_confirmation(tmp_path: Path):
     assert payload["data"]["status"] == "open"
 
 
-def test_challenge_open_against_unaccepted_node_fails(tmp_path: Path):
+def test_challenge_open_against_an_unaccepted_node_is_raised_at_once(tmp_path: Path):
+    # ADR-0025 point 6: anyone may raise one on any unsealed node, Accepted or not, with no review first
     runner.invoke(app, ["node", "create", "lem_1", "lemma", "Base lemma", "--root", str(tmp_path)])
 
     result = runner.invoke(app, ["challenge", "open", "lem_1", "--root", str(tmp_path), "--json"])
-    assert result.exit_code != 0
+    assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
-    assert payload["error"]["code"] == "TARGET_NOT_ACCEPTED"
+    assert (payload["data"]["status"], payload["data"]["kind"]) == ("open", "proof")
 
 
 def test_challenge_show_human_readable(tmp_path: Path):

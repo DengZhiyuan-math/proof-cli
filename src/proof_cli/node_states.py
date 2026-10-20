@@ -9,7 +9,9 @@ Until the records later tickets add exist, today's records are read as ADR-0025 
 is written, and no Challenge kind is guessed or stored (#276).
 
 - **Seal**: unsealed (#279 adds seal lines), except an imported result found no longer callable, which reads sealed false.
-- **Statement layer**: an open Challenge, which has no kind yet (#277), reads challenged as false; so does a Rejected node.
+- **Statement layer**: an open Challenge against the statement reads challenged as false, and so does one raised before
+  Challenges had a kind (#277), whose kind is never guessed; so does a Rejected node. An open Challenge against the
+  proof sends the Proof layer back to incomplete instead, a verification included: it lapses at once (ADR-0025 point 13).
 - **Proof layer**: a counting Acceptance of the current version, a Reference review or a Trust rule the citation meets
   reads expert-verified (a verification counts for its own version only: a newer snapshot nobody verified is not), and
   an imported result without one checks passed. A legacy passed Verdict alone is not a check under the new rules: a
@@ -23,7 +25,15 @@ from collections.abc import Iterable
 from pydantic import BaseModel
 
 from .domain import ProofMapNode, ProofMapNodeKind
-from .proof_map import ProofMapError, get_acceptance_state, get_accepted_version, get_reference_review_state, has_open_challenge, require_node
+from .proof_map import (
+    ProofMapError,
+    get_acceptance_state,
+    get_accepted_version,
+    get_reference_review_state,
+    list_challenges,
+    list_nodes,
+    require_node,
+)
 from .storage import ProjectStore, get_active_claim, get_current_candidate_proof, read_scoped, scoped_memo
 
 SEALS = ("unsealed", "sealed-true", "sealed-false")
@@ -119,7 +129,46 @@ def _own_states(store: ProjectStore, node: ProofMapNode) -> tuple[str, str, str,
             current = get_current_candidate_proof(store, node.id)
             if current is not None and current.version == get_accepted_version(store, node.id):
                 proof_layer = "expert-verified"
-    if has_open_challenge(store, node.id):
-        statement_layer = "challenged-as-false"
+    for challenge in list_challenges(store, target_node_id=node.id, status="open"):
+        if challenge.kind == "proof":
+            proof_layer = "incomplete"
+        else:
+            statement_layer = "challenged-as-false"
     claim = get_active_claim(store, node.id)
     return seal, statement_layer, proof_layer, claim.claimant_id if claim else None
+
+
+def stopped_by(store: ProjectStore, node_id: str) -> list[str]:
+    """The nodes challenged as false whose Challenge stops work on this one (ADR-0025 point 6), by id; empty when none.
+
+    A statement Challenge stops everything under each node that uses the challenged one directly, the challenged node
+    included, on that branch only: what uses it elsewhere, and what sits beside it, goes on. A Challenge against a
+    proof stops nothing: only that node is reworked."""
+    return _stopped(store).get(node_id, [])
+
+
+@read_scoped
+def _stopped(store: ProjectStore) -> dict[str, list[str]]:
+    memo = scoped_memo(store, "stopped")
+    if "stopped" in memo:
+        return memo["stopped"]
+    nodes = {node.id: node for node in list_nodes(store)}
+    users: dict[str, list[str]] = {}
+    for node in nodes.values():
+        for dependency in node.dependencies:
+            users.setdefault(dependency, []).append(node.id)
+    stopped: dict[str, set[str]] = {}
+    for challenged in nodes:
+        if node_states(store, challenged).statement_layer != "challenged-as-false":
+            continue
+        branch = list(users.get(challenged, []))
+        seen: set[str] = set()
+        while branch:  # each direct user and everything under it; `seen` ends a hand-edited cycle
+            current = branch.pop()
+            if current in seen:
+                continue
+            seen.add(current)
+            stopped.setdefault(current, set()).add(challenged)
+            branch.extend(nodes[current].dependencies if current in nodes else [])
+    memo["stopped"] = {node_id: sorted(by) for node_id, by in stopped.items()}
+    return memo["stopped"]
