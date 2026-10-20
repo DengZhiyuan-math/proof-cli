@@ -195,6 +195,7 @@ from .trust_rules import get_trust_rule, list_trust_rules, trust_rule_history
 from .authority import candidate_proof_sha256
 from .vault import working_entry_path
 from .definitions import add_definition, all_definitions, definitions_of, edit_definition, fixed_by_definition, nodes_naming, remove_definition, require_definition
+from .node_states import node_states
 from .pursuit import project_progress, reader_turn
 from .rendering import (
     render_definition,
@@ -381,11 +382,13 @@ def _acceptance_axis(store, node) -> str:
 
 
 def _with_state_axes(store, node) -> dict:
-    """A node under --json, with its three state axes (ADR-0002), whether it is Provisional and the Provisional nodes
-    it is Conditional on (ADR-0021), and, for an imported result, the Trust rules it meets (an agent's import:
-    those it would meet had the researcher created it, ADR-0022)."""
+    """A node under --json, with its four states and conclusion (ADR-0025) and, until their readers move to those (#283),
+    its three state axes (ADR-0002), whether it is Provisional and the Provisional nodes it is Conditional on
+    (ADR-0021), and, for an imported result, the Trust rules it meets (an agent's import: those it would meet had the
+    researcher created it, ADR-0022)."""
     return {
         **node.model_dump(mode="json"),
+        **node_states(store, node.id).model_dump(mode="json"),
         "workflow_state": get_workflow_state(store, node.id),
         "acceptance_state": _acceptance_axis(store, node),
         "integrity_state": get_integrity_state(store, node.id),
@@ -728,6 +731,7 @@ def node_show(
         payload["citation"] = citation
         if is_computation(node):  # the entry is run.sh, under its own key: `working_proof` means proof.tex
             payload["run_script"], working_proof = working_proof, None
+        payload.update(node_states(store, node_id).model_dump(mode="json"))  # its four states and conclusion (ADR-0025)
         payload["workflow_state"] = workflow_state
         payload["acceptance_state"] = acceptance_state
         payload["integrity_state"] = integrity_state
