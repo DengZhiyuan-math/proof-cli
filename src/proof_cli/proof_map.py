@@ -163,7 +163,6 @@ def _decide(
     decision: str,
     reviewer: str | None,
     rationale: str,
-    dependency_id: str | None = None,
     viewed_binding: str | None = None,
 ) -> _Decision:
     """Bind the decision to what it's made on as of now; called on the operation's write transaction.
@@ -176,7 +175,7 @@ def _decide(
     (SNAPSHOT_UNREADABLE): it would bind nothing (#92).
     """
     payload = build_decision_payload(
-        store, kind, target_id, decision, rationale=rationale, **decision_binding(store, kind, target_id, dependency_id=dependency_id, decision=decision)
+        store, kind, target_id, decision, rationale=rationale, **decision_binding(store, kind, target_id, decision=decision)
     )
     if payload.candidate_proof_id is not None and payload.candidate_proof_sha256 is None:
         raise ProofMapError(
@@ -1444,7 +1443,7 @@ def _split(
         raise ProofMapError(
             "NODE_REJECTED", f"node {parent_id} was Rejected and should not be pursued further; split is unavailable"
         )
-    if acceptance in ("accepted", "unverifiable"):
+    if acceptance == "accepted":
         # new dependencies would change the interface the researcher accepted, and
         # silently void the acceptance: that's a decision, not a split (#37)
         raise ProofMapError(
@@ -1526,11 +1525,6 @@ def _not_pickable(store: ProjectStore, node: ProofMapNode) -> ProofMapError | No
         return ProofMapError("NODE_REJECTED", f"node {node.id} was Rejected and should not be pursued further; create a new node instead")
     if acceptance_state == "accepted" and not has_open_challenge(store, node.id):
         return ProofMapError("NODE_ALREADY_ACCEPTED", f"node {node.id} is already Accepted; open a Challenge before reclaiming it to revise")
-    if acceptance_state == "unverifiable":
-        return ProofMapError(
-            "NODE_UNVERIFIABLE",
-            f"node {node.id}'s latest Human Review decision doesn't count; the researcher must decide it afresh before anyone picks it up",
-        )
     return None
 
 
@@ -1609,9 +1603,8 @@ def _structure_editable(store: ProjectStore, node: ProofMapNode) -> None:
     As `_not_pickable` rules for claiming: never an imported result (it rests
     on nothing here) or a Rejected node; an Accepted one only while an open
     Challenge invites its revision. The edit makes its Acceptance stop
-    counting (`unverifiable`: its dependencies changed) until the researcher
-    decides the revised node, so a node in that state stays editable only
-    under the same open Challenge.
+    counting (its dependencies changed): it reads as no decision, a
+    verification counting only for its own version (ADR-0025 point 24).
     """
     if node.kind == ProofMapNodeKind.imported_result:
         raise ProofMapError(
@@ -1621,7 +1614,7 @@ def _structure_editable(store: ProjectStore, node: ProofMapNode) -> None:
     acceptance = get_acceptance_state(store, node.id)
     if acceptance == "rejected":
         raise ProofMapError("NODE_REJECTED", f"node {node.id} was Rejected and should not be pursued further; its dependencies stay as they were")
-    if acceptance in ("accepted", "unverifiable") and not has_open_challenge(store, node.id):
+    if acceptance == "accepted" and not has_open_challenge(store, node.id):
         raise ProofMapError(
             "NODE_ACCEPTED",
             f"node {node.id} is {acceptance}; changing its dependencies would void that decision, so open a Challenge before revising it",
@@ -1688,7 +1681,7 @@ def _own_split_edge(store: ProjectStore, node: ProofMapNode, dependency_id: str,
     return all(
         claim.kind == ProofMapNodeKind.claim
         and claim.created_by == edited_by
-        and get_acceptance_state(store, claim.id) not in ("accepted", "unverifiable", "rejected")
+        and get_acceptance_state(store, claim.id) not in ("accepted", "rejected")
         for claim in (node, dependency)
     )
 
@@ -1753,7 +1746,7 @@ def _own_split_removal(store: ProjectStore, parent: ProofMapNode, claim_id: str,
         and claim.kind == ProofMapNodeKind.claim
         and claim.derived_from == parent.id
         and claim.created_by == edited_by
-        and get_acceptance_state(store, claim_id) not in ("accepted", "unverifiable")
+        and get_acceptance_state(store, claim_id) != "accepted"
         and fixed_by(store, parent.id) is None
     )
 
@@ -1922,7 +1915,7 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
     version; the same inputs as the snapshot under review are refused, unless
     that snapshot is missing or can't be read: then they are snapshotted afresh
     as the next version, a re-snapshot after loss (#99), which needs its own
-    Human Review — decisions on the lost snapshot stay unverifiable.
+    Human Review — decisions on the lost snapshot no longer count.
     Needs the node's key-ideas summary, `key-ideas.md`, with its required fields filled in
     (KEY_IDEAS_REQUIRED): it is frozen with the proof, and a change to it alone is a new
     version (ADR-0013). The researcher's request confirms a draft the agent wrote;
@@ -2004,7 +1997,7 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
         # refused only if nothing is new: the same files (ADR-0011), on the dependencies that
         # snapshot was made on (#96), and the snapshot itself still there to review. A missing or
         # unreadable one is taken afresh from an unchanged proof, a re-snapshot after loss, which
-        # needs a Human Review of its own; its old decisions stay unverifiable (#99)
+        # needs a Human Review of its own; its old decisions no longer count (#99)
         unchanged = current is not None and current.sha256 == sha256 and _snapshot_dependencies_stand(store, node, current)
         lost = unchanged and candidate_proof_sha256(store, current.id) is None
         if unchanged and not lost:
@@ -2315,58 +2308,7 @@ def list_evidence_checks(store: ProjectStore, candidate_proof_id: str) -> list[E
     return list_evidence_checks_for_candidate_proof(store, candidate_proof_id)
 
 
-class EvidenceTrustDecision(str, Enum):
-    trusted = "trusted"
-    unusable = "unusable"
-
-
-_EVIDENCE_DECISION_TO_GOVERNANCE_STATE = {
-    EvidenceTrustDecision.trusted: ReviewGovernanceState.trusted,
-    EvidenceTrustDecision.unusable: ReviewGovernanceState.unusable,
-}
-
 _EVIDENCE_CHECK_OBJECT_TYPE = "evidence_check"
-
-
-def decide_evidence_review(
-    store: ProjectStore,
-    evidence_check_id: str,
-    decision: EvidenceTrustDecision | str,
-    *,
-    reviewer: str | None = None, rationale: str = "", viewed_binding: str | None = None,
-) -> ReviewRecord:
-    """Human Review's trust judgment on an Evidence check itself.
-
-    Recorded in reviews.jsonl bound to the checked Candidate proof's
-    snapshot (ADR-0010).
-
-    `trusted` or `unusable` — never `approved`/`rejected`, and never
-    against `object_type=proof_map_node`, so this can't be confused with,
-    or feed, acceptance_state no matter what it decides (ADR-0004 point 5).
-    """
-    check = require_evidence_check(store, evidence_check_id)
-
-    try:
-        resolved_decision = EvidenceTrustDecision(decision)
-    except ValueError as exc:
-        valid = ", ".join(member.value for member in EvidenceTrustDecision)
-        raise ProofMapError(
-            "INVALID_DECISION", f"'{decision}' is not a valid evidence trust judgment; expected one of: {valid}"
-        ) from exc
-
-    governance_state = _EVIDENCE_DECISION_TO_GOVERNANCE_STATE[resolved_decision]
-    with store.transaction() as conn:
-        decided = _decide(store, kind=DecisionKind.evidence_review, target_id=evidence_check_id, decision=resolved_decision.value, reviewer=reviewer, rationale=rationale, viewed_binding=viewed_binding)
-        record = _record(store, decided, _EVIDENCE_CHECK_OBJECT_TYPE, evidence_check_id, governance_state)
-        append_event(
-            store,
-            "proof_map_evidence_review_decided",
-            f"evidence review for {evidence_check_id}: {resolved_decision.value}",
-            entity_id=check.candidate_proof_id,
-            payload={"decision": resolved_decision.value, "reviewer_id": decided.reviewer_id, "review_id": record.id},
-            conn=conn,
-        )
-    return record
 
 
 def _normalize_whitespace(text: str) -> str:
@@ -2499,23 +2441,16 @@ def pin_dependencies(store: ProjectStore, node: ProofMapNode) -> list[Dependency
 
 @memoized_read
 def _signed_pins(store: ProjectStore, node_id: str) -> dict[str, PinnedDependency] | None:
-    """For an Accepted node: the pins its counted Acceptance was made on,
-    as later refreshed by verified Lightweight re-reviews. `None` for a node
-    that isn't Accepted, whose pins are just what its submission recorded."""
+    """For an Accepted node: the pins its counted Acceptance was made on. `None` for a node that isn't Accepted, whose
+    pins are just what its submission recorded. (A Lightweight re-review's line refreshed them once; it is history now,
+    read by nothing, ADR-0025 point 24.)"""
     node = get_node(store, node_id)
     if node is None:
         return None
     state, latest, _ = _acceptance(store, node)
     if state != "accepted":
         return None
-    pins = {pin.target_node_id: pin for pin in latest.verdict.payload.dependency_pins}
-    for row in decision_rows(store, _ACCEPTANCE_OBJECT_TYPE, node_id, ReviewRecordKind.dependency_revalidation.value):
-        if row["seq"] <= latest.row["seq"]:
-            continue
-        verdict = verify_decision_row(store, row["id"])
-        if verdict.status == "verified":
-            pins.update({pin.target_node_id: pin for pin in verdict.payload.dependency_pins})
-    return pins
+    return {pin.target_node_id: pin for pin in latest.verdict.payload.dependency_pins}
 
 
 @memoized_read
@@ -2578,19 +2513,6 @@ def _provisional_interface(store: ProjectStore, node: ProofMapNode) -> str:
     return _digest([_interface_of(node), *(f"{d.id}\x00{d.term}\x00{d.text}" for d in named if d is not None)])
 
 
-def dependency_pin_lags(store: ProjectStore, pin: DependencyPin) -> bool:
-    """Whether a pin is behind its target's accepted version (#23): the target has moved on to
-    a new Accepted version since the dependent was checked against it, even with the same
-    interface. The same rule as the page's Lightweight re-review remedy; an imported result
-    has no versions, so it never lags, and neither does a pin taken before the target was
-    Accepted: it was checked against no version (the node's own Acceptance pins one)."""
-    target = get_node(store, pin.target_node_id)
-    if target is None or target.kind == ProofMapNodeKind.imported_result or pin.pinned_version is None:
-        return False
-    accepted = get_accepted_version(store, pin.target_node_id)
-    return accepted is not None and pin.pinned_version != accepted
-
-
 class AcceptanceDecision(str, Enum):
     """The only three ways a local node's acceptance_state may ever change.
 
@@ -2614,28 +2536,16 @@ _ACCEPTANCE_DECISION_TO_GOVERNANCE_STATE = {
 _ACCEPTANCE_OBJECT_TYPE = "proof_map_node"
 
 
-def _pin_remedy(pin: DependencyPin | None, *, current: bool | None, accepted_version: int | None) -> str | None:
-    """What a lagging or changed pin needs: a Lightweight re-review, or a new Candidate proof (#23, #24)."""
-    if pin is None:
-        return None
-    if current is False:
-        return "new-candidate-proof"
-    if pin.pinned_version is not None and accepted_version is not None and pin.pinned_version != accepted_version:
-        return "lightweight-re-review"
-    return None
-
-
 def dependency_details(store: ProjectStore, node_id: str) -> list[dict]:
-    """Each of a node's dependencies as the node page and `node show --json` show it (#97):
-    its statement and kind, the pin as it counts, the version now Accepted, whether the pin
-    is still current, and the remedy a lagging or changed pin needs."""
+    """Each of a node's dependencies as the node page and `node show --json` show it (#97): its statement and kind,
+    the pin as it counts, whether the interface it pinned is still the dependency's (`current`), and the Trust rules an
+    imported result is depended on by. A pin follows an unchanged interface by itself, so a version it lags is no
+    matter and there is no re-review to offer (ADR-0025 point 24)."""
     node = require_node(store, node_id)
     details = []
     for dependency_id in node.dependencies:
         pin = get_dependency_pin(store, node_id, dependency_id)
         dependency = get_node(store, dependency_id)
-        accepted_version = get_accepted_version(store, dependency_id)
-        current = dependency_pin_is_current(store, pin) if pin else None
         details.append(
             {
                 "node_id": dependency_id,
@@ -2643,10 +2553,7 @@ def dependency_details(store: ProjectStore, node_id: str) -> list[dict]:
                 # where the dependency opens: a studio, or an imported result's own page
                 "kind": dependency.kind.value if dependency else None,
                 "pin": pin.model_dump(mode="json") if pin else None,
-                # the pin lag a Lightweight re-review is about (#23/#24)
-                "accepted_version": accepted_version,
-                "current": current,
-                "remedy": _pin_remedy(pin, current=current, accepted_version=accepted_version),
+                "current": dependency_pin_is_current(store, pin) if pin else None,
                 # an imported result depended on by rule rather than by a review (ADR-0014)
                 "trust_rule": trust_rules_of(store, dependency_id) if dependency and dependency.kind == ProofMapNodeKind.imported_result else [],
             }
@@ -2713,30 +2620,12 @@ def _snapshot_dependencies_stand(store: ProjectStore, node: ProofMapNode, snapsh
 
     Read off the snapshot's own record, which no dependency edit touches —
     not off the pins, which removing an edge deletes along with it. A
-    snapshot from before the record was kept falls back to its pins. A
-    withdrawn citation the researcher moved this node off (a counted
-    `dependent_migration`, #20) reads as its correction: re-Accepting the
-    same snapshot against the correction is exactly what that decision asks.
+    snapshot from before the record was kept falls back to its pins.
     """
     recorded = snapshot.dependencies
     if recorded is None:
         recorded = [pin.target_node_id for pin in list_dependency_pins_for_node(store, node.id)]
-    return {_migrated(store, node.id, dependency_id) for dependency_id in recorded} == set(node.dependencies)
-
-
-def _migrated(store: ProjectStore, node_id: str, dependency_id: str) -> str:
-    """Where counted Dependent migrations moved `node_id`'s edge on `dependency_id` (itself if none did)."""
-    seen = {dependency_id}
-    while True:
-        moved_to = None
-        for row in decision_rows(store, _ACCEPTANCE_OBJECT_TYPE, dependency_id, ReviewRecordKind.dependent_migration.value):
-            verdict = verify_decision_row(store, row["id"])
-            if verdict.status == "verified" and node_id in verdict.payload.migrated_dependents and verdict.payload.dependency_pins:
-                moved_to = verdict.payload.dependency_pins[0].target_node_id
-        if moved_to is None or moved_to in seen:
-            return dependency_id
-        seen.add(moved_to)
-        dependency_id = moved_to
+    return set(recorded) == set(node.dependencies)
 
 
 def decide_acceptance(
@@ -3026,7 +2915,6 @@ def decision_binding(
     kind: DecisionKind,
     target_id: str,
     *,
-    dependency_id: str | None = None,
     decision: str | None = None,
 ) -> dict[str, Any]:
     """What a decision of `kind` on `target_id` is made on, as of now.
@@ -3069,34 +2957,9 @@ def decision_binding(
         challenge = require_challenge(store, target_id)
         return {**none, "candidate_proof_id": _current_proof_id(store, challenge.target_node_id),
                 "interface_fingerprint": _interface_of(require_node(store, challenge.target_node_id))}
-    if kind == DecisionKind.dependency_revalidation:
-        if dependency_id is None:
-            raise ProofMapError("DEPENDENCY_REQUIRED", "a Lightweight re-review names the dependency it re-pins")
-        node = require_node(store, target_id)
-        return {
-            **none,
-            "candidate_proof_id": _current_proof_id(store, target_id),
-            "interface_fingerprint": _interface_of(node),
-            "dependency_pins": [_refreshed_pin(store, dependency_id)],
-        }
-    if kind == DecisionKind.evidence_review:
-        check = require_evidence_check(store, target_id)
-        proof = require_candidate_proof(store, check.candidate_proof_id)
-        return {**none, "candidate_proof_id": proof.id, "interface_fingerprint": _interface_of(require_node(store, proof.node_id))}
     if kind == DecisionKind.challenge_resolution:
         challenge = require_challenge(store, target_id)
         return {**none, "interface_fingerprint": _interface_of(require_node(store, challenge.target_node_id))}
-    if kind == DecisionKind.dependent_migration:
-        # the withdrawn citation, the exact correction its dependents move onto, and which dependents
-        if dependency_id is None:
-            raise ProofMapError("REPLACEMENT_REQUIRED", "moving dependents names the imported result they move onto")
-        replacement = require_node(store, dependency_id)
-        return {
-            **none,
-            "interface_fingerprint": _interface_of(require_node(store, target_id)),
-            "dependency_pins": [PinnedDependency(target_node_id=replacement.id, pinned_fingerprint=_interface_of(replacement))],
-            "migrated_dependents": [node.id for node in list_migratable_dependents(store, target_id)],
-        }
     if kind == DecisionKind.trust_rule:
         # a rule binds nothing on the map: it is judged against the citations as they are whenever it is read (ADR-0014)
         return dict(none)
@@ -3110,7 +2973,6 @@ def prepare_decision(
     decision: str,
     *,
     rationale: str = "",
-    dependency_id: str | None = None,
 ) -> DecisionPayload:
     """What a decision would be made on right now, for a page to show before the researcher decides. Decides nothing."""
     try:
@@ -3119,7 +2981,7 @@ def prepare_decision(
         raise ProofMapError("INVALID_DECISION_KIND", f"'{kind}' is not a decision kind") from exc
     return build_decision_payload(
         store, resolved_kind, target_id, decision, rationale=rationale,
-        **decision_binding(store, resolved_kind, target_id, dependency_id=dependency_id, decision=decision)
+        **decision_binding(store, resolved_kind, target_id, decision=decision)
     )
 
 
@@ -3131,7 +2993,6 @@ def apply_decision(
     *,
     reviewer: str | None = None,
     rationale: str = "",
-    dependency_id: str | None = None,
     viewed_binding: str | None = None,
     conditions: list | None = None,
 ) -> Any:
@@ -3151,16 +3012,10 @@ def apply_decision(
         return decide_acceptance(store, target_id, decision, **who)
     if resolved_kind == DecisionKind.reference_review:
         return decide_reference_review(store, target_id, decision, **who)
-    if resolved_kind == DecisionKind.evidence_review:
-        return decide_evidence_review(store, target_id, decision, **who)
-    if resolved_kind == DecisionKind.dependency_revalidation:
-        return revalidate_dependency(store, target_id, dependency_id or "", **who)
     if resolved_kind == DecisionKind.challenge_resolution:
         return dismiss_challenge(store, target_id, **who)
     if resolved_kind == DecisionKind.promote:
         return promote_to_lemma(store, target_id, **who)
-    if resolved_kind == DecisionKind.dependent_migration:
-        return migrate_dependents(store, target_id, dependency_id or "", **who)
     raise ProofMapError("UNSUPPORTED_DECISION", f"{resolved_kind.value} decisions aren't applied here")
 
 
@@ -3209,10 +3064,13 @@ def _binding_problem(store: ProjectStore, node: ProofMapNode, payload: DecisionP
 def _acceptance(store: ProjectStore, node: ProofMapNode) -> tuple[str, _Counted | None, str | None]:
     """(acceptance_state, the newest acceptance decision, why it doesn't count).
 
-    Only the *newest* decision is ever read (B): if it doesn't verify, the
-    node reads `unverifiable` — never an older decision it superseded. A
-    Reject is terminal, and bound to the node, not to the proof text: a
-    later edit never reopens a Rejected node.
+    Only the *newest* decision is ever read (B): if it doesn't count — it
+    doesn't verify, or no longer describes the node — the node reads as
+    having none (`unreviewed`, with no decision and the reason), never an
+    older decision it superseded: a verification counts only for its own
+    version (ADR-0025 point 24, which retired `unverifiable`). A Reject is
+    terminal, and bound to the node, not to the proof text: a later edit
+    never reopens a Rejected node.
     """
     rows = [
         row
@@ -3230,10 +3088,10 @@ def _acceptance(store: ProjectStore, node: ProofMapNode) -> tuple[str, _Counted 
         return "rejected", _Counted(reject, verdict), None if verdict.status == "verified" else verdict.reason
     latest = _Counted(rows[-1], verify_decision_row(store, rows[-1]["id"]))
     if latest.verdict.status != "verified":
-        return "unverifiable", latest, latest.verdict.reason
+        return "unreviewed", None, latest.verdict.reason
     problem = _binding_problem(store, node, latest.verdict.payload)
     if problem is not None:
-        return "unverifiable", latest, problem
+        return "unreviewed", None, problem
     if latest.decision == ReviewGovernanceState.approved:
         return "accepted", latest, None
     return "unreviewed", latest, None
@@ -3278,7 +3136,7 @@ def get_accepted_version(store: ProjectStore, node_id: str) -> int | None:
 def get_acceptance_state(store: ProjectStore, node_id: str) -> str:
     """The node's acceptance_state, computed from its recorded Human Review decisions.
 
-    One of `unreviewed`, `accepted`, `rejected`, `unverifiable` — never
+    One of `unreviewed`, `accepted`, `rejected` — never
     stored, always re-derived from the *newest* `kind=acceptance` decision
     (see `_acceptance`). An Acceptance counts only while it still describes
     this node: the Candidate proof it was made on is this node's and its
@@ -3427,82 +3285,6 @@ def decide_reference_review(
     return record
 
 
-def list_migratable_dependents(store: ProjectStore, node_id: str) -> list[ProofMapNode]:
-    """The nodes resting on `node_id` that moving dependents would move: all but the Rejected, the record of an abandoned route."""
-    return [
-        node
-        for node in list_nodes(store)
-        if node_id in node.dependencies and get_acceptance_state(store, node.id) != "rejected"
-    ]
-
-
-def migrate_dependents(
-    store: ProjectStore,
-    node_id: str,
-    replacement_id: str,
-    *,
-    reviewer: str | None = None, rationale: str = "", viewed_binding: str | None = None,
-) -> ReviewRecord:
-    """Move the dependents of a no-longer-callable imported result onto its correction (#20, ADR-0005 Rule 1).
-
-    A Human Review decision (`dependent_migration`, recorded as `superseded`
-    in the withdrawn node's reviews.jsonl), made on the proof map page: a
-    corrected source is a new imported_result node, and what rested on the
-    old one moves deliberately, never by inheriting the correction. Every
-    dependent but a Rejected one has the old id swapped for the new one in
-    its dependencies, and its pin moved with it. An Accepted dependent's
-    Acceptance was made against the withdrawn citation, so it stops counting
-    (`unverifiable`, DECISION_NO_LONGER_APPLIES) and the node reads
-    review-needed until the researcher re-Accepts it against the correction.
-    """
-    # everything — the checks, which dependents, the payload naming them, the writes — under one
-    # write lock, so a concurrent split or new dependent is neither overwritten nor misrecorded
-    with store.transaction() as conn:
-        node = require_node(store, node_id)
-        replacement = require_node(store, replacement_id)
-        if node.kind != ProofMapNodeKind.imported_result:
-            raise ProofMapError("NOT_IMPORTED_RESULT", f"{node_id} is not an imported_result; only a withdrawn citation's dependents move")
-        if replacement.kind != ProofMapNodeKind.imported_result:
-            raise ProofMapError(
-                "REPLACEMENT_NOT_IMPORTED_RESULT", f"{replacement_id} is not an imported_result; a corrected source is cited as a new one"
-            )
-        if replacement_id == node_id:
-            raise ProofMapError("SAME_NODE", f"{node_id} can't replace itself")
-        if not _no_longer_callable(store, node_id):
-            raise ProofMapError(
-                "REFERENCE_STILL_CALLABLE", f"{node_id} is still callable; its dependents move only once it is found no longer callable"
-            )
-        if _no_longer_callable(store, replacement_id):
-            raise ProofMapError("REPLACEMENT_NOT_CALLABLE", f"{replacement_id} is itself no longer callable")
-        dependents = list_migratable_dependents(store, node_id)
-        if not dependents:
-            raise ProofMapError("NO_DEPENDENTS", f"nothing that can move rests on {node_id}")
-
-        decided = _decide(
-            store, kind=DecisionKind.dependent_migration, target_id=node_id, decision="superseded",
-            reviewer=reviewer, rationale=rationale, dependency_id=replacement_id, viewed_binding=viewed_binding)
-        decided.payload.migrated_dependents = [dependent.id for dependent in dependents]  # the very nodes moved below
-        for dependent in dependents:
-            moved = list(dict.fromkeys(replacement_id if dependency == node_id else dependency for dependency in dependent.dependencies))
-            update_proof_map_node(
-                store, dependent.model_copy(update={"dependencies": moved, "updated_by": decided.reviewer_id, "updated_at": utc_now()}), conn=conn
-            )
-            if get_dependency_pin(store, dependent.id, node_id) is not None:
-                # an imported result pins no version: the pin just follows the edge
-                delete_dependency_pin(store, dependent.id, node_id, conn=conn)
-                upsert_dependency_pin(store, DependencyPin(id=str(uuid.uuid4()), node_id=dependent.id, target_node_id=replacement_id), conn=conn)
-        record = _record(store, decided, _ACCEPTANCE_OBJECT_TYPE, node_id, ReviewGovernanceState.superseded)
-        append_event(
-            store,
-            "proof_map_dependents_migrated",
-            f"moved {len(dependents)} dependent(s) of {node_id} onto {replacement_id}",
-            entity_id=node_id,
-            payload={"replacement_id": replacement_id, "dependents": [d.id for d in dependents], "review_id": record.id},
-            conn=conn,
-        )
-    return record
-
-
 @memoized_read
 def _no_longer_callable(store: ProjectStore, node_id: str) -> bool:
     """Whether any Reference review row says `no-longer-callable`: terminal however it's recorded, like a Reject."""
@@ -3541,11 +3323,12 @@ def node_citation(store: ProjectStore, node: ProofMapNode) -> dict[str, Any] | N
 
 @memoized_read
 def _explicit_reference_review(store: ProjectStore, node_id: str) -> str:
-    """`unreviewed`, `reviewed`, `unverifiable` or `no-longer-callable`, from the newest `kind=reference_review`
+    """`unreviewed`, `reviewed` or `no-longer-callable`, from the newest `kind=reference_review`
     decision alone: the researcher's explicit decision on this node, never a Trust rule.
 
     Counts only while the imported result still cites what was reviewed
-    (statement and source) — never acceptance_state. Once found
+    (statement and source) — never acceptance_state; one that no longer
+    does reads as none (`unreviewed`, ADR-0025 point 24). Once found
     wanting, an imported result stays `no-longer-callable`.
     """
     node = require_node(store, node_id)
@@ -3555,10 +3338,10 @@ def _explicit_reference_review(store: ProjectStore, node_id: str) -> str:
     if latest is None:
         return "unreviewed"
     if latest.verdict.status != "verified" or latest.verdict.payload.interface_fingerprint != _interface_of(node):
-        return "unverifiable"
+        return "unreviewed"
     if _citation_missing(store, node):
         # the review was made on a citation that is gone (issue #91)
-        return "unverifiable"
+        return "unreviewed"
     return "reviewed" if latest.decision == ReviewGovernanceState.approved else "unreviewed"
 
 
@@ -3566,7 +3349,7 @@ def _explicit_reference_review(store: ProjectStore, node_id: str) -> str:
 @read_scoped
 def get_reference_review_state(store: ProjectStore, node_id: str) -> str:
     """An imported result's Reference review state: `no-longer-callable`, `reviewed`, `trusted-by-rule`,
-    `unverifiable` or `unreviewed`, in that order of precedence (ADR-0014 point 2).
+    or `unreviewed`, in that order of precedence (ADR-0014 point 2).
 
     The explicit decision comes first: `no-longer-callable` is final, and a
     counting Reference review wins over any rule. Otherwise a citation that
@@ -3686,7 +3469,7 @@ def trust_rule_impact(store: ProjectStore, name: str, *, conditions: list | None
             if node.kind != ProofMapNodeKind.imported_result:
                 continue
             now = get_reference_review_state(store, node.id)
-            if now not in ("trusted-by-rule", "unreviewed", "unverifiable"):
+            if now not in ("trusted-by-rule", "unreviewed"):
                 continue
             after = bool(trust_rules_of(store, node.id, rules=hypothetical))
             if now == "trusted-by-rule" and not after:
@@ -3746,102 +3529,6 @@ def note_trust_rule_matches(store: ProjectStore, node_ids: list[str] | None = No
                     store, _TRUSTED_BY_RULE_EVENT, f"{node.id} is trusted by rule {rule}", entity_id=node.id, payload={"rule": rule}
                 ))
     return events
-
-
-def revalidate_dependency(
-    store: ProjectStore,
-    node_id: str,
-    target_node_id: str,
-    *,
-    reviewer: str | None = None, rationale: str = "", viewed_binding: str | None = None,
-) -> ReviewRecord:
-    """Lightweight re-review: confirm an existing Candidate proof still holds after a dependency advanced.
-
-    Recorded as a `dependency_revalidation` decision whose pins are exactly
-    the refreshed pin this writes (ADR-0010).
-
-    Only available when the pin lags the target's accepted version (#23;
-    otherwise `PIN_NOT_LAGGING`), and when the target's interface fingerprint hasn't changed
-    since it was last pinned — if it has, the old Candidate proof no longer
-    demonstrably accounts for the new premise, and a whole new Candidate
-    proof is required instead (`INTERFACE_CHANGED`). Records
-    `kind=dependency_revalidation, decision=reaffirmed` — deliberately
-    distinct from `approved` so it can never be misread as a fresh
-    Acceptance of `node_id` itself — and refreshes the dependency edge's
-    pin to the target's current accepted version and fingerprint.
-
-    The pin refresh and the review rows are written in one SQLite
-    transaction: neither lands without the other.
-    """
-    node = require_node(store, node_id)
-    target = require_node(store, target_node_id)
-
-    if target_node_id not in node.dependencies:
-        raise ProofMapError(
-            "NOT_A_DEPENDENCY", f"{target_node_id} is not a dependency of {node_id}"
-        )
-
-    if target.kind == ProofMapNodeKind.imported_result:
-        raise ProofMapError(
-            "IMMUTABLE_NODE",
-            f"{target_node_id} is an imported_result; it has no accepted-version history to revalidate against",
-        )
-
-    pin = get_dependency_pin(store, node_id, target_node_id)
-    if pin is None:
-        raise ProofMapError(
-            "NO_DEPENDENCY_PIN",
-            f"{node_id} has never pinned {target_node_id}; submit a Candidate proof first",
-        )
-
-    current_fingerprint = get_accepted_interface_fingerprint(store, target_node_id)
-    if current_fingerprint is None:
-        raise ProofMapError(
-            "TARGET_NOT_ACCEPTED", f"{target_node_id} is not currently Accepted; nothing to revalidate against"
-        )
-
-    if not _same_interface(store, target_node_id, pin.pinned_fingerprint, current_fingerprint):
-        raise ProofMapError(
-            "INTERFACE_CHANGED",
-            f"{target_node_id}'s accepted interface changed since {node_id} last pinned it; "
-            "a new Candidate proof is required, lightweight re-review is not available",
-        )
-    if not dependency_pin_lags(store, pin):
-        # nothing moved since the pin: a re-review would reaffirm nothing (#24)
-        raise ProofMapError(
-            "PIN_NOT_LAGGING",
-            f"{node_id}'s pin on {target_node_id} already names its accepted version; there is nothing to re-review",
-        )
-
-    refreshed = _refreshed_pin(store, target_node_id)
-    new_version = refreshed.pinned_version
-    old_pin = pin
-
-    refreshed_pin = DependencyPin(
-        id=pin.id,
-        node_id=node_id,
-        target_node_id=target_node_id,
-        pinned_version=new_version,
-        pinned_fingerprint=current_fingerprint,
-    )
-    with store.transaction() as conn:
-        decided = _decide(store, kind=DecisionKind.dependency_revalidation, target_id=node_id, decision="reaffirmed", reviewer=reviewer, rationale=rationale, dependency_id=target_node_id, viewed_binding=viewed_binding)
-        upsert_dependency_pin(store, refreshed_pin, conn=conn)
-        record = _record(store, decided, _ACCEPTANCE_OBJECT_TYPE, node_id, ReviewGovernanceState.reaffirmed)
-        append_event(
-            store,
-            "proof_map_dependency_revalidated",
-            f"revalidated {node_id}'s dependency on {target_node_id}",
-            entity_id=node_id,
-            payload={
-                "target_node_id": target_node_id,
-                "old_pinned_version": old_pin.pinned_version,
-                "new_pinned_version": new_version,
-                "review_id": record.id,
-            },
-            conn=conn,
-        )
-    return record
 
 
 CHALLENGE_KINDS = ("proof", "statement")  # ADR-0025 point 6
@@ -4163,8 +3850,9 @@ def _worse(a: str | None, b: str | None) -> str | None:
 def _own_cause(store: ProjectStore, node_id: str) -> str | None:
     """What `node_id` itself starts, never looking further up: `"challenged"` for an open
     Challenge on it or an Imported result found no longer callable, `"stale"` for one of its own
-    dependency edges pinned to an interface its target no longer offers, or behind its target's
-    accepted version (#23), else None."""
+    dependency edges pinned to an interface its target no longer offers, else None. A pin behind
+    its target's accepted version with the interface unchanged is no cause: a pin follows an
+    unchanged interface by itself (ADR-0025 point 24)."""
     _visited_upstream()
     if has_open_challenge(store, node_id):
         return "challenged"
@@ -4175,7 +3863,7 @@ def _own_cause(store: ProjectStore, node_id: str) -> str | None:
         return "challenged"  # a citation found wanting: whatever rests on it needs a second look
     for dependency_id in node.dependencies:
         pin = get_dependency_pin(store, node_id, dependency_id)
-        if pin is not None and (not dependency_pin_is_current(store, pin) or dependency_pin_lags(store, pin)):
+        if pin is not None and not dependency_pin_is_current(store, pin):
             return "stale"
     return None
 
@@ -4187,7 +3875,7 @@ def _upstream_cause(store: ProjectStore, node_id: str) -> str | None:
     """What makes `node_id` unsettled upstream: `"challenged"` if it is itself Challenged, or
     reachable (via dependency edges, transitively) from a Challenged node or a citation found
     no longer callable; `"stale"` if it is reachable only from a dependency edge whose pin no
-    longer matches its target's accepted interface, or lags its accepted version (#23); else None.
+    longer matches its target's accepted interface; else None.
 
     Pure graph reachability over persisted Challenge and DependencyPin records — nothing is
     stored per node. See ADR-0004 point 4.
@@ -4272,7 +3960,7 @@ def _reachable_cause(store: ProjectStore, node_id: str) -> str | None:
 
 def _is_downstream_of_challenge_or_stale_pin(store: ProjectStore, node_id: str) -> bool:
     """Whether anything upstream of `node_id` unsettles it: a Challenge, a withdrawn citation, a
-    stale or lagging pin (see `_upstream_cause`)."""
+    pin whose interface changed (see `_upstream_cause`)."""
     return _upstream_cause(store, node_id) is not None
 
 
@@ -4330,7 +4018,7 @@ def _awaiting_decision(store: ProjectStore, node: ProofMapNode) -> CandidateProo
     state, latest, _ = _acceptance(store, node)
     if state == "rejected":
         return None
-    covered = latest is not None and state != "unverifiable" and latest.verdict.payload.candidate_proof_id == current_proof.id
+    covered = latest is not None and latest.verdict.payload.candidate_proof_id == current_proof.id
     return None if covered else current_proof
 
 
@@ -4374,7 +4062,7 @@ def get_workflow_state(store: ProjectStore, node_id: str) -> str:
         return "open"  # terminal: nothing further happens on a Rejected node
     if _awaiting_decision(store, node) is not None:
         return "review-needed"
-    if latest is not None and state != "unverifiable" and latest.decision == ReviewGovernanceState.revision_requested:
+    if latest is not None and latest.decision == ReviewGovernanceState.revision_requested:
         return "revision-requested"
 
     return "open"
@@ -4387,7 +4075,7 @@ def get_blocked_reason(store: ProjectStore, node_id: str) -> str | None:
 
     `dependency-challenged` when an unresolved dependency is itself
     Challenged or downstream of a Challenge; `dependency-stale` when it is
-    downstream only of a stale or lagging pin (#23) — both distinct from the
+    downstream only of a pin whose interface changed — both distinct from the
     ordinary `not-accepted` case of a dependency simply not having reached
     Acceptance/Reference-review yet.
     """
@@ -4414,17 +4102,14 @@ VERIFIER_CHECK_SUFFIX = "/verifier"
 
 
 def _verifier_passed(store: ProjectStore, proof: CandidateProofRecord) -> bool:
-    """Whether the Verifier's newest check on this very snapshot passed, and the researcher hasn't found that check
-    unusable (an evidence review decision, ADR-0004 point 5). A later failed reading of the same snapshot ends it."""
+    """Whether the Verifier's newest check on this very snapshot passed. A later failed reading of the same snapshot
+    ends it. (An Evidence review judging that check unusable is history now, read by nothing, ADR-0025 point 24.)"""
     checks = [
         check
         for check in list_evidence_checks_for_candidate_proof(store, proof.id)
         if check.run_by.endswith(VERIFIER_CHECK_SUFFIX) and check.candidate_proof_sha256 is not None and check.candidate_proof_sha256 == proof.sha256
     ]
-    if not checks or checks[-1].outcome != EvidenceOutcome.passed:  # oldest first: the newest decides
-        return False
-    reviews = decision_rows(store, _EVIDENCE_CHECK_OBJECT_TYPE, checks[-1].id, ReviewRecordKind.evidence_review.value)
-    return not (reviews and reviews[-1]["decision"] == ReviewGovernanceState.unusable.value)
+    return bool(checks) and checks[-1].outcome == EvidenceOutcome.passed  # oldest first: the newest decides
 
 
 @memoized_read
@@ -4454,7 +4139,7 @@ def _provisional_itself(store: ProjectStore, node_id: str) -> bool:
     if node is None:
         return False
     if node.kind == ProofMapNodeKind.imported_result:
-        # unverifiable is a Reference review the researcher made that no longer counts: theirs to settle again
+        # a Reference review that no longer counts reads as none: unreviewed, as an imported result is before one
         return get_reference_review_state(store, node_id) == "unreviewed"
     if get_acceptance_state(store, node_id) == "accepted" or has_open_challenge(store, node_id):
         return False
@@ -4550,7 +4235,6 @@ def _sent_back(store: ProjectStore, node_id: str) -> bool:
         return True
     return (
         latest is not None
-        and state != "unverifiable"
         and latest.decision == ReviewGovernanceState.revision_requested
         and _awaiting_decision(store, node) is None
     )
@@ -4649,9 +4333,9 @@ def list_integrity_warnings(store: ProjectStore) -> list[AuthorityWarning]:
 
     The authority layer's own findings (unreadable lines, unconfirmed
     pre-ADR-0010 decisions, decisions git doesn't have yet) plus what only
-    the proof map can see: a recorded Acceptance that no longer describes
-    its node, and a Review snapshot on disk the index never recorded (an orphan
-    of a crashed `request_review`, #18).
+    the proof map can see: a Review snapshot on disk the index never recorded
+    (an orphan of a crashed `request_review`, #18). An Acceptance that no
+    longer describes its node is no warning: it reads as none (ADR-0025).
     """
     warnings = list_authority_warnings(store)
     for node in list_nodes(store):
@@ -4671,13 +4355,4 @@ def list_integrity_warnings(store: ProjectStore) -> list[AuthorityWarning]:
                         details={"node_id": node.id, "file_path": file_path},
                     )
                 )
-        state, latest, problem = _acceptance(store, node)
-        if state == "unverifiable" and latest is not None and latest.verdict.status == "verified":
-            warnings.append(
-                AuthorityWarning(
-                    code="DECISION_NO_LONGER_APPLIES",
-                    message=f"{node.id}'s acceptance decision no longer counts: {problem}",
-                    details={"node_id": node.id, "review_id": latest.row["review_id"]},
-                )
-            )
     return warnings

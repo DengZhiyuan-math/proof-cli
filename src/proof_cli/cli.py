@@ -779,7 +779,7 @@ def node_show(
                 for proof in list_candidate_proofs(store, node_id) for now in [candidate_proof_sha256(store, proof.id)]
                 for check in list_evidence_checks(store, proof.id)
             ]
-        # what the node page shows of each dependency: its pin, whether current, the remedy (#97)
+        # what the node page shows of each dependency: its statement, kind and pin (#97)
         payload["dependency_details"] = dependency_details(store, node_id)
         payload["definition_details"] = definition_details
         typer.echo(dump_envelope(success_envelope("node.show", payload)))
@@ -1239,27 +1239,6 @@ def node_review(node_id: str, decision: str = typer.Argument(""), root: str = RO
     human_review_required(root, command="node.review", kind="acceptance", target_id=node_id, node_id=node_id, json_output=json_output)
 
 
-@node_app.command("revalidate")
-def node_revalidate(node_id: str, target_node_id: str = typer.Argument(""), root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
-    """Lightweight re-review of node_id's dependency on target_node_id — on the proof map page (ADR-0010)."""
-    human_review_required(
-        root, command="node.revalidate", kind="dependency_revalidation", target_id=node_id, node_id=node_id, json_output=json_output
-    )
-
-
-@node_app.command("migrate-dependents")
-def node_migrate_dependents(
-    node_id: str,
-    replacement_id: str = typer.Argument(""),
-    root: str = typer.Option(".", "--root", envvar="PROOF_ROOT"),  # the root convention of ADR-0011 (#67)
-    json_output: bool = typer.Option(False, "--json"),
-) -> None:
-    """Move a no-longer-callable imported result's dependents onto its correction — on the proof map page (#20)."""
-    human_review_required(
-        root, command="node.migrate_dependents", kind="dependent_migration", target_id=node_id, node_id=node_id, json_output=json_output
-    )
-
-
 @node_app.command("verify")
 def node_verify(node_id: str, root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
     """Verify a node's version: the researcher's "checked, and I believe it" (ADR-0025) — on the proof map page."""
@@ -1654,12 +1633,6 @@ def evidence_record(
         _emit_error(exc, json_output, command="node.evidence.record")
         raise typer.Exit(code=1)
     _emit_evidence_check(check, json_output, command="node.evidence.record")
-
-
-@node_evidence_app.command("review")
-def evidence_review(check_id: str, decision: str = typer.Argument(""), root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
-    """Judge an Evidence check trusted/unusable — on the proof map page (ADR-0010)."""
-    human_review_required(root, command="node.evidence.review", kind="evidence_review", target_id=check_id, node_id=None, json_output=json_output)
 
 
 node_app.add_typer(node_evidence_app, name="evidence")

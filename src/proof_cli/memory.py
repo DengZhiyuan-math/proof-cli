@@ -191,20 +191,17 @@ class ProofMapHandoffNode(BaseModel):
     node_id: str
     kind: str
     statement: str
-    # why its newest acceptance decision no longer counts (unverifiable nodes only)
-    reason: str | None = None
 
 
 class ProofMapHandoff(BaseModel):
     """The proof map as a handoff reads it (#45).
 
     `accepted` is exactly the nodes whose `get_acceptance_state` is
-    `accepted`; `unverifiable` the nodes whose newest acceptance decision no
-    longer describes them, with why.
+    `accepted`. A decision that no longer describes its node reads as none
+    (ADR-0025 retired `unverifiable`), so it is not listed apart.
     """
 
     accepted: list[ProofMapHandoffNode] = Field(default_factory=list)
-    unverifiable: list[ProofMapHandoffNode] = Field(default_factory=list)
 
 
 class HandoffSnapshot(BaseModel):
@@ -1723,13 +1720,9 @@ def proof_map_handoff(store: ProjectStore) -> ProofMapHandoff:
     from .proof_map import acceptance_overview
 
     section = ProofMapHandoff()
-    for node, state, reason in acceptance_overview(store):
-        entry = ProofMapHandoffNode(node_id=node.id, kind=getattr(node.kind, "value", str(node.kind)), statement=node.statement)
+    for node, state, _ in acceptance_overview(store):
         if state == "accepted":
-            section.accepted.append(entry)
-        elif state == "unverifiable":
-            entry.reason = reason
-            section.unverifiable.append(entry)
+            section.accepted.append(ProofMapHandoffNode(node_id=node.id, kind=getattr(node.kind, "value", str(node.kind)), statement=node.statement))
     return section
 
 

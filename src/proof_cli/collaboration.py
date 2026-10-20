@@ -85,7 +85,7 @@ class ReviewRecordKind(str, Enum):
 
     acceptance = "acceptance"
     reference_review = "reference_review"
-    evidence_review = "evidence_review"
+    evidence_review = "evidence_review"  # retired by ADR-0025 (#280), with the next and dependent_migration: kept to read old rows
     dependency_revalidation = "dependency_revalidation"
     # ADR-0009's other human-only operations, recorded as signed rows (#35)
     challenge_resolution = "challenge_resolution"

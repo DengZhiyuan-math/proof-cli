@@ -386,8 +386,8 @@ class EvidenceOutcome(str, Enum):
 class EvidenceCheck(BaseModel):
     """An automated or semi-automated check run against a specific Candidate proof.
 
-    Purely advisory: recording one, or a Human Review judgment of `trusted`
-    or `unusable` on it (a `kind=evidence_review` decision), can never
+    Purely advisory: a record of what a checker reported, which nobody judges
+    (the Evidence review that once did is retired, ADR-0025); it can never
     grant, revoke, or otherwise touch a node's acceptance_state — only
     `decide_acceptance` can (ADR-0004 point 5).
     """

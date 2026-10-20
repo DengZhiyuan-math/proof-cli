@@ -1,8 +1,8 @@
 """Review decisions as git-tracked text, reviewed by a GitHub identity (ADR-0010, issues #53/#54).
 
 Every Human Review decision on the proof map — an Acceptance, Reference
-review, Evidence review, Lightweight re-review, Challenge dismissal or
-Promote — is one JSON line in its node's `proofs/<node-id>/reviews.jsonl`,
+review, Challenge dismissal, Promote, and ADR-0025's verification, Seal and
+"not a problem" — is one JSON line in its node's `proofs/<node-id>/reviews.jsonl`,
 naming what it decided on (the Review snapshot's SHA-256, the interface,
 the pins, the Challenges it resolves). proof-cli commits that line together
 with the snapshot it decides on, as the reviewer's own git identity; once
@@ -48,7 +48,7 @@ class DecisionKind(str, Enum):
 
     acceptance = "acceptance"
     reference_review = "reference_review"
-    evidence_review = "evidence_review"
+    evidence_review = "evidence_review"  # retired by ADR-0025 with the two below: kept to read old lines, never written
     dependency_revalidation = "dependency_revalidation"
     challenge_resolution = "challenge_resolution"
     promote = "promote"
@@ -127,6 +127,8 @@ DECISION_ROWS: dict[tuple[DecisionKind, str], tuple[str, str]] = {
     (DecisionKind.acceptance, "reject"): ("proof_map_node", "rejected"),
     (DecisionKind.reference_review, "reference-review"): ("proof_map_node", "approved"),
     (DecisionKind.reference_review, "no-longer-callable"): ("proof_map_node", "rejected"),
+    # Evidence review, Lightweight re-review and Dependent migration, retired by ADR-0025 (#280): their old lines still
+    # verify as what they were, so history reads them, and nothing acts on them
     (DecisionKind.evidence_review, "trusted"): ("evidence_check", "trusted"),
     (DecisionKind.evidence_review, "unusable"): ("evidence_check", "unusable"),
     (DecisionKind.dependency_revalidation, "reaffirmed"): ("proof_map_node", "reaffirmed"),
