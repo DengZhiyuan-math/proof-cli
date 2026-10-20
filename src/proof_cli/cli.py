@@ -406,7 +406,12 @@ def frontier(root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "-
     store = get_store(_root(root))
     nodes = get_frontier(store)
     if json_output:
-        typer.echo(dump_envelope(success_envelope("frontier", [_with_state_axes(store, node) for node in nodes])))
+        try:
+            data = [_with_state_axes(store, node) for node in nodes]
+        except ProofMapError as exc:  # a cycle in a hand-edited map (DEPENDENCY_CYCLE)
+            _emit_error(exc, json_output, command="frontier")
+            raise typer.Exit(code=1)
+        typer.echo(dump_envelope(success_envelope("frontier", data)))
         return
     typer.echo(render_frontier(nodes))
 
@@ -702,6 +707,7 @@ def node_show(
     store = get_store(_root(root))
     try:
         node = require_node(store, node_id)
+        states = node_states(store, node_id)  # its four states and conclusion (ADR-0025)
         workflow_state = get_workflow_state(store, node_id)
         acceptance_state = _acceptance_axis(store, node)
         integrity_state = get_integrity_state(store, node_id)
@@ -731,7 +737,7 @@ def node_show(
         payload["citation"] = citation
         if is_computation(node):  # the entry is run.sh, under its own key: `working_proof` means proof.tex
             payload["run_script"], working_proof = working_proof, None
-        payload.update(node_states(store, node_id).model_dump(mode="json"))  # its four states and conclusion (ADR-0025)
+        payload.update(states.model_dump(mode="json"))
         payload["workflow_state"] = workflow_state
         payload["acceptance_state"] = acceptance_state
         payload["integrity_state"] = integrity_state
@@ -796,7 +802,12 @@ def node_list(
     store = get_store(_root(root))
     nodes = list_nodes(store)
     if json_output:
-        typer.echo(dump_envelope(success_envelope("node.list", [_with_state_axes(store, node) for node in nodes])))
+        try:
+            data = [_with_state_axes(store, node) for node in nodes]
+        except ProofMapError as exc:  # a cycle in a hand-edited map (DEPENDENCY_CYCLE)
+            _emit_error(exc, json_output, command="node.list")
+            raise typer.Exit(code=1)
+        typer.echo(dump_envelope(success_envelope("node.list", data)))
         return
     typer.echo(render_proof_map_node_list(nodes))
 

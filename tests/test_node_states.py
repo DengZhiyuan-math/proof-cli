@@ -16,9 +16,9 @@ from _proofs import submit_proof
 from _researcher import researcher
 from proof_cli.cli import app
 from proof_cli.node_states import conclusion, node_states
-from proof_cli.proof_map import claim_node, create_node, get_acceptance_state, open_challenge, record_evidence_check
+from proof_cli.proof_map import ProofMapError, claim_node, create_node, get_acceptance_state, get_node, open_challenge, record_evidence_check
 from proof_cli.references import ReferenceRecord, ReferenceSourceType
-from proof_cli.storage import ensure_project, import_reference
+from proof_cli.storage import ensure_project, import_reference, update_proof_map_node
 
 RUDIN = ReferenceRecord(id="rudin", title="Principles of Mathematical Analysis", authors=["Walter Rudin"], year=1976,
                         source_type=ReferenceSourceType.textbook, identifier="isbn:0-07-054235-X")
@@ -172,3 +172,19 @@ def test_a_chain_deeper_than_pythons_recursion_limit_is_read(tmp_path: Path):
         result = CliRunner().invoke(app, [*args, "--root", str(tmp_path), "--json"])
         assert result.exit_code == 0, result.output[-400:]
     assert node_states(store, f"n{depth - 1}").conclusion == "uncertain"
+
+
+def test_a_cycle_stored_in_a_hand_edited_map_is_refused_by_name_not_walked_forever(tmp_path: Path):
+    # no service makes a cycle, but a hand-edited map may hold one: a read must end, and say where it is
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="a", kind="claim", statement="a")
+    create_node(store, node_id="b", kind="claim", statement="b", dependencies=["a"])
+    update_proof_map_node(store, get_node(store, "a").model_copy(update={"dependencies": ["b"]}))  # a <- b <- a
+    with pytest.raises(ProofMapError) as caught:
+        node_states(store, "a")
+    assert caught.value.code == "DEPENDENCY_CYCLE" and caught.value.details["cycle"] == ["a", "b", "a"]
+    for args in (["node", "show", "b"], ["node", "list"]):
+        result = CliRunner().invoke(app, [*args, "--root", str(tmp_path), "--json"])
+        error = json.loads(result.output)["error"]
+        assert result.exit_code == 1 and error["code"] == "DEPENDENCY_CYCLE", args
+    assert error["cycle"] == ["a", "b", "a"]  # node list reads a first

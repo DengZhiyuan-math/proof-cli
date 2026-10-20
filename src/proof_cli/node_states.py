@@ -22,8 +22,8 @@ from collections.abc import Iterable
 
 from pydantic import BaseModel
 
-from .domain import ProofMapNodeKind
-from .proof_map import get_acceptance_state, get_accepted_version, get_reference_review_state, has_open_challenge, require_node
+from .domain import ProofMapNode, ProofMapNodeKind
+from .proof_map import ProofMapError, get_acceptance_state, get_accepted_version, get_reference_review_state, has_open_challenge, require_node
 from .storage import ProjectStore, get_active_claim, get_current_candidate_proof, read_scoped, scoped_memo
 
 SEALS = ("unsealed", "sealed-true", "sealed-false")
@@ -66,28 +66,44 @@ def node_states(store: ProjectStore, node_id: str) -> NodeStates:
     """The node's states, read off today's records, and its conclusion, capped by each dependency's (ADR-0025).
 
     The dependencies are walked with a stack, not by recursion: a chain may run deeper than Python's recursion limit.
-    What the walk works out is kept for the rest of the read scope, so reading every node of the map reads each once."""
+    What the walk works out is kept for the rest of the read scope, so reading every node of the map reads each once.
+    No service makes a cycle, but a hand-edited map may hold one: the walk refuses it (DEPENDENCY_CYCLE, naming it)
+    rather than going round it forever."""
     read = scoped_memo(store, "node_states")
-    stack = [node_id]
-    while stack:
-        current = stack[-1]
-        if current in read:
-            stack.pop()
+    path: list[ProofMapNode] = []  # the chain being worked out, from node_id down
+    on_path: set[str] = set()
+    todo: list[list[str]] = []  # for each node on the path, its dependencies not yet read, the first last
+
+    def enter(entered: str) -> None:
+        if entered in on_path:
+            ids = [node.id for node in path]
+            cycle = [*ids[ids.index(entered):], entered]
+            raise ProofMapError("DEPENDENCY_CYCLE", "the map holds a cycle of dependencies, which no service writes: "
+                                + " → ".join(cycle) + "; remove one of its edges", details={"node_id": node_id, "cycle": cycle})
+        node = require_node(store, entered)
+        path.append(node)
+        on_path.add(entered)
+        todo.append(list(reversed(node.dependencies)))
+
+    if node_id not in read:
+        enter(node_id)
+    while path:
+        while todo[-1] and todo[-1][-1] in read:
+            todo[-1].pop()
+        if todo[-1]:
+            enter(todo[-1].pop())
             continue
-        node = require_node(store, current)
-        waiting = [dependency for dependency in node.dependencies if dependency not in read]
-        if waiting:
-            stack.extend(waiting)
-            continue
-        stack.pop()
+        node = path.pop()
+        on_path.discard(node.id)
+        todo.pop()
         seal, statement_layer, proof_layer, assignee = _own_states(store, node)
-        read[current] = NodeStates(seal=seal, statement_layer=statement_layer, proof_layer=proof_layer, assignee=assignee,
+        read[node.id] = NodeStates(seal=seal, statement_layer=statement_layer, proof_layer=proof_layer, assignee=assignee,
                                    conclusion=conclusion(seal, statement_layer, proof_layer,
                                                          dependencies=[read[dependency].conclusion for dependency in node.dependencies]))
     return read[node_id]
 
 
-def _own_states(store: ProjectStore, node) -> tuple[str, str, str, str | None]:
+def _own_states(store: ProjectStore, node: ProofMapNode) -> tuple[str, str, str, str | None]:
     """The node's own Seal, Statement layer, Proof layer and Assignee, as the module note maps today's records."""
     seal, statement_layer, proof_layer = "unsealed", "unchallenged", "incomplete"
     if node.kind == ProofMapNodeKind.imported_result:

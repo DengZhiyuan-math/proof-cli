@@ -79,7 +79,7 @@ ERROR_CODES: dict[str, str] = {
     "TARGET_NOT_REVIEWED": "the imported result hasn't been Reference-reviewed",
     "NOT_A_DEPENDENCY": "the target isn't one of the node's dependencies",
     "ALREADY_A_DEPENDENCY": "the node already rests on that dependency",
-    "DEPENDENCY_CYCLE": "the edge would close a cycle of dependencies; the error names it (`cycle`)",
+    "DEPENDENCY_CYCLE": "the edge would close a cycle of dependencies, or a hand-edited map holds one; the error names it (`cycle`)",
     "DEPENDENCIES_CHANGED": "the node's dependencies changed since its snapshot was requested for review; request review again",
     "NO_DEPENDENCY_PIN": "the node never pinned that dependency; request review first",
     "DEPENDENCY_REQUIRED": "a Lightweight re-review names the dependency it re-pins",
