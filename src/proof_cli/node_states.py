@@ -165,6 +165,18 @@ def own_seal(store: ProjectStore, node: ProofMapNode) -> str:
     return seal
 
 
+def _seal_after_unseal(store: ProjectStore, node: ProofMapNode, unsealed: str) -> str:
+    """The node's Seal once `unsealed` is unsealed: its own seal line (the root's is the one removed), else the older
+    review's sealed false, else a true seal other than `unsealed`'s that covers it, else unsealed."""
+    own = "unsealed" if node.id == unsealed else direct_seal(store, node.id)
+    if (own == "unsealed" and node.kind == ProofMapNodeKind.imported_result
+            and get_reference_review_state(store, node.id) == "no-longer-callable"):
+        own = "sealed-false"
+    if own != "unsealed":
+        return own
+    return "sealed-true" if [by for by in _covered(store).get(node.id, []) if by != unsealed] else "unsealed"
+
+
 def verification_holds(store: ProjectStore, node: ProofMapNode) -> tuple[bool, datetime | None]:
     """Whether a verification of the node as it stands holds, before any Challenge lapses it, and when it was made
     (None for a Trust rule, which holds from no one decision): the researcher's verification of the version as it
@@ -230,8 +242,8 @@ def _stopped(store: ProjectStore) -> dict[str, list[str]]:
 
 def sealed_by(store: ProjectStore, node_id: str) -> str | None:
     """The node whose true seal covers this one (ADR-0025 point 14), the first by id when several do, or None. Only the
-    directly sealed node is recorded, with the set it covered as the page showed it; unsealing it releases that set,
-    and a node it came to rest on later is not sealed by it."""
+    directly sealed node is recorded, with the set it covered as the page showed it; unsealing it removes that
+    coverage, never another seal's, and a node it came to rest on later is not sealed by it."""
     coverers = _covered(store).get(node_id)
     return coverers[0] if coverers else None
 
@@ -266,7 +278,8 @@ def seal_preview(store: ProjectStore, node_id: str, action: str) -> dict[str, li
 
     `seal-true`: the nodes it would seal (itself and all it rests on), those of them not verified, and those with a
     Challenge not ended. `seal-false`: the nodes that use it directly, which become uncertain and need another route,
-    and those of them verified, whose verification is void. `unseal`: the nodes released with it."""
+    and those of them verified, whose verification is void. `unseal`: the nodes no seal holds once its seal and that
+    seal's coverage are removed; one sealed itself, by an older review, or by another true seal stays sealed."""
     nodes = {node.id: node for node in list_nodes(store)}
     require_node(store, node_id)
     if action == "seal-true":
@@ -278,8 +291,8 @@ def seal_preview(store: ProjectStore, node_id: str, action: str) -> dict[str, li
         users = sorted(n for n, node in nodes.items() if node_id in node.dependencies)
         return {"direct_users": users, "verified": [n for n in users if node_states(store, n).proof_layer == "expert-verified"]}
     if action == "unseal":
-        # what goes unsealed: it, and what its seal covered, but no node sealed itself or covered by another true seal
+        # unsealing removes this seal and its coverage; what goes unsealed is what is sealed by nothing else after it —
+        # by no seal line of its own (but the root's, which goes), no older review's fallback, no other true seal
         mine = [node_id, *((seal_line(store, node_id) or {}).get("covered") or [])]
-        return {"releases": sorted(n for n in set(mine) if (n == node_id or n in nodes and own_seal(store, nodes[n]) == "unsealed")
-                                   and not [by for by in _covered(store).get(n, []) if by != node_id])}
+        return {"releases": sorted(n for n in set(mine) if n in nodes and _seal_after_unseal(store, nodes[n], node_id) == "unsealed")}
     raise ProofMapError("INVALID_SEAL", f"'{action}' is not seal-true, seal-false or unseal")

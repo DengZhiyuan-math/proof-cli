@@ -2862,8 +2862,9 @@ def seal_node(store: ProjectStore, node_id: str, value: bool, *, reviewer: str |
 
 
 def unseal_node(store: ProjectStore, node_id: str, *, reviewer: str | None = None, rationale: str = "", viewed_binding: str | None = None) -> ReviewRecord:
-    """Unseal a node sealed itself (ADR-0025 point 14), releasing with it what its true seal covered; the agents may
-    audit and challenge them again. A node only covered by another's seal is released by unsealing that one (NOT_SEALED)."""
+    """Unseal a node sealed itself (ADR-0025 point 14), removing its seal and that seal's coverage; what no other seal
+    then holds the agents may audit and challenge again, while a node sealed itself, or covered by another true seal,
+    stays sealed. A node only covered by another's seal is unsealed by unsealing that one (NOT_SEALED)."""
     from .node_states import sealed_by  # it reads this module
 
     if not rationale.strip():
@@ -2938,6 +2939,17 @@ def seal_line(store: ProjectStore, node_id: str) -> dict | None:
     payload = latest.verdict.payload
     return {"decision": payload.decision, "by": latest.row["reviewer_id"], "at": latest.row["created_at"], "note": latest.row["rationale"],
             "covered": list(payload.covered_nodes) if payload.decision == "seal-true" else []}
+
+
+def mathematical_text(store: ProjectStore, node: ProofMapNode) -> str:
+    """A digest of everything the node says (ADR-0020 point 5): its statement, its assumptions, and the term and text of
+    each Definition it names. The interface fingerprint names Definitions by id, which stands for their text only once
+    fixed; a decision made on Unfixed text binds the words themselves."""
+    named = [get_definition(store, definition_id) for definition_id in node.definitions]
+    said = {"statement": node.statement, "assumptions": list(node.assumptions),
+            "definitions": [[definition_id, d.term, d.text] if d is not None else [definition_id, None, None]
+                            for definition_id, d in zip(node.definitions, named)]}
+    return hashlib.sha256(json.dumps(said, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
 def false_since(store: ProjectStore, node_id: str) -> list[datetime]:
@@ -3036,10 +3048,10 @@ def decision_binding(
     if kind == DecisionKind.reference_review:
         node = require_node(store, target_id)
         return {**none, "interface_fingerprint": _interface_of(node), "resolves_challenges": _open_challenge_ids(store, target_id)}
-    if kind == DecisionKind.verification:  # the version as it stands: its snapshot, interface and pins (ADR-0025)
+    if kind == DecisionKind.verification:  # the version as it stands: its snapshot, interface, pins and words (ADR-0025)
         node = require_node(store, target_id)
         return {**none, "candidate_proof_id": _current_proof_id(store, target_id), "interface_fingerprint": _interface_of(node),
-                "dependency_pins": _pins_of(store, target_id)}
+                "dependency_pins": _pins_of(store, target_id), "texts": {target_id: mathematical_text(store, node)}}
     if kind == DecisionKind.seal:
         # absolute belief, bound to the statement and no proof's bytes; a true seal to the whole set it covers, so a page
         # that showed another set is refused (STALE_VIEW), and an unseal to the set it releases (ADR-0025 point 15)
@@ -3047,12 +3059,12 @@ def decision_binding(
         line = seal_line(store, target_id)
         covered = (sorted(rests_on(store, target_id) - {target_id}) if decision == "seal-true"
                    else list((line or {}).get("covered") or []) if decision == "unseal" else [])
-        interfaces = {}
-        if decision == "seal-true":  # what each covered node says, as shown: a restatement since is another set
-            for covered_id in covered:
-                covered_node = get_node(store, covered_id)
-                interfaces[covered_id] = _interface_of(covered_node) if covered_node is not None else None
-        return {**none, "interface_fingerprint": _interface_of(node), "covered_nodes": covered, "covered_interfaces": interfaces}
+        texts: dict[str, str | None] = {}
+        if decision in ("seal-true", "seal-false"):  # what each node it seals says, as shown: other words since are another seal
+            for sealed_id in [target_id, *covered]:
+                sealed_node = get_node(store, sealed_id)
+                texts[sealed_id] = mathematical_text(store, sealed_node) if sealed_node is not None else None
+        return {**none, "interface_fingerprint": _interface_of(node), "covered_nodes": covered, "texts": texts}
     if kind == DecisionKind.not_a_problem:  # the agent's Challenge, on the version it lapsed
         challenge = require_challenge(store, target_id)
         return {**none, "candidate_proof_id": _current_proof_id(store, challenge.target_node_id),

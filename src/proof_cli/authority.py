@@ -132,7 +132,7 @@ def build_decision_payload(
     resolves_challenges: list[str] | None = None,
     migrated_dependents: list[str] | None = None,
     covered_nodes: list[str] | None = None,
-    covered_interfaces: dict[str, str | None] | None = None,
+    texts: dict[str, str | None] | None = None,
 ) -> DecisionPayload:
     """What a decision of `kind` on `target_id` is made on, as of now."""
     proof = get_candidate_proof(store, candidate_proof_id) if candidate_proof_id else None
@@ -148,7 +148,7 @@ def build_decision_payload(
         resolves_challenges=list(resolves_challenges or []),
         migrated_dependents=list(migrated_dependents or []),
         covered_nodes=list(covered_nodes or []),
-        covered_interfaces=dict(covered_interfaces or {}),
+        texts=dict(texts or {}),
         key_ideas_drafted_by=proof.key_ideas_drafted_by if proof is not None else None,
     )
 

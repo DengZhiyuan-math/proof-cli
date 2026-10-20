@@ -93,10 +93,11 @@ class DecisionPayload(BaseModel):
     key_ideas_drafted_by: str | None = None
     # a trust_rule's conditions (ADR-0014): `trust_rules.TrustCondition`, as JSON; empty for a retire
     conditions: list[dict[str, Any]] = Field(default_factory=list)
-    # a true seal's covered set as the page showed it, by id: what it seals, and what its unseal releases (ADR-0025);
-    # and, for a seal, each covered node's interface then, so a statement restated since is a different set
+    # a true seal's covered set as the page showed it, by id: what it seals, and what its unseal removes (ADR-0025)
     covered_nodes: list[str] = Field(default_factory=list)
-    covered_interfaces: dict[str, str | None] = Field(default_factory=dict)
+    # the complete mathematical text of each node a verification or seal is made on, digested by node id: statement,
+    # assumptions and the text of the Definitions it names, so a page that showed other words is refused (STALE_VIEW)
+    texts: dict[str, str | None] = Field(default_factory=dict)
 
 
 class ReviewEntry(BaseModel):

@@ -14,6 +14,7 @@ from typer.testing import CliRunner
 from _proofs import submit_proof
 from _researcher import researcher
 from proof_cli.cli import app
+from proof_cli.definitions import add_definition, edit_definition
 from proof_cli.node_states import node_states, seal_preview
 from proof_cli.reviews import ReviewEntry
 from proof_cli.proof_map import (
@@ -286,4 +287,42 @@ def test_an_unseal_preview_keeps_what_stays_sealed_false_by_an_older_review(tmp_
     researcher(store).seal("A", True, rationale="known")
     assert seal_preview(store, "A", "unseal") == {"releases": ["A"]}
     researcher(store).unseal("A", rationale="reopened")
+    assert _layers(store, "N")[0] == "sealed-false"
+
+
+@pytest.mark.parametrize("named_by", ["C", "A"])  # a covered node's Definition, and the sealed node's own
+def test_a_preview_binds_the_text_of_the_definitions_what_it_seals_names(tmp_path: Path, named_by: str):
+    store = ensure_project(tmp_path)
+    add_definition(store, "D", term="Setting", text="X is compact.")
+    for node_id, dependencies in (("C", []), ("B", ["C"]), ("A", ["B"])):
+        create_node(store, node_id=node_id, kind="lemma", statement=node_id, dependencies=dependencies,
+                    definitions=["D"] if node_id == named_by else [])
+    viewed = binding_digest(prepare_decision(store, "seal", "A", "seal-true"))
+    edit_definition(store, "D", text="X is compact and connected.", reason="a condition added", edited_by="human")
+    with pytest.raises(ProofMapError) as caught:
+        seal_node(store, "A", True, reviewer=researcher(store).reviewer_id, rationale="known", viewed_binding=viewed)
+    assert caught.value.code == "STALE_VIEW"
+
+
+def test_a_verification_preview_binds_the_text_of_its_definitions(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    add_definition(store, "D", term="Setting", text="X is compact.")
+    create_node(store, node_id="L", kind="lemma", statement="L", definitions=["D"])
+    _snapshot(store, "L")
+    viewed = binding_digest(prepare_decision(store, "verification", "L", "verify"))
+    edit_definition(store, "D", text="X is compact and connected.", reason="a condition added", edited_by="human")
+    from proof_cli.proof_map import verify_node
+    with pytest.raises(ProofMapError) as caught:
+        verify_node(store, "L", reviewer=researcher(store).reviewer_id, rationale="checked", viewed_binding=viewed)
+    assert caught.value.code == "STALE_VIEW"
+
+
+def test_unsealing_a_node_an_older_review_found_false_releases_nothing(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="N", kind="imported_result", statement="N", source_locator="Theorem 1", source_version="v1")
+    researcher(store).decide_reference_review("N", "no-longer-callable")
+    researcher(store).seal("N", True, rationale="the source is right after all")
+    assert _layers(store, "N")[0] == "sealed-true"
+    assert seal_preview(store, "N", "unseal") == {"releases": []}  # it falls back to sealed false
+    researcher(store).unseal("N", rationale="reopened")
     assert _layers(store, "N")[0] == "sealed-false"

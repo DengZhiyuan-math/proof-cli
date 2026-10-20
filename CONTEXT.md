@@ -204,7 +204,7 @@ _Avoid_: transcript (the conversation as its backend reported it, folded under a
 A proof map node keeps five states, each read off its own record, never a cached status; everything else about it, its conclusion first, is computed from them, and every gate reads only them and what they compute (ADR-0025). Until ADR-0025's implementation lands, the code still has the three axes of ADR-0002 under the names each entry lists to avoid.
 
 **Seal** (封存):
-The researcher's absolute belief in a node: unsealed, sealed true or sealed false. Sealing true seals everything the node rests on with it — only the directly sealed node is recorded, with the set it rested on when sealed, so a node that comes to rest under it later is not sealed by it, and unsealing releases that set together; sealing false seals only the node. The agents never challenge or audit a sealed node and use it as known, briefed with the researcher's seal note. Set only by the researcher's click, after the system lists what it will do.
+The researcher's absolute belief in a node: unsealed, sealed true or sealed false. Sealing true seals everything the node rests on with it — only the directly sealed node is recorded, with the set it rested on when sealed, so a node that comes to rest under it later is not sealed by it, and unsealing removes that seal's coverage, while a node sealed itself or covered by another true seal stays sealed; sealing false seals only the node. The agents never challenge or audit a sealed node and use it as known, briefed with the researcher's seal note. Set only by the researcher's click, after the system lists what it will do.
 _Avoid_: lock, freeze, no longer callable (now sealed false)
 
 **Statement layer** (命题层):
