@@ -1,6 +1,6 @@
 # Definitions: the named text a statement is written in
 
-**Status**: accepted (2026-10-06; the researcher's decision in #132, option C). Amends ADR-0001 (a node's shape gains the definitions it names) and ADR-0005 (the Accepted mathematical interface includes them). ADR-0004, ADR-0010 and ADR-0011 point 5 stand: Definitions never decide anything, and a snapshot still freezes the proof, not the statement. Amended by ADR-0025: text is fixed by a verification or a Seal that relied on it, no longer by a revision request.
+**Status**: accepted (2026-10-06; the researcher's decision in #132, option C). Amends ADR-0001 (a node's shape gains the definitions it names) and ADR-0005 (the Accepted mathematical interface includes them). ADR-0004, ADR-0010 and ADR-0011 point 5 stand: Definitions never decide anything, and a snapshot still freezes the proof, not the statement. Amended by ADR-0025: text is fixed by a verification or a Seal that relied on it, no longer by a revision request; and point 3 no longer names the parent's definitions automatically (#286): a node names only the definitions its statement and assumptions use, its parent's included only where used.
 
 ## Context
 
