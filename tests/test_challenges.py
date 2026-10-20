@@ -15,8 +15,8 @@ from _proofs import submit_proof
 from _researcher import researcher
 from proof_cli.cli import app
 from proof_cli.node_states import node_states, stopped_by
-from proof_cli.proof_map import ProofMapError, create_node, get_challenge, open_challenge, restate_node, withdraw_challenge, work_log
-from proof_cli.storage import ensure_project
+from proof_cli.proof_map import ProofMapError, create_node, get_challenge, get_node, open_challenge, restate_node, withdraw_challenge, work_log
+from proof_cli.storage import ensure_project, update_proof_map_node
 
 
 def _accepted(store, node_id: str) -> None:
@@ -141,3 +141,50 @@ def test_the_cli_raises_either_kind_withdraws_one_and_says_what_a_challenge_stop
     withdrawn = run("challenge", "withdraw", raised["id"], "--reason", "cx misreads N's hypothesis", "--by", "agent_p")
     assert (withdrawn["status"], withdrawn["withdrawn_by"], withdrawn["withdrawal_reason"]) == ("withdrawn", "agent_p", "cx misreads N's hypothesis")
     assert run("node", "show", "U1")["stopped_by"] == []
+
+
+def test_an_agents_challenge_lapses_a_verification_for_good_and_withdrawing_it_restores_nothing(tmp_path: Path):
+    # ADR-0025 point 13: the verification lapses at once; it comes back only by the researcher's click (#279) or a new one
+    store = ensure_project(tmp_path)
+    for node_id in ("L", "M", "R", "D"):
+        create_node(store, node_id=node_id, kind="lemma", statement=node_id)
+        _accepted(store, node_id)
+    gap = open_challenge(store, "L", opened_by="agent_v", rationale="step 2 skips a case")
+    withdraw_challenge(store, gap.id, by="agent_p", reason="step 2 is case (b)")
+    assert _layers(store, "L") == ("unchallenged", "incomplete", "uncertain")
+    create_node(store, node_id="cx", kind="claim", statement="a counterexample to M")
+    open_challenge(store, "M", kind="statement", counterexample="cx", opened_by="agent_v", rationale="cx refutes M")
+    assert _layers(store, "M") == ("challenged-as-false", "incomplete", "uncertain")
+    mine = open_challenge(store, "R", opened_by="human", rationale="I want to recheck the constant")  # the researcher's own doubt
+    withdraw_challenge(store, mine.id, by="human", reason="the constant is fine")
+    assert _layers(store, "R") == ("unchallenged", "expert-verified", "verified-true")
+    dismissed = open_challenge(store, "D", opened_by="agent_v", rationale="a doubt")
+    researcher(store).dismiss_challenge(dismissed.id, rationale="not a problem")  # the researcher's click on the page
+    assert _layers(store, "D") == ("unchallenged", "expert-verified", "verified-true")
+
+
+def test_a_reviewed_imported_result_an_agent_challenged_is_checks_passed_again_not_verified(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="imp", kind="imported_result", statement="I", source_locator="Theorem 1", source_version="v1")
+    researcher(store).decide_reference_review("imp")
+    doubt = open_challenge(store, "imp", opened_by="agent_v", rationale="the source assumes more")
+    withdraw_challenge(store, doubt.id, by="agent_p", reason="it does not")
+    assert _layers(store, "imp") == ("unchallenged", "checks-passed", "true")
+
+
+def test_an_unrelated_cycle_in_a_hand_edited_map_never_breaks_a_healthy_nodes_read(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="good", kind="claim", statement="G")
+    create_node(store, node_id="a", kind="claim", statement="a")
+    create_node(store, node_id="b", kind="claim", statement="b", dependencies=["a"])
+    update_proof_map_node(store, get_node(store, "a").model_copy(update={"dependencies": ["b"]}))  # a <- b <- a
+    open_challenge(store, "a", kind="statement", opened_by="human", rationale="a doubt on the cycle")
+
+    def run(*args: str) -> tuple[int, dict]:
+        result = CliRunner().invoke(app, [*args, "--root", str(tmp_path), "--json"])
+        return result.exit_code, json.loads(result.output)
+
+    code, shown = run("node", "show", "good")
+    assert code == 0 and shown["data"]["stopped_by"] == [] and shown["data"]["conclusion"] == "uncertain"
+    code, refused = run("node", "show", "a")
+    assert code == 1 and refused["error"]["code"] == "DEPENDENCY_CYCLE" and refused["error"]["cycle"] == ["a", "b", "a"]

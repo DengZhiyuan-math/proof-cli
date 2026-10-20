@@ -710,6 +710,7 @@ def node_show(
     try:
         node = require_node(store, node_id)
         states = node_states(store, node_id)  # its four states and conclusion (ADR-0025)
+        stopped = stopped_by(store, node_id)  # the statement Challenges that stop work on it
         workflow_state = get_workflow_state(store, node_id)
         acceptance_state = _acceptance_axis(store, node)
         integrity_state = get_integrity_state(store, node_id)
@@ -740,7 +741,7 @@ def node_show(
         if is_computation(node):  # the entry is run.sh, under its own key: `working_proof` means proof.tex
             payload["run_script"], working_proof = working_proof, None
         payload.update(states.model_dump(mode="json"))
-        payload["stopped_by"] = stopped_by(store, node_id)  # the statement Challenges that stop work on it (ADR-0025)
+        payload["stopped_by"] = stopped
         payload["workflow_state"] = workflow_state
         payload["acceptance_state"] = acceptance_state
         payload["integrity_state"] = integrity_state

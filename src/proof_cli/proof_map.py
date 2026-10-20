@@ -2959,6 +2959,20 @@ def _acceptance(store: ProjectStore, node: ProofMapNode) -> tuple[str, _Counted 
     return "unreviewed", latest, None
 
 
+def verification_time(store: ProjectStore, node_id: str) -> datetime | None:
+    """When the decision a node's verification rests on was made: its counting Acceptance, or its Reference review.
+
+    None when there is none, and for an imported result trusted by a Trust rule, which holds from no one decision. An
+    agent's Challenge raised after it lapses the verification (ADR-0025 point 13)."""
+    node = require_node(store, node_id)
+    if node.kind == ProofMapNodeKind.imported_result:
+        latest = _latest_decision(store, node_id, ReviewRecordKind.reference_review) if _explicit_reference_review(store, node_id) == "reviewed" else None
+    else:
+        state, latest, _ = _acceptance(store, node)
+        latest = latest if state == "accepted" else None
+    return datetime.fromisoformat(latest.row["created_at"]) if latest is not None else None
+
+
 @memoized_read
 def _accepted_proof(store: ProjectStore, node_id: str) -> CandidateProofRecord | None:
     """The Candidate proof an Accepted node's counted Acceptance was made on."""
@@ -3566,12 +3580,11 @@ def open_challenge(
     researcher's needs none; it is discussed with the agents. A sealed node is the researcher's absolute belief and
     is never challenged (point 6): it is unsealed first.
     """
-    from .node_states import node_states  # it reads this module
+    from .node_states import own_states  # it reads this module
 
     if kind not in CHALLENGE_KINDS:
         raise ProofMapError("INVALID_CHALLENGE_KIND", f"'{kind}' is not a Challenge kind; expected one of: {', '.join(CHALLENGE_KINDS)}")
-    require_node(store, target_node_id)
-    seal = node_states(store, target_node_id).seal
+    seal = own_states(store, require_node(store, target_node_id))[0]
     if seal != "unsealed":
         raise ProofMapError("NODE_SEALED", f"{target_node_id} is {seal.replace('-', ' ')}: a sealed node is never challenged; it is unsealed first",
                             details={"node_id": target_node_id, "seal": seal})

@@ -11,7 +11,10 @@ is written, and no Challenge kind is guessed or stored (#276).
 - **Seal**: unsealed (#279 adds seal lines), except an imported result found no longer callable, which reads sealed false.
 - **Statement layer**: an open Challenge against the statement reads challenged as false, and so does one raised before
   Challenges had a kind (#277), whose kind is never guessed; so does a Rejected node. An open Challenge against the
-  proof sends the Proof layer back to incomplete instead, a verification included: it lapses at once (ADR-0025 point 13).
+  proof sends the Proof layer back to incomplete instead.
+- **A verification lapses** when an agent challenges the node after it, either kind, and stays lapsed when the Challenge
+  is withdrawn or ends (ADR-0025 point 13): only a new verification, or the researcher's click restoring it (the page's
+  dismissal today, #279's later), brings it back. The researcher's own doubt lapses nothing.
 - **Proof layer**: a counting Acceptance of the current version, a Reference review or a Trust rule the citation meets
   reads expert-verified (a verification counts for its own version only: a newer snapshot nobody verified is not), and
   an imported result without one checks passed. A legacy passed Verdict alone is not a check under the new rules: a
@@ -24,8 +27,9 @@ from collections.abc import Iterable
 
 from pydantic import BaseModel
 
-from .domain import ProofMapNode, ProofMapNodeKind
+from .domain import ChallengeStatus, ProofMapNode, ProofMapNodeKind
 from .proof_map import (
+    RESEARCHER,
     ProofMapError,
     get_acceptance_state,
     get_accepted_version,
@@ -33,6 +37,7 @@ from .proof_map import (
     list_challenges,
     list_nodes,
     require_node,
+    verification_time,
 )
 from .storage import ProjectStore, get_active_claim, get_current_candidate_proof, read_scoped, scoped_memo
 
@@ -106,15 +111,16 @@ def node_states(store: ProjectStore, node_id: str) -> NodeStates:
         node = path.pop()
         on_path.discard(node.id)
         todo.pop()
-        seal, statement_layer, proof_layer, assignee = _own_states(store, node)
+        seal, statement_layer, proof_layer, assignee = own_states(store, node)
         read[node.id] = NodeStates(seal=seal, statement_layer=statement_layer, proof_layer=proof_layer, assignee=assignee,
                                    conclusion=conclusion(seal, statement_layer, proof_layer,
                                                          dependencies=[read[dependency].conclusion for dependency in node.dependencies]))
     return read[node_id]
 
 
-def _own_states(store: ProjectStore, node: ProofMapNode) -> tuple[str, str, str, str | None]:
-    """The node's own Seal, Statement layer, Proof layer and Assignee, as the module note maps today's records."""
+def own_states(store: ProjectStore, node: ProofMapNode) -> tuple[str, str, str, str | None]:
+    """The node's own (Seal, Statement layer, Proof layer, Assignee), as the module note maps today's records: no walk
+    over what it rests on, so a hand-edited cycle elsewhere never reaches it. Its conclusion is `node_states`'."""
     seal, statement_layer, proof_layer = "unsealed", "unchallenged", "incomplete"
     if node.kind == ProofMapNodeKind.imported_result:
         review = get_reference_review_state(store, node.id)
@@ -129,11 +135,19 @@ def _own_states(store: ProjectStore, node: ProofMapNode) -> tuple[str, str, str,
             current = get_current_candidate_proof(store, node.id)
             if current is not None and current.version == get_accepted_version(store, node.id):
                 proof_layer = "expert-verified"
-    for challenge in list_challenges(store, target_node_id=node.id, status="open"):
+    challenges = list_challenges(store, target_node_id=node.id)
+    for challenge in challenges:
+        if challenge.status != ChallengeStatus.open:
+            continue
         if challenge.kind == "proof":
             proof_layer = "incomplete"
         else:
             statement_layer = "challenged-as-false"
+    if proof_layer == "expert-verified":
+        since = verification_time(store, node.id)
+        if any(challenge.opened_by != RESEARCHER and challenge.status != ChallengeStatus.dismissed
+               and (since is None or challenge.created_at > since) for challenge in challenges):
+            proof_layer = "checks-passed" if node.kind == ProofMapNodeKind.imported_result else "incomplete"
     claim = get_active_claim(store, node.id)
     return seal, statement_layer, proof_layer, claim.claimant_id if claim else None
 
@@ -159,7 +173,7 @@ def _stopped(store: ProjectStore) -> dict[str, list[str]]:
             users.setdefault(dependency, []).append(node.id)
     stopped: dict[str, set[str]] = {}
     for challenged in nodes:
-        if node_states(store, challenged).statement_layer != "challenged-as-false":
+        if own_states(store, nodes[challenged])[1] != "challenged-as-false":  # its own states: no walk, so no unrelated cycle
             continue
         branch = list(users.get(challenged, []))
         seen: set[str] = set()

@@ -122,9 +122,10 @@ def test_an_open_legacy_challenge_and_a_rejection_read_challenged_as_false(tmp_p
     create_node(store, node_id="lem", kind="lemma", statement="L")
     create_node(store, node_id="clm", kind="claim", statement="C")
     _accepted(store, "lem")
-    # one raised before Challenges had a kind, as it was stored then: its kind is never guessed (#277)
+    # one raised before Challenges had a kind, as it was stored then: its kind is never guessed (#277); an agent's,
+    # raised after the Acceptance, lapses it as any agent's Challenge does (ADR-0025 point 13)
     insert_challenge(store, Challenge(id="legacy-1", target_node_id="lem", opened_by="agent", rationale="step 2 looks wrong"))
-    assert _states(store, "lem") == ("unsealed", "challenged-as-false", "expert-verified", "uncertain")
+    assert _states(store, "lem") == ("unsealed", "challenged-as-false", "incomplete", "uncertain")
     submit_proof(store, "clm", claimant_id="agent", scoping_rationale="scoped", content="proof of clm")
     researcher(store).decide_acceptance("clm", "reject")
     assert _states(store, "clm") == ("unsealed", "challenged-as-false", "incomplete", "uncertain")
