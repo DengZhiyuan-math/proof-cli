@@ -1051,6 +1051,7 @@ def fog_crystallize(
     reassign: bool = typer.Option(False, "--reassign", help="Take the parent's claim over from whoever holds it"),
     assumption: list[str] = typer.Option([], "--assumption"),
     display_label: str = typer.Option("", "--display-label"),
+    definition: list[str] = typer.Option([], "--definition", help="Repeatable: a definition the Claim's statement is written in, the parent's or any other (`proof definition list`)"),
     created_by: str = typer.Option("", "--created-by", help=CREATED_BY_HELP),
     medium: str = typer.Option("", "--medium", help="The new Claim's medium: latex (default) or computation"),
     json_output: bool = typer.Option(False, "--json"),
@@ -1060,7 +1061,7 @@ def fog_crystallize(
     try:
         made = crystallize_fog(
             store, fog_id, node_id, statement, parent=parent, no_parent=no_parent, reassign=reassign,
-            assumptions=assumption, display_label=display_label, created_by=_author(created_by, root),
+            assumptions=assumption, display_label=display_label, definitions=definition, created_by=_author(created_by, root),
             medium=medium or None,
         )
     except ProofMapError as exc:
@@ -1248,7 +1249,8 @@ def node_split(
     child_file: list[str] = typer.Option(None, "--child-file", help=f"Repeatable, one per child after any --child: <child-id>=<path>, the statement read from the file at <path> ({FILE_TEXT})"),
     assumption: list[str] = typer.Option(None, "--assumption", help="Repeatable: an assumption of the one --child (as the page's split gives it)"),
     display_label: str = typer.Option("", "--display-label", help="The one --child's display label"),
-    definition: list[str] = typer.Option(None, "--definition", help="Repeatable: a definition the one --child is written in, beside the parent's, which every child names"),
+    definition: list[str] = typer.Option(None, "--definition", help="Repeatable: a definition the one --child is written in (`proof definition list`)"),
+    child_definition: list[str] = typer.Option(None, "--child-definition", help="Repeatable: <child-id>=<definition-id>, a definition that child's statement is written in, the parent's or any other"),
     root: str = ROOT_OPTION,
     created_by: str = typer.Option("", "--created-by", help=CREATED_BY_HELP),
     reassign: bool = typer.Option(False, "--reassign", help="Take the claim over from whoever holds it (recorded as `claim --reassign` records it); the node need not be on the frontier"),
@@ -1257,7 +1259,8 @@ def node_split(
     """Decompose parent_id into new claim-kind children. Ungated — no researcher approval needed.
     All or nothing; a node someone else holds is theirs to split unless --reassign.
     With a single --child, --assumption and --display-label give it those, as the page's split does (issue #154).
-    A --child-file child's statement is its file's text, read before anything is written."""
+    A --child-file child's statement is its file's text, read before anything is written.
+    A child names only the definitions given it, the parent's included only where its statement uses them (#286)."""
     entries = [*(child or []), *(child_file or [])]
     if not entries:
         raise click.UsageError("Missing option '--child' (or --child-file).")
@@ -1277,6 +1280,12 @@ def node_split(
                 statement = _file_text(statement, "--child-file")
             specs.append({"id": child_id, "statement": statement, "assumptions": list(assumption or []), "display_label": display_label,
                           "definitions": list(definition or [])})
+        by_id = {spec["id"]: spec for spec in specs}
+        for entry in child_definition or []:
+            child_id, _, definition_id = entry.partition("=")
+            if child_id not in by_id or not definition_id:
+                raise ProofMapError("INVALID_CHILD_SPEC", f"--child-definition '{entry}' is not <child-id>=<definition-id> for one of this split's children ({', '.join(by_id)})")
+            by_id[child_id]["definitions"].append(definition_id)
         children = split_node(store, parent_id, specs, created_by=_author(created_by, root), reassign=reassign)
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.split")

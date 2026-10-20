@@ -11,6 +11,7 @@ from typer.testing import CliRunner
 from proof_cli import definitions as D
 from proof_cli.cli import app
 from proof_cli.exchange import export_exchange_bundle, import_exchange_bundle
+from proof_cli.fog import add_fog, crystallize_fog
 from proof_cli.proof_map import (
     ProofMapError,
     _interface_of,
@@ -85,16 +86,38 @@ def test_a_definition_is_editable_until_a_decision_relies_on_it_and_removable_un
     assert _code(lambda: D.require_definition(store, "spare")) == "DEFINITION_NOT_FOUND"
 
 
-def test_a_claim_is_written_in_its_parents_definitions(tmp_path: Path):
+def test_a_claim_names_only_the_definitions_its_creator_gives_its_parents_included_only_where_used(tmp_path: Path):
+    # each definition a node names is one of its conditions (#286): a Claim that names a parent's definition its statement
+    # does not use says more than it proves, and a dependent reading it would think it needs that condition
     store = ensure_project(tmp_path)
     D.add_definition(store, "unit", term="Simple graph", text=UNIT)
     D.add_definition(store, "pair", term="Adjacent pair", text="Two vertices joined by an edge $e$.")
-    create_node(store, node_id="T", kind="theorem", statement="s", definitions=["unit"])
-    first, second = split_node(store, "T", [{"id": "C1", "statement": "a"}, {"id": "C2", "statement": "b", "definitions": ["pair"]}])
-    assert first.definitions == ["unit"] and second.definitions == ["unit", "pair"]
+    create_node(store, node_id="T", kind="theorem", statement="s", definitions=["unit", "pair"])
+    first, second = split_node(store, "T", [{"id": "C1", "statement": "a", "definitions": ["unit"]}, {"id": "C2", "statement": "b"}])
+    assert first.definitions == ["unit"] and second.definitions == []
     assert "\\paragraph{Simple graph.}" in working_proof_path(tmp_path, "C1").read_text()
+    assert "\\paragraph{Adjacent pair.}" not in working_proof_path(tmp_path, "C1").read_text()
     hung = create_node_under_parent(store, "T", node_id="C3", kind="claim", statement="c")
-    assert hung.definitions == ["unit"]
+    assert hung.definitions == []
+    named = create_node_under_parent(store, "T", node_id="C4", kind="claim", statement="d", definitions=["pair"])
+    assert named.definitions == ["pair"]
+
+
+def test_a_claim_crystallized_from_fog_names_the_definitions_given_it_with_or_without_a_parent(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    D.add_definition(store, "unit", term="Simple graph", text=UNIT)
+    D.add_definition(store, "pair", term="Adjacent pair", text="Two vertices joined by an edge $e$.")
+    create_node(store, node_id="T", kind="theorem", statement="s", definitions=["unit", "pair"])
+    add_fog(store, "the bound might follow from counting pairs", near=["T"])
+    add_fog(store, "a free-standing guess")
+    under = crystallize_fog(store, "fog-1", "C1", "Every edge is an adjacent pair.", definitions=["pair"]).node
+    assert under.derived_from == "T" and under.definitions == ["pair"]
+    alone = crystallize_fog(store, "fog-2", "C2", "A guess about simple graphs.", definitions=["unit"]).node
+    assert alone.derived_from is None and alone.definitions == ["unit"]
+    add_fog(store, "one more", near=["T"])
+    result = runner.invoke(app, ["fog", "crystallize", "fog-3", "C3", "Three.", "--definition", "unit", "--root", str(tmp_path), "--json"])
+    assert result.exit_code == 0, result.output
+    assert get_node(store, "C3").definitions == ["unit"]
 
 
 def test_the_definitions_are_part_of_the_interface_and_a_node_naming_none_keeps_its_fingerprint(tmp_path: Path):
@@ -126,7 +149,12 @@ def test_the_cli_adds_lists_shows_and_names_definitions(tmp_path: Path):
     assert run("definition", "remove", "unit", ok=False)["error"]["code"] == "DEFINITION_IN_USE"
     run("definition", "add", "pair", "Two vertices.", "--term", "Adjacent pair")
     child = run("node", "split", "T", "--child", "C=one", "--definition", "pair")["data"][0]
-    assert child["definitions"] == ["unit", "pair"]
+    assert child["definitions"] == ["pair"]
+    first, second = run("node", "split", "T", "--child", "C1=one", "--child", "C2=two",
+                        "--child-definition", "C1=unit", "--child-definition", "C1=pair", "--child-definition", "C2=unit")["data"]
+    assert first["definitions"] == ["unit", "pair"] and second["definitions"] == ["unit"]
+    stray = runner.invoke(app, ["node", "split", "T", "--child", "C3=three", "--child-definition", "C9=unit", "--root", str(tmp_path)])
+    assert stray.exit_code != 0 and "C9" in stray.output
     text = runner.invoke(app, ["node", "show", "T", "--root", str(tmp_path)]).output
     assert text.index("Definition unit") < text.index("Statement") and "Simple graph." in text
 
