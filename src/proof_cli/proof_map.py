@@ -1293,8 +1293,6 @@ def create_node_under_parent(
     """
     with store.transaction() as conn:
         remove_new_node_folders_on_rollback(store, [fields["node_id"]])
-        # a node hung under a parent is written in the parent's definitions too (ADR-0020)
-        fields = {**fields, "definitions": [*require_node(store, parent_id).definitions, *(fields.get("definitions") or [])]}
         node = create_node(store, created_by=created_by, **fields)
         # add_dependency's checks, in its order; the new node is not yet visible outside this
         # transaction, so the cycle is looked for from its own dependencies down to the parent
@@ -1381,8 +1379,8 @@ def _split(
             created_by=created_by,
             derived_from=parent_id,
             medium=spec.get("medium"),
-            # a Claim of a node is about that node's objects: it is written in the parent's definitions (ADR-0020)
-            definitions=[*parent.definitions, *(spec.get("definitions") or [])],
+            # only the definitions its creator gives, the parent's included only where used: each is a condition (#286)
+            definitions=list(spec.get("definitions") or []),
         )
         children.append(child)
 

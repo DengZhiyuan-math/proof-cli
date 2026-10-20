@@ -5,8 +5,9 @@ into it, or were left out and every reader — the researcher and each agent —
 once, under a name: an id, a term to show, and Markdown with `$…$` maths, as a statement is.
 
 A node names the definitions its statement is written in, when it is created (`proof node create --definition <id>`),
-and the names change afterwards only by a restatement while Unfixed, as the statement does. A Split's children, and a node created under a
-parent, name their parent's definitions too: a Claim of a Theorem is about the Theorem's objects. What a node says is
+and the names change afterwards only by a restatement while Unfixed, as the statement does. A Split's children, a node created under a
+parent and a Claim crystallized under one name only the definitions their creator gives, the parent's included only where
+the statement uses them (#286): each definition a node names is one of its conditions. What a node says is
 its statement, its assumptions and the definitions it names — its Accepted mathematical interface, so they are in its
 interface fingerprint (ids only: a decision fixes the definitions it relied on, so under it an id stands for its text).
 
