@@ -55,6 +55,11 @@ class DecisionKind(str, Enum):
     dependent_migration = "dependent_migration"
     # a Trust rule declared, amended or retired: a standing Reference review (ADR-0014)
     trust_rule = "trust_rule"
+    # the researcher's decisions of ADR-0025: verifying a version, sealing and unsealing, and "not a problem" on an
+    # agent's Challenge where it restores a verification (points 13-16)
+    verification = "verification"
+    seal = "seal"
+    not_a_problem = "not_a_problem"
 
 
 class PinnedDependency(BaseModel):
@@ -88,6 +93,11 @@ class DecisionPayload(BaseModel):
     key_ideas_drafted_by: str | None = None
     # a trust_rule's conditions (ADR-0014): `trust_rules.TrustCondition`, as JSON; empty for a retire
     conditions: list[dict[str, Any]] = Field(default_factory=list)
+    # a true seal's covered set as the page showed it, by id: what it seals, and what its unseal removes (ADR-0025)
+    covered_nodes: list[str] = Field(default_factory=list)
+    # the complete mathematical text of each node a verification or seal is made on, digested by node id: statement,
+    # assumptions and the text of the Definitions it names, so a page that showed other words is refused (STALE_VIEW)
+    texts: dict[str, str | None] = Field(default_factory=dict)
 
 
 class ReviewEntry(BaseModel):
@@ -128,6 +138,12 @@ DECISION_ROWS: dict[tuple[DecisionKind, str], tuple[str, str]] = {
     (DecisionKind.trust_rule, "declare"): ("trust_rule", "declare"),
     (DecisionKind.trust_rule, "amend"): ("trust_rule", "amend"),
     (DecisionKind.trust_rule, "retire"): ("trust_rule", "retire"),
+    # ADR-0025 (#279)
+    (DecisionKind.verification, "verify"): ("proof_map_node", "verified"),
+    (DecisionKind.seal, "seal-true"): ("proof_map_node", "sealed_true"),
+    (DecisionKind.seal, "seal-false"): ("proof_map_node", "sealed_false"),
+    (DecisionKind.seal, "unseal"): ("proof_map_node", "unsealed"),
+    (DecisionKind.not_a_problem, "not-a-problem"): ("challenge", "not_a_problem"),
 }
 
 
