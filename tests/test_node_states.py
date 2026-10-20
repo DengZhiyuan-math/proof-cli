@@ -16,7 +16,7 @@ from _proofs import submit_proof
 from _researcher import researcher
 from proof_cli.cli import app
 from proof_cli.node_states import conclusion, node_states
-from proof_cli.proof_map import claim_node, create_node, open_challenge, record_evidence_check
+from proof_cli.proof_map import claim_node, create_node, get_acceptance_state, open_challenge, record_evidence_check
 from proof_cli.references import ReferenceRecord, ReferenceSourceType
 from proof_cli.storage import ensure_project, import_reference
 
@@ -147,3 +147,28 @@ def test_node_show_node_list_and_frontier_give_the_states_beside_the_old_fields(
     assert listed["held"]["assignee"] == "agent_a" and listed["free"]["conclusion"] == "uncertain" and "workflow_state" in listed["free"]
     (ready,) = run("frontier")
     assert ready["id"] == "free" and (ready["proof_layer"], ready["assignee"]) == ("incomplete", None)
+
+
+def test_a_verification_counts_for_its_own_version_only(tmp_path: Path):
+    # ADR-0025 point 13: verified true is the researcher's word on that version; a newer one nobody verified is not
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="lem", kind="lemma", statement="L")
+    create_node(store, node_id="thm", kind="theorem", statement="T", dependencies=["lem"])
+    _accepted(store, "lem")
+    assert _states(store, "lem")[2:] == ("expert-verified", "verified-true")
+    submit_proof(store, "lem", claimant_id="agent", scoping_rationale="a second proof", content="another proof of lem")
+    assert get_acceptance_state(store, "lem") == "accepted"  # the legacy reading is unchanged
+    assert _states(store, "lem")[2:] == ("incomplete", "uncertain")
+    assert _states(store, "thm")[3] == "uncertain"
+
+
+def test_a_chain_deeper_than_pythons_recursion_limit_is_read(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    depth = 1500
+    create_node(store, node_id="n0", kind="lemma", statement="base")
+    for i in range(1, depth):
+        create_node(store, node_id=f"n{i}", kind="lemma", statement=f"stmt {i}", dependencies=[f"n{i - 1}"])
+    for args in (["node", "show", f"n{depth - 1}"], ["node", "list"]):
+        result = CliRunner().invoke(app, [*args, "--root", str(tmp_path), "--json"])
+        assert result.exit_code == 0, result.output[-400:]
+    assert node_states(store, f"n{depth - 1}").conclusion == "uncertain"

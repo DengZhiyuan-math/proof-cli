@@ -10,7 +10,8 @@ is written, and no Challenge kind is guessed or stored (#276).
 
 - **Seal**: unsealed (#279 adds seal lines), except an imported result found no longer callable, which reads sealed false.
 - **Statement layer**: an open Challenge, which has no kind yet (#277), reads challenged as false; so does a Rejected node.
-- **Proof layer**: a counting Acceptance, a Reference review or a Trust rule the citation meets reads expert-verified, and
+- **Proof layer**: a counting Acceptance of the current version, a Reference review or a Trust rule the citation meets
+  reads expert-verified (a verification counts for its own version only: a newer snapshot nobody verified is not), and
   an imported result without one checks passed. A legacy passed Verdict alone is not a check under the new rules: a
   local node with only that is incomplete, until #281 records the check those rules make.
 """
@@ -22,8 +23,8 @@ from collections.abc import Iterable
 from pydantic import BaseModel
 
 from .domain import ProofMapNodeKind
-from .proof_map import get_acceptance_state, get_reference_review_state, has_open_challenge, require_node
-from .storage import ProjectStore, get_active_claim, memoized_read, read_scoped
+from .proof_map import get_acceptance_state, get_accepted_version, get_reference_review_state, has_open_challenge, require_node
+from .storage import ProjectStore, get_active_claim, get_current_candidate_proof, read_scoped, scoped_memo
 
 SEALS = ("unsealed", "sealed-true", "sealed-false")
 STATEMENT_LAYERS = ("unchallenged", "challenged-as-false", "false")
@@ -60,11 +61,34 @@ class NodeStates(BaseModel):
     conclusion: str
 
 
-@memoized_read
 @read_scoped
 def node_states(store: ProjectStore, node_id: str) -> NodeStates:
-    """The node's states, read off today's records, and its conclusion, capped by each dependency's (ADR-0025)."""
-    node = require_node(store, node_id)
+    """The node's states, read off today's records, and its conclusion, capped by each dependency's (ADR-0025).
+
+    The dependencies are walked with a stack, not by recursion: a chain may run deeper than Python's recursion limit.
+    What the walk works out is kept for the rest of the read scope, so reading every node of the map reads each once."""
+    read = scoped_memo(store, "node_states")
+    stack = [node_id]
+    while stack:
+        current = stack[-1]
+        if current in read:
+            stack.pop()
+            continue
+        node = require_node(store, current)
+        waiting = [dependency for dependency in node.dependencies if dependency not in read]
+        if waiting:
+            stack.extend(waiting)
+            continue
+        stack.pop()
+        seal, statement_layer, proof_layer, assignee = _own_states(store, node)
+        read[current] = NodeStates(seal=seal, statement_layer=statement_layer, proof_layer=proof_layer, assignee=assignee,
+                                   conclusion=conclusion(seal, statement_layer, proof_layer,
+                                                         dependencies=[read[dependency].conclusion for dependency in node.dependencies]))
+    return read[node_id]
+
+
+def _own_states(store: ProjectStore, node) -> tuple[str, str, str, str | None]:
+    """The node's own Seal, Statement layer, Proof layer and Assignee, as the module note maps today's records."""
     seal, statement_layer, proof_layer = "unsealed", "unchallenged", "incomplete"
     if node.kind == ProofMapNodeKind.imported_result:
         review = get_reference_review_state(store, node.id)
@@ -76,11 +100,10 @@ def node_states(store: ProjectStore, node_id: str) -> NodeStates:
         if acceptance == "rejected":
             statement_layer = "challenged-as-false"
         elif acceptance == "accepted":
-            proof_layer = "expert-verified"
+            current = get_current_candidate_proof(store, node.id)
+            if current is not None and current.version == get_accepted_version(store, node.id):
+                proof_layer = "expert-verified"
     if has_open_challenge(store, node.id):
         statement_layer = "challenged-as-false"
     claim = get_active_claim(store, node.id)
-    dependencies = [node_states(store, dependency).conclusion for dependency in node.dependencies]
-    return NodeStates(seal=seal, statement_layer=statement_layer, proof_layer=proof_layer,
-                      assignee=claim.claimant_id if claim else None,
-                      conclusion=conclusion(seal, statement_layer, proof_layer, dependencies=dependencies))
+    return seal, statement_layer, proof_layer, claim.claimant_id if claim else None
