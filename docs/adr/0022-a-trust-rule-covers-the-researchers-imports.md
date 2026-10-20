@@ -1,6 +1,6 @@
 # A Trust rule covers the researcher's imports: an agent's imported result needs its own Reference review
 
-**Status**: accepted (2026-10-08; the researcher's decision after the ADR-0021 design audit; the audit evidence is kept locally). Amends:
+**Status**: accepted (2026-10-08; the researcher's decision after the ADR-0021 design audit; the audit evidence is kept locally). Amended by ADR-0025: the precedence loses unverifiable, and a dropped import is true with its dependents capped at true. Amends:
 - ADR-0014 points 2 and 3 and its first consequence: a Trust rule is met only by an imported result the researcher created.
 - ADR-0021's preamble: ADR-0014 no longer stands untouched. ADR-0004, ADR-0009 and ADR-0010 still do.
 

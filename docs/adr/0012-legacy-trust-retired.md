@@ -1,6 +1,6 @@
 # Legacy trust retired; a reference is a citation linked to its imported result
 
-**Status**: accepted (decided in #50; implemented in #90, the link in #91).
+**Status**: accepted (decided in #50; implemented in #90, the link in #91). Amended by ADR-0025: what may be called is read off the computed conclusion, unverifiable is gone, and a doubt about a node is a Challenge as ADR-0025 defines it.
 - **Amends** ADR-0005 Rule 1: a `ReferenceRecord` is no longer re-reviewed on its own. It is trusted only through the Reference review of the imported_result node that links it.
 - **Amends** ADR-0001: `ProofObligation` and `BlockerRecord` stay only as legacy informational notes, with no "resolve", and a `BlockerRecord` is not an annotation attached to a proof-map node (point 6).
 - **Amends** ADR-0004: a `CommentThread` is not how an observation about a proof-map node is recorded (point 7).

@@ -1,6 +1,6 @@
 # The studio is the agent's workbench, watched by the researcher
 
-**Status**: accepted (decided in #144; the run and its roles landed with spec #145 part 3, the page follows). Amends ADR-0011: a local node's studio is no longer a LaTeX workspace with an agent panel, but the place a Proof agent works on the node on its own and the researcher watches and steps in. ADR-0004 and ADR-0010 stand untouched: no role makes a Review decision.
+**Status**: accepted (decided in #144; the run and its roles landed with spec #145 part 3, the page follows). Amends ADR-0011: a local node's studio is no longer a LaTeX workspace with an agent panel, but the place a Proof agent works on the node on its own and the researcher watches and steps in. ADR-0004 and ADR-0010 stand untouched: no role makes a Review decision. Amended by ADR-0025: Redirect and Ask merge into the studio's one Coordinator box, and an agent may withdraw an agent's Challenge.
 
 ## Context
 

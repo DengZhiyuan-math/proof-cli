@@ -1,6 +1,6 @@
 # DAG is canonical, tree is explanatory, fog lives outside the graph
 
-**Status**: accepted; amended by ADR-0011 (a local node's page is its LaTeX studio; an imported result has its own page)
+**Status**: accepted; amended by ADR-0011 (a local node's page is its LaTeX studio; an imported result has its own page) Amended by ADR-0025: the frontier's secondary signals are the five states and the computed conclusion, not the three axes.
 
 A throwaway prototype (issue #10, `prototype/proof-map-ui` branch, published as a Claude Artifact) tested whether the domain model settled in ADR-0001 through ADR-0007 actually reads as a proof map a mathematician can use — not whether it looks good, but whether it answers, at a glance: how is the main theorem decomposed, what's already proven, what's in progress, what's ready for an agent right now, and what's blocking everything. Three decisions came out of building and looking at it.
 

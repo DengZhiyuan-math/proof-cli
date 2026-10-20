@@ -1,6 +1,6 @@
 # A Review snapshot carries a key-ideas summary, and review starts from it
 
-**Status**: accepted (decided in #100; implemented in #103).
+**Status**: accepted (decided in #100; implemented in #103). Amended by ADR-0025: an edit to a frozen summary leaves the verification on its old version only; Evidence review and Lightweight re-review no longer exist.
 - **Amends** ADR-0010 point 2 and ADR-0011 point 5: a Review snapshot also freezes the node's key-ideas summary, `key-ideas.md`, and requesting review needs one.
 - **Amends** ADR-0011 point 2 (and #71): the studio's review view shows the snapshot's key ideas and the decisions, not its frozen LaTeX sources or PDF.
 

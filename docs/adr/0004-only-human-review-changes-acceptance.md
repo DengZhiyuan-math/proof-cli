@@ -1,6 +1,6 @@
 # Only Human Review changes acceptance; everything else derives integrity signals
 
-**Status**: accepted. Amended by ADR-0012: comment threads are not wired to proof map nodes; informal discussion lives in the studio's agent panel and git history. Amended by ADR-0014: an Imported result may also gain standing under a Trust rule the researcher declared in advance (`trusted-by-rule`, derived, never written).
+**Status**: accepted. Amended by ADR-0012: comment threads are not wired to proof map nodes; informal discussion lives in the studio's agent panel and git history. Amended by ADR-0014: an Imported result may also gain standing under a Trust rule the researcher declared in advance (`trusted-by-rule`, derived, never written). Amended by ADR-0025: point 1 holds for verifying and sealing, which only the researcher's click records; points 2–4 give way to the five states, the dependency cap and a Challenge that takes effect at once and may be withdrawn; point 5's Evidence review is deleted.
 
 Auditing the peripheral modules against the graph model (issue #3, issue #9) surfaced a real violation of "human-in-the-loop": `verify accept` (`verification_results.py::_update_obligation`) directly closes or blocks a `ProofObligation` and mutates trust-sensitive project state, with no researcher decision in the loop. Nothing stopped an automated checker from silently deciding a result was established. Left as-is, the new graph model would inherit the same hole the moment any checker, checklist, or future automation touched a node.
 

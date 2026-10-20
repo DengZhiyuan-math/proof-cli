@@ -1,6 +1,6 @@
 # ADR-0024 — Audit first: a Pursue may audit the work awaiting review before it goes on
 
-**Status**: accepted (2026-10-18; the researcher's decision, after a trial project's proofs all awaited review and a new Pursue found nothing to do). Amends ADR-0021 points 4, 7 and 9 for a Start that asks for it. ADR-0004 stands: only the researcher changes acceptance. Amended the same day (point 2's mechanical checks, and ADR-0019 point 3's gate), after a trial's audit ended with no verdict on a check added since the snapshot.
+**Status**: accepted (2026-10-18; the researcher's decision, after a trial project's proofs all awaited review and a new Pursue found nothing to do). Amends ADR-0021 points 4, 7 and 9 for a Start that asks for it. ADR-0004 stands: only the researcher changes acceptance. Amended the same day (point 2's mechanical checks, and ADR-0019 point 3's gate), after a trial's audit ended with no verdict on a check added since the snapshot. Amended by ADR-0025: awaiting review and a failed audit's effect read as the Proof layer and the computed conclusions, and an audit records no Challenge endings.
 
 ## Context
 
