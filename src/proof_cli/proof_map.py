@@ -2884,7 +2884,8 @@ def _pins_accepted_against(store: ProjectStore, node_id: str) -> list[PinnedDepe
     was Accepted, which the target's Acceptance since now answers with the version and interface accepted — while
     that interface is still the one the node was checked against. A restated target's pin stays as it was, and reads
     changed. A node is only decided once what it rests on is (NODE_BLOCKED), so this is what bottom-up Acceptance
-    clears (ADR-0021), and a later proof-only revision of a target lags the pin (ADR-0005)."""
+    clears (ADR-0021); a later proof-only revision of a target leaves the pin current, as a pin follows an unchanged
+    interface by itself (ADR-0025)."""
     pins = []
     for pin in list_dependency_pins_for_node(store, node_id):
         if pin.pinned_version is None and get_accepted_version(store, pin.target_node_id) is not None and dependency_pin_is_current(store, pin):
@@ -2895,7 +2896,8 @@ def _pins_accepted_against(store: ProjectStore, node_id: str) -> list[PinnedDepe
 
 
 def _refreshed_pin(store: ProjectStore, target_node_id: str) -> PinnedDependency:
-    """What a Lightweight re-review re-pins a dependency to: its current accepted version and interface."""
+    """A dependency pinned to its current accepted version and interface: what an Acceptance pins a target accepted
+    since the node's snapshot was taken (`_pins_accepted_against`)."""
     fingerprint = get_accepted_interface_fingerprint(store, target_node_id)
     accepted = _accepted_proof(store, target_node_id) if fingerprint is not None else None
     return PinnedDependency(
