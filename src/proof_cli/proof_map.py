@@ -917,6 +917,21 @@ def work_log(store: ProjectStore, node_id: str) -> list[dict]:
                 entry["role"] = running[node_id].get("role")
             else:
                 entry["role_unknown"] = True  # shared, or several turns could have written it: never a guess
+    # the researcher's decisions of ADR-0025 on the node, read off its reviews.jsonl (point 16): who, which, the note
+    decided = {"verification": "verified", "seal": "sealed", "not_a_problem": "not-a-problem"}
+    for row in list_decisions(store):
+        object_node = row["object_id"] if row["object_type"] == _ACCEPTANCE_OBJECT_TYPE else None
+        if row["kind"] == ReviewRecordKind.not_a_problem.value:
+            challenge = get_challenge(store, row["object_id"])
+            object_node = challenge.target_node_id if challenge else None
+        if row["kind"] not in decided or object_node != node_id or verify_decision_row(store, row["id"]).status != "verified":
+            continue
+        payload = row["payload"]
+        kind = "unsealed" if payload.decision == "unseal" else decided[row["kind"]]
+        entries.append({"at": row["created_at"], "kind": kind, "by": row["reviewer_id"], "decision": payload.decision, "note": row["rationale"],
+                        "review_id": row["review_id"], "candidate_proof_id": payload.candidate_proof_id,
+                        **({"challenge_id": row["object_id"]} if row["kind"] == ReviewRecordKind.not_a_problem.value else {})})
+    entries.sort(key=lambda entry: entry["at"])  # in time order, the events' own order kept on a tie
     return entries
 
 
@@ -1016,9 +1031,11 @@ def fixed_by(store: ProjectStore, node_id: str) -> dict | None:
 def _fixed_index(store: ProjectStore) -> dict[str, dict]:
     """Every fixed node's first fixing decision, by node id: one pass over the decisions for a whole read."""
     first: dict[str, dict] = {}
-    kinds = (ReviewRecordKind.acceptance.value, ReviewRecordKind.reference_review.value)
+    kinds = (ReviewRecordKind.acceptance.value, ReviewRecordKind.reference_review.value,
+             ReviewRecordKind.verification.value, ReviewRecordKind.seal.value)  # a verification or a Seal relies on the text (ADR-0025 point 14)
     for row in list_decisions(store):
-        if row["object_type"] != _ACCEPTANCE_OBJECT_TYPE or row["kind"] not in kinds or row["decision"] == ReviewGovernanceState.proposed_for_review.value:
+        if row["object_type"] != _ACCEPTANCE_OBJECT_TYPE or row["kind"] not in kinds or row["decision"] in (
+                ReviewGovernanceState.proposed_for_review.value, ReviewGovernanceState.unsealed.value):
             continue
         decided = {"node_id": row["object_id"], "review_id": row["review_id"], "kind": row["kind"], "decision": row["decision"], "decided_at": row["created_at"]}
         for relied_id in _relied_on(store, row):
@@ -2800,6 +2817,137 @@ def decide_acceptance(
     return record
 
 
+def verify_node(store: ProjectStore, node_id: str, *, reviewer: str | None = None, rationale: str = "", viewed_binding: str | None = None) -> ReviewRecord:
+    """The researcher's verification (ADR-0025 point 13): "checked, and I believe it", of the version as it stands.
+
+    A local node's version is its current Review snapshot (VERIFY_NEEDS_SNAPSHOT before one); an imported result's is its
+    statement and source. One line in the node's reviews.jsonl, committed with the researcher as author, made on the
+    page's click, never by the CLI or an agent. It may be made above unverified dependencies: the conclusion is capped
+    by them and rises with no action. It counts only for its version: a new snapshot, or a changed interface or
+    dependencies, reads unverified with no action."""
+    node = require_node(store, node_id)
+    if node.kind != ProofMapNodeKind.imported_result and get_current_candidate_proof(store, node_id) is None:
+        raise ProofMapError("VERIFY_NEEDS_SNAPSHOT", f"{node_id} has no Review snapshot to verify: a verification is of a version (request review first)")
+    with store.transaction() as conn:
+        decided = _decide(store, kind=DecisionKind.verification, target_id=node_id, decision="verify", reviewer=reviewer, rationale=rationale,
+                          viewed_binding=viewed_binding)
+        record = _record(store, decided, _ACCEPTANCE_OBJECT_TYPE, node_id, ReviewGovernanceState.verified)
+        append_event(store, "proof_map_node_verified", f"{node_id} verified by {decided.reviewer_id}", entity_id=node_id,
+                     payload={"reviewer_id": decided.reviewer_id, "review_id": record.id, "candidate_proof_id": decided.payload.candidate_proof_id}, conn=conn)
+    return record
+
+
+def seal_node(store: ProjectStore, node_id: str, value: bool, *, reviewer: str | None = None, rationale: str = "",
+              viewed_binding: str | None = None) -> ReviewRecord:
+    """Seal a node true or false (ADR-0025 point 14): the researcher's absolute belief, and responsibility.
+
+    Sealing true seals everything the node rests on with it: only this node is recorded, the covered set is computed
+    (`node_states`), and unsealing releases it together. Sealing false seals only the node. The page lists what it does
+    first and never blocks (point 15); the note is required and briefed to the agents, who never challenge or audit a
+    sealed node. One line in the node's reviews.jsonl, on the researcher's click only."""
+    if not rationale.strip():
+        raise ProofMapError("SEAL_NOTE_REQUIRED", f"a seal on {node_id} is explained: say why (the agents are briefed with it)")
+    require_node(store, node_id)
+    decision, state = ("seal-true", ReviewGovernanceState.sealed_true) if value else ("seal-false", ReviewGovernanceState.sealed_false)
+    with store.transaction() as conn:
+        decided = _decide(store, kind=DecisionKind.seal, target_id=node_id, decision=decision, reviewer=reviewer, rationale=rationale,
+                          viewed_binding=viewed_binding)
+        record = _record(store, decided, _ACCEPTANCE_OBJECT_TYPE, node_id, state)
+        append_event(store, "proof_map_node_sealed", f"{node_id} {decision} by {decided.reviewer_id}", entity_id=node_id,
+                     payload={"decision": decision, "reviewer_id": decided.reviewer_id, "review_id": record.id}, conn=conn)
+    return record
+
+
+def unseal_node(store: ProjectStore, node_id: str, *, reviewer: str | None = None, rationale: str = "", viewed_binding: str | None = None) -> ReviewRecord:
+    """Unseal a node sealed itself (ADR-0025 point 14), releasing with it what its true seal covered; the agents may
+    audit and challenge them again. A node only covered by another's seal is released by unsealing that one (NOT_SEALED)."""
+    from .node_states import sealed_by  # it reads this module
+
+    if not rationale.strip():
+        raise ProofMapError("SEAL_NOTE_REQUIRED", f"unsealing {node_id} is explained: say why")
+    if direct_seal(store, node_id) == "unsealed":
+        cover = sealed_by(store, node_id)
+        raise ProofMapError("NOT_SEALED", f"{node_id} is not sealed itself" + (f": {cover}'s seal covers it; unseal {cover}" if cover else ""),
+                            details={"node_id": node_id, "sealed_by": cover})
+    with store.transaction() as conn:
+        decided = _decide(store, kind=DecisionKind.seal, target_id=node_id, decision="unseal", reviewer=reviewer, rationale=rationale,
+                          viewed_binding=viewed_binding)
+        record = _record(store, decided, _ACCEPTANCE_OBJECT_TYPE, node_id, ReviewGovernanceState.unsealed)
+        append_event(store, "proof_map_node_sealed", f"{node_id} unsealed by {decided.reviewer_id}", entity_id=node_id,
+                     payload={"decision": "unseal", "reviewer_id": decided.reviewer_id, "review_id": record.id}, conn=conn)
+    return record
+
+
+def restore_verification(store: ProjectStore, challenge_id: str, *, reviewer: str | None = None, rationale: str = "",
+                         viewed_binding: str | None = None) -> ReviewRecord:
+    """The researcher's "not a problem" on an agent's Challenge that lapsed a verification (ADR-0025 point 10): the
+    Challenge is withdrawn with the researcher's words, and the verification of the version, unchanged since, counts
+    again. A line in the node's reviews.jsonl, on the click only. With nothing to restore — the researcher's own
+    Challenge, a node not verified as it stands, a Challenge from before the verification — it is refused
+    (NOTHING_TO_RESTORE): "not a problem" there is said, as a withdrawal (`proof challenge withdraw`)."""
+    challenge = require_challenge(store, challenge_id)
+    target = challenge.target_node_id
+    since = verification_time(store, target)
+    if challenge.opened_by == RESEARCHER or since is None or challenge.created_at <= since:
+        why = ("it is the researcher's own, which lapses nothing" if challenge.opened_by == RESEARCHER
+               else f"{target} has no verification of the version as it stands" if since is None else "it was raised before the verification")
+        raise ProofMapError("NOTHING_TO_RESTORE", f"challenge {challenge_id} restores no verification: {why}; withdraw it with a reason instead",
+                            details={"challenge_id": challenge_id, "node_id": target})
+    with store.transaction() as conn:
+        decided = _decide(store, kind=DecisionKind.not_a_problem, target_id=challenge_id, decision="not-a-problem", reviewer=reviewer,
+                          rationale=rationale, viewed_binding=viewed_binding)
+        record = _record(store, decided, "challenge", challenge_id, ReviewGovernanceState.not_a_problem)
+        if require_challenge(store, challenge_id).status == ChallengeStatus.open:
+            reason = rationale.strip() or "not a problem"
+            mark_challenge_withdrawn(store, challenge_id, by=decided.reviewer_id, at=utc_now(), reason=reason, conn=conn)
+            append_event(store, CHALLENGE_WITHDRAWN_EVENT, f"challenge {challenge_id} against {target} withdrawn by {decided.reviewer_id}",
+                         entity_id=target, payload={"challenge_id": challenge_id, "by": decided.reviewer_id, "reason": reason}, conn=conn)
+        append_event(store, "proof_map_verification_restored", f"{target}'s verification restored by {decided.reviewer_id}", entity_id=target,
+                     payload={"challenge_id": challenge_id, "reviewer_id": decided.reviewer_id, "review_id": record.id}, conn=conn)
+    return record
+
+
+@memoized_read
+def restored_challenges(store: ProjectStore) -> frozenset[str]:
+    """The agents' Challenges the researcher's "not a problem" click ended (ADR-0025 point 10): they lapse no verification."""
+    return frozenset(row["object_id"] for row in list_decisions(store)
+                     if row["kind"] == ReviewRecordKind.not_a_problem.value and verify_decision_row(store, row["id"]).status == "verified")
+
+
+def direct_seal(store: ProjectStore, node_id: str) -> str:
+    """The node's own Seal, as its newest seal line says (ADR-0025 point 14): sealed-true, sealed-false or unsealed.
+    Never what covers it: a true seal above is computed (`node_states`). Absolute belief, so bound to no version."""
+    latest = _latest_decision(store, node_id, ReviewRecordKind.seal)
+    if latest is None or latest.verdict.status != "verified":
+        return "unsealed"
+    return {"seal-true": "sealed-true", "seal-false": "sealed-false"}.get(latest.verdict.payload.decision, "unsealed")
+
+
+def seal_line(store: ProjectStore, node_id: str) -> dict | None:
+    """The node's own seal as recorded, while it holds: {"decision", "by", "at", "note"}, or None when unsealed."""
+    latest = _latest_decision(store, node_id, ReviewRecordKind.seal)
+    if latest is None or latest.verdict.status != "verified" or latest.verdict.payload.decision == "unseal":
+        return None
+    return {"decision": latest.verdict.payload.decision, "by": latest.row["reviewer_id"], "at": latest.row["created_at"], "note": latest.row["rationale"]}
+
+
+def researcher_verification_time(store: ProjectStore, node_id: str) -> datetime | None:
+    """When the researcher verified the node as it stands (ADR-0025 point 13), or None: the newest verification line,
+    while it is of the version as it stands — a local node's current snapshot, unchanged, with the same interface and
+    dependencies; an imported result's statement and source, its citation still there."""
+    node = require_node(store, node_id)
+    latest = _latest_decision(store, node_id, ReviewRecordKind.verification)
+    if latest is None or latest.verdict.status != "verified":
+        return None
+    payload = latest.verdict.payload
+    if node.kind == ProofMapNodeKind.imported_result:
+        if payload.interface_fingerprint != _interface_of(node) or _citation_missing(store, node):
+            return None
+    elif payload.candidate_proof_id != _current_proof_id(store, node_id) or _binding_problem(store, node, payload) is not None:
+        return None
+    return datetime.fromisoformat(latest.row["created_at"])
+
+
 def _pins_of(store: ProjectStore, node_id: str) -> list[PinnedDependency]:
     return [
         PinnedDependency(
@@ -2866,6 +3014,14 @@ def decision_binding(
     if kind == DecisionKind.reference_review:
         node = require_node(store, target_id)
         return {**none, "interface_fingerprint": _interface_of(node), "resolves_challenges": _open_challenge_ids(store, target_id)}
+    if kind in (DecisionKind.verification, DecisionKind.seal):  # the version as it stands: its snapshot, interface and pins (ADR-0025)
+        node = require_node(store, target_id)
+        return {**none, "candidate_proof_id": _current_proof_id(store, target_id), "interface_fingerprint": _interface_of(node),
+                "dependency_pins": _pins_of(store, target_id)}
+    if kind == DecisionKind.not_a_problem:  # the agent's Challenge, on the version it lapsed
+        challenge = require_challenge(store, target_id)
+        return {**none, "candidate_proof_id": _current_proof_id(store, challenge.target_node_id),
+                "interface_fingerprint": _interface_of(require_node(store, challenge.target_node_id))}
     if kind == DecisionKind.dependency_revalidation:
         if dependency_id is None:
             raise ProofMapError("DEPENDENCY_REQUIRED", "a Lightweight re-review names the dependency it re-pins")
@@ -3046,7 +3202,9 @@ def verification_time(store: ProjectStore, node_id: str) -> datetime | None:
     else:
         state, latest, _ = _acceptance(store, node)
         latest = latest if state == "accepted" else None
-    return datetime.fromisoformat(latest.row["created_at"]) if latest is not None else None
+    legacy = datetime.fromisoformat(latest.row["created_at"]) if latest is not None else None
+    times = [time for time in (legacy, researcher_verification_time(store, node_id)) if time is not None]
+    return max(times) if times else None  # the newest verification the node reads as expert-verified from
 
 
 @memoized_read

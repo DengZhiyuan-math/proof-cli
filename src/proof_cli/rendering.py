@@ -400,6 +400,10 @@ def _work_log_body(entry: dict) -> str:
         return f"{what} ({entry.get('challenge_id')}): {entry.get('rationale')}" + (f" — counterexample {entry['counterexample_id']}" if entry.get("counterexample_id") else "")
     if kind == "challenge-withdrawn":
         return f"withdrew {entry.get('challenge_id')} — {entry.get('reason')}"
+    if kind in ("verified", "sealed", "unsealed", "not-a-problem"):  # the researcher's decisions (ADR-0025 point 16), from reviews.jsonl
+        what = {"verified": "verified", "unsealed": "unsealed", "not-a-problem": f"not a problem: {entry.get('challenge_id')}"}.get(
+            kind, "sealed " + str(entry.get("decision", "")).removeprefix("seal-"))
+        return what + (f" — {entry['note']}" if entry.get("note") else "")
     if kind == "attempt":
         return f"attempt: {entry.get('goal')}" + (f" ({entry['method']})" if entry.get("method") else "") + f" failed on {entry.get('failed_on')}"
     if kind == "coordinator":

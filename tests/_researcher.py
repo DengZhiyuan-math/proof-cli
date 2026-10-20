@@ -46,6 +46,28 @@ class Researcher:
 
         return migrate_dependents(self.store, node_id, replacement_id, **self._who(rationale))
 
+    # -- ADR-0025: the researcher's decisions (#279), each a line in the node's reviews.jsonl
+
+    def verify(self, node_id: str, *, rationale: str = ""):
+        from proof_cli.proof_map import verify_node
+
+        return verify_node(self.store, node_id, **self._who(rationale))
+
+    def seal(self, node_id: str, value: bool, *, rationale: str = "the researcher's absolute belief"):
+        from proof_cli.proof_map import seal_node
+
+        return seal_node(self.store, node_id, value, **self._who(rationale))
+
+    def unseal(self, node_id: str, *, rationale: str = "open to the agents again"):
+        from proof_cli.proof_map import unseal_node
+
+        return unseal_node(self.store, node_id, **self._who(rationale))
+
+    def not_a_problem(self, challenge_id: str, *, rationale: str = "not a problem"):
+        from proof_cli.proof_map import restore_verification
+
+        return restore_verification(self.store, challenge_id, **self._who(rationale))
+
     def dismiss_challenge(self, challenge_id: str, *, rationale: str = ""):
         from proof_cli.proof_map import dismiss_challenge
 

@@ -8,14 +8,16 @@ states say about it reads it here, so two readings of one node's conclusion cann
 Until the records later tickets add exist, today's records are read as ADR-0025 point 26 maps them, read-only: nothing
 is written, and no Challenge kind is guessed or stored (#276).
 
-- **Seal**: unsealed (#279 adds seal lines), except an imported result found no longer callable, which reads sealed false.
+- **Seal**: the node's own newest seal line (#279), else sealed true where a true seal above covers it, else unsealed; an
+  imported result found no longer callable, sealed by no line of its own, reads sealed false.
 - **Statement layer**: an open Challenge against the statement reads challenged as false, and so does one raised before
   Challenges had a kind (#277), whose kind is never guessed; so does a Rejected node. An open Challenge against the
   proof sends the Proof layer back to incomplete instead.
 - **A verification lapses** when an agent challenges the node after it, either kind, and stays lapsed when the Challenge
   is withdrawn or ends (ADR-0025 point 13): only a new verification, or the researcher's click restoring it (the page's
   dismissal today, #279's later), brings it back. The researcher's own doubt lapses nothing.
-- **Proof layer**: a counting Acceptance of the current version, a Reference review or a Trust rule the citation meets
+- **Proof layer**: the researcher's verification of the version as it stands (#279), a counting Acceptance of the
+  current version, a Reference review or a Trust rule the citation meets
   reads expert-verified (a verification counts for its own version only: a newer snapshot nobody verified is not), and
   an imported result without one checks passed. A local node's checks passed is its newest Verdict, structured (#278),
   passing and on the inputs as they stand; a Verdict from before Verdicts had ids is no check under the new rules.
@@ -31,6 +33,7 @@ from .domain import ChallengeStatus, ProofMapNode, ProofMapNodeKind
 from .proof_map import (
     RESEARCHER,
     ProofMapError,
+    direct_seal,
     get_acceptance_state,
     get_accepted_version,
     get_reference_review_state,
@@ -38,6 +41,9 @@ from .proof_map import (
     list_challenges,
     list_nodes,
     require_node,
+    restored_challenges,
+    seal_line,
+    researcher_verification_time,
     verification_time,
 )
 from .storage import ProjectStore, get_active_claim, get_current_candidate_proof, read_scoped, scoped_memo
@@ -122,10 +128,10 @@ def node_states(store: ProjectStore, node_id: str) -> NodeStates:
 def own_states(store: ProjectStore, node: ProofMapNode) -> tuple[str, str, str, str | None]:
     """The node's own (Seal, Statement layer, Proof layer, Assignee), as the module note maps today's records: no walk
     over what it rests on, so a hand-edited cycle elsewhere never reaches it. Its conclusion is `node_states`'."""
-    seal, statement_layer, proof_layer = "unsealed", "unchallenged", "incomplete"
+    seal, statement_layer, proof_layer = direct_seal(store, node.id), "unchallenged", "incomplete"
     if node.kind == ProofMapNodeKind.imported_result:
         review = get_reference_review_state(store, node.id)
-        if review == "no-longer-callable":
+        if review == "no-longer-callable" and seal == "unsealed":
             seal = "sealed-false"
         proof_layer = "expert-verified" if review in ("reviewed", "trusted-by-rule") else "checks-passed"
     else:
@@ -136,10 +142,15 @@ def own_states(store: ProjectStore, node: ProofMapNode) -> tuple[str, str, str, 
             current = get_current_candidate_proof(store, node.id)
             if current is not None and current.version == get_accepted_version(store, node.id):
                 proof_layer = "expert-verified"
+    if seal == "unsealed" and sealed_by(store, node.id) is not None:
+        seal = "sealed-true"  # a true seal above covers what it rests on (ADR-0025 point 14)
+    if proof_layer != "expert-verified" and researcher_verification_time(store, node.id) is not None:
+        proof_layer = "expert-verified"  # the researcher's verification of the version as it stands (ADR-0025 point 13)
     challenges = list_challenges(store, target_node_id=node.id)
     if proof_layer == "expert-verified":
         since = verification_time(store, node.id)
-        if any(challenge.opened_by != RESEARCHER and challenge.status != ChallengeStatus.dismissed
+        restored = restored_challenges(store)  # the researcher's "not a problem" (point 10), or a dismissal on the page
+        if any(challenge.opened_by != RESEARCHER and challenge.status != ChallengeStatus.dismissed and challenge.id not in restored
                and (since is None or challenge.created_at > since) for challenge in challenges):
             proof_layer = "checks-passed" if node.kind == ProofMapNodeKind.imported_result else "incomplete"
     if proof_layer == "incomplete" and node.kind != ProofMapNodeKind.imported_result and has_passing_check(store, node.id):
@@ -189,3 +200,68 @@ def _stopped(store: ProjectStore) -> dict[str, list[str]]:
             branch.extend(nodes[current].dependencies if current in nodes else [])
     memo["stopped"] = {node_id: sorted(by) for node_id, by in stopped.items()}
     return memo["stopped"]
+
+
+def sealed_by(store: ProjectStore, node_id: str) -> str | None:
+    """The node whose true seal covers this one (ADR-0025 point 14): one sealed true that rests on it, at any depth, or
+    None. Only the directly sealed node is recorded; what it covers is computed, and unsealing it releases them."""
+    return _covered(store).get(node_id)
+
+
+@read_scoped
+def _covered(store: ProjectStore) -> dict[str, str]:
+    memo = scoped_memo(store, "covered")
+    if "covered" in memo:
+        return memo["covered"]
+    nodes = {node.id: node for node in list_nodes(store)}
+    covered: dict[str, str] = {}
+    for sealed in sorted(node_id for node_id in nodes if direct_seal(store, node_id) == "sealed-true"):
+        below = list(nodes[sealed].dependencies)
+        seen: set[str] = set()
+        while below:  # everything it rests on; `seen` ends a hand-edited cycle
+            current = below.pop()
+            if current in seen or current == sealed:
+                continue
+            seen.add(current)
+            covered.setdefault(current, sealed)
+            below.extend(nodes[current].dependencies if current in nodes else [])
+    memo["covered"] = covered
+    return covered
+
+
+def seal_record(store: ProjectStore, node_id: str) -> dict | None:
+    """What seals the node, for every later briefing (ADR-0025 point 14): {"seal", "sealed_node", "by", "at", "note"} —
+    its own seal, or the true seal above that covers it — or None while no seal line holds it."""
+    sealed_node = node_id if direct_seal(store, node_id) != "unsealed" else sealed_by(store, node_id)
+    line = seal_line(store, sealed_node) if sealed_node is not None else None
+    if line is None:
+        return None
+    return {"seal": node_states(store, node_id).seal, "sealed_node": sealed_node, "by": line["by"], "at": line["at"], "note": line["note"]}
+
+
+def seal_preview(store: ProjectStore, node_id: str, action: str) -> dict[str, list[str]]:
+    """What a seal or an unseal would do, listed before the researcher's click (ADR-0025 point 15); it never blocks.
+
+    `seal-true`: the nodes it would seal (itself and all it rests on), those of them not verified, and those with a
+    Challenge not ended. `seal-false`: the nodes that use it directly, which become uncertain and need another route,
+    and those of them verified, whose verification is void. `unseal`: the nodes released with it."""
+    nodes = {node.id: node for node in list_nodes(store)}
+    require_node(store, node_id)
+    if action == "seal-true":
+        covers, below = [], [node_id]
+        while below:
+            current = below.pop()
+            if current in covers:
+                continue
+            covers.append(current)
+            below.extend(nodes[current].dependencies if current in nodes else [])
+        covers.sort()
+        return {"covers": covers,
+                "unverified": [n for n in covers if node_states(store, n).proof_layer != "expert-verified"],
+                "challenged": [n for n in covers if list_challenges(store, target_node_id=n, status="open")]}
+    if action == "seal-false":
+        users = sorted(n for n, node in nodes.items() if node_id in node.dependencies)
+        return {"direct_users": users, "verified": [n for n in users if node_states(store, n).proof_layer == "expert-verified"]}
+    if action == "unseal":
+        return {"releases": sorted([node_id, *(n for n, by in _covered(store).items() if by == node_id)])}
+    raise ProofMapError("INVALID_SEAL", f"'{action}' is not seal-true, seal-false or unseal")

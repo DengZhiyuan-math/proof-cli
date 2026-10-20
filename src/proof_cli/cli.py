@@ -196,7 +196,7 @@ from .trust_rules import get_trust_rule, list_trust_rules, trust_rule_history
 from .authority import candidate_proof_sha256
 from .vault import working_entry_path
 from .definitions import add_definition, all_definitions, definitions_of, edit_definition, fixed_by_definition, nodes_naming, remove_definition, require_definition
-from .node_states import node_states, stopped_by
+from .node_states import node_states, seal_record, stopped_by
 from .pursuit import project_progress, reader_turn
 from .rendering import (
     render_definition,
@@ -711,6 +711,7 @@ def node_show(
         node = require_node(store, node_id)
         states = node_states(store, node_id)  # its four states and conclusion (ADR-0025)
         stopped = stopped_by(store, node_id)  # the statement Challenges that stop work on it
+        sealed = seal_record(store, node_id)  # what seals it, for every briefing (ADR-0025 point 14)
         # each Verifier objection, a proof Challenge numbered in its verdict, with how it ended (ADR-0025 points 8-9)
         objections = [challenge.model_dump(mode="json") for challenge in list_challenges(store, target_node_id=node_id) if challenge.verdict_id]
         workflow_state = get_workflow_state(store, node_id)
@@ -744,6 +745,7 @@ def node_show(
             payload["run_script"], working_proof = working_proof, None
         payload.update(states.model_dump(mode="json"))
         payload["stopped_by"] = stopped
+        payload["seal_record"] = sealed
         payload["objections"] = objections
         if _auditing():  # an objection is an earlier verdict's: an audit reads the proof afresh (ADR-0024 point 13)
             payload["objections"], payload["objections_withheld"] = [], AUDIT_WITHHELD
@@ -1258,6 +1260,25 @@ def node_migrate_dependents(
     )
 
 
+@node_app.command("verify")
+def node_verify(node_id: str, root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
+    """Verify a node's version: the researcher's "checked, and I believe it" (ADR-0025) — on the proof map page."""
+    human_review_required(root, command="node.verify", kind="verification", target_id=node_id, node_id=node_id, json_output=json_output)
+
+
+@node_app.command("seal")
+def node_seal(node_id: str, value: str = typer.Argument("", help="true or false"), root: str = ROOT_OPTION,
+              json_output: bool = typer.Option(False, "--json")) -> None:
+    """Seal a node true or false, the researcher's absolute belief (ADR-0025) — on the proof map page, after it lists what it does."""
+    human_review_required(root, command="node.seal", kind="seal", target_id=node_id, node_id=node_id, json_output=json_output)
+
+
+@node_app.command("unseal")
+def node_unseal(node_id: str, root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
+    """Unseal a node, releasing what its true seal covered (ADR-0025) — on the proof map page."""
+    human_review_required(root, command="node.unseal", kind="seal", target_id=node_id, node_id=node_id, json_output=json_output)
+
+
 @node_app.command("promote")
 def node_promote(node_id: str, root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
     """Promote an Accepted Claim to a Lemma — on the proof map page (ADR-0010)."""
@@ -1573,6 +1594,18 @@ def challenge_withdraw(
         _emit_error(exc, json_output, command="challenge.withdraw")
         raise typer.Exit(code=1)
     _emit_challenge(challenge, json_output, command="challenge.withdraw")
+
+
+@challenge_app.command("not-a-problem")
+def challenge_not_a_problem(challenge_id: str, root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
+    """"Not a problem" on an agent's Challenge, restoring the verification it lapsed (ADR-0025) — on the proof map page.
+    Where it restores nothing, it is said instead: `proof challenge withdraw`."""
+    store = get_store(_root(root))
+    try:
+        target = require_challenge(store, challenge_id).target_node_id
+    except ProofMapError:
+        target = None
+    human_review_required(root, command="challenge.not_a_problem", kind="not_a_problem", target_id=challenge_id, node_id=target, json_output=json_output)
 
 
 @challenge_app.command("dismiss")
