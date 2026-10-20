@@ -204,7 +204,7 @@ _Avoid_: transcript (the conversation as its backend reported it, folded under a
 A proof map node keeps five states, each read off its own record, never a cached status; everything else about it, its conclusion first, is computed from them, and every gate reads only them and what they compute (ADR-0025). Until ADR-0025's implementation lands, the code still has the three axes of ADR-0002 under the names each entry lists to avoid.
 
 **Seal** (封存):
-The researcher's absolute belief in a node: unsealed, sealed true or sealed false. Sealing true seals everything the node rests on with it — only the directly sealed node is recorded, and unsealing releases the rest together; sealing false seals only the node. The agents never challenge or audit a sealed node and use it as known, briefed with the researcher's seal note. Set only by the researcher's click, after the system lists what it will do.
+The researcher's absolute belief in a node: unsealed, sealed true or sealed false. Sealing true seals everything the node rests on with it — only the directly sealed node is recorded, with the set it rested on when sealed, so a node that comes to rest under it later is not sealed by it, and unsealing releases that set together; sealing false seals only the node. The agents never challenge or audit a sealed node and use it as known, briefed with the researcher's seal note. Set only by the researcher's click, after the system lists what it will do.
 _Avoid_: lock, freeze, no longer callable (now sealed false)
 
 **Statement layer** (命题层):
@@ -216,7 +216,7 @@ How far a node's proof has got: incomplete, checks passed (the newest passed Ver
 _Avoid_: workflow state, Review-needed, Revision requested, Accepted, acceptance state
 
 **Verification** (验证):
-The researcher's "checked, and I believe it", which makes a node's Proof layer expert-verified, for that version only; for an imported result, a judgement of its source rather than of a proof. A node may be verified before its dependencies. It lapses when an agent challenges the node, unless the researcher answers "not a problem" on the unchanged version, and is void when a dependency becomes false. Unlike a Seal, it leaves the node open to Challenges and audits.
+The researcher's "checked, and I believe it", which makes a node's Proof layer expert-verified, for that version only; for an imported result, a judgement of its source rather than of a proof. A node may be verified before its dependencies. It lapses when an agent challenges the node, unless the researcher answers "not a problem" on the unchanged version, and is void, for good, when a direct dependency is later found false: unsealing that dependency restores nothing, only a new verification does. A false node further down only caps it, through its weakest dependency. Unlike a Seal, it leaves the node open to Challenges and audits.
 _Avoid_: Acceptance, Reference review, accept, approve, review (as the decision)
 
 **Assignee** (领取):

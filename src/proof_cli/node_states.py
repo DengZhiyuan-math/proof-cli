@@ -131,10 +131,8 @@ def node_states(store: ProjectStore, node_id: str) -> NodeStates:
 def own_states(store: ProjectStore, node: ProofMapNode) -> tuple[str, str, str, str | None]:
     """The node's own (Seal, Statement layer, Proof layer, Assignee), as the module note maps today's records: no walk
     over what it rests on, so a hand-edited cycle elsewhere never reaches it. Its conclusion is `node_states`'."""
-    seal, statement_layer = direct_seal(store, node.id), "unchallenged"
+    seal, statement_layer = own_seal(store, node), "unchallenged"
     imported = node.kind == ProofMapNodeKind.imported_result
-    if imported and seal == "unsealed" and get_reference_review_state(store, node.id) == "no-longer-callable":
-        seal = "sealed-false"
     if not imported and get_acceptance_state(store, node.id) == "rejected":
         statement_layer = "challenged-as-false"
     if seal == "unsealed" and sealed_by(store, node.id) is not None:
@@ -155,6 +153,16 @@ def own_states(store: ProjectStore, node: ProofMapNode) -> tuple[str, str, str, 
             statement_layer = "challenged-as-false"
     claim = get_active_claim(store, node.id)
     return seal, statement_layer, proof_layer, claim.claimant_id if claim else None
+
+
+def own_seal(store: ProjectStore, node: ProofMapNode) -> str:
+    """The node's Seal by itself, never by a seal above: its newest seal line, else sealed false for an imported result a
+    Reference review found no longer callable, from before seal lines (ADR-0025 point 26), else unsealed."""
+    seal = direct_seal(store, node.id)
+    if (seal == "unsealed" and node.kind == ProofMapNodeKind.imported_result
+            and get_reference_review_state(store, node.id) == "no-longer-callable"):
+        return "sealed-false"
+    return seal
 
 
 def verification_holds(store: ProjectStore, node: ProofMapNode) -> tuple[bool, datetime | None]:
@@ -272,6 +280,6 @@ def seal_preview(store: ProjectStore, node_id: str, action: str) -> dict[str, li
     if action == "unseal":
         # what goes unsealed: it, and what its seal covered, but no node sealed itself or covered by another true seal
         mine = [node_id, *((seal_line(store, node_id) or {}).get("covered") or [])]
-        return {"releases": sorted(n for n in set(mine) if (n == node_id or direct_seal(store, n) == "unsealed")
+        return {"releases": sorted(n for n in set(mine) if (n == node_id or n in nodes and own_seal(store, nodes[n]) == "unsealed")
                                    and not [by for by in _covered(store).get(n, []) if by != node_id])}
     raise ProofMapError("INVALID_SEAL", f"'{action}' is not seal-true, seal-false or unseal")

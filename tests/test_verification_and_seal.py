@@ -265,3 +265,25 @@ def test_an_unseal_preview_releases_only_what_no_other_seal_still_covers(tmp_pat
     assert seal_preview(store, "A", "unseal") == {"releases": ["A"]}
     researcher(store).unseal("A", rationale="reopened")
     assert [_layers(store, node_id)[0] for node_id in ("A", "N")] == ["unsealed", "sealed-true"]
+
+
+def test_a_preview_binds_the_statements_of_what_a_true_seal_covers(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    for node_id, dependencies in (("C", []), ("B", ["C"]), ("A", ["B"])):
+        create_node(store, node_id=node_id, kind="lemma", statement=node_id, dependencies=dependencies)
+    viewed = binding_digest(prepare_decision(store, "seal", "A", "seal-true"))
+    restate_node(store, "C", statement="C, restated", reason="a sharper bound", by="human")  # what the page showed changed
+    with pytest.raises(ProofMapError) as caught:
+        seal_node(store, "A", True, reviewer=researcher(store).reviewer_id, rationale="known", viewed_binding=viewed)
+    assert caught.value.code == "STALE_VIEW" and _layers(store, "C")[0] == "unsealed"
+
+
+def test_an_unseal_preview_keeps_what_stays_sealed_false_by_an_older_review(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="N", kind="imported_result", statement="N", source_locator="Theorem 1", source_version="v1")
+    create_node(store, node_id="A", kind="lemma", statement="A", dependencies=["N"])
+    researcher(store).decide_reference_review("N", "no-longer-callable")  # sealed false by a review from before seal lines
+    researcher(store).seal("A", True, rationale="known")
+    assert seal_preview(store, "A", "unseal") == {"releases": ["A"]}
+    researcher(store).unseal("A", rationale="reopened")
+    assert _layers(store, "N")[0] == "sealed-false"

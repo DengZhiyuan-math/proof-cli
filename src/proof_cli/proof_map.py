@@ -3047,7 +3047,12 @@ def decision_binding(
         line = seal_line(store, target_id)
         covered = (sorted(rests_on(store, target_id) - {target_id}) if decision == "seal-true"
                    else list((line or {}).get("covered") or []) if decision == "unseal" else [])
-        return {**none, "interface_fingerprint": _interface_of(node), "covered_nodes": covered}
+        interfaces = {}
+        if decision == "seal-true":  # what each covered node says, as shown: a restatement since is another set
+            for covered_id in covered:
+                covered_node = get_node(store, covered_id)
+                interfaces[covered_id] = _interface_of(covered_node) if covered_node is not None else None
+        return {**none, "interface_fingerprint": _interface_of(node), "covered_nodes": covered, "covered_interfaces": interfaces}
     if kind == DecisionKind.not_a_problem:  # the agent's Challenge, on the version it lapsed
         challenge = require_challenge(store, target_id)
         return {**none, "candidate_proof_id": _current_proof_id(store, challenge.target_node_id),
