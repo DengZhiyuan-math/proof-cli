@@ -16,7 +16,20 @@ from _researcher import researcher
 from proof_cli.cli import app
 from proof_cli.node_states import node_states, seal_preview
 from proof_cli.reviews import ReviewEntry
-from proof_cli.proof_map import ProofMapError, create_node, fixed_by, get_challenge, open_challenge, work_log
+from proof_cli.proof_map import (
+    ProofMapError,
+    add_dependency,
+    binding_digest,
+    create_node,
+    fixed_by,
+    get_challenge,
+    get_current_candidate_proof,
+    open_challenge,
+    prepare_decision,
+    restate_node,
+    seal_node,
+    work_log,
+)
 from proof_cli.storage import ensure_project
 
 
@@ -166,3 +179,89 @@ def test_what_a_seal_would_do_is_listed_first_and_its_note_reaches_every_node_it
     (entry,) = [e for e in work_log(store, "A") if e["kind"] == "sealed"]  # the work log reads it from reviews.jsonl
     assert (entry["decision"], entry["note"]) == ("seal-true", "a chain I know")
     assert [e["kind"] for e in work_log(store, "B") if e["kind"] == "verified"] == ["verified"]
+
+
+# -- review of #293 ------------------------------------------------------------------------------------------------------
+
+
+def test_a_dependency_found_false_voids_the_verification_for_good(tmp_path: Path):
+    # ADR-0025 point 13: if a dependency is later false, the verification is void; unsealing it restores nothing
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="B", kind="imported_result", statement="B", source_locator="Theorem 1", source_version="v1")
+    create_node(store, node_id="A", kind="lemma", statement="A", dependencies=["B"])
+    reviewer = researcher(store)
+    reviewer.verify("B", rationale="read the source")
+    _snapshot(store, "A")
+    reviewer.verify("A", rationale="checked")
+    assert _layers(store, "A")[1:] == ("expert-verified", "verified-true")
+    reviewer.seal("B", False, rationale="the source has an error")
+    reviewer.unseal("B", rationale="a misreading after all")
+    assert _layers(store, "B")[2] == "verified-true" and _layers(store, "A")[1:] == ("incomplete", "uncertain")
+    reviewer.verify("A", rationale="checked again")
+    assert _layers(store, "A")[1:] == ("expert-verified", "verified-true")
+
+
+def test_a_true_seal_fixes_the_text_of_all_it_covers_and_a_false_one_only_its_own(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    for node_id, dependencies in (("C", []), ("B", ["C"]), ("A", ["B"]), ("N", []), ("M", ["N"])):
+        create_node(store, node_id=node_id, kind="lemma", statement=node_id, dependencies=dependencies)
+    reviewer = researcher(store)
+    reviewer.seal("A", True, rationale="known")
+    assert all(fixed_by(store, node_id) is not None for node_id in ("A", "B", "C"))
+    assert _code(lambda: restate_node(store, "C", statement="C'", reason="a typo", by="human")) == "TEXT_FIXED"
+    reviewer.seal("M", False, rationale="false")
+    assert fixed_by(store, "M") is not None and fixed_by(store, "N") is None  # sealing M false says nothing of N's text
+
+
+def test_a_preview_binds_the_whole_set_a_true_seal_covers(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    for node_id, dependencies in (("C", []), ("B", ["C"]), ("A", ["B"]), ("X", [])):
+        create_node(store, node_id=node_id, kind="lemma", statement=node_id, dependencies=dependencies)
+    viewed = binding_digest(prepare_decision(store, "seal", "A", "seal-true"))
+    add_dependency(store, "B", "X", edited_by="human")  # the set changed after the page showed it
+    with pytest.raises(ProofMapError) as caught:
+        seal_node(store, "A", True, reviewer=researcher(store).reviewer_id, rationale="known", viewed_binding=viewed)
+    assert caught.value.code == "STALE_VIEW" and _layers(store, "X")[0] == "unsealed"
+    researcher(store).seal("A", True, rationale="known, X included")
+    create_node(store, node_id="Y", kind="lemma", statement="Y")
+    add_dependency(store, "C", "Y", edited_by="human")  # an edge under a sealed node, after the seal
+    assert _layers(store, "X")[0] == "sealed-true" and _layers(store, "Y")[0] == "unsealed"  # a seal covers what it was shown
+
+
+def test_unsealing_needs_no_readable_snapshot(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="L", kind="lemma", statement="L")
+    _snapshot(store, "L")
+    researcher(store).seal("L", True, rationale="known")
+    snapshot = tmp_path / get_current_candidate_proof(store, "L").file_path
+    snapshot.unlink()  # the manifest gone: the proof's bytes can't be read
+    researcher(store).unseal("L", rationale="reopened")
+    assert _layers(store, "L")[0] == "unsealed"
+
+
+def test_not_a_problem_restores_something_or_is_refused(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="lem", kind="lemma", statement="L")
+    _snapshot(store, "lem")
+    reviewer = researcher(store)
+    reviewer.verify("lem", rationale="checked")
+    gap = open_challenge(store, "lem", opened_by="agent_v", rationale="a doubt")
+    reviewer.not_a_problem(gap.id)
+    assert _code(lambda: reviewer.not_a_problem(gap.id)) == "NOTHING_TO_RESTORE"  # once is enough
+    create_node(store, node_id="old", kind="lemma", statement="O")
+    _snapshot(store, "old")
+    reviewer.decide_acceptance("old", "accept")  # a legacy Acceptance of v1
+    doubt = open_challenge(store, "old", opened_by="agent_v", rationale="a doubt")
+    _snapshot(store, "old", "a second proof")
+    assert _code(lambda: reviewer.not_a_problem(doubt.id)) == "NOTHING_TO_RESTORE"  # v2 is verified by nobody
+
+
+def test_an_unseal_preview_releases_only_what_no_other_seal_still_covers(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    for node_id, dependencies in (("N", []), ("A", ["N"]), ("B", ["N"])):
+        create_node(store, node_id=node_id, kind="lemma", statement=node_id, dependencies=dependencies)
+    researcher(store).seal("A", True, rationale="known")
+    researcher(store).seal("B", True, rationale="known too")
+    assert seal_preview(store, "A", "unseal") == {"releases": ["A"]}
+    researcher(store).unseal("A", rationale="reopened")
+    assert [_layers(store, node_id)[0] for node_id in ("A", "N")] == ["unsealed", "sealed-true"]

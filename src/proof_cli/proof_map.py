@@ -176,7 +176,7 @@ def _decide(
     (SNAPSHOT_UNREADABLE): it would bind nothing (#92).
     """
     payload = build_decision_payload(
-        store, kind, target_id, decision, rationale=rationale, **decision_binding(store, kind, target_id, dependency_id=dependency_id)
+        store, kind, target_id, decision, rationale=rationale, **decision_binding(store, kind, target_id, dependency_id=dependency_id, decision=decision)
     )
     if payload.candidate_proof_id is not None and payload.candidate_proof_sha256 is None:
         raise ProofMapError(
@@ -1006,7 +1006,7 @@ def _resting_on(store: ProjectStore, node_id: str) -> set[str]:
     return found
 
 
-def _rests_on(store: ProjectStore, node_id: str) -> set[str]:
+def rests_on(store: ProjectStore, node_id: str) -> set[str]:
     """`node_id` and every node it rests on, directly or through others."""
     found = {node_id}
     pending = [node_id]
@@ -1047,9 +1047,12 @@ def _fixed_index(store: ProjectStore) -> dict[str, dict]:
 def _relied_on(store: ProjectStore, row: dict) -> set[str]:
     """The nodes whose text a decision relied on: the decided node, what its decided snapshot rested on, and below
     each of those what its own newest snapshot by then rested on (a proof cites statements). A decision with no record
-    of what it was made on reads the node's dependencies as they stand now."""
+    of what it was made on reads the node's dependencies as they stand now. A Seal relies on what it seals: a true one
+    on the set it covered, a false one on the node alone (ADR-0025 point 14)."""
     at = datetime.fromisoformat(row["created_at"])
     payload = row.get("payload")
+    if row["kind"] == ReviewRecordKind.seal.value:
+        return {row["object_id"], *(payload.covered_nodes if payload is not None and payload.decision == "seal-true" else [])}
     node = get_node(store, row["object_id"])
     if node is None:
         return {row["object_id"]}
@@ -1166,7 +1169,7 @@ _TEXT_CHANGES = "text_changes"
 def _reachable_text_change(store: ProjectStore, node_id: str) -> EventRecord | None:
     """`newest_text_change` by plain reachability: for a map with a cycle."""
     restated, edited = _text_changes(store)
-    nodes = _rests_on(store, node_id)
+    nodes = rests_on(store, node_id)
     named = {definition_id for current_id in nodes for definition_id in (getattr(get_node(store, current_id), "definitions", None) or [])}
     newest: EventRecord | None = None
     for change in [*(restated.get(n) for n in nodes), *(edited.get(d) for d in named)]:
@@ -2884,13 +2887,17 @@ def restore_verification(store: ProjectStore, challenge_id: str, *, reviewer: st
     Challenge is withdrawn with the researcher's words, and the verification of the version, unchanged since, counts
     again. A line in the node's reviews.jsonl, on the click only. With nothing to restore — the researcher's own
     Challenge, a node not verified as it stands, a Challenge from before the verification — it is refused
-    (NOTHING_TO_RESTORE): "not a problem" there is said, as a withdrawal (`proof challenge withdraw`)."""
+    (NOTHING_TO_RESTORE): "not a problem" there is said, as a withdrawal (`proof challenge withdraw`). Once given, it is
+    not given again. Eligibility is the Proof layer's own reading (`node_states.verification_holds`)."""
+    from .node_states import lapses, verification_holds  # it reads this module
+
     challenge = require_challenge(store, challenge_id)
     target = challenge.target_node_id
-    since = verification_time(store, target)
-    if challenge.opened_by == RESEARCHER or since is None or challenge.created_at <= since:
+    holds, since = verification_holds(store, require_node(store, target))  # what the Proof layer reads, before any lapse
+    if challenge.opened_by == RESEARCHER or not holds or not lapses(store, challenge, since):
         why = ("it is the researcher's own, which lapses nothing" if challenge.opened_by == RESEARCHER
-               else f"{target} has no verification of the version as it stands" if since is None else "it was raised before the verification")
+               else f"{target} has no verification of the version as it stands" if not holds
+               else "it was raised before the verification, or is already ended by the researcher")
         raise ProofMapError("NOTHING_TO_RESTORE", f"challenge {challenge_id} restores no verification: {why}; withdraw it with a reason instead",
                             details={"challenge_id": challenge_id, "node_id": target})
     with store.transaction() as conn:
@@ -2928,7 +2935,21 @@ def seal_line(store: ProjectStore, node_id: str) -> dict | None:
     latest = _latest_decision(store, node_id, ReviewRecordKind.seal)
     if latest is None or latest.verdict.status != "verified" or latest.verdict.payload.decision == "unseal":
         return None
-    return {"decision": latest.verdict.payload.decision, "by": latest.row["reviewer_id"], "at": latest.row["created_at"], "note": latest.row["rationale"]}
+    payload = latest.verdict.payload
+    return {"decision": payload.decision, "by": latest.row["reviewer_id"], "at": latest.row["created_at"], "note": latest.row["rationale"],
+            "covered": list(payload.covered_nodes) if payload.decision == "seal-true" else []}
+
+
+def false_since(store: ProjectStore, node_id: str) -> list[datetime]:
+    """When the node was found false (ADR-0025 point 3): each seal-false line, and a Reference review that found it no
+    longer callable. A verification of a node resting on it made before any of these is void, unsealing or not."""
+    times = []
+    for kind, decision in ((ReviewRecordKind.seal, "seal-false"), (ReviewRecordKind.reference_review, "no-longer-callable")):
+        for row in decision_rows(store, _ACCEPTANCE_OBJECT_TYPE, node_id, kind.value):
+            verdict = verify_decision_row(store, row["id"])
+            if verdict.status == "verified" and verdict.payload.decision == decision:
+                times.append(datetime.fromisoformat(row["created_at"]))
+    return times
 
 
 def researcher_verification_time(store: ProjectStore, node_id: str) -> datetime | None:
@@ -2994,6 +3015,7 @@ def decision_binding(
     target_id: str,
     *,
     dependency_id: str | None = None,
+    decision: str | None = None,
 ) -> dict[str, Any]:
     """What a decision of `kind` on `target_id` is made on, as of now.
 
@@ -3014,10 +3036,18 @@ def decision_binding(
     if kind == DecisionKind.reference_review:
         node = require_node(store, target_id)
         return {**none, "interface_fingerprint": _interface_of(node), "resolves_challenges": _open_challenge_ids(store, target_id)}
-    if kind in (DecisionKind.verification, DecisionKind.seal):  # the version as it stands: its snapshot, interface and pins (ADR-0025)
+    if kind == DecisionKind.verification:  # the version as it stands: its snapshot, interface and pins (ADR-0025)
         node = require_node(store, target_id)
         return {**none, "candidate_proof_id": _current_proof_id(store, target_id), "interface_fingerprint": _interface_of(node),
                 "dependency_pins": _pins_of(store, target_id)}
+    if kind == DecisionKind.seal:
+        # absolute belief, bound to the statement and no proof's bytes; a true seal to the whole set it covers, so a page
+        # that showed another set is refused (STALE_VIEW), and an unseal to the set it releases (ADR-0025 point 15)
+        node = require_node(store, target_id)
+        line = seal_line(store, target_id)
+        covered = (sorted(rests_on(store, target_id) - {target_id}) if decision == "seal-true"
+                   else list((line or {}).get("covered") or []) if decision == "unseal" else [])
+        return {**none, "interface_fingerprint": _interface_of(node), "covered_nodes": covered}
     if kind == DecisionKind.not_a_problem:  # the agent's Challenge, on the version it lapsed
         challenge = require_challenge(store, target_id)
         return {**none, "candidate_proof_id": _current_proof_id(store, challenge.target_node_id),
@@ -3071,7 +3101,8 @@ def prepare_decision(
     except ValueError as exc:
         raise ProofMapError("INVALID_DECISION_KIND", f"'{kind}' is not a decision kind") from exc
     return build_decision_payload(
-        store, resolved_kind, target_id, decision, rationale=rationale, **decision_binding(store, resolved_kind, target_id, dependency_id=dependency_id)
+        store, resolved_kind, target_id, decision, rationale=rationale,
+        **decision_binding(store, resolved_kind, target_id, dependency_id=dependency_id, decision=decision)
     )
 
 

@@ -93,6 +93,8 @@ class DecisionPayload(BaseModel):
     key_ideas_drafted_by: str | None = None
     # a trust_rule's conditions (ADR-0014): `trust_rules.TrustCondition`, as JSON; empty for a retire
     conditions: list[dict[str, Any]] = Field(default_factory=list)
+    # a true seal's covered set as the page showed it, by id: what it seals, and what its unseal releases (ADR-0025)
+    covered_nodes: list[str] = Field(default_factory=list)
 
 
 class ReviewEntry(BaseModel):
