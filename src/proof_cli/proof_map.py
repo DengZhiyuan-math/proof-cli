@@ -422,6 +422,9 @@ def record_progress(
     coordinator: str | None = None,
     question: str | None = None,
     suggestion: str | None = None,
+    objections: list[str] | None = None,
+    fixed: dict[str, str] | None = None,
+    audit: bool = False,
 ) -> dict:
     """Report a plan (the steps the run means to take), one step's status, a handoff to another role, the
     Verifier's verdict on the working proof, an attempt the role abandoned (ADR-0019), or — on a Theorem or Lemma
@@ -429,9 +432,13 @@ def record_progress(
     stopped; ADR-0019 point 18). A Coordinator holds no node and takes no turn, so its note names no role.
     Returns the log entry.
 
-    A verdict is `passed` or `failed` with the objections as its note, and carries the inputs digest of the node
-    folder as it stands — what a Review snapshot's manifest would hash — so a later edit makes it stale by
-    construction; only the Verifier records one. An attempt is what the role tried to establish, how, and what it
+    A verdict is `passed` or `failed`, with a stable id, and carries the inputs digest of the node folder as it
+    stands — what a Review snapshot's manifest would hash, the version it read — so a later edit makes it stale by
+    construction; only the Verifier records one. A failed one names its `objections`, numbered in it from 1, and each
+    is a proof Challenge on the node (ADR-0025 point 8), ended as any Challenge is. A passing one says, for each proof
+    Challenge still open on the node, where and why it is `fixed` ({challenge id: where and why}); one that leaves any
+    out is refused (ENDINGS_REQUIRED, naming them), so no objection is dropped unsaid. Its `checker` says what checked:
+    the Verifier, or the Verifier in an `audit` (ADR-0024), which reads the proof afresh and records no endings. An attempt is what the role tried to establish, how, and what it
     failed on; any role records one. Both are insert-only events like the rest of the work log.
 
     A question is a Standing question (ADR-0021 point 8): a judgement call the role made itself instead of stopping,
@@ -468,10 +475,29 @@ def record_progress(
             raise ProofMapError("VERDICT_ROLE_REQUIRED", f"only the verifier records a verdict; {role} reports steps, attempts and handoffs")
         if verdict not in VERDICT_OUTCOMES:
             raise ProofMapError("INVALID_VERDICT", f"'{verdict}' is not a verdict; expected one of: {', '.join(VERDICT_OUTCOMES)}")
-        if verdict == "failed" and not note.strip():
-            raise ProofMapError("OBJECTIONS_REQUIRED", "a failed verdict names its objections: --note \"1. <the step or citation it attacks> …\"")
-        payload = {"kind": "verdict", "role": role, "by": by, "outcome": verdict, "note": note.strip(), "inputs_sha256": _working_digest_or_none(store, node)}
+        raised = [text.strip() for text in objections or [] if text.strip()]
+        if verdict == "failed" and not raised:
+            raise ProofMapError("OBJECTIONS_REQUIRED", "a failed verdict names its objections, one each: --objection \"<the step or citation it attacks: why>\"")
+        if verdict == "passed" and raised:
+            raise ProofMapError("PASSED_WITH_OBJECTIONS", "a passing verdict raises no objection; one that stands is a failed verdict")
+        if fixed and audit:
+            raise ProofMapError("AUDIT_RECORDS_NO_ENDINGS", "an audit reads the proof afresh and ends no objection; the next ordinary Verifier does")
+        if fixed and verdict == "failed":
+            raise ProofMapError("INVALID_ENDING", "a failed verdict fixes nothing: a passing one says where and why each objection is fixed")
+        verdict_id = f"v_{uuid.uuid4().hex[:12]}"
+        payload = {"kind": "verdict", "id": verdict_id, "role": role, "by": by, "outcome": verdict, "note": note.strip(),
+                   "inputs_sha256": _working_digest_or_none(store, node), "checker": "audit" if audit else "verifier"}
         message = f"{role} on {node_id}: verdict {verdict}" + (f" — {note.strip()}" if note.strip() else "")
+        with store.transaction() as conn:
+            if verdict == "passed" and not audit:
+                payload["fixed"] = _endings(store, node_id, fixed or {})
+            payload["objections"] = [
+                {"n": number, "text": text, "challenge_id": _raise_challenge(store, node_id, kind="proof", opened_by=by, rationale=text, conn=conn,
+                                                                             verdict_id=verdict_id, objection=number).id}
+                for number, text in enumerate(raised, start=1)
+            ]
+            append_event(store, PROGRESS_EVENT, message, entity_id=node_id, payload=payload, conn=conn)
+        return {**payload, "node_id": node_id, "at": utc_now().isoformat()}
     elif attempt is not None or failed_on is not None:
         goal = (attempt or "").strip()
         obstruction = (failed_on or "").strip()
@@ -503,6 +529,37 @@ def record_progress(
     with store.transaction() as conn:
         append_event(store, PROGRESS_EVENT, message, entity_id=node_id, payload=payload, conn=conn)
     return {**payload, "node_id": node_id, "at": utc_now().isoformat()}
+
+
+def _endings(store: ProjectStore, node_id: str, fixed: dict[str, str]) -> list[dict]:
+    """A passing verdict's endings, one per proof Challenge open on the node, in the order they were raised: where and
+    why each is fixed. Refused when one names no such Challenge or says nothing, or when one is left out."""
+    open_ = [challenge for challenge in list_challenges(store, target_node_id=node_id, status="open") if challenge.kind == "proof"]
+    unknown = sorted(set(fixed) - {challenge.id for challenge in open_})
+    if unknown:
+        raise ProofMapError("INVALID_ENDING", f"{', '.join(unknown)}: no proof Challenge open on {node_id} has that id", details={"unknown": unknown})
+    blank = sorted(challenge_id for challenge_id, text in fixed.items() if not text.strip())
+    if blank:
+        raise ProofMapError("INVALID_ENDING", f"say where and why each is fixed: {', '.join(blank)}", details={"blank": blank})
+    missing = sorted(challenge.id for challenge in open_ if challenge.id not in fixed)
+    if missing:
+        raise ProofMapError("ENDINGS_REQUIRED", f"a passing verdict says where and why each open objection on {node_id} is fixed; it leaves out "
+                            + ", ".join(missing) + " (--fixed <challenge-id>=<where and why>, or withdraw one with a reason)",
+                            details={"node_id": node_id, "missing": missing})
+    return [{"challenge_id": challenge.id, "fix": fixed[challenge.id].strip()} for challenge in open_]
+
+
+@memoized_read
+def _fixes(store: ProjectStore) -> dict[str, dict]:
+    """Each Challenge a passing verdict fixed: {challenge id: {"verdict_id", "at", "fix"}}, off the verdicts alone."""
+    found: dict[str, dict] = {}
+    for (_, kind), entries in _progress_index(store).items():
+        if kind != "verdict":
+            continue
+        for entry in entries:
+            for ending in entry.get("fixed") or []:
+                found[ending["challenge_id"]] = {"verdict_id": entry.get("id"), "at": entry["at"], "fix": ending.get("fix")}
+    return found
 
 
 def _working_digest_or_none(store: ProjectStore, node: ProofMapNode) -> str | None:
@@ -551,6 +608,15 @@ def latest_verdict(store: ProjectStore, node_id: str) -> dict | None:
     whether the Prover may request review (ADR-0019 point 3). A verdict whose hash is not the folder's is stale."""
     found = verdicts(store, node_id)
     return found[-1] if found else None
+
+
+def has_passing_check(store: ProjectStore, node_id: str) -> bool:
+    """Whether the node's newest verdict is a check under ADR-0025: structured (it has an id), passing, not stale, and
+    on the node folder as it stands. A verdict recorded before verdicts had ids is none (point 26)."""
+    verdict = latest_verdict(store, node_id)
+    if verdict is None or not verdict.get("id") or verdict.get("outcome") != "passed" or verdict.get("stale") or not verdict.get("inputs_sha256"):
+        return False
+    return verdict["inputs_sha256"] == _working_digest_or_none(store, require_node(store, node_id))
 
 
 def questions(store: ProjectStore, node_id: str) -> list[dict]:
@@ -826,7 +892,8 @@ def work_log(store: ProjectStore, node_id: str) -> list[dict]:
         elif event.kind == "proof_map_challenge_opened" and event.entity_id == node_id:  # ADR-0025 point 8: who, against what, why
             entries.append({"at": at, "kind": "challenge", "by": payload.get("opened_by"), "challenge_id": payload.get("challenge_id"),
                             "against": payload.get("kind"), "version": payload.get("version"), "rationale": payload.get("rationale"),
-                            "counterexample_id": payload.get("counterexample_id")})
+                            "counterexample_id": payload.get("counterexample_id"), "verdict_id": payload.get("verdict_id"),
+                            "objection": payload.get("objection")})
         elif event.kind == CHALLENGE_WITHDRAWN_EVENT and event.entity_id == node_id:  # and why it was withdrawn (point 9)
             entries.append({"at": at, "kind": "challenge-withdrawn", "by": payload.get("by"), "challenge_id": payload.get("challenge_id"),
                             "reason": payload.get("reason")})
@@ -2123,6 +2190,9 @@ def list_candidate_proofs(store: ProjectStore, node_id: str) -> list[CandidatePr
     return list_candidate_proofs_for_node(store, node_id)
 
 
+CHECKERS = ("verifier", "audit", "mechanical")  # what checked a proof, as a mark (ADR-0025)
+
+
 def record_evidence_check(
     store: ProjectStore,
     candidate_proof_id: str,
@@ -2131,8 +2201,12 @@ def record_evidence_check(
     notes: str = "",
     run_by: str = "system",
     snapshot_sha256: str | None = None,
+    checker: str | None = None,
 ) -> EvidenceCheck:
     """Record an automated or semi-automated check against a specific Candidate proof.
+
+    `checker` marks what checked it (ADR-0025): `verifier`, `audit` or `mechanical`, so who checked is read off the
+    record, never its notes; None for an outside checker, named in `run_by`.
 
     Purely advisory and ungated — an automated checker records its own
     outcome directly, no Human Review needed to log a result. Nothing here
@@ -2171,10 +2245,12 @@ def record_evidence_check(
         raise ProofMapError(
             "INVALID_OUTCOME", f"'{outcome}' is not a valid evidence outcome; expected one of: {valid}"
         ) from exc
+    if checker is not None and checker not in CHECKERS:
+        raise ProofMapError("INVALID_CHECKER", f"'{checker}' is not a checker; expected one of: {', '.join(CHECKERS)} (an outside checker names itself in run_by)")
 
     check = EvidenceCheck(
         id=str(uuid.uuid4()), candidate_proof_id=candidate_proof_id, outcome=resolved_outcome, notes=notes, run_by=run_by,
-        candidate_proof_sha256=sha256,
+        candidate_proof_sha256=sha256, checker=checker,
     )
     insert_evidence_check(store, check)
     append_event(
@@ -2182,7 +2258,7 @@ def record_evidence_check(
         "proof_map_evidence_check_recorded",
         f"evidence check {resolved_outcome.value} for candidate proof {candidate_proof_id}",
         entity_id=candidate_proof_id,
-        payload={"evidence_check_id": check.id, "outcome": resolved_outcome.value, "run_by": run_by, "candidate_proof_sha256": sha256},
+        payload={"evidence_check_id": check.id, "outcome": resolved_outcome.value, "run_by": run_by, "candidate_proof_sha256": sha256, "checker": checker},
     )
     return check
 
@@ -3580,20 +3656,29 @@ def open_challenge(
     researcher's needs none; it is discussed with the agents. A sealed node is the researcher's absolute belief and
     is never challenged (point 6): it is unsealed first.
     """
-    from .node_states import own_states  # it reads this module
-
     if kind not in CHALLENGE_KINDS:
         raise ProofMapError("INVALID_CHALLENGE_KIND", f"'{kind}' is not a Challenge kind; expected one of: {', '.join(CHALLENGE_KINDS)}")
-    seal = own_states(store, require_node(store, target_node_id))[0]
-    if seal != "unsealed":
-        raise ProofMapError("NODE_SEALED", f"{target_node_id} is {seal.replace('-', ' ')}: a sealed node is never challenged; it is unsealed first",
-                            details={"node_id": target_node_id, "seal": seal})
+    require_node(store, target_node_id)
     if kind == "statement" and counterexample is None and opened_by != RESEARCHER:
         raise ProofMapError("COUNTEREXAMPLE_REQUIRED", f"an agent's Challenge against {target_node_id}'s statement links its counterexample (--counterexample <node-id>)")
     if counterexample is not None:
         if counterexample == target_node_id:
             raise ProofMapError("INVALID_COUNTEREXAMPLE", f"{target_node_id} can't be its own counterexample")
         require_node(store, counterexample)
+    with store.transaction() as conn:
+        return _raise_challenge(store, target_node_id, kind=kind, counterexample=counterexample, opened_by=opened_by, rationale=rationale, conn=conn)
+
+
+def _raise_challenge(store: ProjectStore, target_node_id: str, *, kind: str, opened_by: str, rationale: str, conn: sqlite3.Connection,
+                     counterexample: str | None = None, verdict_id: str | None = None, objection: int | None = None) -> Challenge:
+    """Record a Challenge and its work-log entry in the caller's transaction: a Challenge opened, or a Verdict's objection.
+    Every Challenge is written here, so none reaches a sealed node (NODE_SEALED), and a refusal rolls the caller back."""
+    from .node_states import own_states  # it reads this module
+
+    seal = own_states(store, require_node(store, target_node_id))[0]
+    if seal != "unsealed":
+        raise ProofMapError("NODE_SEALED", f"{target_node_id} is {seal.replace('-', ' ')}: a sealed node is never challenged; it is unsealed first",
+                            details={"node_id": target_node_id, "seal": seal})
     current = get_current_candidate_proof(store, target_node_id)
     challenge = Challenge(
         id=str(uuid.uuid4()),
@@ -3603,17 +3688,19 @@ def open_challenge(
         kind=kind,
         version=current.version if current else None,
         counterexample_id=counterexample,
+        verdict_id=verdict_id,
+        objection=objection,
     )
-    with store.transaction() as conn:
-        insert_challenge(store, challenge, conn=conn)
-        append_event(
-            store,
-            "proof_map_challenge_opened",
-            f"challenge opened against {target_node_id} by {opened_by}",
-            entity_id=target_node_id,
-            payload={"challenge_id": challenge.id, "opened_by": opened_by, "rationale": rationale, "kind": kind, "version": challenge.version, "counterexample_id": counterexample},
-            conn=conn,
-        )
+    insert_challenge(store, challenge, conn=conn)
+    append_event(
+        store,
+        "proof_map_challenge_opened",
+        f"challenge opened against {target_node_id} by {opened_by}",
+        entity_id=target_node_id,
+        payload={"challenge_id": challenge.id, "opened_by": opened_by, "rationale": rationale, "kind": kind, "version": challenge.version,
+                 "counterexample_id": counterexample, "verdict_id": verdict_id, "objection": objection},
+        conn=conn,
+    )
     return challenge
 
 
@@ -3622,12 +3709,15 @@ def open_challenge(
 CHALLENGE_WITHDRAWN_EVENT = "proof_map_challenge_withdrawn"
 
 
-def withdraw_challenge(store: ProjectStore, challenge_id: str, *, by: str, reason: str) -> Challenge:
+def withdraw_challenge(store: ProjectStore, challenge_id: str, *, by: str, reason: str, audit: bool = False) -> Challenge:
     """Withdraw a Challenge, with a reason (ADR-0025 point 9): it takes effect when said, and is in the node's work log.
 
     The researcher withdraws any: their own, or an agent's ("not a problem", point 10; whether that restores a
     verification is the researcher's click, #279). Any agent withdraws any agent's, so a mistaken objection never stalls
-    an automated run, and the reason is briefed to the next role. No agent withdraws the researcher's."""
+    an automated run, and the reason is briefed to the next role. No agent withdraws the researcher's. An `audit` reads
+    the proof afresh and ends nothing (AUDIT_RECORDS_NO_ENDINGS): earlier objections are the next ordinary Verifier's."""
+    if audit:
+        raise ProofMapError("AUDIT_RECORDS_NO_ENDINGS", "an audit reads the proof afresh and ends no Challenge; the next ordinary Verifier does")
     if not reason.strip():
         raise ProofMapError("WITHDRAW_REASON_REQUIRED", "a Challenge is withdrawn with a reason, which the next role is briefed with (--reason)")
     with store.transaction() as conn:
@@ -3668,6 +3758,10 @@ def _challenge_outcome(row: dict) -> ChallengeStatus:
 def _with_resolution(store: ProjectStore, challenge: Challenge) -> Challenge:
     if challenge.withdrawn_at is not None:  # its ending, as recorded (ADR-0025 point 9)
         return challenge.model_copy(update={"status": ChallengeStatus.withdrawn})
+    ending = _fixes(store).get(challenge.id)
+    if ending is not None:
+        return challenge.model_copy(update={"status": ChallengeStatus.fixed, "fixed_by": ending["verdict_id"],
+                                            "fixed_at": datetime.fromisoformat(ending["at"]), "fix": ending["fix"]})
     row = challenge_resolution(store, challenge.id)
     if row is not None:
         return challenge.model_copy(

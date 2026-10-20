@@ -17,8 +17,8 @@ is written, and no Challenge kind is guessed or stored (#276).
   dismissal today, #279's later), brings it back. The researcher's own doubt lapses nothing.
 - **Proof layer**: a counting Acceptance of the current version, a Reference review or a Trust rule the citation meets
   reads expert-verified (a verification counts for its own version only: a newer snapshot nobody verified is not), and
-  an imported result without one checks passed. A legacy passed Verdict alone is not a check under the new rules: a
-  local node with only that is incomplete, until #281 records the check those rules make.
+  an imported result without one checks passed. A local node's checks passed is its newest Verdict, structured (#278),
+  passing and on the inputs as they stand; a Verdict from before Verdicts had ids is no check under the new rules.
 """
 
 from __future__ import annotations
@@ -34,6 +34,7 @@ from .proof_map import (
     get_acceptance_state,
     get_accepted_version,
     get_reference_review_state,
+    has_passing_check,
     list_challenges,
     list_nodes,
     require_node,
@@ -136,6 +137,13 @@ def own_states(store: ProjectStore, node: ProofMapNode) -> tuple[str, str, str, 
             if current is not None and current.version == get_accepted_version(store, node.id):
                 proof_layer = "expert-verified"
     challenges = list_challenges(store, target_node_id=node.id)
+    if proof_layer == "expert-verified":
+        since = verification_time(store, node.id)
+        if any(challenge.opened_by != RESEARCHER and challenge.status != ChallengeStatus.dismissed
+               and (since is None or challenge.created_at > since) for challenge in challenges):
+            proof_layer = "checks-passed" if node.kind == ProofMapNodeKind.imported_result else "incomplete"
+    if proof_layer == "incomplete" and node.kind != ProofMapNodeKind.imported_result and has_passing_check(store, node.id):
+        proof_layer = "checks-passed"
     for challenge in challenges:
         if challenge.status != ChallengeStatus.open:
             continue
@@ -143,11 +151,6 @@ def own_states(store: ProjectStore, node: ProofMapNode) -> tuple[str, str, str, 
             proof_layer = "incomplete"
         else:
             statement_layer = "challenged-as-false"
-    if proof_layer == "expert-verified":
-        since = verification_time(store, node.id)
-        if any(challenge.opened_by != RESEARCHER and challenge.status != ChallengeStatus.dismissed
-               and (since is None or challenge.created_at > since) for challenge in challenges):
-            proof_layer = "checks-passed" if node.kind == ProofMapNodeKind.imported_result else "incomplete"
     claim = get_active_claim(store, node.id)
     return seal, statement_layer, proof_layer, claim.claimant_id if claim else None
 

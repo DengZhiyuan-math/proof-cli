@@ -324,6 +324,8 @@ class ChallengeStatus(str, Enum):
     withdrawn = "withdrawn"
     # against the proof, and the node was restated after it was raised: computed, never stored (ADR-0025 point 9)
     superseded = "superseded"
+    # a passing Verdict said where and why it is fixed (ADR-0025 point 9): read off that Verdict, never stored here
+    fixed = "fixed"
 
 
 class Challenge(BaseModel):
@@ -349,10 +351,17 @@ class Challenge(BaseModel):
     version: int | None = None
     # a statement Challenge's counterexample: an ordinary node, whose own statement gives its scope (ADR-0025 point 7)
     counterexample_id: str | None = None
+    # a Verifier's objection is a proof Challenge (ADR-0025 point 8): the Verdict that raised it, and its number there
+    verdict_id: str | None = None
+    objection: int | None = None
     # its withdrawal (ADR-0025 point 9): who, when and why; the reason is briefed to the next role
     withdrawn_by: str | None = None
     withdrawn_at: datetime | None = None
     withdrawal_reason: str | None = None
+    # fixed: the passing Verdict that fixed it, when, and where and why it says it is fixed
+    fixed_by: str | None = None
+    fixed_at: datetime | None = None
+    fix: str | None = None
     resolved_by: str | None = None
     resolved_at: datetime | None = None
     # the signed Human Review decision that resolved it (ADR-0009, #35)
@@ -391,6 +400,9 @@ class EvidenceCheck(BaseModel):
     # the SHA-256 of the Candidate proof the check ran against, as a decision binds it (ADR-0010); None for a check
     # recorded before the field, or against a snapshot that could not be read
     candidate_proof_sha256: str | None = None
+    # what checked it, as a mark (ADR-0025): `verifier`, `audit` (a Verifier reading afresh, ADR-0024) or `mechanical`;
+    # None for an outside checker, which names itself in `run_by`, and for a check recorded before the mark
+    checker: str | None = None
     created_at: datetime = Field(default_factory=utc_now)
 
 

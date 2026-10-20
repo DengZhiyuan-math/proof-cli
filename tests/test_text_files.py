@@ -60,9 +60,10 @@ def _project(tmp_path: Path):
 def test_a_verdicts_note_from_a_file_is_stored_as_written(tmp_path: Path):
     root, store = _project(tmp_path)
     note = _file(tmp_path / "scratch" / "verifier", "verdict.md")
-    entry = _data(_run(root, "node", "progress", "N", "--verdict", "failed", "--note-file", note, env=VERIFIER))
+    entry = _data(_run(root, "node", "progress", "N", "--verdict", "failed", "--note-file", note, "--objection-file", note, env=VERIFIER))
     assert entry["note"] == TEXT
     assert [e["note"] for e in work_log(load_project(root), "N") if e.get("kind") == "verdict"] == [TEXT]
+    assert entry["objections"][0]["text"] == TEXT  # an objection from a file, as written too
 
 
 def test_a_handoff_a_step_a_question_and_an_attempt_take_their_text_from_files(tmp_path: Path):
@@ -113,7 +114,8 @@ def test_a_relative_path_is_read_from_the_current_folder_as_an_agent_in_its_node
     before = read_working_snapshot(root, "N", require_node(store, "N").medium).digest()
     _file(folder / "scratch" / "verifier", "x.md")
     monkeypatch.chdir(folder)
-    entry = _data(runner.invoke(app, ["node", "progress", "N", "--verdict", "failed", "--note-file", "scratch/verifier/x.md", "--json"],
+    entry = _data(runner.invoke(app, ["node", "progress", "N", "--verdict", "failed", "--note-file", "scratch/verifier/x.md",
+                                      "--objection-file", "scratch/verifier/x.md", "--json"],
                                 env={**VERIFIER, "PROOF_ROOT": str(root)}))
     assert entry["note"] == TEXT and entry["inputs_sha256"] == before
 
