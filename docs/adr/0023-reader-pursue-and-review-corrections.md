@@ -1,6 +1,6 @@
 # ADR-0023 — Reader, Pursue and review provenance corrections
 
-**Status**: proposed (2026-10-13). Implementation is under review in core #220, agents #30 and web #25. The accepted historical text of ADR-0021 is retained.
+**Status**: proposed (2026-10-13). Implementation is under review in core #220, agents #30 and web #25. The accepted historical text of ADR-0021 is retained. Amended by ADR-0025: there is no Rejected; history is what no live route rests on.
 
 Amends ADR-0021 points 5, 7 and 10, and ADR-0013 provenance. Autonomous literature retrieval was explicitly requested by the researcher in this chat; it is additional to agents #31/#32.
 
