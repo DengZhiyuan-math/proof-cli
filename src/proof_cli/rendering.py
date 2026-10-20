@@ -389,8 +389,17 @@ def _work_log_body(entry: dict) -> str:
         return f"turn {entry.get('turn')} (job {entry.get('job')}" + (f", session {entry['session_id']}" if entry.get("session_id") else "") + ")"
     if kind == "handoff":
         return f"handed off to {entry.get('to')}" + (f" — {entry['note']}" if entry.get("note") else "")
-    if kind == "verdict":
-        return f"verifier: {entry.get('outcome')}" + (f" — {entry['note']}" if entry.get("note") else "")
+    if kind == "verdict":  # its objections, numbered, and on a pass how many it fixed (ADR-0025 points 8-9)
+        raised = "; ".join(f"{objection['n']}. {objection['text']}" for objection in entry.get("objections") or [])
+        fixed = len(entry.get("fixed") or [])
+        return (f"verifier: {entry.get('outcome')}" + (" (audit)" if entry.get("checker") == "audit" else "")
+                + (f" — {entry['note']}" if entry.get("note") else "") + (f" — objections: {raised}" if raised else "")
+                + (f" — fixed {fixed} objection(s)" if fixed else ""))
+    if kind == "challenge":  # ADR-0025 point 8: against what, which objection of which verdict, why
+        what = f"objection {entry['objection']} of verdict {entry['verdict_id']}" if entry.get("verdict_id") else f"Challenge against the {entry.get('against') or 'node'}"
+        return f"{what} ({entry.get('challenge_id')}): {entry.get('rationale')}" + (f" — counterexample {entry['counterexample_id']}" if entry.get("counterexample_id") else "")
+    if kind == "challenge-withdrawn":
+        return f"withdrew {entry.get('challenge_id')} — {entry.get('reason')}"
     if kind == "attempt":
         return f"attempt: {entry.get('goal')}" + (f" ({entry['method']})" if entry.get("method") else "") + f" failed on {entry.get('failed_on')}"
     if kind == "coordinator":

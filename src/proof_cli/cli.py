@@ -711,6 +711,8 @@ def node_show(
         node = require_node(store, node_id)
         states = node_states(store, node_id)  # its four states and conclusion (ADR-0025)
         stopped = stopped_by(store, node_id)  # the statement Challenges that stop work on it
+        # each Verifier objection, a proof Challenge numbered in its verdict, with how it ended (ADR-0025 points 8-9)
+        objections = [challenge.model_dump(mode="json") for challenge in list_challenges(store, target_node_id=node_id) if challenge.verdict_id]
         workflow_state = get_workflow_state(store, node_id)
         acceptance_state = _acceptance_axis(store, node)
         integrity_state = get_integrity_state(store, node_id)
@@ -742,6 +744,9 @@ def node_show(
             payload["run_script"], working_proof = working_proof, None
         payload.update(states.model_dump(mode="json"))
         payload["stopped_by"] = stopped
+        payload["objections"] = objections
+        if _auditing():  # an objection is an earlier verdict's: an audit reads the proof afresh (ADR-0024 point 13)
+            payload["objections"], payload["objections_withheld"] = [], AUDIT_WITHHELD
         payload["workflow_state"] = workflow_state
         payload["acceptance_state"] = acceptance_state
         payload["integrity_state"] = integrity_state
@@ -1329,7 +1334,11 @@ def node_progress(
     status: str = typer.Option("", "--status", help="With --step: started, done, stuck, or needs-human (a decision only the researcher can make, named in --note)"),
     note: str = typer.Option("", "--note", help="A line about the step: what it found, why it is stuck, what the next role should do"),
     handoff: str = typer.Option("", "--handoff", help=f"Hand the work to this role ({_ROLES_HELP}) and end the turn"),
-    verdict: str = typer.Option("", "--verdict", help="The Verifier's verdict on the working proof as it stands: passed or failed, with the objections in --note (ADR-0019)"),
+    verdict: str = typer.Option("", "--verdict", help="The Verifier's verdict on the working proof as it stands: passed or failed (ADR-0019); a failed one names its --objection(s), a passing one ends each open one with --fixed"),
+    objection: list[str] = typer.Option(None, "--objection", help="With --verdict failed, repeatable: one objection, where and why; each is a proof Challenge, numbered in the verdict (ADR-0025)"),
+    objection_file: list[str] = typer.Option(None, "--objection-file", help=f"With --verdict failed, repeatable: one objection read from a file ({FILE_TEXT}), after any --objection"),
+    fixed: list[str] = typer.Option(None, "--fixed", help="With --verdict passed, repeatable: <challenge-id>=<where and why it is fixed>, one for each proof Challenge open on the node"),
+    fixed_file: list[str] = typer.Option(None, "--fixed-file", help="With --verdict passed, repeatable: <challenge-id>=<path>, the where and why read from the file"),
     attempt: str = typer.Option("", "--attempt", help="Close an abandoned line: what it tried to establish; goes with --failed-on (ADR-0019)"),
     method: str = typer.Option("", "--method", help="With --attempt: the approach"),
     failed_on: str = typer.Option("", "--failed-on", help="With --attempt: the objection or obstruction it failed on"),
@@ -1356,6 +1365,13 @@ def node_progress(
     failed_on = _text(failed_on, failed_on_file, option="--failed-on-file", given="--failed-on", **texts) or ""
     store = get_store(_root(root))
     try:
+        objections = [*(objection or []), *(_file_text(path, "--objection-file") for path in objection_file or [])]
+        endings: dict[str, str] = {}
+        for entry, from_file in [*((entry, False) for entry in fixed or []), *((entry, True) for entry in fixed_file or [])]:
+            challenge_id, _, text = entry.partition("=")
+            if not challenge_id or not text:
+                raise ProofMapError("INVALID_ENDING", f"'{entry}' is not <challenge-id>={'<path>' if from_file else '<where and why>'}")
+            endings[challenge_id] = _file_text(text, "--fixed-file") if from_file else text
         if not plan and step is None and not handoff and not verdict and not attempt and not failed_on and not coordinator and not question:
             log = work_log(store, node_id)
             if _auditing():  # an audit reads the choices made on the node and their answers, nothing else of its record
@@ -1371,7 +1387,7 @@ def node_progress(
             store, node_id, role=role or os.environ.get("PROOF_AGENT_ROLE") or None, by=_author(by, root),
             plan=plan or None, step=step, status=status or None, note=note, handoff=handoff or None,
             verdict=verdict or None, attempt=attempt or None, method=method or None, failed_on=failed_on or None, coordinator=coordinator or None,
-            question=question or None,
+            question=question or None, objections=objections or None, fixed=endings or None, audit=_auditing(),
         )
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.progress")
@@ -1514,6 +1530,8 @@ def challenge_list(
 ) -> None:
     store = get_store(_root(root))
     challenges = list_challenges(store, target_node_id=target_id, status=status)
+    if _auditing():  # a verdict's objections are that verdict's: an audit reads the proof afresh (ADR-0024 point 13)
+        challenges = [challenge for challenge in challenges if not challenge.verdict_id]
     if json_output:
         typer.echo(
             dump_envelope(success_envelope("challenge.list", [c.model_dump(mode="json") for c in challenges]))
@@ -1592,12 +1610,13 @@ def evidence_record(
         help="The SHA-256 of the snapshot the check ran on; refused unless it is the snapshot's hash now. "
              "Omitted, the check is bound to the snapshot's hash at the moment of recording.",
     ),
+    checker: str | None = typer.Option(None, "--checker", help="What checked it, as a mark: verifier, audit or mechanical (an outside checker names itself in --run-by)"),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Record an Evidence check against a specific Candidate proof. Advisory, ungated."""
     store = get_store(_root(root))
     try:
-        check = record_evidence_check(store, candidate_proof_id, outcome, notes=notes, run_by=run_by, snapshot_sha256=snapshot_sha256)
+        check = record_evidence_check(store, candidate_proof_id, outcome, notes=notes, run_by=run_by, snapshot_sha256=snapshot_sha256, checker=checker)
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.evidence.record")
         raise typer.Exit(code=1)
