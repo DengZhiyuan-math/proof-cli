@@ -1568,7 +1568,7 @@ def challenge_withdraw(
     reason = _text(reason, reason_file, option="--reason-file", given="--reason", command="challenge.withdraw", json_output=json_output) or ""
     store = get_store(_root(root))
     try:
-        challenge = withdraw_challenge(store, challenge_id, by=_author(by, root), reason=reason)
+        challenge = withdraw_challenge(store, challenge_id, by=_author(by, root), reason=reason, audit=_auditing())
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="challenge.withdraw")
         raise typer.Exit(code=1)

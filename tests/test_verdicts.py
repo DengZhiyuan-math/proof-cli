@@ -14,7 +14,8 @@ from typer.testing import CliRunner
 from _proofs import submit_proof
 from proof_cli.cli import app
 from proof_cli.node_states import node_states
-from proof_cli.proof_map import ProofMapError, create_node, get_challenge, list_challenges, open_challenge, record_evidence_check, record_progress, withdraw_challenge
+from _researcher import researcher
+from proof_cli.proof_map import ProofMapError, create_node, get_challenge, list_challenges, open_challenge, record_evidence_check, record_progress, withdraw_challenge, work_log
 from proof_cli.storage import append_event, ensure_project
 from proof_cli.vault import working_proof_path
 
@@ -155,3 +156,22 @@ def test_an_audit_is_shown_no_earlier_verdicts_objections(tmp_path: Path):
     assert shown["objections"] == [] and "audit" in shown["objections_withheld"]
     assert [c["rationale"] for c in data("challenge", "list", "--target-id", "lem", env=audit)] == ["a doubt of the Prover's"]
     assert len(data("challenge", "list", "--target-id", "lem")) == 2
+
+
+def test_a_verdict_raises_no_objection_on_a_sealed_node_and_writes_nothing(tmp_path: Path):
+    # ADR-0025 point 14: the agents never challenge or audit a sealed node; an objection is a Challenge
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="imp", kind="imported_result", statement="I", source_locator="Theorem 1", source_version="v1")
+    researcher(store).decide_reference_review("imp", "no-longer-callable")  # sealed false, until seal lines exist (#279)
+    assert _code(lambda: _verdict(store, "imp", "failed", objections=["the source has a gap", "and a second"])) == "NODE_SEALED"
+    assert list_challenges(store, target_node_id="imp") == [] and not [e for e in work_log(store, "imp") if e["kind"] == "verdict"]
+
+
+def test_an_audit_withdraws_no_objection(tmp_path: Path):
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="lem", kind="lemma", statement="L")
+    (objection,) = _verdict(store, "lem", "failed", objections=["step 2: a gap"])["objections"]
+    result = CliRunner().invoke(app, ["challenge", "withdraw", objection["challenge_id"], "--reason", "not a gap", "--by", "agent_v",
+                                      "--root", str(tmp_path), "--json"], env={"PROOF_AGENT_AUDIT": "1"})
+    assert result.exit_code == 1 and json.loads(result.output)["error"]["code"] == "AUDIT_RECORDS_NO_ENDINGS"
+    assert get_challenge(store, objection["challenge_id"]).status.value == "open"

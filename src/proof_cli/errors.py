@@ -83,7 +83,7 @@ ERROR_CODES: dict[str, str] = {
     "PASSED_WITH_OBJECTIONS": "a passing verdict raises no objection; one that stands makes it a failed verdict",
     "ENDINGS_REQUIRED": "a passing verdict says where and why each proof Challenge open on the node is fixed; the error names those left out (`missing`)",
     "INVALID_ENDING": "an ending names a proof Challenge open on the node and says where and why it is fixed, on a passing verdict",
-    "AUDIT_RECORDS_NO_ENDINGS": "an audit reads the proof afresh and ends no objection; the next ordinary Verifier does",
+    "AUDIT_RECORDS_NO_ENDINGS": "an audit reads the proof afresh and ends no objection, fixed or withdrawn; the next ordinary Verifier does",
     "INVALID_CHECKER": "not a checker mark: verifier, audit or mechanical (an outside checker names itself in run_by)",
     "CHALLENGE_NOT_OPEN": "the Challenge is already resolved",
     "TARGET_NOT_ACCEPTED": "the target isn't Accepted",

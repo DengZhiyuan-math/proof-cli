@@ -3656,14 +3656,9 @@ def open_challenge(
     researcher's needs none; it is discussed with the agents. A sealed node is the researcher's absolute belief and
     is never challenged (point 6): it is unsealed first.
     """
-    from .node_states import own_states  # it reads this module
-
     if kind not in CHALLENGE_KINDS:
         raise ProofMapError("INVALID_CHALLENGE_KIND", f"'{kind}' is not a Challenge kind; expected one of: {', '.join(CHALLENGE_KINDS)}")
-    seal = own_states(store, require_node(store, target_node_id))[0]
-    if seal != "unsealed":
-        raise ProofMapError("NODE_SEALED", f"{target_node_id} is {seal.replace('-', ' ')}: a sealed node is never challenged; it is unsealed first",
-                            details={"node_id": target_node_id, "seal": seal})
+    require_node(store, target_node_id)
     if kind == "statement" and counterexample is None and opened_by != RESEARCHER:
         raise ProofMapError("COUNTEREXAMPLE_REQUIRED", f"an agent's Challenge against {target_node_id}'s statement links its counterexample (--counterexample <node-id>)")
     if counterexample is not None:
@@ -3676,7 +3671,14 @@ def open_challenge(
 
 def _raise_challenge(store: ProjectStore, target_node_id: str, *, kind: str, opened_by: str, rationale: str, conn: sqlite3.Connection,
                      counterexample: str | None = None, verdict_id: str | None = None, objection: int | None = None) -> Challenge:
-    """Record a Challenge and its work-log entry in the caller's transaction: a Challenge opened, or a Verdict's objection."""
+    """Record a Challenge and its work-log entry in the caller's transaction: a Challenge opened, or a Verdict's objection.
+    Every Challenge is written here, so none reaches a sealed node (NODE_SEALED), and a refusal rolls the caller back."""
+    from .node_states import own_states  # it reads this module
+
+    seal = own_states(store, require_node(store, target_node_id))[0]
+    if seal != "unsealed":
+        raise ProofMapError("NODE_SEALED", f"{target_node_id} is {seal.replace('-', ' ')}: a sealed node is never challenged; it is unsealed first",
+                            details={"node_id": target_node_id, "seal": seal})
     current = get_current_candidate_proof(store, target_node_id)
     challenge = Challenge(
         id=str(uuid.uuid4()),
@@ -3707,12 +3709,15 @@ def _raise_challenge(store: ProjectStore, target_node_id: str, *, kind: str, ope
 CHALLENGE_WITHDRAWN_EVENT = "proof_map_challenge_withdrawn"
 
 
-def withdraw_challenge(store: ProjectStore, challenge_id: str, *, by: str, reason: str) -> Challenge:
+def withdraw_challenge(store: ProjectStore, challenge_id: str, *, by: str, reason: str, audit: bool = False) -> Challenge:
     """Withdraw a Challenge, with a reason (ADR-0025 point 9): it takes effect when said, and is in the node's work log.
 
     The researcher withdraws any: their own, or an agent's ("not a problem", point 10; whether that restores a
     verification is the researcher's click, #279). Any agent withdraws any agent's, so a mistaken objection never stalls
-    an automated run, and the reason is briefed to the next role. No agent withdraws the researcher's."""
+    an automated run, and the reason is briefed to the next role. No agent withdraws the researcher's. An `audit` reads
+    the proof afresh and ends nothing (AUDIT_RECORDS_NO_ENDINGS): earlier objections are the next ordinary Verifier's."""
+    if audit:
+        raise ProofMapError("AUDIT_RECORDS_NO_ENDINGS", "an audit reads the proof afresh and ends no Challenge; the next ordinary Verifier does")
     if not reason.strip():
         raise ProofMapError("WITHDRAW_REASON_REQUIRED", "a Challenge is withdrawn with a reason, which the next role is briefed with (--reason)")
     with store.transaction() as conn:
