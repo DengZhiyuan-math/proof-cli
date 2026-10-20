@@ -79,6 +79,7 @@ from .storage import (
     list_fog_items,
     list_proof_map_nodes,
     mark_challenge_dismissed,
+    mark_challenge_withdrawn,
     mark_claim_released,
     memoized_read,
     next_candidate_proof_version,
@@ -764,7 +765,8 @@ def work_log(store: ProjectStore, node_id: str) -> list[dict]:
     about: dict[str, set[str]] = {
         kind: {node_id}
         for kind in (PROGRESS_EVENT, "proof_map_node_split", "proof_map_review_requested", "proof_map_dependency_added", "proof_map_dependency_removed",
-                     "proof_map_dependency_moved", RESTATED_EVENT, "proof_map_node_claimed", "proof_map_claim_reassigned")
+                     "proof_map_dependency_moved", RESTATED_EVENT, "proof_map_node_claimed", "proof_map_claim_reassigned",
+                     "proof_map_challenge_opened", CHALLENGE_WITHDRAWN_EVENT)
     }
     about.update({"proof_map_evidence_check_recorded": proof_ids, "proof_fog_experiment_recorded": near_fog, DEFINITION_EDITED_EVENT: named})
     entries: list[dict] = []
@@ -821,6 +823,13 @@ def work_log(store: ProjectStore, node_id: str) -> list[dict]:
             changed = {key: payload[key] for key in ("term", "text") if key in payload}
             entries.append({"at": at, "kind": "definition-edited", "by": payload.get("by"), "definition_id": event.entity_id,
                             "reason": payload.get("reason"), "from": payload.get("from"), "to": payload.get("to") or changed})
+        elif event.kind == "proof_map_challenge_opened" and event.entity_id == node_id:  # ADR-0025 point 8: who, against what, why
+            entries.append({"at": at, "kind": "challenge", "by": payload.get("opened_by"), "challenge_id": payload.get("challenge_id"),
+                            "against": payload.get("kind"), "version": payload.get("version"), "rationale": payload.get("rationale"),
+                            "counterexample_id": payload.get("counterexample_id")})
+        elif event.kind == CHALLENGE_WITHDRAWN_EVENT and event.entity_id == node_id:  # and why it was withdrawn (point 9)
+            entries.append({"at": at, "kind": "challenge-withdrawn", "by": payload.get("by"), "challenge_id": payload.get("challenge_id"),
+                            "reason": payload.get("reason")})
         elif event.kind in ("proof_map_node_claimed", "proof_map_claim_reassigned") and event.entity_id == node_id:
             entries.append({"at": at, "kind": "claimed", "by": payload.get("claimant_id") or payload.get("assignee")})
         for entry in entries[before:]:  # an automatic entry: the role of the turn that did it
@@ -2950,6 +2959,20 @@ def _acceptance(store: ProjectStore, node: ProofMapNode) -> tuple[str, _Counted 
     return "unreviewed", latest, None
 
 
+def verification_time(store: ProjectStore, node_id: str) -> datetime | None:
+    """When the decision a node's verification rests on was made: its counting Acceptance, or its Reference review.
+
+    None when there is none, and for an imported result trusted by a Trust rule, which holds from no one decision. An
+    agent's Challenge raised after it lapses the verification (ADR-0025 point 13)."""
+    node = require_node(store, node_id)
+    if node.kind == ProofMapNodeKind.imported_result:
+        latest = _latest_decision(store, node_id, ReviewRecordKind.reference_review) if _explicit_reference_review(store, node_id) == "reviewed" else None
+    else:
+        state, latest, _ = _acceptance(store, node)
+        latest = latest if state == "accepted" else None
+    return datetime.fromisoformat(latest.row["created_at"]) if latest is not None else None
+
+
 @memoized_read
 def _accepted_proof(store: ProjectStore, node_id: str) -> CandidateProofRecord | None:
     """The Candidate proof an Accepted node's counted Acceptance was made on."""
@@ -3539,34 +3562,47 @@ def revalidate_dependency(
     return record
 
 
-def open_challenge(store: ProjectStore, target_node_id: str, *, opened_by: str = "human", rationale: str = "") -> Challenge:
-    """Raise a Challenge against an already-Accepted (or Reference-reviewed) node.
+CHALLENGE_KINDS = ("proof", "statement")  # ADR-0025 point 6
 
-    Ungated: any agent or collaborator may open one, no confirmation, no
-    permission check — raising a concern is not a mathematical judgment
-    ("this deserves a second look," not "this is wrong"), so it needs no
-    gate the way resolving one does (ADR-0005 Rule 4).
+
+def open_challenge(
+    store: ProjectStore, target_node_id: str, *, kind: str = "proof", counterexample: str | None = None, opened_by: str = "human", rationale: str = ""
+) -> Challenge:
+    """Raise a Challenge against a node's proof or its statement (ADR-0025 point 6): it takes effect at once.
+
+    Anyone, an agent or the researcher, may raise one on any node, Accepted or not, and nobody reviews it first. One
+    against the proof sends the node's Proof layer back to incomplete, so only that node is reworked; one against the
+    statement makes it challenged as false. A Challenge is against the proof unless it is said to be against the
+    statement. It records the node's current Candidate proof version, the version it is about.
+
+    An agent's Challenge against the statement links its counterexample, an ordinary node with its scope in its own
+    statement (ADR-0025 point 7): without one an agent has only a doubt, which is a Challenge against the proof. The
+    researcher's needs none; it is discussed with the agents. A sealed node is the researcher's absolute belief and
+    is never challenged (point 6): it is unsealed first.
     """
-    node = require_node(store, target_node_id)
+    from .node_states import own_states  # it reads this module
 
-    if node.kind == ProofMapNodeKind.imported_result:
-        # a node trusted by rule is depended on as a reviewed one is, so it can be Challenged as one (ADR-0014)
-        if get_reference_review_state(store, target_node_id) not in ("reviewed", "trusted-by-rule"):
-            raise ProofMapError(
-                "TARGET_NOT_REVIEWED",
-                f"{target_node_id} has not been Reference-reviewed yet; nothing to Challenge",
-            )
-    elif get_acceptance_state(store, target_node_id) != "accepted":
-        raise ProofMapError(
-            "TARGET_NOT_ACCEPTED",
-            f"{target_node_id} is not Accepted; a Challenge only makes sense against a result someone might depend on",
-        )
-
+    if kind not in CHALLENGE_KINDS:
+        raise ProofMapError("INVALID_CHALLENGE_KIND", f"'{kind}' is not a Challenge kind; expected one of: {', '.join(CHALLENGE_KINDS)}")
+    seal = own_states(store, require_node(store, target_node_id))[0]
+    if seal != "unsealed":
+        raise ProofMapError("NODE_SEALED", f"{target_node_id} is {seal.replace('-', ' ')}: a sealed node is never challenged; it is unsealed first",
+                            details={"node_id": target_node_id, "seal": seal})
+    if kind == "statement" and counterexample is None and opened_by != RESEARCHER:
+        raise ProofMapError("COUNTEREXAMPLE_REQUIRED", f"an agent's Challenge against {target_node_id}'s statement links its counterexample (--counterexample <node-id>)")
+    if counterexample is not None:
+        if counterexample == target_node_id:
+            raise ProofMapError("INVALID_COUNTEREXAMPLE", f"{target_node_id} can't be its own counterexample")
+        require_node(store, counterexample)
+    current = get_current_candidate_proof(store, target_node_id)
     challenge = Challenge(
         id=str(uuid.uuid4()),
         target_node_id=target_node_id,
         rationale=rationale,
         opened_by=opened_by,
+        kind=kind,
+        version=current.version if current else None,
+        counterexample_id=counterexample,
     )
     with store.transaction() as conn:
         insert_challenge(store, challenge, conn=conn)
@@ -3575,12 +3611,39 @@ def open_challenge(store: ProjectStore, target_node_id: str, *, opened_by: str =
             "proof_map_challenge_opened",
             f"challenge opened against {target_node_id} by {opened_by}",
             entity_id=target_node_id,
-            payload={"challenge_id": challenge.id, "opened_by": opened_by, "rationale": rationale},
+            payload={"challenge_id": challenge.id, "opened_by": opened_by, "rationale": rationale, "kind": kind, "version": challenge.version, "counterexample_id": counterexample},
             conn=conn,
         )
     return challenge
 
 
+
+
+CHALLENGE_WITHDRAWN_EVENT = "proof_map_challenge_withdrawn"
+
+
+def withdraw_challenge(store: ProjectStore, challenge_id: str, *, by: str, reason: str) -> Challenge:
+    """Withdraw a Challenge, with a reason (ADR-0025 point 9): it takes effect when said, and is in the node's work log.
+
+    The researcher withdraws any: their own, or an agent's ("not a problem", point 10; whether that restores a
+    verification is the researcher's click, #279). Any agent withdraws any agent's, so a mistaken objection never stalls
+    an automated run, and the reason is briefed to the next role. No agent withdraws the researcher's."""
+    if not reason.strip():
+        raise ProofMapError("WITHDRAW_REASON_REQUIRED", "a Challenge is withdrawn with a reason, which the next role is briefed with (--reason)")
+    with store.transaction() as conn:
+        challenge = require_challenge(store, challenge_id)
+        if challenge.status != ChallengeStatus.open:
+            raise ProofMapError("CHALLENGE_NOT_OPEN", f"challenge {challenge_id} is already {challenge.status.value}")
+        if challenge.opened_by == RESEARCHER and by != RESEARCHER:
+            raise ProofMapError("RESEARCHERS_CHALLENGE", f"challenge {challenge_id} is the researcher's: only the researcher withdraws it",
+                                details={"challenge_id": challenge_id, "opened_by": challenge.opened_by})
+        at = utc_now()
+        mark_challenge_withdrawn(store, challenge_id, by=by, at=at, reason=reason, conn=conn)
+        append_event(
+            store, CHALLENGE_WITHDRAWN_EVENT, f"challenge {challenge_id} against {challenge.target_node_id} withdrawn by {by}",
+            entity_id=challenge.target_node_id, payload={"challenge_id": challenge_id, "by": by, "reason": reason}, conn=conn,
+        )
+    return challenge.model_copy(update={"status": ChallengeStatus.withdrawn, "withdrawn_by": by, "withdrawn_at": at, "withdrawal_reason": reason})
 
 
 def _derived_challenges(store: ProjectStore) -> list[Challenge]:
@@ -3603,6 +3666,8 @@ def _challenge_outcome(row: dict) -> ChallengeStatus:
 
 
 def _with_resolution(store: ProjectStore, challenge: Challenge) -> Challenge:
+    if challenge.withdrawn_at is not None:  # its ending, as recorded (ADR-0025 point 9)
+        return challenge.model_copy(update={"status": ChallengeStatus.withdrawn})
     row = challenge_resolution(store, challenge.id)
     if row is not None:
         return challenge.model_copy(
@@ -3616,7 +3681,14 @@ def _with_resolution(store: ProjectStore, challenge: Challenge) -> Challenge:
         )
     if challenge.status == ChallengeStatus.dismissed and challenge.resolution_review_id is None:
         return challenge  # dismissed before ADR-0010, with nothing recorded behind it: it stays closed
-    return challenge.model_copy(update={"status": ChallengeStatus.open, "resolved_by": None, "resolved_at": None, "resolution_review_id": None})
+    reopened = {"resolved_by": None, "resolved_at": None, "resolution_review_id": None}
+    if challenge.kind == "proof" and (target := get_node(store, challenge.target_node_id)) is not None:
+        # a gap in the proof of the statement as it was: a restatement since supersedes it; a statement Challenge
+        # follows the statement instead, and is checked afresh against the new version (ADR-0025 point 9)
+        change = _own_text_change(store, target)
+        if change is not None and change.created_at > challenge.created_at:
+            return challenge.model_copy(update={"status": ChallengeStatus.superseded, **reopened})
+    return challenge.model_copy(update={"status": ChallengeStatus.open, **reopened})
 
 
 def get_challenge(store: ProjectStore, challenge_id: str) -> Challenge | None:

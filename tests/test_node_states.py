@@ -16,9 +16,10 @@ from _proofs import submit_proof
 from _researcher import researcher
 from proof_cli.cli import app
 from proof_cli.node_states import conclusion, node_states
-from proof_cli.proof_map import ProofMapError, claim_node, create_node, get_acceptance_state, get_node, open_challenge, record_evidence_check
+from proof_cli.proof_map import ProofMapError, claim_node, create_node, get_acceptance_state, get_node, record_evidence_check
 from proof_cli.references import ReferenceRecord, ReferenceSourceType
-from proof_cli.storage import ensure_project, import_reference, update_proof_map_node
+from proof_cli.domain import Challenge
+from proof_cli.storage import ensure_project, import_reference, insert_challenge, update_proof_map_node
 
 RUDIN = ReferenceRecord(id="rudin", title="Principles of Mathematical Analysis", authors=["Walter Rudin"], year=1976,
                         source_type=ReferenceSourceType.textbook, identifier="isbn:0-07-054235-X")
@@ -121,8 +122,10 @@ def test_an_open_legacy_challenge_and_a_rejection_read_challenged_as_false(tmp_p
     create_node(store, node_id="lem", kind="lemma", statement="L")
     create_node(store, node_id="clm", kind="claim", statement="C")
     _accepted(store, "lem")
-    open_challenge(store, "lem", opened_by="agent", rationale="step 2 looks wrong")
-    assert _states(store, "lem") == ("unsealed", "challenged-as-false", "expert-verified", "uncertain")
+    # one raised before Challenges had a kind, as it was stored then: its kind is never guessed (#277); an agent's,
+    # raised after the Acceptance, lapses it as any agent's Challenge does (ADR-0025 point 13)
+    insert_challenge(store, Challenge(id="legacy-1", target_node_id="lem", opened_by="agent", rationale="step 2 looks wrong"))
+    assert _states(store, "lem") == ("unsealed", "challenged-as-false", "incomplete", "uncertain")
     submit_proof(store, "clm", claimant_id="agent", scoping_rationale="scoped", content="proof of clm")
     researcher(store).decide_acceptance("clm", "reject")
     assert _states(store, "clm") == ("unsealed", "challenged-as-false", "incomplete", "uncertain")

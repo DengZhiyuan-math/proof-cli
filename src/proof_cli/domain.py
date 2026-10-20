@@ -320,6 +320,10 @@ class ChallengeStatus(str, Enum):
     upheld = "upheld"
     # a revised Candidate proof was Accepted
     resolved_by_revision = "resolved-by-revision"
+    # withdrawn with a reason, by its raiser, the researcher or, for an agent's, any agent (ADR-0025 point 9)
+    withdrawn = "withdrawn"
+    # against the proof, and the node was restated after it was raised: computed, never stored (ADR-0025 point 9)
+    superseded = "superseded"
 
 
 class Challenge(BaseModel):
@@ -339,6 +343,16 @@ class Challenge(BaseModel):
     rationale: str = ""
     opened_by: str = "human"
     created_at: datetime = Field(default_factory=utc_now)
+    # against the node's proof or its statement (ADR-0025 point 6); None on one raised before kinds, never guessed
+    kind: str | None = None
+    # the node's current Candidate proof version when it was raised, None before its first
+    version: int | None = None
+    # a statement Challenge's counterexample: an ordinary node, whose own statement gives its scope (ADR-0025 point 7)
+    counterexample_id: str | None = None
+    # its withdrawal (ADR-0025 point 9): who, when and why; the reason is briefed to the next role
+    withdrawn_by: str | None = None
+    withdrawn_at: datetime | None = None
+    withdrawal_reason: str | None = None
     resolved_by: str | None = None
     resolved_at: datetime | None = None
     # the signed Human Review decision that resolved it (ADR-0009, #35)
