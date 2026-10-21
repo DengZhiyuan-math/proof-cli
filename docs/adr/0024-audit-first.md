@@ -1,6 +1,6 @@
 # ADR-0024 — Audit first: a Pursue may audit the work awaiting review before it goes on
 
-**Status**: accepted (2026-10-18; the researcher's decision, after a trial project's proofs all awaited review and a new Pursue found nothing to do). Amends ADR-0021 points 4, 7 and 9 for a Start that asks for it. ADR-0004 stands: only the researcher changes acceptance. Amended the same day (point 2's mechanical checks, and ADR-0019 point 3's gate), after a trial's audit ended with no verdict on a check added since the snapshot. Amended by ADR-0025: awaiting review and a failed audit's effect read as the Proof layer and the computed conclusions, and an audit records no Challenge endings.
+**Status**: accepted (2026-10-18; the researcher's decision, after a trial project's proofs all awaited review and a new Pursue found nothing to do). Amends ADR-0021 points 4, 7 and 9 for a Start that asks for it. ADR-0004 stands: only the researcher changes acceptance. Amended the same day (point 2's mechanical checks, and ADR-0019 point 3's gate), after a trial's audit ended with no verdict on a check added since the snapshot. Amended by ADR-0025: awaiting review and a failed audit's effect read as the Proof layer and the computed conclusions, and an audit records no Challenge endings; a failure on the mechanical checks is no verdict (point 13, 2026-10-21).
 
 ## Context
 
@@ -51,6 +51,7 @@ A review of the records of the first two audit-first runs found the following. T
 13. **What an audit is briefed with.**
     - **No earlier record.** An audit's briefing carries no earlier verdict and no attempts. Its reading is fresh, and nothing anchors it.
     - **A no-turn failure counts as the newest verdict.** An audit that failed on the mechanical checks, with no turn, leaves only its closing note. Later runs read that note as the newest verdict, failed: neither their briefing nor the Prover's gate reads the older pass as current.
+      *Amended by ADR-0025 (zeqome/proof-agents#46, the researcher's decision of 2026-10-21):* the proof is its `.tex`; a check the files fail says nothing of the mathematics. Such a failure is the audit's Evidence check, failed, and no verdict. While the checks fail on the files as they stand, no gate opens, and the briefing and the run's card say they fail beside the newest verdict. Once they pass on the same files, the earlier pass stands. A check the files must change to pass leaves that pass stale anyway.
 14. **The project's Pursue on a map that is already there.**
     - **Offered on the page.** The page offers it once the map has a Theorem, with "Audit first, then Pursue" when nodes await review. It is recorded as a project pursuit.
     - **What the pursuit's history keeps.** Its history keeps whether it audited first, and what it has spent as each turn ends.
