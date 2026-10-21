@@ -531,7 +531,7 @@ def _worked_map(root: Path, claims: int = 6):
         create_node(store, node_id=f"c{index}", kind="claim", statement=f"s{index}", created_by="dec-1")
         record_progress(store, f"c{index}", role="prover", by="agent_a/prover", plan=["first", "second"])
     create_node(store, node_id="top", kind="theorem", statement="t", dependencies=[f"c{index}" for index in range(claims)])
-    record_progress(store, "c1", role=None, by="coordinator", coordinator="parked: out of budget")
+    record_progress(store, "c1", role=None, by="claude-code/coordinator", aside="parked", note="out of budget", pursuit_id="p1")
     for node_id in ("c2", "c3"):
         proof = submit_proof(store, node_id, claimant_id="agent_a", scoping_rationale="r", content=f"proof of {node_id}")
         record_evidence_check(store, proof.id, "passed", run_by="prover-1/verifier", notes="no objections")

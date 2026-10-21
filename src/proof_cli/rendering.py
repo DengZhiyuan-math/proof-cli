@@ -408,6 +408,8 @@ def _work_log_body(entry: dict) -> str:
         return f"attempt: {entry.get('goal')}" + (f" ({entry['method']})" if entry.get("method") else "") + f" failed on {entry.get('failed_on')}"
     if kind == "coordinator":
         return f"coordinator: {entry.get('note')}"
+    if kind == "aside":  # a Coordinator set the node aside (ADR-0025 point 1): how, and why
+        return f"coordinator: set aside {entry.get('how')}" + (f" — {entry['reason']}" if entry.get("reason") else "")
     if kind == "ending":  # how a node run ended (ADR-0025 point 1): an audit's says so, and why its verdict went unrecorded
         how = "stopped for a human decision" if entry.get("how") == "needs-human" else entry.get("how")
         return (f"run {how}" + (" (audit)" if entry.get("audit") else "") + (f" — {entry['reason']}" if entry.get("reason") else "")
@@ -444,6 +446,8 @@ def render_work_log_entry(node_id: str, entry: dict) -> str:
         body = f"verdict {entry.get('outcome')}" + (f" — {entry['note']}" if entry.get("note") else "")
     elif entry.get("kind") == "coordinator":  # no role: the Coordinator holds no node and takes no turn (ADR-0019 point 18)
         return f"coordinator on {node_id}: {entry.get('note')}"
+    elif entry.get("kind") == "aside":  # no role either: what a Coordinator set aside, how and why
+        return f"coordinator on {node_id}: " + _work_log_body(entry).removeprefix("coordinator: ")
     else:
         body = _work_log_body(entry)
     return f"{entry.get('role')} on {node_id}: {body}"
