@@ -224,7 +224,7 @@ Who is working on a node, a researcher or an agent, as a wayfinder ticket's assi
 _Avoid_: claim, claimed (Claim is a node kind), lock, lease, in progress
 
 **Run state** (运行):
-Whether the agents are working: running, paused or not running. Set by the system. How a node run, a Coordinator or a Pursue ended (done, stuck, budget, parked, interrupted) is a run record, always named with what ended, not a Run state.
+Whether the agents are working: running, paused or not running. Set by the system. How a node run ended (done, stuck, budget, needs-human, released, release-failed), and how a Coordinator or a Pursue ended (parked and interrupted too), is a run record, always named with what ended, not a Run state.
 _Avoid_: status, active
 
 **Conclusion** (结论):

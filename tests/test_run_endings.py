@@ -14,6 +14,7 @@ import pytest
 from _proofs import submit_proof
 from proof_cli.errors import ERROR_CODES
 from proof_cli.proof_map import RUN_ENDINGS, ProofMapError, create_node, record_evidence_check, record_progress, work_log
+from proof_cli.rendering import render_work_log_entry
 from proof_cli.storage import ensure_project
 
 
@@ -58,12 +59,23 @@ def test_an_audit_runs_ending_says_so_and_why_its_verdict_was_not_recorded(tmp_p
     assert (entry["audit"], entry["unrecorded"]) == (True, "no snapshot awaits the researcher's review")
 
 
-@pytest.mark.parametrize("bad", [{"ending": "parked"}, {"ending": "interrupted"}, {"ending": "done", "unrecorded": "why"}])
-def test_an_ending_is_one_of_six_and_only_an_audit_says_its_verdict_went_unrecorded(tmp_path: Path, bad):
+def test_a_run_stopped_during_a_turn_names_the_turn_whose_record_comes_after(tmp_path: Path):
+    store = _node(tmp_path)
+
+    record_progress(store, "clm", role="prover", by="agent", ending="released", note="stopped and released by the researcher", turn="t1")
+
+    (entry,) = _endings(store)
+    assert entry["turn"] == "t1"
+
+
+@pytest.mark.parametrize("bad", [{"ending": "parked"}, {"ending": "interrupted"}, {"ending": "done", "unrecorded": "why"},
+                                 {"ending": "done", "note": " "}, {"ending": "done", "verdict": "passed"},
+                                 {"ending": "done", "coordinator": "parked"}, {"ending": "done", "question": "A; B"}])
+def test_an_ending_is_one_of_six_with_why_in_an_entry_of_its_own(tmp_path: Path, bad):
     store = _node(tmp_path)
 
     with pytest.raises(ProofMapError) as refused:
-        record_progress(store, "clm", role="prover", by="agent", note="why", **bad)
+        record_progress(store, "clm", role="prover", by="agent", **{"note": "why", **bad})
 
     assert refused.value.code == "INVALID_RUN_ENDING" and "INVALID_RUN_ENDING" in ERROR_CODES
     assert _endings(store) == []
@@ -78,3 +90,15 @@ def test_an_evidence_check_in_the_work_log_carries_its_checkers_mark(tmp_path: P
 
     assert [(entry["outcome"], entry["checker"]) for entry in work_log(store, "clm") if entry["kind"] == "evidence"] == [
         ("failed", "audit"), ("passed", None)]
+
+
+def test_the_cli_shows_how_a_run_ended_and_why(tmp_path: Path):
+    store = _node(tmp_path)
+    record_progress(store, "clm", role="prover", by="agent", ending="budget", note="this run's cap of 3 turn(s) is spent")
+    record_progress(store, "clm", role="verifier", by="agent", ending="done", note="the Verifier read the snapshot", audit=True,
+                    unrecorded="no snapshot awaits the researcher's review")
+
+    first, audit = (render_work_log_entry("clm", entry) for entry in _endings(store))
+
+    assert "run budget — this run's cap of 3 turn(s) is spent" in first
+    assert "run done (audit) — the Verifier read the snapshot; its verdict was not recorded on the snapshot: no snapshot awaits" in audit

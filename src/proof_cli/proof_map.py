@@ -428,6 +428,7 @@ def record_progress(
     audit: bool = False,
     ending: str | None = None,
     unrecorded: str | None = None,
+    turn: str | None = None,
 ) -> dict:
     """Report a plan (the steps the run means to take), one step's status, a handoff to another role, the
     Verifier's verdict on the working proof, an attempt the role abandoned (ADR-0019), or — on a Theorem or Lemma
@@ -454,8 +455,12 @@ def record_progress(
     An ending is how a run ended, one of `RUN_ENDINGS`, with the reason in `note`: the run's record, written by the run as
     it ends under the role it was on, not a step of that role's (ADR-0025 point 1). An `audit` run's ending says so, and
     `unrecorded` says why its verdict was not recorded on the snapshot when it was not; the audit's outcome is the
-    Evidence check itself."""
+    Evidence check itself. A run stopped during a turn names it (`turn`): that turn's own record comes after the ending,
+    and is no Start since. An ending is an entry of its own, with its reason."""
     node = require_node(store, node_id)
+    if ending is not None and (coordinator is not None or verdict is not None or question is not None or suggestion is not None
+                               or plan or step is not None or handoff is not None or attempt is not None):
+        raise ProofMapError("INVALID_RUN_ENDING", "an ending is an entry of its own: record it apart from a plan, a step, a verdict or a note")
     if coordinator is not None:
         if not coordinator.strip():
             raise ProofMapError("PROGRESS_EMPTY", "say what the Coordinator did: --coordinator \"<what it started, redirected or stopped>\"")
@@ -473,7 +478,10 @@ def record_progress(
             raise ProofMapError("INVALID_RUN_ENDING", f"'{ending}' is not how a run ends; expected one of: {', '.join(RUN_ENDINGS)}")
         if unrecorded is not None and not audit:
             raise ProofMapError("INVALID_RUN_ENDING", "only an audit's ending says why its verdict was not recorded on the snapshot")
-        payload = {"kind": "ending", "role": role, "by": by, "how": ending, "reason": note.strip(), "audit": audit, "unrecorded": unrecorded}
+        if not note.strip():
+            raise ProofMapError("INVALID_RUN_ENDING", f"say why the run ended {ending}")
+        payload = {"kind": "ending", "role": role, "by": by, "how": ending, "reason": note.strip(), "audit": audit, "unrecorded": unrecorded,
+                   "turn": turn}
         message = f"{role} on {node_id}: run {ending}" + (f" — {note.strip()}" if note.strip() else "")
     elif suggestion is not None:
         if not suggestion.strip():
