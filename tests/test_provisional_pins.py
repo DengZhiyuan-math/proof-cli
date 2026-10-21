@@ -4,8 +4,8 @@ A Pursue works a chain bottom-up before the researcher reviews any of it, so eve
 are only Provisional: what the dependent was checked against is the dependency's statement, never a version of its
 proof. Such a pin is current while that interface stands, and lags nothing; it changes only when the dependency is
 restated. The researcher then Accepts bottom-up (CONTEXT, Conditional: "cleared as the researcher Accepts
-bottom-up"), and each Acceptance pins the accepted versions it was made against, so a later proof-only revision of
-a dependency still asks for a Lightweight re-review (ADR-0005). Before this, every such edge read "interface
+bottom-up"), and each Acceptance pins the accepted versions it was made against; a later proof-only revision of a
+dependency leaves the pin current, as a pin follows an unchanged interface by itself (ADR-0025). Before this, every such edge read "interface
 changed", what rested on it read dependency-stale, and a chain could not be Accepted past its middle.
 """
 
@@ -18,9 +18,7 @@ from _researcher import researcher
 
 from proof_cli.proof_map import (
     create_node,
-    dependency_details,
     dependency_pin_is_current,
-    dependency_pin_lags,
     get_accepted_version,
     get_acceptance_state,
     get_blocked_reason,
@@ -52,14 +50,15 @@ def _accept(store, node_id: str) -> None:
     researcher(store).decide_acceptance(node_id, "accept")
 
 
+def _current(store, node_id: str, dependency_id: str) -> bool:
+    return dependency_pin_is_current(store, get_dependency_pin(store, node_id, dependency_id))
+
+
 def test_a_chain_worked_ahead_of_review_reads_no_changed_interface(tmp_path: Path):
     store = _chain(tmp_path)
 
-    for node_id in ("mid", "top"):
-        [edge] = dependency_details(store, node_id)
-        assert (edge["current"], edge["remedy"]) == (True, None), (node_id, edge)
+    assert _current(store, "mid", "leaf") and _current(store, "top", "mid")
     assert get_blocked_reason(store, "top") == "not-accepted"  # waiting for decisions, not stale
-    assert not dependency_pin_lags(store, get_dependency_pin(store, "mid", "leaf"))
 
 
 def test_the_researcher_accepts_it_bottom_up(tmp_path: Path):
@@ -70,10 +69,10 @@ def test_the_researcher_accepts_it_bottom_up(tmp_path: Path):
         assert get_acceptance_state(store, node_id) == "accepted"
         assert get_integrity_state(store, node_id) == "current", node_id
 
-    assert [edge["current"] for node_id in ("mid", "top") for edge in dependency_details(store, node_id)] == [True, True]
+    assert _current(store, "mid", "leaf") and _current(store, "top", "mid")
 
 
-def test_an_acceptance_pins_the_accepted_versions_it_was_made_against(tmp_path: Path):
+def test_an_acceptance_pins_the_accepted_versions_it_was_made_against_and_a_proof_only_revision_leaves_it_current(tmp_path: Path):
     store = _chain(tmp_path)
     _accept(store, "leaf")
     _accept(store, "mid")
@@ -81,13 +80,10 @@ def test_an_acceptance_pins_the_accepted_versions_it_was_made_against(tmp_path: 
     pin = get_dependency_pin(store, "mid", "leaf")
     assert pin.pinned_version == get_accepted_version(store, "leaf") == 1
 
-    # a proof-only revision of leaf: mid was Accepted against v1, so it asks for a Lightweight re-review (ADR-0005)
+    # a proof-only revision of leaf: the interface mid was checked against stands, so its pin follows (ADR-0025)
     submit_proof(store, "leaf", claimant_id="agent", scoping_rationale="scoped", content="proof of leaf, v2, shorter")
     _accept(store, "leaf")
-    assert get_integrity_state(store, "mid") == "potentially-stale"
-    assert dependency_details(store, "mid")[0]["remedy"] == "lightweight-re-review"
-    researcher(store).revalidate_dependency("mid", "leaf")
-    assert get_integrity_state(store, "mid") == "current"
+    assert _current(store, "mid", "leaf") and get_integrity_state(store, "mid") == "current"
 
 
 def test_a_pin_taken_before_acceptance_still_sees_its_dependency_restated(tmp_path: Path):
@@ -95,8 +91,7 @@ def test_a_pin_taken_before_acceptance_still_sees_its_dependency_restated(tmp_pa
 
     restate_node(store, "leaf", statement="A holds for every n", reason="the quantifier was missing")
 
-    [edge] = dependency_details(store, "mid")
-    assert (edge["current"], edge["remedy"]) == (False, "new-candidate-proof")
+    assert not _current(store, "mid", "leaf")
     assert get_blocked_reason(store, "top") == "dependency-stale"
 
 
@@ -150,8 +145,7 @@ def test_a_definition_edited_under_a_pinned_dependency_is_not_pinned_away(tmp_pa
         _passed_by_verifier(store, node_id)
 
     edit_definition(store, "d", text="d is 2", edited_by="reader", reason="the value was wrong")
-    [edge] = dependency_details(store, "top")
-    assert (edge["current"], edge["remedy"]) == (False, "new-candidate-proof")
+    assert not _current(store, "top", "leaf")
 
     _passed_by_verifier(store, "leaf", content="proof of leaf under the corrected d")
     _accept(store, "leaf")
