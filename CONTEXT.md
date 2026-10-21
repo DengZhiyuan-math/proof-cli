@@ -181,7 +181,7 @@ A choice a role made itself where the text admits more than one reading, recorde
 _Avoid_: blocker, needs-human (which is for what no choice settles)
 
 **Parked**:
-A node the Coordinator no longer starts: its run budget is spent, or its last run ended needing the researcher or was refused. Computed from the run records. The Coordinator goes on with the rest of the subtree; a parked node waits in the Review queue with its Attempts (ADR-0021). A Coordinator's ending with every open node parked is its own run record, not this. A re-split of a parked Claim's parent goes ahead, but while the parent still rests on the parked Claim the new Claims it made are not started (ADR-0024 point 20).
+A node the Coordinator no longer starts: its run budget is spent, or its last run ended needing the researcher or was refused. The Coordinator decides it from the run records and records it once on the node, with why, as it records a node held for the researcher, interrupted by the end of the Pursue's total, or not tried again after its launches failed: the map, the Review queue and a page started afresh read that record, parsing no note. The Coordinator goes on with the rest of the subtree; a parked node waits in the Review queue with its Attempts (ADR-0021). A Coordinator's ending with every open node parked is its own run record, not this. A re-split of a parked Claim's parent goes ahead, but while the parent still rests on the parked Claim the new Claims it made are not started (ADR-0024 point 20).
 _Avoid_: stuck (a run's state), failed
 
 **Review queue**:
