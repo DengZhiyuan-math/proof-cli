@@ -395,6 +395,8 @@ def create_node(
 PROGRESS_STATUSES = ("started", "done", "stuck", "needs-human")
 # a Verifier's verdict on the working proof as it stands (ADR-0019 point 2); the objections carry the nuance
 VERDICT_OUTCOMES = ("passed", "failed")
+# how a run ended (ADR-0025 point 1): a record, never a value of its state, which is only running, paused or not running
+RUN_ENDINGS = ("done", "stuck", "budget", "needs-human", "released", "release-failed")
 PROGRESS_EVENT = "agent_progress"
 TURN_EVENT = "agent_turn"
 # a turn's raw conversation, kept with the project's state (never the node folder, which a snapshot freezes)
@@ -424,6 +426,8 @@ def record_progress(
     objections: list[str] | None = None,
     fixed: dict[str, str] | None = None,
     audit: bool = False,
+    ending: str | None = None,
+    unrecorded: str | None = None,
 ) -> dict:
     """Report a plan (the steps the run means to take), one step's status, a handoff to another role, the
     Verifier's verdict on the working proof, an attempt the role abandoned (ADR-0019), or — on a Theorem or Lemma
@@ -445,7 +449,12 @@ def record_progress(
     (`answer_question`).
 
     A suggestion is a redirect the run suggests to the researcher, from what the record repeats (ADR-0019 point 17): an
-    entry of its own under the role whose record it reads, no step of that role's and no status."""
+    entry of its own under the role whose record it reads, no step of that role's and no status.
+
+    An ending is how a run ended, one of `RUN_ENDINGS`, with the reason in `note`: the run's record, written by the run as
+    it ends under the role it was on, not a step of that role's (ADR-0025 point 1). An `audit` run's ending says so, and
+    `unrecorded` says why its verdict was not recorded on the snapshot when it was not; the audit's outcome is the
+    Evidence check itself."""
     node = require_node(store, node_id)
     if coordinator is not None:
         if not coordinator.strip():
@@ -459,7 +468,14 @@ def record_progress(
     if role not in AGENT_ROLES:
         raise ProofMapError("INVALID_ROLE", f"'{role}' is not a Proof agent role; expected one of: {', '.join(AGENT_ROLES)}")
     steps = [str(item).strip() for item in (plan or []) if str(item).strip()]
-    if suggestion is not None:
+    if ending is not None or unrecorded is not None:
+        if ending not in RUN_ENDINGS:
+            raise ProofMapError("INVALID_RUN_ENDING", f"'{ending}' is not how a run ends; expected one of: {', '.join(RUN_ENDINGS)}")
+        if unrecorded is not None and not audit:
+            raise ProofMapError("INVALID_RUN_ENDING", "only an audit's ending says why its verdict was not recorded on the snapshot")
+        payload = {"kind": "ending", "role": role, "by": by, "how": ending, "reason": note.strip(), "audit": audit, "unrecorded": unrecorded}
+        message = f"{role} on {node_id}: run {ending}" + (f" — {note.strip()}" if note.strip() else "")
+    elif suggestion is not None:
         if not suggestion.strip():
             raise ProofMapError("PROGRESS_EMPTY", "say what the run suggests to the researcher")
         payload = {"kind": "suggestion", "role": role, "by": by, "note": suggestion.strip()}
@@ -873,7 +889,8 @@ def work_log(store: ProjectStore, node_id: str) -> list[dict]:
         elif event.kind == "proof_map_review_requested" and event.entity_id == node_id:
             entries.append({"at": at, "kind": "review-requested", "by": payload.get("requested_by"), "version": payload.get("version"), "candidate_proof_id": payload.get("candidate_proof_id")})
         elif event.kind == "proof_map_evidence_check_recorded" and event.entity_id in proof_ids:
-            entries.append({"at": at, "kind": "evidence", "by": payload.get("run_by"), "outcome": payload.get("outcome"), "evidence_check_id": payload.get("evidence_check_id")})
+            entries.append({"at": at, "kind": "evidence", "by": payload.get("run_by"), "outcome": payload.get("outcome"), "evidence_check_id": payload.get("evidence_check_id"),
+                            "checker": payload.get("checker")})
         elif event.kind == "proof_fog_added" and node_id in (payload.get("near") or []):
             text = payload.get("text") or (fog[event.entity_id].text if event.entity_id in fog else None)  # older events: the item's text
             entries.append({"at": at, "kind": "fog", "by": payload.get("created_by"), "fog_id": event.entity_id, "text": text})
