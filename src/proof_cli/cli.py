@@ -420,7 +420,7 @@ def frontier(root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "-
 
 @app.command(rich_help_panel=LEGACY_PANEL)
 def revalidate(source_id: str, root: str = ROOT_OPTION, backend_target: str = "", notes: str = "") -> None:
-    """(legacy) Re-queue a stale verification fragment. A node's dependency is re-reviewed on the proof map page instead."""
+    """(legacy) Re-queue a stale verification fragment."""
     typer.echo(
         render_verification_output(
             f"revalidate {source_id}",

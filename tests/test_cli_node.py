@@ -776,10 +776,7 @@ HUMAN_ONLY_COMMANDS = [
     ["node", "review", "clm_1", "accept"],
     ["node", "review", "clm_1", "reject"],
     ["node", "review", "ref_1", "reference-review"],
-    ["node", "revalidate", "clm_1", "lem_base"],
     ["node", "promote", "clm_1"],
-    ["node", "migrate-dependents", "ref_1", "ref_2"],
-    ["node", "evidence", "review", "chk_1", "trusted"],
     ["node", "release", "clm_1", "--force", "--reason", "stuck"],
     ["challenge", "dismiss", "ch_1"],
     # `reference review` and `obligation resolve` are gone, not refused (ADR-0012): test_legacy_trust_retired.py

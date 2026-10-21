@@ -419,6 +419,10 @@ def _legacy_payload(store: ProjectStore, row: dict) -> DecisionPayload | None:
         elif kind == DecisionKind.dependency_revalidation:
             node = proof_map.require_node(store, row["object_id"])
             binding = {"candidate_proof_id": proof_map._current_proof_id(store, node.id), "interface_fingerprint": proof_map._interface_of(node), "dependency_pins": proof_map._pins_of(store, node.id)}
+        elif kind == DecisionKind.evidence_review:
+            # retired with no binding of its own (ADR-0025): bound as it was, so it moves as the history it is
+            proof = proof_map.require_candidate_proof(store, proof_map.require_evidence_check(store, row["object_id"]).candidate_proof_id)
+            binding = {"candidate_proof_id": proof.id, "interface_fingerprint": proof_map._interface_of(proof_map.require_node(store, proof.node_id))}
         else:
             binding = proof_map.decision_binding(store, kind, row["object_id"])
             binding["resolves_challenges"] = []

@@ -3,7 +3,7 @@
 The skill's retrieval-first reads (`search`, `retrieve`, `reference list`, `memory list`)
 emit `{schema_version, ok, command, data}`, failures included. `node list` carries the
 three state axes, and `node show` what the node page shows of its dependencies: each one's
-pin, whether it is current, and the remedy a lagging or changed pin needs.
+pin, and whether the interface it pinned is still current.
 """
 
 import json

@@ -2308,9 +2308,6 @@ def list_evidence_checks(store: ProjectStore, candidate_proof_id: str) -> list[E
     return list_evidence_checks_for_candidate_proof(store, candidate_proof_id)
 
 
-_EVIDENCE_CHECK_OBJECT_TYPE = "evidence_check"
-
-
 def _normalize_whitespace(text: str) -> str:
     return " ".join(text.split())
 
@@ -3044,16 +3041,31 @@ def _latest_decision(store: ProjectStore, node_id: str, kind: ReviewRecordKind) 
     return _Counted(rows[-1], verify_decision_row(store, rows[-1]["id"]))
 
 
-def _binding_problem(store: ProjectStore, node: ProofMapNode, payload: DecisionPayload) -> str | None:
-    """Why a verified decision no longer applies to `node` as it stands, or None."""
+def _decided_proof(store: ProjectStore, node: ProofMapNode, payload: DecisionPayload) -> CandidateProofRecord | None:
+    """The Candidate proof of `node` a decision was made on, or None if it names none of this node's."""
     proof = _get_candidate_proof(store, payload.candidate_proof_id) if payload.candidate_proof_id else None
-    if proof is None or proof.node_id != node.id:
-        return "it was made on a Candidate proof that isn't this node's"
+    return proof if proof is not None and proof.node_id == node.id else None
+
+
+def _snapshot_problem(store: ProjectStore, proof: CandidateProofRecord, payload: DecisionPayload) -> str | None:
+    """Why the Review snapshot a decision was made on is no longer as decided, or None: missing, unreadable, or its
+    text changed. No new version, the snapshot itself lost or edited (SNAPSHOT_NO_LONGER_AS_DECIDED)."""
     current = candidate_proof_sha256(store, proof.id)
     if current is None:
         return "the snapshot it was decided on is missing or can't be read"
     if not snapshot_matches(payload.candidate_proof_sha256, current):
         return "the snapshot's text changed after it was decided on"
+    return None
+
+
+def _binding_problem(store: ProjectStore, node: ProofMapNode, payload: DecisionPayload) -> str | None:
+    """Why a verified decision no longer applies to `node` as it stands, or None."""
+    proof = _decided_proof(store, node, payload)
+    if proof is None:
+        return "it was made on a Candidate proof that isn't this node's"
+    problem = _snapshot_problem(store, proof, payload)
+    if problem is not None:
+        return problem
     if payload.interface_fingerprint != _interface_of(node):
         return "the node's statement or assumptions changed after it was decided on"
     if set(node.dependencies) != {pin.target_node_id for pin in payload.dependency_pins}:
@@ -4121,8 +4133,9 @@ def is_provisional(store: ProjectStore, node_id: str) -> bool:
 
     A Theorem, Lemma or Claim whose current snapshot awaits a decision, on the
     dependencies it was made on, with the Verifier's pass recorded on it; or an
-    imported result no Reference review has decided (not found no longer
-    callable, nor reviewed on what no longer stands). A node under an open Challenge, or resting on a node the researcher sent
+    imported result no counting Reference review has decided (not one found no
+    longer callable; one whose review no longer counts reads as never reviewed,
+    ADR-0025). A node under an open Challenge, or resting on a node the researcher sent
     back, is not: the support it was worked on is gone. And each thing it rests
     on is settled or Provisional itself: a pass on a proof that cites nothing
     yet worked on is no support (ADR-0021 point 3). Read without recursion: the
@@ -4336,8 +4349,10 @@ def list_integrity_warnings(store: ProjectStore) -> list[AuthorityWarning]:
     The authority layer's own findings (unreadable lines, unconfirmed
     pre-ADR-0010 decisions, decisions git doesn't have yet) plus what only
     the proof map can see: a Review snapshot on disk the index never recorded
-    (an orphan of a crashed `request_review`, #18). An Acceptance that no
-    longer describes its node is no warning: it reads as none (ADR-0025).
+    (an orphan of a crashed `request_review`, #18), and an Acceptance or
+    verification whose snapshot is missing or was edited since. Any other
+    decision that no longer describes its node is no warning: it reads as
+    none, a verification counting only for its own version (ADR-0025).
     """
     warnings = list_authority_warnings(store)
     for node in list_nodes(store):
@@ -4357,4 +4372,33 @@ def list_integrity_warnings(store: ProjectStore) -> list[AuthorityWarning]:
                         details={"node_id": node.id, "file_path": file_path},
                     )
                 )
+        lost = _snapshot_lost(store, node)
+        if lost is not None:
+            warnings.append(lost)
     return warnings
+
+
+_DECIDED_ON_A_SNAPSHOT = {
+    ReviewRecordKind.acceptance: ("Acceptance", ReviewGovernanceState.approved),
+    ReviewRecordKind.verification: ("verification", ReviewGovernanceState.verified),
+}
+
+
+def _snapshot_lost(store: ProjectStore, node: ProofMapNode) -> AuthorityWarning | None:
+    """The researcher's newest Acceptance or verification of `node`, if it no longer counts because the Review
+    snapshot it was made on is missing or was edited. That is no new version, so the decision reads as none
+    (ADR-0025) as any other that no longer counts; this warning is the one place that says why."""
+    for kind, (name, decided) in _DECIDED_ON_A_SNAPSHOT.items():
+        latest = _latest_decision(store, node.id, kind)
+        if latest is None or latest.verdict.status != "verified" or latest.decision != decided:
+            continue
+        proof = _decided_proof(store, node, latest.verdict.payload)
+        problem = _snapshot_problem(store, proof, latest.verdict.payload) if proof is not None else None
+        if problem is not None:
+            folder = proof.file_path.removesuffix("/" + SNAPSHOT_MANIFEST)
+            return AuthorityWarning(
+                code="SNAPSHOT_NO_LONGER_AS_DECIDED",
+                message=f"{node.id}'s {name} no longer counts: {problem} ({folder})",
+                details={"node_id": node.id, "review_id": latest.row["review_id"], "file_path": folder},
+            )
+    return None
