@@ -326,3 +326,23 @@ def test_unsealing_a_node_an_older_review_found_false_releases_nothing(tmp_path:
     assert seal_preview(store, "N", "unseal") == {"releases": []}  # it falls back to sealed false
     researcher(store).unseal("N", rationale="reopened")
     assert _layers(store, "N")[0] == "sealed-false"
+
+
+def test_an_accepted_node_whose_dependency_is_then_found_false_is_claimed_and_edited_as_an_unverified_one(tmp_path: Path):
+    # ADR-0025 point 3: its verification is void, and it needs a proof that does not use the false node (zeqome/proof-agents#46)
+    from proof_cli.proof_map import claim_node, remove_dependency, split_node
+
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="T", kind="theorem", statement="T holds")
+    split_node(store, "T", [{"id": "A", "statement": "A holds"}, {"id": "B", "statement": "B holds"}])
+    reviewer = researcher(store)
+    for node_id in ("A", "B", "T"):
+        _snapshot(store, node_id)
+        reviewer.decide_acceptance(node_id, "accept")
+    assert _code(lambda: claim_node(store, "T", claimant_id="claude-code")) == "NODE_ALREADY_ACCEPTED"
+
+    reviewer.seal("A", False, rationale="A fails for n = 1")
+
+    claim_node(store, "T", claimant_id="claude-code")
+    remove_dependency(store, "T", "A", edited_by="claude-code")
+    assert _code(lambda: claim_node(store, "B", claimant_id="claude-code")) == "NODE_ALREADY_ACCEPTED"  # B rests on nothing false

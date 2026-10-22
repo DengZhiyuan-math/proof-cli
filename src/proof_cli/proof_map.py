@@ -1573,9 +1573,17 @@ def _not_pickable(store: ProjectStore, node: ProofMapNode) -> ProofMapError | No
     acceptance_state = get_acceptance_state(store, node.id)
     if acceptance_state == "rejected":
         return ProofMapError("NODE_REJECTED", f"node {node.id} was Rejected and should not be pursued further; create a new node instead")
-    if acceptance_state == "accepted" and not has_open_challenge(store, node.id):
+    if acceptance_state == "accepted" and not has_open_challenge(store, node.id) and not verification_void(store, node):
         return ProofMapError("NODE_ALREADY_ACCEPTED", f"node {node.id} is already Accepted; open a Challenge before reclaiming it to revise")
     return None
+
+
+def verification_void(store: ProjectStore, node: ProofMapNode) -> bool:
+    """A direct dependency of the node was found false after its verification (ADR-0025 point 3): the verification is
+    void for good, and the node needs a proof that does not use it — claimed and its dependencies edited as an
+    unverified node's are, with no Challenge to open first."""
+    since = verification_time(store, node.id)
+    return since is not None and any(found > since for dependency in node.dependencies for found in false_since(store, dependency))
 
 
 def _held_by_another(
@@ -1652,7 +1660,8 @@ def _structure_editable(store: ProjectStore, node: ProofMapNode) -> None:
 
     As `_not_pickable` rules for claiming: never an imported result (it rests
     on nothing here) or a Rejected node; an Accepted one only while an open
-    Challenge invites its revision. The edit makes its Acceptance stop
+    Challenge invites its revision, or once a dependency found false voided its
+    verification (`verification_void`). The edit makes its Acceptance stop
     counting (its dependencies changed): it reads as no decision, a
     verification counting only for its own version (ADR-0025 point 24).
     """
@@ -1664,7 +1673,7 @@ def _structure_editable(store: ProjectStore, node: ProofMapNode) -> None:
     acceptance = get_acceptance_state(store, node.id)
     if acceptance == "rejected":
         raise ProofMapError("NODE_REJECTED", f"node {node.id} was Rejected and should not be pursued further; its dependencies stay as they were")
-    if acceptance == "accepted" and not has_open_challenge(store, node.id):
+    if acceptance == "accepted" and not has_open_challenge(store, node.id) and not verification_void(store, node):
         raise ProofMapError(
             "NODE_ACCEPTED",
             f"node {node.id} is {acceptance}; changing its dependencies would void that decision, so open a Challenge before revising it",
