@@ -5,6 +5,10 @@ release-failed — and why, is one entry in the node's work log, written as it e
 same ending from the record alone, and no reader parses a closing note's words for it. An audit run's ending says it was
 an audit, and why its verdict was not recorded on the snapshot when it was not; the audit's outcome itself is the Evidence
 check, whose work-log entry carries the checker's mark.
+
+A Coordinator holds no node and takes no turn; where it sets a node aside — parked, held for the researcher, interrupted
+by the end of the Pursue's total, or not tried again after its launches failed — that is one record on the node, with
+why, which a page started afresh reads as the live Coordinator showed it, parsing no note.
 """
 
 from pathlib import Path
@@ -13,7 +17,8 @@ import pytest
 
 from _proofs import submit_proof
 from proof_cli.errors import ERROR_CODES
-from proof_cli.proof_map import RUN_ENDINGS, ProofMapError, create_node, record_evidence_check, record_progress, work_log
+from proof_cli.proof_map import (ASIDES, RUN_ENDINGS, ProofMapError, create_node, record_evidence_check, record_progress, set_aside_in,
+                                  work_log)
 from proof_cli.rendering import render_work_log_entry
 from proof_cli.storage import ensure_project
 
@@ -102,3 +107,41 @@ def test_the_cli_shows_how_a_run_ended_and_why(tmp_path: Path):
 
     assert "run budget — this run's cap of 3 turn(s) is spent" in first
     assert "run done (audit) — the Verifier read the snapshot; its verdict was not recorded on the snapshot: no snapshot awaits" in audit
+
+
+def test_a_node_the_coordinator_set_aside_is_one_record_on_it_with_why(tmp_path: Path):
+    store = _node(tmp_path)
+
+    for how in ("parked", "held", "interrupted", "launch-failed"):
+        record_progress(store, "clm", role=None, by="claude-code/coordinator", aside=how, note=f"{how}: why")
+
+    assert ASIDES == ("parked", "held", "interrupted", "launch-failed")
+    entries = [entry for entry in work_log(store, "clm") if entry["kind"] == "aside"]
+    assert [(entry["how"], entry["reason"], entry["by"], entry["role"]) for entry in entries] == [
+        (how, f"{how}: why", "claude-code/coordinator", None) for how in ASIDES]
+
+
+@pytest.mark.parametrize("bad", [{"aside": "stuck", "note": "why"}, {"aside": "parked", "note": "  "}])
+def test_a_node_is_set_aside_one_of_four_ways_and_always_with_why(tmp_path: Path, bad):
+    store = _node(tmp_path)
+
+    with pytest.raises(ProofMapError) as refused:
+        record_progress(store, "clm", role=None, by="claude-code/coordinator", **bad)
+
+    assert refused.value.code == "INVALID_ASIDE" and "INVALID_ASIDE" in ERROR_CODES
+
+
+def test_what_a_pursuit_set_aside_is_read_back_by_its_id_on_any_node(tmp_path: Path):
+    store = _node(tmp_path)
+    create_node(store, node_id="other", kind="claim", statement="D holds")
+    record_progress(store, "clm", role=None, by="claude-code/coordinator", aside="parked", note="its budget is spent", pursuit_id="p1")
+    record_progress(store, "other", role=None, by="claude-code/coordinator", aside="held", note="waits on the researcher", pursuit_id="p2")
+    record_progress(store, "other", role=None, by="claude-code/coordinator", aside="interrupted", note="the total ran out", pursuit_id="p1")
+
+    assert [(a["node"], a["how"], a["reason"]) for a in set_aside_in(store, "p1")] == [
+        ("clm", "parked", "its budget is spent"), ("other", "interrupted", "the total ran out")]
+    assert render_work_log_entry("clm", _asides(store)[0]) == "coordinator on clm: set aside parked — its budget is spent"
+
+
+def _asides(store) -> list[dict]:
+    return [entry for entry in work_log(store, "clm") if entry["kind"] == "aside"]

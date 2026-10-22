@@ -397,6 +397,9 @@ PROGRESS_STATUSES = ("started", "done", "stuck", "needs-human")
 VERDICT_OUTCOMES = ("passed", "failed")
 # how a run ended (ADR-0025 point 1): a record, never a value of its state, which is only running, paused or not running
 RUN_ENDINGS = ("done", "stuck", "budget", "needs-human", "released", "release-failed")
+# how a Coordinator sets a node aside: parked, held for the researcher, interrupted by the end of the Pursue's total, or not
+# tried again after its launches failed — a record on the node, with why (zeqome/proof-agents#46)
+ASIDES = ("parked", "held", "interrupted", "launch-failed")
 PROGRESS_EVENT = "agent_progress"
 TURN_EVENT = "agent_turn"
 # a turn's raw conversation, kept with the project's state (never the node folder, which a snapshot freezes)
@@ -429,6 +432,8 @@ def record_progress(
     ending: str | None = None,
     unrecorded: str | None = None,
     turn: str | None = None,
+    aside: str | None = None,
+    pursuit_id: str | None = None,
 ) -> dict:
     """Report a plan (the steps the run means to take), one step's status, a handoff to another role, the
     Verifier's verdict on the working proof, an attempt the role abandoned (ADR-0019), or — on a Theorem or Lemma
@@ -456,11 +461,22 @@ def record_progress(
     it ends under the role it was on, not a step of that role's (ADR-0025 point 1). An `audit` run's ending says so, and
     `unrecorded` says why its verdict was not recorded on the snapshot when it was not; the audit's outcome is the
     Evidence check itself. A run stopped during a turn names it (`turn`): that turn's own record comes after the ending,
-    and is no Start since. An ending is an entry of its own, with its reason."""
+    and is no Start since. An ending is an entry of its own, with its reason.
+
+    An `aside` is how a Coordinator set the node aside, one of `ASIDES`, with why in `note`: like a Coordinator's note it
+    names no role, and it is the one record of it a page reads, the live Coordinator gone or not. It names the pursuit
+    the Coordinator worked in (`pursuit_id`), by which `set_aside_in` reads back what that pursuit set aside."""
     node = require_node(store, node_id)
-    if ending is not None and (coordinator is not None or verdict is not None or question is not None or suggestion is not None
-                               or plan or step is not None or handoff is not None or attempt is not None):
+    if ending is not None and (aside is not None or coordinator is not None or verdict is not None or question is not None
+                               or suggestion is not None or plan or step is not None or handoff is not None or attempt is not None):
         raise ProofMapError("INVALID_RUN_ENDING", "an ending is an entry of its own: record it apart from a plan, a step, a verdict or a note")
+    if aside is not None:
+        if aside not in ASIDES or not note.strip():
+            raise ProofMapError("INVALID_ASIDE", f"a node is set aside {', '.join(ASIDES)}, with why: not '{aside}' with {note.strip()!r}")
+        payload = {"kind": "aside", "role": None, "by": by, "how": aside, "reason": note.strip(), "pursuit_id": pursuit_id}
+        with store.transaction() as conn:
+            append_event(store, PROGRESS_EVENT, f"coordinator on {node_id}: {aside} — {note.strip()}", entity_id=node_id, payload=payload, conn=conn)
+        return {**payload, "node_id": node_id, "at": utc_now().isoformat()}
     if coordinator is not None:
         if not coordinator.strip():
             raise ProofMapError("PROGRESS_EMPTY", "say what the Coordinator did: --coordinator \"<what it started, redirected or stopped>\"")
@@ -552,6 +568,15 @@ def record_progress(
     with store.transaction() as conn:
         append_event(store, PROGRESS_EVENT, message, entity_id=node_id, payload=payload, conn=conn)
     return {**payload, "node_id": node_id, "at": utc_now().isoformat()}
+
+
+def set_aside_in(store: ProjectStore, pursuit_id: str) -> list[dict]:
+    """What the Coordinators of one pursuit set aside, oldest first: {"node", "how", "reason", "at"} for each `aside`
+    record naming it, on any node — a Claim the re-split took off its parent since included."""
+    return [{"node": event.entity_id, "how": event.payload.get("how"), "reason": event.payload.get("reason") or "",
+             "at": event.created_at.isoformat()}
+            for event in list_events_of_kind(store, PROGRESS_EVENT)
+            if (event.payload or {}).get("kind") == "aside" and event.payload.get("pursuit_id") == pursuit_id]
 
 
 def _endings(store: ProjectStore, node_id: str, fixed: dict[str, str]) -> list[dict]:

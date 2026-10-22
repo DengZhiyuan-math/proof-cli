@@ -203,6 +203,7 @@ ERROR_CODES: dict[str, str] = {
     "READER_ROLE_REFUSED": "under the reader role (PROOF_AGENT_ROLE=reader), `node create` makes no Claim and takes no --parent or --reassign; the error names which",
     "INVALID_PROGRESS_STATUS": "a step's status is started, done, stuck or needs-human",
     "INVALID_PROGRESS_STEP": "steps count from 1",
+    "INVALID_ASIDE": "a Coordinator sets a node aside parked, held, interrupted or launch-failed, always saying why",
     "INVALID_RUN_ENDING": "a run ends done, stuck, budget, needs-human, released or release-failed, with why, in an entry of its own; only an audit's ending says why its verdict went unrecorded",
     "PROGRESS_STATUS_REQUIRED": "a step report needs its status",
     "PROGRESS_EMPTY": "a progress report is a plan, a step, a handoff, a verdict, an attempt or a choice made (--question); this one is none of them",
