@@ -507,7 +507,7 @@ def test_a_map_read_folds_the_trust_rules_once(tmp_path: Path, review_reads):
     finally:
         app.close()
 
-    assert all(n["acceptance_state"] == "trusted-by-rule" for n in nodes)
+    assert all(n["conclusion"] == "verified-true" and n["trust_rule"] == ["textbooks"] for n in nodes)   # the rule verifies each (ADR-0025)
     assert [path.name for path in review_reads].count("trust-rules.jsonl") <= 1
 
 

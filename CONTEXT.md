@@ -185,7 +185,7 @@ A node the Coordinator no longer starts: its run budget is spent, or its last ru
 _Avoid_: stuck (a run's state), failed
 
 **Review queue**:
-Everything waiting on the researcher, ordered bottom-up: nodes Awaiting verification, imported results included, Unfixed agent-written text, Standing questions, Parked nodes, and the Challenges the Coordinator has asked the researcher to settle — only these last stop anything, and only their own branch (ADR-0021, ADR-0025). Off route nodes and imported results nothing rests on come last, each item saying why: history, kept and never hidden, that no route waits on (ADR-0023 point 4).
+Everything waiting on the researcher, ordered bottom-up: nodes Awaiting verification, imported results included, snapshots Handed over (frozen with Review what it has, which no check has passed: no agent takes one up, so it is the researcher's to read), Unfixed agent-written text, Standing questions, Parked nodes, and the Challenges the Coordinator has asked the researcher to settle — only these last stop anything, and only their own branch (ADR-0021, ADR-0025). Off route nodes and imported results nothing rests on come last, each item saying why: history, kept and never hidden, that no route waits on (ADR-0023 point 4).
 _Avoid_: inbox, approvals
 
 **Off route**:
@@ -228,7 +228,7 @@ Whether the agents are working: running, paused or not running. Set by the syste
 _Avoid_: status, active
 
 **Conclusion** (结论):
-What a node's states say about it, computed and never kept: verified true, true, uncertain or false. Sealed true is verified true and sealed false is false. Otherwise a false statement is false; a statement challenged as false, or an incomplete proof, is uncertain; checks passed is true; expert-verified is verified true. A conclusion is never above the node's weakest dependency: a true dependency caps it at true, an uncertain one makes it uncertain until the dependency recovers, and a false one makes it uncertain, not false, until it has a proof that does not use it.
+What a node's states say about it, computed and never kept: verified true, true, uncertain or false. Sealed true is verified true and sealed false is false. Otherwise a false statement is false; a statement challenged as false, or an incomplete proof, is uncertain; checks passed is true; expert-verified is verified true. A conclusion is never above the node's weakest dependency: a true dependency caps it at true, an uncertain one makes it uncertain until the dependency recovers, and a false one makes it uncertain, not false, until it has a proof that does not use it. A node's page names the dependencies that hold its conclusion down, each with its states, never an Off route one.
 _Avoid_: status, standing, trust, Provisional, Conditional, Blocked, Potentially stale, integrity state
 
 **Awaiting verification**:
