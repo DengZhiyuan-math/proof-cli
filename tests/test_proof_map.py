@@ -1222,178 +1222,6 @@ def _dependent_with_accepted_dependency(store, dependent_id: str = "clm_1", targ
     return get_dependency_pin(store, dependent_id, target_id)
 
 
-def test_revalidate_dependency_reaffirms_when_fingerprint_unchanged(tmp_path: Path):
-    """The target's accepted version advancing past what was pinned, with an
-    unchanged interface, isn't reachable end-to-end today — claim_node
-    refuses to reclaim an already-Accepted node, so nothing can yet push a
-    node past its first accepted version (that path is #25's Challenge
-    territory). This ages the pin's version directly, via a real persisted
-    row, to simulate that precondition against the real, current fingerprint
-    the accept cycle actually computed."""
-    store = ensure_project(tmp_path)
-    pin = _dependent_with_accepted_dependency(store)
-    assert pin.pinned_version == 1
-
-    aged_pin = pin.model_copy(update={"pinned_version": 0})
-    upsert_dependency_pin(store, aged_pin)
-    assert get_dependency_pin(store, "clm_1", "lem_base").pinned_version == 0
-
-    record = researcher(store).revalidate_dependency("clm_1", "lem_base", rationale="interface unchanged")
-
-    assert record.kind.value == "dependency_revalidation"
-    assert record.decision.value == "reaffirmed"
-
-    refreshed = get_dependency_pin(store, "clm_1", "lem_base")
-    assert refreshed.pinned_version == 1
-    assert refreshed.pinned_fingerprint == get_accepted_interface_fingerprint(store, "lem_base")
-
-
-def test_revalidate_dependency_never_touches_the_reviewing_nodes_own_acceptance_state(tmp_path: Path):
-    store = ensure_project(tmp_path)
-    _dependent_with_accepted_dependency(store)
-    before = get_acceptance_state(store, "clm_1")
-    # a pin behind the accepted version: a re-review is only for a lag (#24)
-    aged = get_dependency_pin(store, "clm_1", "lem_base").model_copy(update={"pinned_version": 0})
-    upsert_dependency_pin(store, aged)
-
-    researcher(store).revalidate_dependency("clm_1", "lem_base")
-
-    assert get_acceptance_state(store, "clm_1") == before == "unreviewed"
-
-
-def test_revalidate_dependency_rejected_when_fingerprint_changed(tmp_path: Path):
-    store = ensure_project(tmp_path)
-    _dependent_with_accepted_dependency(store)
-
-    stale_pin = get_dependency_pin(store, "clm_1", "lem_base").model_copy(update={"pinned_fingerprint": "0" * 64})
-    upsert_dependency_pin(store, stale_pin)
-
-    with pytest.raises(ProofMapError) as exc_info:
-        researcher(store).revalidate_dependency("clm_1", "lem_base")
-    assert exc_info.value.code == "INTERFACE_CHANGED"
-
-
-def test_revalidate_dependency_target_not_accepted_is_rejected(tmp_path: Path):
-    store = ensure_project(tmp_path)
-    create_node(store, node_id="lem_base", kind="lemma", statement="Base lemma")
-    create_node(store, node_id="clm_1", kind="claim", statement="Depends on base", dependencies=["lem_base"])
-    submit_proof(
-        store,
-        "clm_1",
-        claimant_id="agent_a",
-        session_id="sess_1",
-        scoping_rationale="scoped correctly",
-        content="proof text")
-
-    with pytest.raises(ProofMapError) as exc_info:
-        researcher(store).revalidate_dependency("clm_1", "lem_base")
-    assert exc_info.value.code == "TARGET_NOT_ACCEPTED"
-
-
-def test_revalidate_dependency_without_a_pin_is_rejected(tmp_path: Path):
-    store = ensure_project(tmp_path)
-    create_node(store, node_id="lem_base", kind="lemma", statement="Base lemma")
-    _accept_via_full_cycle(store, "lem_base")
-    create_node(store, node_id="clm_1", kind="claim", statement="Depends on base", dependencies=["lem_base"])
-
-    with pytest.raises(ProofMapError) as exc_info:
-        researcher(store).revalidate_dependency("clm_1", "lem_base")
-    assert exc_info.value.code == "NO_DEPENDENCY_PIN"
-
-
-def test_revalidate_dependency_rejects_a_non_dependency(tmp_path: Path):
-    store = ensure_project(tmp_path)
-    create_node(store, node_id="lem_base", kind="lemma", statement="Base lemma")
-    _accept_via_full_cycle(store, "lem_base")
-    create_node(store, node_id="clm_1", kind="claim", statement="Unrelated claim")
-
-    with pytest.raises(ProofMapError) as exc_info:
-        researcher(store).revalidate_dependency("clm_1", "lem_base")
-    assert exc_info.value.code == "NOT_A_DEPENDENCY"
-
-
-def test_revalidate_dependency_rejects_imported_result_target(tmp_path: Path):
-    store = ensure_project(tmp_path)
-    create_node(
-        store,
-        node_id="ref_1",
-        kind="imported_result",
-        statement="An external theorem",
-        source_locator="doi:10.1234/example",
-        source_version="v1",
-    )
-    create_node(store, node_id="clm_1", kind="claim", statement="Depends on ref_1", dependencies=["ref_1"])
-    submit_proof(
-        store,
-        "clm_1",
-        claimant_id="agent_a",
-        session_id="sess_1",
-        scoping_rationale="scoped correctly",
-        content="proof text")
-
-    with pytest.raises(ProofMapError) as exc_info:
-        researcher(store).revalidate_dependency("clm_1", "ref_1")
-    assert exc_info.value.code == "IMMUTABLE_NODE"
-
-
-def test_revalidate_dependency_pin_write_failure_leaves_no_review_record(tmp_path: Path, monkeypatch):
-    store = ensure_project(tmp_path)
-    pin = _dependent_with_accepted_dependency(store)
-    aged_pin = pin.model_copy(update={"pinned_version": 0})
-    upsert_dependency_pin(store, aged_pin)
-
-    import proof_cli.proof_map as proof_map_module
-
-    def _boom(*args, **kwargs):
-        raise RuntimeError("simulated pin-write failure")
-
-    monkeypatch.setattr(proof_map_module, "upsert_dependency_pin", _boom)
-
-    with pytest.raises(RuntimeError):
-        researcher(store).revalidate_dependency("clm_1", "lem_base")
-
-    # neither side of the write took effect
-    assert get_dependency_pin(store, "clm_1", "lem_base").pinned_version == 0
-    assert not any(
-        record.kind is not None and record.kind.value == "dependency_revalidation"
-        for record in list_review_records_for_test(store, "clm_1")
-    )
-
-
-def test_revalidate_dependency_review_write_failure_rolls_back_the_pin(tmp_path: Path, monkeypatch):
-    store = ensure_project(tmp_path)
-    pin = _dependent_with_accepted_dependency(store)
-    aged_pin = pin.model_copy(update={"pinned_version": 0})
-    upsert_dependency_pin(store, aged_pin)
-
-    import proof_cli.authority as authority_module
-
-    def _boom(*args, **kwargs):
-        raise RuntimeError("simulated review-write failure")
-
-    # fails after the pin is already written on the transaction: the
-    # decision's reviews.jsonl line is the last write before commit
-    monkeypatch.setattr(authority_module, "append_entry", _boom)
-
-    with pytest.raises(RuntimeError):
-        researcher(store).revalidate_dependency("clm_1", "lem_base")
-
-    # the transaction rolled back the pin — neither write stuck
-    assert get_dependency_pin(store, "clm_1", "lem_base").pinned_version == 0
-    assert not any(
-        record.kind is not None and record.kind.value == "dependency_revalidation"
-        and record.decision.value == "reaffirmed"
-        for record in list_review_records_for_test(store, "clm_1")
-    )
-    # and no dangling request either — a `proposed_for_review` record with
-    # no matching decision would itself be the "inconsistent state, not a
-    # valid intermediate one" ADR-0005 says must never happen
-    assert not any(
-        record.kind is not None and record.kind.value == "dependency_revalidation"
-        for record in list_review_records_for_test(store, "clm_1")
-    )
-
-
 def list_review_records_for_test(store, node_id: str):
     return list_review_records(store, object_type="proof_map_node", object_id=node_id)
 
@@ -1411,16 +1239,15 @@ def test_open_challenge_requires_no_permission_check(tmp_path: Path):
     assert has_open_challenge(store, "lem_1") is True
 
 
-def test_open_challenge_against_unaccepted_node_is_rejected(tmp_path: Path):
+def test_open_challenge_against_an_unaccepted_node_is_raised_at_once(tmp_path: Path):
+    # ADR-0025 point 6: on any unsealed node, Accepted or not, with no review first
     store = ensure_project(tmp_path)
     create_node(store, node_id="lem_1", kind="lemma", statement="Base lemma")
 
-    with pytest.raises(ProofMapError) as exc_info:
-        open_challenge(store, "lem_1", opened_by="agent_a")
-    assert exc_info.value.code == "TARGET_NOT_ACCEPTED"
+    assert open_challenge(store, "lem_1", opened_by="agent_a").status.value == "open"
 
 
-def test_open_challenge_against_imported_result_requires_reference_review(tmp_path: Path):
+def test_open_challenge_against_an_imported_result_needs_no_reference_review(tmp_path: Path):
     store = ensure_project(tmp_path)
     create_node(
         store,
@@ -1431,10 +1258,7 @@ def test_open_challenge_against_imported_result_requires_reference_review(tmp_pa
         source_version="v1",
     )
 
-    with pytest.raises(ProofMapError) as exc_info:
-        open_challenge(store, "ref_1", opened_by="agent_a")
-    assert exc_info.value.code == "TARGET_NOT_REVIEWED"
-
+    assert open_challenge(store, "ref_1", opened_by="agent_a").target_node_id == "ref_1"  # unreviewed (ADR-0025 point 6)
     researcher(store).decide_reference_review("ref_1", "reference-review")
     challenge = open_challenge(store, "ref_1", opened_by="agent_a")
     assert challenge.target_node_id == "ref_1"
@@ -2081,33 +1905,9 @@ def test_record_evidence_check_requires_no_confirmation(tmp_path: Path):
     assert "confirmed" not in inspect.signature(record_evidence_check).parameters
 
 
-def test_decide_evidence_review_invalid_decision_is_rejected(tmp_path: Path):
-    store = ensure_project(tmp_path)
-    proof = _submitted_claim(store, "clm_1")
-    check = record_evidence_check(store, proof.id, "passed")
-
-    with pytest.raises(ProofMapError) as exc_info:
-        researcher(store).decide_evidence_review(check.id, "approved")
-    assert exc_info.value.code == "INVALID_DECISION"
-
-
-def test_decide_evidence_review_records_trusted_or_unusable(tmp_path: Path):
-    store = ensure_project(tmp_path)
-    proof = _submitted_claim(store, "clm_1")
-    check = record_evidence_check(store, proof.id, "passed")
-
-    record = researcher(store).decide_evidence_review(check.id, "trusted", rationale="checked the backend logs")
-
-    assert record.kind.value == "evidence_review"
-    assert record.decision.value == "trusted"
-    assert record.object_type == "evidence_check"
-    assert record.object_id == check.id
-
-
-def test_evidence_check_and_evidence_review_can_never_flip_acceptance_state(tmp_path: Path):
-    """The ticket's own explicit requirement: attempt to flip
-    acceptance_state via an Evidence check / evidence_review path and
-    assert it's impossible."""
+def test_an_evidence_check_can_never_flip_acceptance_state(tmp_path: Path):
+    """The ticket's own explicit requirement: attempt to flip acceptance_state through an Evidence check and assert
+    it's impossible. (The Evidence review that once judged a check is retired, ADR-0025.)"""
     store = ensure_project(tmp_path)
     proof = _submitted_claim(store, "clm_1")
 
@@ -2118,23 +1918,13 @@ def test_evidence_check_and_evidence_review_can_never_flip_acceptance_state(tmp_
     check = record_evidence_check(store, proof.id, "passed", notes="all backends agree", run_by="ci-bot")
     assert get_acceptance_state(store, "clm_1") == "unreviewed"
 
-    researcher(store).decide_evidence_review(check.id, "trusted", rationale="fully credible")
-    assert get_acceptance_state(store, "clm_1") == "unreviewed"
-
-    # architecturally: evidence_review is recorded against object_type
-    # "evidence_check", never "proof_map_node", so get_acceptance_state's
-    # own query (object_type="proof_map_node", kind=acceptance) can't see it
-    # no matter what decision it records — not just by convention.
     acceptance_records = [
         record
         for record in list_review_records(store, object_type="proof_map_node", object_id="clm_1")
         if record.kind is not None and record.kind.value == "acceptance"
     ]
     assert acceptance_records == []
-
-    # even a "unusable" judgment doesn't retroactively do anything either
-    failing_check = record_evidence_check(store, proof.id, "failed")
-    researcher(store).decide_evidence_review(failing_check.id, "unusable")
+    record_evidence_check(store, proof.id, "failed")  # nor does a failing one
     assert get_acceptance_state(store, "clm_1") == "unreviewed"
 
 
@@ -2143,13 +1933,6 @@ def test_evidence_check_on_nonexistent_candidate_proof_raises_not_found(tmp_path
     with pytest.raises(ProofMapError) as exc_info:
         record_evidence_check(store, "does_not_exist", "passed")
     assert exc_info.value.code == "CANDIDATE_PROOF_NOT_FOUND"
-
-
-def test_decide_evidence_review_on_nonexistent_check_raises_not_found(tmp_path: Path):
-    store = ensure_project(tmp_path)
-    with pytest.raises(ProofMapError) as exc_info:
-        researcher(store).decide_evidence_review("does_not_exist", "trusted")
-    assert exc_info.value.code == "EVIDENCE_CHECK_NOT_FOUND"
 
 
 def test_an_old_claim_survives_the_token_columns_removal(tmp_path: Path):

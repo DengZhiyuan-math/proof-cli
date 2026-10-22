@@ -188,6 +188,7 @@ from .proof_map import (
     trust_rule_view,
     trust_rules_of,
     would_meet_trust_rules,
+    withdraw_challenge,
     work_log,
     answer_question,
 )
@@ -195,6 +196,7 @@ from .trust_rules import get_trust_rule, list_trust_rules, trust_rule_history
 from .authority import candidate_proof_sha256
 from .vault import working_entry_path
 from .definitions import add_definition, all_definitions, definitions_of, edit_definition, fixed_by_definition, nodes_naming, remove_definition, require_definition
+from .node_states import node_states, seal_record, stopped_by
 from .pursuit import project_progress, reader_turn
 from .rendering import (
     render_definition,
@@ -381,11 +383,14 @@ def _acceptance_axis(store, node) -> str:
 
 
 def _with_state_axes(store, node) -> dict:
-    """A node under --json, with its three state axes (ADR-0002), whether it is Provisional and the Provisional nodes
-    it is Conditional on (ADR-0021), and, for an imported result, the Trust rules it meets (an agent's import:
-    those it would meet had the researcher created it, ADR-0022)."""
+    """A node under --json, with its four states and conclusion (ADR-0025) and, until their readers move to those (#283),
+    its three state axes (ADR-0002), whether it is Provisional and the Provisional nodes it is Conditional on
+    (ADR-0021), and, for an imported result, the Trust rules it meets (an agent's import: those it would meet had the
+    researcher created it, ADR-0022)."""
     return {
         **node.model_dump(mode="json"),
+        **node_states(store, node.id).model_dump(mode="json"),
+        "stopped_by": stopped_by(store, node.id),  # the statement Challenges that stop work on it (ADR-0025)
         "workflow_state": get_workflow_state(store, node.id),
         "acceptance_state": _acceptance_axis(store, node),
         "integrity_state": get_integrity_state(store, node.id),
@@ -403,14 +408,19 @@ def frontier(root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "-
     store = get_store(_root(root))
     nodes = get_frontier(store)
     if json_output:
-        typer.echo(dump_envelope(success_envelope("frontier", [_with_state_axes(store, node) for node in nodes])))
+        try:
+            data = [_with_state_axes(store, node) for node in nodes]
+        except ProofMapError as exc:  # a cycle in a hand-edited map (DEPENDENCY_CYCLE)
+            _emit_error(exc, json_output, command="frontier")
+            raise typer.Exit(code=1)
+        typer.echo(dump_envelope(success_envelope("frontier", data)))
         return
     typer.echo(render_frontier(nodes))
 
 
 @app.command(rich_help_panel=LEGACY_PANEL)
 def revalidate(source_id: str, root: str = ROOT_OPTION, backend_target: str = "", notes: str = "") -> None:
-    """(legacy) Re-queue a stale verification fragment. A node's dependency is re-reviewed on the proof map page instead."""
+    """(legacy) Re-queue a stale verification fragment."""
     typer.echo(
         render_verification_output(
             f"revalidate {source_id}",
@@ -699,6 +709,11 @@ def node_show(
     store = get_store(_root(root))
     try:
         node = require_node(store, node_id)
+        states = node_states(store, node_id)  # its four states and conclusion (ADR-0025)
+        stopped = stopped_by(store, node_id)  # the statement Challenges that stop work on it
+        sealed = seal_record(store, node_id)  # what seals it, for every briefing (ADR-0025 point 14)
+        # each Verifier objection, a proof Challenge numbered in its verdict, with how it ended (ADR-0025 points 8-9)
+        objections = [challenge.model_dump(mode="json") for challenge in list_challenges(store, target_node_id=node_id) if challenge.verdict_id]
         workflow_state = get_workflow_state(store, node_id)
         acceptance_state = _acceptance_axis(store, node)
         integrity_state = get_integrity_state(store, node_id)
@@ -728,6 +743,12 @@ def node_show(
         payload["citation"] = citation
         if is_computation(node):  # the entry is run.sh, under its own key: `working_proof` means proof.tex
             payload["run_script"], working_proof = working_proof, None
+        payload.update(states.model_dump(mode="json"))
+        payload["stopped_by"] = stopped
+        payload["seal_record"] = sealed
+        payload["objections"] = objections
+        if _auditing():  # an objection is an earlier verdict's: an audit reads the proof afresh (ADR-0024 point 13)
+            payload["objections"], payload["objections_withheld"] = [], AUDIT_WITHHELD
         payload["workflow_state"] = workflow_state
         payload["acceptance_state"] = acceptance_state
         payload["integrity_state"] = integrity_state
@@ -758,7 +779,7 @@ def node_show(
                 for proof in list_candidate_proofs(store, node_id) for now in [candidate_proof_sha256(store, proof.id)]
                 for check in list_evidence_checks(store, proof.id)
             ]
-        # what the node page shows of each dependency: its pin, whether current, the remedy (#97)
+        # what the node page shows of each dependency: its statement, kind and pin (#97)
         payload["dependency_details"] = dependency_details(store, node_id)
         payload["definition_details"] = definition_details
         typer.echo(dump_envelope(success_envelope("node.show", payload)))
@@ -792,7 +813,12 @@ def node_list(
     store = get_store(_root(root))
     nodes = list_nodes(store)
     if json_output:
-        typer.echo(dump_envelope(success_envelope("node.list", [_with_state_axes(store, node) for node in nodes])))
+        try:
+            data = [_with_state_axes(store, node) for node in nodes]
+        except ProofMapError as exc:  # a cycle in a hand-edited map (DEPENDENCY_CYCLE)
+            _emit_error(exc, json_output, command="node.list")
+            raise typer.Exit(code=1)
+        typer.echo(dump_envelope(success_envelope("node.list", data)))
         return
     typer.echo(render_proof_map_node_list(nodes))
 
@@ -1051,6 +1077,7 @@ def fog_crystallize(
     reassign: bool = typer.Option(False, "--reassign", help="Take the parent's claim over from whoever holds it"),
     assumption: list[str] = typer.Option([], "--assumption"),
     display_label: str = typer.Option("", "--display-label"),
+    definition: list[str] = typer.Option([], "--definition", help="Repeatable: a definition the Claim's statement is written in, the parent's or any other (`proof definition list`)"),
     created_by: str = typer.Option("", "--created-by", help=CREATED_BY_HELP),
     medium: str = typer.Option("", "--medium", help="The new Claim's medium: latex (default) or computation"),
     json_output: bool = typer.Option(False, "--json"),
@@ -1060,7 +1087,7 @@ def fog_crystallize(
     try:
         made = crystallize_fog(
             store, fog_id, node_id, statement, parent=parent, no_parent=no_parent, reassign=reassign,
-            assumptions=assumption, display_label=display_label, created_by=_author(created_by, root),
+            assumptions=assumption, display_label=display_label, definitions=definition, created_by=_author(created_by, root),
             medium=medium or None,
         )
     except ProofMapError as exc:
@@ -1212,25 +1239,23 @@ def node_review(node_id: str, decision: str = typer.Argument(""), root: str = RO
     human_review_required(root, command="node.review", kind="acceptance", target_id=node_id, node_id=node_id, json_output=json_output)
 
 
-@node_app.command("revalidate")
-def node_revalidate(node_id: str, target_node_id: str = typer.Argument(""), root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
-    """Lightweight re-review of node_id's dependency on target_node_id — on the proof map page (ADR-0010)."""
-    human_review_required(
-        root, command="node.revalidate", kind="dependency_revalidation", target_id=node_id, node_id=node_id, json_output=json_output
-    )
+@node_app.command("verify")
+def node_verify(node_id: str, root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
+    """Verify a node's version: the researcher's "checked, and I believe it" (ADR-0025) — on the proof map page."""
+    human_review_required(root, command="node.verify", kind="verification", target_id=node_id, node_id=node_id, json_output=json_output)
 
 
-@node_app.command("migrate-dependents")
-def node_migrate_dependents(
-    node_id: str,
-    replacement_id: str = typer.Argument(""),
-    root: str = typer.Option(".", "--root", envvar="PROOF_ROOT"),  # the root convention of ADR-0011 (#67)
-    json_output: bool = typer.Option(False, "--json"),
-) -> None:
-    """Move a no-longer-callable imported result's dependents onto its correction — on the proof map page (#20)."""
-    human_review_required(
-        root, command="node.migrate_dependents", kind="dependent_migration", target_id=node_id, node_id=node_id, json_output=json_output
-    )
+@node_app.command("seal")
+def node_seal(node_id: str, value: str = typer.Argument("", help="true or false"), root: str = ROOT_OPTION,
+              json_output: bool = typer.Option(False, "--json")) -> None:
+    """Seal a node true or false, the researcher's absolute belief (ADR-0025) — on the proof map page, after it lists what it does."""
+    human_review_required(root, command="node.seal", kind="seal", target_id=node_id, node_id=node_id, json_output=json_output)
+
+
+@node_app.command("unseal")
+def node_unseal(node_id: str, root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
+    """Unseal a node, releasing what its true seal covered (ADR-0025) — on the proof map page."""
+    human_review_required(root, command="node.unseal", kind="seal", target_id=node_id, node_id=node_id, json_output=json_output)
 
 
 @node_app.command("promote")
@@ -1248,7 +1273,8 @@ def node_split(
     child_file: list[str] = typer.Option(None, "--child-file", help=f"Repeatable, one per child after any --child: <child-id>=<path>, the statement read from the file at <path> ({FILE_TEXT})"),
     assumption: list[str] = typer.Option(None, "--assumption", help="Repeatable: an assumption of the one --child (as the page's split gives it)"),
     display_label: str = typer.Option("", "--display-label", help="The one --child's display label"),
-    definition: list[str] = typer.Option(None, "--definition", help="Repeatable: a definition the one --child is written in, beside the parent's, which every child names"),
+    definition: list[str] = typer.Option(None, "--definition", help="Repeatable: a definition the one --child is written in (`proof definition list`)"),
+    child_definition: list[str] = typer.Option(None, "--child-definition", help="Repeatable: <child-id>=<definition-id>, a definition that child's statement is written in, the parent's or any other"),
     root: str = ROOT_OPTION,
     created_by: str = typer.Option("", "--created-by", help=CREATED_BY_HELP),
     reassign: bool = typer.Option(False, "--reassign", help="Take the claim over from whoever holds it (recorded as `claim --reassign` records it); the node need not be on the frontier"),
@@ -1257,7 +1283,8 @@ def node_split(
     """Decompose parent_id into new claim-kind children. Ungated — no researcher approval needed.
     All or nothing; a node someone else holds is theirs to split unless --reassign.
     With a single --child, --assumption and --display-label give it those, as the page's split does (issue #154).
-    A --child-file child's statement is its file's text, read before anything is written."""
+    A --child-file child's statement is its file's text, read before anything is written.
+    A child names only the definitions given it, the parent's included only where its statement uses them (#286)."""
     entries = [*(child or []), *(child_file or [])]
     if not entries:
         raise click.UsageError("Missing option '--child' (or --child-file).")
@@ -1277,6 +1304,12 @@ def node_split(
                 statement = _file_text(statement, "--child-file")
             specs.append({"id": child_id, "statement": statement, "assumptions": list(assumption or []), "display_label": display_label,
                           "definitions": list(definition or [])})
+        by_id = {spec["id"]: spec for spec in specs}
+        for entry in child_definition or []:
+            child_id, _, definition_id = entry.partition("=")
+            if child_id not in by_id or not definition_id:
+                raise ProofMapError("INVALID_CHILD_SPEC", f"--child-definition '{entry}' is not <child-id>=<definition-id> for one of this split's children ({', '.join(by_id)})")
+            by_id[child_id]["definitions"].append(definition_id)
         children = split_node(store, parent_id, specs, created_by=_author(created_by, root), reassign=reassign)
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.split")
@@ -1301,7 +1334,11 @@ def node_progress(
     status: str = typer.Option("", "--status", help="With --step: started, done, stuck, or needs-human (a decision only the researcher can make, named in --note)"),
     note: str = typer.Option("", "--note", help="A line about the step: what it found, why it is stuck, what the next role should do"),
     handoff: str = typer.Option("", "--handoff", help=f"Hand the work to this role ({_ROLES_HELP}) and end the turn"),
-    verdict: str = typer.Option("", "--verdict", help="The Verifier's verdict on the working proof as it stands: passed or failed, with the objections in --note (ADR-0019)"),
+    verdict: str = typer.Option("", "--verdict", help="The Verifier's verdict on the working proof as it stands: passed or failed (ADR-0019); a failed one names its --objection(s), a passing one ends each open one with --fixed"),
+    objection: list[str] = typer.Option(None, "--objection", help="With --verdict failed, repeatable: one objection, where and why; each is a proof Challenge, numbered in the verdict (ADR-0025)"),
+    objection_file: list[str] = typer.Option(None, "--objection-file", help=f"With --verdict failed, repeatable: one objection read from a file ({FILE_TEXT}), after any --objection"),
+    fixed: list[str] = typer.Option(None, "--fixed", help="With --verdict passed, repeatable: <challenge-id>=<where and why it is fixed>, one for each proof Challenge open on the node"),
+    fixed_file: list[str] = typer.Option(None, "--fixed-file", help="With --verdict passed, repeatable: <challenge-id>=<path>, the where and why read from the file"),
     attempt: str = typer.Option("", "--attempt", help="Close an abandoned line: what it tried to establish; goes with --failed-on (ADR-0019)"),
     method: str = typer.Option("", "--method", help="With --attempt: the approach"),
     failed_on: str = typer.Option("", "--failed-on", help="With --attempt: the objection or obstruction it failed on"),
@@ -1328,6 +1365,13 @@ def node_progress(
     failed_on = _text(failed_on, failed_on_file, option="--failed-on-file", given="--failed-on", **texts) or ""
     store = get_store(_root(root))
     try:
+        objections = [*(objection or []), *(_file_text(path, "--objection-file") for path in objection_file or [])]
+        endings: dict[str, str] = {}
+        for entry, from_file in [*((entry, False) for entry in fixed or []), *((entry, True) for entry in fixed_file or [])]:
+            challenge_id, _, text = entry.partition("=")
+            if not challenge_id or not text:
+                raise ProofMapError("INVALID_ENDING", f"'{entry}' is not <challenge-id>={'<path>' if from_file else '<where and why>'}")
+            endings[challenge_id] = _file_text(text, "--fixed-file") if from_file else text
         if not plan and step is None and not handoff and not verdict and not attempt and not failed_on and not coordinator and not question:
             log = work_log(store, node_id)
             if _auditing():  # an audit reads the choices made on the node and their answers, nothing else of its record
@@ -1343,7 +1387,7 @@ def node_progress(
             store, node_id, role=role or os.environ.get("PROOF_AGENT_ROLE") or None, by=_author(by, root),
             plan=plan or None, step=step, status=status or None, note=note, handoff=handoff or None,
             verdict=verdict or None, attempt=attempt or None, method=method or None, failed_on=failed_on or None, coordinator=coordinator or None,
-            question=question or None,
+            question=question or None, objections=objections or None, fixed=endings or None, audit=_auditing(),
         )
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.progress")
@@ -1462,13 +1506,15 @@ def challenge_open(
     opened_by: str = "human",
     rationale: str = "",
     rationale_file: str | None = typer.Option(None, "--rationale-file", help=_from_file("The --rationale")),
+    kind: str = typer.Option("proof", "--kind", help="proof (only this node is reworked) or statement (work stops under every node using it directly)"),
+    counterexample: str | None = typer.Option(None, "--counterexample", help="A statement Challenge's counterexample, a node of the map; an agent's needs one"),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
-    """Raise a Challenge against an already-Accepted (or Reference-reviewed) node. Ungated."""
+    """Raise a Challenge against a node's proof or its statement (ADR-0025): on any unsealed node, at once."""
     rationale = _text(rationale, rationale_file, option="--rationale-file", given="--rationale", command="challenge.open", json_output=json_output) or ""
     store = get_store(_root(root))
     try:
-        challenge = open_challenge(store, target_id, opened_by=opened_by, rationale=rationale)
+        challenge = open_challenge(store, target_id, kind=kind, counterexample=counterexample, opened_by=opened_by, rationale=rationale)
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="challenge.open")
         raise typer.Exit(code=1)
@@ -1484,6 +1530,8 @@ def challenge_list(
 ) -> None:
     store = get_store(_root(root))
     challenges = list_challenges(store, target_node_id=target_id, status=status)
+    if _auditing():  # a verdict's objections are that verdict's: an audit reads the proof afresh (ADR-0024 point 13)
+        challenges = [challenge for challenge in challenges if not challenge.verdict_id]
     if json_output:
         typer.echo(
             dump_envelope(success_envelope("challenge.list", [c.model_dump(mode="json") for c in challenges]))
@@ -1505,6 +1553,38 @@ def challenge_show(
         _emit_error(exc, json_output, command="challenge.show")
         raise typer.Exit(code=1)
     _emit_challenge(challenge, json_output, command="challenge.show")
+
+
+@challenge_app.command("withdraw")
+def challenge_withdraw(
+    challenge_id: str,
+    root: str = ROOT_OPTION,
+    reason: str = typer.Option("", "--reason", help="Why: the next role is briefed with it"),
+    reason_file: str | None = typer.Option(None, "--reason-file", help=_from_file("The --reason")),
+    by: str = typer.Option("", "--by", help=CREATED_BY_HELP),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Withdraw a Challenge with a reason (ADR-0025): your own, or as an agent any agent's; the researcher's only the researcher."""
+    reason = _text(reason, reason_file, option="--reason-file", given="--reason", command="challenge.withdraw", json_output=json_output) or ""
+    store = get_store(_root(root))
+    try:
+        challenge = withdraw_challenge(store, challenge_id, by=_author(by, root), reason=reason, audit=_auditing())
+    except ProofMapError as exc:
+        _emit_error(exc, json_output, command="challenge.withdraw")
+        raise typer.Exit(code=1)
+    _emit_challenge(challenge, json_output, command="challenge.withdraw")
+
+
+@challenge_app.command("not-a-problem")
+def challenge_not_a_problem(challenge_id: str, root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
+    """"Not a problem" on an agent's Challenge, restoring the verification it lapsed (ADR-0025) — on the proof map page.
+    Where it restores nothing, it is said instead: `proof challenge withdraw`."""
+    store = get_store(_root(root))
+    try:
+        target = require_challenge(store, challenge_id).target_node_id
+    except ProofMapError:
+        target = None
+    human_review_required(root, command="challenge.not_a_problem", kind="not_a_problem", target_id=challenge_id, node_id=target, json_output=json_output)
 
 
 @challenge_app.command("dismiss")
@@ -1542,22 +1622,17 @@ def evidence_record(
         help="The SHA-256 of the snapshot the check ran on; refused unless it is the snapshot's hash now. "
              "Omitted, the check is bound to the snapshot's hash at the moment of recording.",
     ),
+    checker: str | None = typer.Option(None, "--checker", help="What checked it, as a mark: verifier, audit or mechanical (an outside checker names itself in --run-by)"),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Record an Evidence check against a specific Candidate proof. Advisory, ungated."""
     store = get_store(_root(root))
     try:
-        check = record_evidence_check(store, candidate_proof_id, outcome, notes=notes, run_by=run_by, snapshot_sha256=snapshot_sha256)
+        check = record_evidence_check(store, candidate_proof_id, outcome, notes=notes, run_by=run_by, snapshot_sha256=snapshot_sha256, checker=checker)
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.evidence.record")
         raise typer.Exit(code=1)
     _emit_evidence_check(check, json_output, command="node.evidence.record")
-
-
-@node_evidence_app.command("review")
-def evidence_review(check_id: str, decision: str = typer.Argument(""), root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
-    """Judge an Evidence check trusted/unusable — on the proof map page (ADR-0010)."""
-    human_review_required(root, command="node.evidence.review", kind="evidence_review", target_id=check_id, node_id=None, json_output=json_output)
 
 
 node_app.add_typer(node_evidence_app, name="evidence")

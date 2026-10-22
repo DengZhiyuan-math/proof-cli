@@ -1,8 +1,8 @@
 """Review decisions as git-tracked text, reviewed by a GitHub identity (ADR-0010, issues #53/#54).
 
 Every Human Review decision on the proof map — an Acceptance, Reference
-review, Evidence review, Lightweight re-review, Challenge dismissal or
-Promote — is one JSON line in its node's `proofs/<node-id>/reviews.jsonl`,
+review, Challenge dismissal, Promote, and ADR-0025's verification, Seal and
+"not a problem" — is one JSON line in its node's `proofs/<node-id>/reviews.jsonl`,
 naming what it decided on (the Review snapshot's SHA-256, the interface,
 the pins, the Challenges it resolves). proof-cli commits that line together
 with the snapshot it decides on, as the reviewer's own git identity; once
@@ -48,13 +48,18 @@ class DecisionKind(str, Enum):
 
     acceptance = "acceptance"
     reference_review = "reference_review"
-    evidence_review = "evidence_review"
+    evidence_review = "evidence_review"  # retired by ADR-0025 with the two below: kept to read old lines, never written
     dependency_revalidation = "dependency_revalidation"
     challenge_resolution = "challenge_resolution"
     promote = "promote"
     dependent_migration = "dependent_migration"
     # a Trust rule declared, amended or retired: a standing Reference review (ADR-0014)
     trust_rule = "trust_rule"
+    # the researcher's decisions of ADR-0025: verifying a version, sealing and unsealing, and "not a problem" on an
+    # agent's Challenge where it restores a verification (points 13-16)
+    verification = "verification"
+    seal = "seal"
+    not_a_problem = "not_a_problem"
 
 
 class PinnedDependency(BaseModel):
@@ -88,6 +93,11 @@ class DecisionPayload(BaseModel):
     key_ideas_drafted_by: str | None = None
     # a trust_rule's conditions (ADR-0014): `trust_rules.TrustCondition`, as JSON; empty for a retire
     conditions: list[dict[str, Any]] = Field(default_factory=list)
+    # a true seal's covered set as the page showed it, by id: what it seals, and what its unseal removes (ADR-0025)
+    covered_nodes: list[str] = Field(default_factory=list)
+    # the complete mathematical text of each node a verification or seal is made on, digested by node id: statement,
+    # assumptions and the text of the Definitions it names, so a page that showed other words is refused (STALE_VIEW)
+    texts: dict[str, str | None] = Field(default_factory=dict)
 
 
 class ReviewEntry(BaseModel):
@@ -117,6 +127,8 @@ DECISION_ROWS: dict[tuple[DecisionKind, str], tuple[str, str]] = {
     (DecisionKind.acceptance, "reject"): ("proof_map_node", "rejected"),
     (DecisionKind.reference_review, "reference-review"): ("proof_map_node", "approved"),
     (DecisionKind.reference_review, "no-longer-callable"): ("proof_map_node", "rejected"),
+    # Evidence review, Lightweight re-review and Dependent migration, retired by ADR-0025 (#280): their old lines still
+    # verify as what they were, so history reads them, and nothing acts on them
     (DecisionKind.evidence_review, "trusted"): ("evidence_check", "trusted"),
     (DecisionKind.evidence_review, "unusable"): ("evidence_check", "unusable"),
     (DecisionKind.dependency_revalidation, "reaffirmed"): ("proof_map_node", "reaffirmed"),
@@ -128,6 +140,12 @@ DECISION_ROWS: dict[tuple[DecisionKind, str], tuple[str, str]] = {
     (DecisionKind.trust_rule, "declare"): ("trust_rule", "declare"),
     (DecisionKind.trust_rule, "amend"): ("trust_rule", "amend"),
     (DecisionKind.trust_rule, "retire"): ("trust_rule", "retire"),
+    # ADR-0025 (#279)
+    (DecisionKind.verification, "verify"): ("proof_map_node", "verified"),
+    (DecisionKind.seal, "seal-true"): ("proof_map_node", "sealed_true"),
+    (DecisionKind.seal, "seal-false"): ("proof_map_node", "sealed_false"),
+    (DecisionKind.seal, "unseal"): ("proof_map_node", "unsealed"),
+    (DecisionKind.not_a_problem, "not-a-problem"): ("challenge", "not_a_problem"),
 }
 
 

@@ -32,7 +32,7 @@ from proof_cli.proof_map import (
     list_nodes,
     open_challenge,
 )
-from proof_cli.storage import ensure_project, read_scope
+from proof_cli.storage import ensure_project, read_scope, upsert_dependency_pin
 
 
 @pytest.fixture
@@ -355,8 +355,8 @@ def _scaled_dag(root: Path, copies: int):
         I<k> (imported, Reference-reviewed) <- A<k> <- B<k> <- D<k> <- E<k> (review-needed) <- F<k>
                                      D<k-1> <-'   '-- C<k> <-'  '-- R<k> (Rejected)
                                          B<k> <- G<k>, I<k> <- H<k> <- J<k> (open claims)
-    An open Challenge on B2, B5, ..., the second gadget's I found no longer callable, and A0
-    revised and re-Accepted, so the pins on it lag.
+    An open Challenge on B2, B5, ..., the second gadget's I found no longer callable, and E0's pin
+    on D0 made on an interface D0 no longer offers (a lagging pin is no cause, ADR-0025).
 
     Stands in for the sample proof map fixture of #98 (PR #104) with `copies=n`, which isn't on
     this branch's base yet; it can replace this once both land.
@@ -388,15 +388,15 @@ def _scaled_dag(root: Path, copies: int):
         open_challenge(store, f"B{k}", opened_by="agent_b", rationale="a hypothesis may be missing")
     if copies > 1:
         decide.decide_reference_review("I1", "no-longer-callable", rationale="the source has a gap")
-    # a proof-only revision of A0: B0's and C0's pins now lag its accepted version (#23)
-    submit_proof(store, "A0", claimant_id="agent_a", scoping_rationale="r", content="proof of A0, shorter")
-    decide.decide_acceptance("A0", "accept")
+    # E0's pin on D0 names an interface D0 no longer offers: E0 reads stale, and F0 on it is blocked by that
+    pin = proof_map.get_dependency_pin(store, "E0", "D0")
+    upsert_dependency_pin(store, pin.model_copy(update={"pinned_fingerprint": "an interface D0 no longer offers"}))
     return store
 
 
 def _walk_per_node(store, node_id: str) -> str | None:
     """The derivation before #108: a fresh reachability walk for every node asked about,
-    reporting a Challenge over a stale or lagging pin."""
+    reporting a Challenge over a pin whose interface changed (a lagging one is no cause, ADR-0025)."""
     visited: set[str] = set()
     pending = [node_id]
     found = None
@@ -414,7 +414,7 @@ def _walk_per_node(store, node_id: str) -> str | None:
             return "challenged"
         for dependency_id in node.dependencies:
             pin = proof_map.get_dependency_pin(store, current_id, dependency_id)
-            if pin is not None and (not proof_map.dependency_pin_is_current(store, pin) or proof_map.dependency_pin_lags(store, pin)):
+            if pin is not None and not proof_map.dependency_pin_is_current(store, pin):
                 found = "stale"
             pending.append(dependency_id)
     return found
@@ -531,7 +531,7 @@ def _worked_map(root: Path, claims: int = 6):
         create_node(store, node_id=f"c{index}", kind="claim", statement=f"s{index}", created_by="dec-1")
         record_progress(store, f"c{index}", role="prover", by="agent_a/prover", plan=["first", "second"])
     create_node(store, node_id="top", kind="theorem", statement="t", dependencies=[f"c{index}" for index in range(claims)])
-    record_progress(store, "c1", role=None, by="coordinator", coordinator="parked: out of budget")
+    record_progress(store, "c1", role=None, by="claude-code/coordinator", aside="parked", note="out of budget", pursuit_id="p1")
     for node_id in ("c2", "c3"):
         proof = submit_proof(store, node_id, claimant_id="agent_a", scoping_rationale="r", content=f"proof of {node_id}")
         record_evidence_check(store, proof.id, "passed", run_by="prover-1/verifier", notes="no objections")
@@ -698,7 +698,8 @@ def _work_log_formatting_every_event(store, node_id: str) -> list[dict]:
         elif event.kind == "proof_map_review_requested" and event.entity_id == node_id:
             entries.append({"at": at, "kind": "review-requested", "by": payload.get("requested_by"), "version": payload.get("version"), "candidate_proof_id": payload.get("candidate_proof_id")})
         elif event.kind == "proof_map_evidence_check_recorded" and event.entity_id in proof_ids:
-            entries.append({"at": at, "kind": "evidence", "by": payload.get("run_by"), "outcome": payload.get("outcome"), "evidence_check_id": payload.get("evidence_check_id")})
+            entries.append({"at": at, "kind": "evidence", "by": payload.get("run_by"), "outcome": payload.get("outcome"), "evidence_check_id": payload.get("evidence_check_id"),
+                            "checker": payload.get("checker")})
         elif event.kind == "proof_fog_added" and node_id in (payload.get("near") or []):
             text = payload.get("text") or (fog[event.entity_id].text if event.entity_id in fog else None)
             entries.append({"at": at, "kind": "fog", "by": payload.get("created_by"), "fog_id": event.entity_id, "text": text})

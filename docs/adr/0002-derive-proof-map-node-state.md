@@ -1,6 +1,6 @@
 # Derive proof map node lifecycle state; reuse collaboration review machinery
 
-**Status**: accepted
+**Status**: accepted Amended by ADR-0025: the lifecycle table and the three axes give way to five states, each read off its own record, and four computed conclusions; there is no reject decision, and a revision request is a Challenge against the proof.
 
 A proof map node needs to expose seven lifecycle states (open, claimed, review-needed, accepted, revision requested, rejected, blocked), and the revise loop needs those states to stay consistent across repeated attempts on the same node. We considered giving `Proof map node` a stored `status` field, updated by every mutating action, but rejected it: it would be a second, denormalized source of truth alongside the claim, candidate-proof, and review records that already determine it, and every new action that touches those records would also have to remember to keep the cached field in sync.
 

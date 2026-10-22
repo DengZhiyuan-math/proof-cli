@@ -1,0 +1,217 @@
+{
+ "T0": {
+  "repo": "DengZhiyuan-math/proof-cli",
+  "number": 275,
+  "id": 5941396780,
+  "url": "https://github.com/DengZhiyuan-math/proof-cli/issues/275",
+  "body": "Tracking issue, like #193 for ADR-0021.\n\n- Decided on the map 系统状态清单与精简 (#267) and the paused map #254; recorded in ADR-0025 and the revised CONTEXT.md.\n- Only five states are kept as source facts and read by gates: Seal, Statement layer, Proof layer, Assignee, Run state. The conclusion (uncertain / true / verified true / false) is computed; a node's conclusion is never above its weakest dependency.\n- Measured by three checks: gates read only the five states and what is computed from them, parse no text and name the error they prevent (95 violations today); one fact in one place (123 stored derivable fields, 148 duplicated fields over 50 facts, 28 facts computed twice); one name for one thing (16 names still clashing).\n- Tickets, in dependency order (blocking edges are on each ticket):\n  - Core, in this repository:\n    - #276 A node's states are Seal, Statement layer, Proof layer and Assignee, and its conclusion is computed (ADR-0025)\n    - #277 Challenges carry a kind, take effect at once, and are withdrawn with a reason (ADR-0025)\n    - #278 A verdict has an id and numbered objections, and each objection's ending is recorded (ADR-0025)\n    - #279 Verify, seal and unseal are the researcher's decisions in reviews.jsonl (ADR-0025)\n    - #280 Remove Lightweight re-review, Dependent migration and Evidence review (ADR-0025)\n    - #281 Uses of dependencies, the node's assumptions and the version diff in core checks (ADR-0025, from #256, #261, #264, #266)\n    - #282 Existing projects switch to the five states once, on first open (ADR-0025, from #259)\n    - #283 Core gates read only the five states, and core names mean one thing (ADR-0025 checks 1 and 3)\n    - #284 One fact in one place in core state (ADR-0025 check 2)\n  - Agents, in zeqome/proof-agents (private):\n    - zeqome/proof-agents#46 Runs expose only the run state; the rest is records or computed (ADR-0025)\n    - zeqome/proof-agents#47 The Coordinator is always listening and is the one parser of the researcher's words (ADR-0025; proof-cli #271, #273)\n    - zeqome/proof-agents#48 Prover and Verifier work to the new proof rules (ADR-0025; proof-cli #255, #256, #258, #261, #264, #266)\n    - zeqome/proof-agents#49 A statement challenged as false is checked from both sides (ADR-0025; proof-cli #257, #269)\n    - zeqome/proof-agents#50 Agent gates read only the five states, one computation per fact, one name per thing (ADR-0025 checks 1–3)\n  - Web, in zeqome/proof-web (private):\n    - zeqome/proof-web#45 Every page shows the five states and the conclusion, the same everywhere (ADR-0025)\n    - zeqome/proof-web#46 The researcher verifies, seals and unseals with one click, after the list (ADR-0025; proof-cli #271)\n    - zeqome/proof-web#47 One input box talks to the Coordinator (ADR-0025; proof-cli #273)\n    - zeqome/proof-web#48 Pages drop the deleted operations; web gates and names follow the checks (ADR-0025 checks 1–3)",
+  "title": "ADR-0025: five states and four computed conclusions",
+  "deps": []
+ },
+ "C1": {
+  "repo": "DengZhiyuan-math/proof-cli",
+  "number": 276,
+  "id": 5941399329,
+  "url": "https://github.com/DengZhiyuan-math/proof-cli/issues/276",
+  "body": "Part of #275.\n- One core reading gives each node its Seal (unsealed / sealed true / sealed false), Statement layer (unchallenged / challenged as false / false), Proof layer (incomplete / checks passed / expert-verified) and Assignee, computed from the records that hold them, and its conclusion from the table in ADR-0025, capped by its weakest dependency (a false dependency makes the node uncertain, not false).\n- It replaces the workflow, acceptance and integrity axes: Rejected, Unverifiable, Potentially stale, Blocked and their reasons are gone; Provisional and Conditional are read off the conclusion; frontier, awaiting-decision and dropped are computed from it. Until the new decision records land (#279), an existing Acceptance or Reference review line reads as expert-verified.\n- `node show --json`, `node list --json` and `frontier` show the four node states and the conclusion; nothing else in core reads the old axes.\n- Error it prevents: two readings of one node's conclusion that disagree (today three axes plus overlays, 40 values).\n\nAcceptance criteria:\n- synthetic maps cover every row of the conclusion table and the dependency rule: a verified parent over an unverified dependency reads true and becomes verified true, with no action, when the dependency is verified; a dependency that becomes false leaves the parent uncertain;\n- no core gate or output reads workflow, acceptance or integrity;\n- the existing trust tests pass, rewritten to the new words.\n\nLocal inventory: `core-concepts.tsv` concepts 1–15 (40 values: 25 computed, 8 states, 7 deleted).",
+  "title": "A node's states are Seal, Statement layer, Proof layer and Assignee, and its conclusion is computed (ADR-0025)",
+  "deps": []
+ },
+ "C2": {
+  "repo": "DengZhiyuan-math/proof-cli",
+  "number": 277,
+  "id": 5941399539,
+  "url": "https://github.com/DengZhiyuan-math/proof-cli/issues/277",
+  "body": "Part of #275.\n- A Challenge records its kind (statement or proof), who raised it, the version it targets and why. A proof Challenge returns Proof layer to incomplete; a statement Challenge sets Statement layer to challenged as false and, raised by an agent, must link a counterexample, itself an ordinary proposition. Anyone may raise one on any unsealed node; no review of the Challenge first.\n- Withdrawal, with a reason: the researcher withdraws their own; any agent withdraws any agent's; no agent withdraws the researcher's. The researcher's \"not a problem\" withdraws an agent's Challenge (restoring a verification is #279's click).\n- A Challenge follows a restatement to the new version; a proof gap is superseded by the restatement, a counterexample follows the statement.\n- Which nodes are stopped by a statement Challenge is computed: everything under each direct user of the challenged node, and nothing beside it.\n- Replaces Challenge-on-Accepted-only, researcher-only resolution and the stored dismissed status; the four-state refutation relation and its pauses are not built.\n\nAcceptance criteria:\n- a synthetic A ← U1 ← {N, S}, A ← U2: N challenged as false stops U1's subtree including S, leaves U2 running, and A reads uncertain;\n- an agent cannot withdraw the researcher's Challenge; any agent can withdraw another agent's, and the reason enters the next briefing;\n- a sealed node refuses an agent's Challenge.\n\nLocal inventory: `core-concepts.tsv` concept 21 (6 values); `other-values.tsv` concepts 47–51 and 53 (13 values, 9 deleted); `gates.tsv` layer=core family=legacy-fallback (3).\nBlocked by: #276",
+  "title": "Challenges carry a kind, take effect at once, and are withdrawn with a reason (ADR-0025)",
+  "deps": [
+   "C1:422"
+  ]
+ },
+ "C3": {
+  "repo": "DengZhiyuan-math/proof-cli",
+  "number": 278,
+  "id": 5941405357,
+  "url": "https://github.com/DengZhiyuan-math/proof-cli/issues/278",
+  "body": "Part of #275.\n- A Verifier verdict carries a stable id; its objections are numbered inside it and bound to the version read. Each objection ends in one of three ways, recorded in the work log: fixed (the passing verdict says where and why), withdrawn (with a reason), superseded by a restatement (recorded by the system).\n- A passing verdict that omits an ending for any objection still open on the previous version is refused. An audit records no endings; old objections are left to the next ordinary Verifier.\n- Check records carry a structured marker for who checked and what (Verifier, audit, mechanical check), so Proof layer and audit outcomes are computed without reading notes.\n- Error it prevents: a passing verdict that silently drops an objection; an audit outcome read off free text.\n\nAcceptance criteria:\n- recording a passing verdict without an ending for an open objection fails with a named error; with one, it passes and the objection reads fixed;\n- Proof layer reads checks passed only from a structured passing verdict on the current inputs;\n- `node show --json` lists each objection with its ending.\n\nLocal inventory: `other-values.tsv` concept 54 (1 value); `core-concepts.tsv` concepts 17 and 20 (8 values); `gates.tsv` rows whose note names audit or verdict text (counted in layer=core family=other).\nBlocked by: #277",
+  "title": "A verdict has an id and numbered objections, and each objection's ending is recorded (ADR-0025)",
+  "deps": [
+   "C2:201"
+  ]
+ },
+ "C4": {
+  "repo": "DengZhiyuan-math/proof-cli",
+  "number": 279,
+  "id": 5941408039,
+  "url": "https://github.com/DengZhiyuan-math/proof-cli/issues/279",
+  "body": "Part of #275.\n- New decision lines: verify (local node or imported result), seal true, seal false, unseal, and \"not a problem\" when it restores a verification. Each names who, when, which version and the explanation; the commit author is the researcher. Agents never record one; a project that is not a git repo, or a failed commit, records it locally marked uncommitted.\n- Seal true seals everything it rests on: only the directly sealed node is recorded, the covered set is computed, and unseal releases the same set. Seal false seals only the node. Sealed nodes are not challenged by agents and not audited; the seal's explanation goes into every later briefing.\n- A verification counts only for the version it verified; a node may be verified above unverified dependencies (#276 caps it); a dependency that becomes false voids it.\n- Replaces accept / revision requested / reject and the Reference review outcomes (reviewed → verify; no longer callable → seal false). Promote and Trust rules stay.\n\nAcceptance criteria:\n- every new line round-trips through `reviews.jsonl` and is refused from the CLI and from any agent;\n- sealing true over a three-node chain records one line, reads all three sealed, and unsealing releases all three;\n- a changed version reads unverified with no action.\n\nLocal inventory: `human-operations.tsv` op_disposition=改为 (3 keys, 8 rows); `new-operations.tsv` (8 actions, 5 take effect only on a click); `core-concepts.tsv` concept 16 (14 values) and concept 3 (5 values).\nBlocked by: #276, #277",
+  "title": "Verify, seal and unseal are the researcher's decisions in reviews.jsonl (ADR-0025)",
+  "deps": [
+   "C1:201",
+   "C2:201"
+  ]
+ },
+ "C5": {
+  "repo": "DengZhiyuan-math/proof-cli",
+  "number": 280,
+  "id": 5941408520,
+  "url": "https://github.com/DengZhiyuan-math/proof-cli/issues/280",
+  "body": "Part of #275.\n- Delete the three operations, the pin-lag reading behind Potentially stale, and Unverifiable. Their old records stay as history; nothing reads them.\n- A dependency that moved or changed reads through #276 (the dependent's Proof layer and conclusion), not through a separate revalidation.\n\nAcceptance criteria:\n- no command, service function or gate for the three operations remains; their error codes are unregistered;\n- an existing project with such records loads and shows them in history only.\n\nLocal inventory: `human-operations.tsv` op_disposition=删除 (3 keys, 5 rows); `gates.tsv` layer=core family=deleted-operation (10); `core-concepts.tsv` concepts 18, 19, 23 (11 values, 7 deleted).\nBlocked by: #279",
+  "title": "Remove Lightweight re-review, Dependent migration and Evidence review (ADR-0025)",
+  "deps": [
+   "C4:201"
+  ]
+ },
+ "C6": {
+  "repo": "DengZhiyuan-math/proof-cli",
+  "number": 281,
+  "id": 5941408844,
+  "url": "https://github.com/DengZhiyuan-math/proof-cli/issues/281",
+  "body": "Part of #275.\n- The mechanical check reads the `Uses of dependencies` section of `proof.tex`: one `depuse` entry per dependency, each application with Substitution, Premises, Conclusion and Constants; it checks structure and coverage only. Recording a verdict re-checks coverage against the same `proof.tex`. Without a covering section, Proof layer cannot reach checks passed.\n- The node's own assumptions go into the scaffolded `proof.tex` and the mechanical check.\n- The check marks other nodes' ids found in a statement, as a hint for the Verifier; it blocks nothing.\n- What changed between two versions is computed from the two snapshots, never declared.\n\nAcceptance criteria:\n- a synthetic proof missing one dependency's entry fails the check and cannot record a passing verdict; adding it passes;\n- a statement naming another node's id is flagged and still accepted;\n- the diff between two synthetic snapshots names the changed parts.\n\nLocal inventory: `other-values.tsv` concepts 46 and 52 (2 values).\nBlocked by: #278",
+  "title": "Uses of dependencies, the node's assumptions and the version diff in core checks (ADR-0025, from #256, #261, #264, #266)",
+  "deps": [
+   "C3:201"
+  ]
+ },
+ "C7": {
+  "repo": "DengZhiyuan-math/proof-cli",
+  "number": 282,
+  "id": 5941409156,
+  "url": "https://github.com/DengZhiyuan-math/proof-cli/issues/282",
+  "body": "Part of #275.\n- On first open, in the one-shot pattern core already uses (a `project_meta` flag set in the same transaction, like the review-history and side-document migrations), convert by the rules of #259: Accepted, Reference-reviewed and Trust-rule-covered → expert-verified (read, `reviews.jsonl` not rewritten), nothing sealed; Rejected with nothing resting on it → history, otherwise a researcher Challenge carrying the original reason; open Challenges → Challenges of the same raiser, text kept, kind left for the Coordinator (#277's stop applies until classified); no longer callable → sealed false; passing verdicts from before → do not count, Proof layer incomplete; old objections go into the briefing as text, not gated.\n- Before converting, keep one copy of the database; afterwards write one work-log entry with what changed and how many. Runs from before the switch read as interrupted, assignees released, drafts and work log kept.\n- No dedicated migration flow and no confirmation step.\n\nAcceptance criteria:\n- a synthetic old project with each case converts as listed, once; a second open changes nothing;\n- the copy exists and the entry's counts match the conversions.\n\nLocal inventory: `core-concepts.tsv` concepts 2, 3, 21 (lands_in column).\nBlocked by: #277, #278, #279, #280",
+  "title": "Existing projects switch to the five states once, on first open (ADR-0025, from #259)",
+  "deps": [
+   "C2:201",
+   "C3:201",
+   "C4:201",
+   "C5:201"
+  ]
+ },
+ "C8": {
+  "repo": "DengZhiyuan-math/proof-cli",
+  "number": 283,
+  "id": 5941410068,
+  "url": "https://github.com/DengZhiyuan-math/proof-cli/issues/283",
+  "body": "Part of #275.\n- Every remaining core gate reads only the five states and values computed from them, parses no descriptive text, and its error code says which error it prevents.\n- Node and text authorship, read by several gates, is treated as structure, like node kind.\n- CLI output, error codes and JSON keys use the CONTEXT.md names; the clashing names with core surfaces are renamed.\n- The 7 one-ending-per-record gates are kept (they read run records and prevent a double ending).\n\nAcceptance criteria:\n- `count.py` over a refreshed inventory shows no core violation in family=other;\n- no CLI output uses a name CONTEXT.md lists under _Avoid_.\n\nLocal inventory: `gates.tsv` layer=core family=other (21: 19 read a non-state value, 1 reads text, 3 name no error); `names.tsv` survives=yes with a CLI, reviews.jsonl or CONTEXT.md surface (13).\nBlocked by: #279, #280, #282",
+  "title": "Core gates read only the five states, and core names mean one thing (ADR-0025 checks 1 and 3)",
+  "deps": [
+   "C4:201",
+   "C5:201",
+   "C7:201"
+  ]
+ },
+ "C9": {
+  "repo": "DengZhiyuan-math/proof-cli",
+  "number": 284,
+  "id": 5941410757,
+  "url": "https://github.com/DengZhiyuan-math/proof-cli/issues/284",
+  "body": "Part of #275.\n- Stop writing stored copies of what can be computed: fields whose disposition is computed or deleted are no longer written; fields moved out of proof state leave it.\n- For each duplicated fact, one carrier is the source and readers read it; a record keeps only what happened.\n- Each fact computed in two places is computed once in core, and the other side calls it.\n\nAcceptance criteria:\n- `count.py` shows no stored-but-derivable field with disposition computed or deleted, and every fact_key with one writer;\n- the computed-twice pairs that involve core are down to one computation each.\n\nLocal inventory: `fields.tsv` stored_but_derivable=yes (123: 88 records, 16 deleted, 13 moved out, 6 computed) and duplicate=yes (148 over 50 fact_keys); `computed-twice.tsv` rows naming proof-cli (11 of 28).\nBlocked by: #276, #280",
+  "title": "One fact in one place in core state (ADR-0025 check 2)",
+  "deps": [
+   "C1:201",
+   "C5:201"
+  ]
+ },
+ "A1": {
+  "repo": "zeqome/proof-agents",
+  "number": 46,
+  "id": 5941411317,
+  "url": "https://github.com/zeqome/proof-agents/issues/46",
+  "title": "Runs expose only the run state; the rest is records or computed (ADR-0025)",
+  "deps": [
+   "C1:201"
+  ]
+ },
+ "A2": {
+  "repo": "zeqome/proof-agents",
+  "number": 47,
+  "id": 5941411701,
+  "url": "https://github.com/zeqome/proof-agents/issues/47",
+  "title": "The Coordinator is always listening and is the one parser of the researcher's words (ADR-0025; proof-cli #271, #273)",
+  "deps": [
+   "A1:201",
+   "C2:201",
+   "C4:201"
+  ]
+ },
+ "A3": {
+  "repo": "zeqome/proof-agents",
+  "number": 48,
+  "id": 5941412487,
+  "url": "https://github.com/zeqome/proof-agents/issues/48",
+  "title": "Prover and Verifier work to the new proof rules (ADR-0025; proof-cli #255, #256, #258, #261, #264, #266)",
+  "deps": [
+   "C3:201",
+   "C6:201"
+  ]
+ },
+ "A4": {
+  "repo": "zeqome/proof-agents",
+  "number": 49,
+  "id": 5941412981,
+  "url": "https://github.com/zeqome/proof-agents/issues/49",
+  "title": "A statement challenged as false is checked from both sides (ADR-0025; proof-cli #257, #269)",
+  "deps": [
+   "A1:201",
+   "C2:201"
+  ]
+ },
+ "A5": {
+  "repo": "zeqome/proof-agents",
+  "number": 50,
+  "id": 5941413605,
+  "url": "https://github.com/zeqome/proof-agents/issues/50",
+  "title": "Agent gates read only the five states, one computation per fact, one name per thing (ADR-0025 checks 1–3)",
+  "deps": [
+   "A1:201",
+   "A2:201",
+   "A3:201",
+   "A4:201"
+  ]
+ },
+ "W1": {
+  "repo": "zeqome/proof-web",
+  "number": 45,
+  "id": 5941414573,
+  "url": "https://github.com/zeqome/proof-web/issues/45",
+  "title": "Every page shows the five states and the conclusion, the same everywhere (ADR-0025)",
+  "deps": [
+   "C1:201",
+   "A1:201"
+  ]
+ },
+ "W2": {
+  "repo": "zeqome/proof-web",
+  "number": 46,
+  "id": 5941415215,
+  "url": "https://github.com/zeqome/proof-web/issues/46",
+  "title": "The researcher verifies, seals and unseals with one click, after the list (ADR-0025; proof-cli #271)",
+  "deps": [
+   "C4:201",
+   "W1:201"
+  ]
+ },
+ "W3": {
+  "repo": "zeqome/proof-web",
+  "number": 47,
+  "id": 5941415905,
+  "url": "https://github.com/zeqome/proof-web/issues/47",
+  "title": "One input box talks to the Coordinator (ADR-0025; proof-cli #273)",
+  "deps": [
+   "A2:201",
+   "W1:201"
+  ]
+ },
+ "W4": {
+  "repo": "zeqome/proof-web",
+  "number": 48,
+  "id": 5941416502,
+  "url": "https://github.com/zeqome/proof-web/issues/48",
+  "title": "Pages drop the deleted operations; web gates and names follow the checks (ADR-0025 checks 1–3)",
+  "deps": [
+   "C5:201",
+   "W1:201",
+   "W2:201"
+  ]
+ }
+}

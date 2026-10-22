@@ -452,13 +452,14 @@ def test_challenge_open_requires_no_confirmation(tmp_path: Path):
     assert payload["data"]["status"] == "open"
 
 
-def test_challenge_open_against_unaccepted_node_fails(tmp_path: Path):
+def test_challenge_open_against_an_unaccepted_node_is_raised_at_once(tmp_path: Path):
+    # ADR-0025 point 6: anyone may raise one on any unsealed node, Accepted or not, with no review first
     runner.invoke(app, ["node", "create", "lem_1", "lemma", "Base lemma", "--root", str(tmp_path)])
 
     result = runner.invoke(app, ["challenge", "open", "lem_1", "--root", str(tmp_path), "--json"])
-    assert result.exit_code != 0
+    assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
-    assert payload["error"]["code"] == "TARGET_NOT_ACCEPTED"
+    assert (payload["data"]["status"], payload["data"]["kind"]) == ("open", "proof")
 
 
 def test_challenge_show_human_readable(tmp_path: Path):
@@ -763,18 +764,6 @@ def test_node_evidence_record_invalid_outcome_json_error(tmp_path: Path):
     assert payload["error"]["code"] == "INVALID_OUTCOME"
 
 
-def test_node_evidence_review_never_touches_acceptance_state(tmp_path: Path):
-    proof_id = _create_claimed_and_submitted(tmp_path)
-    record = runner.invoke(
-        app, ["node", "evidence", "record", proof_id, "passed", "--root", str(tmp_path), "--json"]
-    )
-    check_id = json.loads(record.stdout)["data"]["id"]
-    researcher(load_project(tmp_path)).decide_evidence_review(check_id, "trusted")
-
-    show = runner.invoke(app, ["node", "show", "clm_1", "--root", str(tmp_path), "--json"])
-    assert json.loads(show.stdout)["data"]["acceptance_state"] == "unreviewed"
-
-
 def test_verify_accept_and_reject_commands_no_longer_exist(tmp_path: Path):
     result = runner.invoke(app, ["verify", "accept", "thm_x", "--root", str(tmp_path)])
     assert result.exit_code != 0
@@ -787,10 +776,7 @@ HUMAN_ONLY_COMMANDS = [
     ["node", "review", "clm_1", "accept"],
     ["node", "review", "clm_1", "reject"],
     ["node", "review", "ref_1", "reference-review"],
-    ["node", "revalidate", "clm_1", "lem_base"],
     ["node", "promote", "clm_1"],
-    ["node", "migrate-dependents", "ref_1", "ref_2"],
-    ["node", "evidence", "review", "chk_1", "trusted"],
     ["node", "release", "clm_1", "--force", "--reason", "stuck"],
     ["challenge", "dismiss", "ch_1"],
     # `reference review` and `obligation resolve` are gone, not refused (ADR-0012): test_legacy_trust_retired.py
@@ -829,16 +815,6 @@ def test_a_bare_human_only_command_is_a_clean_human_review_required(tmp_path: Pa
     error = json.loads(result.stdout)["error"]
     assert error["code"] == "HUMAN_REVIEW_REQUIRED"
     assert error["url"].endswith("/#/node/clm_1")
-
-
-def test_migrate_dependents_points_at_the_page_of_the_project_proof_root_names(tmp_path: Path, monkeypatch):
-    """PR #77 review: with PROOF_ROOT set, the refusal must still carry the project's page URL."""
-    runner.invoke(app, ["init", "--root", str(tmp_path)])
-    monkeypatch.setenv("PROOF_ROOT", str(tmp_path))
-    monkeypatch.chdir(tmp_path.parent)
-    result = runner.invoke(app, ["node", "migrate-dependents", "ref_1", "ref_2", "--json"])
-    error = json.loads(result.stdout)["error"]
-    assert error["code"] == "HUMAN_REVIEW_REQUIRED" and error["url"].startswith("http://localhost:")
 
 
 # -- an Evidence check binds a snapshot hash, and node show says whether it still matches (PR #147) --------

@@ -146,7 +146,7 @@ class SiblingCitation(BaseModel):
 
     node_id: str
     source_version: str | None
-    explicit_state: str  # unreviewed, reviewed, unverifiable, no-longer-callable: never trusted-by-rule
+    explicit_state: str  # unreviewed, reviewed, no-longer-callable: never trusted-by-rule
 
 
 def condition_holds(condition: TrustCondition, *, source_version: str | None, reference: ReferenceRecord, siblings: list[SiblingCitation]) -> bool:

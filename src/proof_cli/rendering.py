@@ -389,12 +389,31 @@ def _work_log_body(entry: dict) -> str:
         return f"turn {entry.get('turn')} (job {entry.get('job')}" + (f", session {entry['session_id']}" if entry.get("session_id") else "") + ")"
     if kind == "handoff":
         return f"handed off to {entry.get('to')}" + (f" — {entry['note']}" if entry.get("note") else "")
-    if kind == "verdict":
-        return f"verifier: {entry.get('outcome')}" + (f" — {entry['note']}" if entry.get("note") else "")
+    if kind == "verdict":  # its objections, numbered, and on a pass how many it fixed (ADR-0025 points 8-9)
+        raised = "; ".join(f"{objection['n']}. {objection['text']}" for objection in entry.get("objections") or [])
+        fixed = len(entry.get("fixed") or [])
+        return (f"verifier: {entry.get('outcome')}" + (" (audit)" if entry.get("checker") == "audit" else "")
+                + (f" — {entry['note']}" if entry.get("note") else "") + (f" — objections: {raised}" if raised else "")
+                + (f" — fixed {fixed} objection(s)" if fixed else ""))
+    if kind == "challenge":  # ADR-0025 point 8: against what, which objection of which verdict, why
+        what = f"objection {entry['objection']} of verdict {entry['verdict_id']}" if entry.get("verdict_id") else f"Challenge against the {entry.get('against') or 'node'}"
+        return f"{what} ({entry.get('challenge_id')}): {entry.get('rationale')}" + (f" — counterexample {entry['counterexample_id']}" if entry.get("counterexample_id") else "")
+    if kind == "challenge-withdrawn":
+        return f"withdrew {entry.get('challenge_id')} — {entry.get('reason')}"
+    if kind in ("verified", "sealed", "unsealed", "not-a-problem"):  # the researcher's decisions (ADR-0025 point 16), from reviews.jsonl
+        what = {"verified": "verified", "unsealed": "unsealed", "not-a-problem": f"not a problem: {entry.get('challenge_id')}"}.get(
+            kind, "sealed " + str(entry.get("decision", "")).removeprefix("seal-"))
+        return what + (f" — {entry['note']}" if entry.get("note") else "")
     if kind == "attempt":
         return f"attempt: {entry.get('goal')}" + (f" ({entry['method']})" if entry.get("method") else "") + f" failed on {entry.get('failed_on')}"
     if kind == "coordinator":
         return f"coordinator: {entry.get('note')}"
+    if kind == "aside":  # a Coordinator set the node aside (ADR-0025 point 1): how, and why
+        return f"coordinator: set aside {entry.get('how')}" + (f" — {entry['reason']}" if entry.get("reason") else "")
+    if kind == "ending":  # how a node run ended (ADR-0025 point 1): an audit's says so, and why its verdict went unrecorded
+        how = "stopped for a human decision" if entry.get("how") == "needs-human" else entry.get("how")
+        return (f"run {how}" + (" (audit)" if entry.get("audit") else "") + (f" — {entry['reason']}" if entry.get("reason") else "")
+                + (f"; its verdict was not recorded on the snapshot: {entry['unrecorded']}" if entry.get("unrecorded") else ""))
     if kind == "question":  # a Standing question (ADR-0021): the choice made, open until the researcher answers
         return f"chose {entry.get('question')} ({entry.get('id')})"
     if kind == "answer":
@@ -427,6 +446,8 @@ def render_work_log_entry(node_id: str, entry: dict) -> str:
         body = f"verdict {entry.get('outcome')}" + (f" — {entry['note']}" if entry.get("note") else "")
     elif entry.get("kind") == "coordinator":  # no role: the Coordinator holds no node and takes no turn (ADR-0019 point 18)
         return f"coordinator on {node_id}: {entry.get('note')}"
+    elif entry.get("kind") == "aside":  # no role either: what a Coordinator set aside, how and why
+        return f"coordinator on {node_id}: " + _work_log_body(entry).removeprefix("coordinator: ")
     else:
         body = _work_log_body(entry)
     return f"{entry.get('role')} on {node_id}: {body}"

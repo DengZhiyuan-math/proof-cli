@@ -31,7 +31,7 @@ from proof_cli.collaboration import (
     upsert_contributor,
 )
 from proof_cli.authority import list_authority_warnings, list_decisions
-from proof_cli.commands import cmd_review_decide, cmd_review_request
+from proof_cli.commands import cmd_review_request
 from proof_cli.exchange import export_exchange_bundle, import_exchange_bundle
 from proof_cli.proof_map import (
     claim_node,
@@ -39,7 +39,6 @@ from proof_cli.proof_map import (
     get_acceptance_state,
     get_workflow_state,
     open_challenge,
-    record_evidence_check,
 )
 from proof_cli.storage import (
     REVIEW_HISTORY_MIGRATED_KEY,
@@ -335,22 +334,15 @@ def test_saving_collaboration_state_cannot_touch_review_history(tmp_path: Path):
 # -- generic `proof review` commands can't reach trust-bearing reviews --------
 
 
-def test_generic_review_decide_refuses_evidence_and_revalidation_records(tmp_path: Path):
+def test_nothing_trust_bearing_enters_the_generic_review_history(tmp_path: Path):
     from proof_cli.authority import AuthorityError
 
     store = ensure_project(tmp_path)
-    proof = _submitted_claim(store, "clm_1")
-    check = record_evidence_check(store, proof.id, "passed")
-    evidence_review = researcher(store).decide_evidence_review(check.id, "trusted")
-
-    with pytest.raises(ValueError, match="can't be re-decided"):
-        cmd_review_decide(evidence_review.id, "unusable", root=tmp_path)
-    # and nothing trust-bearing enters the generic history in the first place
-    with pytest.raises(AuthorityError):
+    _submitted_claim(store, "clm_1")
+    with pytest.raises(AuthorityError):  # a retired kind (ADR-0025) no more than any other
         collaboration_module.record_decided_review(
             store, "proof_map_node", "clm_1", ReviewGovernanceState.reaffirmed, reviewer_id="agent", kind=ReviewRecordKind.dependency_revalidation
         )
-    assert [row["decision"] for row in list_decisions(store) if row["id"] == evidence_review.id] == ["trusted"]
 
 
 def test_exchange_import_never_revokes_or_forges_a_local_decision(tmp_path: Path):
@@ -390,11 +382,11 @@ def test_exchange_import_never_revokes_or_forges_a_local_decision(tmp_path: Path
 def _migrated_but_unsigned(store, node_id: str, review_id: str, decision: ReviewGovernanceState) -> None:
     """A JSON-era decision survives both migrations intact, into reviews.jsonl
     (ADR-0010). A legacy Reject keeps the node terminal; an approval of a node
-    that never had a Candidate proof describes nothing, so it reads
-    `unverifiable` rather than accepted."""
+    that never had a Candidate proof describes nothing, so it reads as none
+    (`unreviewed`, ADR-0025) rather than accepted."""
     record = next(record for record in list_review_records(store) if record.id == review_id)
     assert (record.object_id, record.decision) == (node_id, decision)
-    expected = "rejected" if decision == ReviewGovernanceState.rejected else "unverifiable"
+    expected = "rejected" if decision == ReviewGovernanceState.rejected else "unreviewed"
     assert get_acceptance_state(store, node_id) == expected
     assert any(row["id"] == review_id and row["migrated"] for row in list_decisions(store))
 
@@ -560,8 +552,8 @@ def test_a_malformed_review_record_in_json_is_warned_about_not_fatal(tmp_path: P
         json.dumps({"review_records": [bad, legitimate] if pre_review_history else [bad]})
     )
 
-    # the legitimate legacy approval migrates, and (unsigned) reads unverifiable
-    expected = "unverifiable" if pre_review_history else "unreviewed"
+    # the legitimate legacy approval migrates, and (unsigned) describes nothing: it reads as none either way
+    expected = "unreviewed"
     assert get_acceptance_state(store, "clm_1") == expected
     assert get_acceptance_state(store, "clm_1") == expected
     if pre_review_history:

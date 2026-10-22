@@ -88,15 +88,6 @@ def test_a_snapshot_without_the_verifier_s_pass_is_not_provisional(tmp_path: Pat
     assert "lem" not in _frontier(store)
 
 
-def test_a_verifier_check_the_researcher_found_unusable_does_not_make_provisional(tmp_path: Path):
-    store = _parent_on_claim(tmp_path)
-    check = _passed_by_verifier(store, "clm")
-
-    researcher(store).decide_evidence_review(check.id, "unusable")
-
-    assert not is_provisional(store, "clm")
-
-
 def test_accepting_bottom_up_clears_conditional_and_makes_the_parent_s_decision_possible(tmp_path: Path):
     store = _parent_on_claim(tmp_path)
     _passed_by_verifier(store, "clm")
@@ -272,7 +263,7 @@ def test_a_citation_found_no_longer_callable_makes_the_snapshots_resting_on_it_p
     assert not is_provisional(store, "mid")
 
 
-def test_an_imported_result_whose_review_no_longer_counts_is_not_provisional(tmp_path: Path):
+def test_an_imported_result_whose_review_no_longer_counts_reads_as_never_reviewed(tmp_path: Path):
     import json
 
     from proof_cli.proof_map import get_reference_review_state
@@ -284,10 +275,10 @@ def test_an_imported_result_whose_review_no_longer_counts_is_not_provisional(tmp
     line = json.loads(path.read_text())
     line["payload"]["interface_fingerprint"] = "made on something else"  # a decision that no longer binds this node
     path.write_text(json.dumps(line) + "\n")
-    assert get_reference_review_state(store, "ref") == "unverifiable"
+    assert get_reference_review_state(store, "ref") == "unreviewed"
 
-    # the researcher has decided on it: what stands now is theirs to settle, not an unreviewed citation
-    assert not is_provisional(store, "ref")
+    # a decision that no longer counts reads as none (ADR-0025): a citation not yet reviewed, Provisional as any is
+    assert is_provisional(store, "ref")
 
 
 def test_a_node_on_a_provisional_dependency_stays_off_the_frontier_while_claimed_or_awaiting_a_decision(tmp_path: Path):

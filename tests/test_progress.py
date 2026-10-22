@@ -196,20 +196,22 @@ def test_a_verdict_is_bound_to_the_working_inputs_as_they_stand(tmp_path: Path):
     store = ensure_project(tmp_path)
     create_node(store, node_id="N", kind="claim", statement="a claim")
     before = vault.read_working_snapshot(store.root, "N", Medium.latex).digest()
-    first = record_progress(store, "N", role="verifier", by="claude-code", verdict="failed", note="1. step 2 appeals to Lemma L for a bound L does not give")
+    first = record_progress(store, "N", role="verifier", by="claude-code", verdict="failed", note="one gap",
+                            objections=["step 2 appeals to Lemma L for a bound L does not give"])
     assert first["kind"] == "verdict" and first["outcome"] == "failed" and first["inputs_sha256"] == before
-    assert first["role"] == "verifier" and first["by"] == "claude-code" and first["note"].startswith("1. step 2")
-    assert set(first) == {"kind", "role", "by", "outcome", "note", "inputs_sha256", "node_id", "at"}
+    assert first["role"] == "verifier" and first["by"] == "claude-code" and first["objections"][0]["text"].startswith("step 2")
+    assert set(first) == {"kind", "id", "role", "by", "outcome", "note", "inputs_sha256", "checker", "objections", "node_id", "at"}
     with vault.working_proof_path(store.root, "N").open("a", encoding="utf-8") as handle:
         handle.write("% the bound is now justified\n")
     after = vault.read_working_snapshot(store.root, "N", Medium.latex).digest()
     assert after != before
-    second = record_progress(store, "N", role="verifier", by="claude-code", verdict="passed")
+    second = record_progress(store, "N", role="verifier", by="claude-code", verdict="passed",
+                             fixed={first["objections"][0]["challenge_id"]: "the bound is now justified, after step 2"})
     assert second["inputs_sha256"] == after and second["note"] == ""
     assert [entry["outcome"] for entry in verdicts(store, "N")] == ["failed", "passed"]  # newest last
     newest = latest_verdict(store, "N")
     assert newest is not None and newest["outcome"] == "passed" and newest["inputs_sha256"] == after and "at" in newest
-    assert [entry["kind"] for entry in work_log(store, "N")] == ["verdict", "verdict"]
+    assert [entry["kind"] for entry in work_log(store, "N")] == ["challenge", "verdict", "verdict"]  # the objection is a Challenge
 
 
 def test_a_node_without_verdicts_has_none(tmp_path: Path):
@@ -256,7 +258,7 @@ def test_an_unreadable_node_folder_leaves_the_verdicts_hash_null_rather_than_ref
         raise OSError(13, "Permission denied", str(root / "proofs" / node_id))
 
     monkeypatch.setattr(proof_map, "read_working_snapshot", unreadable)
-    entry = record_progress(store, "N", role="verifier", by="claude-code", verdict="failed", note="1. nothing could be read")
+    entry = record_progress(store, "N", role="verifier", by="claude-code", verdict="failed", objections=["nothing could be read"])
     assert entry["outcome"] == "failed" and entry["inputs_sha256"] is None
     assert latest_verdict(store, "N")["inputs_sha256"] is None
 
@@ -310,15 +312,16 @@ def test_the_cli_records_a_verdict_and_an_attempt_and_shows_them_in_the_work_log
     _data(_run(tmp_path, "node", "create", "N", "claim", "a claim", "--json"))
     verifier = {"PROOF_AGENT_ROLE": "verifier", "PROOF_AGENT_NAME": "claude-code"}
     prover = {"PROOF_AGENT_ROLE": "prover", "PROOF_AGENT_NAME": "claude-code"}
-    verdict = _data(_run(tmp_path, "node", "progress", "N", "--verdict", "failed", "--note", "1. step 3 cites nothing", "--json", env=verifier))
+    verdict = _data(_run(tmp_path, "node", "progress", "N", "--verdict", "failed", "--note", "1. step 3 cites nothing",
+                         "--objection", "step 3 cites nothing", "--json", env=verifier))
     assert verdict["kind"] == "verdict" and verdict["outcome"] == "failed" and verdict["note"] == "1. step 3 cites nothing"
     assert verdict["inputs_sha256"] == vault.working_inputs_digest(tmp_path, "N", Medium.latex) and verdict["role"] == "verifier"
     attempt = _data(_run(tmp_path, "node", "progress", "N", "--attempt", "step 3 directly", "--method", "a compactness argument", "--failed-on", "the space is not compact", "--json", env=prover))
     assert attempt == {**attempt, "kind": "attempt", "role": "prover", "by": "claude-code", "goal": "step 3 directly", "method": "a compactness argument", "failed_on": "the space is not compact"}
-    passed = _run(tmp_path, "node", "progress", "N", "--verdict", "passed", env=verifier)
+    passed = _run(tmp_path, "node", "progress", "N", "--verdict", "passed", "--fixed", f"{verdict['objections'][0]['challenge_id']}=step 3 cites Lemma 2", env=verifier)
     assert passed.exit_code == 0 and passed.output.strip() == "verifier on N: verdict passed"
     log = _data(_run(tmp_path, "node", "progress", "N", "--json"))
-    assert [entry["kind"] for entry in log] == ["verdict", "attempt", "verdict"]
+    assert [entry["kind"] for entry in log] == ["challenge", "verdict", "attempt", "verdict"]
     shown = " ".join(_run(tmp_path, "node", "progress", "N").output.split())  # Rich wraps a long line; the words are what count
     assert "verifier: failed — 1. step 3 cites nothing" in shown
     assert "attempt: step 3 directly (a compactness argument) failed on the space is not compact" in shown
@@ -405,12 +408,12 @@ def test_the_gate_is_one_digest_given_once_and_the_newest_verdict_must_be_the_pa
                 ["--gated-by", passed["inputs_sha256"], "--gated-by", passed["inputs_sha256"]]):  # given once: an equal repeat is a repeat
         result = _run(tmp_path, "node", "request-review", "N", "--rationale", "r", *bad, "--json")
         assert result.exit_code == 1 and json.loads(result.output)["error"]["code"] == "GATE_MALFORMED", bad
-    record_progress(store, "N", role="verifier", by="claude-code", verdict="failed", note="1. step 2 is unjustified")  # same files, newer verdict
+    gap = record_progress(store, "N", role="verifier", by="claude-code", verdict="failed", objections=["step 2 is unjustified"])  # same files, newer
     with pytest.raises(ProofMapError) as refused:
         request_review(store, "N", requested_by="claude-code", rationale="r", gated_by=passed["inputs_sha256"])
     assert refused.value.code == "VERDICT_STALE" and refused.value.details["newest_verdict"]["outcome"] == "failed"
     assert not (tmp_path / "proofs" / "N" / "snapshots").exists() or not any((tmp_path / "proofs" / "N" / "snapshots").iterdir())
-    again = record_progress(store, "N", role="verifier", by="claude-code", verdict="passed")
+    again = record_progress(store, "N", role="verifier", by="claude-code", verdict="passed", fixed={gap["objections"][0]["challenge_id"]: "step 2 cites L"})
     result = _run(tmp_path, "node", "request-review", "N", "--rationale", "r", "--gated-by", again["inputs_sha256"], "--json")
     assert result.exit_code == 0, result.output
 
@@ -434,7 +437,7 @@ def test_a_failed_verdict_committed_while_the_request_is_made_is_seen_on_the_wri
     def transaction_after_someone_fails():
         if not injected:  # once: the injected verdict's own transaction comes through here too
             injected.append(True)
-            record_progress(store, "N", role="verifier", by="another-verifier", verdict="failed", note="1. the lemma is misapplied")
+            record_progress(store, "N", role="verifier", by="another-verifier", verdict="failed", objections=["the lemma is misapplied"])
         with real_transaction() as conn:
             yield conn
 

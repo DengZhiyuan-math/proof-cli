@@ -117,15 +117,15 @@ def test_a_decision_git_doesnt_have_yet_is_warned_about(tmp_path: Path):
     assert "REVIEWS_NOT_COMMITTED" in _codes(store)
 
 
-def test_editing_the_snapshot_after_acceptance_makes_the_node_unverifiable(tmp_path: Path):
+def test_editing_the_snapshot_after_acceptance_makes_the_decision_read_as_none(tmp_path: Path):
     store = ensure_project(tmp_path)
     snapshot = _awaiting_review(store)
     researcher(store).decide_acceptance("clm_1", "accept")
 
     (tmp_path / snapshot.file_path).write_text("a different proof")
 
-    assert get_acceptance_state(store, "clm_1") == "unverifiable"
-    assert "DECISION_NO_LONGER_APPLIES" in _codes(store)
+    assert get_acceptance_state(store, "clm_1") == "unreviewed"  # a verification counts only for its own version (ADR-0025)
+    assert "DECISION_NO_LONGER_APPLIES" not in _codes(store)
 
 
 def test_an_unreadable_line_is_warned_about_and_ignored(tmp_path: Path):

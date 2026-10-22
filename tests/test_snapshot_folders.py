@@ -234,8 +234,7 @@ def test_a_broken_snapshot_still_shows_its_node_page_and_the_warning(tmp_path: P
     view = ReviewApp(store).node("clm_1")
 
     assert view["candidate_proof"]["unreadable"] is True and view["candidate_proof"]["sha256"] is None
-    assert view["acceptance_state"] == "unverifiable"
-    assert any(w["code"] == "DECISION_NO_LONGER_APPLIES" for w in view["warnings"])
+    assert view["acceptance_state"] == "unreviewed"  # it no longer counts: as none (ADR-0025)
 
 
 # -- #92: a missing or unreadable snapshot binds nothing (None is never a match) ---------------
@@ -285,13 +284,13 @@ def test_an_acceptance_whose_snapshot_is_then_deleted_stops_counting_and_blocks_
 
     shutil.rmtree(folder / "snapshots" / "v1")
 
-    assert get_acceptance_state(store, "clm_1") == "unverifiable"
+    assert get_acceptance_state(store, "clm_1") == "unreviewed"
     assert get_workflow_state(store, "user") == "blocked"
-    assert any(w.code == "DECISION_NO_LONGER_APPLIES" for w in list_integrity_warnings(store))
+    assert not any(w.code == "DECISION_NO_LONGER_APPLIES" for w in list_integrity_warnings(store))
 
 
 @pytest.mark.parametrize("snapshot", ["present", "deleted"])
-def test_a_decision_line_naming_no_snapshot_hash_reads_unverifiable(tmp_path: Path, snapshot):
+def test_a_decision_line_naming_no_snapshot_hash_reads_as_none(tmp_path: Path, snapshot):
     """The audit's reproduction (#92): a recorded `candidate_proof_sha256: null` matched a missing snapshot's None."""
     store, folder = _node(tmp_path)
     _request(store)
@@ -303,7 +302,7 @@ def test_a_decision_line_naming_no_snapshot_hash_reads_unverifiable(tmp_path: Pa
     if snapshot == "deleted":
         shutil.rmtree(folder / "snapshots" / "v1")
 
-    assert get_acceptance_state(store, "clm_1") == "unverifiable"
+    assert get_acceptance_state(store, "clm_1") == "unreviewed"
 
 
 def test_the_page_offers_no_decision_on_an_unreadable_snapshot_and_says_why_one_is_refused(tmp_path: Path):
@@ -376,7 +375,7 @@ def test_an_old_single_file_snapshot_that_cant_be_read_is_refused_and_voids_its_
     path.chmod(0o644)
     researcher(store).decide_acceptance("old", "accept")
     unreadable(path)
-    assert get_acceptance_state(store, "old") == "unverifiable"
+    assert get_acceptance_state(store, "old") == "unreviewed"
 
 
 @needs_permissions
@@ -388,7 +387,7 @@ def test_a_folder_snapshot_file_that_cant_be_read_is_refused_and_its_page_still_
     researcher(store).decide_acceptance("clm_1", "accept")
     unreadable(folder / "snapshots" / "v1" / "node" / "body.tex")
 
-    assert get_acceptance_state(store, "clm_1") == "unverifiable"
+    assert get_acceptance_state(store, "clm_1") == "unreviewed"
     assert ReviewApp(store).node("clm_1")["candidate_proof"]["sha256"] is None
 
 
@@ -442,7 +441,7 @@ def test_the_re_snapshot_needs_a_fresh_acceptance_and_the_old_decision_never_rev
     record = _request(store)
 
     assert record.version == 2 and record.resnapshot_after_loss == 1
-    assert get_acceptance_state(store, "clm_1") == "unverifiable"  # the Accept on v1 doesn't carry over to v2
+    assert get_acceptance_state(store, "clm_1") == "unreviewed"  # the Accept on v1 doesn't carry over to v2
     assert get_workflow_state(store, "clm_1") == "review-needed"
 
     researcher(store).decide_acceptance("clm_1", "accept")
@@ -450,7 +449,7 @@ def test_the_re_snapshot_needs_a_fresh_acceptance_and_the_old_decision_never_rev
 
     # the v2 snapshot then being lost voids its own Accept; v1's is never read again
     shutil.rmtree(folder / "snapshots" / "v2")
-    assert get_acceptance_state(store, "clm_1") == "unverifiable"
+    assert get_acceptance_state(store, "clm_1") == "unreviewed"
 
 
 def test_the_refusal_on_a_lost_snapshot_says_how_to_recover(tmp_path: Path):

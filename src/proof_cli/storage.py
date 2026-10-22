@@ -259,12 +259,14 @@ CREATE TABLE IF NOT EXISTS review_history (
 # Existing databases get them by ALTER TABLE before the triggers below, which
 # reference `payload_hash`, are (re)created.
 _REVIEW_HISTORY_ADDED_COLUMNS = {"prev_row_hash": "TEXT", "signed_decision": "TEXT", "payload_hash": "TEXT"}
-_CHALLENGE_ADDED_COLUMNS = {"resolution_review_id": "TEXT"}
+_CHALLENGE_ADDED_COLUMNS = {"resolution_review_id": "TEXT",  # and, from ADR-0025, its kind, version, counterexample and withdrawal
+                            "kind": "TEXT", "version": "INTEGER", "counterexample_id": "TEXT", "verdict_id": "TEXT", "objection": "INTEGER",
+                            "withdrawn_by": "TEXT", "withdrawn_at": "TEXT", "withdrawal_reason": "TEXT"}
 _CLAIM_DROPPED_COLUMNS = ("token_hash",)  # the #37 claim token, gone with ADR-0010
 # a Review snapshot's hash (ADR-0010), and the node's dependencies as the snapshot was requested (#96, JSON)
 _CANDIDATE_PROOF_ADDED_COLUMNS = {"sha256": "TEXT", "dependencies": "TEXT", "key_ideas_drafted_by": "TEXT"}
 # the snapshot hash an Evidence check ran against (PR #147 review)
-_EVIDENCE_CHECK_ADDED_COLUMNS = {"candidate_proof_sha256": "TEXT"}
+_EVIDENCE_CHECK_ADDED_COLUMNS = {"candidate_proof_sha256": "TEXT", "checker": "TEXT"}  # checker: ADR-0025
 
 REVIEW_HISTORY_TRIGGERS = """
 CREATE INDEX IF NOT EXISTS idx_review_history_object ON review_history(object_type, object_id, seq);
@@ -1852,6 +1854,14 @@ def _row_to_challenge(row: sqlite3.Row) -> Challenge:
         resolved_by=row["resolved_by"],
         resolved_at=row["resolved_at"],
         resolution_review_id=row["resolution_review_id"],
+        kind=row["kind"],
+        version=row["version"],
+        counterexample_id=row["counterexample_id"],
+        verdict_id=row["verdict_id"],
+        objection=row["objection"],
+        withdrawn_by=row["withdrawn_by"],
+        withdrawn_at=row["withdrawn_at"],
+        withdrawal_reason=row["withdrawal_reason"],
     )
 
 
@@ -1859,8 +1869,9 @@ def insert_challenge(store: ProjectStore, challenge: Challenge, *, conn: sqlite3
     with _writing(store, conn) as conn:
         conn.execute(
             """
-            INSERT INTO challenges(id, target_node_id, status, rationale, opened_by, created_at, resolved_by, resolved_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO challenges(id, target_node_id, status, rationale, opened_by, created_at, resolved_by, resolved_at, kind, version, counterexample_id,
+                                   verdict_id, objection)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 challenge.id,
@@ -1871,6 +1882,11 @@ def insert_challenge(store: ProjectStore, challenge: Challenge, *, conn: sqlite3
                 challenge.created_at.isoformat(),
                 challenge.resolved_by,
                 challenge.resolved_at.isoformat() if challenge.resolved_at else None,
+                challenge.kind,
+                challenge.version,
+                challenge.counterexample_id,
+                challenge.verdict_id,
+                challenge.objection,
             ),
         )
     return challenge
@@ -1929,6 +1945,19 @@ def mark_challenge_dismissed(
         return cursor.rowcount > 0
 
 
+def mark_challenge_withdrawn(
+    store: ProjectStore, challenge_id: str, *, by: str, at: datetime, reason: str, conn: sqlite3.Connection | None = None
+) -> bool:
+    """Record a Challenge's withdrawal (ADR-0025 point 9); only one not withdrawn already, so two racing withdrawals
+    can't both win. Returns whether this call changed it."""
+    with _writing(store, conn) as conn:
+        cursor = conn.execute(
+            "UPDATE challenges SET withdrawn_by = ?, withdrawn_at = ?, withdrawal_reason = ? WHERE id = ? AND withdrawn_at IS NULL",
+            (by, at.isoformat(), reason, challenge_id),
+        )
+        return cursor.rowcount > 0
+
+
 def _row_to_evidence_check(row: sqlite3.Row) -> EvidenceCheck:
     return EvidenceCheck(
         id=row["id"],
@@ -1937,6 +1966,7 @@ def _row_to_evidence_check(row: sqlite3.Row) -> EvidenceCheck:
         notes=row["notes"],
         run_by=row["run_by"],
         candidate_proof_sha256=row["candidate_proof_sha256"],
+        checker=row["checker"],
         created_at=row["created_at"],
     )
 
@@ -1944,10 +1974,10 @@ def _row_to_evidence_check(row: sqlite3.Row) -> EvidenceCheck:
 def insert_evidence_check(store: ProjectStore, check: EvidenceCheck) -> EvidenceCheck:
     with _writing(store, None) as conn:
         conn.execute(
-            "INSERT INTO evidence_checks(id, candidate_proof_id, outcome, notes, run_by, candidate_proof_sha256, created_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO evidence_checks(id, candidate_proof_id, outcome, notes, run_by, candidate_proof_sha256, checker, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (check.id, check.candidate_proof_id, check.outcome.value, check.notes, check.run_by, check.candidate_proof_sha256,
-             check.created_at.isoformat()),
+             check.checker, check.created_at.isoformat()),
         )
     return check
 

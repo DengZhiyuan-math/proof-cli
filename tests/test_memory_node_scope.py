@@ -354,16 +354,13 @@ def test_handoff_accepted_list_is_exactly_the_accepted_nodes(tmp_path: Path):
     expected = sorted(node.id for node in list_nodes(store) if get_acceptance_state(store, node.id) == "accepted")
     assert expected == ["clm_accepted", "clm_also_accepted"]
     assert [entry.node_id for entry in handoff.proof_map.accepted] == expected
-    assert handoff.proof_map.unverifiable == []
 
-    # the accepted snapshot changes on disk: the decision no longer counts
+    # the accepted snapshot changes on disk: the decision no longer counts, and reads as none (ADR-0025)
     (tmp_path / accepted_proof.file_path).write_text("a different proof")
-    assert get_acceptance_state(store, "clm_accepted") == "unverifiable"
+    assert get_acceptance_state(store, "clm_accepted") == "unreviewed"
 
     handoff = build_handoff_snapshot(store, create_snapshot(store))
     assert [entry.node_id for entry in handoff.proof_map.accepted] == ["clm_also_accepted"]
-    assert [entry.node_id for entry in handoff.proof_map.unverifiable] == ["clm_accepted"]
-    assert handoff.proof_map.unverifiable[0].reason
 
 
 def test_legacy_trust_lists_are_labelled_legacy(tmp_path: Path):

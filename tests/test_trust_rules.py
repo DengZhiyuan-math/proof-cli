@@ -369,7 +369,7 @@ def test_a_rule_applies_when_the_explicit_review_no_longer_counts(tmp_path: Path
     line = json.loads(path.read_text())
     line["payload"]["interface_fingerprint"] = "made on something else"  # a decision that no longer binds this node
     path.write_text(json.dumps(line) + "\n")
-    assert get_reference_review_state(store, "ref_bw") == "unverifiable"
+    assert get_reference_review_state(store, "ref_bw") == "unreviewed"  # it no longer counts: as none (ADR-0025)
 
     reviewer.declare_trust_rule("textbooks", conditions=TEXTBOOKS, rationale="standard textbooks")
 

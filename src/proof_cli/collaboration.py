@@ -63,6 +63,12 @@ class ReviewGovernanceState(str, Enum):
     trusted = "trusted"
     unusable = "unusable"
     dismissed = "dismissed"
+    # the researcher's decisions of ADR-0025 (#279)
+    verified = "verified"
+    sealed_true = "sealed_true"
+    sealed_false = "sealed_false"
+    unsealed = "unsealed"
+    not_a_problem = "not_a_problem"
 
 
 class ReviewRecordKind(str, Enum):
@@ -79,7 +85,7 @@ class ReviewRecordKind(str, Enum):
 
     acceptance = "acceptance"
     reference_review = "reference_review"
-    evidence_review = "evidence_review"
+    evidence_review = "evidence_review"  # retired by ADR-0025 (#280), with the next and dependent_migration: kept to read old rows
     dependency_revalidation = "dependency_revalidation"
     # ADR-0009's other human-only operations, recorded as signed rows (#35)
     challenge_resolution = "challenge_resolution"
@@ -87,6 +93,10 @@ class ReviewRecordKind(str, Enum):
     dependent_migration = "dependent_migration"
     force_release = "force_release"  # retired by ADR-0010; kept to read old rows
     legacy_decline = "legacy_decline"
+    # the researcher's decisions of ADR-0025 (#279)
+    verification = "verification"
+    seal = "seal"
+    not_a_problem = "not_a_problem"
 
 
 class CommentThreadStatus(str, Enum):

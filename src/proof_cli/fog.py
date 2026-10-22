@@ -275,6 +275,7 @@ def crystallize_fog(
     reassign: bool = False,
     assumptions: list[str] | None = None,
     display_label: str = "",
+    definitions: list[str] | None = None,
     created_by: str = "human",
     medium: str | None = None,
 ) -> CrystallizeResult:
@@ -296,13 +297,15 @@ def crystallize_fog(
         parent_id = _resolve_parent(item, parent=parent, no_parent=no_parent)
         # the item first: if the node can't be made, the whole transaction rolls back, item included
         update_fog_item(store, item.model_copy(update={"status": FogStatus.crystallized, "node_id": node_id, "updated_at": utc_now()}), conn=conn)
-        spec = {"id": node_id, "statement": statement, "assumptions": list(assumptions or []), "display_label": display_label, "medium": medium}
+        spec = {"id": node_id, "statement": statement, "assumptions": list(assumptions or []), "display_label": display_label, "medium": medium,
+                "definitions": list(definitions or [])}
         if parent_id is not None:
             (node,) = split_node(store, parent_id, [spec], created_by=created_by, reassign=reassign)  # cleans its child folder up on rollback
         else:
             # a free-standing Claim writes its proof.tex before this transaction commits: the same cleanup a Split registers
             remove_new_node_folders_on_rollback(store, [node_id])
-            node = create_node(store, node_id=node_id, kind="claim", statement=statement, display_label=display_label, assumptions=list(assumptions or []), created_by=created_by, medium=medium)
+            node = create_node(store, node_id=node_id, kind="claim", statement=statement, display_label=display_label, assumptions=list(assumptions or []),
+                               definitions=list(definitions or []), created_by=created_by, medium=medium)
         append_event(
             store, "proof_fog_crystallized", f"crystallized {item.id} as {node_id}",
             entity_id=item.id, payload={"node_id": node_id, "parent": parent_id, "created_by": created_by}, conn=conn,

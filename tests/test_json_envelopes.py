@@ -3,7 +3,7 @@
 The skill's retrieval-first reads (`search`, `retrieve`, `reference list`, `memory list`)
 emit `{schema_version, ok, command, data}`, failures included. `node list` carries the
 three state axes, and `node show` what the node page shows of its dependencies: each one's
-pin, whether it is current, and the remedy a lagging or changed pin needs.
+pin, and whether the interface it pinned is still current.
 """
 
 import json
@@ -146,14 +146,14 @@ def _accepted(store, node_id, dependencies=()):
     researcher(store).decide_acceptance(node_id, "accept")
 
 
-def test_node_show_under_json_carries_each_dependencys_pin_and_remedy(tmp_path: Path):
+def test_node_show_under_json_carries_each_dependencys_pin(tmp_path: Path):
     store = ensure_project(tmp_path)
     _accepted(store, "lem")
     _accepted(store, "uses", ["lem"])
     open_challenge(store, "lem", opened_by="agent_b", rationale="?")  # an Accepted node is reclaimed only once challenged
     claim_node(store, "lem", claimant_id="agent_a", session_id="s2")
     submit_proof(store, "lem", claimant_id="agent_a", session_id="s2", scoping_rationale="scoped", content="v2")
-    researcher(store).decide_acceptance("lem", "accept")  # v2, same interface: the pin on v1 lags
+    researcher(store).decide_acceptance("lem", "accept")  # v2, same interface: the pin on v1 follows it (ADR-0025)
 
     result, envelope = _json(tmp_path, "node", "show", "uses")
 
@@ -162,8 +162,8 @@ def test_node_show_under_json_carries_each_dependencys_pin_and_remedy(tmp_path: 
     assert data["dependencies"] == ["lem"]  # the node's own field, unchanged
     (dependency,) = data["dependency_details"]
     assert dependency["node_id"] == "lem" and dependency["kind"] == "claim"
-    assert (dependency["pin"]["pinned_version"], dependency["accepted_version"]) == (1, 2)
-    assert (dependency["current"], dependency["remedy"]) == (True, "lightweight-re-review")
+    assert dependency["pin"]["pinned_version"] == 1
+    assert dependency["current"] is True and not {"accepted_version", "remedy"} & set(dependency)  # no lag to remedy
 
 
 def test_node_show_under_json_says_a_node_without_dependencies_has_none(tmp_path: Path):

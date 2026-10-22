@@ -26,25 +26,32 @@ class Researcher:
 
         return decide_reference_review(self.store, node_id, decision, **self._who(rationale))
 
-    def decide_evidence_review(self, check_id: str, decision: str, *, rationale: str = ""):
-        from proof_cli.proof_map import decide_evidence_review
-
-        return decide_evidence_review(self.store, check_id, decision, **self._who(rationale))
-
-    def revalidate_dependency(self, node_id: str, target_node_id: str, *, rationale: str = ""):
-        from proof_cli.proof_map import revalidate_dependency
-
-        return revalidate_dependency(self.store, node_id, target_node_id, **self._who(rationale))
-
     def promote_to_lemma(self, node_id: str, *, rationale: str = ""):
         from proof_cli.proof_map import promote_to_lemma
 
         return promote_to_lemma(self.store, node_id, **self._who(rationale))
 
-    def migrate_dependents(self, node_id: str, replacement_id: str, *, rationale: str = ""):
-        from proof_cli.proof_map import migrate_dependents
+    # -- ADR-0025: the researcher's decisions (#279), each a line in the node's reviews.jsonl
 
-        return migrate_dependents(self.store, node_id, replacement_id, **self._who(rationale))
+    def verify(self, node_id: str, *, rationale: str = ""):
+        from proof_cli.proof_map import verify_node
+
+        return verify_node(self.store, node_id, **self._who(rationale))
+
+    def seal(self, node_id: str, value: bool, *, rationale: str = "the researcher's absolute belief"):
+        from proof_cli.proof_map import seal_node
+
+        return seal_node(self.store, node_id, value, **self._who(rationale))
+
+    def unseal(self, node_id: str, *, rationale: str = "open to the agents again"):
+        from proof_cli.proof_map import unseal_node
+
+        return unseal_node(self.store, node_id, **self._who(rationale))
+
+    def not_a_problem(self, challenge_id: str, *, rationale: str = "not a problem"):
+        from proof_cli.proof_map import restore_verification
+
+        return restore_verification(self.store, challenge_id, **self._who(rationale))
 
     def dismiss_challenge(self, challenge_id: str, *, rationale: str = ""):
         from proof_cli.proof_map import dismiss_challenge
