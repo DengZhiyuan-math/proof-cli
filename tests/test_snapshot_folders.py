@@ -234,7 +234,7 @@ def test_a_broken_snapshot_still_shows_its_node_page_and_the_warning(tmp_path: P
     view = ReviewApp(store).node("clm_1")
 
     assert view["candidate_proof"]["unreadable"] is True and view["candidate_proof"]["sha256"] is None
-    assert view["acceptance_state"] == "unreviewed"  # it no longer counts: as none (ADR-0025)
+    assert view["states"]["proof_layer"] == "incomplete"  # it no longer counts: as none, no verification (ADR-0025)
 
 
 # -- #92: a missing or unreadable snapshot binds nothing (None is never a match) ---------------
