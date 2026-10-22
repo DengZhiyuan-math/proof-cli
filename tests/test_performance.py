@@ -698,7 +698,8 @@ def _work_log_formatting_every_event(store, node_id: str) -> list[dict]:
         elif event.kind == "proof_map_review_requested" and event.entity_id == node_id:
             entries.append({"at": at, "kind": "review-requested", "by": payload.get("requested_by"), "version": payload.get("version"), "candidate_proof_id": payload.get("candidate_proof_id")})
         elif event.kind == "proof_map_evidence_check_recorded" and event.entity_id in proof_ids:
-            entries.append({"at": at, "kind": "evidence", "by": payload.get("run_by"), "outcome": payload.get("outcome"), "evidence_check_id": payload.get("evidence_check_id")})
+            entries.append({"at": at, "kind": "evidence", "by": payload.get("run_by"), "outcome": payload.get("outcome"), "evidence_check_id": payload.get("evidence_check_id"),
+                            "checker": payload.get("checker")})
         elif event.kind == "proof_fog_added" and node_id in (payload.get("near") or []):
             text = payload.get("text") or (fog[event.entity_id].text if event.entity_id in fog else None)
             entries.append({"at": at, "kind": "fog", "by": payload.get("created_by"), "fog_id": event.entity_id, "text": text})

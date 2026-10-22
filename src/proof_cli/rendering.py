@@ -408,6 +408,10 @@ def _work_log_body(entry: dict) -> str:
         return f"attempt: {entry.get('goal')}" + (f" ({entry['method']})" if entry.get("method") else "") + f" failed on {entry.get('failed_on')}"
     if kind == "coordinator":
         return f"coordinator: {entry.get('note')}"
+    if kind == "ending":  # how a node run ended (ADR-0025 point 1): an audit's says so, and why its verdict went unrecorded
+        how = "stopped for a human decision" if entry.get("how") == "needs-human" else entry.get("how")
+        return (f"run {how}" + (" (audit)" if entry.get("audit") else "") + (f" — {entry['reason']}" if entry.get("reason") else "")
+                + (f"; its verdict was not recorded on the snapshot: {entry['unrecorded']}" if entry.get("unrecorded") else ""))
     if kind == "question":  # a Standing question (ADR-0021): the choice made, open until the researcher answers
         return f"chose {entry.get('question')} ({entry.get('id')})"
     if kind == "answer":
