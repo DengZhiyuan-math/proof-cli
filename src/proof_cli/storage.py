@@ -1706,26 +1706,6 @@ def insert_candidate_proof(
     return record
 
 
-def set_candidate_proof_interface_fingerprint(
-    store: ProjectStore, candidate_proof_id: str, fingerprint: str, *, conn: sqlite3.Connection | None = None
-) -> None:
-    with _writing(store, conn) as conn:
-        conn.execute(
-            "UPDATE candidate_proofs SET interface_fingerprint = ? WHERE id = ?",
-            (fingerprint, candidate_proof_id),
-        )
-
-
-def set_candidate_proof_review_record_id(
-    store: ProjectStore, candidate_proof_id: str, review_record_id: str, *, conn: sqlite3.Connection | None = None
-) -> None:
-    with _writing(store, conn) as conn:
-        conn.execute(
-            "UPDATE candidate_proofs SET review_record_id = ? WHERE id = ?",
-            (review_record_id, candidate_proof_id),
-        )
-
-
 @memoized_read
 def get_candidate_proof(store: ProjectStore, candidate_proof_id: str) -> CandidateProofRecord | None:
     with _reading(store, None) as conn:

@@ -395,7 +395,7 @@ def _claim_from_proof_map_node(node: ProofMapNode) -> PublicationClaim:
         internal_only=False,
         # a node's dependencies are node ids, not theorem-contract ids: they stay
         # on the node, and aren't copied into supporting_theorem_ids (issue #30)
-        updated_by=node.updated_by,
+        updated_by=node.created_by,   # a node keeps no editor of its own: each edit's record names who (#284)
         created_at=node.created_at,
         updated_at=node.updated_at,
     )
