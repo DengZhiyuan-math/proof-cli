@@ -160,7 +160,7 @@ def test_the_cli_adds_lists_shows_and_names_definitions(tmp_path: Path):
 
 
 def test_a_definition_whose_text_is_already_one_is_refused_and_named_its_wording_may_differ(tmp_path: Path):
-    """An agent may add definitions (#255), so one setting could be written twice: a text the same as one there is, but for
+    """An agent may add definitions (#255), so one condition could be written twice: a text the same as one there is, but for
     its surrounding and repeated whitespace, is refused, naming the definition it repeats, whatever its term. Nothing
     mathematical is normalized: `$f$` and `f` are different wordings, and a near one goes to the researcher, never merged."""
     ensure_project(tmp_path)
@@ -173,7 +173,8 @@ def test_a_definition_whose_text_is_already_one_is_refused_and_named_its_wording
     assert not repeated["ok"] and repeated["error"]["code"] == "DEFINITION_DUPLICATE" and "cc" in repeated["error"]["message"], repeated
     assert repeated["error"]["definition_id"] == "cc"
     assert add("cc3", "f is continuous and has compact support.", "--term", "Compact continuous")["ok"]  # another wording: added
-    assert json.loads(runner.invoke(app, ["definition", "list", "--root", str(tmp_path), "--json"]).output)["data"][1]["id"] != "cc2"
+    listed = json.loads(runner.invoke(app, ["definition", "list", "--root", str(tmp_path), "--json"]).output)["data"]
+    assert sorted(d["id"] for d in listed) == ["cc", "cc3"]   # the refused one was not added
 
 
 def test_a_definition_looked_up_under_an_id_there_is_none_of_names_the_ids_there_are(tmp_path: Path):

@@ -1342,12 +1342,12 @@ def node_split(
                 raise ProofMapError("INVALID_CHILD_SPEC", f"--child-definition '{entry}' is not <child-id>=<definition-id> for one of this split's children ({', '.join(by_id)})")
             by_id[child_id]["definitions"].append(definition_id)
         for number, entry in enumerate([*(child_assumption or []), *(child_assumption_file or [])]):
+            from_file = number >= len(child_assumption or [])
+            option, given = ("--child-assumption-file", "<path>") if from_file else ("--child-assumption", "<assumption>")
             child_id, _, assumption_text = entry.partition("=")
             if child_id not in by_id or not assumption_text:
-                raise ProofMapError("INVALID_CHILD_SPEC", f"--child-assumption '{entry}' is not <child-id>=<assumption> for one of this split's children ({', '.join(by_id)})")
-            if number >= len(child_assumption or []):
-                assumption_text = _file_text(assumption_text, "--child-assumption-file")
-            by_id[child_id]["assumptions"].append(assumption_text)
+                raise ProofMapError("INVALID_CHILD_SPEC", f"{option} '{entry}' is not <child-id>={given} for one of this split's children ({', '.join(by_id)})")
+            by_id[child_id]["assumptions"].append(_file_text(assumption_text, option) if from_file else assumption_text)
         children = split_node(store, parent_id, specs, created_by=_author(created_by, root), reassign=reassign)
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.split")

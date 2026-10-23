@@ -116,7 +116,7 @@ def _wording(text: str) -> str:
 
 def add_definition(store: ProjectStore, definition_id: str, *, term: str, text: str, created_by: str = "human") -> Definition:
     """Add a definition under a new id. One whose text another already has, whitespace aside, is refused, naming that one
-    (DEFINITION_DUPLICATE): an agent adds definitions too, and a setting written twice would be two conditions (#255)."""
+    (DEFINITION_DUPLICATE): an agent adds definitions too, and one condition written twice would read as two (#255)."""
     if not DEFINITION_ID.fullmatch(definition_id or ""):
         raise ProofMapError("INVALID_DEFINITION_ID", f"definition id {definition_id!r} must be letters, digits, '.', '_' or '-' (at most 64), starting with a letter or digit")
     definition = Definition(id=definition_id, term=_clean(term, "term"), text=_clean(text, "text"), created_by=created_by)
@@ -124,7 +124,7 @@ def add_definition(store: ProjectStore, definition_id: str, *, term: str, text: 
         if get_definition(store, definition_id, conn=conn) is not None:
             raise ProofMapError("DEFINITION_ALREADY_EXISTS", f"definition {definition_id} already exists")
         same = next((known for known in list_definitions(store, conn=conn) if _wording(known.text) == _wording(definition.text)), None)
-        if same is not None:  # one setting, written once (#255): name it instead
+        if same is not None:  # one condition, written once (#255): name it instead
             raise ProofMapError("DEFINITION_DUPLICATE", f"definition {same.id} ({same.term}) already says this: name it instead",
                                 details={"definition_id": same.id})
         insert_definition(store, definition, conn=conn)

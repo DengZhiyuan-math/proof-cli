@@ -105,6 +105,8 @@ def test_each_claim_of_a_split_gets_its_own_assumptions_and_none_of_its_parents(
     assert [child["assumptions"] for child in children] == [["$f$ is continuous"], ["a second", TEXT], []]  # inline ones first
     stray = _run(root, "node", "split", "P", "--child", "C4=four", "--child-assumption", "C9=x")
     assert _error(stray)["code"] == "INVALID_CHILD_SPEC" and "C9" in _error(stray)["message"]
+    malformed = _error(_run(root, "node", "split", "P", "--child", "C4=four", "--child-assumption-file", "C4"))
+    assert malformed["code"] == "INVALID_CHILD_SPEC" and "--child-assumption-file 'C4' is not <child-id>=<path>" in malformed["message"]
 
 
 def test_a_fog_item_a_memory_entry_and_a_challenges_rationale_take_their_text_from_files(tmp_path: Path):
