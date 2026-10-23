@@ -376,3 +376,18 @@ def test_the_pages_one_entry_point_records_each_of_the_researchers_clicks_on_wha
     click("seal", "B", "seal-false", "fails for n = 1")
     assert _layers(store, "B")[0] == "sealed-false"
     assert _code(lambda: apply_decision(store, "seal", "B", "seal-maybe", reviewer=who, rationale="x")) == "INVALID_DECISION"
+
+
+def test_a_snapshot_whose_dependencies_changed_since_is_no_version_to_verify(tmp_path: Path):
+    """A verification is of a version (ADR-0025 point 13): once the node rests on something else than its snapshot did,
+    that snapshot is not the node's version any more, so a verification of it would never count. It is refused, as an
+    Acceptance was (DEPENDENCIES_CHANGED), and counts again once review is requested anew (zeqome/proof-web#46)."""
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="lem", kind="lemma", statement="L")
+    create_node(store, node_id="a", kind="lemma", statement="A")
+    _snapshot(store, "a")
+    add_dependency(store, "a", "lem")
+    assert _code(lambda: researcher(store).verify("a", rationale="read it")) == "DEPENDENCIES_CHANGED"
+    _snapshot(store, "a", "the proof using lem")
+    researcher(store).verify("a", rationale="read it")
+    assert _layers(store, "a")[1] == "expert-verified"
