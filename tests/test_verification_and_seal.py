@@ -346,3 +346,33 @@ def test_an_accepted_node_whose_dependency_is_then_found_false_is_claimed_and_ed
     claim_node(store, "T", claimant_id="claude-code")
     remove_dependency(store, "T", "A", edited_by="claude-code")
     assert _code(lambda: claim_node(store, "B", claimant_id="claude-code")) == "NODE_ALREADY_ACCEPTED"  # B rests on nothing false
+
+
+def test_the_pages_one_entry_point_records_each_of_the_researchers_clicks_on_what_it_showed(tmp_path: Path):
+    """zeqome/proof-web#46: the page records verify, seal true, seal false, unseal and a restoring "not a problem" through
+    `apply_decision`, as it records every decision, each bound to what it showed (STALE_VIEW otherwise)."""
+    from proof_cli.proof_map import apply_decision
+
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="B", kind="lemma", statement="B")
+    create_node(store, node_id="A", kind="lemma", statement="A", dependencies=["B"])
+    who = researcher(store).reviewer_id
+
+    def click(kind: str, target: str, decision: str, rationale: str = "read it"):
+        shown = binding_digest(prepare_decision(store, kind, target, decision))
+        return apply_decision(store, kind, target, decision, reviewer=who, rationale=rationale, viewed_binding=shown)
+
+    _snapshot(store, "A")
+    click("verification", "A", "verify")
+    assert _layers(store, "A")[1] == "expert-verified"
+    challenge = open_challenge(store, "A", kind="proof", opened_by="claude-code", rationale="step 2?")
+    assert _layers(store, "A")[1] == "incomplete"   # an agent's Challenge lapses the verification
+    click("not_a_problem", challenge.id, "not-a-problem", "step 2 is fine")
+    assert _layers(store, "A")[1] == "expert-verified"
+    click("seal", "A", "seal-true", "known")
+    assert (_layers(store, "A")[0], _layers(store, "B")[0]) == ("sealed-true", "sealed-true")
+    click("seal", "A", "unseal", "open it again")
+    assert (_layers(store, "A")[0], _layers(store, "B")[0]) == ("unsealed", "unsealed")
+    click("seal", "B", "seal-false", "fails for n = 1")
+    assert _layers(store, "B")[0] == "sealed-false"
+    assert _code(lambda: apply_decision(store, "seal", "B", "seal-maybe", reviewer=who, rationale="x")) == "INVALID_DECISION"

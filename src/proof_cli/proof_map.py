@@ -3142,6 +3142,17 @@ def apply_decision(
         return dismiss_challenge(store, target_id, **who)
     if resolved_kind == DecisionKind.promote:
         return promote_to_lemma(store, target_id, **who)
+    # the researcher's clicks of ADR-0025 (points 13-16), each after the page listed what it does (zeqome/proof-web#46)
+    if resolved_kind == DecisionKind.verification:
+        return verify_node(store, target_id, **who)
+    if resolved_kind == DecisionKind.not_a_problem:
+        return restore_verification(store, target_id, **who)
+    if resolved_kind == DecisionKind.seal:
+        if decision == "unseal":
+            return unseal_node(store, target_id, **who)
+        if decision in ("seal-true", "seal-false"):
+            return seal_node(store, target_id, decision == "seal-true", **who)
+        raise ProofMapError("INVALID_DECISION", f"'{decision}' is not a seal decision: seal-true, seal-false or unseal")
     raise ProofMapError("UNSUPPORTED_DECISION", f"{resolved_kind.value} decisions aren't applied here")
 
 
