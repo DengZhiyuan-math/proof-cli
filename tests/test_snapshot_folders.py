@@ -305,24 +305,24 @@ def test_a_decision_line_naming_no_snapshot_hash_reads_as_none(tmp_path: Path, s
     assert get_acceptance_state(store, "clm_1") == "unreviewed"
 
 
-def test_the_page_offers_no_decision_on_an_unreadable_snapshot_and_says_why_one_is_refused(tmp_path: Path):
+def test_the_page_offers_no_verification_on_an_unreadable_snapshot_and_says_why_one_is_refused(tmp_path: Path):
     ReviewApp = pytest.importorskip("proof_web.server").ReviewApp  # the page (proof-web), when it is installed
 
     store, folder = _node(tmp_path)
     _request(store)
     page = ReviewApp(store)
     offered = page.node("clm_1")
-    accept = next(d for d in offered["decisions"] if d["decision"] == "accept")
+    verify = next(d for d in offered["decisions"] if d["decision"] == "verify")   # zeqome/proof-web#46
     shutil.rmtree(folder / "snapshots" / "v1")
 
     view = page.node("clm_1")
     assert view["candidate_proof"]["unreadable"] is True
-    assert not [d for d in view["decisions"] if d["kind"] == "acceptance"]
+    assert not [d for d in view["decisions"] if d["kind"] == "verification"]
     (pending,) = [item for item in page.state()["pending"] if item["node_id"] == "clm_1"]
     assert pending["decisions"] == []
 
-    # an Accept the page offered before the snapshot went is refused, with the reason
-    (result,) = page.decide({"decisions": [accept]})["results"]
+    # a verification the page offered before the snapshot went is refused, with the reason
+    (result,) = page.decide({"decisions": [{**verify, "rationale": "read it"}]})["results"]
     assert result["ok"] is False and result["error"]["code"] == "SNAPSHOT_UNREADABLE"
     assert not (folder / "reviews.jsonl").exists()
 

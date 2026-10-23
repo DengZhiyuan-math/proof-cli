@@ -99,6 +99,7 @@ ERROR_CODES: dict[str, str] = {
     "DEPENDENCIES_CHANGED": "the node's dependencies changed since its snapshot was requested for review; request review again",
     # -- Human Review decisions (made on the page) ---------------------------------------
     "INVALID_DECISION": "not a decision of this kind",
+    "EXPLANATION_REQUIRED": "a decision the researcher makes on the page (verify, seal, unseal, not a problem) carries their explanation, which the agents are briefed with",
     "INVALID_DECISION_KIND": "not a decision kind",
     "UNSUPPORTED_DECISION": "the page doesn't apply decisions of this kind",
     "NOT_REVIEW_NEEDED": "no snapshot awaits a decision",
