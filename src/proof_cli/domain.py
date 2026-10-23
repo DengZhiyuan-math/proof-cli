@@ -202,7 +202,6 @@ class ProofMapNode(BaseModel):
     # result none; a node recorded before the field existed reads `latex`
     medium: Medium | None = None
     created_by: str = "human"
-    updated_by: str = "human"
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 
@@ -254,11 +253,11 @@ class CandidateProofRecord(BaseModel):
     submission by `id`, never by where its file happens to live. See ADR
     (candidate proof storage) and ProofMapNode.
 
-    `interface_fingerprint` is set once, at the moment this version's node
-    is Accepted (a pure function of that already-immutable version's kind,
-    statement, and assumptions), never recomputed afterward. A dependency
-    that pinned this version compares against it to tell an
-    interface-preserving revision from a substantive one.
+    `review_record_id` and `interface_fingerprint` are no longer written
+    (#284): the Acceptance's line in reviews.jsonl names the snapshot it
+    decided and the interface it accepted, and is where both are read. A
+    row from before keeps its values, which only the one-time migration of
+    unsigned decisions reads.
     """
 
     id: str
