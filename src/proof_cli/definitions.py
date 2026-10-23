@@ -108,13 +108,25 @@ def check_named(store: ProjectStore, definition_ids: list[str], *, conn=None) ->
 # -- writing -------------------------------------------------------------------------------------
 
 
+def _wording(text: str) -> str:
+    """A definition's text as `add` compares it (#255): its whitespace runs made one space. Nothing mathematical is
+    normalized, so `$f$` and `f` are two wordings; a near one is the researcher's to read, never merged."""
+    return " ".join(text.split())
+
+
 def add_definition(store: ProjectStore, definition_id: str, *, term: str, text: str, created_by: str = "human") -> Definition:
+    """Add a definition under a new id. One whose text another already has, whitespace aside, is refused, naming that one
+    (DEFINITION_DUPLICATE): an agent adds definitions too, and a setting written twice would be two conditions (#255)."""
     if not DEFINITION_ID.fullmatch(definition_id or ""):
         raise ProofMapError("INVALID_DEFINITION_ID", f"definition id {definition_id!r} must be letters, digits, '.', '_' or '-' (at most 64), starting with a letter or digit")
     definition = Definition(id=definition_id, term=_clean(term, "term"), text=_clean(text, "text"), created_by=created_by)
     with store.transaction() as conn:
         if get_definition(store, definition_id, conn=conn) is not None:
             raise ProofMapError("DEFINITION_ALREADY_EXISTS", f"definition {definition_id} already exists")
+        same = next((known for known in list_definitions(store, conn=conn) if _wording(known.text) == _wording(definition.text)), None)
+        if same is not None:  # one setting, written once (#255): name it instead
+            raise ProofMapError("DEFINITION_DUPLICATE", f"definition {same.id} ({same.term}) already says this: name it instead",
+                                details={"definition_id": same.id})
         insert_definition(store, definition, conn=conn)
         append_event(store, "definition_added", f"definition {definition_id}: {definition.term}", entity_id=definition_id,
                      payload=definition.model_dump(mode="json"), conn=conn)

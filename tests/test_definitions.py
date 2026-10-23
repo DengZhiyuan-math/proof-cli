@@ -159,6 +159,23 @@ def test_the_cli_adds_lists_shows_and_names_definitions(tmp_path: Path):
     assert text.index("Definition unit") < text.index("Statement") and "Simple graph." in text
 
 
+def test_a_definition_whose_text_is_already_one_is_refused_and_named_its_wording_may_differ(tmp_path: Path):
+    """An agent may add definitions (#255), so one setting could be written twice: a text the same as one there is, but for
+    its surrounding and repeated whitespace, is refused, naming the definition it repeats, whatever its term. Nothing
+    mathematical is normalized: `$f$` and `f` are different wordings, and a near one goes to the researcher, never merged."""
+    ensure_project(tmp_path)
+
+    def add(*args: str) -> dict:
+        return json.loads(runner.invoke(app, ["definition", "add", *args, "--root", str(tmp_path), "--json"]).output)
+
+    assert add("cc", "$f$ is continuous and has compact support.", "--term", "Compact continuous")["ok"]
+    repeated = add("cc2", "  $f$ is continuous\n and  has compact support. ", "--term", "Another name")
+    assert not repeated["ok"] and repeated["error"]["code"] == "DEFINITION_DUPLICATE" and "cc" in repeated["error"]["message"], repeated
+    assert repeated["error"]["definition_id"] == "cc"
+    assert add("cc3", "f is continuous and has compact support.", "--term", "Compact continuous")["ok"]  # another wording: added
+    assert json.loads(runner.invoke(app, ["definition", "list", "--root", str(tmp_path), "--json"]).output)["data"][1]["id"] != "cc2"
+
+
 def test_a_definition_looked_up_under_an_id_there_is_none_of_names_the_ids_there_are(tmp_path: Path):
     """Looking a definition up (show, edit, remove) under an id there is none of names the ids there are and where to
     read them, so a guessed id is not answered with `proof definition add`; a statement naming a missing definition is

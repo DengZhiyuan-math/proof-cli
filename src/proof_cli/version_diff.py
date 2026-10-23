@@ -15,6 +15,7 @@ Which objection a version settles is said by the passed Verdict's endings (ADR-0
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 
 from .key_ideas import KEY_IDEAS_FILE
 from .node_check import strip_comments
@@ -75,7 +76,12 @@ def version_diff(store: ProjectStore, node_id: str, old: int, new: int) -> dict:
     """{"node_id", "from", "to", "parts": the parts that changed, in `PARTS` order, "files": {"added", "removed",
     "changed"}} between snapshots v`old` and v`new` of the node, from what they froze."""
     require_node(store, node_id)
-    before, after = _files(store, node_id, old), _files(store, node_id, new)
+    return {"node_id": node_id, "from": old, "to": new, **changed_parts(_files(store, node_id, old), _files(store, node_id, new))}
+
+
+def changed_parts(before: Mapping[str, bytes], after: Mapping[str, bytes]) -> dict:
+    """{"parts", "files"} as `version_diff` gives them, between two readings of a node's files by their path from its
+    folder: two snapshots, or the working files at two moments (the researcher's edit between two turns, #264)."""
     added = sorted(set(after) - set(before))
     removed = sorted(set(before) - set(after))
     changed = sorted(rel for rel in set(before) & set(after) if before[rel] != after[rel])
@@ -87,8 +93,7 @@ def version_diff(store: ProjectStore, node_id: str, old: int, new: int) -> dict:
         was, now = (_regions(files[rel].decode("utf-8", errors="replace")) if rel in files else {} for files in (before, after))
         moved = {part for part in (STATEMENT, PROOF, CITATIONS) if was.get(part) != now.get(part)}
         parts |= moved or {CITATIONS}   # the same once comments are set aside: a comment changed
-    return {"node_id": node_id, "from": old, "to": new, "parts": [part for part in PARTS if part in parts],
-            "files": {"added": added, "removed": removed, "changed": changed}}
+    return {"parts": [part for part in PARTS if part in parts], "files": {"added": added, "removed": removed, "changed": changed}}
 
 
-__all__ = ["PARTS", "version_diff"]
+__all__ = ["PARTS", "changed_parts", "version_diff"]
