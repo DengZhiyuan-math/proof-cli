@@ -56,10 +56,10 @@ from .storage import (
     append_event,
     list_events_of_kind,
     put_turn_transcript,
+    read_turn_transcript,
     delete_dependency_pin,
     get_active_claim,
     get_candidate_proof as _get_candidate_proof,
-    get_challenge as _get_challenge,
     get_current_candidate_proof,
     get_dependency_pin as _get_dependency_pin,
     get_evidence_check as _get_evidence_check,
@@ -78,7 +78,6 @@ from .storage import (
     list_evidence_checks_for_candidate_proof,
     list_fog_items,
     list_proof_map_nodes,
-    mark_challenge_dismissed,
     mark_challenge_withdrawn,
     mark_claim_released,
     memoized_read,
@@ -830,8 +829,7 @@ def record_agent_turn(
                    for e in list_events_of_kind(store, TURN_EVENT, conn=conn)):
                 raise ProofMapError("TURN_ENDED", f"turn {turn} on {node_id} has ended already; its record is kept as it is")
             if events is not None:  # kept only with the recorded end: see put_turn_transcript
-                payload["transcript"] = put_turn_transcript(store, TURNS_DIR / node_id / f"{turn}.json",
-                                                            {**payload, "prompt": prompt, "events": events})
+                payload["transcript"] = put_turn_transcript(store, TURNS_DIR / node_id / f"{turn}.json", prompt, events)
         append_event(store, TURN_EVENT, f"{role} on {node_id}: turn {turn} {phase}", entity_id=node_id, payload=payload, conn=conn)
 
 
@@ -875,8 +873,7 @@ def record_discussion_turn(
                    for e in list_events_of_kind(store, DISCUSSION_EVENT, conn=conn)):
                 raise ProofMapError("TURN_ENDED", f"discussion turn {turn} has ended already; its record is kept as it is")
             if events is not None:  # kept only with the recorded end: see put_turn_transcript
-                payload["transcript"] = put_turn_transcript(store, DISCUSSION_DIR / f"{turn}.json",
-                                                            {**payload, "prompt": prompt, "events": events})
+                payload["transcript"] = put_turn_transcript(store, DISCUSSION_DIR / f"{turn}.json", prompt, events)
         append_event(store, DISCUSSION_EVENT, f"discussion with {by}: turn {turn} {phase}", payload=payload, conn=conn)
 
 
@@ -902,23 +899,17 @@ def discussion_turns(store: ProjectStore, limit: int = 50) -> list[dict]:
 
 
 def discussion_transcript(store: ProjectStore, turn: str) -> dict | None:
-    """A discussion turn's record with its conversation (`events`), as record_discussion_turn kept it; None when there is none."""
+    """A discussion turn's record with its conversation (`events`), as read_turn_transcript joins them; None when there is none."""
     if not _TURN_ID.fullmatch(turn or ""):
         return None
-    try:
-        return json.loads((store.root / DISCUSSION_DIR / f"{turn}.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
+    return read_turn_transcript(store, DISCUSSION_DIR / f"{turn}.json", DISCUSSION_EVENT, turn)
 
 
 def agent_turn_transcript(store: ProjectStore, node_id: str, turn: str) -> dict | None:
-    """A turn's record with its conversation (`events`), as record_agent_turn kept it; None when there is none."""
+    """A turn's record with its conversation (`events`), as read_turn_transcript joins them; None when there is none."""
     if not _TURN_ID.fullmatch(turn or "") or not _SAFE_NODE_ID.fullmatch(node_id or ""):  # as node folders are named
         return None
-    try:
-        return json.loads((store.root / TURNS_DIR / node_id / f"{turn}.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
+    return read_turn_transcript(store, TURNS_DIR / node_id / f"{turn}.json", TURN_EVENT, turn, entity_id=node_id)
 
 
 @memoized_read  # a page asks every node of a subtree for its log, some twice (parked? audited?): once per node per read (#43)
@@ -2813,15 +2804,6 @@ def decide_acceptance(
                     upsert_dependency_pin(store, pin.model_copy(update={"pinned_version": pinned.pinned_version, "pinned_fingerprint": pinned.pinned_fingerprint,
                                                                         "created_at": utc_now()}), conn=conn)
 
-        _resolve_open_challenges(
-            store,
-            node_id,
-            resolved_by=decided.reviewer_id,
-            review_id=record.id,
-            challenge_ids=decided.payload.resolves_challenges,
-            conn=conn,
-        )
-
         append_event(
             store,
             "proof_map_acceptance_decided",
@@ -3405,14 +3387,6 @@ def decide_reference_review(
     with store.transaction() as conn:
         decided = _decide(store, kind=DecisionKind.reference_review, target_id=node_id, decision=decision, reviewer=reviewer, rationale=rationale, viewed_binding=viewed_binding)
         record = _record(store, decided, _ACCEPTANCE_OBJECT_TYPE, node_id, ReviewGovernanceState.rejected if not_callable else ReviewGovernanceState.approved)
-        _resolve_open_challenges(
-            store,
-            node_id,
-            resolved_by=decided.reviewer_id,
-            review_id=record.id,
-            challenge_ids=decided.payload.resolves_challenges,
-            conn=conn,
-        )
         append_event(
             store,
             "proof_map_no_longer_callable" if not_callable else "proof_map_reference_review_granted",
@@ -3808,7 +3782,7 @@ def _with_resolution(store: ProjectStore, challenge: Challenge) -> Challenge:
             }
         )
     if challenge.status == ChallengeStatus.dismissed and challenge.resolution_review_id is None:
-        return challenge  # dismissed before ADR-0010, with nothing recorded behind it: it stays closed
+        return challenge  # dismissed before ADR-0010, with nothing recorded behind it: it stays closed (none is stored since #284)
     reopened = {"resolved_by": None, "resolved_at": None, "resolution_review_id": None}
     if challenge.kind == "proof" and (target := get_node(store, challenge.target_node_id)) is not None:
         # a gap in the proof of the statement as it was: a restatement since supersedes it; a statement Challenge
@@ -3848,55 +3822,6 @@ def has_open_challenge(store: ProjectStore, node_id: str) -> bool:
     return bool(list_challenges(store, target_node_id=node_id, status="open"))
 
 
-def _resolve_open_challenges(
-    store: ProjectStore,
-    node_id: str,
-    *,
-    resolved_by: str,
-    review_id: str,
-    challenge_ids: list[str],
-    conn: sqlite3.Connection,
-) -> None:
-    """Dismiss every open Challenge against `node_id`, as resolved by review `review_id`.
-
-    Called from `decide_acceptance` and `decide_reference_review`: per
-    ADR-0005 Rule 4, only Human Review resolves a Challenge, either by an
-    explicit `challenge dismiss` or by directly addressing the concern —
-    revising and re-Accepting a local node, or reaffirming trust in an
-    Imported result's Reference review. Without this, a Challenge-driven
-    reclaim (`claim_node`'s one sanctioned way to revise an Accepted node)
-    would leave the node permanently `challenged` even after the concern was
-    addressed.
-
-    Runs on the deciding review's own transaction (`conn`). What resolves
-    them is the recorded decision itself, which lists `challenge_ids` in its
-    payload; marking the `challenges` rows here only keeps that advisory
-    table in step.
-    """
-    resolved_at = utc_now()
-    for challenge in [_get_challenge(store, challenge_id) for challenge_id in challenge_ids]:
-        if challenge is None:
-            continue
-        reopened = challenge.status != ChallengeStatus.open
-        if mark_challenge_dismissed(
-            store,
-            challenge.id,
-            resolved_by=resolved_by,
-            resolved_at=resolved_at,
-            resolution_review_id=review_id,
-            reopened=reopened,
-            conn=conn,
-        ):
-            append_event(
-                store,
-                "proof_map_challenge_dismissed",
-                f"challenge {challenge.id} dismissed by {resolved_by} (resolved via review decision)",
-                entity_id=node_id,
-                payload={"challenge_id": challenge.id, "reviewer_id": resolved_by, "review_id": review_id},
-                conn=conn,
-            )
-
-
 def dismiss_challenge(
     store: ProjectStore,
     challenge_id: str,
@@ -3914,43 +3839,21 @@ def dismiss_challenge(
     if challenge.status != ChallengeStatus.open:
         raise ProofMapError("CHALLENGE_NOT_OPEN", f"challenge {challenge_id} is already {challenge.status.value}")
 
-    resolved_at = utc_now()
     with store.transaction() as conn:
-        # re-read on the write lock: a concurrent dismissal may have landed
+        # re-read on the write lock: a concurrent dismissal may have landed, and only its line says so (#284)
         if require_challenge(store, challenge_id).status != ChallengeStatus.open:
             raise ProofMapError("CHALLENGE_NOT_OPEN", f"challenge {challenge_id} is already dismissed")
         decided = _decide(store, kind=DecisionKind.challenge_resolution, target_id=challenge_id, decision="dismissed", reviewer=reviewer, rationale=rationale, viewed_binding=viewed_binding)
         record = _record(store, decided, "challenge", challenge_id, ReviewGovernanceState.dismissed)
-        mark_challenge_dismissed(
-            store,
-            challenge_id,
-            resolved_by=decided.reviewer_id,
-            resolved_at=resolved_at,
-            resolution_review_id=record.id,
-            reopened=True,
-            conn=conn,
-        )
         append_event(
             store,
             "proof_map_challenge_dismissed",
             f"challenge {challenge_id} dismissed by {decided.reviewer_id}",
             entity_id=challenge.target_node_id,
-            payload={
-                "challenge_id": challenge_id,
-                "reviewer_id": decided.reviewer_id,
-                "rationale": decided.payload.rationale,
-                "review_id": record.id,
-            },
+            payload={"challenge_id": challenge_id, "reviewer_id": decided.reviewer_id, "review_id": record.id},
             conn=conn,
         )
-    return challenge.model_copy(
-        update={
-            "status": ChallengeStatus.dismissed,
-            "resolved_by": decided.reviewer_id,
-            "resolved_at": resolved_at,
-            "resolution_review_id": record.id,
-        }
-    )
+    return require_challenge(store, challenge_id)  # its ending, read from the line just recorded
 
 
 @dataclass

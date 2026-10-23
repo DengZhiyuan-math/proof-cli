@@ -23,7 +23,6 @@ any job exists is no turn and leaves none.
 
 from __future__ import annotations
 
-import json
 import sqlite3
 import uuid
 from pathlib import Path
@@ -31,7 +30,7 @@ from typing import Any
 
 from .domain import EventRecord
 from .proof_map import _TURN_ID, READER_TURN_EVENT, ProofMapError  # a Reader turn's id is a node turn's
-from .storage import ProjectStore, append_event, list_events_of_kind, put_turn_transcript
+from .storage import ProjectStore, append_event, list_events_of_kind, put_turn_transcript, read_turn_transcript
 
 PURSUIT_EVENT = "pursuit"
 
@@ -231,8 +230,7 @@ def record_reader_turn(
                 if prompt is None:  # the transcript holds the turn's prompt too, as its start recorded it
                     prompt = next((p.get("prompt") for p in this_turn if p.get("phase") == "started"), None)
                 # kept only with the recorded end: see put_turn_transcript
-                payload["transcript"] = put_turn_transcript(store, READER_TURNS_DIR / f"{turn}.json",
-                                                            {**payload, "prompt": prompt, "events": events})
+                payload["transcript"] = put_turn_transcript(store, READER_TURNS_DIR / f"{turn}.json", prompt, events)
             elif phase == "started":
                 payload["prompt"] = str(prompt or "")
             append_event(store, READER_TURN_EVENT, f"the Reader's turn {turn} {phase}", entity_id=None, payload=payload, conn=conn)
@@ -264,13 +262,10 @@ def reader_turns(store: ProjectStore) -> list[dict[str, Any]]:
 
 
 def reader_turn_transcript(store: ProjectStore, turn: str) -> dict | None:
-    """A Reader turn's record with its conversation (`events`), as record_reader_turn kept it; None when there is none."""
+    """A Reader turn's record with its conversation (`events`), as read_turn_transcript joins them; None when there is none."""
     if not _TURN_ID.fullmatch(turn or ""):
         return None
-    try:
-        return json.loads((store.root / READER_TURNS_DIR / f"{turn}.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
+    return read_turn_transcript(store, READER_TURNS_DIR / f"{turn}.json", READER_TURN_EVENT, turn)
 
 
 def reader_turn(store: ProjectStore, turn: str) -> dict | None:
