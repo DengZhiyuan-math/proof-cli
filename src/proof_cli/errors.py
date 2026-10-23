@@ -80,6 +80,9 @@ ERROR_CODES: dict[str, str] = {
     "WITHDRAW_REASON_REQUIRED": "a Challenge is withdrawn with a reason, which the next role is briefed with",
     "RESEARCHERS_CHALLENGE": "the Challenge is the researcher's: only the researcher withdraws it",
     "PASSED_WITH_OBJECTIONS": "a passing verdict raises no objection; one that stands makes it a failed verdict",
+    "USES_INCOMPLETE": "a passing verdict needs proof.tex's Uses of dependencies section complete (the node check's CHECK_USES_* findings)",
+    "APPLICATIONS_MISMATCH": "a verdict's lines do not cover each application of the Uses of dependencies section exactly once, or name an objection it does not raise",
+    "INVALID_APPLICATION_LINE": "a verdict's line on an application is '<dependency>/<n>: checked' or '<dependency>/<n>: objection <k>'",
     "ENDINGS_REQUIRED": "a passing verdict says where and why each proof Challenge open on the node is fixed; the error names those left out (`missing`)",
     "INVALID_ENDING": "an ending names a proof Challenge open on the node and says where and why it is fixed, on a passing verdict",
     "AUDIT_RECORDS_NO_ENDINGS": "an audit reads the proof afresh and ends no objection, fixed or withdrawn; the next ordinary Verifier does",
@@ -294,7 +297,13 @@ NOTICE_CODES: dict[str, str] = {
     "CHECK_KEY_IDEAS_HEADINGS": "key-ideas.md lacks one of its four headings (node check)",
     "CHECK_KEY_IDEAS_EMPTY": "key-ideas.md has an empty required section (核心思路 or 主要步骤) (node check)",
     "CHECK_KEY_IDEAS_UNKNOWN_NODE": "key-ideas.md's 主要步骤 names a node that is not on the map (node check)",
-    "CHECK_DEPENDENCY_UNMENTIONED": "a dependency of the node is named neither in proof.tex nor in key-ideas.md (node check)",
+    "CHECK_ASSUMPTIONS_MISMATCH": "an assumption of the node, as the map has it, does not appear in proof.tex or a file it inputs (node check)",
+    "CHECK_NAMES_OTHER_NODE": "the statement or an assumption names another node: a hint for the Verifier, never a refusal (node check)",
+    "CHECK_USES_SECTION": "proof.tex has no single Uses of dependencies section after the proof holding every depuse entry (node check)",
+    "CHECK_USES_MISSING": "a dependency of the node has no depuse entry in the Uses of dependencies section (node check)",
+    "CHECK_USES_DUPLICATE": "a dependency has more than one depuse entry; each use is an \\application in its one entry (node check)",
+    "CHECK_USES_NOT_A_DEPENDENCY": "a depuse entry names a node the node does not rest on, or no node at all (node check)",
+    "CHECK_USES_FIELDS": "an application lacks, repeats or leaves empty one of Substitution, Premises, Conclusion, Constants (node check)",
 }
 
 

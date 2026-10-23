@@ -55,3 +55,21 @@ def submit_proof(store, node_id: str, *, claimant_id: str, scoping_rationale: st
         working.write_text(content, encoding="utf-8")
         ensure_key_ideas(store, node_id)
     return request_review(store, node_id, requested_by=claimant_id, rationale=scoping_rationale)
+
+
+def proved(store, node_id: str, body: str = "As required.") -> str:
+    """A proof of the node with its complete Uses of dependencies (ADR-0025, #256): one depuse entry per dependency, one
+    application each. What a passing verdict on a node with dependencies needs in proof.tex (`checked_lines`)."""
+    from proof_cli.proof_map import require_node
+
+    entries = "".join(f"\\begin{{depuse}}{{{dependency}}}\n\\item[Substitution] as the statement has it.\n\\item[Premises] as stated.\n"
+                      f"\\item[Conclusion] as stated.\n\\item[Constants] None.\n\\end{{depuse}}\n"
+                      for dependency in require_node(store, node_id).dependencies)
+    return f"\\begin{{proof}}\n{body}\n\\end{{proof}}\n\n\\section*{{Uses of dependencies}}\n{entries}"
+
+
+def checked_lines(store, node_id: str) -> list[str]:
+    """A verdict's line on each application `proved` writes: every one checked."""
+    from proof_cli.proof_map import require_node
+
+    return [f"{dependency}/1: checked" for dependency in require_node(store, node_id).dependencies]

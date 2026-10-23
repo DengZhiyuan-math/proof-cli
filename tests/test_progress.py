@@ -200,7 +200,7 @@ def test_a_verdict_is_bound_to_the_working_inputs_as_they_stand(tmp_path: Path):
                             objections=["step 2 appeals to Lemma L for a bound L does not give"])
     assert first["kind"] == "verdict" and first["outcome"] == "failed" and first["inputs_sha256"] == before
     assert first["role"] == "verifier" and first["by"] == "claude-code" and first["objections"][0]["text"].startswith("step 2")
-    assert set(first) == {"kind", "id", "role", "by", "outcome", "note", "inputs_sha256", "checker", "objections", "node_id", "at"}
+    assert set(first) == {"kind", "id", "role", "by", "outcome", "note", "inputs_sha256", "checker", "objections", "applications", "node_id", "at"}
     with vault.working_proof_path(store.root, "N").open("a", encoding="utf-8") as handle:
         handle.write("% the bound is now justified\n")
     after = vault.read_working_snapshot(store.root, "N", Medium.latex).digest()

@@ -671,6 +671,33 @@ def node_restate(
     _emit_node(node, json_output, command="node.restate")
 
 
+@node_app.command("diff")
+@read_scoped
+def node_diff(
+    node_id: str,
+    old: int = typer.Argument(..., metavar="FROM", help="The earlier snapshot's version"),
+    new: int = typer.Argument(..., metavar="TO", help="The later snapshot's version"),
+    root: str = ROOT_OPTION,
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """What changed between two versions of the node, computed from their Review snapshots (ADR-0025, #264): the
+    statement, the proof, the key-ideas summary, or only citations or metadata; and which files."""
+    from .version_diff import version_diff
+
+    store = get_store(_root(root))
+    try:
+        diff = version_diff(store, node_id, old, new)
+    except ProofMapError as exc:
+        _emit_error(exc, json_output, command="node.diff")
+        raise typer.Exit(code=1)
+    if json_output:
+        typer.echo(dump_envelope(success_envelope("node.diff", diff)))
+        return
+    files = diff["files"]
+    named = "; ".join(f"{how}: {', '.join(paths)}" for how, paths in files.items() if paths) or "no file"
+    typer.echo(f"{node_id} v{old} → v{new}: " + (", ".join(diff["parts"]) + " changed" if diff["parts"] else "nothing changed") + f" ({named})")
+
+
 @node_app.command("check")
 @read_scoped
 def node_check(
@@ -679,7 +706,8 @@ def node_check(
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """The mechanical checks of the node's working proof (issue #180): does it build cleanly, is key-ideas.md there with its four
-    headings, does proof.tex state the node's statement, do its \\input's stay in the folder, is each dependency mentioned.
+    headings, does proof.tex state the node's statement and assumptions, do its \\input's stay in the folder, does its Uses of
+    dependencies section give each dependency an entry and each application its four fields.
     Findings, never refusals: a run sends the work back on an error before the Verifier reads; the researcher's own
     request-review is never stopped by one. Exit 1 when there is an error-level finding."""
     from .node_check import check_node, errors_of
@@ -1337,6 +1365,7 @@ def node_progress(
     verdict: str = typer.Option("", "--verdict", help="The Verifier's verdict on the working proof as it stands: passed or failed (ADR-0019); a failed one names its --objection(s), a passing one ends each open one with --fixed"),
     objection: list[str] = typer.Option(None, "--objection", help="With --verdict failed, repeatable: one objection, where and why; each is a proof Challenge, numbered in the verdict (ADR-0025)"),
     objection_file: list[str] = typer.Option(None, "--objection-file", help=f"With --verdict failed, repeatable: one objection read from a file ({FILE_TEXT}), after any --objection"),
+    application: list[str] = typer.Option(None, "--application", help="With --verdict, repeatable: one line per application of proof.tex's Uses of dependencies, '<dependency>/<n>: checked' or '<dependency>/<n>: objection <k>' (#256)"),
     fixed: list[str] = typer.Option(None, "--fixed", help="With --verdict passed, repeatable: <challenge-id>=<where and why it is fixed>, one for each proof Challenge open on the node"),
     fixed_file: list[str] = typer.Option(None, "--fixed-file", help="With --verdict passed, repeatable: <challenge-id>=<path>, the where and why read from the file"),
     attempt: str = typer.Option("", "--attempt", help="Close an abandoned line: what it tried to establish; goes with --failed-on (ADR-0019)"),
@@ -1388,6 +1417,7 @@ def node_progress(
             plan=plan or None, step=step, status=status or None, note=note, handoff=handoff or None,
             verdict=verdict or None, attempt=attempt or None, method=method or None, failed_on=failed_on or None, coordinator=coordinator or None,
             question=question or None, objections=objections or None, fixed=endings or None, audit=_auditing(),
+            applications=application or None,
         )
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.progress")

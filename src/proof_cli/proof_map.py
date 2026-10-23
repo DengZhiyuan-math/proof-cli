@@ -108,6 +108,7 @@ from .trust_rules import (
     record_rule_decision,
     rule_matches,
 )
+from .node_check import uses_of
 from .vault import (
     SNAPSHOT_MANIFEST,
     archived_pdf_path,
@@ -434,6 +435,7 @@ def record_progress(
     turn: str | None = None,
     aside: str | None = None,
     pursuit_id: str | None = None,
+    applications: list[str] | None = None,
 ) -> dict:
     """Report a plan (the steps the run means to take), one step's status, a handoff to another role, the
     Verifier's verdict on the working proof, an attempt the role abandoned (ADR-0019), or — on a Theorem or Lemma
@@ -446,7 +448,11 @@ def record_progress(
     construction; only the Verifier records one. A failed one names its `objections`, numbered in it from 1, and each
     is a proof Challenge on the node (ADR-0025 point 8), ended as any Challenge is. A passing one says, for each proof
     Challenge still open on the node, where and why it is `fixed` ({challenge id: where and why}); one that leaves any
-    out is refused (ENDINGS_REQUIRED, naming them), so no objection is dropped unsaid. Its `checker` says what checked:
+    out is refused (ENDINGS_REQUIRED, naming them), so no objection is dropped unsaid. It reports on each application of
+    proof.tex's Uses of dependencies section, one of its `applications` lines each (`<dependency>/<n>: checked` or
+    `<dependency>/<n>: objection <k>`), read off the same bytes its digest is of: one left out, repeated or not in the
+    section, or an objection the verdict does not have, is refused (APPLICATIONS_MISMATCH); a passing one needs the
+    section complete (USES_INCOMPLETE) and objects to none (#256). Its `checker` says what checked:
     the Verifier, or the Verifier in an `audit` (ADR-0024), which reads the proof afresh and records no endings. An attempt is what the role tried to establish, how, and what it
     failed on; any role records one. Both are insert-only events like the rest of the work log.
 
@@ -523,9 +529,20 @@ def record_progress(
             raise ProofMapError("AUDIT_RECORDS_NO_ENDINGS", "an audit reads the proof afresh and ends no objection; the next ordinary Verifier does")
         if fixed and verdict == "failed":
             raise ProofMapError("INVALID_ENDING", "a failed verdict fixes nothing: a passing one says where and why each objection is fixed")
+        lines = _application_lines(applications or [])
+        if verdict == "passed" and any(objection for _, objection in lines):
+            raise ProofMapError("PASSED_WITH_OBJECTIONS", "a passing verdict objects to no application; one that stands is a failed verdict")
+        digest, read = _working_read(store, node)
+        if read is not None:   # proof.tex as the digest reads it: what the lines report on
+            findings, expected = uses_of(read, list(node.dependencies))
+            if verdict == "passed" and findings:
+                raise ProofMapError("USES_INCOMPLETE", "a passing verdict needs the Uses of dependencies section complete: "
+                                    + "; ".join(f["message"] for f in findings), details={"findings": findings})
+            _check_application_lines(lines, expected, len(raised))
         verdict_id = f"v_{uuid.uuid4().hex[:12]}"
         payload = {"kind": "verdict", "id": verdict_id, "role": role, "by": by, "outcome": verdict, "note": note.strip(),
-                   "inputs_sha256": _working_digest_or_none(store, node), "checker": "audit" if audit else "verifier"}
+                   "inputs_sha256": digest, "checker": "audit" if audit else "verifier",
+                   "applications": [{"id": application, "objection": objection} for application, objection in lines]}
         message = f"{role} on {node_id}: verdict {verdict}" + (f" — {note.strip()}" if note.strip() else "")
         with store.transaction() as conn:
             if verdict == "passed" and not audit:
@@ -608,6 +625,45 @@ def _fixes(store: ProjectStore) -> dict[str, dict]:
             for ending in entry.get("fixed") or []:
                 found[ending["challenge_id"]] = {"verdict_id": entry.get("id"), "at": entry["at"], "fix": ending.get("fix")}
     return found
+
+
+# one line of a verdict's report on the Uses of dependencies (#256): "<dependency>/<n>: checked" or "...: objection <k>"
+_APPLICATION_LINE = re.compile(r"^\s*(\S+/\d+)\s*:\s*(?:(checked)|objection\s+(\d+))\s*$")
+
+
+def _application_lines(lines: list[str]) -> list[tuple[str, int | None]]:
+    """Each line as (application, the objection it names or None); one not of that form is refused, naming it."""
+    read = []
+    for line in lines:
+        match = _APPLICATION_LINE.match(line)
+        if match is None:
+            raise ProofMapError("INVALID_APPLICATION_LINE", f"'{line}' is not a line on an application: "
+                                "'<dependency>/<n>: checked' or '<dependency>/<n>: objection <k>'")
+        read.append((match.group(1), int(match.group(3)) if match.group(3) else None))
+    return read
+
+
+def _check_application_lines(lines: list[tuple[str, int | None]], expected: list[str], objections: int) -> None:
+    """A verdict's lines cover the section's applications, each exactly once, and name only objections the verdict raises."""
+    named = [application for application, _ in lines]
+    problems = [*(f"{application} is left out" for application in expected if application not in named),
+                *(f"{application} has more than one line" for application in sorted({a for a in named if named.count(a) > 1})),
+                *(f"{application} is not an application of the section" for application in dict.fromkeys(named) if application not in expected),
+                *(f"{application}: objection {objection} is not one of the verdict's" for application, objection in lines
+                  if objection is not None and not 1 <= objection <= objections)]
+    if problems:
+        raise ProofMapError("APPLICATIONS_MISMATCH", "a verdict has one line on each application of the Uses of dependencies section: "
+                            + "; ".join(problems), details={"expected": expected, "problems": problems})
+
+
+def _working_read(store: ProjectStore, node: ProofMapNode) -> tuple[str | None, dict[str, bytes] | None]:
+    """The node folder read once, as a verdict is about it: its digest (`_working_digest_or_none`) and, for a LaTeX
+    document, its files, from which proof.tex's Uses of dependencies are read; (None, None) when it can't be read."""
+    try:
+        snapshot = read_working_snapshot(store.root, node.id, node.medium)
+    except (OSError, NodeFolderLinks):
+        return None, None
+    return snapshot.digest(), None if is_computation(node) else snapshot.files
 
 
 def _working_digest_or_none(store: ProjectStore, node: ProofMapNode) -> str | None:
@@ -1007,7 +1063,7 @@ def _write_working_files(store: ProjectStore, node: ProofMapNode) -> None:
     else:
         named = [get_definition(store, definition_id) for definition_id in node.definitions]
         write_working_proof(store.root, node_id=node.id, kind=node.kind.value, statement=node.statement,
-                            definitions=[(d.term, d.text) for d in named if d is not None])
+                            definitions=[(d.term, d.text) for d in named if d is not None], assumptions=list(node.assumptions))
 
 
 def set_medium(store: ProjectStore, node_id: str, medium: Medium | str, *, edited_by: str = "human") -> ProofMapNode:
