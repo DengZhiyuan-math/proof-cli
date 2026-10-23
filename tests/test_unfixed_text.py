@@ -142,7 +142,7 @@ def test_an_agent_may_not_edit_the_researcher_s_definition(tmp_path: Path):
 def _verified(store, node_id: str) -> dict:
     working_proof_path(store.root, node_id).write_text(proved(store, node_id, f"proof of {node_id}"), encoding="utf-8")
     ensure_key_ideas(store, node_id)
-    return record_progress(store, node_id, role="verifier", by="v-1", verdict="passed", applications=checked_lines(store, node_id))
+    return record_progress(store, node_id, role="verifier", by="v-1", verdict="passed", application_lines=checked_lines(store, node_id))
 
 
 def test_a_restatement_makes_stale_the_verdicts_on_the_node_and_on_what_rests_on_it(tmp_path: Path):

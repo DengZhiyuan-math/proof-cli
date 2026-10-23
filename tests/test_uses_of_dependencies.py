@@ -72,10 +72,31 @@ def test_a_node_with_dependencies_needs_exactly_one_section_after_the_proof(stor
     assert "CHECK_USES_SECTION" in [code for code, _ in _uses(check_node(store, "N"))]
 
 
+def test_the_section_comes_after_the_last_proof(store):
+    """Not between two proofs: the section is the proof's account of its uses, after all of it."""
+    _write(store, "N", SECTION + _entry("L", FIELDS) + _entry("R", FIELDS) + "\\begin{proof}\nThe second half.\n\\end{proof}\n")
+    assert [code for code, _ in _uses(check_node(store, "N"))] == ["CHECK_USES_SECTION"]
+
+
 def test_every_entry_is_in_the_section(store):
     stray = _entry("L", FIELDS)
     _write(store, "N", SECTION + _entry("L", FIELDS) + _entry("R", FIELDS), before_proof=stray)
     assert "CHECK_USES_SECTION" in [code for code, _ in _uses(check_node(store, "N"))]
+
+
+def test_an_entry_in_a_file_proof_tex_inputs_is_an_error_and_one_in_a_file_it_does_not_is_nothing(store):
+    """What the document holds is proof.tex and what it inputs; a stray file in the folder is not in it, for the check
+    and for the verdict alike."""
+    from proof_cli.vault import node_folder
+
+    folder = node_folder(store.root, "N")
+    (folder / "old.tex").write_text(_entry("L", FIELDS))
+    _ready(store)
+    assert _uses(check_node(store, "N")) == []
+    _verdict(store, "passed", ALL_CHECKED)
+    (folder / "part.tex").write_text(_entry("L", FIELDS))
+    _write(store, "N", "\\input{part}\n" + SECTION + _entry("L", FIELDS) + _entry("R", FIELDS, FIELDS))
+    assert [code for code, _ in _uses(check_node(store, "N"))] == ["CHECK_USES_SECTION"]
 
 
 def test_an_entry_for_what_is_not_a_dependency_is_an_error(store):
@@ -196,7 +217,7 @@ ALL_CHECKED = ["L/1: checked", "R/1: checked", "R/2: checked"]
 def _verdict(store, outcome, lines, **more):
     from proof_cli.proof_map import record_progress
 
-    return record_progress(store, "N", role="verifier", by="agent/verifier", verdict=outcome, applications=lines, **more)
+    return record_progress(store, "N", role="verifier", by="agent/verifier", verdict=outcome, application_lines=lines, **more)
 
 
 def test_a_passing_verdict_says_each_application_was_checked(store):
@@ -221,6 +242,29 @@ def test_a_proof_missing_a_dependencys_entry_cannot_record_a_passing_verdict_and
     _write(store, "N", SECTION + _entry("L", FIELDS) + _entry("R", FIELDS))
     _verdict(store, "passed", ["L/1: checked", "R/1: checked"])
     assert node_states(store, "N").proof_layer == "checks-passed"
+
+
+@pytest.mark.parametrize("edit", ["gains C", "loses R"])
+def test_a_passing_check_stops_counting_when_the_node_gains_or_loses_a_dependency(store, edit):
+    """The proof was checked with a use of each dependency the node had: one it has gained has no use there, and one
+    it has lost is still used, resting on what the map no longer says it rests on. Nor does the verdict let an agent
+    request review any more."""
+    from proof_cli.node_states import node_states
+    from _proofs import write_key_ideas
+    from proof_cli.proof_map import ProofMapError, add_dependency, remove_dependency, request_review
+
+    _ready(store)
+    write_key_ideas(store, "N")
+    passed = _verdict(store, "passed", ALL_CHECKED)
+    assert node_states(store, "N").proof_layer == "checks-passed"
+    if edit == "gains C":
+        add_dependency(store, "N", "C")
+    else:
+        remove_dependency(store, "N", "R")
+    assert node_states(store, "N").proof_layer == "incomplete"
+    with pytest.raises(ProofMapError) as refused:
+        request_review(store, "N", requested_by="agent", rationale="scoped", gated_by=passed["inputs_sha256"])
+    assert refused.value.code == "VERDICT_STALE" and "other dependencies" in refused.value.message
 
 
 @pytest.mark.parametrize("lines, named", [
@@ -282,7 +326,7 @@ def test_the_cli_takes_each_application_line(store):
     from proof_cli.cli import app
 
     _ready(store)
-    lines = [arg for line in ALL_CHECKED for arg in ("--application", line)]
+    lines = [arg for line in ALL_CHECKED for arg in ("--application-line", line)]
     result = CliRunner().invoke(app, ["node", "progress", "N", "--role", "verifier", "--by", "agent/verifier", "--verdict", "passed", *lines,
                                       "--json", "--root", str(store.root)])
     assert result.exit_code == 0, result.output
@@ -293,7 +337,7 @@ def test_the_cli_takes_each_application_line(store):
 
 DOCUMENT = ("\\documentclass{amsart}\n\\input{../preamble}\n\\begin{document}\n"
             "\\begin{claim}\n$f$ is bounded on $[0,1]$\n\\end{claim}\n\n"
-            "\\begin{proof}\nBy compactness.\n\\end{proof}\n\n"
+            "\\begin{proof}\nBy compactness.\nSee \\cite[Theorem 2]{rudin}.\n\\end{proof}\n\n"
             + SECTION + _entry("L", FIELDS) + _entry("R", FIELDS)
             + "\\bibliographystyle{plain}\n\\end{document}\n")
 
@@ -312,6 +356,7 @@ def _version(store, tex: str, ideas: str | None = None) -> int:
     (lambda tex: tex.replace("By compactness.", "By compactness and a covering argument."), ["proof"]),
     (lambda tex: tex.replace("\\item[Constants] None.", "\\item[Constants] $C$ depends on $f$ only.", 1), ["proof"]),
     (lambda tex: tex.replace("\\bibliographystyle{plain}", "\\bibliographystyle{alpha}"), ["citations or metadata"]),
+    (lambda tex: tex.replace("{rudin}", "{folland}"), ["citations or metadata"]),                    # which work is cited
     (lambda tex: tex.replace("$[0,1]$\n\\end{claim}", "$[0,2]$\n\\end{claim}").replace("By compactness.", "By Heine-Borel."), ["statement", "proof"]),
 ])
 def test_the_diff_between_two_versions_names_the_parts_that_changed(store, change, parts):

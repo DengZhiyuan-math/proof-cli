@@ -435,7 +435,7 @@ def record_progress(
     turn: str | None = None,
     aside: str | None = None,
     pursuit_id: str | None = None,
-    applications: list[str] | None = None,
+    application_lines: list[str] | None = None,
 ) -> dict:
     """Report a plan (the steps the run means to take), one step's status, a handoff to another role, the
     Verifier's verdict on the working proof, an attempt the role abandoned (ADR-0019), or — on a Theorem or Lemma
@@ -449,7 +449,7 @@ def record_progress(
     is a proof Challenge on the node (ADR-0025 point 8), ended as any Challenge is. A passing one says, for each proof
     Challenge still open on the node, where and why it is `fixed` ({challenge id: where and why}); one that leaves any
     out is refused (ENDINGS_REQUIRED, naming them), so no objection is dropped unsaid. It reports on each application of
-    proof.tex's Uses of dependencies section, one of its `applications` lines each (`<dependency>/<n>: checked` or
+    proof.tex's Uses of dependencies section, one of its `application_lines` each (`<dependency>/<n>: checked` or
     `<dependency>/<n>: objection <k>`), read off the same bytes its digest is of: one left out, repeated or not in the
     section, or an objection the verdict does not have, is refused (APPLICATIONS_MISMATCH); a passing one needs the
     section complete (USES_INCOMPLETE) and objects to none (#256). Its `checker` says what checked:
@@ -529,12 +529,12 @@ def record_progress(
             raise ProofMapError("AUDIT_RECORDS_NO_ENDINGS", "an audit reads the proof afresh and ends no objection; the next ordinary Verifier does")
         if fixed and verdict == "failed":
             raise ProofMapError("INVALID_ENDING", "a failed verdict fixes nothing: a passing one says where and why each objection is fixed")
-        lines = _application_lines(applications or [])
+        lines = _application_lines(application_lines or [])
         if verdict == "passed" and any(objection for _, objection in lines):
             raise ProofMapError("PASSED_WITH_OBJECTIONS", "a passing verdict objects to no application; one that stands is a failed verdict")
-        digest, read = _working_read(store, node)
-        if read is not None:   # proof.tex as the digest reads it: what the lines report on
-            findings, expected = uses_of(read, list(node.dependencies))
+        digest, files = _working_read(store, node)
+        if files is not None:   # proof.tex as the digest reads it: what the lines report on
+            findings, expected = uses_of(files, list(node.dependencies))
             if verdict == "passed" and findings:
                 raise ProofMapError("USES_INCOMPLETE", "a passing verdict needs the Uses of dependencies section complete: "
                                     + "; ".join(f["message"] for f in findings), details={"findings": findings})
@@ -633,14 +633,14 @@ _APPLICATION_LINE = re.compile(r"^\s*(\S+/\d+)\s*:\s*(?:(checked)|objection\s+(\
 
 def _application_lines(lines: list[str]) -> list[tuple[str, int | None]]:
     """Each line as (application, the objection it names or None); one not of that form is refused, naming it."""
-    read = []
+    parsed = []
     for line in lines:
         match = _APPLICATION_LINE.match(line)
         if match is None:
             raise ProofMapError("INVALID_APPLICATION_LINE", f"'{line}' is not a line on an application: "
                                 "'<dependency>/<n>: checked' or '<dependency>/<n>: objection <k>'")
-        read.append((match.group(1), int(match.group(3)) if match.group(3) else None))
-    return read
+        parsed.append((match.group(1), int(match.group(3)) if match.group(3) else None))
+    return parsed
 
 
 def _check_application_lines(lines: list[tuple[str, int | None]], expected: list[str], objections: int) -> None:
@@ -672,10 +672,7 @@ def _working_digest_or_none(store: ProjectStore, node: ProofMapNode) -> str | No
     inputs alone (those are a Run's Evidence rule, ADR-0015). None when the folder can't be read or holds a link where
     a snapshot would read: the verdict is still recorded — it is the Verifier's reading, not a snapshot — and a verdict
     without a hash matches no snapshot, so it opens no gate."""
-    try:
-        return read_working_snapshot(store.root, node.id, node.medium).digest()
-    except (OSError, NodeFolderLinks):
-        return None
+    return _working_read(store, node)[0]
 
 
 def _progress_entries(store: ProjectStore, node_id: str, kind: str) -> list[dict]:
@@ -715,12 +712,24 @@ def latest_verdict(store: ProjectStore, node_id: str) -> dict | None:
 
 
 def has_passing_check(store: ProjectStore, node_id: str) -> bool:
-    """Whether the node's newest verdict is a check under ADR-0025: structured (it has an id), passing, not stale, and
-    on the node folder as it stands. A verdict recorded before verdicts had ids is none (point 26)."""
+    """Whether the node's newest verdict is a check under ADR-0025: structured (it has an id), passing, not stale, on
+    the node folder as it stands, and, for a LaTeX document, reporting on the uses of exactly the dependencies the node
+    has now (#256): a verdict recorded before verdicts had ids is none (point 26), nor one from before verdicts
+    reported on the Uses of dependencies, on a node with dependencies, nor one whose node has gained or lost a
+    dependency since — a proof checked without a use of the dependency it rests on, or with a use of one it no longer
+    rests on, is not checked."""
     verdict = latest_verdict(store, node_id)
     if verdict is None or not verdict.get("id") or verdict.get("outcome") != "passed" or verdict.get("stale") or not verdict.get("inputs_sha256"):
         return False
-    return verdict["inputs_sha256"] == _working_digest_or_none(store, require_node(store, node_id))
+    node = require_node(store, node_id)
+    return covers_dependencies(verdict, node) and verdict["inputs_sha256"] == _working_digest_or_none(store, node)
+
+
+def covers_dependencies(verdict: dict, node: ProofMapNode) -> bool:
+    """Whether the verdict reported on the uses of exactly the dependencies the node has now (#256): each of its
+    `applications` is `<dependency>/<n>`. A computation has no Uses of dependencies section, so any of its verdicts does."""
+    covered = {application["id"].rsplit("/", 1)[0] for application in verdict.get("applications", [])}
+    return is_computation(node) or covered == set(node.dependencies)
 
 
 def questions(store: ProjectStore, node_id: str) -> list[dict]:
@@ -2094,12 +2103,15 @@ def request_review(store: ProjectStore, node_id: str, *, requested_by: str, rati
         # this request is — BEGIN IMMEDIATE holds the lock from here to the commit.
         if gated_by is not None:
             newest = latest_verdict(store, node_id)
-            if newest is None or newest.get("outcome") != "passed" or newest.get("inputs_sha256") != sha256 or newest.get("stale"):
+            if newest is None or newest.get("outcome") != "passed" or newest.get("inputs_sha256") != sha256 or newest.get("stale") \
+                    or not covers_dependencies(newest, node):
                 raise ProofMapError(
                     "VERDICT_STALE",
                     f"the newest verdict on {node_id} is not a passing one on these files"
                     + (f" (it {newest.get('outcome')} {str(newest.get('inputs_sha256') or '')[:12]}…"
-                       + (", before a restatement of what it read the proof against)" if newest.get("stale") else ")") if newest else " (there is none)")
+                       + (", before a restatement of what it read the proof against)" if newest.get("stale") else
+                          ", on the uses of other dependencies than the node's now)" if not covers_dependencies(newest, node) else ")")
+                       if newest else " (there is none)")
                     + "; have the Verifier read them again before requesting review",
                     details={"gated_by": gated_by, "working_sha256": sha256, "newest_verdict": newest},
                 )

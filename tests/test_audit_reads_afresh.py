@@ -36,7 +36,7 @@ def _audited(tmp_path: Path) -> str:
     record_progress(store, "thm", role="prover", by="prover-1", attempt="the direct bound", method="by parts", failed_on="a boundary term")
     asked = record_progress(store, "thm", role="prover", by="prover-1", question="read c as any constant; the alternative: the best one")
     answer_question(store, "thm", asked["id"], keep=True)
-    record_progress(store, "thm", role="verifier", by="claude-code", verdict="passed", note="every step holds", applications=checked_lines(store, "thm"))
+    record_progress(store, "thm", role="verifier", by="claude-code", verdict="passed", note="every step holds", application_lines=checked_lines(store, "thm"))
     return str(tmp_path)
 
 
