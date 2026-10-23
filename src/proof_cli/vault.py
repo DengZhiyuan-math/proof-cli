@@ -28,6 +28,11 @@ PREAMBLE = r"""% Shared by every node's proof.tex (\input{../preamble}): package
 \newtheorem{theorem}{Theorem}
 \newtheorem{lemma}[theorem]{Lemma}
 \newtheorem{claim}[theorem]{Claim}
+% Uses of dependencies (ADR-0025): after the proof, one depuse entry per dependency, its argument the dependency's id,
+% each field an \item[Substitution], \item[Premises], \item[Conclusion], \item[Constants]; a dependency used more than
+% once has \application before each use, each with all four fields
+\newenvironment{depuse}[1]{\par\medskip\noindent\textbf{\texttt{\detokenize{#1}}}\begin{description}}{\end{description}}
+\newcommand{\application}{\item[\textit{Application.}]}
 """
 
 _ENVIRONMENTS = {"theorem": "theorem", "lemma": "lemma", "claim": "claim"}
@@ -619,10 +624,13 @@ def _packages_lacking(preamble: Path, texts: list[str]) -> list[str]:
     return [package for package, used in _PACKAGES_USED.items() if package not in loaded and any(used.search(text) for text in texts)]
 
 
-def write_working_proof(root: Path, *, node_id: str, kind: str, statement: str, definitions: list[tuple[str, str]] = ()) -> None:
+def write_working_proof(root: Path, *, node_id: str, kind: str, statement: str, definitions: list[tuple[str, str]] = (),
+                        assumptions: list[str] = ()) -> None:
     """Create the project preamble and a node's working `proof.tex`, if missing. Never overwrites. A statement written in
-    Definitions (ADR-0020) is preceded by them, each `(term, text)`, so the document says what its symbols are. The map's
-    text goes in as `latex_text` writes it, a term as `heading_text` does: the untouched document builds."""
+    Definitions (ADR-0020) is preceded by them, each `(term, text)`, so the document says what its symbols are, and by the
+    node's own assumptions (ADR-0025, #266). After the proof, the Uses of dependencies heading: one `depuse` entry per
+    dependency goes under it (#256). The map's text goes in as `latex_text` writes it, a term as `heading_text` does: the
+    untouched document builds."""
     preamble = preamble_path(root)
     if not preamble.exists():
         preamble.parent.mkdir(parents=True, exist_ok=True)
@@ -633,16 +641,20 @@ def write_working_proof(root: Path, *, node_id: str, kind: str, statement: str, 
         return
     path.parent.mkdir(parents=True, exist_ok=True)
     environment = _ENVIRONMENTS.get(kind, "claim")
-    lacking = _packages_lacking(preamble, [statement, *(part for pair in definitions for part in pair)])
+    lacking = _packages_lacking(preamble, [statement, *(part for pair in definitions for part in pair), *assumptions])
     path.write_text(
         "\\documentclass{amsart}\n"
         "\\input{../preamble}\n"
         + "".join(f"\\usepackage{{{package}}} % the statement or a definition uses it, and ../preamble.tex does not load it\n" for package in lacking)
         + "\\begin{document}\n\n"
         + ("\\section*{Definitions}\n" + "".join(f"\\paragraph{{{heading_text(term)}.}} {latex_text(text)}\n\n" for term, text in definitions) if definitions else "")
+        + ("\\section*{Assumptions}\n\\begin{enumerate}\n" + "".join(f"\\item {latex_text(text)}\n" for text in assumptions) + "\\end{enumerate}\n\n"
+           if assumptions else "")
         + f"% Proof map node {node_id} ({kind}).\n"
         f"\\begin{{{environment}}}\n{latex_text(statement)}\n\\end{{{environment}}}\n\n"
         "\\begin{proof}\n% Write the proof here.\n\\end{proof}\n\n"
+        "\\section*{Uses of dependencies}\n"
+        "% One depuse entry per dependency: \\begin{depuse}{<id>} with Substitution, Premises, Conclusion, Constants (../preamble.tex).\n\n"
         "\\end{document}\n",
         encoding="utf-8",
     )

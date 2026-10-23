@@ -14,6 +14,9 @@ from proof_cli.storage import ensure_project
 from proof_cli.vault import node_folder
 
 IDEAS = "## 核心思路\nby compactness\n## 主要步骤\n1. use L\n## 难点\n无\n## 未覆盖\n无\n"
+# how N's proof uses L, under the heading the scaffold writes (ADR-0025, #256)
+USES_L = ("\\begin{depuse}{L}\n\\item[Substitution] the partial sums of $f$.\n\\item[Premises] none beyond the statement.\n"
+          "\\item[Conclusion] the partial sums are bounded.\n\\item[Constants] None.\n\\end{depuse}\n")
 
 
 @pytest.fixture
@@ -21,6 +24,9 @@ def project(tmp_path):
     store = ensure_project(tmp_path / "project")
     create_node(store, node_id="L", kind="lemma", statement="the partial sums are bounded")
     create_node(store, node_id="N", kind="claim", statement="for every $n$ the bound holds", dependencies=["L"])
+    proof = node_folder(store.root, "N") / "proof.tex"
+    heading = "\\section*{Uses of dependencies}\n"
+    proof.write_text(proof.read_text().replace(heading, heading + USES_L))
     return store
 
 
@@ -39,8 +45,8 @@ def _codes(findings):
 
 def test_a_fresh_node_is_not_built_and_has_no_summary_and_a_finished_one_passes(project):
     findings = check_node(project, "N")
-    assert _codes(findings) == ["CHECK_KEY_IDEAS_MISSING", "CHECK_NOT_BUILT", "CHECK_DEPENDENCY_UNMENTIONED"]  # errors first, then the note
-    assert [f["level"] for f in findings] == ["error", "error", "note"] and len(errors_of(findings)) == 2
+    assert _codes(findings) == ["CHECK_KEY_IDEAS_MISSING", "CHECK_NOT_BUILT"]
+    assert [f["level"] for f in findings] == ["error", "error"] and len(errors_of(findings)) == 2
     folder = node_folder(project.root, "N")
     (folder / "key-ideas.md").write_text(IDEAS)
     _build(project, "N")
@@ -83,15 +89,11 @@ def test_each_break_is_named(project):
     assert "CHECK_KEY_IDEAS_HEADINGS" in _codes(check_node(project, "N")) and "未覆盖" in summary(check_node(project, "N"))
     (folder / "key-ideas.md").write_text("## 核心思路\n\n## 主要步骤\n1. L\n## 难点\n无\n## 未覆盖\n无\n")
     assert "CHECK_KEY_IDEAS_EMPTY" in _codes(check_node(project, "N"))
-    # the dependency is mentioned in the proof or the summary, as a word
-    (folder / "key-ideas.md").write_text(IDEAS.replace("use L", "use the lemma"))
-    assert "CHECK_DEPENDENCY_UNMENTIONED" in _codes(check_node(project, "N"))
-    (folder / "proof.tex").write_text(tex.replace("% Write the proof here.", "By \\ref{L}, done."))
+    # how the proof uses its dependency is its own entry, not a mention of it (ADR-0025, #256)
+    (folder / "key-ideas.md").write_text(IDEAS)
+    (folder / "proof.tex").write_text(tex.replace(USES_L, "").replace("% Write the proof here.", "By \\ref{L}, done."))
     _build(project, "N")
-    assert "CHECK_DEPENDENCY_UNMENTIONED" not in _codes(check_node(project, "N"))
-    (folder / "proof.tex").write_text(tex.replace("% Write the proof here.", "By LL, done."))  # another id's prefix is not a mention
-    _build(project, "N")
-    assert "CHECK_DEPENDENCY_UNMENTIONED" in _codes(check_node(project, "N"))
+    assert "CHECK_USES_MISSING" in _codes(check_node(project, "N"))
 
 
 def test_a_computation_node_needs_its_program_and_an_imported_result_has_no_findings(project):
@@ -165,12 +167,12 @@ def test_the_audits_cases_comments_links_sub_files_the_environment_and_unknown_n
 def test_the_re_reviews_tex_cases_unreadable_sub_file_double_backslash_dotted_names_and_spacing(project):
     """Re-review of #180: a sub-file the check cannot read is a finding, not a pass; `\\\\%` is a line break then a comment; `part.v1`
     means `part.v1.tex` when it exists (TeX's rule); `\\input {x}`, `\\input⏎{x}` and TeX's `\\input x` are inputs."""
-    from proof_cli.node_check import _strip_comments
+    from proof_cli.node_check import strip_comments
 
     folder = node_folder(project.root, "N")
     (folder / "key-ideas.md").write_text(IDEAS)
     tex = (folder / "proof.tex").read_text()
-    assert _strip_comments("a \\% b % c\n") == "a \\% b \n" and _strip_comments("x \\\\% \\input{../../out}\n") == "x \\\\\n"
+    assert strip_comments("a \\% b % c\n") == "a \\% b \n" and strip_comments("x \\\\% \\input{../../out}\n") == "x \\\\\n"
     # an unreadable sub-file
     (folder / "part.tex").write_text("fine")
     (folder / "proof.tex").write_text(tex.replace("\\begin{document}", "\\input{part}\\begin{document}"))

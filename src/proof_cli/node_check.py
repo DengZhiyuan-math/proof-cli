@@ -4,7 +4,8 @@ A Proof agent's run spent turns on `ls`, `cat`, `grep error build/*.log` and rea
 checking what needs no judgment. These checks are that work, done once, deterministically and read-only — does the
 proof build and build cleanly, is the summary there with its four headings, does proof.tex's theorem environment state
 what the node states and does the document give the definitions it names as the map has them, do its `\\input`s (and
-theirs) stay in the folder, is each dependency at least mentioned. The run
+theirs) stay in the folder, does its Uses of dependencies section have an entry for each dependency, each application
+with its four fields (ADR-0025 point 23: the structure and the coverage only, whether each holds is the Verifier's). The run
 gates the Verifier on them (an error sends the work back to the role that owns the files; the Verifier is briefed that
 they passed and reads only the mathematics), and `proof node check` shows them to anyone. Nothing here is a
 verification: whether a step holds is the Verifier's and the researcher's. A finding is a notice (`CHECK_*` in
@@ -14,6 +15,8 @@ errors.NOTICE_CODES), never a refusal, and never stops the researcher's own requ
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .domain import ProofMapNodeKind, is_computation
@@ -37,6 +40,15 @@ MAX_INPUT_FILES = 50   # files read through \input, at most
 # form says nothing about what is stated. Not `\\[2pt]`, a line break; and a \label in a display says nothing either.
 _DISPLAY = re.compile(r"(?<!\\)\$\$(.+?)(?<!\\)\$\$|(?<!\\)\\\[(.+?)(?<!\\)\\\]|\\begin\{(equation\*?|displaymath)\}(.*?)\\end\{\3\}", re.S)
 _LABEL = re.compile(r"\\label\{[^}]*\}")
+# the Uses of dependencies section (#256): its heading, the end of the proof it follows, what ends it, its entries, the
+# start of each application of an entry used more than once, and the four fields of an application
+_USES_HEADING = re.compile(r"\\section\*\{\s*Uses of dependencies\s*\}")
+_PROOF_END = re.compile(r"\\end\{proof\}")
+_SECTION_END = re.compile(r"\\(?:section|chapter)\*?\s*[\[{]|\\end\{document\}")
+_DEPUSE = re.compile(r"\\begin\{depuse\}\s*\{([^}]*)\}(.*?)\\end\{depuse\}", re.S)
+_APPLICATION = re.compile(r"\\application(?![A-Za-z@])")
+USES_FIELDS = ("Substitution", "Premises", "Conclusion", "Constants")
+_FIELD = re.compile(r"\\item\s*\[\s*(" + "|".join(USES_FIELDS) + r")\s*\]")
 
 
 def _finding(code: str, level: str, message: str, path: str | None = None) -> dict:
@@ -59,12 +71,13 @@ def _comparable(text: str) -> str:
     return _normal(_DISPLAY.sub(display, text))
 
 
-def _mentions(node_id: str, *texts: str) -> bool:
+def _is_named(node_id: str, *texts: str) -> bool:
+    """Whether one of `texts` names the node `node_id`, as an id stands on its own (not part of a longer one)."""
     pattern = re.compile(r"(?<![A-Za-z0-9_.-])" + re.escape(node_id) + r"(?![A-Za-z0-9_.-])")
     return any(pattern.search(text) for text in texts if text)
 
 
-def _strip_comments(tex: str) -> str:
+def strip_comments(tex: str) -> str:
     """The text without its comments: a `%` opens one unless an odd number of backslashes precedes it (`\\%` is a percent sign,
     `\\\\%` is a line break and then a comment), to the end of the line."""
     out: list[str] = []
@@ -78,6 +91,119 @@ def _strip_comments(tex: str) -> str:
         else:
             out.append(line)
     return "".join(out)
+
+
+@dataclass
+class Application:
+    """One use of a dependency in its `depuse` entry: its id (`<dependency>/<n>`), its fields' texts by name (a field
+    given twice has two), and its whole text."""
+    id: str
+    fields: dict[str, list[str]]
+    text: str
+
+
+@dataclass
+class UsesEntry:
+    """One `depuse` entry: the dependency it names, whether it stands in proof.tex's one Uses of dependencies section,
+    its applications and whatever stands before its first `\\application` when it has several."""
+    dependency: str
+    in_section: bool
+    applications: list[Application] = field(default_factory=list)
+    prelude: str = ""
+
+
+def parse_uses(tex: str) -> tuple[list[int], list[UsesEntry]]:
+    """proof.tex's Uses of dependencies, read off its text (comments stripped): where each section heading stands, and
+    every `depuse` entry, wherever it stands. An entry is in the section when there is exactly one and the entry stands
+    between its heading and the next section or the end of the document."""
+    headings = [match.start() for match in _USES_HEADING.finditer(tex)]
+    span = (0, 0)
+    if len(headings) == 1:
+        end = _SECTION_END.search(tex, headings[0] + 1)
+        span = (headings[0], end.start() if end else len(tex))
+    entries = []
+    for match in _DEPUSE.finditer(tex):
+        entry = UsesEntry(dependency=match.group(1).strip(), in_section=span[0] <= match.start() < span[1])
+        parts = _APPLICATION.split(match.group(2))
+        bodies = parts if len(parts) == 1 else parts[1:]
+        entry.prelude = "" if len(parts) == 1 else parts[0]
+        for number, body in enumerate(bodies, start=1):
+            marks = list(_FIELD.finditer(body))
+            fields: dict[str, list[str]] = {}
+            for at, mark in enumerate(marks):
+                stop = marks[at + 1].start() if at + 1 < len(marks) else len(body)
+                fields.setdefault(mark.group(1), []).append(body[mark.end():stop].strip())
+            entry.applications.append(Application(id=f"{entry.dependency}/{number}", fields=fields, text=body.strip()))
+        entries.append(entry)
+    return headings, entries
+
+
+def application_ids(tex: str) -> list[str]:
+    """The ids of the applications proof.tex's Uses of dependencies section gives, in order: what a Verifier's verdict
+    reports on, one line each (#256)."""
+    return [application.id for entry in parse_uses(tex)[1] if entry.in_section for application in entry.applications]
+
+
+def uses_findings(tex: str, dependencies: list[str], inputs: Sequence[str] = (), path: str = "proof.tex") -> list[dict]:
+    """The Uses of dependencies section's structure and coverage (#256): with dependencies, exactly one section, after the
+    proof, holding every entry; one entry per dependency and none for anything else; each application's four fields
+    exactly once, none empty. `inputs` are the texts of the files proof.tex inputs, where no entry belongs."""
+    headings, entries = parse_uses(tex)
+    elsewhere = any(_DEPUSE.search(text) for text in inputs)
+    if not dependencies and not entries and not elsewhere:
+        return []
+    findings = []
+    proof_ends = [match.start() for match in _PROOF_END.finditer(tex)]
+    if len(headings) != 1:
+        findings.append(_finding("CHECK_USES_SECTION", ERROR, (f"proof.tex has {len(headings)} Uses of dependencies sections; it has exactly one" if headings else
+                                                                "proof.tex has no Uses of dependencies section: after the proof, \\section*{Uses of dependencies} with one depuse entry per dependency"), path))
+    elif not proof_ends or proof_ends[-1] > headings[0]:
+        findings.append(_finding("CHECK_USES_SECTION", ERROR, "the Uses of dependencies section comes after the proof", path))
+    stray = [entry.dependency for entry in entries if not entry.in_section]
+    if len(headings) == 1 and (stray or elsewhere):
+        findings.append(_finding("CHECK_USES_SECTION", ERROR, "every depuse entry stands in proof.tex's Uses of dependencies section"
+                                 + (f"; {', '.join(stray)} does not" if stray else "; a file it inputs has one"), path))
+    named = [entry.dependency for entry in entries]
+    missing = [dependency for dependency in dependencies if dependency not in named]
+    if missing and (headings or entries):   # with no section and no entry at all, the section's finding says it
+        findings.append(_finding("CHECK_USES_MISSING", ERROR, f"no depuse entry for the dependenc{'ies' if len(missing) > 1 else 'y'} {', '.join(missing)}: "
+                                 "each dependency, an imported result too, has one, saying how the proof uses it", path))
+    twice = sorted({dependency for dependency in named if dependency in dependencies and named.count(dependency) > 1})
+    if twice:
+        findings.append(_finding("CHECK_USES_DUPLICATE", ERROR, f"more than one depuse entry for {', '.join(twice)}: one entry per dependency, "
+                                 "each use of it an \\application in it", path))
+    strangers = sorted({dependency for dependency in named if dependency not in dependencies})
+    if strangers:
+        findings.append(_finding("CHECK_USES_NOT_A_DEPENDENCY", ERROR, f"depuse entries name {', '.join(strangers)}, which the node does not rest on", path))
+    problems = []
+    for entry in entries:
+        if entry.prelude.strip():
+            problems.append(f"{entry.dependency} has fields or text before its first \\application")
+        for application in entry.applications:
+            if not application.fields and not application.text:
+                problems.append(f"{application.id} is empty")
+                continue
+            for field_name in USES_FIELDS:
+                given = application.fields.get(field_name, [])
+                if not given:
+                    problems.append(f"{application.id} lacks {field_name}")
+                elif len(given) > 1:
+                    problems.append(f"{application.id} has {field_name} {'twice' if len(given) == 2 else f'{len(given)} times'}")
+                elif not given[0]:
+                    problems.append(f"{application.id} leaves {field_name} empty")
+    if problems:
+        findings.append(_finding("CHECK_USES_FIELDS", ERROR, "; ".join(problems) + " (each application: Substitution, Premises, Conclusion and Constants, "
+                                 "once each, none empty)", path))
+    return findings
+
+
+def uses_of(files: dict[str, bytes], dependencies: list[str], entry: str = "proof.tex") -> tuple[list[dict], list[str]]:
+    """The Uses of dependencies as a verdict re-checks them (#256), off the very bytes its digest is of (the folder's
+    files, by path; proof.tex is `entry`): the section's findings and its applications' ids. Only proof.tex is read,
+    where the section and every entry stand; an entry in a file it inputs is the node check's to report, which follows
+    the \\inputs (`check_node`), so the verdict never refuses what the check passed."""
+    tex = strip_comments(files.get(entry, b"").decode("utf-8", errors="replace"))
+    return uses_findings(tex, dependencies, path=entry), application_ids(tex)
 
 
 def _input_candidates(folder: Path, target: str) -> list[Path]:
@@ -107,7 +233,7 @@ def _sources(folder: Path, proof: Path, preamble: Path, findings: list[dict]) ->
         if rel in sources:
             continue
         try:
-            text = _strip_comments(path.read_text(encoding="utf-8", errors="replace"))
+            text = strip_comments(path.read_text(encoding="utf-8", errors="replace"))
         except OSError as exc:  # a file the check cannot read is not a file that passed
             findings.append(_finding("CHECK_INPUT_UNREADABLE", ERROR, f"{rel} could not be read ({exc.strerror or type(exc).__name__}): the checks cannot see what it inputs or states", rel))
             continue
@@ -131,7 +257,7 @@ def _sources(folder: Path, proof: Path, preamble: Path, findings: list[dict]) ->
 def check_node(store: ProjectStore, node_id: str) -> list[dict]:
     """The findings on the node's working folder, errors first: `{"code", "level": "error"|"note", "message", "path"?}`.
     An imported result has no working proof and no findings. Read-only."""
-    from .proof_map import get_node, list_nodes, require_node
+    from .proof_map import list_nodes, require_node
 
     node = require_node(store, node_id)
     if node.kind == ProofMapNodeKind.imported_result:
@@ -139,20 +265,16 @@ def check_node(store: ProjectStore, node_id: str) -> list[dict]:
     root = store.root
     folder = node_folder(root, node.id)
     findings: list[dict] = []
-    texts: list[str] = []
     if is_computation(node):
         script = run_script_path(root, node.id)
         if not script.is_file():
             findings.append(_finding("CHECK_RUN_SCRIPT_MISSING", ERROR, f"{script.name} is not in the node folder: the program is the candidate proof", script.name))
-        else:
-            texts.append(script.read_text(encoding="utf-8", errors="replace"))
     else:
         proof = working_entry_path(root, node.id, node.medium)
         if not proof.is_file():
             findings.append(_finding("CHECK_PROOF_MISSING", ERROR, f"{proof.name} is not in the node folder", proof.name))
         else:
             sources = _sources(folder, proof, preamble_path(root), findings)
-            texts.extend(sources.values())
             stated = [_comparable(body) for _, body in _ENV.findall(sources.get(proof.name, ""))]
             if not stated:
                 findings.append(_finding("CHECK_STATEMENT_MISMATCH", ERROR,
@@ -171,6 +293,15 @@ def check_node(store: ProjectStore, node_id: str) -> list[dict]:
                 findings.append(_finding("CHECK_DEFINITIONS_MISMATCH", ERROR,
                                          f"proof.tex does not give the definition{'s' if many else ''} {', '.join(absent)} as the map has {'them' if many else 'it'}: "
                                          "its Definitions section carries each definition the node names, word for word (`proof definition show <id>`)", proof.name))
+            # the node's own assumptions (#266), as the definitions are: the map's text, word for word, wherever given
+            unstated = [text for text in node.assumptions if not any(_comparable(latex_text(text)) in given_text for given_text in given)]
+            if unstated:
+                findings.append(_finding("CHECK_ASSUMPTIONS_MISMATCH", ERROR,
+                                         f"proof.tex does not state the assumption{'s' if len(unstated) > 1 else ''} {'; '.join(unstated)} as the map has "
+                                         f"{'them' if len(unstated) > 1 else 'it'}: its Assumptions section carries each of the node's assumptions, word for word", proof.name))
+            # how the proof uses each dependency (ADR-0025 point 23): proof.tex's own Uses of dependencies section
+            findings.extend(uses_findings(sources.get(proof.name, ""), list(node.dependencies),
+                                          inputs=[text for rel, text in sources.items() if rel != proof.name], path=proof.name))
             pdf = build_pdf_path(root, node.id)
             log = pdf.with_suffix(".log")
             if not pdf.is_file():
@@ -184,12 +315,18 @@ def check_node(store: ProjectStore, node_id: str) -> list[dict]:
                     findings.append(_finding("CHECK_COMPILE_ERRORS", ERROR, f"the build log has {len(bangs)} error line(s); the first: {bangs[0][:160]}", "build/proof.log"))
                 if _UNDEFINED.search(log_text):
                     findings.append(_finding("CHECK_UNDEFINED_REFERENCES", ERROR, "the build log reports undefined references or citations", "build/proof.log"))
+    # a statement says all it needs itself (#261): another node named in it, or in an assumption, is a hint for the
+    # Verifier, which fails a statement that needs a reading; it blocks nothing
+    hinted = sorted(other.id for other in list_nodes(store) if other.id != node.id
+                    and _is_named(other.id, node.statement, *node.assumptions))
+    if hinted:
+        findings.append(_finding("CHECK_NAMES_OTHER_NODE", NOTE, f"the statement or an assumption names {', '.join(hinted)}: a node states every "
+                                 "condition it needs itself, in its statement, its assumptions or the definitions it names"))
     ideas = folder / KEY_IDEAS_FILE
     if not ideas.is_file():
         findings.append(_finding("CHECK_KEY_IDEAS_MISSING", ERROR, f"{KEY_IDEAS_FILE} is not in the node folder; the review starts from it, and request-review is refused without it", KEY_IDEAS_FILE))
     else:
         text = ideas.read_text(encoding="utf-8", errors="replace")
-        texts.append(text)
         parsed = parse(text)
         absent = [heading for key, heading in FIELDS if key not in parsed.fields]
         if absent:
@@ -201,9 +338,6 @@ def check_node(store: ProjectStore, node_id: str) -> list[dict]:
         unknown = sorted(name for name in named if _ID_LIKE.fullmatch(name) and name not in known)
         if unknown:
             findings.append(_finding("CHECK_KEY_IDEAS_UNKNOWN_NODE", NOTE, f"主要步骤 names {', '.join(unknown)} as a node, and no such node is on the map", KEY_IDEAS_FILE))
-    for dep_id in node.dependencies:
-        if get_node(store, dep_id) is not None and not _mentions(dep_id, *texts):
-            findings.append(_finding("CHECK_DEPENDENCY_UNMENTIONED", NOTE, f"dependency {dep_id} is named neither in the proof nor in {KEY_IDEAS_FILE}: say where it is used, or drop the edge"))
     findings.sort(key=lambda f: (f["level"] != ERROR, f["code"]))
     return findings
 
@@ -219,4 +353,5 @@ def summary(findings: list[dict]) -> str:
     return "; ".join(f"{f['code']}: {f['message']}" for f in findings)
 
 
-__all__ = ["ERROR", "NOTE", "check_node", "errors_of", "summary"]
+__all__ = ["ERROR", "NOTE", "USES_FIELDS", "Application", "UsesEntry", "application_ids", "check_node", "errors_of", "parse_uses", "strip_comments",
+           "summary", "uses_findings", "uses_of"]

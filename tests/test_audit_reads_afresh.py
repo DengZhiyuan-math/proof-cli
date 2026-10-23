@@ -12,7 +12,7 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from _proofs import submit_proof
+from _proofs import submit_proof, proved, checked_lines
 
 from proof_cli.cli import app
 from proof_cli.proof_map import answer_question, claim_node, create_node, record_progress
@@ -30,13 +30,13 @@ def _audited(tmp_path: Path) -> str:
     create_node(store, node_id="thm", kind="theorem", statement="T", dependencies=["lem"])
     for node_id in ("lem", "thm"):
         claim_node(store, node_id, claimant_id="prover-1")
-        proof = submit_proof(store, node_id, claimant_id="prover-1", scoping_rationale="scoped", content=f"proof of {node_id}")
+        proof = submit_proof(store, node_id, claimant_id="prover-1", scoping_rationale="scoped", content=proved(store, node_id, f"proof of {node_id}"))
         runner.invoke(app, ["node", "evidence", "record", proof.id, "passed", "--notes", "every step checked", "--run-by",
                             "claude-code/verifier", "--root", str(tmp_path)])
     record_progress(store, "thm", role="prover", by="prover-1", attempt="the direct bound", method="by parts", failed_on="a boundary term")
     asked = record_progress(store, "thm", role="prover", by="prover-1", question="read c as any constant; the alternative: the best one")
     answer_question(store, "thm", asked["id"], keep=True)
-    record_progress(store, "thm", role="verifier", by="claude-code", verdict="passed", note="every step holds")
+    record_progress(store, "thm", role="verifier", by="claude-code", verdict="passed", note="every step holds", application_lines=checked_lines(store, "thm"))
     return str(tmp_path)
 
 
