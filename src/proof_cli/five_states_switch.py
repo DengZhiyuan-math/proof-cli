@@ -17,21 +17,24 @@ a Pursue with no end reads interrupted. `reviews.jsonl` is not rewritten. What t
 
 Before it, one copy of the database is kept (`BACKUP_FILE`, written whole under another name first); after it, one
 project entry (`SWITCH_EVENT`, listed by `proof history`: the switch is no node's) says what changed and how many.
-What it counts is read before the write lock is taken; the writes, the preamble's among them, are made under it, and
-the flag is set in the same transaction, so two processes opening at once switch once, a second open changes nothing,
-and a switch that fails leaves the preamble as it was. A project this version makes is switched as it is made.
+What it counts is read before the write lock is taken; the copy and the writes, the preamble's among them, are made
+under it, and the flag is set in the same transaction, so two processes opening at once switch once and copy once, a
+second open changes nothing, and a switch that fails leaves the preamble as it was. A switch that fails never keeps
+the project from opening: it opens as it is, the open says why, and the next one tries again (`switch_on_open`). A
+project this version makes is switched as it is made.
 """
 
 from __future__ import annotations
 
 import sqlite3
+import sys
 from contextlib import closing
 from pathlib import Path
 
 from .domain import ProofMapNode, ProofMapNodeKind
 from .node_states import NodeStates, node_states
-from .proof_map import (RESEARCHER, _raise_challenge, direct_seal, latest_verdict, list_challenges, list_nodes, rejected_because, release_node,
-                        researcher_verification_time)
+from .proof_map import (RESEARCHER, ProofMapError, _raise_challenge, direct_seal, latest_verdict, list_challenges, list_nodes, rejected_because,
+                        release_node, researcher_verification_time)
 from .pursuit import INTERRUPTED, project_progress
 from .storage import FIVE_STATES_SWITCHED_KEY, ProjectStore, append_event, get_active_claim, read_scope
 from .vault import USES_PREAMBLE, preamble_path
@@ -41,6 +44,17 @@ SWITCH_EVENT = "five_states_switch"
 BACKUP_FILE = Path(".proof") / "project-before-five-states.sqlite3"   # from the project root
 SWITCHED_BY = "five-states-switch"   # who released the claims of the runs from before
 _RELEASED = "the switch to the five states (ADR-0025): runs from before it are interrupted; start a Pursue to go on"
+
+
+def switch_on_open(store: ProjectStore) -> None:
+    """Switch the project as it is opened, or, when the switch fails, say why on stderr and leave the project as it is,
+    open: a map the switch can't read (a hand-edited cycle, say) must stay editable, and the next open tries again."""
+    try:
+        switch_to_five_states(store)
+    except Exception as exc:  # noqa: BLE001 - whatever stops the switch, the project still opens
+        why = f"{exc.code}: {exc.message}" if isinstance(exc, ProofMapError) else f"{type(exc).__name__}: {exc}"
+        print(f"proof: the switch to the five states (ADR-0025) did not run, so the project opens as it is and the next open"
+              f" tries again: {why}", file=sys.stderr)
 
 
 def switch_to_five_states(store: ProjectStore) -> dict[str, int] | None:
@@ -64,12 +78,12 @@ def switch_to_five_states(store: ProjectStore) -> dict[str, int] | None:
                                         for node in nodes if node.kind != ProofMapNodeKind.imported_result),
             "pursuits_interrupted": sum(pursuit["status"] == INTERRUPTED for pursuit in project_progress(store)),
         }
-    _back_up(store)
     preamble, before = preamble_path(store.root), None
     try:
         with store.transaction() as conn:
             if _switched(store, conn):   # another process switched it meanwhile
                 return None
+            _back_up(store)   # under the write lock: one process copies, and only what it is about to switch
             for node_id in challenged:
                 _raise_challenge(store, node_id, kind=None, opened_by=RESEARCHER, rationale=rejected[node_id], conn=conn)
             counts["claims_released"] = 0
@@ -117,7 +131,7 @@ def _switched(store: ProjectStore, conn: sqlite3.Connection | None = None) -> bo
 
 def _back_up(store: ProjectStore) -> None:
     """One copy of the database as it stood before the switch's first try, written whole under another name, then
-    named: a copy cut short is never kept for good."""
+    named: a copy cut short is never kept for good. Made under the switch's write lock, so no other open copies at once."""
     backup = store.root / BACKUP_FILE
     if backup.exists():
         return

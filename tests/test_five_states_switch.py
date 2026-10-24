@@ -8,6 +8,7 @@ shared preamble. Before it, one copy of the database is kept; after it, one entr
 Synthetic projects only."""
 
 import sqlite3
+import threading
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -142,3 +143,50 @@ def test_a_new_project_has_nothing_to_switch(tmp_path: Path):
     store = ensure_project(tmp_path)
     store = ensure_project(tmp_path)
     assert list_events_of_kind(store, SWITCH_EVENT) == [] and not (tmp_path / BACKUP_FILE).exists()
+
+
+def test_a_switch_that_fails_leaves_the_project_open_says_why_and_runs_on_the_next_open(tmp_path: Path, capsys):
+    """An old project the switch can't convert still opens, as it is: a hand-edited cycle, say, which the switch's reading
+    refuses. The open says why, every command still runs (the edit that removes the cycle among them), and the next open
+    switches."""
+    store = _old_project(tmp_path)
+    create_node(store, node_id="ONE", kind="claim", statement="one half of a cycle")
+    create_node(store, node_id="TWO", kind="claim", statement="the other half", dependencies=["ONE"])
+    update_proof_map_node(store, get_node(store, "ONE").model_copy(update={"dependencies": ["TWO"]}))   # edited by hand: a cycle
+
+    store = ensure_project(tmp_path)
+    said = capsys.readouterr().err
+    assert "five states" in said and "DEPENDENCY_CYCLE" in said and "ONE" in said
+    assert list_events_of_kind(store, SWITCH_EVENT) == [] and preamble_path(tmp_path).read_text(encoding="utf-8") == OLD_PREAMBLE
+    removed = CliRunner().invoke(app, ["node", "depend", "ONE", "--remove", "TWO", "--root", str(tmp_path), "--json"])
+    assert removed.exit_code == 0, removed.output
+
+    store = ensure_project(tmp_path)
+    assert len(list_events_of_kind(store, SWITCH_EVENT)) == 1 and len(list_challenges(store, target_node_id="REJ")) == 1
+
+
+def test_two_first_opens_at_once_switch_once_and_keep_one_whole_copy(tmp_path: Path):
+    """The page and a command opening an old project together: both open, one switches, and the copy kept from before is
+    whole, with nothing half-written left beside it."""
+    _old_project(tmp_path)
+    together, failed = threading.Barrier(2), []
+
+    def first_open() -> None:
+        together.wait()
+        try:
+            ensure_project(tmp_path)
+        except Exception as exc:  # noqa: BLE001 - what the test is about
+            failed.append(exc)
+
+    opens = [threading.Thread(target=first_open) for _ in range(2)]
+    for thread in opens:
+        thread.start()
+    for thread in opens:
+        thread.join()
+
+    assert failed == []
+    assert len(list_events_of_kind(ensure_project(tmp_path), SWITCH_EVENT)) == 1
+    with sqlite3.connect(tmp_path / BACKUP_FILE) as copy:
+        assert copy.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+        assert copy.execute("SELECT COUNT(*) FROM project_meta WHERE key = ?", (SWITCHED_KEY,)).fetchone() == (0,)
+    assert [path.name for path in (tmp_path / BACKUP_FILE).parent.iterdir() if path.name.startswith(BACKUP_FILE.name + ".")] == []

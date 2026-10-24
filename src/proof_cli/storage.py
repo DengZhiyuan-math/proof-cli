@@ -1124,9 +1124,9 @@ def create_project(root: str | Path, project_id: str) -> ProjectStore:
         conn.commit()
         switched = conn.execute("SELECT 1 FROM project_meta WHERE key = ?", (FIVE_STATES_SWITCHED_KEY,)).fetchone() is not None
     if not switched:  # a project from before ADR-0025, opened by this version for the first time
-        from .five_states_switch import switch_to_five_states  # it reads the map, which reads this module
+        from .five_states_switch import switch_on_open  # it reads the map, which reads this module
 
-        switch_to_five_states(store)
+        switch_on_open(store)
     return store
 
 
