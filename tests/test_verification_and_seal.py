@@ -391,3 +391,47 @@ def test_a_snapshot_whose_dependencies_changed_since_is_no_version_to_verify(tmp
     _snapshot(store, "a", "the proof using lem")
     researcher(store).verify("a", rationale="read it")
     assert _layers(store, "a")[1] == "expert-verified"
+
+
+def test_a_click_names_its_own_decision_or_is_refused(tmp_path: Path):
+    """The page's one entry point records a verification only as "verify" and a restoring "not a problem" only as itself, as
+    a Seal only as seal-true, seal-false or unseal: any other word is refused, and nothing is recorded (#307)."""
+    from proof_cli.proof_map import apply_decision
+
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="A", kind="lemma", statement="A")
+    _snapshot(store, "A")
+    who = researcher(store).reviewer_id
+    assert _code(lambda: apply_decision(store, "verification", "A", "unverify", reviewer=who, rationale="x")) == "INVALID_DECISION"
+    assert _layers(store, "A")[1] != "expert-verified"
+    researcher(store).verify("A", rationale="read it")
+    challenge = open_challenge(store, "A", kind="proof", opened_by="claude-code", rationale="step 2?")
+    assert _code(lambda: apply_decision(store, "not_a_problem", challenge.id, "dismiss", reviewer=who, rationale="x")) == "INVALID_DECISION"
+    assert get_challenge(store, challenge.id).status.value == "open"
+
+
+@pytest.mark.parametrize("command, replacements", [
+    (["node", "review", "A", "accept"], ["proof node verify A", "proof node seal A"]),
+    (["challenge", "dismiss", "{challenge}"], ["proof challenge withdraw {challenge}", "not a problem"]),
+])
+def test_a_retired_decision_names_what_replaced_it(tmp_path: Path, command, replacements):
+    """Accept, revision, reject and Reference review became Verify and Seal, and a Challenge is withdrawn or found "not a
+    problem" rather than dismissed (ADR-0025): the old commands say so, still sending the researcher to the page (#307)."""
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="A", kind="lemma", statement="A")
+    challenge = open_challenge(store, "A", kind="proof", opened_by="claude-code", rationale="step 2?")
+    args = [part.format(challenge=challenge.id) for part in command]
+    result = CliRunner().invoke(app, [*args, "--root", str(tmp_path), "--json"])
+    error = json.loads(result.stdout)["error"]
+    assert result.exit_code == 1 and error["code"] == "HUMAN_REVIEW_REQUIRED" and error["url"].startswith("http://localhost:")
+    for replacement in replacements:
+        assert replacement.format(challenge=challenge.id) in error["message"], error["message"]
+
+
+def test_a_retired_command_given_an_id_with_braces_still_refuses_and_names_it(tmp_path: Path):
+    """An id is put into the message as it is typed: one with braces in it is refused like any other, never an error."""
+    ensure_project(tmp_path)
+    for args in (["node", "review", "A{x}", "accept"], ["challenge", "dismiss", "c{0}"]):
+        result = CliRunner().invoke(app, [*args, "--root", str(tmp_path), "--json"])
+        error = json.loads(result.stdout)["error"]
+        assert (result.exit_code, error["code"]) == (1, "HUMAN_REVIEW_REQUIRED") and args[2] in error["message"], error

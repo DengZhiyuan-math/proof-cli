@@ -3115,6 +3115,9 @@ def prepare_decision(
     )
 
 
+_CLICK_WORDS = {DecisionKind.verification: "verify", DecisionKind.not_a_problem: "not-a-problem"}
+
+
 def apply_decision(
     store: ProjectStore,
     kind: DecisionKind | str,
@@ -3146,7 +3149,10 @@ def apply_decision(
         return dismiss_challenge(store, target_id, **who)
     if resolved_kind == DecisionKind.promote:
         return promote_to_lemma(store, target_id, **who)
-    # the researcher's clicks of ADR-0025 (points 13-16), each after the page listed what it does (zeqome/proof-web#46)
+    # the researcher's clicks of ADR-0025 (points 13-16), each after the page listed what it does (zeqome/proof-web#46);
+    # each names its own decision, as a Seal does: another word is refused, never taken for it (#307)
+    if resolved_kind in _CLICK_WORDS and decision != _CLICK_WORDS[resolved_kind]:
+        raise ProofMapError("INVALID_DECISION", f"'{decision}' is not a {resolved_kind.value} decision: {_CLICK_WORDS[resolved_kind]}")
     if resolved_kind == DecisionKind.verification:
         return verify_node(store, target_id, **who)
     if resolved_kind == DecisionKind.not_a_problem:
