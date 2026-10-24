@@ -23,17 +23,19 @@ def vault_dir(root: Path) -> Path:
 
 # A statement and a definition are Markdown whose maths the map's pages typeset with KaTeX, and the scaffold writes them
 # into proof.tex: the preamble loads what that maths uses beyond amsmath and amssymb (`\mathscr`: mathrsfs).
-PREAMBLE = r"""% Shared by every node's proof.tex (\input{../preamble}): packages, macros, theorem environments.
-\usepackage{amsmath,amssymb,amsthm,mathrsfs}
-\newtheorem{theorem}{Theorem}
-\newtheorem{lemma}[theorem]{Lemma}
-\newtheorem{claim}[theorem]{Claim}
-% Uses of dependencies (ADR-0025): after the proof, one depuse entry per dependency, its argument the dependency's id,
+# the Uses of dependencies' environments (#281), which the switch to the five states adds to a preamble from before (#282)
+USES_PREAMBLE = r"""% Uses of dependencies (ADR-0025): after the proof, one depuse entry per dependency, its argument the dependency's id,
 % each field an \item[Substitution], \item[Premises], \item[Conclusion], \item[Constants]; a dependency used more than
 % once has \application before each use, each with all four fields
 \newenvironment{depuse}[1]{\par\medskip\noindent\textbf{\texttt{\detokenize{#1}}}\begin{description}}{\end{description}}
 \newcommand{\application}{\item[\textit{Application.}]}
 """
+PREAMBLE = r"""% Shared by every node's proof.tex (\input{../preamble}): packages, macros, theorem environments.
+\usepackage{amsmath,amssymb,amsthm,mathrsfs}
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{claim}[theorem]{Claim}
+""" + USES_PREAMBLE
 
 _ENVIRONMENTS = {"theorem": "theorem", "lemma": "lemma", "claim": "claim"}
 
