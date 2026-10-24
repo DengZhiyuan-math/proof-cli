@@ -726,9 +726,13 @@ def read_turn_transcript(store: ProjectStore, relative: Path, kind: str, turn: s
         kept = json.loads((store.root / relative).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    ended = [e.payload for e in list_events_of_kind(store, kind)
-             if (entity_id is None or e.entity_id == entity_id) and e.payload.get("turn") == turn and e.payload.get("phase") == "ended"]
-    record = {key: value for key, value in (ended[-1] if ended else {}).items() if key != "transcript"}
+    with _reading(store, None) as conn:   # that one event, found by the database: not every event of the kind, parsed (#307)
+        row = conn.execute(
+            "SELECT payload FROM events WHERE kind = ? AND json_extract(payload, '$.turn') = ? AND json_extract(payload, '$.phase') = 'ended'"
+            + (" AND entity_id = ?" if entity_id is not None else "") + " ORDER BY created_at DESC, rowid DESC LIMIT 1",
+            (kind, turn, *(() if entity_id is None else (entity_id,))),
+        ).fetchone()
+    record = {key: value for key, value in (json.loads(row["payload"]) if row else {}).items() if key != "transcript"}
     return {**record, **kept}
 
 

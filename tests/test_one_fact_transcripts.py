@@ -71,3 +71,15 @@ def test_a_transcript_from_before_reads_as_it_did(tmp_path: Path):
     (tmp_path / P.READER_TURNS_DIR / "r0.json").write_text(json.dumps(read), encoding="utf-8")
     turn = P.reader_turn_transcript(store, "r0")
     assert {key: turn[key] for key in read} == read
+
+
+def test_two_nodes_turns_of_one_id_each_read_back_their_own_record(tmp_path: Path):
+    """A turn id is a node's own: two nodes' turns named alike each read back with the record of their own end (#307)."""
+    store = ensure_project(tmp_path)
+    for node_id, role, job in (("N", "prover", 3), ("M", "verifier", 7)):
+        create_node(store, node_id=node_id, kind="claim", statement=node_id)
+        record_agent_turn(store, node_id, phase="started", turn="t1", role=role, by="claude-code", provider="claude")
+        record_agent_turn(store, node_id, phase="ended", turn="t1", role=role, by="claude-code", provider="claude", job=job,
+                          events=EVENTS, prompt=f"work on {node_id}")
+    assert [(t["role"], t["job"], t["prompt"]) for t in (agent_turn_transcript(store, "N", "t1"), agent_turn_transcript(store, "M", "t1"))] == [
+        ("prover", 3, "work on N"), ("verifier", 7, "work on M")]
