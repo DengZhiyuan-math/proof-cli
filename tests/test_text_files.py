@@ -94,6 +94,21 @@ def test_statements_and_definitions_take_their_text_from_files(tmp_path: Path):
     assert edited["text"] == "$$u$$ |a|=b" and require_definition(load_project(root), "unit").text == "$$u$$ |a|=b"
 
 
+def test_each_claim_of_a_split_gets_its_own_assumptions_and_none_of_its_parents(tmp_path: Path):
+    """A condition only one Claim needs goes in its assumptions, and a Claim inherits none (#255): a split of several Claims
+    gives each its own, inline or from a file, as `--child-definition` gives each its definitions."""
+    root, store = _project(tmp_path)
+    create_node(store, node_id="P", kind="lemma", statement="a lemma", assumptions=["the parent's own"])
+    children = _data(_run(root, "node", "split", "P", "--child", "C1=one", "--child", "C2=two", "--child", "C3=three",
+                          "--child-assumption", "C1=$f$ is continuous", "--child-assumption-file", f"C2={_file(tmp_path, 'C2a.md')}",
+                          "--child-assumption", "C2=a second"))
+    assert [child["assumptions"] for child in children] == [["$f$ is continuous"], ["a second", TEXT], []]  # inline ones first
+    stray = _run(root, "node", "split", "P", "--child", "C4=four", "--child-assumption", "C9=x")
+    assert _error(stray)["code"] == "INVALID_CHILD_SPEC" and "C9" in _error(stray)["message"]
+    malformed = _error(_run(root, "node", "split", "P", "--child", "C4=four", "--child-assumption-file", "C4"))
+    assert malformed["code"] == "INVALID_CHILD_SPEC" and "--child-assumption-file 'C4' is not <child-id>=<path>" in malformed["message"]
+
+
 def test_a_fog_item_a_memory_entry_and_a_challenges_rationale_take_their_text_from_files(tmp_path: Path):
     root, store = _project(tmp_path)
     fog = _data(_run(root, "fog", "add", "--text-file", _file(tmp_path, "fog.md"), "--near", "N"))

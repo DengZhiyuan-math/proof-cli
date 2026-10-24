@@ -117,6 +117,7 @@ ERROR_CODES: dict[str, str] = {
     # -- Definitions (ADR-0020) -----------------------------------------------------------------
     "DEFINITION_NOT_FOUND": "no definition has this id: a lookup (show, edit, remove) names the ids there are; a statement naming it needs `proof definition add` first",
     "DEFINITION_ALREADY_EXISTS": "a definition with this id exists; choose another id",
+    "DEFINITION_DUPLICATE": "another definition has this text, whitespace aside (details.definition_id names it): name that one instead",
     "DEFINITION_IN_USE": "a node names this definition, so it can't be removed; edit it while it is unfixed, or add a corrected one under a new id",
     "DEFINITION_FIXED": "a Review decision relied on this definition (details.fixed_by names it): add a corrected one under a new id",
     "TEXT_FIXED": "a Review decision relied on this node's statement (details.fixed_by names it): state the correction as a new node",

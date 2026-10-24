@@ -108,13 +108,31 @@ def check_named(store: ProjectStore, definition_ids: list[str], *, conn=None) ->
 # -- writing -------------------------------------------------------------------------------------
 
 
+def _wording(text: str) -> str:
+    """A definition's text as `add` compares it (#255): its whitespace runs made one space. Nothing mathematical is
+    normalized, so `$f$` and `f` are two wordings; a near one is the researcher's to read, never merged."""
+    return " ".join(text.split())
+
+
+def _refuse_a_repeat(store: ProjectStore, text: str, *, conn, apart_from: str | None = None) -> None:
+    """Refuse a text another definition already has, whitespace aside, naming that one (DEFINITION_DUPLICATE): one
+    condition, written once (#255), whether it is added or edited in (#307). `apart_from`: the definition being edited."""
+    same = next((known for known in list_definitions(store, conn=conn) if known.id != apart_from and _wording(known.text) == _wording(text)), None)
+    if same is not None:
+        raise ProofMapError("DEFINITION_DUPLICATE", f"definition {same.id} ({same.term}) already says this: name it instead",
+                            details={"definition_id": same.id})
+
+
 def add_definition(store: ProjectStore, definition_id: str, *, term: str, text: str, created_by: str = "human") -> Definition:
+    """Add a definition under a new id. One whose text another already has, whitespace aside, is refused, naming that one
+    (DEFINITION_DUPLICATE): an agent adds definitions too, and one condition written twice would read as two (#255)."""
     if not DEFINITION_ID.fullmatch(definition_id or ""):
         raise ProofMapError("INVALID_DEFINITION_ID", f"definition id {definition_id!r} must be letters, digits, '.', '_' or '-' (at most 64), starting with a letter or digit")
     definition = Definition(id=definition_id, term=_clean(term, "term"), text=_clean(text, "text"), created_by=created_by)
     with store.transaction() as conn:
         if get_definition(store, definition_id, conn=conn) is not None:
             raise ProofMapError("DEFINITION_ALREADY_EXISTS", f"definition {definition_id} already exists")
+        _refuse_a_repeat(store, definition.text, conn=conn)
         insert_definition(store, definition, conn=conn)
         append_event(store, "definition_added", f"definition {definition_id}: {definition.term}", entity_id=definition_id,
                      payload=definition.model_dump(mode="json"), conn=conn)
@@ -144,7 +162,8 @@ def edit_definition(
     """Change an Unfixed definition (ADR-0021 point 6): the researcher any, an agent one an agent wrote and no node
     of the researcher's names (RESEARCHER_TEXT: the edit would restate the researcher's statement); a fixed one is
     refused (DEFINITION_FIXED). Once a node names it, the edit restates that node and needs a reason. Any change is
-    an edit; changing nothing changes and records nothing."""
+    an edit; changing nothing changes and records nothing. Text another definition already has is refused, as on an add
+    (DEFINITION_DUPLICATE)."""
     with store.transaction() as conn:
         current = require_definition(store, definition_id, conn=conn)
         update = {}
@@ -156,6 +175,8 @@ def edit_definition(
             return current
         require_restatable(store, what=f"definition {definition_id}", created_by=current.created_by, by=edited_by,
                            fixed=fixed_by_definition(store, definition_id), fixed_code="DEFINITION_FIXED")
+        if "text" in update:
+            _refuse_a_repeat(store, update["text"], conn=conn, apart_from=definition_id)
         naming = _nodes_naming(store, definition_id, conn=conn)
         theirs = [node.id for node in naming if node.created_by == RESEARCHER]
         if edited_by != RESEARCHER and theirs:

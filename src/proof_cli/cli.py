@@ -1303,6 +1303,8 @@ def node_split(
     display_label: str = typer.Option("", "--display-label", help="The one --child's display label"),
     definition: list[str] = typer.Option(None, "--definition", help="Repeatable: a definition the one --child is written in (`proof definition list`)"),
     child_definition: list[str] = typer.Option(None, "--child-definition", help="Repeatable: <child-id>=<definition-id>, a definition that child's statement is written in, the parent's or any other"),
+    child_assumption: list[str] = typer.Option(None, "--child-assumption", help="Repeatable: <child-id>=<assumption>, a condition of that child alone"),
+    child_assumption_file: list[str] = typer.Option(None, "--child-assumption-file", help=f"Repeatable, after any --child-assumption: <child-id>=<path>, the assumption read from the file at <path> ({FILE_TEXT})"),
     root: str = ROOT_OPTION,
     created_by: str = typer.Option("", "--created-by", help=CREATED_BY_HELP),
     reassign: bool = typer.Option(False, "--reassign", help="Take the claim over from whoever holds it (recorded as `claim --reassign` records it); the node need not be on the frontier"),
@@ -1312,7 +1314,8 @@ def node_split(
     All or nothing; a node someone else holds is theirs to split unless --reassign.
     With a single --child, --assumption and --display-label give it those, as the page's split does (issue #154).
     A --child-file child's statement is its file's text, read before anything is written.
-    A child names only the definitions given it, the parent's included only where its statement uses them (#286)."""
+    A child names only the definitions given it, the parent's included only where its statement uses them (#286), and
+    has only the assumptions given it: a condition shared by several is a definition they name (#255)."""
     entries = [*(child or []), *(child_file or [])]
     if not entries:
         raise click.UsageError("Missing option '--child' (or --child-file).")
@@ -1338,6 +1341,13 @@ def node_split(
             if child_id not in by_id or not definition_id:
                 raise ProofMapError("INVALID_CHILD_SPEC", f"--child-definition '{entry}' is not <child-id>=<definition-id> for one of this split's children ({', '.join(by_id)})")
             by_id[child_id]["definitions"].append(definition_id)
+        for number, entry in enumerate([*(child_assumption or []), *(child_assumption_file or [])]):
+            from_file = number >= len(child_assumption or [])
+            option, given = ("--child-assumption-file", "<path>") if from_file else ("--child-assumption", "<assumption>")
+            child_id, _, assumption_text = entry.partition("=")
+            if child_id not in by_id or not assumption_text:
+                raise ProofMapError("INVALID_CHILD_SPEC", f"{option} '{entry}' is not <child-id>={given} for one of this split's children ({', '.join(by_id)})")
+            by_id[child_id]["assumptions"].append(_file_text(assumption_text, option) if from_file else assumption_text)
         children = split_node(store, parent_id, specs, created_by=_author(created_by, root), reassign=reassign)
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="node.split")

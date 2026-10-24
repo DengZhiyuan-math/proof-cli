@@ -42,6 +42,7 @@ from .proof_map import (
     has_passing_check,
     list_challenges,
     list_nodes,
+    no_longer_callable_review,
     require_node,
     restored_challenges,
     rests_on,
@@ -265,8 +266,15 @@ def _covered(store: ProjectStore) -> dict[str, list[str]]:
 
 def seal_record(store: ProjectStore, node_id: str) -> dict | None:
     """What seals the node, for every later briefing (ADR-0025 point 14): {"seal", "sealed_node", "by", "at", "note"} —
-    its own seal, or the true seal above that covers it — or None while no seal line holds it."""
-    sealed_node = node_id if direct_seal(store, node_id) != "unsealed" else sealed_by(store, node_id)
+    its own seal, or the true seal above that covers it, or for an imported result the older Reference review that
+    found it no longer callable — or None while nothing seals it."""
+    if direct_seal(store, node_id) != "unsealed":
+        sealed_node = node_id
+    elif own_seal(store, require_node(store, node_id)) == "sealed-false":  # its own, before any seal above (`own_states`)
+        older = no_longer_callable_review(store, node_id)
+        return {"seal": "sealed-false", "sealed_node": node_id, **older} if older else None
+    else:
+        sealed_node = sealed_by(store, node_id)
     line = seal_line(store, sealed_node) if sealed_node is not None else None
     if line is None:
         return None
