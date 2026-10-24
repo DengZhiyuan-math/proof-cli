@@ -169,11 +169,12 @@ class ProofMapNode(BaseModel):
     and how much it's trusted. An `imported_result` is immutable once
     created — a source correction is always a brand-new node, never an edit
     of this one (see ADR on imported results). `statement`/`assumptions`
-    likewise never change in place on any node, for the same reason. Two
-    narrow, deliberate exceptions exist to that rule: Promote changes `kind`
-    from `claim` to `lemma` (issue #22), and Split appends new child ids to
-    `dependencies` (issue #26) — both go through `update_proof_map_node`,
-    the only in-place write path this model has.
+    likewise never change in place on any node, for the same reason, except
+    through the sanctioned edits (a Split appending child ids to
+    `dependencies`, issue #26; a restatement), all through
+    `update_proof_map_node`, the only in-place write path this model has.
+    `kind` never changes in place: a Promote is its decision line, read as a
+    Lemma on top of the kind the node was made with (#22, #284).
 
     `derived_from` is set by Split: which node a purpose-built subclaim was
     split from, distinguishing it from a coincidentally-shared Lemma. `None`

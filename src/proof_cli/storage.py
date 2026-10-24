@@ -1533,18 +1533,19 @@ def insert_proof_map_node(store: ProjectStore, node: ProofMapNode, *, conn: sqli
 
 
 def update_proof_map_node(store: ProjectStore, node: ProofMapNode, *, conn: sqlite3.Connection | None = None) -> ProofMapNode:
-    """Overwrite an existing node's row in place.
+    """Overwrite an existing node's row in place, but for its kind, which stays as the row has it.
 
-    Its callers are the node's sanctioned edits: Promote (issue #22)
-    changing `kind` from `claim` to `lemma`, Split (issue #26) appending
-    children to `dependencies`, moving dependents off a withdrawn
-    imported result (issue #20) swapping one dependency for its correction,
-    and adding, removing or moving one dependency edge (issue #96).
+    Its callers are the node's sanctioned edits: Split (issue #26) appending
+    children to `dependencies`, adding, removing or moving one dependency
+    edge (issue #96), a restatement (ADR-0025), and setting the Medium. None
+    changes a node's kind, and the `node` given carries the kind as it is
+    read: a Claim its Promote line makes a Lemma keeps `claim` in its row, so
+    the line stays the one source of "lemma" (#284). Returns `node` as given.
     """
     with _writing(store, conn) as conn:
         conn.execute(
-            "UPDATE proof_map_nodes SET kind = ?, data = ?, updated_at = ? WHERE id = ?",
-            (node.kind.value, node.model_dump_json(), node.updated_at.isoformat(), node.id),
+            "UPDATE proof_map_nodes SET data = json_set(?, '$.kind', json_extract(data, '$.kind')), updated_at = ? WHERE id = ?",
+            (node.model_dump_json(), node.updated_at.isoformat(), node.id),
         )
     return node
 
