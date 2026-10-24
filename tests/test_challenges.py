@@ -106,7 +106,8 @@ def test_a_restatement_supersedes_a_proof_gap_and_a_statement_challenge_follows_
 
 def test_a_statement_challenge_stops_the_branch_under_each_direct_user_and_nothing_beside_it(tmp_path: Path):
     # ADR-0025 point 6: A uses U1 and U2, and U1 uses N and S; N challenged as false stops all of U1's branch, S
-    # included; U2 goes on; A is uncertain and waits
+    # included; U2 goes on; A is uncertain and waits. N and its counterexample are the two sides worked meanwhile
+    # (point 7, zeqome/proof-agents#49)
     store = ensure_project(tmp_path)
     for node_id, dependencies in (("N", []), ("S", []), ("U1", ["N", "S"]), ("U2", []), ("A", ["U1", "U2"])):
         create_node(store, node_id=node_id, kind="theorem" if node_id == "A" else "claim", statement=node_id, dependencies=dependencies)
@@ -115,7 +116,7 @@ def test_a_statement_challenge_stops_the_branch_under_each_direct_user_and_nothi
     assert all(stopped_by(store, node_id) == [] for node_id in ("A", "U1", "U2", "N", "S"))
     open_challenge(store, "N", kind="statement", counterexample="cx", opened_by="agent_v", rationale="cx refutes N")
     assert {node_id: stopped_by(store, node_id) for node_id in ("A", "U1", "U2", "N", "S", "cx")} == {
-        "A": [], "U1": ["N"], "U2": [], "N": ["N"], "S": ["N"], "cx": []}
+        "A": [], "U1": ["N"], "U2": [], "N": [], "S": ["N"], "cx": []}
     assert node_states(store, "A").conclusion == "uncertain"
 
 
@@ -136,7 +137,7 @@ def test_the_cli_raises_either_kind_withdraws_one_and_says_what_a_challenge_stop
     raised = run("challenge", "open", "N", "--kind", "statement", "--counterexample", "cx", "--opened-by", "agent_v", "--rationale", "cx refutes N")
     assert (raised["kind"], raised["counterexample_id"], raised["status"]) == ("statement", "cx", "open")
     assert run("node", "show", "U1")["stopped_by"] == ["N"]
-    assert {node["id"]: node["stopped_by"] for node in run("node", "list")} == {"N": ["N"], "U1": ["N"], "cx": []}
+    assert {node["id"]: node["stopped_by"] for node in run("node", "list")} == {"N": [], "U1": ["N"], "cx": []}   # N and cx: the two sides
     assert run("challenge", "open", "U1", "--opened-by", "agent_v", "--rationale", "a gap")["kind"] == "proof"
     withdrawn = run("challenge", "withdraw", raised["id"], "--reason", "cx misreads N's hypothesis", "--by", "agent_p")
     assert (withdrawn["status"], withdrawn["withdrawn_by"], withdrawn["withdrawal_reason"]) == ("withdrawn", "agent_p", "cx misreads N's hypothesis")

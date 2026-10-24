@@ -597,19 +597,31 @@ def set_aside_in(store: ProjectStore, pursuit_id: str) -> list[dict]:
 
 
 def _endings(store: ProjectStore, node_id: str, fixed: dict[str, str]) -> list[dict]:
-    """A passing verdict's endings, one per proof Challenge open on the node, in the order they were raised: where and
-    why each is fixed. Refused when one names no such Challenge or says nothing, or when one is left out."""
-    open_ = [challenge for challenge in list_challenges(store, target_node_id=node_id, status="open") if challenge.kind == "proof"]
+    """A passing verdict's endings, in the order they were raised: where and why each proof Challenge open on the node is
+    fixed, and where the counterexample of each agent's statement Challenge on it fails, which ends it as the proof's
+    side deciding first (ADR-0025 point 7; zeqome/proof-agents#49). Refused when one names no such Challenge or says
+    nothing, or when one is left out. A statement Challenge whose counterexample decided first can't be ended so: the
+    statement is false."""
+    from .node_states import counterexample_decides  # it reads this module
+
+    open_ = [challenge for challenge in list_challenges(store, target_node_id=node_id, status="open") if challenge.kind == "proof" or two_sided(challenge)]
+    decided = sorted(challenge.id for challenge in open_ if challenge.kind == "statement" and counterexample_decides(store, challenge))
+    if set(fixed) & set(decided):
+        raise ProofMapError("INVALID_ENDING", f"{', '.join(sorted(set(fixed) & set(decided)))}: its counterexample passed its check first, so the "
+                            f"statement of {node_id} is false; nothing ends it so", details={"decided": decided})
+    open_ = [challenge for challenge in open_ if challenge.id not in decided]
     unknown = sorted(set(fixed) - {challenge.id for challenge in open_})
     if unknown:
-        raise ProofMapError("INVALID_ENDING", f"{', '.join(unknown)}: no proof Challenge open on {node_id} has that id", details={"unknown": unknown})
+        raise ProofMapError("INVALID_ENDING", f"{', '.join(unknown)}: no proof Challenge, nor agent's statement Challenge with a counterexample, open on "
+                            f"{node_id} has that id", details={"unknown": unknown})
     blank = sorted(challenge_id for challenge_id, text in fixed.items() if not text.strip())
     if blank:
         raise ProofMapError("INVALID_ENDING", f"say where and why each is fixed: {', '.join(blank)}", details={"blank": blank})
     missing = sorted(challenge.id for challenge in open_ if challenge.id not in fixed)
     if missing:
-        raise ProofMapError("ENDINGS_REQUIRED", f"a passing verdict says where and why each open objection on {node_id} is fixed; it leaves out "
-                            + ", ".join(missing) + " (--fixed <challenge-id>=<where and why>, or withdraw one with a reason)",
+        raise ProofMapError("ENDINGS_REQUIRED", f"a passing verdict says where and why each open objection on {node_id} is fixed, and where the "
+                            "counterexample of each statement Challenge fails; it leaves out " + ", ".join(missing)
+                            + " (--fixed <challenge-id>=<where and why>, or withdraw one with a reason)",
                             details={"node_id": node_id, "missing": missing})
     return [{"challenge_id": challenge.id, "fix": fixed[challenge.id].strip()} for challenge in open_]
 
@@ -3683,8 +3695,16 @@ def note_trust_rule_matches(store: ProjectStore, node_ids: list[str] | None = No
 CHALLENGE_KINDS = ("proof", "statement")  # ADR-0025 point 6
 
 
+def two_sided(challenge: Challenge) -> bool:
+    """Whether a Challenge is worked from both sides (ADR-0025 point 7; zeqome/proof-agents#49): an agent's against the
+    statement, with its counterexample. The researcher's is discussed with the agents and the researcher concludes; one
+    from before kinds has none."""
+    return challenge.kind == "statement" and bool(challenge.counterexample_id) and challenge.opened_by != RESEARCHER
+
+
 def open_challenge(
-    store: ProjectStore, target_node_id: str, *, kind: str = "proof", counterexample: str | None = None, opened_by: str = "human", rationale: str = ""
+    store: ProjectStore, target_node_id: str, *, kind: str = "proof", counterexample: str | None = None, opened_by: str = "human", rationale: str = "",
+    counterexample_statement: str | None = None,
 ) -> Challenge:
     """Raise a Challenge against a node's proof or its statement (ADR-0025 point 6): it takes effect at once.
 
@@ -3697,6 +3717,10 @@ def open_challenge(
     statement (ADR-0025 point 7): without one an agent has only a doubt, which is a Challenge against the proof. The
     researcher's needs none; it is discussed with the agents. A sealed node is the researcher's absolute belief and
     is never challenged (point 6): it is unsealed first.
+
+    With `counterexample_statement` the counterexample is made in the same step, a new Claim under the id `counterexample`
+    by whoever raises the Challenge: an agent finds the counterexample as it finds the Challenge (zeqome/proof-agents#49).
+    A counterexample that rests on its target could contradict it only by assuming it, and is refused.
     """
     if kind not in CHALLENGE_KINDS:
         raise ProofMapError("INVALID_CHALLENGE_KIND", f"'{kind}' is not a Challenge kind; expected one of: {', '.join(CHALLENGE_KINDS)}")
@@ -3706,8 +3730,18 @@ def open_challenge(
     if counterexample is not None:
         if counterexample == target_node_id:
             raise ProofMapError("INVALID_COUNTEREXAMPLE", f"{target_node_id} can't be its own counterexample")
-        require_node(store, counterexample)
+        if counterexample_statement is None:
+            require_node(store, counterexample)
+            if target_node_id in rests_on(store, counterexample):
+                raise ProofMapError("COUNTEREXAMPLE_RESTS_ON_TARGET", f"{counterexample} rests on {target_node_id}: it could contradict it only by assuming it",
+                                    details={"counterexample": counterexample, "node_id": target_node_id})
+    elif counterexample_statement is not None:
+        raise ProofMapError("COUNTEREXAMPLE_REQUIRED", "a counterexample made with its Challenge is named by its id (--counterexample <new-id>)")
+    if counterexample_statement is not None and kind != "statement":
+        raise ProofMapError("INVALID_COUNTEREXAMPLE", "only a Challenge against the statement has a counterexample")
     with store.transaction() as conn:
+        if counterexample_statement is not None:   # a new Claim, its statement its scope (ADR-0025 point 7)
+            create_node(store, node_id=counterexample, kind=ProofMapNodeKind.claim, statement=counterexample_statement, created_by=opened_by)
         return _raise_challenge(store, target_node_id, kind=kind, counterexample=counterexample, opened_by=opened_by, rationale=rationale, conn=conn)
 
 

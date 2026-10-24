@@ -11,8 +11,10 @@ is written, and no Challenge kind is guessed or stored (#276).
 - **Seal**: the node's own newest seal line (#279), else sealed true where a true seal above covers it, else unsealed; an
   imported result found no longer callable, sealed by no line of its own, reads sealed false.
 - **Statement layer**: an open Challenge against the statement reads challenged as false, and so does one raised before
-  Challenges had a kind (#277), whose kind is never guessed; so does a Rejected node. An open Challenge against the
-  proof sends the Proof layer back to incomplete instead.
+  Challenges had a kind (#277), whose kind is never guessed; so does a Rejected node. It reads false once the
+  Challenge's counterexample reads true (`counterexample_decides`, zeqome/proof-agents#49). An open Challenge against
+  the proof sends the Proof layer back to incomplete instead, and so does an agent's statement Challenge until its
+  counterexample decides: no Verdict has yet said where the counterexample fails.
 - **A verification lapses** when an agent challenges the node after it, either kind, and stays lapsed when the Challenge
   is withdrawn or ends (ADR-0025 point 13): only a new verification, or the researcher's click restoring it (the page's
   dismissal today, #279's later), brings it back. The researcher's own doubt lapses nothing.
@@ -38,6 +40,7 @@ from .proof_map import (
     false_since,
     get_acceptance_state,
     get_accepted_version,
+    get_node,
     get_reference_review_state,
     has_passing_check,
     list_challenges,
@@ -47,6 +50,7 @@ from .proof_map import (
     restored_challenges,
     rests_on,
     seal_line,
+    two_sided,
     researcher_verification_time,
     verification_time,
 )
@@ -131,7 +135,8 @@ def node_states(store: ProjectStore, node_id: str) -> NodeStates:
 
 def own_states(store: ProjectStore, node: ProofMapNode) -> tuple[str, str, str, str | None]:
     """The node's own (Seal, Statement layer, Proof layer, Assignee), as the module note maps today's records: no walk
-    over what it rests on, so a hand-edited cycle elsewhere never reaches it. Its conclusion is `node_states`'."""
+    over what it rests on, so a hand-edited cycle elsewhere never reaches it; only a counterexample's conclusion is read
+    with it (`counterexample_decides`). Its conclusion is `node_states`'."""
     seal, statement_layer = own_seal(store, node), "unchallenged"
     imported = node.kind == ProofMapNodeKind.imported_result
     if not imported and get_acceptance_state(store, node.id) == "rejected":
@@ -150,10 +155,43 @@ def own_states(store: ProjectStore, node: ProofMapNode) -> tuple[str, str, str, 
             continue
         if challenge.kind == "proof":
             proof_layer = "incomplete"
-        else:
-            statement_layer = "challenged-as-false"
+            continue
+        decided = counterexample_decides(store, challenge)   # a counterexample that decided makes it false (ADR-0025 point 7)
+        if statement_layer != "false":
+            statement_layer = "false" if decided else "challenged-as-false"
+        if two_sided(challenge) and not decided:   # no Verdict has said where its counterexample fails yet
+            proof_layer = "incomplete"
     claim = get_active_claim(store, node.id)
     return seal, statement_layer, proof_layer, claim.claimant_id if claim else None
+
+
+@read_scoped
+def counterexample_decides(store: ProjectStore, challenge: Challenge) -> bool:
+    """Whether an open statement Challenge's counterexample decides it (ADR-0025 point 7; zeqome/proof-agents#49): the
+    counterexample's conclusion is true — its proof has passed its check, its own statement is unchallenged, and what it
+    rests on holds — so the challenged statement is false; it reads challenged again when that stops being so, and when
+    the counterexample comes to rest on its target, which it could then contradict only by assuming it. Counterexamples
+    that contradict each other in a cycle are each challenged, none decides, and all read uncertain; a cycle that runs
+    through what they rest on is cut where it comes back to a Challenge being decided, which reads undecided there."""
+    if challenge.kind != "statement" or not challenge.counterexample_id or challenge.status != ChallengeStatus.open:
+        return False
+    node = get_node(store, challenge.counterexample_id)
+    if node is None or any(other.status == ChallengeStatus.open and other.kind != "proof" for other in list_challenges(store, target_node_id=node.id)):
+        return False   # gone, or its own statement in question
+    if challenge.target_node_id in rests_on(store, node.id):
+        return False
+    deciding = scoped_memo(store, "deciding")
+    if challenge.id in deciding:
+        return False
+    deciding[challenge.id] = True
+    try:
+        return node_states(store, node.id).conclusion in ("true", "verified-true")
+    except ProofMapError as error:
+        if error.code != "DEPENDENCY_CYCLE":
+            raise
+        return False   # a hand-edited cycle under it: undecided here, and named where the counterexample is read
+    finally:
+        deciding.pop(challenge.id, None)
 
 
 def own_seal(store: ProjectStore, node: ProofMapNode) -> str:
@@ -208,9 +246,10 @@ def lapses(store: ProjectStore, challenge: Challenge, since: datetime | None) ->
 def stopped_by(store: ProjectStore, node_id: str) -> list[str]:
     """The nodes challenged as false whose Challenge stops work on this one (ADR-0025 point 6), by id; empty when none.
 
-    A statement Challenge stops everything under each node that uses the challenged one directly, the challenged node
-    included, on that branch only: what uses it elsewhere, and what sits beside it, goes on. A Challenge against a
-    proof stops nothing: only that node is reworked."""
+    A statement Challenge stops everything under each node that uses the challenged one directly, on that branch only:
+    what uses it elsewhere, and what sits beside it, goes on. The challenged node is stopped with it, unless an agent's
+    Challenge links a counterexample: then it and its counterexample are the two sides worked while the branch waits
+    (point 7; zeqome/proof-agents#49). A Challenge against a proof stops nothing: only that node is reworked."""
     return _stopped(store).get(node_id, [])
 
 
@@ -229,7 +268,8 @@ def _stopped(store: ProjectStore) -> dict[str, list[str]]:
         if own_states(store, nodes[challenged])[1] != "challenged-as-false":  # its own states: no walk, so no unrelated cycle
             continue
         branch = list(users.get(challenged, []))
-        seen: set[str] = set()
+        examples = counterexamples(store, challenged)   # with them, the two sides and what they rest on are worked
+        seen: set[str] = set().union(*(rests_on(store, side) for side in (challenged, *examples))) if examples else set()
         while branch:  # each direct user and everything under it; `seen` ends a hand-edited cycle
             current = branch.pop()
             if current in seen:
@@ -239,6 +279,19 @@ def _stopped(store: ProjectStore) -> dict[str, list[str]]:
             branch.extend(nodes[current].dependencies if current in nodes else [])
     memo["stopped"] = {node_id: sorted(by) for node_id, by in stopped.items()}
     return memo["stopped"]
+
+
+def counterexamples(store: ProjectStore, node_id: str) -> list[str]:
+    """The counterexamples of the agents' statement Challenges open on the node: with the node itself, the two sides of
+    each, worked while its branch waits (ADR-0025 point 7; zeqome/proof-agents#49). None while the researcher's Challenge,
+    one from before kinds or a Rejection is also on it: the node stays stopped for the researcher to conclude."""
+    statement = [challenge for challenge in list_challenges(store, target_node_id=node_id, status="open") if challenge.kind != "proof"]
+    if not all(two_sided(challenge) for challenge in statement):
+        return []
+    node = require_node(store, node_id)
+    if node.kind != ProofMapNodeKind.imported_result and get_acceptance_state(store, node_id) == "rejected":
+        return []
+    return [challenge.counterexample_id for challenge in statement]
 
 
 def sealed_by(store: ProjectStore, node_id: str) -> str | None:
