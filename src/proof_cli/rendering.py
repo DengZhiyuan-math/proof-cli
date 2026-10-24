@@ -364,9 +364,10 @@ def render_challenge_list(challenges: list[Challenge]) -> str:
     table.add_column("id")
     table.add_column("target")
     table.add_column("status")
+    table.add_column("against")
     table.add_column("opened_by")
-    for challenge in challenges:
-        table.add_row(challenge.id, challenge.target_node_id, challenge.status.value, challenge.opened_by)
+    for challenge in challenges:   # a Challenge from before kinds says so: the Coordinator reads it (ADR-0025 point 26)
+        table.add_row(challenge.id, challenge.target_node_id, challenge.status.value, challenge.kind or "no kind yet", challenge.opened_by)
     console.print(table)
     return console.export_text()
 
@@ -400,6 +401,18 @@ def _work_log_body(entry: dict) -> str:
         return f"{what} ({entry.get('challenge_id')}): {entry.get('rationale')}" + (f" — counterexample {entry['counterexample_id']}" if entry.get("counterexample_id") else "")
     if kind == "challenge-withdrawn":
         return f"withdrew {entry.get('challenge_id')} — {entry.get('reason')}"
+    if kind == "challenge-classified":  # a Challenge from before kinds, as the Coordinator read it (ADR-0025 point 26)
+        return f"{entry.get('challenge_id')} read as against the {entry.get('against')}" + (f" — {entry['reading']}" if entry.get("reading") else "")
+    # what the Coordinator recorded of the researcher's words (ADR-0025 points 16-22), the words with it
+    if kind == "reading":
+        return f"coordinator read “{entry.get('words')}” as: {entry.get('reading')}"
+    if kind == "redirect":
+        return f"coordinator: for the next turn — {entry.get('text')}"
+    if kind == "redirect-given":
+        return f"given the researcher's redirect ({', '.join(entry.get('ids') or [])})"
+    if kind == "proposal":
+        return (f"coordinator proposes {entry.get('decision')} ({entry.get('decision_kind')}), for your click"
+                + (f" — {entry['reading']}" if entry.get("reading") else ""))
     if kind in ("verified", "sealed", "unsealed", "not-a-problem"):  # the researcher's decisions (ADR-0025 point 16), from reviews.jsonl
         what = {"verified": "verified", "unsealed": "unsealed", "not-a-problem": f"not a problem: {entry.get('challenge_id')}"}.get(
             kind, "sealed " + str(entry.get("decision", "")).removeprefix("seal-"))
@@ -448,6 +461,8 @@ def render_work_log_entry(node_id: str, entry: dict) -> str:
         return f"coordinator on {node_id}: {entry.get('note')}"
     elif entry.get("kind") == "aside":  # no role either: what a Coordinator set aside, how and why
         return f"coordinator on {node_id}: " + _work_log_body(entry).removeprefix("coordinator: ")
+    elif entry.get("kind") in ("reading", "redirect", "proposal"):  # nor what it recorded of the researcher's words
+        return f"coordinator on {node_id}: " + _work_log_body(entry).removeprefix("coordinator: ").removeprefix("coordinator ")
     else:
         body = _work_log_body(entry)
     return f"{entry.get('role')} on {node_id}: {body}"

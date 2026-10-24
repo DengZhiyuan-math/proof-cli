@@ -80,6 +80,7 @@ from .storage import (
     list_proof_map_nodes,
     mark_challenge_dismissed,
     mark_challenge_withdrawn,
+    mark_challenge_kind,
     mark_claim_released,
     memoized_read,
     next_candidate_proof_version,
@@ -835,7 +836,7 @@ def record_agent_turn(
         append_event(store, TURN_EVENT, f"{role} on {node_id}: turn {turn} {phase}", entity_id=node_id, payload=payload, conn=conn)
 
 
-# the map-level discussion (issue #177): the researcher and the map's agent on the proof plan, kept with the project
+# the map-level discussion (issue #177): the researcher and the Coordinator (zeqome/proof-agents#47), kept with the project
 DISCUSSION_EVENT = "map_discussion"
 DISCUSSION_DIR = Path(".proof") / "discussion"
 DISCUSSION_REPLY_KEPT = 4000   # characters of the reply kept in the event itself; the transcript holds the whole
@@ -945,7 +946,7 @@ def work_log(store: ProjectStore, node_id: str) -> list[dict]:
         kind: {node_id}
         for kind in (PROGRESS_EVENT, "proof_map_node_split", "proof_map_review_requested", "proof_map_dependency_added", "proof_map_dependency_removed",
                      "proof_map_dependency_moved", RESTATED_EVENT, "proof_map_node_claimed", "proof_map_claim_reassigned",
-                     "proof_map_challenge_opened", CHALLENGE_WITHDRAWN_EVENT)
+                     "proof_map_challenge_opened", CHALLENGE_WITHDRAWN_EVENT, CHALLENGE_CLASSIFIED_EVENT)
     }
     about.update({"proof_map_evidence_check_recorded": proof_ids, "proof_fog_experiment_recorded": near_fog, DEFINITION_EDITED_EVENT: named})
     entries: list[dict] = []
@@ -1011,6 +1012,8 @@ def work_log(store: ProjectStore, node_id: str) -> list[dict]:
         elif event.kind == CHALLENGE_WITHDRAWN_EVENT and event.entity_id == node_id:  # and why it was withdrawn (point 9)
             entries.append({"at": at, "kind": "challenge-withdrawn", "by": payload.get("by"), "challenge_id": payload.get("challenge_id"),
                             "reason": payload.get("reason")})
+        elif event.kind == CHALLENGE_CLASSIFIED_EVENT and event.entity_id == node_id:  # a kind given to one from before kinds (point 26)
+            entries.append({"at": at, "kind": "challenge-classified", **{key: payload.get(key) for key in ("by", "challenge_id", "against", "words", "reading")}})
         elif event.kind in ("proof_map_node_claimed", "proof_map_claim_reassigned") and event.entity_id == node_id:
             entries.append({"at": at, "kind": "claimed", "by": payload.get("claimant_id") or payload.get("assignee")})
         for entry in entries[before:]:  # an automatic entry: the role of the turn that did it
@@ -2895,6 +2898,28 @@ def unseal_node(store: ProjectStore, node_id: str, *, reviewer: str | None = Non
     return record
 
 
+def restores_verification(store: ProjectStore, challenge_id: str) -> bool:
+    """Whether "not a problem" on this Challenge would restore a verification (ADR-0025 point 10), and so is the
+    researcher's click; otherwise it is said, as a withdrawal. The Coordinator reads it to tell the two apart
+    (zeqome/proof-agents#47)."""
+    return _nothing_to_restore(store, require_challenge(store, challenge_id)) is None
+
+
+def _nothing_to_restore(store: ProjectStore, challenge: Challenge) -> str | None:
+    """Why "not a problem" on `challenge` restores no verification, or None when it restores one. Eligibility is the
+    Proof layer's own reading (`node_states.verification_holds`)."""
+    from .node_states import lapses, verification_holds  # it reads this module
+
+    if challenge.opened_by == RESEARCHER:
+        return "it is the researcher's own, which lapses nothing"
+    holds, since = verification_holds(store, require_node(store, challenge.target_node_id))  # what the Proof layer reads, before any lapse
+    if not holds:
+        return f"{challenge.target_node_id} has no verification of the version as it stands"
+    if not lapses(store, challenge, since):
+        return "it was raised before the verification, or is already ended by the researcher"
+    return None
+
+
 def restore_verification(store: ProjectStore, challenge_id: str, *, reviewer: str | None = None, rationale: str = "",
                          viewed_binding: str | None = None) -> ReviewRecord:
     """The researcher's "not a problem" on an agent's Challenge that lapsed a verification (ADR-0025 point 10): the
@@ -2903,15 +2928,10 @@ def restore_verification(store: ProjectStore, challenge_id: str, *, reviewer: st
     Challenge, a node not verified as it stands, a Challenge from before the verification — it is refused
     (NOTHING_TO_RESTORE): "not a problem" there is said, as a withdrawal (`proof challenge withdraw`). Once given, it is
     not given again. Eligibility is the Proof layer's own reading (`node_states.verification_holds`)."""
-    from .node_states import lapses, verification_holds  # it reads this module
-
     challenge = require_challenge(store, challenge_id)
     target = challenge.target_node_id
-    holds, since = verification_holds(store, require_node(store, target))  # what the Proof layer reads, before any lapse
-    if challenge.opened_by == RESEARCHER or not holds or not lapses(store, challenge, since):
-        why = ("it is the researcher's own, which lapses nothing" if challenge.opened_by == RESEARCHER
-               else f"{target} has no verification of the version as it stands" if not holds
-               else "it was raised before the verification, or is already ended by the researcher")
+    why = _nothing_to_restore(store, challenge)
+    if why is not None:
         raise ProofMapError("NOTHING_TO_RESTORE", f"challenge {challenge_id} restores no verification: {why}; withdraw it with a reason instead",
                             details={"challenge_id": challenge_id, "node_id": target})
     with store.transaction() as conn:
@@ -3741,6 +3761,92 @@ def _raise_challenge(store: ProjectStore, target_node_id: str, *, kind: str, ope
 
 
 CHALLENGE_WITHDRAWN_EVENT = "proof_map_challenge_withdrawn"
+
+
+CHALLENGE_CLASSIFIED_EVENT = "proof_map_challenge_classified"
+
+
+def classify_challenge(store: ProjectStore, challenge_id: str, *, kind: str, by: str, words: str, reading: str) -> Challenge:
+    """Give an open Challenge from before Challenges had a kind its kind, as the Coordinator read it, with the
+    researcher's words it read and its reading (ADR-0025 point 26; zeqome/proof-agents#47). Until then it reads as
+    against the statement, so the branch using its node waits. Once only: a kind given stays (CHALLENGE_KIND_SET)."""
+    if kind not in CHALLENGE_KINDS:
+        raise ProofMapError("INVALID_CHALLENGE_KIND", f"a Challenge is against the {' or the '.join(CHALLENGE_KINDS)}, not {kind!r}")
+    words, reading = _coordinator_words(words), (reading or "").strip()
+    with store.transaction() as conn:
+        challenge = require_challenge(store, challenge_id)
+        if challenge.status != ChallengeStatus.open:
+            raise ProofMapError("CHALLENGE_NOT_OPEN", f"challenge {challenge_id} is {challenge.status.value}: only an open one is read again")
+        if challenge.kind is not None or not mark_challenge_kind(store, challenge_id, kind, conn=conn):
+            raise ProofMapError("CHALLENGE_KIND_SET", f"challenge {challenge_id} is against the {challenge.kind or 'node'} already; its kind is given once")
+        append_event(store, CHALLENGE_CLASSIFIED_EVENT, f"challenge {challenge_id} against {challenge.target_node_id} read as against the {kind}",
+                     entity_id=challenge.target_node_id,
+                     payload={"challenge_id": challenge_id, "against": kind, "by": by, "words": words, "reading": reading}, conn=conn)
+    return require_challenge(store, challenge_id)
+
+
+# What the Coordinator records of the researcher's words (ADR-0025 points 16-22; zeqome/proof-agents#47), in the node's
+# work log under no role, like its notes: its reading of what took effect when said, an instruction for the node's next
+# turn, and a proposal of a decision only the researcher's click makes (point 16), which changes nothing.
+PROPOSABLE = {"verification": ("verify",), "seal": ("seal-true", "seal-false", "unseal"), "not_a_problem": ("not-a-problem",)}
+
+
+def _coordinator_words(words: str) -> str:
+    if not (words or "").strip():
+        raise ProofMapError("COORDINATOR_WORDS_REQUIRED", "the Coordinator records what the researcher said with the record it made of it")
+    return words.strip()
+
+
+def _coordinator_entry(store: ProjectStore, node_id: str, payload: dict, message: str) -> dict:
+    require_node(store, node_id)
+    with store.transaction() as conn:
+        append_event(store, PROGRESS_EVENT, f"coordinator on {node_id}: {message}", entity_id=node_id, payload=payload, conn=conn)
+    return {**payload, "node_id": node_id, "at": utc_now().isoformat()}
+
+
+def record_reading(store: ProjectStore, node_id: str, *, by: str, words: str, reading: str) -> dict:
+    """What the Coordinator read the researcher's words as, when it acted on them with one reading (ADR-0025 point 22):
+    recorded with the words, so a misreading is seen and undone by saying so (point 17)."""
+    words = _coordinator_words(words)
+    if not (reading or "").strip():
+        raise ProofMapError("PROGRESS_EMPTY", "say what the words were read as")
+    return _coordinator_entry(store, node_id, {"kind": "reading", "role": None, "by": by, "words": words, "reading": reading.strip()},
+                              f"read “{words}” as {reading.strip()}")
+
+
+def record_redirect(store: ProjectStore, node_id: str, *, by: str, words: str, text: str) -> dict:
+    """An instruction for the node's agent, from the researcher's words (ADR-0025 point 20), with an id: the node's next
+    turn that begins is briefed with it, whether a run is going now or not, and that turn's record that it was given it
+    (`record_redirects_given`) says it was had."""
+    words = _coordinator_words(words)
+    if not (text or "").strip():
+        raise ProofMapError("REDIRECT_EMPTY", "a Redirect needs its one line of text")
+    payload = {"kind": "redirect", "id": f"r_{uuid.uuid4().hex[:10]}", "role": None, "by": by, "words": words, "text": text.strip()}
+    return _coordinator_entry(store, node_id, payload, f"for the next turn — {text.strip()}")
+
+
+def record_redirects_given(store: ProjectStore, node_id: str, redirect_ids: list[str], *, turn: str, role: str, by: str) -> dict:
+    """The redirects a node's turn was briefed with, by their ids, recorded once that turn has begun: none of them is
+    given to another turn (zeqome/proof-agents#47). A turn that never began records none, and its redirects wait."""
+    ids = [str(redirect_id) for redirect_id in redirect_ids if str(redirect_id).strip()]
+    if not ids:
+        raise ProofMapError("PROGRESS_EMPTY", "name the redirects the turn was given")
+    payload = {"kind": "redirect-given", "role": role, "by": by, "ids": ids, "turn": turn}
+    return _coordinator_entry(store, node_id, payload, f"{', '.join(ids)} given to the {role}'s turn {turn}")
+
+
+def record_proposal(store: ProjectStore, node_id: str, *, by: str, words: str, reading: str, kind: str, decision: str,
+                    target_id: str | None = None) -> dict:
+    """A decision only the researcher's click makes (ADR-0025 point 16), proposed from their words: verify, seal true or
+    false, unseal, or a "not a problem" that restores a verification (`PROPOSABLE`), on the node or, for "not a
+    problem", on its Challenge (`target_id`). It changes nothing: the page shows it for the click."""
+    words = _coordinator_words(words)
+    if decision not in PROPOSABLE.get(kind, ()):
+        raise ProofMapError("INVALID_PROPOSAL", f"the Coordinator proposes {', '.join(f'{k} {d}' for k, ds in PROPOSABLE.items() for d in ds)}; "
+                            f"not {kind} {decision!r}")
+    payload = {"kind": "proposal", "role": None, "by": by, "words": words, "reading": (reading or "").strip(), "decision_kind": kind,
+               "decision": decision, "target_id": target_id or node_id}
+    return _coordinator_entry(store, node_id, payload, f"proposes {decision} ({kind}), for the researcher's click")
 
 
 def withdraw_challenge(store: ProjectStore, challenge_id: str, *, by: str, reason: str, audit: bool = False) -> Challenge:
