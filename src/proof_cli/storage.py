@@ -119,7 +119,7 @@ CREATE TABLE IF NOT EXISTS candidate_proofs (
   node_id TEXT NOT NULL,
   version INTEGER NOT NULL,
   file_path TEXT NOT NULL,
-  is_current INTEGER NOT NULL DEFAULT 1,
+  is_current INTEGER NOT NULL DEFAULT 1,  -- not read since #284: the current snapshot is the highest version
   review_record_id TEXT,
   submitted_by TEXT NOT NULL,
   scoping_rationale TEXT NOT NULL,
@@ -680,9 +680,10 @@ def on_rollback(store: ProjectStore, callback) -> None:
         active.on_rollback.append(callback)
 
 
-def put_turn_transcript(store: ProjectStore, relative: Path, record: dict) -> str:
-    """Put a turn's transcript (`record`, as JSON) at `relative` under the project, inside the open
-    `store.transaction()` that records the turn's end — a node's turn, a discussion turn, the Reader's.
+def put_turn_transcript(store: ProjectStore, relative: Path, prompt: str | None, events: list[dict]) -> str:
+    """Put a turn's transcript, its conversation alone (its `prompt` and `events`, as JSON: the turn's record is the
+    event that records its end, #284), at `relative` under the project, inside the open `store.transaction()` that
+    records the turn's end — a node's turn, a discussion turn, the Reader's.
     Write-then-rename, so no reader sees half a file. If that transaction rolls back (its event or its
     commit failing), the file this attempt put there is removed and anything it moved aside is put back.
     A file already there is an orphan a crash left before an end was recorded (the caller refuses a turn
@@ -695,7 +696,7 @@ def put_turn_transcript(store: ProjectStore, relative: Path, record: dict) -> st
     tmp = target.with_name(f"{target.name}.{uuid.uuid4().hex}.tmp")
     aside = target.with_name(f"{target.name}.{uuid.uuid4().hex}.orphan") if target.exists() else None
     try:
-        tmp.write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
+        tmp.write_text(json.dumps({"prompt": prompt, "events": events}, ensure_ascii=False), encoding="utf-8")
         if aside is not None:
             os.replace(target, aside)
         os.replace(tmp, target)
@@ -715,6 +716,24 @@ def put_turn_transcript(store: ProjectStore, relative: Path, record: dict) -> st
     if aside is not None:
         after_commit(store, lambda: aside.unlink(missing_ok=True))
     return relative.as_posix()
+
+
+def read_turn_transcript(store: ProjectStore, relative: Path, kind: str, turn: str, *, entity_id: str | None = None) -> dict | None:
+    """The transcript put at `relative` read back with the turn's record: the payload of the `kind` event that ended
+    `turn` (on `entity_id`, for a node's turn), less its path to this file, and the file's prompt and events. A file
+    from before #284 holds the whole record itself and reads as it did. None when the file is missing or unreadable."""
+    try:
+        kept = json.loads((store.root / relative).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    with _reading(store, None) as conn:   # that one event, found by the database: not every event of the kind, parsed (#307)
+        row = conn.execute(
+            "SELECT payload FROM events WHERE kind = ? AND json_extract(payload, '$.turn') = ? AND json_extract(payload, '$.phase') = 'ended'"
+            + (" AND entity_id = ?" if entity_id is not None else "") + " ORDER BY created_at DESC, rowid DESC LIMIT 1",
+            (kind, turn, *(() if entity_id is None else (entity_id,))),
+        ).fetchone()
+    record = {key: value for key, value in (json.loads(row["payload"]) if row else {}).items() if key != "transcript"}
+    return {**record, **kept}
 
 
 def _run_rollback_callbacks(callbacks: list, start: int) -> None:
@@ -1642,13 +1661,21 @@ def mark_claim_released(
         return cursor.rowcount > 0
 
 
+# selects candidate proofs, each with whether it is its node's current snapshot: its highest version (#284), computed
+# on read, so no write has to reset the others and no import order can leave a node with none
+_SELECT_CANDIDATE_PROOFS = (
+    "SELECT candidate_proofs.*, version = (SELECT MAX(version) FROM candidate_proofs AS newest"
+    " WHERE newest.node_id = candidate_proofs.node_id) AS is_newest FROM candidate_proofs"
+)
+
+
 def _row_to_candidate_proof(row: sqlite3.Row) -> CandidateProofRecord:
     return CandidateProofRecord(
         id=row["id"],
         node_id=row["node_id"],
         version=row["version"],
         file_path=row["file_path"],
-        is_current=bool(row["is_current"]),
+        is_current=bool(row["is_newest"]),
         review_record_id=row["review_record_id"],
         submitted_by=row["submitted_by"],
         scoping_rationale=row["scoping_rationale"],
@@ -1673,7 +1700,7 @@ def next_candidate_proof_version(store: ProjectStore, node_id: str, *, conn: sql
 def insert_candidate_proof(
     store: ProjectStore, record: CandidateProofRecord, *, conn: sqlite3.Connection | None = None
 ) -> CandidateProofRecord:
-    """Index a new candidate proof, marking every prior version of this node not-current.
+    """Index a new candidate proof; being its node's highest version makes it the current one (#284).
 
     The unique index on (node_id, version) is the real guarantee against two
     requests racing onto the same version number; `request_review` already
@@ -1681,18 +1708,16 @@ def insert_candidate_proof(
     means a double insert fails loudly instead of corrupting the index.
     """
     with _writing(store, conn) as conn:
-        conn.execute("UPDATE candidate_proofs SET is_current = 0 WHERE node_id = ?", (record.node_id,))
         conn.execute(
             """
-            INSERT INTO candidate_proofs(id, node_id, version, file_path, is_current, review_record_id, submitted_by, scoping_rationale, interface_fingerprint, sha256, dependencies, key_ideas_drafted_by, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO candidate_proofs(id, node_id, version, file_path, review_record_id, submitted_by, scoping_rationale, interface_fingerprint, sha256, dependencies, key_ideas_drafted_by, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record.id,
                 record.node_id,
                 record.version,
                 record.file_path,
-                int(record.is_current),
                 record.review_record_id,
                 record.submitted_by,
                 record.scoping_rationale,
@@ -1730,7 +1755,7 @@ def set_candidate_proof_review_record_id(
 def get_candidate_proof(store: ProjectStore, candidate_proof_id: str) -> CandidateProofRecord | None:
     with _reading(store, None) as conn:
         row = conn.execute(
-            "SELECT * FROM candidate_proofs WHERE id = ? LIMIT 1",
+            f"{_SELECT_CANDIDATE_PROOFS} WHERE id = ? LIMIT 1",
             (candidate_proof_id,),
         ).fetchone()
     return _row_to_candidate_proof(row) if row else None
@@ -1739,7 +1764,7 @@ def get_candidate_proof(store: ProjectStore, candidate_proof_id: str) -> Candida
 def list_candidate_proofs_for_node(store: ProjectStore, node_id: str) -> list[CandidateProofRecord]:
     with _reading(store, None) as conn:
         rows = conn.execute(
-            "SELECT * FROM candidate_proofs WHERE node_id = ? ORDER BY version",
+            f"{_SELECT_CANDIDATE_PROOFS} WHERE node_id = ? ORDER BY version",
             (node_id,),
         ).fetchall()
     return [_row_to_candidate_proof(row) for row in rows]
@@ -1751,7 +1776,7 @@ def get_current_candidate_proof(
 ) -> CandidateProofRecord | None:
     with _reading(store, conn) as conn:
         row = conn.execute(
-            "SELECT * FROM candidate_proofs WHERE node_id = ? AND is_current = 1 LIMIT 1",
+            f"{_SELECT_CANDIDATE_PROOFS} WHERE node_id = ? ORDER BY version DESC LIMIT 1",
             (node_id,),
         ).fetchone()
     return _row_to_candidate_proof(row) if row else None
@@ -1765,7 +1790,7 @@ def list_all_candidate_proofs(store: ProjectStore) -> list[CandidateProofRecord]
     exchange bundle carries them beside this index (`ExchangeBundle.vault_files`).
     """
     with _reading(store, None) as conn:
-        rows = conn.execute("SELECT * FROM candidate_proofs ORDER BY node_id, version").fetchall()
+        rows = conn.execute(f"{_SELECT_CANDIDATE_PROOFS} ORDER BY node_id, version").fetchall()
     return [_row_to_candidate_proof(row) for row in rows]
 
 
@@ -1914,35 +1939,6 @@ def list_challenges(store: ProjectStore, *, target_node_id: str = "", status: st
     with _reading(store, None) as conn:
         rows = conn.execute(query, params).fetchall()
     return [_row_to_challenge(row) for row in rows]
-
-
-def mark_challenge_dismissed(
-    store: ProjectStore,
-    challenge_id: str,
-    *,
-    resolved_by: str,
-    resolved_at: datetime,
-    resolution_review_id: str | None = None,
-    reopened: bool = False,
-    conn: sqlite3.Connection | None = None,
-) -> bool:
-    """Dismiss a challenge, recording the signed decision that resolved it.
-
-    By default only a still-open row is updated — the guard that stops two
-    racing dismissals both winning; returns whether this call changed it.
-    `resolution_review_id` names the signed Human Review decision; a
-    dismissal counts only while that decision verifies (ADR-0009 point 2).
-    `reopened=True` also re-dismisses a row whose stored dismissal no longer
-    counts; the caller has then already settled the race by re-reading the
-    Challenge on its own write transaction.
-    """
-    with _writing(store, conn) as conn:
-        cursor = conn.execute(
-            "UPDATE challenges SET status = 'dismissed', resolved_by = ?, resolved_at = ?, resolution_review_id = ? "
-            "WHERE id = ?" + ("" if reopened else " AND status = 'open'"),
-            (resolved_by, resolved_at.isoformat(), resolution_review_id, challenge_id),
-        )
-        return cursor.rowcount > 0
 
 
 def mark_challenge_withdrawn(
