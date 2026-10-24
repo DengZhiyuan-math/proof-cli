@@ -177,6 +177,20 @@ def test_a_definition_whose_text_is_already_one_is_refused_and_named_its_wording
     assert sorted(d["id"] for d in listed) == ["cc", "cc3"]   # the refused one was not added
 
 
+def test_an_edit_that_would_repeat_another_definition_is_refused_and_one_rewording_itself_is_not(tmp_path: Path):
+    """The same rule on an edit (#307): agents edit definitions too (proof-agents#56), so changing one's text to another's,
+    whitespace aside, is refused, naming that one; an edit of a definition's own wording, or of its term, goes through."""
+    store = ensure_project(tmp_path)
+    D.add_definition(store, "cc", term="Compact continuous", text="$f$ is continuous and has compact support.", created_by="claude-code")
+    D.add_definition(store, "bd", term="Bounded", text="$f$ is bounded.", created_by="claude-code")
+    with pytest.raises(D.ProofMapError) as repeated:
+        D.edit_definition(store, "bd", text=" $f$ is continuous and  has compact support.", edited_by="claude-code")
+    assert (repeated.value.code, repeated.value.details["definition_id"]) == ("DEFINITION_DUPLICATE", "cc")
+    assert D.require_definition(store, "bd").text == "$f$ is bounded."
+    D.edit_definition(store, "cc", text="$f$ is continuous  and has compact support.", term="Compactly supported", edited_by="claude-code")
+    assert D.require_definition(store, "cc").term == "Compactly supported"
+
+
 def test_a_definition_looked_up_under_an_id_there_is_none_of_names_the_ids_there_are(tmp_path: Path):
     """Looking a definition up (show, edit, remove) under an id there is none of names the ids there are and where to
     read them, so a guessed id is not answered with `proof definition add`; a statement naming a missing definition is
