@@ -2730,8 +2730,8 @@ def _require_awaiting_acceptance_review(store: ProjectStore, node_id: str) -> No
 def snapshot_with_changed_dependencies(store: ProjectStore, node_id: str) -> CandidateProofRecord | None:
     """The node's current snapshot if its dependencies changed since it was requested for review, else None.
 
-    The one rule by which an Acceptance decision on it is refused (DEPENDENCIES_CHANGED), and by which
-    the proof map page offers none (#156).
+    The one rule by which an Acceptance decision or a verification of it is refused (DEPENDENCIES_CHANGED), and by
+    which the proof map page offers none (#156, zeqome/proof-web#46): it is not the node's version any more.
     """
     current = get_current_candidate_proof(store, node_id)
     if current is not None and not _snapshot_dependencies_stand(store, require_node(store, node_id), current):
@@ -2844,6 +2844,10 @@ def verify_node(store: ProjectStore, node_id: str, *, reviewer: str | None = Non
     node = require_node(store, node_id)
     if node.kind != ProofMapNodeKind.imported_result and get_current_candidate_proof(store, node_id) is None:
         raise ProofMapError("VERIFY_NEEDS_SNAPSHOT", f"{node_id} has no Review snapshot to verify: a verification is of a version (request review first)")
+    stale = snapshot_with_changed_dependencies(store, node_id) if node.kind != ProofMapNodeKind.imported_result else None
+    if stale is not None:   # that snapshot is not the node's version any more: a verification of it would never count
+        raise ProofMapError("DEPENDENCIES_CHANGED", f"{node_id}'s dependencies changed since snapshot v{stale.version}: request review again, then verify",
+                            details={"node_id": node_id, "version": stale.version})
     with store.transaction() as conn:
         decided = _decide(store, kind=DecisionKind.verification, target_id=node_id, decision="verify", reviewer=reviewer, rationale=rationale,
                           viewed_binding=viewed_binding)
@@ -3111,6 +3115,9 @@ def prepare_decision(
     )
 
 
+_CLICK_WORDS = {DecisionKind.verification: "verify", DecisionKind.not_a_problem: "not-a-problem"}
+
+
 def apply_decision(
     store: ProjectStore,
     kind: DecisionKind | str,
@@ -3142,6 +3149,20 @@ def apply_decision(
         return dismiss_challenge(store, target_id, **who)
     if resolved_kind == DecisionKind.promote:
         return promote_to_lemma(store, target_id, **who)
+    # the researcher's clicks of ADR-0025 (points 13-16), each after the page listed what it does (zeqome/proof-web#46);
+    # each names its own decision, as a Seal does: another word is refused, never taken for it (#307)
+    if resolved_kind in _CLICK_WORDS and decision != _CLICK_WORDS[resolved_kind]:
+        raise ProofMapError("INVALID_DECISION", f"'{decision}' is not a {resolved_kind.value} decision: {_CLICK_WORDS[resolved_kind]}")
+    if resolved_kind == DecisionKind.verification:
+        return verify_node(store, target_id, **who)
+    if resolved_kind == DecisionKind.not_a_problem:
+        return restore_verification(store, target_id, **who)
+    if resolved_kind == DecisionKind.seal:
+        if decision == "unseal":
+            return unseal_node(store, target_id, **who)
+        if decision in ("seal-true", "seal-false"):
+            return seal_node(store, target_id, decision == "seal-true", **who)
+        raise ProofMapError("INVALID_DECISION", f"'{decision}' is not a seal decision: seal-true, seal-false or unseal")
     raise ProofMapError("UNSUPPORTED_DECISION", f"{resolved_kind.value} decisions aren't applied here")
 
 
