@@ -812,16 +812,25 @@ def record_agent_turn(
     events: list[dict] | None = None,
     prompt: str | None = None,
     changed: list[dict] | None = None,
+    pursuit_id: str | None = None,
+    launch_failed: bool | None = None,
 ) -> None:
     """A run's turn on the node: `started` before it runs, `ended` when it is over, with its job, its backend session
     (where the backend keeps the conversation too), the step it belongs to, and the conversation itself, kept under
-    .proof/agent-turns/ so it outlives the studio's memory: a new Start, a restart. Never a decision."""
+    .proof/agent-turns/ so it outlives the studio's memory: a new Start, a restart. Never a decision. A turn spent under
+    a Pursue names it (`pursuit_id`): its records are what the Pursue spent (proof-agents#50). An end with no job is a
+    turn that never began; `launch_failed` says its launch failed, as against a turn called off first — and an end with no
+    start is a launch refused before any job existed."""
     require_node(store, node_id)
     if not _TURN_ID.fullmatch(turn):
         raise ProofMapError("INVALID_REQUEST", f"not a turn id: {turn!r}")
     payload: dict = {"phase": phase, "turn": turn, "role": role, "by": by, "provider": provider}
+    if pursuit_id is not None:
+        payload["pursuit_id"] = pursuit_id
     if phase == "ended":
         payload.update(job=job, session_id=session_id, step=step)
+        if job is None and launch_failed is not None:
+            payload["launch_failed"] = bool(launch_failed)
         if changed is not None:  # the files it changed, each with the first line it changed (spec #145, story 18)
             payload["changed"] = [{"path": str(c.get("path")), "line": int(c.get("line") or 1)} for c in changed]
     with store.transaction() as conn:

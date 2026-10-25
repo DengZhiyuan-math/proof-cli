@@ -110,10 +110,10 @@ def test_a_failing_write_at_start_is_refused_with_a_code_and_records_nothing(tmp
 def test_the_service_refuses_what_is_not_a_pursuits_history(tmp_path: Path):
     store = ensure_project(tmp_path)
     assert _code(lambda: P.record_pursuit(store, "resume")) == "INVALID_PURSUIT_PHASE"
-    assert _code(lambda: P.record_pursuit(store, "start", pursuit_id="mine")) == "INVALID_PURSUIT_PHASE"
     assert _code(lambda: P.record_pursuit(store, "stop", pursuit_id="nobody")) == "PURSUIT_NOT_FOUND"
     assert _code(lambda: P.record_pursuit(store, "stop")) == "PURSUIT_NOT_FOUND"
     pid = _start(store)
+    assert _code(lambda: P.record_pursuit(store, "start", pursuit_id=pid)) == "INVALID_PURSUIT_PHASE"   # another pursuit's id
     assert _code(lambda: P.record_pursuit(store, "end", pursuit_id=pid)) == "PURSUIT_OUTCOME_REQUIRED"
     P.record_pursuit(store, "end", pursuit_id=pid, outcome="done")
     assert _code(lambda: P.record_pursuit(store, "stop", pursuit_id=pid)) == "PURSUIT_ENDED"
