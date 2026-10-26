@@ -1548,13 +1548,20 @@ def challenge_open(
     rationale_file: str | None = typer.Option(None, "--rationale-file", help=_from_file("The --rationale")),
     kind: str = typer.Option("proof", "--kind", help="proof (only this node is reworked) or statement (work stops under every node using it directly)"),
     counterexample: str | None = typer.Option(None, "--counterexample", help="A statement Challenge's counterexample, a node of the map; an agent's needs one"),
+    counterexample_statement: str | None = typer.Option(None, "--counterexample-statement",
+                                                        help="Make the counterexample now, a new Claim under the --counterexample id with this statement, its scope"),
+    counterexample_statement_file: str | None = typer.Option(None, "--counterexample-statement-file", help=_from_file("The --counterexample-statement")),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
-    """Raise a Challenge against a node's proof or its statement (ADR-0025): on any unsealed node, at once."""
+    """Raise a Challenge against a node's proof or its statement (ADR-0025): on any unsealed node, at once. An agent's
+    against the statement links its counterexample, which it may make in the same step (zeqome/proof-agents#49)."""
     rationale = _text(rationale, rationale_file, option="--rationale-file", given="--rationale", command="challenge.open", json_output=json_output) or ""
+    counterexample_statement = _text(counterexample_statement, counterexample_statement_file, option="--counterexample-statement-file",
+                                     given="--counterexample-statement", command="challenge.open", json_output=json_output)
     store = get_store(_root(root))
     try:
-        challenge = open_challenge(store, target_id, kind=kind, counterexample=counterexample, opened_by=opened_by, rationale=rationale)
+        challenge = open_challenge(store, target_id, kind=kind, counterexample=counterexample, opened_by=opened_by, rationale=rationale,
+                                   counterexample_statement=counterexample_statement)
     except ProofMapError as exc:
         _emit_error(exc, json_output, command="challenge.open")
         raise typer.Exit(code=1)

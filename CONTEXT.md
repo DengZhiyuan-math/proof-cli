@@ -93,7 +93,7 @@ A doubt about a node, raised by an agent or the researcher, that takes effect at
 _Avoid_: dispute, refutation, rejection, dismissed (say withdrawn), resolved, upheld, bug, finding
 
 **Counterexample**:
-An ordinary node whose statement, its scope written into it, contradicts a challenged statement — for example "f(x)=x(1−x) is continuous on [0,1] and not monotone". A statement Challenge links to it; the link has no state of its own, and that the counterexample does not rest on its target is computed from the graph (ADR-0025).
+An ordinary node whose statement, its scope written into it, contradicts a challenged statement — for example "f(x)=x(1−x) is continuous on [0,1] and not monotone". A statement Challenge links to it; the link has no state of its own, and a counterexample that rests on its target is refused, as computed from the graph (ADR-0025). An agent may make it in the same step as its Challenge (`--counterexample <id> --counterexample-statement-file`). It is one of the two sides worked while the branch waits, the challenged node's own proof the other: once its conclusion is true — its proof has passed its check, its own statement is unchallenged, and what it rests on holds — the challenged statement is false, and it stops being so when that stops being so, or when the counterexample comes to rest on its target. Until then no Verdict has said where it fails, so the challenged node's Proof layer reads incomplete. Counterexamples that contradict each other in a cycle are each challenged, so none decides until one side's proof passes saying where the other fails. With both sides out of budget the statement is **undecided**, and the work goes back a level as from a false one.
 _Avoid_: refutation, refutes (an Experiment's outcome), rebuttal
 
 **Mathematical interface**:
@@ -136,7 +136,7 @@ _Avoid_: verifier (an Evidence check's checker), simulator
 Reads the current proof against the statement and dependencies, and a challenged statement's proof against its Counterexample, and records a Verdict. It writes only under `scratch/verifier/`, never splits, never requests review and never makes a Researcher decision (ADR-0019, ADR-0025).
 
 **Verdict**:
-A passed or failed adversarial reading in the Work log, with a stable id, bound to the SHA-256 of the working inputs. Its objections are Challenges against the proof, numbered within it. The newest passed Verdict on the current inputs, with the mechanical checks passing (`Uses of dependencies` among them), puts the Proof layer at checks passed and permits an agent's request for review; a passed one that does not say, for each open objection of the previous version, where and why it is fixed is refused. It reports on each application of the `Uses of dependencies`, one line each (`<dependency>/<n>: checked` or `objection <k>`), read off the same proof.tex its SHA-256 is of: one left out, repeated or unknown is refused, and a passed one needs the section complete and stops counting once the node gains or loses a dependency. The researcher's request remains ungated; a Verdict never verifies or seals (ADR-0019, ADR-0025).
+A passed or failed adversarial reading in the Work log, with a stable id, bound to the SHA-256 of the working inputs. Its objections are Challenges against the proof, numbered within it. The newest passed Verdict on the current inputs, with the mechanical checks passing (`Uses of dependencies` among them), puts the Proof layer at checks passed and permits an agent's request for review; a passed one that does not say, for each open objection of the previous version, where and why it is fixed, and for each agent's statement Challenge open on the node, where its Counterexample fails, is refused; saying so ends that Challenge as fixed, unless its Counterexample decided first. It reports on each application of the `Uses of dependencies`, one line each (`<dependency>/<n>: checked` or `objection <k>`), read off the same proof.tex its SHA-256 is of: one left out, repeated or unknown is refused, and a passed one needs the section complete and stops counting once the node gains or loses a dependency. The researcher's request remains ungated; a Verdict never verifies or seals (ADR-0019, ADR-0025).
 
 **Uses of dependencies**:
 The section after a proof in `proof.tex`, one `depuse` entry per dependency, each use an application with its Substitution, Premises, Conclusion and Constants; each premise of the dependency has exactly one basis: what the node says, a numbered step of the proof, or another application's Conclusion (#255). The mechanical check requires it complete; the Verifier checks each application (#256, #262).
@@ -152,7 +152,7 @@ The project's one agent that parses the researcher's words, always listening whi
 _Avoid_: controller, scheduler, chat, Ask
 
 **Decomposer** (a Proof agent role):
-Starts alone on a Theorem or Lemma with no children created by Split; ordinary dependency nodes are not children. It retrieves first and proposes a Split into Claims, each naming the definitions it uses (which it may add) and given its own assumptions, with unresolved statements in the Proof fog. It adds the edges between its own Claims. Under a Coordinator its Split is the structure worked next; started alone, the Split stops the run for the researcher (ADR-0019, ADR-0021).
+Starts alone on a Theorem or Lemma with no children created by Split; ordinary dependency nodes are not children. It retrieves first and proposes a Split into Claims, each naming the definitions it uses (which it may add) and given its own assumptions, with unresolved statements in the Proof fog. It adds the edges between its own Claims, and challenges a statement it finds false with its Counterexample, as the Prover may (zeqome/proof-agents#49). Under a Coordinator its Split is the structure worked next; started alone, the Split stops the run for the researcher (ADR-0019, ADR-0021).
 
 **Reader** (a Proof agent role):
 States a draft in the library as a map: Definitions, Theorems and Lemmas, imported results with their references, and fog. It records where it departed from the draft and why, and proves nothing (ADR-0021). Its turn is kept with the project, as a node's turns are, though it works no node. Its runtime sets the reader role (`PROOF_AGENT_ROLE=reader`, no node role), under which `proof node create` refuses, on the parsed arguments, a Claim, `--parent` and `--reassign` (READER_ROLE_REFUSED); a statement's text is never searched (#203).
@@ -208,11 +208,11 @@ The researcher's absolute belief in a node: unsealed, sealed true or sealed fals
 _Avoid_: lock, freeze, no longer callable (now sealed false)
 
 **Statement layer** (命题层):
-Whether a node's statement stands: unchallenged, challenged as false, or false. The agents change it through statement Challenges and their Counterexamples, the researcher by raising a Challenge.
+Whether a node's statement stands: unchallenged, challenged as false, or false. The agents change it through statement Challenges and their Counterexamples, the researcher by raising a Challenge. It reads false once a statement Challenge's Counterexample decides it (see Counterexample).
 _Avoid_: refuted, disputed, Rejected
 
 **Proof layer** (证明层):
-How far a node's proof has got: incomplete, checks passed (the newest passed Verdict on the current inputs, with the mechanical checks passing) or expert-verified (the researcher verified this version). A Challenge against the proof puts it back to incomplete. An imported result counts as checks passed until it is verified.
+How far a node's proof has got: incomplete, checks passed (the newest passed Verdict on the current inputs, with the mechanical checks passing) or expert-verified (the researcher verified this version). A Challenge against the proof puts it back to incomplete, and so does an agent's statement Challenge until its Counterexample decides. An imported result counts as checks passed until it is verified.
 _Avoid_: workflow state, Review-needed, Revision requested, Accepted, acceptance state
 
 **Verification** (验证):
