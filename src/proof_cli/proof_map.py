@@ -3435,6 +3435,14 @@ def _no_longer_callable(store: ProjectStore, node_id: str) -> bool:
     )
 
 
+def no_longer_callable_review(store: ProjectStore, node_id: str) -> dict | None:
+    """The Reference review that found the imported result no longer callable, from before seal lines, as a seal line
+    gives a seal: {"by", "at", "note"}; None when none did. It reads as sealed false (ADR-0025 point 26)."""
+    rows = [row for row in decision_rows(store, _ACCEPTANCE_OBJECT_TYPE, node_id, ReviewRecordKind.reference_review.value)
+            if row["decision"] == ReviewGovernanceState.rejected.value]
+    return {"by": rows[0]["reviewer_id"], "at": rows[0]["created_at"], "note": rows[0]["rationale"]} if rows else None
+
+
 def _citation_missing(store: ProjectStore, node: ProofMapNode) -> bool:
     return node.reference_id is not None and get_reference(store, node.reference_id) is None
 

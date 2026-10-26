@@ -290,6 +290,24 @@ def test_an_unseal_preview_keeps_what_stays_sealed_false_by_an_older_review(tmp_
     assert _layers(store, "N")[0] == "sealed-false"
 
 
+def test_an_import_sealed_false_by_an_older_review_has_a_seal_record_with_that_reviews_note(tmp_path: Path):
+    # ADR-0025 point 14: every briefing on a sealed node carries its note (zeqome/proof-agents#48); an imported result a
+    # Reference review found no longer callable, from before seal lines, reads sealed false, and says why
+    from proof_cli.node_states import seal_record
+
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="N", kind="imported_result", statement="N", source_locator="Theorem 1", source_version="v1")
+    assert seal_record(store, "N") is None
+    researcher(store).decide_reference_review("N", "no-longer-callable", rationale="the source was retracted")
+    record = seal_record(store, "N")
+    assert (record["seal"], record["sealed_node"], record["note"], record["by"]) == (
+        "sealed-false", "N", "the source was retracted", researcher(store).reviewer_id)
+    assert record["at"]
+    create_node(store, node_id="A", kind="lemma", statement="A", dependencies=["N"])
+    researcher(store).seal("A", True, rationale="known")
+    assert seal_record(store, "N")["note"] == "the source was retracted"  # its own seal, not the true one above
+
+
 @pytest.mark.parametrize("named_by", ["C", "A"])  # a covered node's Definition, and the sealed node's own
 def test_a_preview_binds_the_text_of_the_definitions_what_it_seals_names(tmp_path: Path, named_by: str):
     store = ensure_project(tmp_path)

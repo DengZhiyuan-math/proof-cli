@@ -37,7 +37,7 @@ The single entity type for every vertex in a proof map — theorem, lemma, claim
 _Avoid_: node (ambiguous with generic graph/UI nodes), ticket (carries software-wayfinder connotations), work unit
 
 **Definition**:
-A project's named piece of mathematical text — a definition, the setting of a model, notation — that node statements are written in. A Proof map node names, when it is created, the definitions its statement and assumptions are written in and no others, and they change only by a restatement while Unfixed; a Claim split from a node names only those of that node's definitions it uses. The researcher or the Reader writes them. A definition is Unfixed until a verification or a Seal relies on it, then fixed like a statement: a corrected one is a new definition, named by new nodes. What a node says is its statement, assumptions and definitions together, so each definition it names is one of its conditions, which whoever uses it must meet. See ADR-0020, ADR-0021, ADR-0025.
+A project's named piece of mathematical text — a definition, the setting of a model, notation — that node statements are written in. A Proof map node names, when it is created, the definitions its statement and assumptions are written in and no others, and they change only by a restatement while Unfixed; a Claim split from a node names only those of that node's definitions it uses. The researcher, the Reader, the Decomposer and the Prover write them: a condition several nodes share is a definition, never copied into each, and one whose text another already has is refused; a near wording is never merged, and the researcher reads both at review (#255). A definition is Unfixed until a verification or a Seal relies on it, then fixed like a statement: a corrected one is a new definition, named by new nodes. What a node says is its statement, assumptions and definitions together, so each definition it names is one of its conditions, which whoever uses it must meet. See ADR-0020, ADR-0021, ADR-0025.
 _Avoid_: notation file, glossary, context (as a noun for this), setting (say the definition's term)
 
 **Theorem** (a proof map node kind):
@@ -121,11 +121,11 @@ The agent run a node's studio starts and the researcher watches: one run is the 
 _Avoid_: assistant, chat, agent panel (the panel is where it is watched), prompt-driven
 
 **Prover** (a Proof agent role):
-Finds the proof — retrieval first, then reasoning — and writes its structure as a draft in `scratch/`; decides when to split the node; review is requested only after the newest Verifier verdict passes the current working inputs — by the run itself, under its name, the moment that verdict stands with the checks passing, or by the Prover when the run's request is refused (ADR-0024 point 19); may raise a Challenge on a dependency that may not hold (`proof challenge open`), a statement Challenge with its Counterexample, and may withdraw an agent's Challenge with a reason; hands work to the Typesetter or Numerics and takes it back.
+Finds the proof — retrieval first, then reasoning — and writes its structure as a draft in `scratch/`, with its Uses of dependencies; decides when to split the node, giving each Claim the definitions it uses and its own assumptions; adds and edits definitions, and restates its own node while the text is an agent's and unfixed; review is requested only after the newest Verifier verdict passes the current working inputs — by the run itself, under its name, the moment that verdict stands with the checks passing, or by the Prover when the run's request is refused (ADR-0024 point 19); may raise a Challenge on a dependency that may not hold (`proof challenge open`), a statement Challenge with its Counterexample, and may withdraw an agent's Challenge with a reason; hands work to the Typesetter or Numerics and takes it back.
 _Avoid_: solver, assistant
 
 **Typesetter** (a Proof agent role):
-Writes the Prover's draft as the node's LaTeX and its key-ideas summary, compiles and fixes it; never supplies a missing step itself — it reports the gap and the Prover takes it from there; never splits, never requests review.
+Writes the Prover's draft as the node's LaTeX, its Uses of dependencies as drafted, and its key-ideas summary, compiles and fixes it; never supplies a missing step or entry itself — it reports the gap and the Prover takes it from there; never splits, never requests review.
 _Avoid_: LaTeX assistant, editor
 
 **Numerics** (a Proof agent role):
@@ -139,7 +139,7 @@ Reads the current proof against the statement and dependencies, and a challenged
 A passed or failed adversarial reading in the Work log, with a stable id, bound to the SHA-256 of the working inputs. Its objections are Challenges against the proof, numbered within it. The newest passed Verdict on the current inputs, with the mechanical checks passing (`Uses of dependencies` among them), puts the Proof layer at checks passed and permits an agent's request for review; a passed one that does not say, for each open objection of the previous version, where and why it is fixed is refused. It reports on each application of the `Uses of dependencies`, one line each (`<dependency>/<n>: checked` or `objection <k>`), read off the same proof.tex its SHA-256 is of: one left out, repeated or unknown is refused, and a passed one needs the section complete and stops counting once the node gains or loses a dependency. The researcher's request remains ungated; a Verdict never verifies or seals (ADR-0019, ADR-0025).
 
 **Uses of dependencies**:
-The section after a proof in `proof.tex`, one `depuse` entry per dependency, each use an application with its Substitution, Premises, Conclusion and Constants. The mechanical check requires it complete; the Verifier checks each application (#256, #262).
+The section after a proof in `proof.tex`, one `depuse` entry per dependency, each use an application with its Substitution, Premises, Conclusion and Constants; each premise of the dependency has exactly one basis: what the node says, a numbered step of the proof, or another application's Conclusion (#255). The mechanical check requires it complete; the Verifier checks each application (#256, #262).
 
 **Attempt**:
 An insert-only Work log entry naming what a proof approach tried to establish, its method and the obstruction. Failed Verdict objections and stuck steps also enter the next Briefing as attempts (ADR-0019).
@@ -152,7 +152,7 @@ The project's one agent that parses the researcher's words, always listening whi
 _Avoid_: controller, scheduler, chat, Ask
 
 **Decomposer** (a Proof agent role):
-Starts alone on a Theorem or Lemma with no children created by Split; ordinary dependency nodes are not children. It retrieves first and proposes a Split into Claims, with unresolved statements in the Proof fog. It adds the edges between its own Claims. Under a Coordinator its Split is the structure worked next; started alone, the Split stops the run for the researcher (ADR-0019, ADR-0021).
+Starts alone on a Theorem or Lemma with no children created by Split; ordinary dependency nodes are not children. It retrieves first and proposes a Split into Claims, each naming the definitions it uses (which it may add) and given its own assumptions, with unresolved statements in the Proof fog. It adds the edges between its own Claims. Under a Coordinator its Split is the structure worked next; started alone, the Split stops the run for the researcher (ADR-0019, ADR-0021).
 
 **Reader** (a Proof agent role):
 States a draft in the library as a map: Definitions, Theorems and Lemmas, imported results with their references, and fog. It records where it departed from the draft and why, and proves nothing (ADR-0021). Its turn is kept with the project, as a node's turns are, though it works no node. Its runtime sets the reader role (`PROOF_AGENT_ROLE=reader`, no node role), under which `proof node create` refuses, on the parsed arguments, a Claim, `--parent` and `--reassign` (READER_ROLE_REFUSED); a statement's text is never searched (#203).

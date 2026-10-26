@@ -159,6 +159,38 @@ def test_the_cli_adds_lists_shows_and_names_definitions(tmp_path: Path):
     assert text.index("Definition unit") < text.index("Statement") and "Simple graph." in text
 
 
+def test_a_definition_whose_text_is_already_one_is_refused_and_named_its_wording_may_differ(tmp_path: Path):
+    """An agent may add definitions (#255), so one condition could be written twice: a text the same as one there is, but for
+    its surrounding and repeated whitespace, is refused, naming the definition it repeats, whatever its term. Nothing
+    mathematical is normalized: `$f$` and `f` are different wordings, and a near one goes to the researcher, never merged."""
+    ensure_project(tmp_path)
+
+    def add(*args: str) -> dict:
+        return json.loads(runner.invoke(app, ["definition", "add", *args, "--root", str(tmp_path), "--json"]).output)
+
+    assert add("cc", "$f$ is continuous and has compact support.", "--term", "Compact continuous")["ok"]
+    repeated = add("cc2", "  $f$ is continuous\n and  has compact support. ", "--term", "Another name")
+    assert not repeated["ok"] and repeated["error"]["code"] == "DEFINITION_DUPLICATE" and "cc" in repeated["error"]["message"], repeated
+    assert repeated["error"]["definition_id"] == "cc"
+    assert add("cc3", "f is continuous and has compact support.", "--term", "Compact continuous")["ok"]  # another wording: added
+    listed = json.loads(runner.invoke(app, ["definition", "list", "--root", str(tmp_path), "--json"]).output)["data"]
+    assert sorted(d["id"] for d in listed) == ["cc", "cc3"]   # the refused one was not added
+
+
+def test_an_edit_that_would_repeat_another_definition_is_refused_and_one_rewording_itself_is_not(tmp_path: Path):
+    """The same rule on an edit (#307): agents edit definitions too (proof-agents#56), so changing one's text to another's,
+    whitespace aside, is refused, naming that one; an edit of a definition's own wording, or of its term, goes through."""
+    store = ensure_project(tmp_path)
+    D.add_definition(store, "cc", term="Compact continuous", text="$f$ is continuous and has compact support.", created_by="claude-code")
+    D.add_definition(store, "bd", term="Bounded", text="$f$ is bounded.", created_by="claude-code")
+    with pytest.raises(D.ProofMapError) as repeated:
+        D.edit_definition(store, "bd", text=" $f$ is continuous and  has compact support.", edited_by="claude-code")
+    assert (repeated.value.code, repeated.value.details["definition_id"]) == ("DEFINITION_DUPLICATE", "cc")
+    assert D.require_definition(store, "bd").text == "$f$ is bounded."
+    D.edit_definition(store, "cc", text="$f$ is continuous  and has compact support.", term="Compactly supported", edited_by="claude-code")
+    assert D.require_definition(store, "cc").term == "Compactly supported"
+
+
 def test_a_definition_looked_up_under_an_id_there_is_none_of_names_the_ids_there_are(tmp_path: Path):
     """Looking a definition up (show, edit, remove) under an id there is none of names the ids there are and where to
     read them, so a guessed id is not answered with `proof definition add`; a statement naming a missing definition is
