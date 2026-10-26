@@ -820,7 +820,7 @@ def record_agent_turn(
     .proof/agent-turns/ so it outlives the studio's memory: a new Start, a restart. Never a decision. A turn spent under
     a Pursue names it (`pursuit_id`): its records are what the Pursue spent (proof-agents#50). An end with no job is a
     turn that never began; `launch_failed` says its launch failed, as against a turn called off first — and an end with no
-    start is a launch refused before any job existed."""
+    start is a launch that failed before any job existed: refused, or a run's that ended before any turn of it began."""
     require_node(store, node_id)
     if not _TURN_ID.fullmatch(turn):
         raise ProofMapError("INVALID_REQUEST", f"not a turn id: {turn!r}")

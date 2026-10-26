@@ -5,6 +5,7 @@ page reads core's reading. Whether its Reader began, and how the Reader's turn e
 `reader_end` step says only what no turn record holds: a launch refused before any job existed.
 """
 
+from datetime import datetime
 from pathlib import Path
 
 from proof_cli import pursuit as P
@@ -25,7 +26,10 @@ def test_an_interrupted_pursuit_reads_its_last_whole_budget_as_a_floor_past_an_o
 
     [view] = P.project_progress(store)
     assert view["status"] == P.INTERRUPTED
-    assert view["budget"] == {**WHOLE, "spent": 7, "structure_spent": 1, "spend_incomplete": True}
+    budget = dict(view["budget"])
+    # its deadline counts from its Start, as a total's does (proof-agents#50); a copy kept no count of the turns under way
+    assert budget.pop("deadline") == datetime.fromisoformat(view["started_at"]).timestamp() + 90 * 60
+    assert budget == {**WHOLE, "spent": 7, "structure_spent": 1, "under_way": None, "spend_incomplete": True}
 
 
 def test_a_pursuit_that_kept_only_an_older_hosts_theorem_counts_reads_its_budget_unknown(tmp_path: Path):
