@@ -17,18 +17,18 @@ def _start(store) -> str:
     return P.record_pursuit(store, "start", provider="claude", budget=WHOLE).payload["pursuit_id"]
 
 
-def test_an_interrupted_pursuit_reads_its_last_whole_budget_as_a_floor_past_an_older_hubs_theorem_count(tmp_path: Path):
+def test_an_interrupted_pursuit_reads_its_last_whole_budget_as_a_floor_past_an_older_hosts_theorem_count(tmp_path: Path):
     store = ensure_project(tmp_path)
     pid = _start(store)
     P.record_pursuit(store, "spend", pursuit_id=pid, budget={**WHOLE, "spent": 7, "structure_spent": 1})
-    P.record_pursuit(store, "theorem", pursuit_id=pid, theorem="T1", budget={"turns": 4, "turns_max": 20})   # an older hub's
+    P.record_pursuit(store, "theorem", pursuit_id=pid, theorem="T1", budget={"turns": 4, "turns_max": 20})   # an older host's
 
     [view] = P.project_progress(store)
     assert view["status"] == P.INTERRUPTED
     assert view["budget"] == {**WHOLE, "spent": 7, "structure_spent": 1, "spend_incomplete": True}
 
 
-def test_a_pursuit_that_kept_only_an_older_hubs_theorem_counts_reads_its_budget_unknown(tmp_path: Path):
+def test_a_pursuit_that_kept_only_an_older_hosts_theorem_counts_reads_its_budget_unknown(tmp_path: Path):
     store = ensure_project(tmp_path)
     pid = P.record_pursuit(store, "start", provider="claude").payload["pursuit_id"]
     P.record_pursuit(store, "end", pursuit_id=pid, outcome="budget", reason="turn budget spent", budget={"turns": 20, "turns_max": 20})
@@ -73,7 +73,7 @@ def test_history_whose_step_said_failed_beside_a_stopped_turn_reads_the_turns_re
     store = ensure_project(tmp_path)
     pid = _start(store)
     _reader_turn(store, pid, outcome="stopped", reason="stopped by the researcher")
-    P.record_pursuit(store, "reader_end", pursuit_id=pid, outcome="failed", reason="the turn was stopped", launched=True)   # as hubs did
+    P.record_pursuit(store, "reader_end", pursuit_id=pid, outcome="failed", reason="the turn was stopped", launched=True)   # as hosts did
 
     [view] = P.project_progress(store)
     assert (view["events"][1]["outcome"], view["events"][1]["reason"]) == ("stopped", "stopped by the researcher")
