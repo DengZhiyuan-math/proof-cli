@@ -57,7 +57,7 @@ INTERRUPTED = "interrupted"
 RUNNING = "running"
 
 # a Pursue's whole budget, as proof-agents' PursueBudget gives it (proof-agents#19) and its events keep it (#223); anything
-# else an event carries (an older hub's count of one Theorem's turns, {"turns", "turns_max"}) is not the Pursue's
+# else an event carries (an older host's count of one Theorem's turns, {"turns", "turns_max"}) is not the Pursue's
 PURSUE_BUDGET = ("turns_max", "minutes_max", "spent", "structure_spent", "failed_launches")
 
 
@@ -225,7 +225,7 @@ def project_progress(store: ProjectStore, *, live: str | None = None) -> list[di
             status = INTERRUPTED
             reason = "no end was recorded: the process that ran it stopped; a new Start rechecks claims, snapshots and node states"
         theorems = [e["theorem"] for e in events if e["theorem"]]
-        budgets = [e["budget"] for e in events if pursue_budget(e["budget"]) is not None]   # an older hub's: unknown
+        budgets = [e["budget"] for e in events if pursue_budget(e["budget"]) is not None]   # an older host's: unknown
         if status == INTERRUPTED and budgets:   # its last record may predate turns it spent: a floor, not the whole
             budgets[-1] = {**budgets[-1], "spend_incomplete": True}
         totals = [e["budget"] for e in events if _pursue_total(e["budget"]) is not None]
