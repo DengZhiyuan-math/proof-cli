@@ -90,6 +90,20 @@ def test_a_verified_node_is_refused_until_an_agent_challenges_it_and_an_old_acce
     assert claim_node(store, "VER", claimant_id="agent").node_id == "VER"
 
 
+def test_a_verified_node_the_researcher_challenges_as_false_waits_for_the_agents_and_is_theirs_to_work(tmp_path: Path):
+    """The researcher's own doubt lapses no verification (ADR-0025 point 13), but it is an open Challenge: the node is no
+    longer refused as verified. The agents wait for the researcher to conclude; the researcher works it as they see fit."""
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="V", kind="claim", statement="V")
+    create_node(store, node_id="X", kind="lemma", statement="X")
+    _snapshot(store, "V")
+    researcher(store).verify("V", rationale="checked")
+    open_challenge(store, "V", kind="statement", opened_by="human", rationale="does V hold for n = 1?")
+    assert _code(lambda: claim_node(store, "V", claimant_id="agent")) == "STATEMENT_CHALLENGED"
+    add_dependency(store, "V", "X", edited_by="human")
+    assert claim_node(store, "V", claimant_id="human").node_id == "V"
+
+
 def test_a_node_challenged_as_false_waits_and_a_resplit_one_level_up_stays_open(tmp_path: Path):
     """ADR-0025 point 6's example: A uses U1 and U2, and U1 uses N and S; the researcher challenges N as false. N waits
     for the researcher to conclude. What the Challenge stops below U1 is the agents' and the frontier's to hold back,

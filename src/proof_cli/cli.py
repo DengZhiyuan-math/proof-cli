@@ -1500,8 +1500,9 @@ def node_depend(
 ) -> None:
     """Add, remove or move one of node_id's dependencies. Ungated, like split (#96).
 
-    A node someone else holds is theirs to edit unless --reassign; an Accepted
-    node only under an open Challenge. Pins are taken at the next request-review."""
+    A node someone else holds is theirs to edit unless --reassign; a verified
+    node only under an open Challenge, and a sealed one only by the researcher.
+    Pins are taken at the next request-review."""
     named = [flag for flag, value in (("--add", add), ("--remove", remove), ("--move", move)) if value]
     if len(named) != 1:
         raise click.UsageError("name exactly one of --add, --remove or --move")

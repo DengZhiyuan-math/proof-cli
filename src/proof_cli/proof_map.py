@@ -1573,7 +1573,7 @@ def _split(
     if parent.kind == ProofMapNodeKind.imported_result:
         raise ProofMapError("IMMUTABLE_NODE", f"imported_result node {parent_id} cannot be split")
 
-    problem = _unworkable(store, parent, created_by)  # new dependencies would void a verification: a decision, not a split (#37)
+    problem = _unworkable(store, parent, created_by)  # a verified node's new dependencies would void it: a decision, not a split (#37)
     if problem is not None:
         raise problem
 
@@ -1653,9 +1653,10 @@ def _unworkable(store: ProjectStore, node: ProofMapNode, by: str | None = None) 
     """Why the node's states keep `by` from working it — claiming, splitting or editing its dependencies — or None;
     with no `by`, what keeps anyone from it.
 
-    Read off the five states (ADR-0025 check 1), never the old acceptance axis. An expert-verified node is done, for
-    anyone: a Challenge lapses the verification, or puts the Proof layer back to incomplete, before it is worked again
-    (points 13 and 18), and a verification a false dependency voided no longer counts (point 3). Two more are the
+    Read off the five states (ADR-0025 check 1), never the old acceptance axis. An expert-verified node with no open
+    Challenge is done, for anyone: a doubt about it is raised as a Challenge before it is worked again (point 18), which
+    an agent's lapses the verification and one against the proof puts the Proof layer back to incomplete (point 13); a
+    verification a false dependency voided no longer counts (point 3). Two more are the
     agents' limits, never the researcher's: a sealed node they use as known and never work (point 14), while the
     researcher, whose belief the Seal is, may still rework what rests under it; and a node whose statement is challenged
     as false waits for the Challenge to be settled, unless an agent's Challenge links a counterexample: then its proof
@@ -1667,13 +1668,13 @@ def _unworkable(store: ProjectStore, node: ProofMapNode, by: str | None = None) 
     from .node_states import counterexamples, own_states  # it reads this module
 
     seal, statement_layer, proof_layer, _ = own_states(store, node)
-    if proof_layer == "expert-verified":
+    if proof_layer == "expert-verified" and not has_open_challenge(store, node.id):
         return ProofMapError("NODE_VERIFIED", f"node {node.id} is verified; a Challenge against it comes before working it again",
                              details={"node_id": node.id})
     if by == RESEARCHER:
         return None
     if seal != "unsealed":
-        return ProofMapError("NODE_SEALED", f"node {node.id} is {seal}: the agents use it as known and never work it",
+        return ProofMapError("NODE_SEALED", f"node {node.id} is {seal.replace('-', ' ')}: the agents use it as known and never work it",
                              details={"node_id": node.id, "seal": seal})
     if statement_layer == "challenged-as-false" and not counterexamples(store, node.id):
         return ProofMapError("STATEMENT_CHALLENGED", f"node {node.id}'s statement is challenged as false: it waits until the Challenge is settled",
@@ -1681,7 +1682,7 @@ def _unworkable(store: ProjectStore, node: ProofMapNode, by: str | None = None) 
     return None
 
 
-def _believed(store: ProjectStore, node: ProofMapNode) -> bool:
+def _verified_or_sealed_true(store: ProjectStore, node: ProofMapNode) -> bool:
     """Whether the researcher holds the node as it stands: expert-verified, or sealed true (ADR-0025 point 14)."""
     from .node_states import own_states  # it reads this module
 
@@ -1807,8 +1808,8 @@ def add_dependency(
     Structural, like Split: no researcher approval, agent-reachable. The
     target must exist and not already rest on the node (DEPENDENCY_CYCLE).
     A node someone else holds is theirs (NOT_CLAIMANT) unless `reassign`,
-    except an edge between two unaccepted Claims `edited_by`'s own Split
-    created: the Decomposer adds those itself (ADR-0021 point 7).
+    except an edge between two Claims `edited_by`'s own Split created, both
+    still the agents' to work: the Decomposer adds those itself (ADR-0021 point 7).
     No pin is taken here: the next request-review pins what the edge offers.
     """
     with store.transaction() as conn:
@@ -1863,7 +1864,7 @@ def remove_dependency(
     """Stop `node_id` resting on `dependency_id` (#96). The edge's pin goes with it.
 
     A node someone else holds is theirs (NOT_CLAIMANT) unless `reassign`, except a resplit: an agent taking a Claim
-    its own Split of `node_id` created back off it, while the Claim is unaccepted and no decision has fixed
+    its own Split of `node_id` created back off it, while the Claim is neither verified nor sealed true and no decision has fixed
     `node_id` (ADR-0021 points 7 and 9). Recorded in `node_id`'s work log, naming the Claim and the agent."""
     with store.transaction() as conn:
         node = require_node(store, node_id)
@@ -1894,7 +1895,7 @@ def remove_dependency(
 
 def _own_split_removal(store: ProjectStore, parent: ProofMapNode, claim_id: str, edited_by: str) -> bool:
     """Whether agent `edited_by` is taking back off `parent` a Claim its own Split of `parent` created, one the
-    researcher neither verified nor sealed true (`_believed`), while no decision has fixed `parent` (ADR-0021 point 9:
+    researcher neither verified nor sealed true, while no decision has fixed `parent` (ADR-0021 point 9:
     one further Decomposer turn tries another structure). Nothing relied on that edge, so the Decomposer removes it
     without holding `parent`."""
     claim = get_node(store, claim_id)
@@ -1904,7 +1905,7 @@ def _own_split_removal(store: ProjectStore, parent: ProofMapNode, claim_id: str,
         and claim.kind == ProofMapNodeKind.claim
         and claim.derived_from == parent.id
         and claim.created_by == edited_by
-        and not _believed(store, claim)
+        and not _verified_or_sealed_true(store, claim)
         and fixed_by(store, parent.id) is None
     )
 
@@ -3386,12 +3387,12 @@ def decision_node_id(store: ProjectStore, review_id: str) -> str | None:
 def promote_to_lemma(
     store: ProjectStore, node_id: str, *, reviewer: str | None = None, rationale: str = "", viewed_binding: str | None = None
 ) -> ProofMapNode:
-    """Promote a verified Claim to a Lemma, marking it independently reusable.
+    """Promote a verified Claim, or one sealed true, to a Lemma, marking it independently reusable.
 
     The researcher's explicit decision, never automatic, recorded as its
-    own review decision (ADR-0010). Only
-    available for `kind=claim` nodes the researcher verified or sealed true
-    (ADR-0025 point 14; `_believed`) and not under an open Challenge (a node whose soundness is in question isn't something
+    own review decision (ADR-0010). Only available for `kind=claim` nodes
+    the researcher verified or sealed true (ADR-0025 point 14) and not under
+    an open Challenge (a node whose soundness is in question isn't something
     to advertise as reusable); there is no demote. The decision line is the
     whole of it: the node's row keeps the kind it was made with, and the
     counted line makes it a Lemma wherever it is read (`_effective_kind`), as
@@ -3405,7 +3406,7 @@ def promote_to_lemma(
     if node.kind != ProofMapNodeKind.claim:
         raise ProofMapError("NOT_A_CLAIM", f"node {node_id} is kind={node.kind.value}, not claim; only a claim can be promoted")
 
-    if not _believed(store, node):
+    if not _verified_or_sealed_true(store, node):
         raise ProofMapError("NOT_VERIFIED", f"node {node_id} must be verified or sealed true before it can be promoted to Lemma")
 
     if has_open_challenge(store, node_id):
