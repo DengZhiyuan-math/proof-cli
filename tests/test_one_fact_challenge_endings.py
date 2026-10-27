@@ -9,12 +9,11 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-import pytest
 
 from _proofs import submit_proof
 from _researcher import researcher
 from proof_cli import storage
-from proof_cli.proof_map import ProofMapError, claim_node, create_node, get_challenge, open_challenge
+from proof_cli.proof_map import claim_node, create_node, get_challenge, open_challenge
 from proof_cli.storage import ensure_project
 
 
@@ -76,29 +75,3 @@ def test_a_challenge_closed_on_its_row_before_researcher_decisions_had_lines_sti
         conn.execute("UPDATE challenges SET status = 'dismissed', resolved_by = 'alice', resolved_at = '2025-01-01T00:00:00+00:00' WHERE id = ?", (old.id,))
 
     assert get_challenge(store, old.id).status.value == "dismissed"
-    with pytest.raises(ProofMapError) as refused:
-        researcher(store).dismiss_challenge(old.id)
-    assert refused.value.code == "CHALLENGE_NOT_OPEN"
-
-
-def test_of_two_researcher_decisions_racing_to_close_one_challenge_only_one_is_recorded(tmp_path: Path, monkeypatch):
-    first = ensure_project(tmp_path)
-    _accepted(first, "L")
-    challenge = open_challenge(first, "L", opened_by="agent_a")
-    second = ensure_project(tmp_path)
-    taking_the_lock = first.transaction
-
-    @contextlib.contextmanager
-    def after_the_other_lands():  # the other decision lands between this one's first read and its write lock
-        researcher(second).dismiss_challenge(challenge.id, rationale="the other one")
-        with taking_the_lock() as conn:
-            yield conn
-
-    monkeypatch.setattr(first, "transaction", after_the_other_lands)
-    with pytest.raises(ProofMapError) as refused:
-        researcher(first).dismiss_challenge(challenge.id, rationale="this one")
-    assert refused.value.code == "CHALLENGE_NOT_OPEN"
-    monkeypatch.undo()
-    assert get_challenge(first, challenge.id).resolution_rationale == "the other one"
-    lines = (tmp_path / "proofs" / "L" / "reviews.jsonl").read_text(encoding="utf-8").splitlines()
-    assert [json.loads(line)["kind"] for line in lines].count("challenge_resolution") == 1

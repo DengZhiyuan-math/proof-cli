@@ -9,7 +9,7 @@ from typer.testing import CliRunner
 
 from proof_cli.cli import app
 from proof_cli.memory import list_memory_artifacts, record_memory
-from proof_cli.proof_map import claim_node, create_node, decide_acceptance
+from proof_cli.proof_map import claim_node, create_node
 from proof_cli.storage import ensure_project
 from _proofs import submit_proof
 

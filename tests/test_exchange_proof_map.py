@@ -19,7 +19,6 @@ from proof_cli.exchange import (
 from proof_cli.proof_map import (
     claim_node,
     create_node,
-    decide_acceptance,
     get_node,
     get_workflow_state,
     list_candidate_proofs,

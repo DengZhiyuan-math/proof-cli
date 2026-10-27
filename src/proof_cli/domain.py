@@ -389,8 +389,8 @@ class EvidenceCheck(BaseModel):
 
     Purely advisory: a record of what a checker reported, which nobody judges
     (the Evidence review that once did is retired, ADR-0025); it can never
-    grant, revoke, or otherwise touch a node's acceptance_state — only
-    `decide_acceptance` can (ADR-0004 point 5).
+    verify or seal a node — only the researcher's click does (ADR-0025
+    point 16).
     """
 
     id: str

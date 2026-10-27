@@ -3,6 +3,10 @@
 Decisions are plain calls now — no passkey — made the way the proof map page
 makes them. Methods mirror the service functions they call; the reviewer is
 the git identity the test process has (or `reviewer_id` when set).
+
+An Acceptance, a Reference review and a Challenge's dismissal are no decisions
+any more (ADR-0025 point 24): their methods write the line an older version
+wrote (`legacy_decisions`), for tests of a project as such a version left it.
 """
 
 from __future__ import annotations
@@ -17,14 +21,14 @@ class Researcher:
         return {"reviewer": self.reviewer_id, "rationale": rationale}
 
     def decide_acceptance(self, node_id: str, decision: str, *, rationale: str = ""):
-        from proof_cli.proof_map import decide_acceptance
+        from proof_cli.legacy_decisions import write_acceptance
 
-        return decide_acceptance(self.store, node_id, decision, **self._who(rationale))
+        return write_acceptance(self.store, node_id, decision, **self._who(rationale))
 
     def decide_reference_review(self, node_id: str, decision: str = "reference-review", *, rationale: str = ""):
-        from proof_cli.proof_map import decide_reference_review
+        from proof_cli.legacy_decisions import write_reference_review
 
-        return decide_reference_review(self.store, node_id, decision, **self._who(rationale))
+        return write_reference_review(self.store, node_id, decision, **self._who(rationale))
 
     def promote_to_lemma(self, node_id: str, *, rationale: str = ""):
         from proof_cli.proof_map import promote_to_lemma
@@ -54,9 +58,9 @@ class Researcher:
         return restore_verification(self.store, challenge_id, **self._who(rationale))
 
     def dismiss_challenge(self, challenge_id: str, *, rationale: str = ""):
-        from proof_cli.proof_map import dismiss_challenge
+        from proof_cli.legacy_decisions import write_dismissal
 
-        return dismiss_challenge(self.store, challenge_id, **self._who(rationale))
+        return write_dismissal(self.store, challenge_id, **self._who(rationale))
 
     # -- Trust rules (ADR-0014): the page's three decisions on the project's trust-rules.jsonl
 

@@ -530,22 +530,6 @@ def test_decide_acceptance_on_nonexistent_node_raises_node_not_found(tmp_path: P
     assert exc_info.value.code == "NODE_NOT_FOUND"
 
 
-def test_decide_acceptance_on_imported_result_is_rejected(tmp_path: Path):
-    store = ensure_project(tmp_path)
-    create_node(
-        store,
-        node_id="ref_1",
-        kind="imported_result",
-        statement="An external theorem",
-        source_locator="doi:10.1234/example",
-        source_version="v1",
-    )
-
-    with pytest.raises(ProofMapError) as exc_info:
-        researcher(store).decide_acceptance("ref_1", "accept")
-    assert exc_info.value.code == "IMMUTABLE_NODE"
-
-
 def test_accept_sets_acceptance_state_to_accepted(tmp_path: Path):
     store = ensure_project(tmp_path)
     _submitted_claim(store)
@@ -773,32 +757,6 @@ def test_decide_reference_review_grants_review_independent_of_acceptance_state(t
     assert get_reference_review_state(store, "ref_1") == "reviewed"
     # acceptance_state is untouched by a Reference review decision
     assert get_acceptance_state(store, "ref_1") == "unreviewed"
-
-
-def test_decide_reference_review_on_non_imported_result_is_rejected(tmp_path: Path):
-    store = ensure_project(tmp_path)
-    create_node(store, node_id="clm_1", kind="claim", statement="stmt")
-
-    with pytest.raises(ProofMapError) as exc_info:
-        researcher(store).decide_reference_review("clm_1", "reference-review")
-    assert exc_info.value.code == "NOT_IMPORTED_RESULT"
-
-
-def test_decide_acceptance_still_rejects_imported_result_after_reference_review(tmp_path: Path):
-    store = ensure_project(tmp_path)
-    create_node(
-        store,
-        node_id="ref_1",
-        kind="imported_result",
-        statement="An external theorem",
-        source_locator="doi:10.1234/example",
-        source_version="v1",
-    )
-    researcher(store).decide_reference_review("ref_1", "reference-review")
-
-    with pytest.raises(ProofMapError) as exc_info:
-        researcher(store).decide_acceptance("ref_1", "accept")
-    assert exc_info.value.code == "IMMUTABLE_NODE"
 
 
 def test_workflow_state_open_for_a_fresh_unclaimed_node(tmp_path: Path):
@@ -1262,18 +1220,6 @@ def test_open_challenge_against_an_imported_result_needs_no_reference_review(tmp
     researcher(store).decide_reference_review("ref_1", "reference-review")
     challenge = open_challenge(store, "ref_1", opened_by="agent_a")
     assert challenge.target_node_id == "ref_1"
-
-
-def test_dismiss_challenge_on_already_dismissed_is_rejected(tmp_path: Path):
-    store = ensure_project(tmp_path)
-    create_node(store, node_id="lem_1", kind="lemma", statement="Base lemma")
-    _accept_via_full_cycle(store, "lem_1")
-    challenge = open_challenge(store, "lem_1", opened_by="agent_a")
-    researcher(store).dismiss_challenge(challenge.id)
-
-    with pytest.raises(ProofMapError) as exc_info:
-        researcher(store).dismiss_challenge(challenge.id)
-    assert exc_info.value.code == "CHALLENGE_NOT_OPEN"
 
 
 def test_challenge_list_filters_by_target_and_status(tmp_path: Path):
