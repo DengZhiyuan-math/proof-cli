@@ -979,7 +979,7 @@ def test_interface_fingerprint_is_unset_before_acceptance(tmp_path: Path):
     assert get_accepted_interface_fingerprint(store, "clm_1") is None
 
 
-def test_interface_fingerprint_persisted_on_candidate_proof_at_accept_time(tmp_path: Path):
+def test_the_accepted_interface_fingerprint_is_the_decisions_and_not_copied_onto_the_snapshot(tmp_path: Path):
     store = ensure_project(tmp_path)
     create_node(store, node_id="clm_1", kind="claim", statement="A implies B", assumptions=["A"])
     _accept_via_full_cycle(store, "clm_1")
@@ -988,9 +988,9 @@ def test_interface_fingerprint_persisted_on_candidate_proof_at_accept_time(tmp_p
     fingerprint = get_accepted_interface_fingerprint(store, "clm_1")
     assert fingerprint == expected
 
-    # persisted on the candidate_proof row itself, not recomputed per read
+    # the Acceptance's line holds it; the snapshot's row no longer keeps a copy (#284)
     current_proof = list_candidate_proofs(store, "clm_1")[-1]
-    assert current_proof.interface_fingerprint == expected
+    assert current_proof.interface_fingerprint is None
 
 
 def test_dependency_pin_for_local_target_records_pinned_version(tmp_path: Path):
@@ -1181,9 +1181,9 @@ def test_claim_on_accepted_node_is_refused(tmp_path: Path):
 
 def test_workflow_state_review_needed_after_reclaim_is_not_masked_by_a_stale_review(tmp_path: Path):
     """A prior revision_requested decision must not read as covering a
-    resubmission that happened after it, purely because get_workflow_state
-    now keys off the structural review_record_id link rather than wall-clock
-    timestamps."""
+    resubmission that happened after it: get_workflow_state keys off the
+    snapshot the decision names (its line's candidate_proof_id), never
+    wall-clock timestamps, and the snapshot rows carry no copy of it (#284)."""
     store = ensure_project(tmp_path)
     create_node(store, node_id="clm_1", kind="claim", statement="stmt")
     claim_node(store, "clm_1", claimant_id="agent_a", session_id="sess_1")
@@ -1193,7 +1193,7 @@ def test_workflow_state_review_needed_after_reclaim_is_not_masked_by_a_stale_rev
     researcher(store).decide_acceptance("clm_1", "revision-requested")
 
     v1 = get_current_candidate_proof(store, "clm_1")
-    assert v1.review_record_id is not None
+    assert v1.review_record_id is None
 
     claim_node(store, "clm_1", claimant_id="agent_b", session_id="sess_2")
     submit_proof(

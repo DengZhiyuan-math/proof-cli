@@ -88,8 +88,6 @@ from .storage import (
     read_scope,
     read_scoped,
     scoped_memo,
-    set_candidate_proof_interface_fingerprint,
-    set_candidate_proof_review_record_id,
     update_proof_map_node,
     upsert_dependency_pin,
 )
@@ -351,7 +349,6 @@ def create_node(
         derived_from=derived_from,
         medium=resolved_medium,
         created_by=created_by,
-        updated_by=created_by,
     )
     try:
         with store.transaction() as conn:
@@ -366,7 +363,8 @@ def create_node(
                 "proof_map_node_created",
                 f"created {resolved_kind.value} node {node.id}",
                 entity_id=node.id,
-                payload=node.model_dump(mode="json"),
+                # what happened: the node's row is the node, so its fields are not copied here (#284)
+                payload={"node_id": node.id, "kind": resolved_kind.value, "created_by": node.created_by},
                 conn=conn,
             )
     except sqlite3.IntegrityError as exc:
@@ -755,7 +753,9 @@ def questions(store: ProjectStore, node_id: str) -> list[dict]:
         found.append({
             **entry,
             "state": "open" if answer is None else "answered",
-            "answer": None if answer is None else {key: answer.get(key) for key in ("at", "by", "keep", "answer", "redirect")},
+            # whether the choice was kept, and the other reading, are what its redirect says (#284): stored once, as the redirect
+            "answer": None if answer is None else {"at": answer.get("at"), "by": answer.get("by"), "keep": answer.get("redirect") is None,
+                                                   "answer": answer.get("redirect"), "redirect": answer.get("redirect")},
         })
     return found
 
@@ -785,13 +785,11 @@ def answer_question(
             )
         if text and _same_reading(text, asked.get("question") or ""):
             keep, text = True, ""  # the choice, said again: it stands
-        payload = {
-            "kind": "answer", "role": None, "by": by, "question_id": question_id,
-            "keep": keep, "answer": text or None, "redirect": text or None,
-        }
+        # the redirect alone: none when the choice stands (#284: `keep` and `answer` repeated it)
+        payload = {"kind": "answer", "role": None, "by": by, "question_id": question_id, "redirect": text or None}
         message = f"{by} answered {question_id} on {node_id}: " + ("the choice stands" if keep else f"redirect — {text}")
         append_event(store, PROGRESS_EVENT, message, entity_id=node_id, payload=payload, conn=conn)
-    return {**payload, "node_id": node_id, "at": utc_now().isoformat()}
+    return {**payload, "keep": keep, "answer": text or None, "node_id": node_id, "at": utc_now().isoformat()}
 
 
 def _same_reading(answer: str, question: str) -> bool:
@@ -1096,7 +1094,7 @@ def set_medium(store: ProjectStore, node_id: str, medium: Medium | str, *, edite
     resolved = _resolve_medium(node.kind, medium)  # refuses an imported result or an unknown medium
     if resolved == node.medium:
         return node
-    changed = node.model_copy(update={"medium": resolved, "updated_by": edited_by, "updated_at": utc_now()})
+    changed = node.model_copy(update={"medium": resolved, "updated_at": utc_now()})
     with store.transaction() as conn:
         # the scaffold first, undone if the transaction rolls back: an event is never left without its entry file
         _scaffold_on_rollback(store, node_id)
@@ -1351,7 +1349,7 @@ def restate_node(
         if not update:
             raise ProofMapError("RESTATE_EMPTY", f"nothing to restate: give {node_id} a different --statement, --assumption or --definition")
         require_restatable(store, what=f"{node_id}'s statement", created_by=node.created_by, by=by, fixed=fixed_by(store, node_id), fixed_code="TEXT_FIXED")
-        changed = node.model_copy(update={**update, "updated_by": by, "updated_at": utc_now()})
+        changed = node.model_copy(update={**update, "updated_at": utc_now()})
         update_proof_map_node(store, changed, conn=conn)
         append_event(
             store, RESTATED_EVENT, f"{node_id} restated by {by}: {reason.strip()}", entity_id=node_id,
@@ -1776,7 +1774,7 @@ class DependencyEdit:
 
 
 def _with_dependencies(node: ProofMapNode, dependencies: list[str], actor: str) -> ProofMapNode:
-    return node.model_copy(update={"dependencies": dependencies, "updated_by": actor, "updated_at": utc_now()})
+    return node.model_copy(update={"dependencies": dependencies, "updated_at": utc_now()})
 
 
 def add_dependency(
@@ -1963,23 +1961,37 @@ def claim_node(
     reassigned. Any node that may still be worked can be claimed, a Blocked
     one included (see `_not_pickable`). The one-active-claim-per-node rule is
     the `claims` table's partial unique index, so a race between two
-    claimants still resolves to one.
+    claimants still resolves to one. The claim, a release of the one it takes over, and their record are one
+    transaction (#284): none is written without the others.
     """
-    node = require_node(store, node_id)
-    existing = get_active_claim(store, node_id)
-    if existing is not None and existing.claimant_id == claimant_id:
-        return existing
-    problem = _not_pickable(store, node)
-    if problem is not None:
-        raise problem
-    if existing is not None:
-        if not reassign:
-            raise _claim_conflict(existing)
-        mark_claim_released(store, existing.id, released_by=claimant_id, reason=f"reassigned to {claimant_id}", released_at=utc_now())
-
-    claim = ClaimRecord(id=str(uuid.uuid4()), node_id=node_id, claimant_id=claimant_id, session_id=session_id)
     try:
-        insert_claim(store, claim)
+        with store.transaction() as conn:
+            node = require_node(store, node_id)
+            existing = get_active_claim(store, node_id, conn=conn)
+            if existing is not None and existing.claimant_id == claimant_id:
+                return existing
+            problem = _not_pickable(store, node)
+            if problem is not None:
+                raise problem
+            if existing is not None:
+                if not reassign:
+                    raise _claim_conflict(existing)
+                mark_claim_released(store, existing.id, released_by=claimant_id, reason=f"reassigned to {claimant_id}", released_at=utc_now(), conn=conn)
+            claim = ClaimRecord(id=str(uuid.uuid4()), node_id=node_id, claimant_id=claimant_id, session_id=session_id)
+            insert_claim(store, claim, conn=conn)
+            append_event(
+                store,
+                "proof_map_claim_reassigned" if existing is not None else "proof_map_node_claimed",
+                f"claimed node {node_id} by {claimant_id}",
+                entity_id=node_id,
+                payload={
+                    "claim_id": claim.id,
+                    "claimant_id": claimant_id,
+                    "previous_claimant_id": existing.claimant_id if existing is not None else None,
+                },
+                conn=conn,
+            )
+            return claim
     except sqlite3.IntegrityError as exc:
         existing = get_active_claim(store, node_id)
         if existing is not None and existing.claimant_id == claimant_id:
@@ -1988,23 +2000,11 @@ def claim_node(
             raise _claim_conflict(existing) from exc
         raise ProofMapError("CLAIM_CONFLICT", f"node {node_id} is currently claimed") from exc
     except sqlite3.OperationalError as exc:
-        # e.g. "database is locked" under heavy concurrent contention past
-        # SQLite's busy_timeout — we don't know who, if anyone, won, so this
-        # is honestly a contention error, not a confirmed conflict.
+        # "database is locked" under heavy concurrent contention past SQLite's busy_timeout — we don't know who, if
+        # anyone, won, so this is honestly a contention error, not a confirmed conflict; any other error is itself
+        if "locked" not in str(exc) and "busy" not in str(exc):
+            raise
         raise ProofMapError("CLAIM_CONTENDED", f"could not claim node {node_id} due to database contention; retry") from exc
-
-    append_event(
-        store,
-        "proof_map_claim_reassigned" if existing is not None else "proof_map_node_claimed",
-        f"claimed node {node_id} by {claimant_id}",
-        entity_id=node_id,
-        payload={
-            "claim_id": claim.id,
-            "claimant_id": claimant_id,
-            "previous_claimant_id": existing.claimant_id if existing is not None else None,
-        },
-    )
-    return claim
 
 
 def release_node(
@@ -2022,21 +2022,23 @@ def release_node(
     reason. Claims never expire on their own.
     """
     require_node(store, node_id)
-    claim = get_active_claim(store, node_id)
-    if claim is None:
-        raise ProofMapError("NO_ACTIVE_CLAIM", f"proof map node {node_id} has no active claim")
-    release_reason = reason or ("released by claimant" if claim.claimant_id == claimant_id else f"unassigned by {claimant_id}")
-    released_at = utc_now()
-    if not mark_claim_released(store, claim.id, released_by=claimant_id, reason=release_reason, released_at=released_at):
-        # someone else's concurrent release reached SQLite's write lock first
-        raise ProofMapError("NO_ACTIVE_CLAIM", f"proof map node {node_id} has no active claim")
-    append_event(
-        store,
-        "proof_map_claim_released",
-        f"released claim on {node_id} by {claimant_id}",
-        entity_id=node_id,
-        payload={"claim_id": claim.id, "original_claimant_id": claim.claimant_id, "released_by": claimant_id, "reason": release_reason},
-    )
+    with store.transaction() as conn:   # the claim's end and its record together (#284)
+        claim = get_active_claim(store, node_id, conn=conn)
+        if claim is None:
+            raise ProofMapError("NO_ACTIVE_CLAIM", f"proof map node {node_id} has no active claim")
+        release_reason = reason or ("released by claimant" if claim.claimant_id == claimant_id else f"unassigned by {claimant_id}")
+        released_at = utc_now()
+        if not mark_claim_released(store, claim.id, released_by=claimant_id, reason=release_reason, released_at=released_at, conn=conn):
+            # someone else's concurrent release reached SQLite's write lock first
+            raise ProofMapError("NO_ACTIVE_CLAIM", f"proof map node {node_id} has no active claim")
+        append_event(
+            store,
+            "proof_map_claim_released",
+            f"released claim on {node_id} by {claimant_id}",
+            entity_id=node_id,
+            payload={"claim_id": claim.id, "original_claimant_id": claim.claimant_id, "released_by": claimant_id, "reason": release_reason},
+            conn=conn,
+        )
     return claim.model_copy(update={"released_by": claimant_id, "release_reason": release_reason, "released_at": released_at})
 
 
@@ -2404,14 +2406,16 @@ def record_evidence_check(
         id=str(uuid.uuid4()), candidate_proof_id=candidate_proof_id, outcome=resolved_outcome, notes=notes, run_by=run_by,
         candidate_proof_sha256=sha256, checker=checker,
     )
-    insert_evidence_check(store, check)
-    append_event(
-        store,
-        "proof_map_evidence_check_recorded",
-        f"evidence check {resolved_outcome.value} for candidate proof {candidate_proof_id}",
-        entity_id=candidate_proof_id,
-        payload={"evidence_check_id": check.id, "outcome": resolved_outcome.value, "run_by": run_by, "candidate_proof_sha256": sha256, "checker": checker},
-    )
+    with store.transaction() as conn:   # the check and its record together (#284)
+        insert_evidence_check(store, check)
+        append_event(
+            store,
+            "proof_map_evidence_check_recorded",
+            f"evidence check {resolved_outcome.value} for candidate proof {candidate_proof_id}",
+            entity_id=candidate_proof_id,
+            payload={"evidence_check_id": check.id, "outcome": resolved_outcome.value, "run_by": run_by, "candidate_proof_sha256": sha256, "checker": checker},
+            conn=conn,
+        )
     return check
 
 
@@ -2810,13 +2814,8 @@ def decide_acceptance(
         # can land between the check and the write
         _require_awaiting_acceptance_review(store, node_id)
         decided = _decide(store, kind=DecisionKind.acceptance, target_id=node_id, decision=resolved_decision.value, reviewer=reviewer, rationale=rationale, viewed_binding=viewed_binding)
-        current_proof = get_current_candidate_proof(store, node_id)
+        # the snapshot it decided and the interface it accepted are the line's (its payload): not copied onto the snapshot (#284)
         record = _record(store, decided, _ACCEPTANCE_OBJECT_TYPE, node_id, governance_state)
-        if current_proof is not None:
-            set_candidate_proof_review_record_id(store, current_proof.id, record.id, conn=conn)
-            if resolved_decision == AcceptanceDecision.accept:
-                fingerprint = compute_interface_fingerprint(node.statement, node.assumptions, node.definitions)
-                set_candidate_proof_interface_fingerprint(store, current_proof.id, fingerprint, conn=conn)
         if resolved_decision == AcceptanceDecision.accept:  # the pins are what it was made against (`_pins_accepted_against`)
             stored = {pin.target_node_id: pin for pin in list_dependency_pins_for_node(store, node_id)}
             for pinned in decided.payload.dependency_pins:
@@ -3383,7 +3382,7 @@ def promote_to_lemma(
         decided = _decide(store, kind=DecisionKind.promote, target_id=node_id, decision="promote", reviewer=reviewer, rationale=rationale, viewed_binding=viewed_binding)
         record = _record(store, decided, _ACCEPTANCE_OBJECT_TYPE, node_id, ReviewGovernanceState.approved)
         promoted = node.model_copy(
-            update={"kind": ProofMapNodeKind.lemma, "updated_by": decided.reviewer_id, "updated_at": utc_now()}
+            update={"kind": ProofMapNodeKind.lemma, "updated_at": utc_now()}
         )
         update_proof_map_node(store, promoted, conn=conn)
         append_event(
