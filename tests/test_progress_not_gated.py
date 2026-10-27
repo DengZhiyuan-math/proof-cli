@@ -15,7 +15,6 @@ from _proofs import submit_proof
 from _researcher import researcher
 
 from proof_cli.proof_map import (
-    ProofMapError,
     claim_node,
     conditional_on,
     create_node,
@@ -55,17 +54,6 @@ def test_a_blocked_node_can_be_claimed_worked_and_requested_for_review(tmp_path:
     assert get_workflow_state(store, "lem") == "blocked"
 
 
-def test_a_blocked_node_s_acceptance_decision_is_refused(tmp_path: Path):
-    store = _parent_on_claim(tmp_path)
-    submit_proof(store, "lem", claimant_id="agent_a", scoping_rationale="scoped", content="proof")
-
-    for decision in ("accept", "revision-requested", "reject"):
-        with pytest.raises(ProofMapError) as exc_info:
-            researcher(store).decide_acceptance("lem", decision)
-        assert exc_info.value.code == "NODE_BLOCKED"
-        assert exc_info.value.details["unsettled"] == ["clm"]
-
-
 def test_a_claim_the_verifier_passed_is_provisional_and_puts_its_parent_on_the_frontier(tmp_path: Path):
     store = _parent_on_claim(tmp_path)
     assert _frontier(store) == {"clm"}
@@ -88,15 +76,11 @@ def test_a_snapshot_without_the_verifier_s_pass_is_not_provisional(tmp_path: Pat
     assert "lem" not in _frontier(store)
 
 
-def test_accepting_bottom_up_clears_conditional_and_makes_the_parent_s_decision_possible(tmp_path: Path):
+def test_an_old_acceptance_bottom_up_clears_conditional(tmp_path: Path):
     store = _parent_on_claim(tmp_path)
     _passed_by_verifier(store, "clm")
     claim_node(store, "lem", claimant_id="agent_b")
     submit_proof(store, "lem", claimant_id="agent_b", scoping_rationale="scoped", content="proof of lem")
-
-    with pytest.raises(ProofMapError) as exc_info:
-        researcher(store).decide_acceptance("lem", "accept")
-    assert exc_info.value.code == "NODE_BLOCKED"
 
     researcher(store).decide_acceptance("clm", "accept")
 

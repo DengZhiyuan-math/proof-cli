@@ -3,9 +3,9 @@
 A Pursue works a chain bottom-up before the researcher reviews any of it, so every snapshot pins dependencies that
 are only Provisional: what the dependent was checked against is the dependency's statement, never a version of its
 proof. Such a pin is current while that interface stands, and lags nothing; it changes only when the dependency is
-restated. The researcher then Accepts bottom-up (CONTEXT, Conditional: "cleared as the researcher Accepts
-bottom-up"), and each Acceptance pins the accepted versions it was made against; a later proof-only revision of a
-dependency leaves the pin current, as a pin follows an unchanged interface by itself (ADR-0025). Before this, every such edge read "interface
+restated. An old Acceptance, made bottom-up, leaves each pin as request-review took it: only request-review writes a
+pin (#323), and a later proof-only revision of a dependency leaves the pin current, as a pin follows an unchanged
+interface by itself (ADR-0025). Before this, every such edge read "interface
 changed", what rested on it read dependency-stale, and a chain could not be Accepted past its middle.
 """
 
@@ -72,13 +72,13 @@ def test_the_researcher_accepts_it_bottom_up(tmp_path: Path):
     assert _current(store, "mid", "leaf") and _current(store, "top", "mid")
 
 
-def test_an_acceptance_pins_the_accepted_versions_it_was_made_against_and_a_proof_only_revision_leaves_it_current(tmp_path: Path):
+def test_an_acceptance_leaves_the_pin_as_request_review_took_it_and_a_proof_only_revision_leaves_it_current(tmp_path: Path):
     store = _chain(tmp_path)
     _accept(store, "leaf")
     _accept(store, "mid")
 
     pin = get_dependency_pin(store, "mid", "leaf")
-    assert pin.pinned_version == get_accepted_version(store, "leaf") == 1
+    assert pin.pinned_version is None and get_accepted_version(store, "leaf") == 1   # taken while leaf was Provisional
 
     # a proof-only revision of leaf: the interface mid was checked against stands, so its pin follows (ADR-0025)
     submit_proof(store, "leaf", claimant_id="agent", scoping_rationale="scoped", content="proof of leaf, v2, shorter")
@@ -123,7 +123,7 @@ def test_an_old_pin_reads_current_and_the_chain_is_accepted_bottom_up(legacy):
     for node_id in ("leaf", "mid", "top"):
         _accept(legacy, node_id)
         assert get_integrity_state(legacy, node_id) == "current", node_id
-    assert get_dependency_pin(legacy, "top", "mid").pinned_version == 1
+    assert get_dependency_pin(legacy, "top", "mid").pinned_version is None   # only request-review writes a pin (#323)
 
 
 def test_an_old_pin_still_sees_its_dependency_restated_after_it_was_taken(legacy):

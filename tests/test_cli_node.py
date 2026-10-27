@@ -535,7 +535,7 @@ def test_challenge_unlocks_reclaim_of_accepted_node(tmp_path: Path):
         app, ["node", "claim", "lem_1", "--root", str(tmp_path), "--claimant", "agent_b", "--json"]
     )
     assert blocked.exit_code != 0
-    assert json.loads(blocked.stdout)["error"]["code"] == "NODE_ALREADY_ACCEPTED"
+    assert json.loads(blocked.stdout)["error"]["code"] == "NODE_VERIFIED"
 
     runner.invoke(app, ["challenge", "open", "lem_1", "--root", str(tmp_path)])
 

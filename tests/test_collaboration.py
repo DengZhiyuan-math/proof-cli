@@ -21,7 +21,7 @@ import pytest
 from _researcher import researcher
 
 from proof_cli.domain import TheoremStatus, TrustLevel
-from proof_cli.proof_map import claim_node, create_node, decide_acceptance
+from proof_cli.proof_map import claim_node, create_node
 from proof_cli.reusable_assets import ReusableAsset, ReusableAssetKind, ReusableAssetPayload, ReusableAssetProvenance, ReusableAssetReuseStatus, ReusableAssetTrustLevel
 from proof_cli.storage import ensure_project
 from proof_cli.theorems import add_theorem

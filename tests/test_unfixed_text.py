@@ -78,13 +78,12 @@ def test_a_restatement_needs_a_reason_and_a_change(tmp_path: Path):
     assert _code(lambda: restate_node(store, "L", definitions=["nowhere"], reason="r", by="reader-1")) == "DEFINITION_NOT_FOUND"
 
 
-@pytest.mark.parametrize("decision", ["accept", "revision-requested", "reject"])
-def test_the_first_review_decision_on_a_node_fixes_its_text(tmp_path: Path, decision):
+def test_an_old_acceptance_fixes_a_node_s_text(tmp_path: Path):
     store = ensure_project(tmp_path)
     create_node(store, node_id="L", kind="lemma", statement="s", created_by="prover-1")
     assert fixed_by(store, "L") is None
     submit_proof(store, "L", claimant_id="prover-1", scoping_rationale="scoped", content="proof")
-    record = researcher(store).decide_acceptance("L", decision)
+    record = researcher(store).decide_acceptance("L", "accept")   # reads as a verification (ADR-0025 point 26)
 
     assert fixed_by(store, "L")["review_id"] == record.id
     with pytest.raises(ProofMapError) as caught:
@@ -262,12 +261,13 @@ def test_a_restatement_and_a_definition_edit_are_in_the_work_log_with_who_why_an
 
 
 def test_a_decision_fixes_only_what_the_decided_snapshot_rested_on_then(tmp_path: Path):
-    from proof_cli.proof_map import split_node
+    from proof_cli.proof_map import open_challenge, split_node
 
     store = ensure_project(tmp_path)
     create_node(store, node_id="T", kind="theorem", statement="t", created_by="reader-1")
     submit_proof(store, "T", claimant_id="prover-1", scoping_rationale="scoped", content="a first try")
-    researcher(store).decide_acceptance("T", "revision-requested")
+    researcher(store).verify("T", rationale="read it")
+    open_challenge(store, "T", opened_by="verifier-1", rationale="step 2 skips a case")   # lapses the verification
 
     split_node(store, "T", [{"id": "c1", "statement": "A"}], created_by="dec-1")
 

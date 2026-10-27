@@ -88,7 +88,7 @@ def _run_python(code: str, *args: str) -> subprocess.CompletedProcess:
 _DECIDER = """
 import json, sys
 from proof_cli.collaboration import Contributor, upsert_contributor
-from proof_cli.proof_map import decide_acceptance
+from proof_cli.legacy_decisions import write_acceptance as decide_acceptance
 from proof_cli.storage import load_project
 
 store = load_project(sys.argv[1])
@@ -167,7 +167,7 @@ def test_a_process_killed_between_request_and_decision_leaves_prior_acceptance_u
         """
         import os, sys
         import proof_cli.authority as authority
-        from proof_cli.proof_map import decide_acceptance
+        from proof_cli.legacy_decisions import write_acceptance as decide_acceptance
         from proof_cli.storage import load_project
 
         # die hard, mid-transaction, the instant the decision would be written
