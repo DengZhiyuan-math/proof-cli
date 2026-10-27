@@ -1158,11 +1158,11 @@ def test_pin_dependencies_leaves_pinned_version_none_for_submitted_but_unaccepte
 def test_claim_on_rejected_node_is_refused(tmp_path: Path):
     store = ensure_project(tmp_path)
     _submitted_claim(store)
-    researcher(store).decide_acceptance("clm_1", "reject")
+    researcher(store).decide_acceptance("clm_1", "reject")   # reads as the researcher's statement Challenge (ADR-0025 point 26)
 
     with pytest.raises(ProofMapError) as exc_info:
         claim_node(store, "clm_1", claimant_id="agent_b", session_id="sess_2")
-    assert exc_info.value.code == "NODE_REJECTED"
+    assert exc_info.value.code == "STATEMENT_CHALLENGED"
 
 
 def test_claim_on_accepted_node_is_refused(tmp_path: Path):
@@ -1172,7 +1172,7 @@ def test_claim_on_accepted_node_is_refused(tmp_path: Path):
 
     with pytest.raises(ProofMapError) as exc_info:
         claim_node(store, "clm_1", claimant_id="agent_b", session_id="sess_2")
-    assert exc_info.value.code == "NODE_ALREADY_ACCEPTED"
+    assert exc_info.value.code == "NODE_VERIFIED"
 
     # the interface fingerprint stays intact — no reclaim ever happened to
     # desync it from the node's still-"accepted" acceptance_state
@@ -1375,7 +1375,7 @@ def test_reclaiming_a_challenged_accepted_node_is_permitted(tmp_path: Path):
 
     with pytest.raises(ProofMapError) as exc_info:
         claim_node(store, "lem_1", claimant_id="agent_b", session_id="sess_2")
-    assert exc_info.value.code == "NODE_ALREADY_ACCEPTED"
+    assert exc_info.value.code == "NODE_VERIFIED"
 
     open_challenge(store, "lem_1", opened_by="agent_a", rationale="might be wrong")
 
@@ -1470,7 +1470,7 @@ def test_promote_requires_claim_and_accepted(tmp_path: Path):
     create_node(store, node_id="clm_1", kind="claim", statement="Not yet accepted")
     with pytest.raises(ProofMapError) as exc_info:
         researcher(store).promote_to_lemma("clm_1")
-    assert exc_info.value.code == "NOT_ACCEPTED"
+    assert exc_info.value.code == "NOT_VERIFIED"
 
 
 def test_promote_changes_only_kind(tmp_path: Path):
@@ -1587,7 +1587,8 @@ def test_a_challenged_node_cannot_be_promoted(tmp_path: Path):
     store = ensure_project(tmp_path)
     create_node(store, node_id="clm_1", kind="claim", statement="A promotable claim")
     _accept_via_full_cycle(store, "clm_1")
-    open_challenge(store, "clm_1", opened_by="agent_b", rationale="step 2 looks wrong")
+    # the researcher's own doubt lapses no verification (ADR-0025 point 13); an agent's would, and Promote then says NOT_VERIFIED
+    open_challenge(store, "clm_1", kind="statement", opened_by="human", rationale="does it hold for n = 1?")
 
     with pytest.raises(ProofMapError) as exc_info:
         researcher(store).promote_to_lemma("clm_1")
@@ -1821,22 +1822,22 @@ def test_split_on_imported_result_is_rejected(tmp_path: Path):
 def test_split_on_rejected_node_is_rejected(tmp_path: Path):
     store = ensure_project(tmp_path)
     _submitted_claim(store, "clm_parent")
-    researcher(store).decide_acceptance("clm_parent", "reject")
+    researcher(store).decide_acceptance("clm_parent", "reject")   # reads as the researcher's statement Challenge
 
     with pytest.raises(ProofMapError) as exc_info:
-        split_node(store, "clm_parent", [{"id": "clm_child_1", "statement": "A sub-claim"}])
-    assert exc_info.value.code == "NODE_REJECTED"
+        split_node(store, "clm_parent", [{"id": "clm_child_1", "statement": "A sub-claim"}], created_by="decomposer-1")
+    assert exc_info.value.code == "STATEMENT_CHALLENGED"
 
 
 def test_split_on_accepted_node_is_refused_and_leaves_its_acceptance(tmp_path: Path):
-    """New dependencies would void the signed interface: an Accepted node isn't split (#37)."""
+    """New dependencies would void the verification: a verified node isn't split (#37), an old Acceptance included."""
     store = ensure_project(tmp_path)
     _submitted_claim(store, "clm_parent")
     researcher(store).decide_acceptance("clm_parent", "accept")
 
     with pytest.raises(ProofMapError) as exc_info:
         split_node(store, "clm_parent", [{"id": "clm_child_1", "statement": "A sub-claim"}])
-    assert exc_info.value.code == "NODE_ACCEPTED"
+    assert exc_info.value.code == "NODE_VERIFIED"
     assert get_acceptance_state(store, "clm_parent") == "accepted"
     assert get_node(store, "clm_parent").dependencies == []
 

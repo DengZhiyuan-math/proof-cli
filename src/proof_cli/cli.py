@@ -1293,7 +1293,7 @@ def node_unseal(node_id: str, root: str = ROOT_OPTION, json_output: bool = typer
 
 @node_app.command("promote")
 def node_promote(node_id: str, root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
-    """Promote an Accepted Claim to a Lemma — on the proof map page (ADR-0010)."""
+    """Promote a verified Claim, or one sealed true, to a Lemma — on the proof map page (ADR-0010, ADR-0025 point 14)."""
     human_review_required(root, command="node.promote", kind="promote", target_id=node_id, node_id=node_id, json_output=json_output)
 
 
