@@ -1175,14 +1175,14 @@ def write_state(store: ProjectStore, state: ProjectState) -> None:
 # the event payload field naming the agent turn an event was written for (#227): {"node": ..., "role": ...}
 ACTING_TURN_FIELD = "acting_turn"
 # the context's acting turn, which append_event writes into that field; None: not acting for any (the researcher, the
-# host's own writes) — not to be confused with acting_as(None, None), an agent acting for no turn (the map's agent)
+# host's own writes) — not to be confused with acting_as(None, None), an agent acting for no turn (the Coordinator's talk)
 _ACTING_CONTEXT: ContextVar[dict | None] = ContextVar("proof_acting_context", default=None)
 
 
 @contextmanager
 def acting_as(node: str | None, role: str | None) -> Iterator[None]:
     """Make every event appended inside this block name the agent turn it was written for (#227): the node a turn
-    works and its role (a Reader's turn names no node; the map's agent names neither, and is still an agent's).
+    works and its role (a Reader's turn names no node; the Coordinator's talk names neither, and is still an agent's).
     Several runs act under one agent name at once, so the name alone can't say which turn did something. The CLI
     enters it for an agent's runtime; the host enters it for what it records of a run's turn. Per thread and task,
     as a ContextVar is: a turn never reaches another thread, and leaving the block restores what was before."""
@@ -1941,6 +1941,14 @@ def mark_challenge_withdrawn(
         )
         return cursor.rowcount > 0
 
+
+
+def mark_challenge_kind(store: ProjectStore, challenge_id: str, kind: str, *, conn: sqlite3.Connection | None = None) -> bool:
+    """Give a Challenge raised before Challenges had a kind its kind (ADR-0025 point 26): only one with none yet, so two
+    racing readings can't both win. Returns whether this call changed it."""
+    with _writing(store, conn) as conn:
+        cursor = conn.execute("UPDATE challenges SET kind = ? WHERE id = ? AND kind IS NULL", (kind, challenge_id))
+        return cursor.rowcount > 0
 
 def _row_to_evidence_check(row: sqlite3.Row) -> EvidenceCheck:
     return EvidenceCheck(

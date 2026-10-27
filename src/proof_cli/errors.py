@@ -74,6 +74,9 @@ ERROR_CODES: dict[str, str] = {
     "INVALID_OUTCOME": "not an Evidence check outcome (or, on `fog experiment record`, not an Experiment outcome)",
     "CHALLENGE_NOT_FOUND": "no Challenge has this id",
     "INVALID_CHALLENGE_KIND": "a Challenge is against the proof or against the statement",
+    "CHALLENGE_KIND_SET": "a Challenge's kind is given once: one from before Challenges had a kind is read as against the proof or the statement, and stays so",
+    "COORDINATOR_WORDS_REQUIRED": "what the Coordinator records of the researcher's words carries the words",
+    "INVALID_PROPOSAL": "the Coordinator proposes only what takes effect on the researcher's click: verify, seal true or false, unseal, or a restoring \"not a problem\"",
     "COUNTEREXAMPLE_REQUIRED": "an agent's Challenge against a statement links its counterexample, a node of the map",
     "INVALID_COUNTEREXAMPLE": "a counterexample belongs to a Challenge against the statement, and is another node than the one it challenges",
     "COUNTEREXAMPLE_RESTS_ON_TARGET": "a counterexample that rests on the node it challenges could contradict it only by assuming it",
@@ -242,7 +245,7 @@ ERROR_CODES: dict[str, str] = {
     "COORDINATOR_REFUSED": "the Coordinator refused the action; the message says why",
     "REDIRECT_EMPTY": "a Redirect needs its one line of text",
     # the map-level discussion (issue #177)
-    "PROMPT_EMPTY": "a message to the map's agent needs its text",
+    "PROMPT_EMPTY": "a message to the Coordinator needs its text",
     "AGENT_REFUSED": "the agent's turn could not start for a reason with no code of its own; the message says why",
     "RUN_REFUSED": "the run's Start was refused for a reason with no code of its own; the message says why",
     "RELEASE_FAILED": "the run ended but the node could not be given back; it is still assigned, and the message says why",
