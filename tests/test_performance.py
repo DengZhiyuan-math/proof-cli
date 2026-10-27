@@ -18,7 +18,7 @@ import pytest
 import proof_cli.proof_map as proof_map
 import proof_cli.reviews as reviews
 import proof_cli.storage as storage
-from _proofs import submit_proof
+from _proofs import checked_lines, proved, submit_proof
 from _researcher import researcher
 from proof_cli.proof_map import (
     counting_upstream_visits,
@@ -185,10 +185,10 @@ def test_the_frontier_and_a_node_read_grow_linearly_with_the_chain(tmp_path: Pat
 
 
 def _provisional_chain(root: Path, length: int):
-    """c0 <- c1 <- ... <- top: every Claim unaccepted, its snapshot passed by the Verifier, so each is Provisional
-    on all below it (ADR-0021), and one Definition every Claim names, edited once."""
+    """c0 <- c1 <- ... <- top: every Claim unaccepted, its proof passed by the Verifier, so each is Provisional on all
+    below it (ADR-0021) and its conclusion true (ADR-0025), and one Definition every Claim names, edited once."""
     from proof_cli import definitions
-    from proof_cli.proof_map import record_evidence_check, restate_node
+    from proof_cli.proof_map import record_evidence_check, record_progress, restate_node
 
     store = ensure_project(root)
     definitions.add_definition(store, "unit", term="Unit", text="u", created_by="dec-1")
@@ -201,8 +201,11 @@ def _provisional_chain(root: Path, length: int):
     restate_node(store, "c0", statement="s0, restated", reason="clearer", by="dec-1")
     definitions.edit_definition(store, "unit", text="u'", edited_by="dec-1", reason="clearer")
     for index in range(length):
-        proof = submit_proof(store, f"c{index}", claimant_id="agent_a", scoping_rationale="r", content=f"proof {index}")
-        record_evidence_check(store, proof.id, "passed", run_by="prover-1/verifier", notes="no objections")
+        node_id = f"c{index}"
+        proof = submit_proof(store, node_id, claimant_id="agent_a", scoping_rationale="r", content=proved(store, node_id))
+        record_progress(store, node_id, role="verifier", by="prover-1", verdict="passed", note="holds",
+                        application_lines=checked_lines(store, node_id) or None)
+        record_evidence_check(store, proof.id, "passed", run_by="prover-1/verifier", notes="no objections", checker="verifier")
     create_node(store, node_id="top", kind="lemma", statement="t", dependencies=[previous])
     return store
 
@@ -342,11 +345,13 @@ def _page(read: str):
     ],
 )
 def test_one_read_visits_each_upstream_node_once(chain, read):
-    """Each node's integrity is worked out once per read, and its dependents reuse it: O(n), not O(n^2)."""
+    """Each node's integrity is worked out at most once per read, and its dependents reuse it: O(n), not O(n^2). The
+    frontier reads the five states (#322), so it and the page's reads of it walk upstream not at all; the frontier's
+    own growth is measured on the Provisional chain."""
     with counting_upstream_visits() as visits:
         read(chain)
 
-    assert 0 < visits.count <= CHAIN, visits.count
+    assert visits.count <= CHAIN, visits.count
 
 
 def _scaled_dag(root: Path, copies: int):

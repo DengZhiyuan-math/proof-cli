@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from _proofs import submit_proof
+from _proofs import checked_lines, proved, submit_proof
 from _researcher import researcher
 
 from proof_cli.proof_map import (
@@ -23,14 +23,18 @@ from proof_cli.proof_map import (
     get_workflow_state,
     is_provisional,
     record_evidence_check,
+    record_progress,
 )
 from proof_cli.storage import ensure_project
 
 
 def _passed_by_verifier(store, node_id: str, run_by: str = "prover-1/verifier"):
-    """The run's record of a passing verdict on the snapshot it gated (ADR-0019 point 4)."""
-    proof = submit_proof(store, node_id, claimant_id="agent", scoping_rationale="scoped", content=f"proof of {node_id}")
-    return record_evidence_check(store, proof.id, "passed", run_by=run_by, notes="no objections")
+    """The run's record of a passing verdict on the snapshot it gated (ADR-0019 point 4): the Verifier's Verdict, a check
+    under ADR-0025, and the run's marked check on the snapshot."""
+    proof = submit_proof(store, node_id, claimant_id="agent", scoping_rationale="scoped", content=proved(store, node_id))
+    record_progress(store, node_id, role="verifier", by=run_by.split("/")[0], verdict="passed", note="holds",
+                    application_lines=checked_lines(store, node_id) or None)
+    return record_evidence_check(store, proof.id, "passed", run_by=run_by, notes="no objections", checker="verifier")
 
 
 def _parent_on_claim(tmp_path: Path):
@@ -225,7 +229,9 @@ def test_a_later_failed_verifier_check_on_the_same_snapshot_ends_provisional_sta
     check = _passed_by_verifier(store, "clm")
     assert is_provisional(store, "clm")
 
-    record_evidence_check(store, check.candidate_proof_id, "failed", run_by="prover-1/verifier", notes="1. step 3 cites nothing")
+    # the run's later failed Verdict on the same proof: its objection is a Challenge against the proof (ADR-0025 point 8)
+    record_progress(store, "clm", role="verifier", by="prover-1", verdict="failed", note="a gap", objections=["step 3 cites nothing"])
+    record_evidence_check(store, check.candidate_proof_id, "failed", run_by="prover-1/verifier", notes="1. step 3 cites nothing", checker="verifier")
 
     assert not is_provisional(store, "clm")
     assert "lem" not in _frontier(store)

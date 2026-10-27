@@ -404,7 +404,9 @@ def _with_state_axes(store, node) -> dict:
 @app.command(rich_help_panel=PROOF_MAP_PANEL)
 @read_scoped
 def frontier(root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
-    """The nodes ready to be worked: every dependency Accepted or Provisional, nobody holding them, none awaiting review."""
+    """The nodes ready to be worked (CONTEXT.md, Frontier): unassigned, unsealed, unverified, not stopped by a statement
+    Challenge, every dependency true, verified true or false, and the proof incomplete with no snapshot handed over to the
+    researcher, or resting directly on a false node."""
     store = get_store(_root(root))
     nodes = get_frontier(store)
     if json_output:

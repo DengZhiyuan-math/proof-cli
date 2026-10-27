@@ -4304,21 +4304,49 @@ def _snapshot_restated_under(store: ProjectStore, node_id: str) -> bool:
 
 @read_scoped
 def get_frontier(store: ProjectStore) -> list[ProofMapNode]:
-    """The nodes ready to be worked right now: what an agent should claim next (ADR-0010, ADR-0021).
+    """The nodes ready to be worked right now (CONTEXT.md, Frontier; ADR-0025): what an agent should take up next.
 
-    Every dependency Accepted (or Reference-reviewed) or Provisional, nobody
-    holding it, and no snapshot of it already awaiting the researcher; among
-    the nodes `claim_node` would accept from anyone (the same check,
-    `_not_pickable`).
+    Read off the five states, never the old acceptance axis. Unassigned, and among the nodes `claim_node` would let
+    anyone take (the same check, `_not_pickable`: no imported result, nothing sealed or verified, no statement
+    challenged as false); not stopped by a statement Challenge (point 6); every dependency true, verified true or false;
+    and its Proof layer incomplete with no snapshot Handed over to the researcher (`handed_over`), or resting directly
+    on a false node, which needs a proof that does not use it (point 3). A node whose own statement is false has nothing
+    left to prove. A node under a hand-edited cycle is not ready: its conclusion can't be read.
     """
-    return [
-        node
-        for node in list_nodes(store)
-        if get_active_claim(store, node.id) is None
-        and _not_pickable(store, node) is None
-        and _awaiting_decision(store, node) is None
-        and all(_dependency_satisfied(store, d) or is_provisional(store, d) for d in node.dependencies)
-    ]
+    from .node_states import node_states, stopped_by  # it reads this module
+
+    ready = []
+    for node in list_nodes(store):
+        if get_active_claim(store, node.id) is not None or _not_pickable(store, node) is not None or stopped_by(store, node.id):
+            continue
+        try:
+            states = node_states(store, node.id)
+            below = {node_states(store, dependency_id).conclusion for dependency_id in node.dependencies}
+        except ProofMapError as error:
+            if error.code != "DEPENDENCY_CYCLE":
+                raise
+            continue
+        if states.statement_layer == "false" or "uncertain" in below:
+            continue
+        if "false" in below or states.proof_layer == "incomplete" and not handed_over(store, node):
+            ready.append(node)
+    return ready
+
+
+def handed_over(store: ProjectStore, node: ProofMapNode) -> bool:
+    """Whether the node's current snapshot is Handed over (CONTEXT.md, Review queue): frozen, with its Proof layer
+    incomplete, no Challenge open against it, and no check of a run's — the Verifier's or an audit's, read off the
+    check's mark — ever passing it. It is the researcher's to read, and no agent takes it up; a Challenge, a Verifier's
+    objections included, hands the work back to the agents."""
+    from .node_states import own_states  # it reads this module
+
+    if node.kind == ProofMapNodeKind.imported_result:
+        return False
+    current = get_current_candidate_proof(store, node.id)
+    if current is None or own_states(store, node)[2] != "incomplete" or has_open_challenge(store, node.id):
+        return False
+    return not any(check.outcome.value == "passed" and check.checker in ("verifier", "audit")
+                   for check in list_evidence_checks_for_candidate_proof(store, current.id))
 
 
 @read_scoped
