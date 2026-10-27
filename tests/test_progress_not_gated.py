@@ -11,11 +11,10 @@ from pathlib import Path
 
 import pytest
 
-from _proofs import submit_proof
+from _proofs import submit_proof, verifier_passes
 from _researcher import researcher
 
 from proof_cli.proof_map import (
-    ProofMapError,
     claim_node,
     conditional_on,
     create_node,
@@ -24,14 +23,14 @@ from proof_cli.proof_map import (
     get_workflow_state,
     is_provisional,
     record_evidence_check,
+    record_progress,
 )
 from proof_cli.storage import ensure_project
 
 
 def _passed_by_verifier(store, node_id: str, run_by: str = "prover-1/verifier"):
     """The run's record of a passing verdict on the snapshot it gated (ADR-0019 point 4)."""
-    proof = submit_proof(store, node_id, claimant_id="agent", scoping_rationale="scoped", content=f"proof of {node_id}")
-    return record_evidence_check(store, proof.id, "passed", run_by=run_by, notes="no objections")
+    return verifier_passes(store, node_id, run_by)
 
 
 def _parent_on_claim(tmp_path: Path):
@@ -53,17 +52,6 @@ def test_a_blocked_node_can_be_claimed_worked_and_requested_for_review(tmp_path:
 
     # its snapshot waits; the workflow axis still reads Blocked
     assert get_workflow_state(store, "lem") == "blocked"
-
-
-def test_a_blocked_node_s_acceptance_decision_is_refused(tmp_path: Path):
-    store = _parent_on_claim(tmp_path)
-    submit_proof(store, "lem", claimant_id="agent_a", scoping_rationale="scoped", content="proof")
-
-    for decision in ("accept", "revision-requested", "reject"):
-        with pytest.raises(ProofMapError) as exc_info:
-            researcher(store).decide_acceptance("lem", decision)
-        assert exc_info.value.code == "NODE_BLOCKED"
-        assert exc_info.value.details["unsettled"] == ["clm"]
 
 
 def test_a_claim_the_verifier_passed_is_provisional_and_puts_its_parent_on_the_frontier(tmp_path: Path):
@@ -88,15 +76,11 @@ def test_a_snapshot_without_the_verifier_s_pass_is_not_provisional(tmp_path: Pat
     assert "lem" not in _frontier(store)
 
 
-def test_accepting_bottom_up_clears_conditional_and_makes_the_parent_s_decision_possible(tmp_path: Path):
+def test_an_old_acceptance_bottom_up_clears_conditional(tmp_path: Path):
     store = _parent_on_claim(tmp_path)
     _passed_by_verifier(store, "clm")
     claim_node(store, "lem", claimant_id="agent_b")
     submit_proof(store, "lem", claimant_id="agent_b", scoping_rationale="scoped", content="proof of lem")
-
-    with pytest.raises(ProofMapError) as exc_info:
-        researcher(store).decide_acceptance("lem", "accept")
-    assert exc_info.value.code == "NODE_BLOCKED"
 
     researcher(store).decide_acceptance("clm", "accept")
 
@@ -241,7 +225,9 @@ def test_a_later_failed_verifier_check_on_the_same_snapshot_ends_provisional_sta
     check = _passed_by_verifier(store, "clm")
     assert is_provisional(store, "clm")
 
-    record_evidence_check(store, check.candidate_proof_id, "failed", run_by="prover-1/verifier", notes="1. step 3 cites nothing")
+    # the run's later failed Verdict on the same proof: its objection is a Challenge against the proof (ADR-0025 point 8)
+    record_progress(store, "clm", role="verifier", by="prover-1", verdict="failed", note="a gap", objections=["step 3 cites nothing"])
+    record_evidence_check(store, check.candidate_proof_id, "failed", run_by="prover-1/verifier", notes="1. step 3 cites nothing", checker="verifier")
 
     assert not is_provisional(store, "clm")
     assert "lem" not in _frontier(store)

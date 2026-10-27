@@ -404,7 +404,9 @@ def _with_state_axes(store, node) -> dict:
 @app.command(rich_help_panel=PROOF_MAP_PANEL)
 @read_scoped
 def frontier(root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
-    """The nodes ready to be worked: every dependency Accepted or Provisional, nobody holding them, none awaiting review."""
+    """The nodes ready to be worked (CONTEXT.md, Frontier): unassigned, unsealed, unverified, not stopped by a statement
+    Challenge, every dependency true, verified true or false, and the proof incomplete with no snapshot handed over to the
+    researcher, or resting directly on a false node."""
     store = get_store(_root(root))
     nodes = get_frontier(store)
     if json_output:
@@ -1293,7 +1295,7 @@ def node_unseal(node_id: str, root: str = ROOT_OPTION, json_output: bool = typer
 
 @node_app.command("promote")
 def node_promote(node_id: str, root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
-    """Promote an Accepted Claim to a Lemma — on the proof map page (ADR-0010)."""
+    """Promote a verified Claim, or one sealed true, to a Lemma — on the proof map page (ADR-0010, ADR-0025 point 14)."""
     human_review_required(root, command="node.promote", kind="promote", target_id=node_id, node_id=node_id, json_output=json_output)
 
 
@@ -1500,8 +1502,9 @@ def node_depend(
 ) -> None:
     """Add, remove or move one of node_id's dependencies. Ungated, like split (#96).
 
-    A node someone else holds is theirs to edit unless --reassign; an Accepted
-    node only under an open Challenge. Pins are taken at the next request-review."""
+    A node someone else holds is theirs to edit unless --reassign; a verified
+    node only under an open Challenge, and a sealed one only by the researcher.
+    Pins are taken at the next request-review."""
     named = [flag for flag, value in (("--add", add), ("--remove", remove), ("--move", move)) if value]
     if len(named) != 1:
         raise click.UsageError("name exactly one of --add, --remove or --move")

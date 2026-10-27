@@ -423,6 +423,12 @@ def _legacy_payload(store: ProjectStore, row: dict) -> DecisionPayload | None:
             # retired with no binding of its own (ADR-0025): bound as it was, so it moves as the history it is
             proof = proof_map.require_candidate_proof(store, proof_map.require_evidence_check(store, row["object_id"]).candidate_proof_id)
             binding = {"candidate_proof_id": proof.id, "interface_fingerprint": proof_map._interface_of(proof_map.require_node(store, proof.node_id))}
+        elif kind == DecisionKind.reference_review:
+            # retired (ADR-0025 point 24): bound as an old version bound it, to the citation's interface
+            binding = {"interface_fingerprint": proof_map._interface_of(proof_map.require_node(store, row["object_id"]))}
+        elif kind == DecisionKind.challenge_resolution:
+            challenge = proof_map.require_challenge(store, row["object_id"])
+            binding = {"interface_fingerprint": proof_map._interface_of(proof_map.require_node(store, challenge.target_node_id))}
         else:
             binding = proof_map.decision_binding(store, kind, row["object_id"])
             binding["resolves_challenges"] = []

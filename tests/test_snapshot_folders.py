@@ -249,14 +249,13 @@ def _lose(folder: Path, how: str) -> None:
 
 
 @pytest.mark.parametrize("how", ["deleted", "unreadable"])
-@pytest.mark.parametrize("decision", ["accept", "revision-requested", "reject"])
-def test_no_decision_is_made_on_a_missing_or_unreadable_snapshot(tmp_path: Path, how, decision):
+def test_no_decision_is_made_on_a_missing_or_unreadable_snapshot(tmp_path: Path, how):
     store, folder = _node(tmp_path)
     _request(store)
     _lose(folder, how)
 
     with pytest.raises(ProofMapError) as refused:
-        researcher(store).decide_acceptance("clm_1", decision)
+        researcher(store).verify("clm_1")
 
     assert refused.value.code == "SNAPSHOT_UNREADABLE"
     assert not (folder / "reviews.jsonl").exists()
@@ -271,7 +270,7 @@ def test_an_old_single_file_snapshot_that_is_gone_is_refused_too(tmp_path: Path)
         submitted_by="agent_a", scoping_rationale="scoped", sha256="0" * 64,
     ))
     with pytest.raises(ProofMapError) as refused:
-        researcher(store).decide_acceptance("old", "accept")
+        researcher(store).verify("old")
     assert refused.value.code == "SNAPSHOT_UNREADABLE"
 
 
@@ -369,11 +368,11 @@ def test_an_old_single_file_snapshot_that_cant_be_read_is_refused_and_voids_its_
 
     assert candidate_proof_sha256(store, "cp-old") is None
     with pytest.raises(ProofMapError) as refused:
-        researcher(store).decide_acceptance("old", "accept")
+        researcher(store).verify("old")
     assert refused.value.code == "SNAPSHOT_UNREADABLE"
 
     path.chmod(0o644)
-    researcher(store).decide_acceptance("old", "accept")
+    researcher(store).decide_acceptance("old", "accept")   # an older version's Acceptance, made while it could be read
     unreadable(path)
     assert get_acceptance_state(store, "old") == "unreviewed"
 
@@ -458,7 +457,7 @@ def test_the_refusal_on_a_lost_snapshot_says_how_to_recover(tmp_path: Path):
     _lose(folder, "deleted")
 
     with pytest.raises(ProofMapError) as refused:
-        researcher(store).decide_acceptance("clm_1", "accept")
+        researcher(store).verify("clm_1")
 
     assert "request review again" in str(refused.value)
 
