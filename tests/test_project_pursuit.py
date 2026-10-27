@@ -19,6 +19,9 @@ from proof_cli.storage import ensure_project, list_events
 
 runner = CliRunner()
 
+# a Pursue's whole budget, as a host records it (proof-agents#19)
+WHOLE = {"turns_max": 12, "minutes_max": 90.0, "spent": 0, "structure_spent": 0, "failed_launches": 0}
+
 
 def _code(call) -> str:
     with pytest.raises(ProofMapError) as caught:
@@ -42,8 +45,8 @@ def test_each_phase_round_trips_through_the_service_and_the_cli(tmp_path: Path):
     store = ensure_project(tmp_path)
     pid = _start(store)
     P.record_pursuit(store, "reader_end", pursuit_id=pid, outcome="ok")
-    P.record_pursuit(store, "theorem", pursuit_id=pid, theorem="T1", budget={"turns": 0})
-    P.record_pursuit(store, "theorem", pursuit_id=pid, theorem="T1", outcome="budget", reason="turn budget spent", budget={"turns": 12})
+    P.record_pursuit(store, "theorem", pursuit_id=pid, theorem="T1", budget=WHOLE)
+    P.record_pursuit(store, "theorem", pursuit_id=pid, theorem="T1", outcome="budget", reason="turn budget spent", budget={**WHOLE, "spent": 12})
     P.record_pursuit(store, "stop", pursuit_id=pid, theorem="T1", reason="stopped by the researcher")
     P.record_pursuit(store, "release_failed", pursuit_id=pid, theorem="T1", reason="T1 still assigned: database is locked")
     P.record_pursuit(store, "end", pursuit_id=pid, outcome="released", reason="stopped by the researcher")
@@ -53,7 +56,7 @@ def test_each_phase_round_trips_through_the_service_and_the_cli(tmp_path: Path):
         view = pursuits[0]
         assert view["pursuit_id"] == pid and view["provider"] == "claude"
         assert (view["status"], view["reason"]) == ("released", "stopped by the researcher")
-        assert view["theorem"] == "T1" and view["budget"] == {"turns": 12} and view["ended_at"]
+        assert view["theorem"] == "T1" and view["budget"] == {**WHOLE, "spent": 12} and view["ended_at"]
         assert [e["phase"] for e in view["events"]] == ["start", "reader_end", "theorem", "theorem", "stop", "release_failed", "end"]
         failed = view["events"][5]
         assert (failed["theorem"], failed["reason"]) == ("T1", "T1 still assigned: database is locked")
@@ -162,14 +165,14 @@ def test_plain_progress_says_when_a_recorded_spend_is_incomplete(tmp_path: Path)
     """A host that could not count every turn says so in the budget it records; the plain view says it, JSON keeps it."""
     store = ensure_project(tmp_path)
     counted = _start(store)
-    P.record_pursuit(store, "end", pursuit_id=counted, outcome="done", reason="ended", budget={"turns_max": 12, "spent": 4})
+    P.record_pursuit(store, "end", pursuit_id=counted, outcome="done", reason="ended", budget={**WHOLE, "spent": 4})
     partial = _start(store)
     P.record_pursuit(store, "end", pursuit_id=partial, outcome="stuck", reason="the Reader could not start",
-                     budget={"turns_max": 12, "spent": 0, "spend_incomplete": True})
+                     budget={**WHOLE, "spend_incomplete": True})
 
     first, second = _progress_json(tmp_path)
-    assert first["budget"] == {"turns_max": 12, "spent": 4}
-    assert second["budget"] == {"turns_max": 12, "spent": 0, "spend_incomplete": True}
+    assert first["budget"] == {**WHOLE, "spent": 4}
+    assert second["budget"] == {**WHOLE, "spend_incomplete": True}
     text = runner.invoke(app, ["project", "progress", "--root", str(tmp_path)]).output
     assert text.count("spend: incomplete — not every turn was counted") == 1
     assert text.index("spend: incomplete") > text.index(partial)
@@ -182,7 +185,7 @@ def test_plain_progress_says_when_a_pursuits_budget_was_not_recorded(tmp_path: P
     older = _start(store)
     P.record_pursuit(store, "end", pursuit_id=older, outcome="stuck", reason="the Reader stated no Theorem")
     counted = _start(store)
-    P.record_pursuit(store, "end", pursuit_id=counted, outcome="done", reason="ended", budget={"turns_max": 12, "spent": 4})
+    P.record_pursuit(store, "end", pursuit_id=counted, outcome="done", reason="ended", budget={**WHOLE, "spent": 4})
 
     text = runner.invoke(app, ["project", "progress", "--root", str(tmp_path)]).output
     assert text.count("budget: not recorded") == 1
@@ -194,12 +197,12 @@ def test_a_spend_checkpoint_keeps_what_an_interrupted_pursuit_had_spent(tmp_path
     as nothing spent. A `spend` checkpoint, recorded as turns end, is the last budget an interrupted pursuit reads."""
     store = ensure_project(tmp_path)
     pid = _start(store)
-    P.record_pursuit(store, "theorem", pursuit_id=pid, theorem="T1", budget={"turns_max": 60, "spent": 0})
-    P.record_pursuit(store, "spend", pursuit_id=pid, budget={"turns_max": 60, "spent": 7})
-    P.record_pursuit(store, "spend", pursuit_id=pid, budget={"turns_max": 60, "spent": 9})
+    P.record_pursuit(store, "theorem", pursuit_id=pid, theorem="T1", budget=WHOLE)
+    P.record_pursuit(store, "spend", pursuit_id=pid, budget={**WHOLE, "spent": 7})
+    P.record_pursuit(store, "spend", pursuit_id=pid, budget={**WHOLE, "spent": 9})
     (view,) = P.project_progress(store)
     # what an interrupted pursuit spent is what it last recorded: a floor, so it reads as incomplete (the page and the CLI)
-    assert view["status"] == P.INTERRUPTED and view["budget"] == {"turns_max": 60, "spent": 9, "spend_incomplete": True}
+    assert view["status"] == P.INTERRUPTED and view["budget"] == {**WHOLE, "spent": 9, "spend_incomplete": True}
     assert view["theorem"] == "T1" and view["last_phase"] == "spend"
     plain = runner.invoke(app, ["project", "progress", "--root", str(tmp_path)]).output
     assert "spend: incomplete" in plain and plain.count(" spend ") == 1   # its last spend, not one line per turn

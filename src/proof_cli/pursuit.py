@@ -34,7 +34,8 @@ from .storage import ProjectStore, append_event, list_events_of_kind, put_turn_t
 
 PURSUIT_EVENT = "pursuit"
 
-# start: the researcher started it; reader_end: the Reader's turn ended (outcome ok, failed, or unknown);
+# start: the researcher started it; reader_end: the Reader's step ended (how its turn ended is the turn's record;
+# the step's own outcome only where no turn holds it: a launch refused before any job existed, failed or stopped);
 # theorem: work moved to a Theorem (or a Theorem's Coordinator ended: outcome is its status);
 # stop: the researcher stopped it; release_failed: releasing the claims failed (a retry may follow);
 # spend: what it has spent so far, recorded as its turns end, so an interrupted pursuit reads its last spend, not its Start's;
@@ -46,6 +47,16 @@ READER_OUTCOMES = ("ok", "failed", "stopped")
 
 INTERRUPTED = "interrupted"
 RUNNING = "running"
+
+# a Pursue's whole budget, as proof-agents' PursueBudget gives it (proof-agents#19) and its events keep it (#223); anything
+# else an event carries (an older host's count of one Theorem's turns, {"turns", "turns_max"}) is not the Pursue's
+PURSUE_BUDGET = ("turns_max", "minutes_max", "spent", "structure_spent", "failed_launches")
+
+
+def pursue_budget(budget: Any) -> dict | None:
+    """`budget` when it is a Pursue's whole budget: its total may be not set yet (no turns or minutes), a known budget all
+    the same, and its spend may be marked incomplete (`spend_incomplete`). None (unknown) when it is not one at all."""
+    return budget if isinstance(budget, dict) and all(key in budget for key in PURSUE_BUDGET) else None
 
 
 def record_pursuit(
@@ -66,7 +77,8 @@ def record_pursuit(
     """Append one `pursuit` event. `start` makes the pursuit's id (read it from the event's payload);
     every other phase names a started pursuit that has not ended, and `end` names its outcome. `budget` is the
     pursuit's whole total and what it has spent so far, `results` each Theorem's result so far (#223). On a
-    `reader_end`, `launched` says whether the Reader's turn began (its job existed) or was refused before (#224). On a
+    `reader_end`, `launched` False says the Reader's launch was refused before its job existed, which no turn record
+    holds (#224): a Reader that began is its turn's record (`record_reader_turn`), and so is how it ended. On a
     `start`, `audit` says the Pursue audits first (ADR-0024), and `root` names the node whose subtree it pursues — a
     Theorem's or Lemma's own Start, by its Coordinator, rather than the project's Pursue (None)."""
     if phase not in PHASES:
@@ -133,7 +145,9 @@ def _event_view(event: EventRecord) -> dict[str, Any]:
 def project_progress(store: ProjectStore, *, live: str | None = None) -> list[dict[str, Any]]:
     """Every pursuit, oldest first, with its events. An ended one reads its end's outcome and reason;
     one with no end reads `interrupted`, except `live`, the pursuit the calling process runs now,
-    which reads `running`."""
+    which reads `running`. Its `budget` is the last whole-Pursue budget it recorded (`pursue_budget`), marked incomplete
+    when it was interrupted: what it spent after that record is not on it. Its `reader_end` step reads how the Reader
+    ended off the Reader's turn record (`_reader_ended`)."""
     pursuits: dict[str, list[dict[str, Any]]] = {}
     kept_reader_turns = reader_turns(store)
     for event in list_events_of_kind(store, PURSUIT_EVENT):
@@ -149,13 +163,14 @@ def project_progress(store: ProjectStore, *, live: str | None = None) -> list[di
             status = INTERRUPTED
             reason = "no end was recorded: the process that ran it stopped; a new Start rechecks claims, snapshots and node states"
         theorems = [e["theorem"] for e in events if e["theorem"]]
-        budgets = [e["budget"] for e in events if e["budget"] is not None]
+        budgets = [e["budget"] for e in events if pursue_budget(e["budget"]) is not None]   # an older host's: unknown
         if status == INTERRUPTED and budgets:   # its last record may predate turns it spent: a floor, not the whole
             budgets[-1] = {**budgets[-1], "spend_incomplete": True}
         results = [e["results"] for e in events if e["results"] is not None]  # none recorded: unknown, not empty
         # a Reader that may have begun: a reader_end that did not say it was refused before its job existed
         reader_may_have_run = any(e["phase"] == "reader_end" and e["launched"] is not False for e in events)
         its_reader_turns = [turn for turn in kept_reader_turns if turn["pursuit_id"] == pursuit_id]
+        events = [_reader_ended(e, its_reader_turns) if e["phase"] == "reader_end" else e for e in events]
         views.append(
             {
                 "pursuit_id": pursuit_id,
@@ -176,6 +191,17 @@ def project_progress(store: ProjectStore, *, live: str | None = None) -> list[di
             }
         )
     return views
+
+
+def _reader_ended(event: dict[str, Any], turns: list[dict[str, Any]]) -> dict[str, Any]:
+    """A `reader_end` step as it reads: how the Reader ended, off its turn's record — ok, failed or stopped, with why —
+    whatever the step said beside it (history from before #284 said a stopped turn failed); when no turn's end is on
+    record, as the step said it (a launch refused before any job existed, a turn whose end was not kept), `unknown`
+    when it said nothing either."""
+    ended = next((turn for turn in reversed(turns) if turn["ended"]), None)
+    if ended is not None:
+        return {**event, "outcome": ended["outcome"], "reason": ended["reason"]}
+    return event if event["outcome"] else {**event, "outcome": "unknown"}
 
 
 def record_reader_turn(
