@@ -1,12 +1,13 @@
 """Mechanical checks of a node's working proof (issue #180): what a program can settle before any agent reads it.
 
 A Proof agent's run spent turns on `ls`, `cat`, `grep error build/*.log` and reading `--help`: discovering the folder and
-checking what needs no judgment. These checks are that work, done once, deterministically and read-only — does the
-proof build and build cleanly, is the summary there with its four headings, does proof.tex's theorem environment state
+checking what needs no judgment. These checks are that work, done once, deterministically and read-only — is the
+summary there with its four headings, does proof.tex's theorem environment state
 what the node states and does the document give the definitions it names as the map has them, do its `\\input`s (and
 theirs) stay in the folder, does its Uses of dependencies section have an entry for each dependency, each application
-with its four fields (ADR-0025 point 23: the structure and the coverage only, whether each holds is the Verifier's). The run
-gates the Verifier on them (an error sends the work back to the role that owns the files; the Verifier is briefed that
+with its four fields (ADR-0025 point 23: the structure and the coverage only, whether each holds is the Verifier's), and,
+as notes only, does the proof build cleanly: the proof is its .tex, and a build that fails or never ran gates nothing
+(#297). The run gates the Verifier on the errors (an error sends the work back to the role that owns the files; the Verifier is briefed that
 they passed and reads only the mathematics), and `proof node check` shows them to anyone. Nothing here is a
 verification: whether a step holds is the Verifier's and the researcher's. A finding is a notice (`CHECK_*` in
 errors.NOTICE_CODES), never a refusal, and never stops the researcher's own request-review.
@@ -302,19 +303,21 @@ def check_node(store: ProjectStore, node_id: str) -> list[dict]:
             # how the proof uses each dependency (ADR-0025 point 23): proof.tex's own Uses of dependencies section
             findings.extend(uses_findings(sources.get(proof.name, ""), list(node.dependencies),
                                           inputs=[text for rel, text in sources.items() if rel != proof.name], path=proof.name))
+            # the build (#297): the proof is its .tex, which is enough to verify, so a build that failed or never ran is a
+            # note, shown and briefed, gating no Verifier, no audit and no review request
             pdf = build_pdf_path(root, node.id)
             log = pdf.with_suffix(".log")
             if not pdf.is_file():
-                findings.append(_finding("CHECK_NOT_BUILT", ERROR, "proof.tex has not been compiled: compile it, and fix what fails, before the proof is read", "build/proof.pdf"))
+                findings.append(_finding("CHECK_NOT_BUILT", NOTE, "proof.tex has not been compiled: there is no PDF beside it (a note: the proof is its .tex)", "build/proof.pdf"))
             elif not build_is_current(root, node.id):
-                findings.append(_finding("CHECK_BUILD_STALE", ERROR, "an input changed after the last build: compile again so the PDF and the log are of the proof as it stands", "build/proof.pdf"))
+                findings.append(_finding("CHECK_BUILD_STALE", NOTE, "an input changed after the last build: the PDF and the log are of an earlier version (a note: the proof is its .tex)", "build/proof.pdf"))
             if log.is_file():
                 log_text = log.read_text(encoding="utf-8", errors="replace")
                 bangs = log_errors(log_text)
                 if bangs:
-                    findings.append(_finding("CHECK_COMPILE_ERRORS", ERROR, f"the build log has {len(bangs)} error line(s); the first: {bangs[0][:160]}", "build/proof.log"))
+                    findings.append(_finding("CHECK_COMPILE_ERRORS", NOTE, f"the build log has {len(bangs)} error line(s); the first: {bangs[0][:160]}", "build/proof.log"))
                 if _UNDEFINED.search(log_text):
-                    findings.append(_finding("CHECK_UNDEFINED_REFERENCES", ERROR, "the build log reports undefined references or citations", "build/proof.log"))
+                    findings.append(_finding("CHECK_UNDEFINED_REFERENCES", NOTE, "the build log reports undefined references or citations", "build/proof.log"))
     # a statement says all it needs itself (#261): another node named in it, or in an assumption, is a hint for the
     # Verifier, which fails a statement that needs a reading; it blocks nothing
     hinted = sorted(other.id for other in list_nodes(store) if other.id != node.id

@@ -46,7 +46,7 @@ def _codes(findings):
 def test_a_fresh_node_is_not_built_and_has_no_summary_and_a_finished_one_passes(project):
     findings = check_node(project, "N")
     assert _codes(findings) == ["CHECK_KEY_IDEAS_MISSING", "CHECK_NOT_BUILT"]
-    assert [f["level"] for f in findings] == ["error", "error"] and len(errors_of(findings)) == 2
+    assert [f["level"] for f in findings] == ["error", "note"] and len(errors_of(findings)) == 1   # the build is a note (#297)
     folder = node_folder(project.root, "N")
     (folder / "key-ideas.md").write_text(IDEAS)
     _build(project, "N")
@@ -94,6 +94,24 @@ def test_each_break_is_named(project):
     (folder / "proof.tex").write_text(tex.replace(USES_L, "").replace("% Write the proof here.", "By \\ref{L}, done."))
     _build(project, "N")
     assert "CHECK_USES_MISSING" in _codes(check_node(project, "N"))
+
+
+def test_a_build_that_failed_or_never_ran_is_a_note_and_a_content_check_still_an_error(project):
+    """#297, the researcher's decision of 2026-10-21: the proof is its .tex. A TeX build that fails produces no PDF, and
+    the .tex is enough to verify, so the four build checks are notes: shown, briefed, gating nothing. The checks of what
+    the files say stay errors."""
+    folder = node_folder(project.root, "N")
+    (folder / "key-ideas.md").write_text(IDEAS)
+    tex = (folder / "proof.tex").read_text()
+    levels = lambda: {f["code"]: f["level"] for f in check_node(project, "N")}  # noqa: E731
+    assert levels() == {"CHECK_NOT_BUILT": "note"} and errors_of(check_node(project, "N")) == []
+    _build(project, "N", log="! Undefined control sequence.\nl.4 \\foo\nLaTeX Warning: Reference `eq:1' on page 1 undefined on input line 9.\n")
+    (folder / "proof.tex").write_text(tex + "% edited after the build\n")
+    later = time.time() + 10
+    os.utime(folder / "proof.tex", (later, later))
+    assert levels() == {"CHECK_BUILD_STALE": "note", "CHECK_COMPILE_ERRORS": "note", "CHECK_UNDEFINED_REFERENCES": "note"}
+    (folder / "proof.tex").write_text(tex.replace("for every $n$ the bound holds", "for some $n$ the bound holds"))
+    assert levels()["CHECK_STATEMENT_MISMATCH"] == "error"
 
 
 def test_a_computation_node_needs_its_program_and_an_imported_result_has_no_findings(project):
