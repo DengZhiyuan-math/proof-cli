@@ -2,12 +2,15 @@
 
 ADR-0025 point 24 retired the three decisions: the researcher verifies and seals, and a Challenge is withdrawn or
 answered "not a problem". Projects keep their old lines, and core reads them as point 26 says: an approving Acceptance
-or Reference review as a verification, a rejection as the researcher's Challenge against the statement, a
-no-longer-callable import as sealed false, a dismissal as the Challenge's ending. Nothing in the CLI, the page or the
-agents makes one any more (`apply_decision` refuses them).
+or Reference review as a verification, a no-longer-callable import as sealed false, a dismissal as the Challenge's
+ending, and a Rejection as history once nothing rests on the node (one still rested on became the researcher's Challenge
+against the statement in #282's switch). Nothing in the CLI, the page or the agents makes one any more
+(`apply_decision` refuses them).
 
-This module writes such lines, in the old format and with no gate, for tests and fixtures that build a project as an
-older version left it. It refuses nothing an old version refused: a line it writes is a record of what happened then.
+Test support, not a decision: this module writes such lines, with no gate, for tests and fixtures (proof-web's
+included) that build a project as an older version left it. It refuses nothing an old version refused, since a line it
+writes is a record of what happened then; it binds the pins as they stand, where an old Acceptance bound the versions
+accepted since, which no reading of the line looks at.
 """
 
 from __future__ import annotations
@@ -30,12 +33,12 @@ from .proof_map import (
 from .reviews import DecisionKind, git_identity
 from .storage import ProjectStore, append_event, list_challenges
 
-ACCEPTANCE_DECISIONS = {
+_ACCEPTANCE_DECISIONS = {
     "accept": ReviewGovernanceState.approved,
     "revision-requested": ReviewGovernanceState.revision_requested,
     "reject": ReviewGovernanceState.rejected,
 }
-REFERENCE_REVIEW_DECISIONS = {"reference-review": ReviewGovernanceState.approved, "no-longer-callable": ReviewGovernanceState.rejected}
+_REFERENCE_REVIEW_DECISIONS = {"reference-review": ReviewGovernanceState.approved, "no-longer-callable": ReviewGovernanceState.rejected}
 
 
 def _open_challenge_ids(store: ProjectStore, node_id: str) -> list[str]:
@@ -45,9 +48,9 @@ def _open_challenge_ids(store: ProjectStore, node_id: str) -> list[str]:
 def write_acceptance(store: ProjectStore, node_id: str, decision: str, *, reviewer: str | None = None, rationale: str = "") -> ReviewRecord:
     """An Acceptance line on the node's current snapshot: accept, revision-requested or reject, bound to the snapshot,
     the interface and the pins as they stand, and resolving the node's open Challenges, as an old version bound it."""
-    state = ACCEPTANCE_DECISIONS.get(decision)
+    state = _ACCEPTANCE_DECISIONS.get(decision)
     if state is None:
-        raise ProofMapError("INVALID_DECISION", f"'{decision}' is not an old acceptance decision: {', '.join(ACCEPTANCE_DECISIONS)}")
+        raise ProofMapError("INVALID_DECISION", f"'{decision}' is not an old acceptance decision: {', '.join(_ACCEPTANCE_DECISIONS)}")
     node = require_node(store, node_id)
     with store.transaction() as conn:
         payload = build_decision_payload(
@@ -64,9 +67,9 @@ def write_reference_review(store: ProjectStore, node_id: str, decision: str = "r
                            rationale: str = "") -> ReviewRecord:
     """A Reference review line on an imported result: reference-review or no-longer-callable, bound to its interface and
     resolving its open Challenges, as an old version bound it."""
-    state = REFERENCE_REVIEW_DECISIONS.get(decision)
+    state = _REFERENCE_REVIEW_DECISIONS.get(decision)
     if state is None:
-        raise ProofMapError("INVALID_DECISION", f"'{decision}' is not an old reference review decision: {', '.join(REFERENCE_REVIEW_DECISIONS)}")
+        raise ProofMapError("INVALID_DECISION", f"'{decision}' is not an old reference review decision: {', '.join(_REFERENCE_REVIEW_DECISIONS)}")
     node = require_node(store, node_id)
     not_callable = state == ReviewGovernanceState.rejected
     with store.transaction() as conn:

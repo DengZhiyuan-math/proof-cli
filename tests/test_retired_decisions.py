@@ -15,7 +15,8 @@ from _researcher import researcher
 from proof_cli import proof_map
 from proof_cli.errors import ERROR_CODES
 from proof_cli.node_states import node_states
-from proof_cli.proof_map import ProofMapError, apply_decision, create_node, get_challenge, get_dependency_pin, open_challenge
+from proof_cli.proof_map import (ProofMapError, apply_decision, create_node, get_challenge, get_dependency_pin, open_challenge,
+                                  prepare_decision)
 from proof_cli.storage import ensure_project
 
 
@@ -36,6 +37,7 @@ def test_the_page_s_entry_point_refuses_the_three_and_names_what_replaced_them(t
         with pytest.raises(ProofMapError) as refused:
             apply_decision(store, kind, target, decision, reviewer="Researcher <r@example.org>")
         assert refused.value.code == "RETIRED_DECISION" and replaced_by in refused.value.message, kind
+        assert _code(lambda: prepare_decision(store, kind, target, decision)) == "RETIRED_DECISION"   # nor is one previewed
     assert not (tmp_path / "proofs" / "L" / "reviews.jsonl").exists() and not (tmp_path / "proofs" / "I" / "reviews.jsonl").exists()
 
 
@@ -79,3 +81,38 @@ def test_an_old_acceptance_writes_no_pin(tmp_path: Path):
 
     pin = get_dependency_pin(store, "N", "D")   # only request-review writes a pin (#284's check 2)
     assert (pin.id, pin.pinned_version, pin.pinned_fingerprint) == (taken.id, None, taken.pinned_fingerprint)
+
+
+def test_rows_from_before_reviews_jsonl_still_move_into_it_and_read_as_point_26_says(tmp_path: Path):
+    """The one-time move of pre-ADR-0010 review rows binds an old Reference review and dismissal itself, now that no
+    decision of theirs is bound (`authority._legacy_payload`)."""
+    from datetime import datetime, timezone
+
+    from proof_cli import authority
+    from proof_cli.collaboration import ReviewGovernanceState, ReviewRecord, ReviewRecordKind, _decision_row, _request_row
+    from proof_cli.storage import insert_review_history_row
+
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="IMP", kind="imported_result", statement="imp", source_locator="T1", source_version="v1")
+    create_node(store, node_id="GONE", kind="imported_result", statement="gone", source_locator="T2", source_version="v1")
+    create_node(store, node_id="L", kind="lemma", statement="L")
+    submit_proof(store, "L", claimant_id="agent", scoping_rationale="scoped", content="a proof of L")
+    challenge = open_challenge(store, "L", opened_by="agent", rationale="step 2")
+    now = datetime.now(timezone.utc)
+    with store.transaction() as conn:
+        for object_type, object_id, kind, decision in (
+                ("proof_map_node", "IMP", ReviewRecordKind.reference_review, ReviewGovernanceState.approved),
+                ("proof_map_node", "GONE", ReviewRecordKind.reference_review, ReviewGovernanceState.rejected),
+                ("proof_map_node", "L", ReviewRecordKind.acceptance, ReviewGovernanceState.approved),
+                ("challenge", challenge.id, ReviewRecordKind.challenge_resolution, ReviewGovernanceState.dismissed)):
+            record = ReviewRecord(object_type=object_type, object_id=object_id, reviewer_id="Old <o@example.org>", kind=kind)
+            insert_review_history_row(conn, _request_row(record))
+            insert_review_history_row(conn, _decision_row(record, decision, reviewer_id=record.reviewer_id, rationale="old", created_at=now))
+        conn.execute("DELETE FROM project_meta WHERE key = ?", (authority._MIGRATED_KEY,))
+    authority._MIGRATED.clear()
+
+    authority._migrate_review_history(store)
+
+    assert (node_states(store, "IMP").proof_layer, node_states(store, "GONE").seal, node_states(store, "L").proof_layer) == (
+        "expert-verified", "sealed-false", "expert-verified")
+    assert get_challenge(store, challenge.id).status.value == "dismissed"

@@ -1,12 +1,14 @@
 """The human side of a test: the researcher making Human Review decisions (ADR-0010).
 
 Decisions are plain calls now — no passkey — made the way the proof map page
-makes them. Methods mirror the service functions they call; the reviewer is
-the git identity the test process has (or `reviewer_id` when set).
+makes them, each method calling its service function; the reviewer is the git
+identity the test process has (or `reviewer_id` when set).
 
-An Acceptance, a Reference review and a Challenge's dismissal are no decisions
-any more (ADR-0025 point 24): their methods write the line an older version
-wrote (`legacy_decisions`), for tests of a project as such a version left it.
+Three methods keep their old names but make no decision: an Acceptance, a
+Reference review and a Challenge's dismissal are no decisions any more
+(ADR-0025 point 24), so `decide_acceptance`, `decide_reference_review` and
+`dismiss_challenge` write the line an older version wrote (`legacy_decisions`),
+for tests of a project as such a version left it.
 """
 
 from __future__ import annotations

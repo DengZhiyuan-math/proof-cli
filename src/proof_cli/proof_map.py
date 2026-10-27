@@ -2571,8 +2571,8 @@ def pin_dependencies(store: ProjectStore, node: ProofMapNode) -> list[Dependency
     immutable, so there's nothing to have moved on. A local target not yet
     Accepted pins no version and the interface it offers now: a Provisional
     node's statement may be used, its proof never (ADR-0021), so that is all
-    the submission was checked against; this pin is its only writer (#284,
-    #323). A pin whose edge is gone (a
+    the submission was checked against. Nothing else writes a pin: the
+    dependent's Acceptance once rewrote it (#284, #323). A pin whose edge is gone (a
     dependency removed or moved, #96) goes too, so the pins are exactly the
     node's dependencies.
     """
@@ -2941,6 +2941,8 @@ def decision_binding(
     dismissal are no decisions any more (ADR-0025 point 24): their old lines
     keep the binding they were written with (`legacy_decisions`).
     """
+    if kind in _RETIRED_DECISIONS:
+        raise _retired(kind)
     none = {"candidate_proof_id": None, "interface_fingerprint": None, "dependency_pins": [], "resolves_challenges": []}
     if kind == DecisionKind.promote:
         node = require_node(store, target_id)
@@ -3001,6 +3003,11 @@ _RETIRED_DECISIONS = {
 }
 
 
+def _retired(kind: DecisionKind) -> ProofMapError:
+    return ProofMapError("RETIRED_DECISION", f"{kind.value} is no decision any more (ADR-0025 point 24): {_RETIRED_DECISIONS[kind]}",
+                         details={"kind": kind.value})
+
+
 def apply_decision(
     store: ProjectStore,
     kind: DecisionKind | str,
@@ -3025,8 +3032,7 @@ def apply_decision(
         return decide_trust_rule(store, target_id, decision, conditions=conditions, reviewer=reviewer, rationale=rationale)
     who = {"reviewer": reviewer, "rationale": rationale, "viewed_binding": viewed_binding}
     if resolved_kind in _RETIRED_DECISIONS:
-        raise ProofMapError("RETIRED_DECISION", f"{resolved_kind.value} is no decision any more (ADR-0025 point 24): {_RETIRED_DECISIONS[resolved_kind]}",
-                            details={"kind": resolved_kind.value})
+        raise _retired(resolved_kind)
     if resolved_kind == DecisionKind.promote:
         return promote_to_lemma(store, target_id, **who)
     # the researcher's clicks of ADR-0025 (points 13-16), each after the page listed what it does (zeqome/proof-web#46);

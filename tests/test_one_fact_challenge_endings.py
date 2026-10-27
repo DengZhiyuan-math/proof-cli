@@ -9,7 +9,6 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-
 from _proofs import submit_proof
 from _researcher import researcher
 from proof_cli import storage
