@@ -357,13 +357,13 @@ def test_an_accepted_node_whose_dependency_is_then_found_false_is_claimed_and_ed
     for node_id in ("A", "B", "T"):
         _snapshot(store, node_id)
         reviewer.decide_acceptance(node_id, "accept")
-    assert _code(lambda: claim_node(store, "T", claimant_id="claude-code")) == "NODE_ALREADY_ACCEPTED"
+    assert _code(lambda: claim_node(store, "T", claimant_id="claude-code")) == "NODE_VERIFIED"
 
     reviewer.seal("A", False, rationale="A fails for n = 1")
 
     claim_node(store, "T", claimant_id="claude-code")
     remove_dependency(store, "T", "A", edited_by="claude-code")
-    assert _code(lambda: claim_node(store, "B", claimant_id="claude-code")) == "NODE_ALREADY_ACCEPTED"  # B rests on nothing false
+    assert _code(lambda: claim_node(store, "B", claimant_id="claude-code")) == "NODE_VERIFIED"  # B rests on nothing false
 
 
 def test_the_pages_one_entry_point_records_each_of_the_researchers_clicks_on_what_it_showed(tmp_path: Path):

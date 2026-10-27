@@ -197,7 +197,7 @@ def test_split_promote_verify_and_exchange_import_never_write_acceptance_state(t
     # promote refuses an unaccepted claim rather than accepting it along the way
     with pytest.raises(ProofMapError) as exc_info:
         researcher(store).promote_to_lemma("clm_child")
-    assert exc_info.value.code == "NOT_ACCEPTED"
+    assert exc_info.value.code == "NOT_VERIFIED"
     assert get_acceptance_state(store, "clm_child") == "unreviewed"
 
     # the legacy theorem-contract verify path, on a contract sharing the node's id (the trust

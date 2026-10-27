@@ -51,8 +51,8 @@ ERROR_CODES: dict[str, str] = {
     "NOT_CLAIMANT": "someone else holds this node, so the operation is theirs (ADR-0006 §8's CLAIM_OWNERSHIP_MISMATCH)",
     "NODE_BLOCKED": "a dependency hasn't reached the standing this needs",
     "NODE_CHALLENGED": "the node is the target of an open Challenge",
-    "NODE_ACCEPTED": "the node is Accepted; the operation would void that decision",
-    "NODE_ALREADY_ACCEPTED": "the node is already Accepted",
+    "NODE_VERIFIED": "the node is verified: a Challenge against it comes before working it again",
+    "STATEMENT_CHALLENGED": "the node's statement is challenged as false: it waits until the Challenge is settled, unless an agent's counterexample has both sides worked",
     "NODE_REJECTED": "the node was Rejected, which is final",
     # -- proofs, snapshots and splits ----------------------------------------------------
     "SCOPING_RATIONALE_REQUIRED": "requesting review needs a statement of why the node is scoped to prove directly",
@@ -80,7 +80,7 @@ ERROR_CODES: dict[str, str] = {
     "COUNTEREXAMPLE_REQUIRED": "an agent's Challenge against a statement links its counterexample, a node of the map",
     "INVALID_COUNTEREXAMPLE": "a counterexample belongs to a Challenge against the statement, and is another node than the one it challenges",
     "COUNTEREXAMPLE_RESTS_ON_TARGET": "a counterexample that rests on the node it challenges could contradict it only by assuming it",
-    "NODE_SEALED": "the node is sealed, the researcher's absolute belief: it is never challenged, and is unsealed first",
+    "NODE_SEALED": "the node is sealed, the researcher's absolute belief: it is never challenged, the agents never work it, and it is unsealed first",
     "WITHDRAW_REASON_REQUIRED": "a Challenge is withdrawn with a reason, which the next role is briefed with",
     "RESEARCHERS_CHALLENGE": "the Challenge is the researcher's: only the researcher withdraws it",
     "PASSED_WITH_OBJECTIONS": "a passing verdict raises no objection; one that stands makes it a failed verdict",
@@ -107,7 +107,7 @@ ERROR_CODES: dict[str, str] = {
     "INVALID_DECISION_KIND": "not a decision kind",
     "UNSUPPORTED_DECISION": "the page doesn't apply decisions of this kind",
     "NOT_REVIEW_NEEDED": "no snapshot awaits a decision",
-    "NOT_ACCEPTED": "the node isn't Accepted",
+    "NOT_VERIFIED": "only a Claim the researcher verified, or sealed true, can be promoted",
     "REFERENCE_NOT_CALLABLE": "the imported result is no longer callable, which is final",
     "SAME_NODE": "a dependency can't be moved onto itself",
     # -- Trust rules (ADR-0014; declared on the page, read-only from the CLI) ------------------

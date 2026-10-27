@@ -80,7 +80,8 @@ def test_no_command_service_function_or_error_code_of_the_three_operations_remai
         assert not hasattr(proof_map, name), name
     for code in ("TARGET_NOT_ACCEPTED", "PIN_NOT_LAGGING", "INTERFACE_CHANGED", "NO_DEPENDENCY_PIN", "DEPENDENCY_REQUIRED",
                  "REFERENCE_STILL_CALLABLE", "REPLACEMENT_REQUIRED", "REPLACEMENT_NOT_IMPORTED_RESULT", "REPLACEMENT_NOT_CALLABLE",
-                 "NO_DEPENDENTS", "NODE_UNVERIFIABLE"):
+                 "NO_DEPENDENTS", "NODE_UNVERIFIABLE",
+                 "NODE_ACCEPTED", "NODE_ALREADY_ACCEPTED", "NOT_ACCEPTED"):  # the gates read the five states (#321)
         assert code not in ERROR_CODES, code
     ensure_project(tmp_path)
     for args in (["node", "revalidate", "M", "L"], ["node", "migrate-dependents", "I", "J"], ["node", "evidence", "review", "x", "trusted"]):

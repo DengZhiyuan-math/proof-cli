@@ -260,16 +260,16 @@ def test_crystallize_keeps_every_split_rule_for_the_parent(tmp_path: Path):
     submit_proof(store, "R", claimant_id="agent_a", scoping_rationale="scoped", content="\\begin{proof}no.\\end{proof}\n")
     researcher(store).decide_acceptance("R", "reject", rationale="wrong")
     add_fog(store, "under a rejected node", near=["R"])
-    with pytest.raises(ProofMapError) as rejected:
-        crystallize_fog(store, "fog-2", "X2", "s")
-    assert rejected.value.code == "NODE_REJECTED"
+    with pytest.raises(ProofMapError) as rejected:   # an old Rejection reads as the researcher's statement Challenge
+        crystallize_fog(store, "fog-2", "X2", "s", created_by="agent_a")
+    assert rejected.value.code == "STATEMENT_CHALLENGED"
 
     submit_proof(store, "L1", claimant_id="agent_a", scoping_rationale="scoped", content="\\begin{proof}ok.\\end{proof}\n")
     researcher(store).decide_acceptance("L1", "accept", rationale="fine")
     add_fog(store, "under an accepted node", near=["L1"])
     with pytest.raises(ProofMapError) as accepted:
         crystallize_fog(store, "fog-3", "X3", "s")
-    assert accepted.value.code == "NODE_ACCEPTED" and get_acceptance_state(store, "L1") == "accepted"
+    assert accepted.value.code == "NODE_VERIFIED" and get_acceptance_state(store, "L1") == "accepted"
 
     claim_node(store, "C1", claimant_id="agent_b", session_id="s")
     add_fog(store, "under someone else's node", near=["C1"])
