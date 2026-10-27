@@ -364,3 +364,92 @@ def test_an_accepted_node_whose_dependency_is_then_found_false_is_claimed_and_ed
     claim_node(store, "T", claimant_id="claude-code")
     remove_dependency(store, "T", "A", edited_by="claude-code")
     assert _code(lambda: claim_node(store, "B", claimant_id="claude-code")) == "NODE_ALREADY_ACCEPTED"  # B rests on nothing false
+
+
+def test_the_pages_one_entry_point_records_each_of_the_researchers_clicks_on_what_it_showed(tmp_path: Path):
+    """zeqome/proof-web#46: the page records verify, seal true, seal false, unseal and a restoring "not a problem" through
+    `apply_decision`, as it records every decision, each bound to what it showed (STALE_VIEW otherwise)."""
+    from proof_cli.proof_map import apply_decision
+
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="B", kind="lemma", statement="B")
+    create_node(store, node_id="A", kind="lemma", statement="A", dependencies=["B"])
+    who = researcher(store).reviewer_id
+
+    def click(kind: str, target: str, decision: str, rationale: str = "read it"):
+        shown = binding_digest(prepare_decision(store, kind, target, decision))
+        return apply_decision(store, kind, target, decision, reviewer=who, rationale=rationale, viewed_binding=shown)
+
+    _snapshot(store, "A")
+    click("verification", "A", "verify")
+    assert _layers(store, "A")[1] == "expert-verified"
+    challenge = open_challenge(store, "A", kind="proof", opened_by="claude-code", rationale="step 2?")
+    assert _layers(store, "A")[1] == "incomplete"   # an agent's Challenge lapses the verification
+    click("not_a_problem", challenge.id, "not-a-problem", "step 2 is fine")
+    assert _layers(store, "A")[1] == "expert-verified"
+    click("seal", "A", "seal-true", "known")
+    assert (_layers(store, "A")[0], _layers(store, "B")[0]) == ("sealed-true", "sealed-true")
+    click("seal", "A", "unseal", "open it again")
+    assert (_layers(store, "A")[0], _layers(store, "B")[0]) == ("unsealed", "unsealed")
+    click("seal", "B", "seal-false", "fails for n = 1")
+    assert _layers(store, "B")[0] == "sealed-false"
+    assert _code(lambda: apply_decision(store, "seal", "B", "seal-maybe", reviewer=who, rationale="x")) == "INVALID_DECISION"
+
+
+def test_a_snapshot_whose_dependencies_changed_since_is_no_version_to_verify(tmp_path: Path):
+    """A verification is of a version (ADR-0025 point 13): once the node rests on something else than its snapshot did,
+    that snapshot is not the node's version any more, so a verification of it would never count. It is refused, as an
+    Acceptance was (DEPENDENCIES_CHANGED), and counts again once review is requested anew (zeqome/proof-web#46)."""
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="lem", kind="lemma", statement="L")
+    create_node(store, node_id="a", kind="lemma", statement="A")
+    _snapshot(store, "a")
+    add_dependency(store, "a", "lem")
+    assert _code(lambda: researcher(store).verify("a", rationale="read it")) == "DEPENDENCIES_CHANGED"
+    _snapshot(store, "a", "the proof using lem")
+    researcher(store).verify("a", rationale="read it")
+    assert _layers(store, "a")[1] == "expert-verified"
+
+
+def test_a_click_names_its_own_decision_or_is_refused(tmp_path: Path):
+    """The page's one entry point records a verification only as "verify" and a restoring "not a problem" only as itself, as
+    a Seal only as seal-true, seal-false or unseal: any other word is refused, and nothing is recorded (#307)."""
+    from proof_cli.proof_map import apply_decision
+
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="A", kind="lemma", statement="A")
+    _snapshot(store, "A")
+    who = researcher(store).reviewer_id
+    assert _code(lambda: apply_decision(store, "verification", "A", "unverify", reviewer=who, rationale="x")) == "INVALID_DECISION"
+    assert _layers(store, "A")[1] != "expert-verified"
+    researcher(store).verify("A", rationale="read it")
+    challenge = open_challenge(store, "A", kind="proof", opened_by="claude-code", rationale="step 2?")
+    assert _code(lambda: apply_decision(store, "not_a_problem", challenge.id, "dismiss", reviewer=who, rationale="x")) == "INVALID_DECISION"
+    assert get_challenge(store, challenge.id).status.value == "open"
+
+
+@pytest.mark.parametrize("command, replacements", [
+    (["node", "review", "A", "accept"], ["proof node verify A", "proof node seal A"]),
+    (["challenge", "dismiss", "{challenge}"], ["proof challenge withdraw {challenge}", "not a problem"]),
+])
+def test_a_retired_decision_names_what_replaced_it(tmp_path: Path, command, replacements):
+    """Accept, revision, reject and Reference review became Verify and Seal, and a Challenge is withdrawn or found "not a
+    problem" rather than dismissed (ADR-0025): the old commands say so, still sending the researcher to the page (#307)."""
+    store = ensure_project(tmp_path)
+    create_node(store, node_id="A", kind="lemma", statement="A")
+    challenge = open_challenge(store, "A", kind="proof", opened_by="claude-code", rationale="step 2?")
+    args = [part.format(challenge=challenge.id) for part in command]
+    result = CliRunner().invoke(app, [*args, "--root", str(tmp_path), "--json"])
+    error = json.loads(result.stdout)["error"]
+    assert result.exit_code == 1 and error["code"] == "HUMAN_REVIEW_REQUIRED" and error["url"].startswith("http://localhost:")
+    for replacement in replacements:
+        assert replacement.format(challenge=challenge.id) in error["message"], error["message"]
+
+
+def test_a_retired_command_given_an_id_with_braces_still_refuses_and_names_it(tmp_path: Path):
+    """An id is put into the message as it is typed: one with braces in it is refused like any other, never an error."""
+    ensure_project(tmp_path)
+    for args in (["node", "review", "A{x}", "accept"], ["challenge", "dismiss", "c{0}"]):
+        result = CliRunner().invoke(app, [*args, "--root", str(tmp_path), "--json"])
+        error = json.loads(result.stdout)["error"]
+        assert (result.exit_code, error["code"]) == (1, "HUMAN_REVIEW_REQUIRED") and args[2] in error["message"], error

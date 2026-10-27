@@ -467,17 +467,20 @@ def _emit_node(node, json_output: bool, *, command: str) -> None:
         typer.echo(render_proof_map_node(node))
 
 
-def human_review_required(root: str, *, command: str, kind: str, target_id: str, node_id: str | None, json_output: bool) -> None:
-    """Every Human Review decision is made on the proof map page, never here (ADR-0010): say where, and fail."""
+def human_review_required(root: str, *, command: str, kind: str, target_id: str, node_id: str | None, json_output: bool,
+                          retired: str | None = None) -> None:
+    """Every Human Review decision is made on the proof map page, never here (ADR-0010): say where, and fail. A decision
+    ADR-0025 retired says what replaced it instead (`retired`, with `{where}` for the page's address) (#307)."""
     from .origins import project_url
 
     # not a project yet: nothing to decide, and a refusal shouldn't create one
     url = project_url(get_store(_root(root)), node_id) if (_root(root) / ".proof").exists() else None
+    where = f"the proof map page{f', at {url}' if url else ''} (run `{('proof map open ' + node_id) if node_id else 'proof map open'}`)"
     _emit_error(
         ProofMapError(
             "HUMAN_REVIEW_REQUIRED",
-            f"{kind} on {target_id} is a Human Review decision: the researcher makes it on the proof map page"
-            f"{f', at {url}' if url else ''} (run `{('proof map open ' + node_id) if node_id else 'proof map open'}`)",
+            # replaced, not formatted: the id in the message is as typed, braces and all
+            retired.replace("{where}", where) if retired else f"{kind} on {target_id} is a Human Review decision: the researcher makes it on {where}",
             details={"kind": kind, "target_id": target_id, "url": url},
         ),
         json_output,
@@ -1258,13 +1261,15 @@ def _emit_review_record(record, json_output: bool, *, command: str) -> None:
 
 @node_app.command("review")
 def node_review(node_id: str, decision: str = typer.Argument(""), root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
-    """Accept / revision-requested / reject a node, or Reference-review an imported result — on the proof map page.
+    """Retired by ADR-0025 (Accept / revision-requested / reject, Reference review): says to verify or seal on the page.
 
     A Human Review decision is the researcher's, made on the proof map page
     (ADR-0010): this command never makes one, whatever flags it's given. It
     prints where to.
     """
-    human_review_required(root, command="node.review", kind="acceptance", target_id=node_id, node_id=node_id, json_output=json_output)
+    human_review_required(root, command="node.review", kind="acceptance", target_id=node_id, node_id=node_id, json_output=json_output,
+                          retired=f"Accept, revision, reject and Reference review are no longer decisions (ADR-0025): the researcher verifies "
+                                  f"or seals {node_id} on {{where}}; `proof node verify {node_id}` and `proof node seal {node_id}` say so too")
 
 
 @node_app.command("verify")
@@ -1636,14 +1641,16 @@ def challenge_not_a_problem(challenge_id: str, root: str = ROOT_OPTION, json_out
 
 @challenge_app.command("dismiss")
 def challenge_dismiss(challenge_id: str, root: str = ROOT_OPTION, json_output: bool = typer.Option(False, "--json")) -> None:
-    """Resolve a Challenge — on the proof map page (ADR-0010)."""
+    """Retired by ADR-0025: says to withdraw the Challenge, or to find it not a problem on the page."""
     store = get_store(_root(root))
     try:
         target = require_challenge(store, challenge_id).target_node_id
     except ProofMapError:
         target = None
     human_review_required(
-        root, command="challenge.dismiss", kind="challenge_resolution", target_id=challenge_id, node_id=target, json_output=json_output
+        root, command="challenge.dismiss", kind="challenge_resolution", target_id=challenge_id, node_id=target, json_output=json_output,
+        retired=f"a Challenge is no longer dismissed (ADR-0025): withdraw it with a reason (`proof challenge withdraw {challenge_id} "
+                f"--reason …`), or, on an agent's Challenge that lapsed a verification, the researcher says it is not a problem on {{where}}",
     )
 
 
