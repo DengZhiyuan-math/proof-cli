@@ -21,6 +21,14 @@ runner = CliRunner()
 
 # a Pursue's whole budget, as a host records it (proof-agents#19)
 WHOLE = {"turns_max": 12, "minutes_max": 90.0, "spent": 0, "structure_spent": 0, "failed_launches": 0}
+# what a copy of the spend reads back with (proof-agents#50): no count of the turns under way, which it did not keep, and
+# whether it is the whole spend
+COPY_READ = {"under_way": None, "spend_incomplete": False}
+
+
+def _no_deadline(budget: dict) -> dict:
+    """A budget as read, but its deadline (counted from the Start)."""
+    return {key: value for key, value in budget.items() if key != "deadline"}
 
 
 def _code(call) -> str:
@@ -56,7 +64,7 @@ def test_each_phase_round_trips_through_the_service_and_the_cli(tmp_path: Path):
         view = pursuits[0]
         assert view["pursuit_id"] == pid and view["provider"] == "claude"
         assert (view["status"], view["reason"]) == ("released", "stopped by the researcher")
-        assert view["theorem"] == "T1" and view["budget"] == {**WHOLE, "spent": 12} and view["ended_at"]
+        assert view["theorem"] == "T1" and _no_deadline(view["budget"]) == {**WHOLE, **COPY_READ, "spent": 12} and view["ended_at"]
         assert [e["phase"] for e in view["events"]] == ["start", "reader_end", "theorem", "theorem", "stop", "release_failed", "end"]
         failed = view["events"][5]
         assert (failed["theorem"], failed["reason"]) == ("T1", "T1 still assigned: database is locked")
@@ -110,10 +118,10 @@ def test_a_failing_write_at_start_is_refused_with_a_code_and_records_nothing(tmp
 def test_the_service_refuses_what_is_not_a_pursuits_history(tmp_path: Path):
     store = ensure_project(tmp_path)
     assert _code(lambda: P.record_pursuit(store, "resume")) == "INVALID_PURSUIT_PHASE"
-    assert _code(lambda: P.record_pursuit(store, "start", pursuit_id="mine")) == "INVALID_PURSUIT_PHASE"
     assert _code(lambda: P.record_pursuit(store, "stop", pursuit_id="nobody")) == "PURSUIT_NOT_FOUND"
     assert _code(lambda: P.record_pursuit(store, "stop")) == "PURSUIT_NOT_FOUND"
     pid = _start(store)
+    assert _code(lambda: P.record_pursuit(store, "start", pursuit_id=pid)) == "PURSUIT_ID_TAKEN"   # another pursuit's id
     assert _code(lambda: P.record_pursuit(store, "end", pursuit_id=pid)) == "PURSUIT_OUTCOME_REQUIRED"
     P.record_pursuit(store, "end", pursuit_id=pid, outcome="done")
     assert _code(lambda: P.record_pursuit(store, "stop", pursuit_id=pid)) == "PURSUIT_ENDED"
@@ -146,7 +154,7 @@ def test_the_pursuits_total_and_each_theorems_result_are_kept_and_read_back(tmp_
 
     for pursuits in (P.project_progress(store), _progress_json(tmp_path)):
         [view] = pursuits
-        assert view["budget"] == {"turns_max": 12, "minutes_max": 90.0, "spent": 9, "structure_spent": 2, "failed_launches": 0}
+        assert _no_deadline(view["budget"]) == {**total, **COPY_READ, "spent": 9, "structure_spent": 2}
         assert view["results"] == {"T1": {"status": "done", "reason": "T1 is requested for review"}}
         assert view["events"][-1]["results"] == done and view["events"][1]["results"] is None
 
@@ -171,9 +179,10 @@ def test_plain_progress_says_when_a_recorded_spend_is_incomplete(tmp_path: Path)
                      budget={**WHOLE, "spend_incomplete": True})
 
     first, second = _progress_json(tmp_path)
-    assert first["budget"] == {**WHOLE, "spent": 4}
-    assert second["budget"] == {**WHOLE, "spend_incomplete": True}
+    assert _no_deadline(first["budget"]) == {**WHOLE, **COPY_READ, "spent": 4}
+    assert _no_deadline(second["budget"]) == {**WHOLE, **COPY_READ, "spend_incomplete": True}
     text = runner.invoke(app, ["project", "progress", "--root", str(tmp_path)]).output
+    assert text.count("spent: 4 of 12 turns (0 structure), 0 failed launch(es)\n") == 1   # what was copied: nothing under way known
     assert text.count("spend: incomplete — not every turn was counted") == 1
     assert text.index("spend: incomplete") > text.index(partial)
 
@@ -202,7 +211,7 @@ def test_a_spend_checkpoint_keeps_what_an_interrupted_pursuit_had_spent(tmp_path
     P.record_pursuit(store, "spend", pursuit_id=pid, budget={**WHOLE, "spent": 9})
     (view,) = P.project_progress(store)
     # what an interrupted pursuit spent is what it last recorded: a floor, so it reads as incomplete (the page and the CLI)
-    assert view["status"] == P.INTERRUPTED and view["budget"] == {**WHOLE, "spent": 9, "spend_incomplete": True}
+    assert view["status"] == P.INTERRUPTED and _no_deadline(view["budget"]) == {**WHOLE, **COPY_READ, "spent": 9, "spend_incomplete": True}
     assert view["theorem"] == "T1" and view["last_phase"] == "spend"
     plain = runner.invoke(app, ["project", "progress", "--root", str(tmp_path)]).output
     assert "spend: incomplete" in plain and plain.count(" spend ") == 1   # its last spend, not one line per turn

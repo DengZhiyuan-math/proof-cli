@@ -529,10 +529,15 @@ def render_project_progress(pursuits: list[dict]) -> str:
             if event["budget"] is not None:
                 line += f" (budget {event['budget']})"
             console.print(line)
-        if pursuit.get("budget") is None:  # history from before the total was kept (#223): unknown, never nothing spent
+        budget = pursuit.get("budget")
+        if budget is None:  # history from before the total was kept (#223): unknown, never nothing spent
             console.print("  budget: not recorded")
-        elif pursuit["budget"].get("spend_incomplete") is True:  # the host could not count every turn
-            console.print("  spend: incomplete — not every turn was counted")
+        else:  # counted off its turns' records (proof-agents#50), or as history copied it
+            console.print(f"  spent: {budget['spent']} of {budget['turns_max'] if budget['turns_max'] is not None else '—'} turns "
+                          f"({budget['structure_spent']} structure), {budget['failed_launches']} failed launch(es)"
+                          + (f", {budget['under_way']} under way" if budget["under_way"] else ""))
+            if budget["spend_incomplete"]:  # something spent is on no record: at least this
+                console.print("  spend: incomplete — not every turn was counted")
         results = pursuit.get("results")
         if results is None:
             console.print("  results: not recorded")
