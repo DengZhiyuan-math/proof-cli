@@ -2369,6 +2369,7 @@ def list_candidate_proofs(store: ProjectStore, node_id: str) -> list[CandidatePr
 
 
 CHECKERS = ("verifier", "audit", "mechanical")  # what checked a proof, as a mark (ADR-0025)
+RUN_CHECKERS = ("verifier", "audit")  # a run's reading of the proof; a mechanical check reads the build
 
 
 def record_evidence_check(
@@ -4308,16 +4309,20 @@ def get_frontier(store: ProjectStore) -> list[ProofMapNode]:
 
     Read off the five states, never the old acceptance axis. Unassigned, and among the nodes `claim_node` would let
     anyone take (the same check, `_not_pickable`: no imported result, nothing sealed or verified, no statement
-    challenged as false); not stopped by a statement Challenge (point 6); every dependency true, verified true or false;
-    and its Proof layer incomplete with no snapshot Handed over to the researcher (`handed_over`), or resting directly
-    on a false node, which needs a proof that does not use it (point 3). A node whose own statement is false has nothing
-    left to prove. A node under a hand-edited cycle is not ready: its conclusion can't be read.
+    challenged as false); reached from a node nothing rests on without going through a sealed one, since what only a
+    sealed node rests on is not worked (point 14); not stopped by a statement Challenge (point 6); every dependency
+    true, verified true or false; and either resting directly on a false node, which needs a proof that does not use it
+    (point 3), or with its Proof layer incomplete and no snapshot waiting for a check (`snapshot_awaits_check`). A node
+    whose own statement is false has nothing left to prove. A node under a hand-edited cycle is not ready: its
+    conclusion can't be read.
     """
     from .node_states import node_states, stopped_by  # it reads this module
 
+    worked = _reached_without_a_seal(store)
     ready = []
     for node in list_nodes(store):
-        if get_active_claim(store, node.id) is not None or _not_pickable(store, node) is not None or stopped_by(store, node.id):
+        if (node.id not in worked or get_active_claim(store, node.id) is not None or _not_pickable(store, node) is not None
+                or stopped_by(store, node.id)):
             continue
         try:
             states = node_states(store, node.id)
@@ -4328,16 +4333,44 @@ def get_frontier(store: ProjectStore) -> list[ProofMapNode]:
             continue
         if states.statement_layer == "false" or "uncertain" in below:
             continue
-        if "false" in below or states.proof_layer == "incomplete" and not handed_over(store, node):
+        if "false" in below or (states.proof_layer == "incomplete" and not snapshot_awaits_check(store, node)):
             ready.append(node)
     return ready
 
 
-def handed_over(store: ProjectStore, node: ProofMapNode) -> bool:
-    """Whether the node's current snapshot is Handed over (CONTEXT.md, Review queue): frozen, with its Proof layer
-    incomplete, no Challenge open against it, and no check of a run's — the Verifier's or an audit's, read off the
-    check's mark — ever passing it. It is the researcher's to read, and no agent takes it up; a Challenge, a Verifier's
-    objections included, hands the work back to the agents."""
+def _reached_without_a_seal(store: ProjectStore) -> set[str]:
+    """The ids of the nodes reached from a node nothing rests on without going through a sealed one (CONTEXT.md,
+    Frontier): what only a sealed node rests on is left out, as is a hand-edited cycle nothing outside rests on."""
+    from .node_states import node_states  # it reads this module
+
+    nodes = {node.id: node for node in list_nodes(store)}
+    rested_on = {dependency_id for node in nodes.values() for dependency_id in node.dependencies}
+
+    def unsealed(node_id: str) -> bool:
+        try:
+            return node_states(store, node_id).seal == "unsealed"
+        except ProofMapError as error:
+            if error.code != "DEPENDENCY_CYCLE":
+                raise
+            return True   # its own seal still reads; the cycle keeps it off the frontier elsewhere
+
+    pending = [node_id for node_id in nodes if node_id not in rested_on and unsealed(node_id)]
+    reached = set(pending)
+    while pending:
+        for dependency_id in nodes[pending.pop()].dependencies:
+            if dependency_id in nodes and dependency_id not in reached and unsealed(dependency_id):
+                reached.add(dependency_id)
+                pending.append(dependency_id)
+    return reached
+
+
+def snapshot_awaits_check(store: ProjectStore, node: ProofMapNode) -> bool:
+    """Whether the node's current snapshot waits for a check: frozen with its Proof layer incomplete, no check of a
+    run's (`RUN_CHECKERS`, read off the check's mark) ever passing it, and nothing sending it back since — no Challenge
+    open against it (a Verifier's objections are Challenges), and no old Revision requested on it, which is a proof
+    Challenge now (ADR-0025 point 24). The researcher's "Review what it has" hands one over to be read; an agent's
+    request leaves one for the Verifier. Either way it needs a check, not a Prover, so the frontier leaves it out. A
+    check from before the mark is no check (point 26): its snapshot is checked again."""
     from .node_states import own_states  # it reads this module
 
     if node.kind == ProofMapNodeKind.imported_result:
@@ -4345,7 +4378,11 @@ def handed_over(store: ProjectStore, node: ProofMapNode) -> bool:
     current = get_current_candidate_proof(store, node.id)
     if current is None or own_states(store, node)[2] != "incomplete" or has_open_challenge(store, node.id):
         return False
-    return not any(check.outcome.value == "passed" and check.checker in ("verifier", "audit")
+    _, latest, _ = _acceptance(store, node)   # an old decision, read as point 26 says
+    if (latest is not None and latest.decision == ReviewGovernanceState.revision_requested
+            and latest.verdict.payload.candidate_proof_id == current.id):
+        return False
+    return not any(check.outcome.value == "passed" and check.checker in RUN_CHECKERS
                    for check in list_evidence_checks_for_candidate_proof(store, current.id))
 
 

@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from _proofs import checked_lines, proved, submit_proof
+from _proofs import submit_proof, verifier_passes
 from _researcher import researcher
 
 from proof_cli.proof_map import (
@@ -29,12 +29,8 @@ from proof_cli.storage import ensure_project
 
 
 def _passed_by_verifier(store, node_id: str, run_by: str = "prover-1/verifier"):
-    """The run's record of a passing verdict on the snapshot it gated (ADR-0019 point 4): the Verifier's Verdict, a check
-    under ADR-0025, and the run's marked check on the snapshot."""
-    proof = submit_proof(store, node_id, claimant_id="agent", scoping_rationale="scoped", content=proved(store, node_id))
-    record_progress(store, node_id, role="verifier", by=run_by.split("/")[0], verdict="passed", note="holds",
-                    application_lines=checked_lines(store, node_id) or None)
-    return record_evidence_check(store, proof.id, "passed", run_by=run_by, notes="no objections", checker="verifier")
+    """The run's record of a passing verdict on the snapshot it gated (ADR-0019 point 4)."""
+    return verifier_passes(store, node_id, run_by)
 
 
 def _parent_on_claim(tmp_path: Path):

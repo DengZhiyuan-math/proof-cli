@@ -73,3 +73,15 @@ def checked_lines(store, node_id: str) -> list[str]:
     from proof_cli.proof_map import require_node
 
     return [f"{dependency}/1: checked" for dependency in require_node(store, node_id).dependencies]
+
+
+def verifier_passes(store, node_id: str, run_by: str = "prover-1/verifier"):
+    """A run's Verifier passes the node: its proof written with complete Uses of dependencies and frozen, a passing
+    Verdict (a check under ADR-0025), and the run's marked check on the snapshot. Returns that check."""
+    from proof_cli.proof_map import record_evidence_check, record_progress
+
+    proof = submit_proof(store, node_id, claimant_id="agent", scoping_rationale="scoped", content=proved(store, node_id))
+    record_progress(store, node_id, role="verifier", by=run_by.split("/")[0], verdict="passed", note="holds",
+                    application_lines=checked_lines(store, node_id) or None)
+    return record_evidence_check(store, proof.id, "passed", run_by=run_by, notes="no objections", checker="verifier")
+
