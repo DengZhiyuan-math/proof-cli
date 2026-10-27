@@ -3342,10 +3342,13 @@ def promote_to_lemma(
     own review decision (ADR-0010). Only
     available for `kind=claim` nodes that are already Accepted and not under
     an open Challenge (a node whose soundness is in question isn't something
-    to advertise as reusable); there is no demote. Every field but `kind` is
-    unchanged — the Candidate-proof history and the interface fingerprint
-    included, since `kind` isn't part of the interface (#22): every
-    dependent's pin stays current across a promotion.
+    to advertise as reusable); there is no demote. The decision line is the
+    whole of it: the node's row keeps the kind it was made with, and the
+    counted line makes it a Lemma wherever it is read (`_effective_kind`), as
+    a Promote arriving through git always was (#284). Nothing else changes —
+    the Candidate-proof history and the interface fingerprint included, since
+    `kind` isn't part of the interface (#22): every dependent's pin stays
+    current across a promotion.
     """
     node = require_node(store, node_id)
 
@@ -3363,10 +3366,6 @@ def promote_to_lemma(
     with store.transaction() as conn:
         decided = _decide(store, kind=DecisionKind.promote, target_id=node_id, decision="promote", reviewer=reviewer, rationale=rationale, viewed_binding=viewed_binding)
         record = _record(store, decided, _ACCEPTANCE_OBJECT_TYPE, node_id, ReviewGovernanceState.approved)
-        promoted = node.model_copy(
-            update={"kind": ProofMapNodeKind.lemma, "updated_at": utc_now()}
-        )
-        update_proof_map_node(store, promoted, conn=conn)
         append_event(
             store,
             "proof_map_node_promoted",
@@ -3375,7 +3374,7 @@ def promote_to_lemma(
             payload={"promoted_by": decided.reviewer_id, "review_id": record.id},
             conn=conn,
         )
-    return promoted
+    return require_node(store, node_id)   # a Lemma now, read from the line just recorded
 
 
 REFERENCE_REVIEW_DECISION = "reference-review"
