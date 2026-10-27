@@ -264,7 +264,7 @@ class CandidateProofRecord(BaseModel):
     node_id: str
     version: int
     file_path: str
-    is_current: bool = True
+    is_current: bool = True  # computed on read, never stored: the node's highest version is its current snapshot (#284)
     review_record_id: str | None = None
     submitted_by: str = "human"
     scoping_rationale: str
@@ -361,9 +361,10 @@ class Challenge(BaseModel):
     fixed_by: str | None = None
     fixed_at: datetime | None = None
     fix: str | None = None
+    # the Researcher decision that ended it (ADR-0009, #35): its reviewer, time and id, read from its line (#284); a row
+    # keeps them only from before ADR-0010, when a Challenge was closed with no decision line behind it
     resolved_by: str | None = None
     resolved_at: datetime | None = None
-    # the signed Human Review decision that resolved it (ADR-0009, #35)
     resolution_review_id: str | None = None
     # that decision's signed rationale
     resolution_rationale: str | None = None
