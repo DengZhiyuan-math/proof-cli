@@ -3300,6 +3300,13 @@ def get_acceptance_state(store: ProjectStore, node_id: str) -> str:
     return _acceptance(store, require_node(store, node_id))[0]
 
 
+def rejected_because(store: ProjectStore, node_id: str) -> str | None:
+    """Why the node was Rejected, as the researcher's decision says, or None when it is not Rejected: what the switch to
+    the five states carries into the Challenge a Rejected node becomes (ADR-0025 point 26)."""
+    state, counted, _ = _acceptance(store, require_node(store, node_id))
+    return str(counted.row["rationale"] or "") if state == "rejected" and counted is not None else None
+
+
 def acceptance_overview(store: ProjectStore) -> list[tuple[ProofMapNode, str, str | None]]:
     """(node, acceptance_state, why its newest decision doesn't count) for every node, by id.
 
@@ -3745,10 +3752,11 @@ def open_challenge(
         return _raise_challenge(store, target_node_id, kind=kind, counterexample=counterexample, opened_by=opened_by, rationale=rationale, conn=conn)
 
 
-def _raise_challenge(store: ProjectStore, target_node_id: str, *, kind: str, opened_by: str, rationale: str, conn: sqlite3.Connection,
+def _raise_challenge(store: ProjectStore, target_node_id: str, *, kind: str | None, opened_by: str, rationale: str, conn: sqlite3.Connection,
                      counterexample: str | None = None, verdict_id: str | None = None, objection: int | None = None) -> Challenge:
     """Record a Challenge and its work-log entry in the caller's transaction: a Challenge opened, or a Verdict's objection.
-    Every Challenge is written here, so none reaches a sealed node (NODE_SEALED), and a refusal rolls the caller back."""
+    Every Challenge is written here, so none reaches a sealed node (NODE_SEALED), and a refusal rolls the caller back.
+    Its kind is None only for a Rejected node the switch to the five states turns into one, left for the Coordinator."""
     from .node_states import own_states  # it reads this module
 
     seal = own_states(store, require_node(store, target_node_id))[0]

@@ -970,6 +970,7 @@ def collaboration_state_path(store: ProjectStore) -> Path:
 REVIEW_HISTORY_MIGRATED_KEY = "review_history_migrated"
 # review_history's pre-ADR-0010 decisions moved into reviews.jsonl, once (authority._migrate_review_history)
 REVIEWS_JSONL_MIGRATED_KEY = "reviews_jsonl_migrated"
+FIVE_STATES_SWITCHED_KEY = "five_states_switched"   # the switch to the five states ran (ADR-0025 point 26), or had nothing to do
 
 
 def is_review_history_migrated(conn: sqlite3.Connection) -> bool:
@@ -1098,8 +1099,9 @@ def create_project(root: str | Path, project_id: str) -> ProjectStore:
                 ("project_id", project_id),
             )
             project_instance_id(conn)
-            # a brand-new project has nothing to adopt into the ledger
+            # a brand-new project has nothing to adopt into the ledger, nor anything to switch to the five states
             conn.execute("INSERT OR IGNORE INTO project_meta(key, value) VALUES (?, ?)", (LEDGER_ADOPTED_KEY, utc_now().isoformat()))
+            conn.execute("INSERT OR IGNORE INTO project_meta(key, value) VALUES (?, ?)", (FIVE_STATES_SWITCHED_KEY, utc_now().isoformat()))
             if not collaboration_state_path(store).exists():
                 # a brand-new project has no JSON-era review records, so its
                 # one-shot migration is done before it ever starts
@@ -1120,6 +1122,11 @@ def create_project(root: str | Path, project_id: str) -> ProjectStore:
                 (project_id, state.model_dump_json()),
             )
         conn.commit()
+        switched = conn.execute("SELECT 1 FROM project_meta WHERE key = ?", (FIVE_STATES_SWITCHED_KEY,)).fetchone() is not None
+    if not switched:  # a project from before ADR-0025, opened by this version for the first time
+        from .five_states_switch import switch_on_open  # it reads the map, which reads this module
+
+        switch_on_open(store)
     return store
 
 
